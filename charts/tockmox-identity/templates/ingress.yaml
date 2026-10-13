@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Ingress for the Authentik console. Backend Service name follows the upstream
+# chart's fullname convention: `<release>-authentik-server`. Port 80 is the
+# server's plain HTTP listener; TLS terminates at the ingress.
+#
+# The brand asset server rides the SAME Ingress at /tockmox rather than taking a
+# hostname of its own: one DNS name, one certificate, and the login page's logo
+# and favicon load same-origin. See charts/tockmox-common _helpers.tpl.
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "authentik")) .Values.ingress.apps.authentik.enabled }}
+{{- $extra := list }}
+{{- if .Values.brand.enabled }}
+{{- $extra = list (dict "path" "/tockmox" "pathType" "Prefix" "service" "tockmox-brand" "port" 80) }}
+{{- end }}
+---
+{{ include "tockmox.ingress" (dict "ctx" . "name" "authentik" "prefix" "auth" "host" .Values.ingress.apps.authentik.host "service" (printf "%s-authentik-server" .Release.Name) "port" 80 "extra" $extra) }}
+{{- end }}

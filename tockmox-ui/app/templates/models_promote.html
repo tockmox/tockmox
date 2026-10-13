@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, source_line %}
+{% block title %}Promote {{ row.route.alias }}{% endblock %}
+{% block main %}
+<h1>Promote {{ row.route.alias }}</h1>
+<p class="lede"><code>{{ row.alias }}</code> serves <code>{{ row.live.model if row.live else "nothing yet" }}</code> on the production gateway. <code>{{ row.route.alias }}</code> serves <code>{{ row.route.model }}</code> on the eval gateway. The alias moves only after {{ row.required }} passing comparison(s){% if row.klass %} for class {{ row.klass }}{% endif %}, counted from the eval runner's verdict records. A fail resets the count.</p>
+{% if verdict_reading is not none %}<p>{{ source_line(verdict_reading) }}</p>{% endif %}
+{% if error %}<p>{{ badge("critical", "Not promoted") }} {{ error }}</p>{% endif %}
+<section class="panel" aria-labelledby="c-h">
+  <h2 id="c-h">What counts</h2>
+  {% if row.counted %}
+  <div class="table-wrap" role="region" aria-labelledby="c-cap" tabindex="0">
+  <table>
+    <caption id="c-cap">Passing comparisons of {{ row.route.model }} for {{ row.alias }}</caption>
+    <thead><tr><th scope="col">Run</th><th scope="col">Date</th><th scope="col">Graded by</th><th scope="col">Eval set</th><th scope="col">File</th></tr></thead>
+    <tbody>{% for v in row.counted %}<tr><th scope="row"><code>{{ v.run_id }}</code></th><td>{{ v.date }}</td><td>{{ v.grader }}</td><td>{{ v.eval_set[0] }} {{ v.eval_set[1] }}</td><td><code>{{ v.path }}</code></td></tr>{% endfor %}</tbody>
+  </table>
+  </div>
+  {% else %}<p class="empty">No passing comparison yet.</p>{% endif %}
+  {% if row.notes %}<ul>{% for n in row.notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+</section>
+<form method="post" action="/models/promote" class="panel">
+  <input type="hidden" name="csrf" value="{{ user.csrf }}">
+  <input type="hidden" name="alias" value="{{ row.route.alias }}">
+  <p>{% if row.ready %}{{ badge("ok", row.counted|length ~ " of " ~ row.required) }} Enough passing comparisons.{% else %}{{ badge("warning", row.counted|length ~ " of " ~ row.required) }} Not enough yet: the change will be refused until there are.{% endif %}</p>
+  <button class="btn" type="submit">Generate the promotion</button>
+</form>
+<p><a href="/models/evaluate?alias={{ row.route.alias|urlencode }}">Start another evaluation</a></p>
+{% endblock %}

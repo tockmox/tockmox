@@ -1,0 +1,970 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "global"
+  ],
+  "properties": {
+    "global": {
+      "type": "object",
+      "required": [
+        "internalDomain",
+        "lanCIDR"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "internalDomain": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Base domain for internal service hostnames."
+        },
+        "certIssuer": {
+          "type": "string"
+        },
+        "imageRegistry": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string"
+        },
+        "clusterCIDR": {
+          "type": "string"
+        },
+        "serviceCIDR": {
+          "type": "string"
+        },
+        "lanCIDR": {
+          "type": "string",
+          "minLength": 1,
+          "description": "LAN/node CIDR admitted by NetworkPolicies. No safe default."
+        },
+        "storageClass": {
+          "type": "string",
+          "description": "StorageClass for data the volume must protect. Empty uses the cluster default."
+        },
+        "localStorageClass": {
+          "type": "string",
+          "description": "StorageClass for data the application replicates itself or can re-derive. Empty uses the cluster default."
+        },
+        "namespaceLabels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Extra labels on every namespace this layer creates (policy: all of namespaces.create; platform: garage.createCredentialsNamespaces). Labels the chart sets itself are refused."
+        }
+      },
+      "x-tockmox-stability": "stable"
+    },
+    "namespaces": {
+      "type": "object",
+      "description": "Namespace names. Prefixed defaults; override to legacy names when adopting into an existing cluster.",
+      "properties": {
+        "create": {
+          "type": "array",
+          "description": "Keys from this map that the chart CREATES. Others are referenced only.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": {
+        "type": "string"
+      },
+      "x-tockmox-stability": "stable"
+    },
+    "priorityClasses": {
+      "type": "object",
+      "description": "PriorityClass names referenced by shipped workloads.",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "x-tockmox-stability": "stable"
+    },
+    "aiEgress": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Tockmox-owned block: aiEgress.",
+      "x-tockmox-stability": "stable",
+      "properties": {
+        "openWebui": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "extraEgress": {
+              "type": "array",
+              "description": "Raw NetworkPolicy egress entries appended verbatim for the console, e.g. a model host it is pointed at directly.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "to"
+                ],
+                "description": "One NetworkPolicy egress rule, as the API server takes it: `to` (ipBlock, namespaceSelector, podSelector) and `ports` ({protocol, port}). Not {cidr, ports}, which is providerAllow's shape; that renders clean and fails at apply with `.cidr: field not declared in schema`.",
+                "properties": {
+                  "to": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "minProperties": 1,
+                      "properties": {
+                        "ipBlock": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "cidr"
+                          ],
+                          "properties": {
+                            "cidr": {
+                              "type": "string",
+                              "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$"
+                            },
+                            "except": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$"
+                              }
+                            }
+                          }
+                        },
+                        "namespaceSelector": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "matchLabels": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            },
+                            "matchExpressions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object"
+                              }
+                            }
+                          }
+                        },
+                        "podSelector": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "matchLabels": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            },
+                            "matchExpressions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "ports": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "protocol": {
+                          "type": "string",
+                          "enum": [
+                            "TCP",
+                            "UDP",
+                            "SCTP"
+                          ]
+                        },
+                        "port": {
+                          "oneOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 65535
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "endPort": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 65535
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "namespaceDefaultDeny": {
+          "type": "boolean",
+          "description": "Egress default-deny for the whole AI namespace with the companion allows (TM-0273 fix 1). Follows apps.ai_namespace. False is a rollback lever, not a tuning knob."
+        },
+        "litellm": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "providerAllow": {
+              "type": "array",
+              "description": "Where the model gateway may send traffic outside the namespace: {cidr, ports}. A cidr of exactly 0.0.0.0/0 automatically excludes the cluster, service and LAN CIDRs and 169.254.0.0/16. Empty list: nothing outside the namespace except extraEgress.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "cidr"
+                ],
+                "properties": {
+                  "cidr": {
+                    "type": "string",
+                    "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$"
+                  },
+                  "ports": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 65535
+                    }
+                  }
+                }
+              }
+            },
+            "extraEgress": {
+              "type": "array",
+              "description": "Raw NetworkPolicy egress entries appended verbatim for the gateway, e.g. a model host on the LAN. Lives in the site's policy.yaml (this is the policy layer), not ai.yaml.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "to"
+                ],
+                "description": "One NetworkPolicy egress rule, as the API server takes it: `to` (ipBlock, namespaceSelector, podSelector) and `ports` ({protocol, port}). Not {cidr, ports}, which is providerAllow's shape; that renders clean and fails at apply with `.cidr: field not declared in schema`.",
+                "properties": {
+                  "to": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "minProperties": 1,
+                      "properties": {
+                        "ipBlock": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "cidr"
+                          ],
+                          "properties": {
+                            "cidr": {
+                              "type": "string",
+                              "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$"
+                            },
+                            "except": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$"
+                              }
+                            }
+                          }
+                        },
+                        "namespaceSelector": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "matchLabels": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            },
+                            "matchExpressions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object"
+                              }
+                            }
+                          }
+                        },
+                        "podSelector": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "matchLabels": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            },
+                            "matchExpressions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "ports": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "protocol": {
+                          "type": "string",
+                          "enum": [
+                            "TCP",
+                            "UDP",
+                            "SCTP"
+                          ]
+                        },
+                        "port": {
+                          "oneOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 65535
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "endPort": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 65535
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "cnpg": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "apiServerCIDRs": {
+              "type": "array",
+              "description": "Kubernetes API endpoints for CNPG pods and the restore drill. Empty means lanCIDR on 6443 plus serviceCIDR on 443.",
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$"
+              }
+            },
+            "extraEgress": {
+              "type": "array",
+              "description": "Raw egress entries appended verbatim for CNPG pods, e.g. an S3 endpoint that is not the shipped Garage.",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "to"
+                ],
+                "description": "One NetworkPolicy egress rule, as the API server takes it: `to` (ipBlock, namespaceSelector, podSelector) and `ports` ({protocol, port}). Not {cidr, ports}, which is providerAllow's shape; that renders clean and fails at apply with `.cidr: field not declared in schema`.",
+                "properties": {
+                  "to": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "minProperties": 1,
+                      "properties": {
+                        "ipBlock": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": [
+                            "cidr"
+                          ],
+                          "properties": {
+                            "cidr": {
+                              "type": "string",
+                              "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$"
+                            },
+                            "except": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$"
+                              }
+                            }
+                          }
+                        },
+                        "namespaceSelector": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "matchLabels": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            },
+                            "matchExpressions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object"
+                              }
+                            }
+                          }
+                        },
+                        "podSelector": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "properties": {
+                            "matchLabels": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "type": "string"
+                              }
+                            },
+                            "matchExpressions": {
+                              "type": "array",
+                              "items": {
+                                "type": "object"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "ports": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "protocol": {
+                          "type": "string",
+                          "enum": [
+                            "TCP",
+                            "UDP",
+                            "SCTP"
+                          ]
+                        },
+                        "port": {
+                          "oneOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 65535
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "endPort": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 65535
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "apps": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "true or false to decide explicitly; unset or null to follow the owning capability."
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Tockmox-owned block: apps.",
+      "x-tockmox-stability": "stable",
+      "propertyNames": {
+        "enum": [
+          "addressPool",
+          "ai_cnpg_netpol",
+          "ai_namespace",
+          "ai_openwebui_egress",
+          "alloy",
+          "argoWorkflows",
+          "argocdMonitoring",
+          "authentik",
+          "authentik_netpol",
+          "barmanPlugin",
+          "blackbox",
+          "certManager",
+          "cnpg",
+          "dashboards",
+          "devops_netpol",
+          "diagnostic_identity",
+          "docs",
+          "etcdScrapeConfig",
+          "forgejo_netpol",
+          "garage",
+          "harbor_netpol",
+          "healthRules",
+          "heartbeat",
+          "kubePrometheusStack",
+          "kube_bench",
+          "kured",
+          "litellm",
+          "loki",
+          "longhorn",
+          "metallb",
+          "monitoring_netpol",
+          "openWebui",
+          "platform_netpol",
+          "platform_policies",
+          "prometheusOperatorCrds",
+          "rbac_guardrails",
+          "selfcheck_netpol",
+          "serviceMonitors",
+          "smartctl",
+          "snapshotController",
+          "snmp",
+          "syslog_ingest_netpol",
+          "tailscale_netpol",
+          "traefik",
+          "traefik_headers"
+        ],
+        "description": "Generated by tools/check-values-typos.sh --write: every component name any layer declares (TM-0404)."
+      }
+    },
+    "diagnosticIdentity": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Tockmox-owned block: diagnosticIdentity.",
+      "x-tockmox-stability": "stable",
+      "properties": {
+        "extraApiGroups": {
+          "type": "array",
+          "description": "Extra API groups the identity may read.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "apiServerCIDRs": {
+          "type": "array",
+          "description": "The Kubernetes API endpoint(s) as narrow CIDRs (TM-0273 fix 2). Empty keeps the whole serviceCIDR and lanCIDR on 443/6443.",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$"
+          }
+        }
+      }
+    },
+    "rbacGuardrails": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Tockmox-owned block: rbacGuardrails.",
+      "x-tockmox-stability": "stable"
+    },
+    "tockmox-common": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "The Tockmox library chart. It has no values interface; the block exists so a site cannot be surprised by a schema rejection if it sets one."
+    },
+    "addressPool": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "alertmanagerURL": {
+      "description": "Not this layer's key. Owned by the selfcheck layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "alloy": {
+      "description": "Not this layer's key. Owned by the observability layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "argo-workflows": {
+      "description": "Not this layer's key. Owned by the devops layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "authentik": {
+      "description": "Not this layer's key. Owned by the identity layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "brand": {
+      "description": "Not this layer's key. Owned by the identity layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "cert-manager": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "certIssuer": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "cloudnative-pg": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "heartbeat": {
+      "description": "Not this layer's key. Owned by the selfcheck layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "kubeBench": {
+      "description": "Not this layer's key. Owned by the selfcheck layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "ingress": {
+      "description": "Not this layer's key. Owned by the ai, devops, identity, observability, platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "kube-prometheus-stack": {
+      "description": "Not this layer's key. Owned by the observability layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "kured": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "litellm": {
+      "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "loki": {
+      "description": "Not this layer's key. Owned by the observability layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "longhorn": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "metallb": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "modelGateway": {
+      "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "notifications": {
+      "description": "Not this layer's key. Owned by the observability layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "open-webui": {
+      "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "prometheus-blackbox-exporter": {
+      "description": "Not this layer's key. Owned by the exporters layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "prometheus-operator-crds": {
+      "description": "Not this layer's key. Owned by the crds layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "prometheus-smartctl-exporter": {
+      "description": "Not this layer's key. Owned by the exporters layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "prometheus-snmp-exporter": {
+      "description": "Not this layer's key. Owned by the exporters layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "sso": {
+      "description": "Not this layer's key. Owned by the ai, devops, identity, observability layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "staleAfterSeconds": {
+      "description": "Not this layer's key. Owned by the selfcheck layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "traefik": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "garage": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "plugin-barman-cloud": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observability": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Unset means components follow this capability; true or false overrides."
+            }
+          },
+          "description": "Metrics, logs, and the ServiceMonitor/PrometheusRule objects this repo writes. Decline it and set apps.serviceMonitors.enabled to keep the monitors for your own Prometheus operator."
+        },
+        "notifications": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Unset means components follow this capability; true or false overrides."
+            }
+          },
+          "description": "Alerts that reach a person: the sink, the bridge and the heartbeat that proves the path. Its component switch is notifications.enabled, which predates this framework."
+        },
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Unset means components follow this capability; true or false overrides."
+            }
+          },
+          "description": "Single sign-on across every console, and the identity provider behind it."
+        },
+        "aiPlane": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Unset means components follow this capability; true or false overrides."
+            }
+          },
+          "description": "The private AI plane: the chat console and the model gateway in front of it."
+        },
+        "dataProtection": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Unset means components follow this capability; true or false overrides."
+            }
+          },
+          "description": "Backups that go somewhere, and the object store, backup plugin and snapshot control plane underneath them."
+        },
+        "hardwareTelemetry": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Unset means components follow this capability; true or false overrides."
+            }
+          },
+          "description": "SMART and SNMP telemetry from physical hardware. Off by default, because the reference deployment is a virtual machine."
+        },
+        "workflowAutomation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Unset means components follow this capability; true or false overrides."
+            }
+          },
+          "description": "Scheduled and event-driven jobs inside the cluster, with a console to watch them."
+        },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Unset means components follow this capability; true or false overrides."
+            }
+          },
+          "description": "Default-deny between namespaces. Decline it on a CNI that does not enforce NetworkPolicy, where these objects are decoration."
+        }
+      },
+      "description": "Named functional capabilities: one switch per functional story, spanning whatever components it takes across whichever layers they live in. CLOSED, unlike `global`: nothing upstream reads this block, so an unrecognised name here is always a typo, and an ignored typo means a capability you thought you declined is still on. See docs/administration/capabilities.md.",
+      "x-tockmox-stability": "stable"
+    },
+    "snapshot-controller": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "probes": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Blackbox Probe objects. The exporter shipped with none, so it ran and measured nothing.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "interval": {
+          "type": "string"
+        },
+        "scrapeTimeout": {
+          "type": "string"
+        },
+        "module": {
+          "type": "string",
+          "description": "A module name from the blackbox exporter's own config."
+        },
+        "consoles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "description": "Subdomain under global.internalDomain -> probe it or not."
+        },
+        "alerts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "x-tockmox-stability": "stable"
+    },
+    "platformNetpol": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Tockmox-owned block: platformNetpol. The platform namespace's node-network, scrape and object-store ingress rules (TM-0273 fixes 3 and 4), plus the site-peer lists for the devops scrape rule and the monitoring namespace (TM-0820).",
+      "properties": {
+        "nodeOriginSources": {
+          "type": "array",
+          "description": "Sources of node-originated traffic (per-node flannel gateway addresses). Empty keeps the whole clusterCIDR admitted to every platform pod, the insecure pre-0.7.0 rule. Print the list with install/tockmox-install.sh --print-netpol-node-sources.",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$"
+          }
+        },
+        "scrapePorts": {
+          "type": "array",
+          "description": "Container ports Prometheus may reach on platform pods; derived from the shipped ServiceMonitors.",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          }
+        },
+        "extraS3ClientNamespaces": {
+          "type": "array",
+          "description": "Extra namespaces allowed to reach the shipped object store's S3 port 3900.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "extraPrometheusNamespaces": {
+          "type": "array",
+          "description": "Extra namespaces whose Prometheus pods may scrape the platform and devops namespaces, beyond namespaces.monitoring.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "extraMonitoringClientNamespaces": {
+          "type": "array",
+          "description": "Extra namespaces whose pods may reach Prometheus, Loki and ntfy in the monitoring namespace (a site's own Alloy, capacity jobs, publishers).",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "x-tockmox-stability": "provisional",
+      "x-tockmox-stability-ruled": "2026-10-08",
+      "x-tockmox-stability-rerule": "0.9.0"
+    },
+    "podSecurity": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Tockmox-owned block: podSecurity. The pod-security.kubernetes.io labels on every namespace this chart creates (TM-0135). Labels only.",
+      "properties": {
+        "warn": {
+          "type": "string",
+          "enum": [
+            "privileged",
+            "baseline",
+            "restricted"
+          ],
+          "description": "Level the API server warns at. Observes without blocking."
+        },
+        "audit": {
+          "type": "string",
+          "enum": [
+            "privileged",
+            "baseline",
+            "restricted"
+          ],
+          "description": "Level written to the audit log. Observes without blocking."
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(latest|v[0-9]+\\.[0-9]+)$",
+          "description": "Standard version for warn and audit."
+        },
+        "enforceVersion": {
+          "type": "string",
+          "pattern": "^(latest|v[0-9]+\\.[0-9]+)$",
+          "description": "Standard version for enforce."
+        },
+        "enforce": {
+          "type": "object",
+          "description": "Enforce level per namespaces.* key. Empty string renders no enforce label. tools/check-pod-security.sh fails a level stricter than the rendered pods pass.",
+          "additionalProperties": {
+            "type": "string",
+            "enum": [
+              "",
+              "privileged",
+              "baseline",
+              "restricted"
+            ]
+          }
+        },
+        "enforceDefault": {
+          "type": "string",
+          "enum": [
+            "",
+            "privileged",
+            "baseline",
+            "restricted"
+          ],
+          "description": "Level for a created namespace with no entry in enforce. Empty renders none."
+        }
+      },
+      "x-tockmox-stability": "provisional",
+      "x-tockmox-stability-ruled": "2026-10-08",
+      "x-tockmox-stability-rerule": "0.9.0"
+    },
+    "grafanaDatabase": {
+      "description": "Not this layer's key. Owned by the observability layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "inferenceNodes": {
+      "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "modelLifecycle": {
+      "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "tockmoxUi": {
+      "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    }
+  },
+  "additionalProperties": false,
+  "$comment": "The ROOT is closed: a key that is neither a Tockmox block, a chart dependency, nor another layer's block is a typo, and a typo in a top-level key used to be accepted in silence. Keys owned by other layers are listed because ci/values.yaml and profiles/*.yaml are passed to all nine. See docs/administration/values-contract.md."
+}

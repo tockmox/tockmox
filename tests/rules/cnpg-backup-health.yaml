@@ -1,0 +1,125 @@
+# TockmoxCNPGBackupUnhealthy ... TM-0659.
+#
+# DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
+#
+# THE CASE THIS ALERT EXISTS FOR was measured on 2026-09-16, during the first
+# Phase E soak of the rc4 install: `news/miniflux-db` had ContinuousArchiving
+# false and a failed nightly Backup for thirteen hours, the Cluster reported
+# `Cluster in healthy state` the whole time, and the only alert firing anywhere
+# was Watchdog. Case 2 below is that install, reproduced.
+#
+# CASE 4 IS THE ONE THAT MATTERS MOST. The database that was fine
+# (`tockmox-ai`) and the database that was not (`news`) are evaluated together,
+# and only the broken one fires. The defect this alert replaces was an
+# expression pinned to `namespace="tockmox-ai"`, which is precisely the shape
+# that passes a single-namespace test and protects nothing else.
+evaluation_interval: 1m
+
+tests:
+  # 1. Both conditions true: never fires. The silent half of the pair.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_cnpg_cluster_condition{name="tockmox-litellm-db",namespace="tockmox-ai",type="ContinuousArchiving",reason="ContinuousArchivingSuccess"}'
+        values: '1+0x60'
+      - series: 'tockmox_cnpg_cluster_condition{name="tockmox-litellm-db",namespace="tockmox-ai",type="LastBackupSucceeded",reason="LastBackupSucceeded"}'
+        values: '1+0x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxCNPGBackupUnhealthy
+        exp_alerts: []
+
+  # 2. THE rc4 CASE, reproduced. Both conditions false, and a Ready condition
+  #    that is TRUE sitting alongside them ... the database is serving, which is
+  #    exactly why nothing else noticed. Must fire on both condition types, and
+  #    must NOT fire on Ready.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_cnpg_cluster_condition{name="miniflux-db",namespace="news",type="ContinuousArchiving",reason="ContinuousArchivingFailing"}'
+        values: '0+0x60'
+      - series: 'tockmox_cnpg_cluster_condition{name="miniflux-db",namespace="news",type="LastBackupSucceeded",reason="LastBackupFailed"}'
+        values: '0+0x60'
+      - series: 'tockmox_cnpg_cluster_condition{name="miniflux-db",namespace="news",type="Ready",reason="ClusterIsReady"}'
+        values: '1+0x60'
+    alert_rule_test:
+      # `for: 15m`, so nothing before it.
+      - eval_time: 10m
+        alertname: TockmoxCNPGBackupUnhealthy
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: TockmoxCNPGBackupUnhealthy
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              name: miniflux-db
+              namespace: news
+              type: ContinuousArchiving
+            exp_annotations:
+              summary: "CNPG Cluster news/miniflux-db reports ContinuousArchiving false"
+              description: "This database has been failing to protect itself for fifteen minutes, and it will keep reporting itself healthy while it does: the Cluster phase describes whether POSTGRES is well, not whether anything is being archived. Every point-in-time recovery after the last shipped segment is already unavailable. The condition's `reason` says why, and it is usually the ObjectStore's credential, endpoint, bucket or region rather than the database: `kubectl -n news get cluster miniflux-db -o jsonpath='{.status.conditions}'`."
+          - exp_labels:
+              severity: warning
+              name: miniflux-db
+              namespace: news
+              type: LastBackupSucceeded
+            exp_annotations:
+              summary: "CNPG Cluster news/miniflux-db reports LastBackupSucceeded false"
+              description: "This database has been failing to protect itself for fifteen minutes, and it will keep reporting itself healthy while it does: the Cluster phase describes whether POSTGRES is well, not whether anything is being archived. Every point-in-time recovery after the last shipped segment is already unavailable. The condition's `reason` says why, and it is usually the ObjectStore's credential, endpoint, bucket or region rather than the database: `kubectl -n news get cluster miniflux-db -o jsonpath='{.status.conditions}'`."
+
+  # 3. A cluster with NO backup configured produces no condition series at all.
+  #    It must be silent ... a database nobody asked to back up is not failing
+  #    to back up. This case exists so the deliberate trade in the template
+  #    comment fails here if anyone "fixes" it with an absent() clause.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_cnpg_cluster_condition{name="plain-db",namespace="tockmox-ai",type="Ready",reason="ClusterIsReady"}'
+        values: '1+0x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxCNPGBackupUnhealthy
+        exp_alerts: []
+
+  # 4. TWO databases, one healthy and one not, in DIFFERENT namespaces. Only the
+  #    broken one fires, and it carries its own identity. This is the regression
+  #    case for the namespace-pinned expression the alert replaces: pin it back
+  #    to tockmox-ai and this case goes silent.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_cnpg_cluster_condition{name="tockmox-litellm-db",namespace="tockmox-ai",type="ContinuousArchiving",reason="ContinuousArchivingSuccess"}'
+        values: '1+0x60'
+      - series: 'tockmox_cnpg_cluster_condition{name="miniflux-db",namespace="news",type="ContinuousArchiving",reason="ContinuousArchivingFailing"}'
+        values: '0+0x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxCNPGBackupUnhealthy
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              name: miniflux-db
+              namespace: news
+              type: ContinuousArchiving
+            exp_annotations:
+              summary: "CNPG Cluster news/miniflux-db reports ContinuousArchiving false"
+              description: "This database has been failing to protect itself for fifteen minutes, and it will keep reporting itself healthy while it does: the Cluster phase describes whether POSTGRES is well, not whether anything is being archived. Every point-in-time recovery after the last shipped segment is already unavailable. The condition's `reason` says why, and it is usually the ObjectStore's credential, endpoint, bucket or region rather than the database: `kubectl -n news get cluster miniflux-db -o jsonpath='{.status.conditions}'`."
+
+  # 5. A condition that RECOVERS must stop firing. Guards against a rule written
+  #    with max_over_time or a stale `for` window that latches on.
+  - interval: 1m
+    input_series:
+      # false for the first 25 minutes, true thereafter
+      - series: 'tockmox_cnpg_cluster_condition{name="miniflux-db",namespace="news",type="ContinuousArchiving",reason="ContinuousArchivingFailing"}'
+        values: '0+0x25 1+0x40'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: TockmoxCNPGBackupUnhealthy
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              name: miniflux-db
+              namespace: news
+              type: ContinuousArchiving
+            exp_annotations:
+              summary: "CNPG Cluster news/miniflux-db reports ContinuousArchiving false"
+              description: "This database has been failing to protect itself for fifteen minutes, and it will keep reporting itself healthy while it does: the Cluster phase describes whether POSTGRES is well, not whether anything is being archived. Every point-in-time recovery after the last shipped segment is already unavailable. The condition's `reason` says why, and it is usually the ObjectStore's credential, endpoint, bucket or region rather than the database: `kubectl -n news get cluster miniflux-db -o jsonpath='{.status.conditions}'`."
+      - eval_time: 45m
+        alertname: TockmoxCNPGBackupUnhealthy
+        exp_alerts: []

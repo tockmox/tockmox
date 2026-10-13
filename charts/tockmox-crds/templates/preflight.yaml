@@ -1,0 +1,11 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+Render-time guards for this layer. Emits no objects.
+*/ -}}
+{{- /*
+CAPABILITY COHERENCE. A component switched on individually while the capability
+that owns it is off leaves a part with no whole. Failing beats delivering half,
+and beats silently promoting the capability back on because of one key.
+*/ -}}
+{{- include "tockmox.capabilityCoherent" (dict "ctx" $ "capability" "observability" "apps" (list "prometheusOperatorCrds")) -}}

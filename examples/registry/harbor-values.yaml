@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Reference values for a Harbor you run YOURSELF as the mirror registry of an
+# air-gapped Tockmox install. Tockmox does not ship Harbor (TM-0130): a registry
+# is a prerequisite, not a component. See docs/deployment/airgap.md, "The
+# registry prerequisite", and docs/deployment/registry.md.
+#
+# Written against the upstream chart harbor/harbor 1.19.2 (Harbor 2.15.2). Pin
+# whichever chart version you install and re-render this file against it: the
+# keys below are the ones that chart reads, and Harbor renames keys between
+# minors. What was and was not tested is stated in the airgap page.
+#
+#   helm template registry harbor/harbor --version 1.19.2 -f examples/registry/harbor-values.yaml
+#
+# Replace every value marked CHANGE ME. Nothing here is a credential: the admin
+# password is deliberately NOT set, so the chart generates one into a Secret.
+
+# CHANGE ME. Must equal the hostname you expose it on, scheme included. Harbor
+# bakes it into `docker login` instructions, OIDC redirects and the registry's
+# own 307s, so a mismatch presents as a working UI in front of a registry
+# nobody can push to.
+externalURL: https://registry.int.example.com
+
+expose:
+  type: ingress
+  tls:
+    enabled: true
+    certSource: secret
+    secret:
+      secretName: harbor-tls
+  ingress:
+    hosts:
+      core: registry.int.example.com   # CHANGE ME, same host as externalURL
+    className: tockmox-platform-traefik
+    annotations:
+      # Lets cert-manager issue harbor-tls from your internal CA.
+      cert-manager.io/cluster-issuer: tockmox-ca   # CHANGE ME, your ClusterIssuer
+
+# Trivy pulls its vulnerability database from the internet at startup and on a
+# refresh interval. Inside the boundary it comes up and reports nothing useful.
+# Turning it off drops a pod and a 5Gi volume; scanning goes with it.
+trivy:
+  enabled: false
+
+# Mirror duty is large pushes and pulls of layers, so the registry volume is the
+# one to size. 25Gi is a starting figure, not a measurement: size it from the
+# images you actually mirror (images.txt, plus your own).
+persistence:
+  persistentVolumeClaim:
+    registry:
+      size: 25Gi
+      storageClass: longhorn   # CHANGE ME if your StorageClass is not longhorn
+
+# Harbor's bundled PostgreSQL and Redis are plain StatefulSets, not the
+# CloudNativePG operator the platform layer runs, so they sit outside the
+# backup story in docs/operations/backup-restore.md. To use a database you do
+# back up, set `database.type: external` and fill in `database.external`.
+database:
+  type: internal
+
+# Harbor's own images must already be pullable before Harbor exists, which is
+# the chicken-and-egg of every in-boundary registry. Bring them across the
+# boundary with skopeo into any registry the nodes can already reach, and set:
+#
+#   core:        { image: { repository: <that registry>/goharbor/harbor-core } }
+#   registry:    { registry: { image: { repository: <that registry>/goharbor/registry-photon } } }
+#
+# (and the portal, jobservice, registryctl and database images the same way).
+# They are left at the chart defaults here so the file renders as shipped.

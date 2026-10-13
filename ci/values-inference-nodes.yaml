@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE INFERENCE-NODES FIXTURE (REQ-0047, REQ-0048; TM-0920). Applied ON TOP of
+# ci/values.yaml by tools/check-inference-nodes.sh, which asserts on the RENDER
+# that the gateway routes derived from inferenceNodes are exactly what the
+# Tockmox UI derives from the same block (tests/golden/), that a -next candidate
+# reaches only the eval gateway, and that the eval gateway is fenced.
+#
+# Generic hardware on documentation addresses (RFC 5737). Not a site.
+
+inferenceNodes:
+  render:
+    enabled: true
+    configMapName: tockmox-litellm-config
+  monitoring:
+    enabled: true
+  nodes:
+    - id: studio
+      name: Mac Studio
+      type: apple-silicon-mac
+      address: 192.0.2.10
+      metrics: {node_exporter: 9100, macmon: 9101}
+      endpoints:
+        - {id: mlx-lm-8080, engine: mlx-lm, url: "http://192.0.2.10:8080"}
+        - {id: ollama-11434, engine: ollama, url: "http://192.0.2.10:11434"}
+        - {id: llama-server-8090, engine: llama-server, url: "http://192.0.2.10:8090"}
+    - id: spark
+      name: DGX Spark
+      type: nvidia-dgx-spark
+      address: 192.0.2.20
+      metrics: {node_exporter: 9100, dcgm: 9400}
+      endpoints:
+        - {id: vllm-8000, engine: vllm, url: "http://192.0.2.20:8000", auth: {secretRef: spark-key}}
+  routes:
+    - {alias: local-chat, node: studio, endpoint: mlx-lm-8080, model: mlx-community/Example-27B-4bit, kind: chat}
+    - {alias: local-chat-next, node: studio, endpoint: mlx-lm-8080, model: mlx-community/Example-2-27B-4bit, kind: chat}
+    - {alias: local-coder, node: studio, endpoint: ollama-11434, model: "example-coder:30b", kind: chat, params: {keep_alive: -1, num_ctx: 16384}}
+    - {alias: local-embed, node: studio, endpoint: ollama-11434, model: example-embed, kind: embedding, params: {num_ctx: 8192}}
+    - {alias: local-rerank, node: studio, endpoint: llama-server-8090, model: example-reranker, kind: rerank}
+    - {alias: big-chat, node: spark, endpoint: vllm-8000, model: example/Big-70B-AWQ, kind: chat, modelInfo: {note: "<a&b>"}}
+
+modelLifecycle:
+  catalog:
+    - {id: example-27b, model: mlx-community/Example-27B-4bit, adopted: "2026-10-07", source: {kind: huggingface, ref: mlx-community/Example-27B-4bit}}
+    - {id: example-2-27b, model: mlx-community/Example-2-27B-4bit, stage: candidate, source: {kind: huggingface, ref: mlx-community/Example-2-27B-4bit}}
+    - {id: hosted-new, model: anthropic/example-model-9, stage: candidate, source: {kind: hosted, ref: anthropic/example-model-9}}
+  frontier:
+    providers:
+      anthropic: {keyEnv: EXAMPLE_ANTHROPIC_KEY}
+  watch:
+    enabled: true
+    image: registry.example/tockmox/tockmox-ui:0.8.0-site   # a site-built image (TM-0902); placeholder
+    providers: {openrouter: {allow: ["anthropic/*"]}}
+    pullRequests:
+      enabled: true
+      forge: github
+      repo: example/site-repo
+      valuesPath: site/values/models.yaml
+      githubApp: {appId: 12345}
+  evalGateway:
+    enabled: true
+    allowedClients:
+      - podSelector: {matchLabels: {app.kubernetes.io/name: eval-runner}}
+    environmentSecrets: [tockmox-eval-provider-keys]
+
+litellm:
+  proxyConfigMap:
+    create: false
+    name: tockmox-litellm-config
+  proxy_config:
+    model_list:
+      - model_name: hosted-chat
+        litellm_params: {model: anthropic/example-model-8, api_key: os.environ/EXAMPLE_ANTHROPIC_KEY, tags: [open]}
+    general_settings:
+      master_key: os.environ/PROXY_MASTER_KEY
+  podAnnotations:
+    tockmox.com/node-routes: "226d93d23628a860"
+    tockmox.com/gateway-config: "7280ea0f146304d3"
+
+tockmoxUi:
+  enabled: true
+  image: registry.example/tockmox/tockmox-ui:0.8.0-site     # placeholder, as above
+  config:
+    site: {name: Example, domain: int.example.com}
+    oidc:
+      issuer: https://auth.int.example.com/application/o/tockmox-ui
+      clientId: tockmox-ui
+      redirectUrl: https://tockmox.int.example.com/auth/callback

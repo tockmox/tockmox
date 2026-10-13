@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v2
+name: posture-probe
+description: >-
+  Security Posture Probe, a Tockmox add-on (experimental): measures whether what
+  the cluster enforces matches what you declared, and gates on the difference.
+  Observe-and-report only; its role holds no write verb.
+type: application
+# Versioned on its own, not with the layers: an add-on is not one of the nine
+# layer charts, and RELEASING.md's version bump does not touch it.
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [security, networkpolicy, rbac, posture, tockmox-addon]
+annotations:
+  tockmox.com/addon: "true"
+  tockmox.com/stability: experimental

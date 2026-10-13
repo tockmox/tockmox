@@ -1,0 +1,449 @@
+# SPDX-License-Identifier: Apache-2.0
+global:
+  internalDomain: ""
+  certIssuer: "tockmox-ca"
+  imageRegistry: ""
+  timezone: "UTC"
+  clusterCIDR: "10.42.0.0/16"
+  serviceCIDR: "10.43.0.0/16"
+  lanCIDR: ""
+  # THE STORAGE CONTRACT. Empty means "use whatever the cluster's default
+  # StorageClass happens to be", which is not the same as "use the storage this
+  # platform ships". On k3s the default is `local-path`: node-local, one copy,
+  # no snapshots, no backup target. Tockmox shipped Longhorn and, because
+  # nothing named a class, wrote every PVC to local-path anyway.
+  #
+  # Name it. `longhorn` on a stock install with apps.longhorn enabled;
+  # `local-path` if you have deliberately chosen node-local storage; the name of
+  # your own CSI class if you brought one. A preflight refuses the combination
+  # that used to fail silently.
+  storageClass: ""
+
+  # THE SECOND HALF OF THE STORAGE CONTRACT: the class for data whose
+  # application already protects it, or that can be re-derived.
+  #
+  # The policy is "replicate at exactly one layer". If an application keeps its
+  # own copies (Postgres streaming to replicas, an object store spreading
+  # across nodes) or the data can be rebuilt (a metrics TSDB), then replicating
+  # the volume underneath buys nothing and costs two to three times the disk
+  # plus write latency on the hot path. Those workloads get THIS class.
+  # Everything else gets `storageClass` above.
+  #
+  # `local-path` is k3s's own provisioner and is the shipped default here.
+  # prerequisites.md tells you to UN-DEFAULT it rather than delete it, and this
+  # is why. Node-local means a rescheduled pod finds an empty volume, which is
+  # the trade this class exists to make; do not point it at anything whose loss
+  # you would mind.
+  #
+  # Empty falls back to the cluster default, which un-does the policy without
+  # complaining. Set it to a class you have.
+  localStorageClass: "local-path"
+namespaces:
+  devops: tockmox-devops
+
+# ---------------------------------------------------------------------------
+# The way in. `workflows.<internalDomain>`; renders when the app is enabled.
+# global.certIssuer adds TLS.
+# ---------------------------------------------------------------------------
+ingress:
+  # Empty uses the cluster's DEFAULT IngressClass ... the Traefik the platform
+  # layer ships marks itself default, and its class name derives from the
+  # release (`tockmox-platform-traefik` on a stock install), so naming it here
+  # would break on rename. Set this only to pin a specific class.
+  className: ""
+  annotations: {}
+  apps:
+    argoWorkflows:
+      enabled: true
+      host: ""            # override the derived workflows.<internalDomain>
+
+# ---------------------------------------------------------------------------
+# Single sign-on: this chart ships the group->permission ServiceAccounts and
+# Roles for Argo's SSO-RBAC. The OIDC endpoint values themselves are written
+# into your site values by the installer (see the argo-workflows comment
+# below). Client id+secret: operator-created `tockmox-sso-argo` Secret with
+# keys `client-id`, `client-secret`. See docs/administration/secrets.md.
+# ---------------------------------------------------------------------------
+sso:
+  enabled: true
+  adminGroup: tockmox-admins
+  userGroup: tockmox-users
+
+# ---------------------------------------------------------------------------
+# CAPABILITIES: functional stories you can decline.
+#
+# `apps.*` is one switch per piece of software, which is the wrong unit for the
+# decision people actually make. Nobody chooses "a Garage", "a barman plugin"
+# and "a snapshot controller" separately; they choose whether this deployment
+# protects its data, or whether they already run Velero and want none of it.
+#
+# A capability is that decision, named, on one switch, spanning whatever
+# components it takes and whichever layers they live in.
+#
+# HOW IT RESOLVES, and the tri-state is the point:
+#   apps.<x>.enabled unset   follow the capability that owns the component
+#   apps.<x>.enabled: true   on, even if the capability is off
+#   apps.<x>.enabled: false  off, even if the capability is on
+#
+# So declining a capability turns off everything it owns, and a component you
+# named yourself still means what you said. Turning a single component on while
+# its capability is off fails the render rather than half-building the story.
+#
+# THIS BLOCK IS BYTE-IDENTICAL IN ALL NINE LAYERS, and that is deliberate. The
+# values namespace is shared across layers, so one profile sets a capability
+# once and every layer owning part of it reads the same answer. Editing one copy
+# and not the others is the failure the uniformity exists to prevent, and
+# tools/check-capabilities.sh fails CI on any drift between them.
+#
+# Full list, what each one contains, and why you would decline it:
+# docs/administration/capabilities.md
+# ---------------------------------------------------------------------------
+capabilities:
+  # Metrics, logs and the rules that read them ... everything answering "what is
+  # this platform doing right now". Off means Tockmox ships no Prometheus, no
+  # Loki, no Alloy, and none of its own ServiceMonitors or alert rules.
+  #
+  # Running your own Prometheus operator is the case worth naming. Decline the
+  # capability and set `apps.serviceMonitors.enabled: true`, and Tockmox renders
+  # its monitors and rules for YOUR operator to collect, without standing up a
+  # second stack beside the one you already run.
+  observability:
+    enabled: true
+
+  # Alerts that reach a person: the notification sink, the bridge that feeds it
+  # and the heartbeat that proves the path still works when nothing is wrong.
+  # Off means alerts fire into Alertmanager and stop there.
+  #
+  # The component switch for this one is `notifications.enabled` rather than an
+  # `apps` key, because it predates this framework and is a contract key. It has
+  # the same tri-state: unset follows the capability, set means what you said.
+  notifications:
+    enabled: true
+
+  # One sign-in across every console, and the identity provider behind it. Off
+  # means Tockmox ships no Authentik and each console falls back to its own
+  # local login, unless you point `sso` at an issuer you already run.
+  identity:
+    enabled: true
+
+  # The private AI plane: a chat console and the model gateway in front of it.
+  # Off leaves Tockmox as a platform and nothing else, which is a legitimate way
+  # to run it and the right answer if you are here for the infrastructure.
+  aiPlane:
+    enabled: true
+
+  # Backups that go somewhere, restores that are exercised, and the CSI
+  # plumbing underneath both. Off means Tockmox ships no object store, no
+  # backup plugin and no snapshot control plane, and expects you to have your
+  # own or to not want one.
+  dataProtection:
+    enabled: true
+
+  # Telemetry from PHYSICAL hardware: disk SMART attributes, and SNMP from
+  # switches, UPSes and appliances.
+  #
+  # OFF BY DEFAULT, unlike every other capability here, because the reference
+  # deployment is a virtual machine: there is no physical disk to ask and no
+  # switch to poll, and an exporter scraping nothing still alerts on its own
+  # absence. Turn it on when the hardware is real, and both exporters follow.
+  hardwareTelemetry:
+    enabled: false
+
+  # Jobs running inside the cluster on a schedule or an event, with a console to
+  # watch them. Off means no Argo Workflows.
+  workflowAutomation:
+    enabled: true
+
+  # Default-deny between namespaces, so a compromised workload cannot reach a
+  # neighbour it was never meant to.
+  #
+  # Off is the honest setting on a cluster whose CNI does not enforce
+  # NetworkPolicy at all. Flannel without a policy plugin accepts every object
+  # here and enforces none of them, and a control that is only decoration is
+  # worse than no control, because it gets counted.
+  networkPolicy:
+    enabled: true
+
+apps:
+  # Enabled, with client auth. The upstream default of server auth-mode grants
+  # every caller the server ServiceAccount's rights, including creating
+  # Workflows whose pod spec the caller controls. Tockmox does not ship that.
+  argoWorkflows: {}   # unset: follows capabilities.workflowAutomation
+
+# ---------------------------------------------------------------------------
+# NO REGISTRY SHIPS IN THIS LAYER, as of 0.1.0.
+#
+# Harbor used to. It was the heaviest thing Tockmox carried ... 8 pods, 5
+# volumes totalling 33Gi, and 9 of the 55 entries in images.txt ... and it was
+# the wrong shape for the job. A registry is something an operator needs
+# BEFORE Tockmox installs, not a capability Tockmox delivers: ADR-0036 ships
+# source, and an airgapped site must already have a registry to mirror into.
+#
+# It also carried a defect that shipping it could not fix: the layer's
+# NetworkPolicy bundle targeted a `harbor` namespace while Harbor, as a
+# subchart, landed in the devops namespace. Enabling it deployed an unguarded
+# registry, which was a documented known issue rather than a fixed one.
+#
+# So the registry is now a documented prerequisite with a tested reference
+# values file: docs/deployment/registry.md. Bring Harbor, or a registry you
+# already run, or none at all on a connected install.
+#
+# The pull-through proxy cache went with it. That procedure is preserved in
+# docs/administration/external-integrations.md, which is where it belonged:
+# it was never chart configuration, because the endpoint and the project are
+# rows in the registry's own database created through its API after the pods
+# are up, and the node-side containerd mirror is not a Kubernetes object at
+# all.
+# ---------------------------------------------------------------------------
+argo-workflows:
+  # Scope the server AND the controller to this namespace (TM-0557). Top-level
+  # on purpose: this is the subchart's own key, and it is what emits
+  # `--namespaced` onto both Deployments. The full measurement is in the
+  # `server:` block below.
+  singleNamespace: true
+  crds:
+    install: true           # single-layer CRDs stay with their chart
+    # full: false (TM-0820). The subchart default (true) renders a pre-install
+    # hook Job that DOWNLOADS the full CRDs from the network at sync ... a dark
+    # site has no route, and a hook Job that hangs blocks the whole sync. false
+    # installs the minified CRDs bundled in the chart (x-kubernetes-preserve-
+    # unknown-fields), which need no egress. Set true to get the full schemas.
+    full: false
+  # Metrics on, and a ServiceMonitor to scrape them ... the prerequisite the
+  # Tockmox / Argo Workflows dashboard queries against. Static true rather
+  # than capability-gated, the same accepted posture as Authentik's monitors
+  # in the identity layer: a ServiceMonitor CR on a cluster that declined
+  # observability (and with it the prometheus-operator CRDs) fails to apply
+  # loudly, which is preferable to a metrics port nobody can turn on.
+  controller:
+    resources:
+      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # peak 57.6 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2); average 49.8 MiB.
+      # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+      # request = average, rounded up to 16Mi. Re-measure before changing.
+      requests:
+        memory: 64Mi
+      limits:
+        memory: 96Mi
+    # PRIORITY (TM-0820). The workflow controller and server run the restore
+    # drills and the console; under node pressure they should be evicted like
+    # the rest of the platform control plane, not like user apps. This is the
+    # PriorityClass tockmox-policy ships (priorityClasses.infrastructure); a
+    # policy-less install that renamed it must override both here and in
+    # `server:` below, or the pods will not schedule.
+    priorityClassName: tockmox-infrastructure
+    metricsConfig:
+      enabled: true
+      # honorLabels: true (TM-0820). The restore-drill gauges carry a `service`
+      # label, and the ServiceMonitor target also has one. Without honorLabels
+      # Prometheus renames the metric's to `exported_service` and every
+      # `max by (service)` drill rollup and alert quietly stops matching.
+      honorLabels: true
+    serviceMonitor:
+      enabled: true
+    # POD SECURITY (TM-0135). The controller and server containers already set
+    # runAsNonRoot, no privilege escalation and drop ALL; seccomp was the one
+    # restricted field left unset, on both. Pod level is the seam the upstream
+    # chart exposes. The workflow pods this controller CREATES are not covered
+    # by this: they are built from Workflow objects at run time (see the
+    # devops entry under `podSecurity` in tockmox-policy values).
+    podSecurityContext:
+      seccompProfile:
+        type: RuntimeDefault
+  server:
+    resources:
+      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # peak 39.0 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 62.5 MiB in the pre-migration namespace (30 days); average 37.9 MiB.
+      # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+      # request = average, rounded up to 16Mi. Re-measure before changing.
+      requests:
+        memory: 48Mi
+      limits:
+        memory: 96Mi
+    priorityClassName: tockmox-infrastructure   # see controller.priorityClassName (TM-0820)
+    podSecurityContext:
+      seccompProfile:
+        type: RuntimeDefault
+    # NOT "server": that mode authenticates nobody.
+    #
+    # SSO: unlike Grafana and Open WebUI, the upstream chart takes the OIDC
+    # issuer and redirect URL as plain values it does not template, so the
+    # derived-from-internalDomain versions cannot ship as chart defaults.
+    # The INSTALLER writes them into your site values (site/values/devops.yaml)
+    # ... same mechanism as the MetalLB range. The shape it writes:
+    #
+    #   argo-workflows:
+    #     server:
+    #       authModes: ["sso", "client"]   # client stays = break-glass
+    #       sso:
+    #         enabled: true
+    #         issuer: http(s)://auth.<internalDomain>/application/o/tockmox-argo/
+    #         clientId:     { name: tockmox-sso-argo, key: client-id }
+    #         clientSecret: { name: tockmox-sso-argo, key: client-secret }
+    #         redirectUrl: http(s)://workflows.<internalDomain>/oauth2/callback
+    #         scopes: ["openid", "email", "profile"]
+    #         rbac: { enabled: true }
+    #
+    # Group->permission mapping rides on the two ServiceAccounts below via
+    # sso RBAC annotations (tockmox-admins -> admin, tockmox-users -> read).
+    authModes: ["client"]
+    # ------------------------------------------------------------------------
+    # SCOPE THE SERVER TO ITS OWN NAMESPACE. Added 2026-09-13, TM-0557, after a
+    # signed-in user reached the console and could list nothing in it.
+    #
+    # MEASURED, not reasoned. The server was running unscoped, so the UI's
+    # default view asks for workflows across ALL namespaces ... the empty string
+    # in the error a real user hit:
+    #
+    #   "Permission denied, you are not allowed to list workflows in namespace
+    #    \"\". Maybe you want to specify a namespace with query parameter ..."
+    #
+    # Exercised directly against the API with a minted token for each shipped
+    # ServiceAccount, since --auth-mode=client is on:
+    #
+    #   tockmox-argo-admin   GET /api/v1/workflows/                 -> 403
+    #   tockmox-argo-admin   GET /api/v1/workflows/tockmox-devops   -> 200
+    #   tockmox-argo-viewer  GET /api/v1/workflows/                 -> 403
+    #   tockmox-argo-viewer  GET /api/v1/workflows/tockmox-devops   -> 200
+    #
+    # IDENTICAL FOR BOTH, so this was never a role or an RBAC gap ... both
+    # Roles are namespaced to tockmox-devops and neither SA has a
+    # ClusterRoleBinding. The shipped UI asked a question no shipped identity
+    # could answer, and WHICH user met it depended on session state: a returning
+    # session carries a namespace selection, a fresh one does not. An admin
+    # looked fine and a first-time user did not, from the same permissions.
+    #
+    # Scoping is the least-privilege half of the fix rather than widening the
+    # Roles: Tockmox runs workflows only here, so nothing is lost. AN ADOPTER
+    # RUNNING WORKFLOWS IN OTHER NAMESPACES MUST WIDEN THIS DELIBERATELY, which
+    # is the point ... the previous state granted nothing and merely looked
+    # broken.
+    #
+    # THE KEY IS TOP-LEVEL ON THE SUBCHART, NOT UNDER `server:`. It is set
+    # below, beside `crds:`. A first draft of this change put it here and it
+    # would have been a silent no-op ... helm accepts unknown keys under an
+    # open block without a word, which is a trap the reference homelab has hit before.
+    # Verified by rendering and grepping the emitted args for `--namespaced`.
+    # ------------------------------------------------------------------------
+    # IN-CLUSTER TRUST. The Argo server does the OIDC token exchange itself, so
+    # the CA has to be trusted inside its container.
+    #
+    # NO initContainer, AND THE REASON IS TWO MEASUREMENTS RATHER THAN TASTE.
+    #
+    # 1. Go does not need one. `crypto/x509` reads SSL_CERT_FILE **and** the
+    #    default certificate directories and unions them, so pointing it at the
+    #    CA alone yields the CA plus every public root. Measured on the lab
+    #    2026-08-15: with SSL_CERT_FILE unset the internal endpoint failed and a
+    #    public one worked; with SSL_CERT_FILE set to the CA alone, both worked.
+    #    Python is the opposite ... `requests` and `httpx` pass the file as the
+    #    ENTIRE trust store ... which is why the AI layer still concatenates.
+    #
+    # 2. Go could not have one here anyway. `quay.io/argoproj/argocli` is
+    #    distroless: no /bin/sh, so an initContainer running the application's
+    #    own image cannot start at all. Shipped that way for 77 minutes on
+    #    2026-08-15 and the server sat in Init:CrashLoopBackOff with
+    #    `exec: "/bin/sh": no such file or directory`.
+    #
+    # A missing file is safe: with `optional: true` and no certIssuer there is
+    # no Secret, SSL_CERT_FILE points at nothing, and Go falls through to the
+    # default directories. Verified rather than assumed.
+    # ------------------------------------------------------------------------
+    extraEnv:
+      - name: SSL_CERT_FILE
+        value: /etc/tockmox/ca/ca.crt
+    # WAIT FOR THE CA. TM-0632.
+    #
+    # The comment above explains why there is no BUNDLE-BUILDING initContainer
+    # here, and that reasoning still holds: Go unions SSL_CERT_FILE with the
+    # default directories, so the CA alone is enough, and argocli is distroless
+    # so it cannot run one of its own image anyway.
+    #
+    # WAITING IS A DIFFERENT JOB FROM BUILDING, and it was missing. Go builds
+    # the root pool ONCE at the first handshake and caches it; a server that
+    # starts before cert-manager has written `argo-workflows-tls` reads a path
+    # that is not there, falls back to the public roots and never rebuilds, so
+    # server-side OIDC fails permanently while the server reports healthy.
+    # Measured on Grafana, which has the identical shape, at a ONE SECOND
+    # margin on the 0.6.0-rc4 gate. Argo passed that gate on timing, not on
+    # design.
+    #
+    # A wait-only container writes nothing, so it does NOT need the app's own
+    # trust store and the distroless objection does not apply ... any image
+    # with a shell is correct. busybox is already in `images.txt`, so this adds
+    # no image, and the registry is threaded so `global.imageRegistry` still
+    # redirects it.
+    #
+    # `server.extraInitContainers` runs through `tpl` in this subchart
+    # (`server-deployment.yaml`: `tpl (toYaml .) $`), which is what lets a
+    # static values block ask about a global. No issuer, no Secret to wait for,
+    # renders to nothing.
+    extraInitContainers:
+      - name: wait-for-ca
+        image: '{{ .Values.global.imageRegistry | default "docker.io" }}/library/busybox:1.38.0'
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -eu
+            # THIS SUBCHART RENDERS extraInitContainers AS `tpl (toYaml .)`, so
+            # the value has to be a LIST ... a `|-` string is toYaml'd into a
+            # block scalar and the deployment fails to parse. A list cannot be
+            # made conditional at render time, so the container always exists
+            # and decides here. The substitution below happens at render.
+            if [ -z "{{ .Values.global.certIssuer }}" ]; then
+              echo "global.certIssuer is empty: no CA is coming, nothing to wait for."
+              exit 0
+            fi
+            ca=/etc/tockmox/ca/ca.crt
+            i=0
+            while [ ! -s "$ca" ]; do
+              i=$((i + 1))
+              if [ "$i" -gt 60 ]; then
+                echo "FATAL: $ca is still absent after 300s."
+                echo "global.certIssuer is set, so the Argo server's OIDC token exchange is"
+                echo "https to the Tockmox CA. Starting without this file would"
+                echo "break SSO permanently, because the Go root pool is built"
+                echo "once and cached, while the process still reports healthy."
+                exit 1
+              fi
+              if [ "$((i % 6))" -eq 1 ]; then
+                echo "waiting for $ca (attempt $i, 5s apart) ..."
+              fi
+              sleep 5
+            done
+            echo "CA present, $(wc -c < "$ca") bytes; starting."
+        # TM-0903: the same shell-and-sleep init container as the other
+        # wait-for-ca containers, which measured 0.6 MiB peak; 32Mi is the
+        # init-container floor and 8Mi the request. This one was not sampled on
+        # its own (it does not run under the lab profile), so the figure is
+        # the floor, not a measurement of this pod.
+        resources:
+          requests: {memory: 8Mi}
+          limits: {memory: 32Mi}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 8737
+          seccompProfile:
+            type: RuntimeDefault
+        volumeMounts:
+          - name: tockmox-ca
+            mountPath: /etc/tockmox/ca
+            readOnly: true
+    volumes:
+      # The server's OWN ingress certificate Secret. cert-manager writes
+      # `ca.crt` into it in this namespace and renews it with the certificate.
+      - name: tockmox-ca
+        secret:
+          secretName: argo-workflows-tls
+          optional: true
+          items:
+            - key: ca.crt
+              path: ca.crt
+    volumeMounts:
+      - name: tockmox-ca
+        mountPath: /etc/tockmox/ca
+        readOnly: true

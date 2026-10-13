@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Your change{% endblock %}
+{% block main %}
+<h1>{{ title }}</h1>
+<p class="lede">Nothing has changed yet. Commit this to <code>{{ values_file }}</code> in your site repository; Argo CD applies it.</p>
+{% if notes %}<section class="panel" aria-labelledby="n-h"><h2 id="n-h">Before you commit</h2><ul>{% for n in notes %}<li>{{ n }}</li>{% endfor %}</ul></section>{% endif %}
+{% if model_list or prod_hosted %}
+<section class="panel steps" aria-labelledby="ml-h">
+  <h2 id="ml-h">What the production gateway will get</h2>
+  <p>What agents can call. Nothing reaches it without a promotion.</p>
+{% if model_list %}<pre tabindex="0"><code>{{ model_list }}</code></pre>{% endif %}
+{% if prod_hosted %}<p>Hosted models are not on a node: add this to the production gateway's <code>model_list</code>.</p>
+<pre tabindex="0"><code>{{ prod_hosted }}</code></pre>{% endif %}
+</section>
+{% endif %}
+{% if eval_list or eval_hosted %}
+<section class="panel steps" aria-labelledby="el-h">
+  <h2 id="el-h">What the eval gateway will get</h2>
+  <p>Only the eval runner can reach this gateway. Candidates live here, beside the model each is compared against.</p>
+{% if eval_list %}<pre tabindex="0"><code>{{ eval_list }}</code></pre>{% endif %}
+{% if eval_hosted %}<p>Hosted candidates are not on a node: add this to the eval gateway's <code>model_list</code>. It carries no data-class tags.</p>
+<pre tabindex="0"><code>{{ eval_hosted }}</code></pre>{% endif %}
+</section>
+{% endif %}
+<section class="panel steps" aria-labelledby="y-h">
+  <h2 id="y-h">The values blocks</h2>
+  <form method="post" action="{{ path }}">
+    <input type="hidden" name="csrf" value="{{ user.csrf }}">
+    {% for k, v in form_fields.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <input type="hidden" name="fmt" value="yaml">
+    <button class="btn" type="submit">Download it</button>
+  </form>
+  <details><summary>Show the blocks</summary>
+<pre tabindex="0"><code>{{ text }}</code></pre>
+  </details>
+</section>
+{% endblock %}

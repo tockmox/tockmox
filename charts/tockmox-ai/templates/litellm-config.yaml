@@ -1,0 +1,102 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+The production gateway's config, with the inference-node routes derived from `inferenceNodes`
+(REQ-0047). OFF by default: nothing changes until a site sets inferenceNodes.render.enabled.
+
+When it is on, this chart renders the gateway's whole config.yaml ... litellm.proxy_config as written,
+with the derived routes appended to its model_list ... into a ConfigMap of a FIXED name, and the
+subchart must be told to mount it instead of rendering its own:
+
+    litellm:
+      proxyConfigMap: {create: false, name: tockmox-litellm-config}
+
+The name is fixed for the reason tockmox-litellm-hooks is: the subchart takes it as a literal value.
+
+Three render-time refusals, each a quiet failure otherwise:
+  - the subchart still renders its own config: the derived routes would be in a ConfigMap nobody mounts;
+  - a derived alias collides with a hand-written model_list entry: LiteLLM would load-balance one name
+    across both, sending one route's traffic to the other's backend;
+  - the pod annotations that roll the gateway do not match. LiteLLM reads config.yaml once, at start-up,
+    and the subchart can only hash a ConfigMap it renders itself, so without them a change would load on
+    the next unrelated restart. Two annotations, so each has one writer:
+      tockmox.com/node-routes      a hash of the derived routes. The Tockmox UI and the model watcher's PR
+                                   opener write it beside inferenceNodes, in the same file and commit
+                                   (litellm.podAnnotations merges across values files; it is a map).
+      tockmox.com/gateway-config   a hash of litellm.proxy_config as written by hand (and of
+                                   modelLifecycle.productionKeys when set). Whoever edits those updates
+                                   it; the render says the value.
+*/ -}}
+{{- $in := .Values.inferenceNodes | default dict -}}
+{{- if and (hasKey (((.Values.modelLifecycle | default dict).productionKeys) | default dict) "defaultModels") (not (($in.render | default dict).enabled)) -}}
+{{- fail "modelLifecycle.productionKeys.defaultModels needs inferenceNodes.render.enabled (this chart then renders the gateway config). Without it, set litellm.proxy_config.litellm_settings.default_key_generate_params yourself." -}}
+{{- end -}}
+{{- if and (($in.render | default dict).enabled) (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm")) -}}
+{{- $name := $in.render.configMapName | default "tockmox-litellm-config" -}}
+{{- $pcm := .Values.litellm.proxyConfigMap | default dict -}}
+{{- if or $pcm.create (ne ($pcm.name | default "") $name) -}}
+{{- fail (printf "inferenceNodes.render.enabled is true, so this chart renders the gateway config as ConfigMap %q. Set litellm.proxyConfigMap.create: false and litellm.proxyConfigMap.name: %s, or the gateway keeps reading the subchart's ConfigMap and none of the node routes reach it." $name $name) -}}
+{{- end -}}
+{{- if (.Values.litellm.redis | default dict).enabled -}}
+{{- fail "inferenceNodes.render.enabled does not support litellm.redis.enabled yet: the subchart injects coordination_redis into a config it renders itself, and this chart would have to repeat that logic. Leave redis off (a single replica does not use it) or keep render off." -}}
+{{- end -}}
+{{- $config := deepCopy (.Values.litellm.proxy_config | default dict) -}}
+{{- $hand := $config.model_list | default list -}}
+{{- $derived := include "tockmox-ai.nodeRoutes" (dict "root" $ "gateway" "production") | fromYamlArray -}}
+{{- $names := dict -}}
+{{- range $hand -}}{{- $_ := set $names (.model_name | default "") true -}}{{- end -}}
+{{- range $derived -}}
+{{- if hasKey $names .model_name -}}
+{{- fail (printf "inferenceNodes.routes: %s is also a hand-written entry in litellm.proxy_config.model_list. LiteLLM load-balances one name across every entry that carries it, so one route's traffic would reach the other's backend. Remove one of them." .model_name) -}}
+{{- end -}}
+{{- end -}}
+{{- $_ := set $config "model_list" (concat $hand $derived) -}}
+{{- /*
+DEFAULT MODELS FOR NEW KEYS (TM-0920, REQ-0048). On LiteLLM a virtual key minted with no model list can call
+every model the gateway has (TM-0936). modelLifecycle.productionKeys.defaultModels gives such keys a list instead.
+Defense in depth, NOT a fence: LiteLLM applies it only at mint time, so keys that exist keep what they have, and a
+key later updated to an empty list reaches everything again. Refused: an empty list or all-proxy-models (both
+mean every model), a name that is not a production model or access group, and a second writer of the setting.
+*/ -}}
+{{- $pk := ((.Values.modelLifecycle | default dict).productionKeys) | default dict -}}
+{{- $handHashInput := .Values.litellm.proxy_config | default dict -}}
+{{- if hasKey $pk "defaultModels" -}}
+{{- $dm := $pk.defaultModels | default list -}}
+{{- if not $dm -}}{{- fail "modelLifecycle.productionKeys.defaultModels is empty, and LiteLLM reads an empty list as EVERY model: name the models or access groups a new key may call, or remove the key" -}}{{- end -}}
+{{- $known := dict -}}
+{{- range ($config.model_list | default list) -}}
+{{- $_ := set $known (.model_name | default "") true -}}
+{{- range (((.model_info | default dict).access_groups) | default list) -}}{{- $_ := set $known . true -}}{{- end -}}
+{{- end -}}
+{{- range $dm -}}
+{{- if has . (list "all-proxy-models" "*") -}}{{- fail (printf "modelLifecycle.productionKeys.defaultModels names %q, which means every model: name the models a new key may call" .) -}}{{- end -}}
+{{- if not (hasKey $known .) -}}{{- fail (printf "modelLifecycle.productionKeys.defaultModels names %q, which is not a model or access group on the production gateway" .) -}}{{- end -}}
+{{- end -}}
+{{- $ls := deepCopy ($config.litellm_settings | default dict) -}}
+{{- if hasKey $ls "default_key_generate_params" -}}{{- fail "litellm.proxy_config.litellm_settings.default_key_generate_params is set by hand AND modelLifecycle.productionKeys.defaultModels is set: keep one of them" -}}{{- end -}}
+{{- $_ := set $ls "default_key_generate_params" (dict "models" $dm) -}}
+{{- $_ := set $config "litellm_settings" $ls -}}
+{{- $handHashInput = dict "proxy_config" (.Values.litellm.proxy_config | default dict) "productionKeys" $pk -}}
+{{- end -}}
+{{- $routesHash := $derived | toJson | sha256sum | trunc 16 -}}
+{{- $configHash := $handHashInput | toJson | sha256sum | trunc 16 -}}
+{{- $ann := .Values.litellm.podAnnotations | default dict -}}
+{{- if ne (index $ann "tockmox.com/node-routes" | default "") $routesHash -}}
+{{- fail (printf "the node routes changed, and LiteLLM reads its config only at start-up. Set litellm.podAnnotations.\"tockmox.com/node-routes\": %q beside inferenceNodes in the same commit so the gateway rolls and loads them (the Tockmox UI's changes carry it)." $routesHash) -}}
+{{- end -}}
+{{- if ne (index $ann "tockmox.com/gateway-config" | default "") $configHash -}}
+{{- fail (printf "litellm.proxy_config (or modelLifecycle.productionKeys) changed, and with inferenceNodes.render on the subchart no longer hashes it. Set litellm.podAnnotations.\"tockmox.com/gateway-config\": %q in the same commit so the gateway rolls and loads it." $configHash) -}}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    tockmox.com/node-routes: {{ $routesHash | quote }}
+    tockmox.com/gateway-config: {{ $configHash | quote }}
+data:
+  config.yaml: |
+{{ $config | toYaml | indent 4 }}
+{{- end }}

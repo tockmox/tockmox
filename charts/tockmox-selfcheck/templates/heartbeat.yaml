@@ -1,0 +1,114 @@
+{{- /*
+`notifications` is declared in the OBSERVABILITY layer's values, not this
+one. The values namespace is shared, so a full profile supplies it here and a
+real site's per-layer values file does not ... and reading .Values.notifications.enabled
+directly is then a nil pointer that fails the whole render. ci/values.yaml is
+more complete than any real site, which is exactly why this passed CI and
+failed on the first deployment that used it.
+*/ -}}
+{{- $notify := include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "notifications" "override" (.Values.notifications | default dict).enabled) }}
+{{- if and .Values.apps.heartbeat.enabled $notify }}
+{{- /*
+The checker's own liveness signal.
+
+A monitoring stack that goes quiet looks identical to a platform with nothing
+wrong. This CronJob pushes a timestamp on a schedule; the companion alert fires
+when the timestamp stops advancing. Absence renders not-green.
+
+Deterministic by design: no model, no network beyond the in-cluster
+Alertmanager, nothing to go wrong that would not itself be visible.
+*/ -}}
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tockmox-heartbeat
+  namespace: {{ .Values.namespaces.selfcheck }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.heartbeat.schedule | quote }}
+  timeZone: {{ .Values.global.timezone | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            {{- include "tockmox.labels" . | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          # No Kubernetes API calls: a ServiceAccount of its own and no token (TM-0759,
+          # CIS 5.1.5 and 5.1.6). It POSTs to Alertmanager over HTTP.
+          serviceAccountName: tockmox-heartbeat
+          automountServiceAccountToken: false
+          priorityClassName: tockmox-infrastructure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: beat
+              image: {{ include "tockmox.image" (dict "ctx" $ "repo" .Values.heartbeat.image) }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              resources:
+                requests: { cpu: 10m, memory: 32Mi }
+                limits:   { memory: 64Mi }
+              command: ["sh","-c"]
+              args:
+                - |
+                  set -eu
+                  # Push a Prometheus-visible heartbeat via Alertmanager's API.
+                  # Deliberately NOT a metrics push: this proves the alerting
+                  # path works end to end, not merely that a scrape happened.
+                  AM="{{ .Values.alertmanagerURL }}"
+                  # BusyBox date has neither -d nor -v. Compute the expiry from
+                  # the epoch instead, which every date implementation supports.
+                  END=$(awk 'BEGIN{print strftime("%Y-%m-%dT%H:%M:%SZ", systime()+1800, 1)}')
+                  # WAIT FOR ALERTMANAGER RATHER THAN FAILING THE FIRST TICK.
+                  #
+                  # On a cold install this CronJob's first tick can land before
+                  # Alertmanager exists, and then this Job FAILS ... which fires
+                  # upstream's KubeJobFailed, on every cold install, at the exact
+                  # moment an operator first looks at their alerts. Measured
+                  # 2026-09-12: tick at 20:15:00, Alertmanager started 20:16:48,
+                  # Job failed; the 20:30 tick succeeded with no intervention.
+                  #
+                  # The condition was real and transient, so the fix is to wait
+                  # for it rather than to suppress the alert. Six tries at 20s is
+                  # two minutes, comfortably longer than the gap measured, and
+                  # still well inside the 15-minute schedule so a tick can never
+                  # overlap the next one. If Alertmanager is genuinely down this
+                  # still fails, which is the point ... TockmoxSelfCheckStale is
+                  # what reports a heartbeat that stops arriving.
+                  i=1
+                  while [ "$i" -le 6 ]; do
+                    if wget -q -O- --timeout=10 "${AM}/-/ready" >/dev/null 2>&1; then break; fi
+                    echo "alertmanager not ready yet (attempt ${i}/6), waiting"
+                    i=$((i + 1)); sleep 20
+                  done
+                  wget -q -O- --post-data "[{
+                    \"labels\":{\"alertname\":\"TockmoxHeartbeat\",\"severity\":\"none\"},
+                    \"annotations\":{\"summary\":\"self-check heartbeat\"},
+                    \"endsAt\":\"${END}\"}]" \
+                    --header 'Content-Type: application/json' \
+                    "${AM}/api/v2/alerts" >/dev/null
+                  echo "heartbeat sent, expires ${END}"
+---
+# TM-0759: this workload's own identity, with no token. The namespace's `default`
+# account is not used (CIS 5.1.5 and 5.1.6).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-heartbeat
+  namespace: {{ .Values.namespaces.selfcheck }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+{{- end }}

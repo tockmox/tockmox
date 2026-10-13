@@ -1,0 +1,12 @@
+{% include "onboarding/_sources.html" %}
+<p>Ryzen AI Max machines share system memory with the GPU. Linux only gives the GPU a slice of it unless you raise the limit.</p>
+<ol>
+  <li><h3>Give the GPU most of the memory</h3>
+<pre tabindex="0" data-step="gtt"><code>sudo sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="/&amp;amdgpu.gttsize=110000 ttm.pages_limit=28160000 /' /etc/default/grub
+sudo update-grub &amp;&amp; sudo reboot
+cat /sys/class/drm/card*/device/mem_info_gtt_total</code></pre>
+    <p>Set the firmware's dedicated GPU memory to its minimum (often 512 MB) as well. The figures are for 128 GB machines; scale them for less.</p></li>
+</ol>
+<p>Then follow the generic Linux steps for the engine you chose:</p>
+{% include "onboarding/linux.html" %}
+<p class="muted">llama.cpp's Vulkan build is the usual starting point on this hardware: use the image tag <code>server-vulkan</code> in place of <code>server-cuda</code> and pass <code>--device /dev/dri</code> instead of <code>--gpus all</code>.</p>

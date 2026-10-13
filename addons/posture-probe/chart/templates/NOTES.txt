@@ -1,0 +1,9 @@
+{{- if .Values.enabled }}
+Security Posture Probe (experimental) installed in {{ .Release.Namespace }}.
+Runs on "{{ .Values.schedule }}"{{ if .Values.suspend }} (suspended){{ end }}. To run now, see
+docs/administration/posture-probe.md, "Run it now". The report is in the
+posture-probe-reports volume; the Job's exit code is the gate (0 clean,
+1 could not run, 2 drift).
+{{- else }}
+posture-probe: enabled is false, nothing was rendered.
+{{- end }}

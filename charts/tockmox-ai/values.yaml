@@ -1,0 +1,1536 @@
+# SPDX-License-Identifier: Apache-2.0
+global:
+  internalDomain: ""
+  certIssuer: "tockmox-ca"
+  imageRegistry: ""
+  timezone: "UTC"
+  clusterCIDR: "10.42.0.0/16"
+  serviceCIDR: "10.43.0.0/16"
+  lanCIDR: ""
+  # THE STORAGE CONTRACT. Empty means "use whatever the cluster's default
+  # StorageClass happens to be", which is not the same as "use the storage this
+  # platform ships". On k3s the default is `local-path`: node-local, one copy,
+  # no snapshots, no backup target. Tockmox shipped Longhorn and, because
+  # nothing named a class, wrote every PVC to local-path anyway.
+  #
+  # Name it. `longhorn` on a stock install with apps.longhorn enabled;
+  # `local-path` if you have deliberately chosen node-local storage; the name of
+  # your own CSI class if you brought one. A preflight refuses the combination
+  # that used to fail silently.
+  storageClass: ""
+
+  # THE SECOND HALF OF THE STORAGE CONTRACT: the class for data whose
+  # application already protects it, or that can be re-derived.
+  #
+  # The policy is "replicate at exactly one layer". If an application keeps its
+  # own copies (Postgres streaming to replicas, an object store spreading
+  # across nodes) or the data can be rebuilt (a metrics TSDB), then replicating
+  # the volume underneath buys nothing and costs two to three times the disk
+  # plus write latency on the hot path. Those workloads get THIS class.
+  # Everything else gets `storageClass` above.
+  #
+  # `local-path` is k3s's own provisioner and is the shipped default here.
+  # prerequisites.md tells you to UN-DEFAULT it rather than delete it, and this
+  # is why. Node-local means a rescheduled pod finds an empty volume, which is
+  # the trade this class exists to make; do not point it at anything whose loss
+  # you would mind.
+  #
+  # Empty falls back to the cluster default, which un-does the policy without
+  # complaining. Set it to a class you have.
+  localStorageClass: "local-path"
+namespaces:
+  ai: tockmox-ai
+
+# ---------------------------------------------------------------------------
+# The way in. `chat.<internalDomain>` by default; global.certIssuer adds TLS.
+# The upstream chart's own `open-webui.ingress` stays off: its host is a
+# static string, and Tockmox derives hostnames from one place.
+# ---------------------------------------------------------------------------
+ingress:
+  # Empty uses the cluster's DEFAULT IngressClass ... the Traefik the platform
+  # layer ships marks itself default, and its class name derives from the
+  # release (`tockmox-platform-traefik` on a stock install), so naming it here
+  # would break on rename. Set this only to pin a specific class.
+  className: ""
+  annotations: {}
+  apps:
+    openWebui:
+      enabled: true
+      host: ""            # override the derived chat.<internalDomain>
+    litellm:
+      enabled: true       # gated by apps.litellm below, which follows the capability
+      host: ""            # override the derived llm.<internalDomain>
+
+# ---------------------------------------------------------------------------
+# CAPABILITIES: functional stories you can decline.
+#
+# `apps.*` is one switch per piece of software, which is the wrong unit for the
+# decision people actually make. Nobody chooses "a Garage", "a barman plugin"
+# and "a snapshot controller" separately; they choose whether this deployment
+# protects its data, or whether they already run Velero and want none of it.
+#
+# A capability is that decision, named, on one switch, spanning whatever
+# components it takes and whichever layers they live in.
+#
+# HOW IT RESOLVES, and the tri-state is the point:
+#   apps.<x>.enabled unset   follow the capability that owns the component
+#   apps.<x>.enabled: true   on, even if the capability is off
+#   apps.<x>.enabled: false  off, even if the capability is on
+#
+# So declining a capability turns off everything it owns, and a component you
+# named yourself still means what you said. Turning a single component on while
+# its capability is off fails the render rather than half-building the story.
+#
+# THIS BLOCK IS BYTE-IDENTICAL IN ALL NINE LAYERS, and that is deliberate. The
+# values namespace is shared across layers, so one profile sets a capability
+# once and every layer owning part of it reads the same answer. Editing one copy
+# and not the others is the failure the uniformity exists to prevent, and
+# tools/check-capabilities.sh fails CI on any drift between them.
+#
+# Full list, what each one contains, and why you would decline it:
+# docs/administration/capabilities.md
+# ---------------------------------------------------------------------------
+capabilities:
+  # Metrics, logs and the rules that read them ... everything answering "what is
+  # this platform doing right now". Off means Tockmox ships no Prometheus, no
+  # Loki, no Alloy, and none of its own ServiceMonitors or alert rules.
+  #
+  # Running your own Prometheus operator is the case worth naming. Decline the
+  # capability and set `apps.serviceMonitors.enabled: true`, and Tockmox renders
+  # its monitors and rules for YOUR operator to collect, without standing up a
+  # second stack beside the one you already run.
+  observability:
+    enabled: true
+
+  # Alerts that reach a person: the notification sink, the bridge that feeds it
+  # and the heartbeat that proves the path still works when nothing is wrong.
+  # Off means alerts fire into Alertmanager and stop there.
+  #
+  # The component switch for this one is `notifications.enabled` rather than an
+  # `apps` key, because it predates this framework and is a contract key. It has
+  # the same tri-state: unset follows the capability, set means what you said.
+  notifications:
+    enabled: true
+
+  # One sign-in across every console, and the identity provider behind it. Off
+  # means Tockmox ships no Authentik and each console falls back to its own
+  # local login, unless you point `sso` at an issuer you already run.
+  identity:
+    enabled: true
+
+  # The private AI plane: a chat console and the model gateway in front of it.
+  # Off leaves Tockmox as a platform and nothing else, which is a legitimate way
+  # to run it and the right answer if you are here for the infrastructure.
+  aiPlane:
+    enabled: true
+
+  # Backups that go somewhere, restores that are exercised, and the CSI
+  # plumbing underneath both. Off means Tockmox ships no object store, no
+  # backup plugin and no snapshot control plane, and expects you to have your
+  # own or to not want one.
+  dataProtection:
+    enabled: true
+
+  # Telemetry from PHYSICAL hardware: disk SMART attributes, and SNMP from
+  # switches, UPSes and appliances.
+  #
+  # OFF BY DEFAULT, unlike every other capability here, because the reference
+  # deployment is a virtual machine: there is no physical disk to ask and no
+  # switch to poll, and an exporter scraping nothing still alerts on its own
+  # absence. Turn it on when the hardware is real, and both exporters follow.
+  hardwareTelemetry:
+    enabled: false
+
+  # Jobs running inside the cluster on a schedule or an event, with a console to
+  # watch them. Off means no Argo Workflows.
+  workflowAutomation:
+    enabled: true
+
+  # Default-deny between namespaces, so a compromised workload cannot reach a
+  # neighbour it was never meant to.
+  #
+  # Off is the honest setting on a cluster whose CNI does not enforce
+  # NetworkPolicy at all. Flannel without a policy plugin accepts every object
+  # here and enforces none of them, and a control that is only decoration is
+  # worse than no control, because it gets counted.
+  networkPolicy:
+    enabled: true
+
+# ---------------------------------------------------------------------------
+# The local AI plane. Deliberately thin and independently adoptable: someone
+# who already has a platform should be able to take this layer alone.
+#
+# Ollama is DISABLED by default even though the chart offers it. Pulling a
+# multi-gigabyte model image onto a cluster during a first install, without
+# being asked, is rude. Point Open WebUI at a model host you already run, or
+# turn Ollama on deliberately.
+#
+# LiteLLM, the model gateway, FOLLOWS THE CAPABILITY since 0.8.0 (TM-0460,
+# REQ-0004 AC-4.1, ruled 2026-10-08). Through 0.7.x it shipped off because it
+# needs two things only the site can supply: a master key Secret
+# (docs/administration/secrets.md; mint-secrets.sh now mints it by default)
+# and a model list naming hosts on your network (it still ships empty, so a
+# first install has a gateway with nothing to route to, which is the same
+# "nothing to talk to yet" state the console had before, now behind one
+# endpoint instead of none). The console points at the gateway on a scoped
+# virtual key that modelGateway.consoleKey below mints; see open-webui below.
+#
+# A site may still turn the gateway off: `apps.litellm: { enabled: false }`
+# in a values file EVERY layer reads (global.yaml, so the exporters layer stops
+# probing it), plus either `open-webui.enableOpenaiApi: false` or an
+# `open-webui.openaiBaseApiUrl` of its own, because the console's default
+# names this gateway and the render refuses to point it at nothing. That
+# override re-opens AC-4.1 on that site; docs/usage/ai-plane.md says so.
+# ---------------------------------------------------------------------------
+apps:
+  openWebui: {}   # unset: follows capabilities.aiPlane
+  litellm:   {}   # unset: follows capabilities.aiPlane (shipped off until 0.8.0)
+  # The ServiceMonitor, PodMonitor and PrometheusRule objects THIS REPO writes,
+  # as distinct from the stack that consumes them.
+  #
+  # It is a separate component so that "I run my own Prometheus operator" is one
+  # key rather than a fork. Decline capabilities.observability to drop the stack,
+  # set this true, and Tockmox still renders its monitors and rules for your
+  # operator to collect. Unset, it follows the capability, so the common case
+  # needs no decision at all.
+  serviceMonitors: {}   # unset: follows capabilities.observability
+
+# ---------------------------------------------------------------------------
+# THE MODEL GATEWAY ... Tockmox-owned settings for the LiteLLM layer.
+#
+# BUILD-OR-ADOPT (Landscape scan 2026-08-14): ADOPT, wrapped. `litellm-helm`
+# 1.96.2 (OCI, ghcr.io/berriai) already exposes every seam this layer needs:
+# an existing database (db.useExisting), an existing master-key Secret
+# (masterkeySecretName), its own ingress switched off, and a proxy config it
+# does not own. Authoring a Deployment instead would mean owning the Prisma
+# migration Job, the drain/lifecycle contract and the probe paths against an
+# app that changes weekly. What upstream does NOT do is the database: its
+# bundled path is a Bitnami postgresql subchart pinned to `bitnamilegacy`
+# images with a password in values. That half is replaced here with a CNPG
+# Cluster, the same operator the platform layer already runs.
+#
+# The split, so the seam is obvious:
+#   litellm.*        upstream chart values (what the vendored chart reads)
+#   modelGateway.*   objects THIS chart renders around it
+# ---------------------------------------------------------------------------
+modelGateway:
+  # A CNPG Cluster rendered by this chart, in the release namespace, following
+  # docs/administration/adding-an-application.md. LiteLLM stores keys, teams,
+  # budgets and spend here; it is not a cache, and losing it loses your keys.
+  database:
+    # Cluster name. `<name>-rw` is the read/write Service, which is what
+    # litellm.db.endpoint below must point at ... a preflight guard fails the
+    # render if the two disagree, because the failure otherwise shows up as a
+    # pod retrying DNS forever.
+    name: tockmox-litellm-db
+    # The role that owns the database. MUST equal the `username` key in the
+    # Secret below, because CNPG bootstraps the owner from that Secret and the
+    # proxy then logs in as whatever the Secret says.
+    owner: litellm
+    # 1 on a single-node cluster, 3 when you have three nodes to put them on.
+    # This also decides the storage class: see storageClass below.
+    instances: 1
+    storage: 8Gi
+    # Empty means "derive it from instances", which is what the storage policy
+    # asks for: `global.storageClass` at one instance, because nothing else
+    # holds a copy, and `global.localStorageClass` at three or more, because
+    # Postgres is already streaming to its own replicas and replicating the
+    # volume under them triples the disk for a copy it was keeping anyway.
+    #
+    # Naming a class here overrides that derivation. Do it if your cluster's
+    # classes are called something else and you have not set the globals.
+    storageClass: ""
+    # Empty uses the operator's default PostgreSQL image. Pin it (and mirror
+    # it) for an airgapped install; a major-version jump on an existing data
+    # directory is a dump and restore, not an image bump.
+    imageName: ""
+    # The postgres container's resources, set on the Cluster's spec.resources
+    # (TM-0595). Measured on the prod install 2026-10-05 (accepted for the lab):
+    # peak 212.5 MiB in tockmox-ai (~3 days at v0.7.2), 129.2 MiB for the same
+    # database in the pre-migration namespace (30 days); average 127.4 MiB.
+    # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+    # request = average, rounded up to 16Mi. Re-measure before changing.
+    # CHANGING THIS RESTARTS THE DATABASE: CNPG rolls the instance pods, and at
+    # instances: 1 there is no replica to switch to. `null` leaves it unset.
+    resources:
+      requests:
+        memory: 128Mi
+      limits:
+        memory: 320Mi
+    # Empty omits priorityClassName entirely. The classes live in the policy
+    # layer, and this chart is meant to be independently adoptable ... naming a
+    # class that does not exist gets the pod REJECTED by the API server, which
+    # is a worse failure than having no priority. Set `tockmox-apps` on a full
+    # Tockmox install.
+    priorityClassName: ""
+    # Whether the operator creates a PodMonitor for this cluster's exporter.
+    # See the note in templates/litellm-db.yaml: without it the backup story
+    # has no metric behind it and the first sign of trouble is a restore that
+    # does not work.
+    monitoring:
+      enablePodMonitor: true
+    # DISASTER RECOVERY INTO THIS CLUSTER (TM-0820 C1). Off: the cluster
+    # bootstraps empty with `initdb`, as before. On: it bootstraps from a base
+    # backup and WAL in an ObjectStore instead (`bootstrap.recovery`), so a lost
+    # gateway database comes back with its keys, spend and teams. The database,
+    # owner and credentials Secret are still the ones below; only the data
+    # source changes. Use it on a NEW cluster: recovery runs once, at first
+    # bootstrap, and does nothing to a cluster that already exists.
+    #   objectStoreName  the ObjectStore holding the backups; empty uses this
+    #                    chart's own store when backup.enabled
+    #   serverName       the name they were archived under (required)
+    #   sourceName       the externalClusters entry; default <name>-origin
+    # Not exercised against a live CNPG in this repo's gates; the render is.
+    recovery:
+      enabled: false
+      objectStoreName: ""
+      serverName: ""
+      sourceName: ""
+    # BACKUPS FOLLOW THE dataProtection CAPABILITY (TM-0312). The house
+    # tri-state: unset (null) follows `capabilities.dataProtection`, which is on,
+    # so a stock install with the model gateway enabled is backed up; true or
+    # false here means what it says whatever the capability says.
+    #
+    # THIS WAS `false` through 0.7.0, on the grounds that the destination is
+    # site-supplied. It no longer is by default: the platform layer ships Garage
+    # and its bootstrap Job copies `tockmox-garage-credentials` into this
+    # namespace (platform `garage.credentialsNamespaces` lists `tockmox-ai`), and
+    # `objectStore.create` below renders the ObjectStore against it. What a
+    # default of `false` cost was a database holding API keys and spend that
+    # nothing backed up and nothing said so.
+    #
+    # WHAT THE DEFAULT ASSUMES, because this chart cannot see the platform
+    # layer's values: Garage and the Barman plugin are on (both follow the same
+    # capability) and the bootstrap has run. If you declined either, or pointed
+    # the platform layer at your own S3, set `objectStoreName` and
+    # `objectStore.create: false` to name your own store, or set `enabled: false`
+    # and take the unbacked-database alert below as the reminder. A missing
+    # store or credential should stop WAL archiving rather than the Cluster (not
+    # exercised against a live CNPG here), and TockmoxWalArchiveBacklog fires on
+    # a stalled archiver while the PodMonitor is on.
+    # See docs/operations/backup-restore.md.
+    backup:
+      enabled: null
+      # With backups OFF (enabled: false, or the capability declined) and the
+      # observability capability on, render TockmoxModelGatewayDatabaseUnbacked,
+      # which fires for as long as the gateway's database has no backup. Absence
+      # has to read not-green: a database nobody backs up looks identical to a
+      # healthy one from every metric. Set false only if something outside this
+      # chart (a volume-level backup, a dump you run) really covers it.
+      unbackedAlert: true
+      # Name an ObjectStore you created, OR leave it empty and let `objectStore`
+      # below render one against the Garage the platform layer ships. The second
+      # is what makes a fresh install able to back up without you first standing
+      # up an S3 endpoint and writing a CR against it.
+      objectStoreName: ""
+      # RENDER THE OBJECTSTORE, pointing at the shipped object store.
+      #
+      # Turn this off if you brought your own S3: set objectStoreName to your
+      # own CR instead. The two are mutually exclusive and a guard says so
+      # rather than letting one quietly win.
+      objectStore:
+        create: true
+        name: tockmox-litellm-db-store
+        # In-cluster Service of the platform layer's Garage. Change the
+        # namespace if you renamed it; change the whole endpoint if you pointed
+        # `create` at something else.
+        endpoint: http://tockmox-garage.tockmox-platform.svc:3900
+        region: garage
+        bucket: tockmox-backups
+        # Written into this namespace by the Garage bootstrap Job, because a
+        # CNPG ObjectStore reads its Secret from its own namespace.
+        credentialsSecretName: tockmox-garage-credentials
+        # The database gets its own prefix inside the shared bucket, so a
+        # second database backing up here cannot collide with this one.
+        destinationPath: s3://tockmox-backups/litellm-db
+      # The name this cluster archives under inside the object store. Empty keeps
+      # CNPG's default, the cluster name (modelGateway.database.name), and the
+      # restore drill reads the same name. Set it when a cluster is RECOVERED
+      # from a store it will also archive to: CNPG refuses to archive into a
+      # path that already holds another cluster's backups, so the new cluster
+      # needs a new server name (TM-0820 C1/C6).
+      serverName: ""
+      schedule: "0 0 3 * * *"      # six fields (CNPG includes seconds); 03:00 daily
+      # ----------------------------------------------------------------------
+      # THE SCHEDULED RESTORE DRILL: prove the store contains a database
+      # somebody could come back from, weekly, with a register to show for it.
+      # A green backup job proves an upload happened; only a restore proves a
+      # backup. The drill bootstraps a NEW cluster from the store, asserts
+      # recovery finished and the schema has substance, writes a dated
+      # PASS/FAIL row to the tockmox-restore-drill-register ConfigMap, and
+      # tears itself down ... PASS or FAIL. It never touches the live
+      # database. Tockmox proves restorability; humans perform recovery.
+      #
+      # ON when backups are on, because an untested backup is a hope with a
+      # retention policy. Turn it off if the drill's transient storage cost
+      # (one extra copy of `storage` on localStorageClass, minutes per week)
+      # genuinely matters more than the proof.
+      #
+      # Watching the watcher: TockmoxRestoreDrillStale fires after 15 days
+      # without a PASS (two missed weekly cycles ... one slot lost to a
+      # maintenance window stays silent, two never does), and
+      # TockmoxRestoreDrillNeverRan names the never-scheduled case that a
+      # freshness rule alone cannot see. TockmoxRestoreDrillFailed is the
+      # third case, the one the other two miss: the drill RAN and did not
+      # PASS. It fires while the most recent drill is a failure and clears on
+      # the next PASS.
+      # ----------------------------------------------------------------------
+      restoreDrill:
+        enabled: true
+        # Mondays 04:30, after the 03:00 backup has landed. FIVE fields ... this
+        # is a Kubernetes CronJob, unlike the CNPG six-field schedule above.
+        schedule: "30 4 * * 1"
+        suspend: false
+        image: alpine/k8s:1.37.1
+
+  # ------------------------------------------------------------------------
+  # SITE HOOKS FOR THE MODEL GATEWAY (TM-0787). A supported way to load your
+  # own LiteLLM callbacks ... a pre-call policy gate, a logging hook ... with
+  # no forked template.
+  #
+  # WHAT THIS KEY DOES: every entry in `files` becomes a key of ONE ConfigMap,
+  # `tockmox-litellm-hooks`, in the release namespace. The name is fixed on
+  # purpose (see the mount note under `litellm.volumes` below). The file name
+  # is the key, the value is the file content.
+  #
+  # WHAT IT DOES NOT DO: it does not register anything. LiteLLM loads a hook
+  # only when `litellm.proxy_config.litellm_settings.callbacks` names it, and
+  # the object names are yours, so that one list is yours to write:
+  #
+  #   modelGateway:
+  #     hooks:
+  #       files:
+  #         policy_gate.py: |
+  #           ...your CustomLogger subclass and a module-level instance...
+  #         audit_log.py: |
+  #           ...
+  #   litellm:
+  #     proxy_config:
+  #       litellm_settings:
+  #         callbacks:
+  #           - hooks.policy_gate.gate       # <dir>.<file without .py>.<object>
+  #           - hooks.audit_log.logger
+  #
+  # The files land in /etc/litellm/hooks, beside the config file, because
+  # LiteLLM resolves a callback path RELATIVE TO THE DIRECTORY OF THE CONFIG
+  # FILE. `hooks.policy_gate.gate` is read from /etc/litellm/hooks/policy_gate.py.
+  # A file is a flat module: a ConfigMap key cannot contain a slash, so a
+  # package with sub-directories does not fit here (flatten it, or supply your
+  # own volume). A ConfigMap is capped at 1MiB in total.
+  #
+  # templates/preflight.yaml fails the render if `files` is set and the mount
+  # below was replaced, if no callback names a file, or if a callback under
+  # `hooks.` names a file that is not in `files`. Empty means: no ConfigMap,
+  # no hooks, and the optional volume below projects an empty directory.
+  #
+  # CHANGING A FILE DOES NOT RESTART THE PROXY. The kubelet refreshes the
+  # mounted file, but LiteLLM imported the module at startup and does not
+  # re-read it. Roll the pod (kubectl rollout restart) or change
+  # `litellm.podAnnotations` ... any value, for example a hash of the files ...
+  # in the same commit. This chart cannot hash them for you: the subchart
+  # renders its pod annotations in its own scope, which cannot see this block.
+  # ------------------------------------------------------------------------
+  hooks:
+    files: {}
+
+  # ------------------------------------------------------------------------
+  # THE POLICY GATE (TM-0383). Off by default; the default render is unchanged.
+  #
+  # A pre-call hook that gives every request a CLASS and refuses one whose class
+  # may not use the endpoint tier of the model it asked for. It is the shipped
+  # form of REQ-0002 ("external is the exception"): a restricted request never
+  # reaches an external endpoint, including when the local one is down, because
+  # the gate strips client fallbacks and the config carries none.
+  #
+  #   class        decided by     may use
+  #   open         route posture  local, external
+  #   internal     route posture  local
+  #   restricted   the default    local only
+  #
+  # Turning it on is THREE edits, and the preflight refuses a render with any
+  # one missing:
+  #   1. modelGateway.policyGate.enabled: true, and a routePosture entry for
+  #      every alias in your model list.
+  #   2. litellm.proxy_config.litellm_settings.callbacks gains
+  #      `hooks.tockmox_gate.tockmox_gate`.
+  #   3. Every entry in the model list carries `model_info.endpoint_tier` (local or
+  #      external) and `litellm_params.tags` (the classes it may serve), and
+  #      litellm.proxy_config.router_settings.enable_tag_filtering is true.
+  #
+  # The module and its policy land beside your own hook files in
+  # tockmox-litellm-hooks, as tockmox_gate.py and tockmox_policy.yaml, so you
+  # cannot also ship files with those names. Every request writes one JSON line
+  # to the proxy's stdout with `"tockmox_audit": 1`; the log pipeline keeps it.
+  # What it does not cover is in docs/usage/ai-plane.md, "The policy gate".
+  # ------------------------------------------------------------------------
+  policyGate:
+    enabled: false
+    enforcement: enforce
+    platformMode: normal
+    policyId: tockmox-default-v1
+    defaultClass: restricted
+    classes:
+      open: [local, external]
+      internal: [local]
+      restricted: [local]
+    routePosture: {}
+
+  # ------------------------------------------------------------------------
+  # THE CONSOLE'S VIRTUAL KEY, MINTED BY THE CHART (TM-0460 ruling B1,
+  # 2026-10-08). Open WebUI authenticates to the gateway with a LiteLLM virtual
+  # key, and a virtual key can only be issued by a running LiteLLM. Through
+  # 0.7.x that was a manual post-install step (install.md, "Mint the console's
+  # model-gateway key"), and until someone did it every fresh install had its
+  # console in CreateContainerConfigError. This Job does that step: it waits
+  # for the gateway to answer, calls POST /key/generate with the master key,
+  # and creates the Secret the console reads. When the Secret already exists
+  # it asks the gateway whether the key still works (GET /v1/models with it):
+  # a working key is left alone, so a re-sync or an upgrade never rotates the
+  # console's key; a key the gateway rejects (401, which is what a gateway
+  # turned off and on again does, since the prune takes its database and
+  # every key in it) is replaced in place and the console's pods are deleted
+  # so the StatefulSet restarts them on the new key.
+  #
+  # WHAT IT HOLDS AND FOR HOW LONG. The master key is in the Job pod's
+  # environment for one request. Its Role is `get` and `update` on the one
+  # Secret name (RBAC can scope those by name), `create` on secrets (RBAC
+  # cannot scope a create by name, so the guardrail there is the script, which
+  # writes exactly `secretName` and nothing else), and `delete` on the
+  # console's pod names (a restart that cannot change what the console runs;
+  # a patch on the StatefulSet could). Nothing here can list, read or delete
+  # another Secret. templates/gateway-key.yaml.
+  #
+  # ORDERING. An ordinary synced resource, like the migrations Job and for the
+  # same reason: a PostSync hook would wait for the Application to be Healthy,
+  # and the console cannot be Healthy until this Job has run, which is a
+  # deadlock. So the Job polls the gateway's readiness endpoint itself, with
+  # the migrations Job's retry budget (the gateway is not up until its
+  # database has bootstrapped and its schema is in). The Job is named after a
+  # hash of its pod template, so an image bump is a new Job and never a
+  # `field is immutable` sync failure. No TTL, for the reason under
+  # litellm.migrationJob below: a GitOps-managed Job with a TTL churns forever.
+  #
+  # Unset follows the console AND the gateway: it renders when both do and the
+  # console's openaiApiKeyExistingSecret is `secretName`. Set false to keep the
+  # manual step. Set true to force it on, which refuses unless both render.
+  # ------------------------------------------------------------------------
+  consoleKey:
+    enabled: null
+    secretName: tockmox-openwebui-gateway
+    secretKey: api-key
+    # The key's alias in LiteLLM (its spend logs attribute requests to it). If
+    # LiteLLM already holds a key with this alias (a Secret deleted by hand
+    # after a mint), the Job retries once with a timestamp suffix and says so.
+    alias: open-webui
+    # Extra fields for the /key/generate request, as a JSON object. The
+    # request names no model list, so with modelLifecycle.productionKeys
+    # .defaultModels set the key sees only those models; name them here
+    # ({"models": ["local-chat"]}) to widen or narrow that.
+    generateExtra: {}
+    image: alpine/k8s:1.37.1
+    # Same budget as litellm.migrationJob and for the same measured reason: a
+    # cold install's database took 12 minutes to bootstrap on NVMe.
+    backoffLimit: 20
+    activeDeadlineSeconds: 5400
+    # How long one attempt polls the gateway before giving the pod back to the
+    # Job's backoff. Seconds.
+    waitSeconds: 600
+    # THE CHECK (TM-0982). The Job repairs a rejected key at sync time only;
+    # between syncs nothing else notices one, because the llm uptime probe
+    # carries no key (it stayed green through the 0.8.0 upgrade lab's
+    # off-then-on cycle with the console unable to chat). So a CronJob sends
+    # GET /v1/models to the gateway with the console's key, as the console
+    # would, and exits 1 on 401 or 403. Nothing else: no master key, no
+    # ServiceAccount token (the key is an environment reference), no verb on
+    # anything, and a NetworkPolicy in the policy layer that lets it reach the
+    # gateway's port and nothing beyond DNS. A gateway that does not answer is
+    # exit 3 and NOT a rejection; the Deployment and the probe cover that.
+    #
+    # The alert, TockmoxConsoleKeyRejected (rendered with the observability
+    # capability), fires when the newest run was a rejection and no later run
+    # passed, and clears on the first passing run after the Job replaces the
+    # key. templates/console-key-check.yaml; docs/usage/ai-plane.md, "When the
+    # gateway rejects the console's key". Follows the Job: off whenever the
+    # Job is, and off on its own with enabled false.
+    check:
+      enabled: true
+      schedule: "*/15 * * * *"
+      suspend: false
+
+# ---------------------------------------------------------------------------
+# Single sign-on (consumes the identity layer's Authentik). On by default and
+# harmless without it: the env Secret this renders is referenced optionally,
+# so with sso disabled or identity absent, Open WebUI keeps local login only.
+# Local email login stays enabled alongside = break-glass, same policy as
+# Grafana. Client secret: operator-created `tockmox-sso-openwebui` (key
+# `client-secret`). See docs/administration/secrets.md.
+# ---------------------------------------------------------------------------
+sso:
+  enabled: true
+  # Changing clientId or a group name after install needs a rollout restart of
+  # the console: envFrom does not roll the pod and GitOps reports the layer
+  # healthy while it keeps the old value. Exact command and why:
+  # docs/administration/identity.md.
+  clientId: tockmox-openwebui    # must match the identity layer's blueprint
+  adminGroup: tockmox-admins
+  userGroup: tockmox-users
+  # Open WebUI's OAUTH_MERGE_ACCOUNTS_BY_EMAIL. True (the default, unchanged
+  # since the first release) signs an SSO login into an existing local account
+  # that has the same email, instead of failing with "email already
+  # registered". THE RISK: Authentik does not enforce unique emails, so two
+  # Authentik users who share an address merge into ONE Open WebUI account on
+  # the second sign-in, with the first user's role and chat history. Anyone who
+  # can edit their own email in Authentik can reach another user's account the
+  # same way. Keep it true if you migrate existing local accounts onto SSO and
+  # you control every address; set false once accounts are migrated, or if
+  # users can change their own email. With false, a login whose email matches
+  # an existing local account is refused rather than merged (TM-0669).
+  mergeAccountsByEmail: true
+
+# ---------------------------------------------------------------------------
+# INFERENCE NODES (REQ-0047, experimental in 0.8.0). Machines that serve models
+# outside the cluster: a Mac Studio, a DGX Spark, a workstation with a GPU.
+# Record them here and the gateway's routes to them are DERIVED
+# (templates/_inference-nodes.tpl) instead of written by hand. The Tockmox UI
+# imports an existing model_list into this shape and edits it; the reference
+# is docs/administration/inference-nodes.md.
+#
+# Empty and off by default. With render.enabled the chart renders the
+# gateway's config itself, so the site also sets
+#   litellm.proxyConfigMap: {create: false, name: tockmox-litellm-config}
+# and the two litellm.podAnnotations the render asks for (they roll the
+# gateway when routes change; templates/litellm-config.yaml says why).
+#
+# A route whose alias ends in -next is a CANDIDATE and never reaches this
+# gateway: it goes to the eval gateway below.
+# ---------------------------------------------------------------------------
+inferenceNodes:
+  render:
+    enabled: false
+    configMapName: tockmox-litellm-config
+  nodes: []
+  routes: []
+  probe:
+    allowedCidrs: []
+  gateway:
+    sourceCidrs: []
+  # Prometheus scrapes each node's exporters (its `metrics` ports) and a
+  # blackbox probe checks each engine endpoint, so the Tockmox UI and the
+  # dashboards can say whether a node is up. Needs the observability layer
+  # (serviceMonitors) and the exporters layer's blackbox exporter.
+  monitoring:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    # http_inference is the exporters layer's module for engines: it accepts
+    # 401, so an engine that wants a token still reads as up to a probe that
+    # has none, and HTTP/1.0, which mlx-lm's server speaks (lab F6). A site
+    # that copied `http_console` here keeps every mlx-lm node reading down.
+    probeModule: http_inference
+    # host:port, no scheme. Empty derives the exporters layer's Service:
+    # tockmox-exporters-prometheus-blackbox-exporter.<namespaces.monitoring>.svc:9115
+    blackboxProber: ""
+
+# ---------------------------------------------------------------------------
+# MODEL LIFECYCLE (REQ-0048, experimental). The catalog of models the platform
+# runs and the eval gateway candidates are compared on. A new model, local or
+# hosted, is unusable until a person approves it twice: admitting it puts it
+# on the EVAL gateway only; promoting it, after promotion.requiredPasses
+# passing comparisons, moves the alias on the production gateway. Reference:
+# docs/administration/model-lifecycle.md.
+#
+# The eval gateway is a separate small LiteLLM, because inside one gateway a
+# key with no model list reaches every model (measured on 1.100.3). It is OFF
+# by default, and with allowedClients empty NOTHING reaches it: name the eval
+# runner and any hand-grading front end as NetworkPolicy peers.
+# ---------------------------------------------------------------------------
+modelLifecycle:
+  catalog: []
+  promotion:
+    requiredPasses: 3
+  # The model watcher (and, with pullRequests, its PR opener) as a CronJob of
+  # its own: the one part of Tockmox that reaches the internet unprompted, so
+  # OFF by default. It runs in the Tockmox UI image, which ships as source
+  # (TM-0902): build it and name it in `image`. Its NetworkPolicy allows DNS
+  # and HTTPS to the internet only (no cluster, LAN or metadata address);
+  # add an in-cluster forge under egress.extra. docs/administration/model-lifecycle.md.
+  # Every other key under watch (providers, quantAuthors, pullRequests ...)
+  # is read by the watcher and the opener themselves.
+  watch:
+    enabled: false
+    image: ""
+    schedule: "17 6 * * *"
+    pullRequests:
+      enabled: false
+    secrets:
+      githubAppKey: tockmox-model-watch-bot-app   # key: private-key.pem
+      forgeToken: ""                              # a Secret with key `token` (Forgejo, or a GitHub token)
+      providerKeys: ""                            # a Secret whose keys become env (ANTHROPIC_API_KEY ...)
+    report:
+      size: 64Mi
+      accessModes: [ReadWriteOnce]
+    egress:
+      extra: []
+  # Defense in depth for the PRODUCTION gateway (needs inferenceNodes.render):
+  # a virtual key minted with no model list gets this one instead of every
+  # model. Mint-time only on LiteLLM, so it is not a fence. Unset by default;
+  # an empty list is refused (it means every model). Example:
+  #   productionKeys: {defaultModels: [local-chat]}
+  productionKeys: {}
+  frontier:
+    providers: {}
+  evalGateway:
+    enabled: false
+    allowedClients: []
+    # A Secret YOU create, as for the production gateway's master key.
+    masterkeySecretName: tockmox-litellm-eval
+    masterkeySecretKey: masterkey
+    # Secrets whose keys become environment variables: node bearer tokens
+    # (NODE_KEY_<SECRET>) and provider keys for hosted candidates.
+    environmentSecrets: []
+    resources:
+      requests: { cpu: 50m, memory: 384Mi }
+      limits: { memory: 1Gi }
+
+# ---------------------------------------------------------------------------
+# THE TOCKMOX UI (experimental in 0.8.0; Jeff 2026-10-07). The admin console
+# for inference nodes and model lifecycle: it reads the cluster, Prometheus
+# and these blocks, and every change it makes ends in YAML an admin commits.
+# OFF by default. Ships as source (TM-0902): build the image and name it.
+#
+# Its NetworkPolicy is the whole of what it may reach: DNS, the Kubernetes
+# API, Prometheus and Alertmanager, Traefik (for the OIDC issuer), the
+# inference-node probe ranges ONLY when inferenceNodes.probe.allowedCidrs is
+# set, and HTTPS out ONLY when config.updateCheck.enabled with an https feed.
+# `config` is the UI's own config (site, apps, roles, oidc ...); the chart
+# fills in the sources, the secret paths and the two blocks above.
+#
+# `config.tockmoxRepo` is optional. Unset, the UI takes the Applications whose
+# first source path is charts/tockmox-<layer> as the Tockmox layers, whichever
+# repository serves them, so a site that mirrors the product tree (airgap.md
+# section 5, and every lab) reads its version like one on github.com. Set it
+# to match on one repository URL instead (TM-0979).
+# ---------------------------------------------------------------------------
+tockmoxUi:
+  enabled: false
+  image: ""
+  config: {}
+  secrets:
+    session: tockmox-ui-session          # key: secret
+    oidcClient: tockmox-sso-tockmox-ui   # key: client-secret (when config.oidc.issuer is set)
+  ingress:
+    enabled: true
+    host: ""                             # empty: tockmox.<global.internalDomain>
+  networkPolicy:
+    apiServer: []                        # [{cidr: 10.0.0.10/32, port: 6443}]; empty uses global.lanCIDR on 6443
+    extraEgress: []
+  # The update feed from a ConfigMap instead of the internet (TM-1027): the ConfigMap's
+  # keys appear under /feed, so `releases.json` and `releases.json.sig` make
+  # config.updateCheck.feedUrl `file:///feed/releases.json`. With a file feed the
+  # NetworkPolicy opens no HTTPS out. Empty mounts nothing.
+  updateFeed:
+    configMap: ""
+
+open-webui:
+  resources:
+    # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+    # peak 742.6 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 784.0 MiB in the pre-migration namespace (30 days); average 718.5 MiB.
+    # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+    # request = average, rounded up to 16Mi. Re-measure before changing.
+    requests:
+      memory: 720Mi
+    limits:
+      memory: 1280Mi
+  # ------------------------------------------------------------------------
+  # THE CONSOLE TALKS TO THE MODEL GATEWAY, AND TO NOTHING ELSE, BY DEFAULT
+  # (TM-0460, REQ-0004 AC-4.1, ruled 2026-10-08). Through 0.7.x this block
+  # shipped the API off and the URL empty, and the page that told you to point
+  # the console at the gateway called it "optional, and recommended". The
+  # shipped default now does it: the OpenAI-compatible API is on, the URL is
+  # this release's gateway Service, and the key is a scoped virtual key in
+  # `tockmox-openwebui-gateway`, which modelGateway.consoleKey mints once the
+  # gateway answers (no manual key step on a fresh install).
+  #
+  # NO CLOUD BACKEND, STILL. The upstream chart ships
+  # openaiBaseApiUrl=https://api.openai.com/v1 and a placeholder key; on a
+  # platform whose entire pitch is that your data does not leave your hardware
+  # that default would be indefensible, and CI greps the full render to prove
+  # no shipped default names a hosted provider. The URL below is rendered
+  # through `tpl` by the subchart, so `{{ .Release.Name }}` becomes your AI
+  # layer's release name (tockmox-ai on a stock install).
+  #
+  # STRAIGHT AT A MODEL HOST is still supported, and it is a site's choice to
+  # make in its own values, with the cost named: no per-console key, no
+  # revocation, no request log, and AC-4.1 re-opened on that site. Set
+  # openaiBaseApiUrl to the host and openaiApiKeyExistingSecret to "" if the
+  # host does not authenticate. A site that turns the gateway off
+  # (apps.litellm.enabled: false) MUST do one of these two, because the render
+  # refuses a console pointed at a gateway Service nothing renders:
+  #
+  #   open-webui:
+  #     enableOpenaiApi: false          # a console with no backend, or
+  #     openaiBaseApiUrl: "http://<your-model-host>:<port>/v1"
+  #
+  # Either way a preflight guard fails the render if the API is enabled with no
+  # URL to send it to, because the upstream template emits NO OpenAI env at all
+  # in that combination and the image then falls back to api.openai.com.
+  # Configure these through the values here, never through extraEnvVars (see
+  # the note on extraEnvVars below for why).
+  # ------------------------------------------------------------------------
+  enableOpenaiApi: true
+  # The gateway Service this release renders: <release>-litellm, port 4000.
+  # The subchart runs `tpl` on this value; a literal release name would break
+  # on rename. EMPTY IS NOT THE SAME AS SAFE, which is worth being exact about
+  # because an earlier revision of this file got it wrong: Open WebUI's own
+  # config.py reads `os.getenv('OPENAI_API_BASE_URL', '')` and substitutes
+  # `https://api.openai.com/v1` when the result is the empty string, so unset
+  # and set-to-empty take the SAME branch. What protects a console with the API
+  # on is a URL that names something; what protects one with the API off is
+  # enableOpenaiApi being false, which makes the chart emit
+  # ENABLE_OPENAI_API=False and stops the client being constructed at all. The
+  # preflight guard covers the gap between those two facts.
+  openaiBaseApiUrl: "http://{{ .Release.Name }}-litellm:4000/v1"
+  # The console's virtual key, NOT the master key. modelGateway.consoleKey
+  # mints it into this Secret; docs/administration/secrets.md says why a
+  # scoped key and what the scoping was measured to refuse.
+  openaiApiKeyExistingSecret: tockmox-openwebui-gateway
+  openaiApiKeyExistingSecretKey: api-key
+  ollama:
+    enabled: false
+  pipelines:
+    enabled: false
+  persistence:
+    enabled: true
+    # THE STORAGE CLASS, threaded from the global. This subchart runs `tpl` on
+    # the value, so the template expression is evaluated ... which is NOT true
+    # of every upstream chart, and is why this cannot be done uniformly. Charts
+    # that do not `tpl` it need the class named literally, or need the intended
+    # class to be the cluster default. See the note in
+    # tockmox-platform/values.yaml.
+    #
+    # Empty renders an empty string here, which the upstream template omits.
+    storageClass: '{{ .Values.global.storageClass }}'
+  # ------------------------------------------------------------------------
+  # POD HARDENING. Upstream ships both of these empty, so the console runs as
+  # root with no seccomp profile and every capability the runtime grants.
+  #
+  # Verified on a cluster, 2026-08-15: with these settings the console starts,
+  # serves, signs a user in and completes a chat through the model gateway,
+  # running as uid 1000 and unable to write anywhere outside its data volume.
+  #
+  # It does NOT start without WEBUI_SECRET_KEY_FILE pointed into that volume
+  # (see the note in extraEnvVars). The two are a pair: upstream's default key
+  # path is root-owned, so a non-root console fails at `start.sh: line 46:
+  # .webui_secret_key: Permission denied`. That is the whole reason this was
+  # previously reported as "Open WebUI refuses to run non-root."
+  #
+  # fsGroup is what makes the mounted volume writable by that user, and
+  # OnRootMismatch keeps a large data directory from being re-chowned on every
+  # start. readOnlyRootFilesystem is deliberately NOT set: the image writes to
+  # several paths under /app at startup and upstream mounts no emptyDirs over
+  # them, so it is a separate, tested change rather than a free win.
+  # ------------------------------------------------------------------------
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
+  # ------------------------------------------------------------------------
+  # THE BUNDLED WEBSOCKET REDIS (TM-0135). Upstream deploys it by default with
+  # both security contexts empty, so it failed all four restricted fields the
+  # console itself now meets. It is the only default pod in this namespace that
+  # did. uid 999 is the `redis` user the alpine image creates and its /data is
+  # owned by it. INFERRED, not measured on a cluster: that redis 7.4-alpine
+  # starts as that uid with every capability dropped and no volume mounted (the
+  # image's entrypoint only needs to drop privileges, which it no longer has to
+  # do). readOnlyRootFilesystem is left unset, as for the console above.
+  # ------------------------------------------------------------------------
+  websocket:
+    redis:
+      resources:
+        # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+        # peak 12.7 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2); average 11.7 MiB.
+        # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+        # request = average, rounded up to 16Mi. Re-measure before changing.
+        requests:
+          memory: 16Mi
+        limits:
+          memory: 32Mi
+      podSecurityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containerSecurityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        capabilities:
+          drop: ["ALL"]
+  # ------------------------------------------------------------------------
+  # THE copy-app-data INIT CONTAINER, overridden.
+  #
+  # NOT RE-MEASURED SINCE 0.11.0, AND WE NOW SHIP 0.11.3 (bumped 2026-09-12).
+  # Everything below was measured on 0.11.0. The 2026-09-12 cold install proved
+  # the override still WORKS on 0.11.3 ... the pod reached 1/1 Running ... but
+  # that is not the same as it still being NEEDED, because the override makes
+  # the init container succeed whether or not the bad file is still in the
+  # image. If upstream has since fixed the mode, this is a workaround for a
+  # failure mode nobody produces any more, and it will sit here indefinitely
+  # because nothing can tell. The check is one command against a running pod:
+  #   kubectl -n tockmox-ai exec tockmox-ai-open-webui-0 -- \
+  #     find /app/backend/data/cache/whisper -not -perm -o=r
+  # Empty output means the override can go.
+  #
+  # Upstream runs `cp -R -n /app/backend/data/* /tmp/app-data/` to seed the
+  # image's bundled model cache into an empty data volume. Exactly one file in
+  # ghcr.io/open-webui/open-webui:0.11.0 ships mode 0600 root:root:
+  #
+  #   cache/whisper/models/models--Systran--faster-whisper-base/trees/<rev>.json
+  #
+  # It is a huggingface xet tree manifest, 836 bytes of cache bookkeeping the
+  # app regenerates on demand. 47 of the 48 files under that directory are
+  # world-readable; that one is not. This init container inherits
+  # containerSecurityContext above and so runs as uid 1000, cannot read it,
+  # and cp exits 1. The pod never leaves Init:CrashLoopBackOff.
+  #
+  # Reproduced 2026-08-18 on a single-node reference install, on FRESH volumes of BOTH classes:
+  # longhorn EXIT=1 and local-path EXIT=1, identical error. So it is not a
+  # storage-class problem, and it is not the destination's permissions ...
+  # fsGroup 1000 with OnRootMismatch applied correctly on Longhorn (the mount
+  # root came up `drwxrwsr-x 0 1000`) and the copy wrote into it happily. The
+  # failure is on the READ side, inside the image.
+  #
+  # What masked it for so long: `cp -n` skips a destination file that already
+  # exists WITHOUT opening the source. Any volume seeded before the console
+  # was hardened to non-root already held that file, so cp never touched it.
+  # The trigger is an EMPTY volume, which means this fires on every greenfield
+  # install whatever the storage class, and never on a reinstall over old data.
+  #
+  # The override tolerates unreadable files under cache/ and ONLY under
+  # cache/. Anything unreadable elsewhere in the data directory is a real
+  # defect and stops the container rather than being quietly skipped. It then
+  # asserts on the artifact instead of on cp's exit code: every readable
+  # source file must exist at the destination, or the container fails.
+  #
+  # Verified 2026-08-18 on a fresh longhorn volume as uid 1000: exit 0,
+  # 47/47 files, 27/27 symlinks, 277054780 bytes on both sides.
+  #
+  # Assumes GNU findutils (`-readable`), which every official Open WebUI image
+  # has, being Debian-based. A busybox-based rebuild would need this rewritten.
+  # ------------------------------------------------------------------------
+  copyAppData:
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        set -u
+        src=/app/backend/data
+        dst=/tmp/app-data
+
+        bad=$(cd "$src" && find . ! -readable ! -path './cache/*')
+        if [ -n "$bad" ]; then
+            echo "copy-app-data: unreadable source outside cache/, refusing to continue:" >&2
+            echo "$bad" >&2
+            exit 1
+        fi
+
+        skipped=$(cd "$src" && find . ! -readable)
+        if [ -n "$skipped" ]; then
+            echo "copy-app-data: upstream image ships unreadable cache metadata owned by root;"
+            echo "it is regenerable, so it is skipped rather than fatal:"
+            echo "$skipped"
+        fi
+
+        cp -R -n "$src"/. "$dst"/ || true
+
+        missing=$(cd "$src" && find . -type f -readable -exec sh -c '[ -e "$1/$2" ] || printf "%s\n" "$2"' _ "$dst" {} \;)
+        if [ -n "$missing" ]; then
+            echo "copy-app-data: files missing at destination after copy:" >&2
+            echo "$missing" >&2
+            exit 1
+        fi
+
+        echo "copy-app-data: $(cd "$src" && find . -type f -readable | wc -l) readable file(s) present at destination"
+    # TM-0903: no sample could be taken (it finishes in under a second on a warm
+    # restart), so this is the 32Mi init-container floor doubled: it copies the
+    # console's app tree, which the 32Mi shell-only containers do not.
+    resources:
+      requests: {memory: 8Mi}
+      limits: {memory: 64Mi}
+  ingress:
+    enabled: false          # enable once you have decided on a hostname
+  # SSO config env from the parent-rendered Secret; absent when sso is
+  # disabled, hence optional.
+  extraEnvFrom:
+    - secretRef:
+        name: tockmox-ai-sso-env
+        optional: true
+    # THE FIRST-ACCOUNT WINDOW, CLOSED BY CONSTRUCTION (TM-0859, ruled for 0.8.0).
+    # Open WebUI makes the first account it ever creates an administrator,
+    # whatever that account's groups, and SSO logins count. So on a fresh
+    # install the first person through Authentik, admin or not, became the
+    # console's admin (TM-0856). Open WebUI also creates a local administrator
+    # at startup from WEBUI_ADMIN_EMAIL / WEBUI_ADMIN_PASSWORD when it has no
+    # accounts at all, which makes the count one before anyone signs in.
+    #
+    # tools/mint-secrets.sh (and so `tockmox-install.sh bootstrap-secrets`)
+    # mints this Secret with a random password and an address under the
+    # reserved `.invalid` domain, which no Authentik user can receive mail at,
+    # so no SSO login can merge into it by email. It is the console's
+    # break-glass account; secrets.md says how to read its password.
+    #
+    # Optional, so a site without the Secret behaves exactly as before, and an
+    # install that already has accounts is unchanged: Open WebUI only creates
+    # this administrator when its user table is empty.
+    - secretRef:
+        name: tockmox-openwebui-bootstrap-admin
+        optional: true
+  extraEnvVars:
+    # NOTHING OPENAI- OR OLLAMA-RELATED BELONGS IN THIS LIST. The upstream
+    # chart already renders OPENAI_API_BASE_URL, OPENAI_API_KEY and
+    # ENABLE_OLLAMA_API from its own values, so naming any of them here yields
+    # the key TWICE in the pod spec. That passes `helm template` and passes
+    # `helm lint`, then fails ArgoCD's ServerSideApply with "duplicate
+    # entries" ... an error only a real GitOps install surfaces.
+    #
+    # Earlier revisions pinned OPENAI_API_BASE_URL and OPENAI_API_KEY to ""
+    # here as belt and braces. That pin was itself the trap: it made the
+    # supported way of configuring a model endpoint (enableOpenaiApi +
+    # openaiBaseApiUrl) render a duplicate, so a site had to restate this whole
+    # list instead ... and a restated list is one that can silently drop a key.
+    # The cloud default is neutralized at its source instead, in
+    # openaiBaseApiUrl above.
+    - name: WEBUI_AUTH
+      value: "True"
+    # THE CONSOLE PHONES HOME BY DEFAULT. Upstream sets
+    # ENABLE_VERSION_UPDATE_CHECK true, and /api/version/updates then fetches
+    # https://api.github.com/repos/open-webui/open-webui/releases/latest when a
+    # signed-in user loads the UI. On a platform sold on data not leaving your
+    # hardware, an outbound call from the AI console on every session is
+    # indefensible, and no shipped-defaults grep would ever have caught it:
+    # the address is in the image, not in any values file.
+    #
+    # Turned off at the source rather than only blocked by the egress policy,
+    # so it is off for people who never enable that policy. OFFLINE_MODE=true
+    # is the stronger setting and also disables it, but it sets HF_HUB_OFFLINE
+    # as well, which stops embedding-model downloads ... correct for a Dark
+    # Site, surprising anywhere else. This is the narrow version.
+    - name: ENABLE_VERSION_UPDATE_CHECK
+      value: "False"
+    # WHERE THE SESSION-SIGNING KEY LIVES, and it is not cosmetic.
+    #
+    # Upstream's start.sh defaults this to `.webui_secret_key` RELATIVE to
+    # /app/backend, which is the container's writable layer and not a volume.
+    # So the key is regenerated on every pod start and every signed-in session
+    # is invalidated by a restart. Observed on the lab 2026-08-15: the file's
+    # timestamp matched the most recent restart, on the overlay filesystem,
+    # while the PVC was mounted one directory down.
+    #
+    # Pointing it into the data directory puts it on the volume, which fixes
+    # that and is also what makes running as a non-root user possible: the
+    # default path is root-owned and unwritable, which is exactly how the
+    # hardened pod fails (`start.sh: line 46: .webui_secret_key: Permission
+    # denied`). One line closes both.
+    - name: WEBUI_SECRET_KEY_FILE
+      value: "/app/backend/data/.webui_secret_key"
+    # SSO client secret; optional so sso-off installs run without the Secret.
+    - name: OAUTH_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: tockmox-sso-openwebui
+          key: client-secret
+          optional: true
+    # Configuration is GitOps-authoritative: without this, changes made in the
+    # UI persist to the database and silently diverge from your repo.
+    - name: ENABLE_PERSISTENT_CONFIG
+      value: "False"
+    # ------------------------------------------------------------------------
+    # IN-CLUSTER TRUST. Open WebUI performs the OIDC token exchange itself, from
+    # inside the container, so the browser trusting the Tockmox CA does nothing
+    # for it. These two point every HTTP client in the image at the bundle the
+    # `tockmox-trust-bundle` initContainer writes below.
+    #
+    # BOTH are needed and they are not redundant. `requests` reads
+    # REQUESTS_CA_BUNDLE and ignores SSL_CERT_FILE; `httpx`, `aiohttp` and
+    # `urllib` read SSL_CERT_FILE. Measured in the 0.11.0 image on 2026-08-15;
+    # all four verified against the lab's Authentik with the bundle in place.
+    #
+    # These are also why the initContainer concatenates rather than mounting the
+    # CA alone: with a CA-only file, httpx and requests stop trusting every
+    # public root, because they pass it as a cafile and consult nothing else.
+    # ------------------------------------------------------------------------
+    - name: SSL_CERT_FILE
+      value: /etc/tockmox/trust/ca-bundle.crt
+    - name: REQUESTS_CA_BUNDLE
+      value: /etc/tockmox/trust/ca-bundle.crt
+    # WHAT ROLLS THIS POD WHEN THE SSO SECRET CHANGES. Open WebUI reads its
+    # OIDC configuration through `envFrom`, and envFrom is not a restart
+    # trigger, so a re-rendered Secret leaves the running pod on its old
+    # values. This variable is a hash of the globals that Secret is derived
+    # from, so changing `global.certIssuer` or `global.internalDomain` changes
+    # the pod spec and Kubernetes rolls it.
+    #
+    # The upstream chart runs `tpl` over extraEnvVars values, which is what
+    # makes this resolve; it does NOT do so for podAnnotations, which is why
+    # this is not the usual checksum annotation. See the note on
+    # `tockmox.ssoEnvRevision` in tockmox-common for the exact coverage: it
+    # does not extend to sso.clientId or the group names.
+    - name: TOCKMOX_SSO_ENV_REVISION
+      value: '{{ include "tockmox.ssoEnvRevision" . }}'
+
+  # --------------------------------------------------------------------------
+  # THE TRUST BUNDLE. Builds "this image's own CA store, plus the Tockmox CA"
+  # into an emptyDir, and mounts it where the env vars above point.
+  #
+  # It is unconditional on purpose. With global.certIssuer empty there is no
+  # `open-webui-tls` Secret, the volume is `optional` so it projects nothing,
+  # and the initContainer writes the image's store unchanged ... the same trust
+  # the container had before. Nothing to switch on, nothing to get wrong.
+  #
+  # The image MUST equal the application image. templates/preflight.yaml fails
+  # the render if it drifts, because a bundle built from a different image hands
+  # this container a different set of public roots and nothing would say so.
+  # --------------------------------------------------------------------------
+  extraInitContainers:
+    - name: tockmox-trust-bundle
+      image: ghcr.io/open-webui/open-webui:0.12.0
+      imagePullPolicy: IfNotPresent
+      # The Secret is the same one Open WebUI reads its OIDC config from, and it
+      # is optional for the same reason: sso off means it does not render.
+      # TOCKMOX_EXPECT_CA unset therefore means "no CA is coming", which is the
+      # pre-2026-09-15 behaviour and the safe default.
+      envFrom:
+        - secretRef:
+            name: tockmox-ai-sso-env
+            optional: true
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -eu
+          ca=/tockmox-ca/ca.crt
+          # WAIT, rather than shrug. Open WebUI's HTTP clients read this bundle
+          # once; `requests` and `httpx` treat the file as the WHOLE trust
+          # store. A bundle built before the CA lands is wrong for the life of
+          # the pod, and the old `else` branch printed a calm line while that
+          # happened ... a silent permanent failure behind a reassuring
+          # message. TM-0632, measured on Grafana at a one-second margin.
+          if [ "${TOCKMOX_EXPECT_CA:-false}" = "true" ]; then
+            i=0
+            while [ ! -s "$ca" ]; do
+              i=$((i + 1))
+              if [ "$i" -gt 60 ]; then
+                echo "FATAL: $ca is still absent after 300s."
+                echo "global.certIssuer is set, so this bundle must carry the"
+                echo "Tockmox CA. Building it without the CA would break"
+                echo "server-side OIDC and any https call to another console"
+                echo "for the life of this pod. Exiting so kubelet retries."
+                exit 1
+              fi
+              if [ "$((i % 6))" -eq 1 ]; then
+                echo "waiting for $ca (attempt $i, 5s apart) ..."
+              fi
+              sleep 5
+            done
+          fi
+          cat /etc/ssl/certs/ca-certificates.crt > /trust/ca-bundle.crt
+          if [ -s "$ca" ]; then
+            cat "$ca" >> /trust/ca-bundle.crt
+            echo "trust bundle: image store + Tockmox CA"
+          else
+            echo "trust bundle: image store only (no CA expected)"
+          fi
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
+      # TM-0903: 0.6 MiB peak measured (waits for the CA, then copies one
+      # bundle); 32Mi is the floor for every shell-and-cp init container.
+      resources:
+        requests: {memory: 8Mi}
+        limits: {memory: 32Mi}
+      volumeMounts:
+        - name: tockmox-trust
+          mountPath: /trust
+        - name: tockmox-ca
+          mountPath: /tockmox-ca
+          readOnly: true
+  volumes:
+    - name: tockmox-trust
+      emptyDir: {}
+    # The console's OWN ingress certificate Secret. cert-manager writes `ca.crt`
+    # into it alongside the leaf, in this namespace, and renews it with the
+    # certificate ... so this needs no copying mechanism and no second object.
+    # `optional` covers both the no-TLS case and the first seconds of a fresh
+    # install before the Certificate has issued.
+    - name: tockmox-ca
+      secret:
+        secretName: open-webui-tls
+        optional: true
+        items:
+          - key: ca.crt
+            path: ca.crt
+  volumeMounts:
+    container:
+      - name: tockmox-trust
+        mountPath: /etc/tockmox/trust
+        readOnly: true
+
+# ---------------------------------------------------------------------------
+# litellm-helm ... the vendored upstream chart. Everything below is an override
+# of ITS values. Aliased to `litellm` in Chart.yaml.
+# ---------------------------------------------------------------------------
+litellm:
+  image:
+    repository: ghcr.io/berriai/litellm-database
+    # Empty tracks the subchart's appVersion, so the image and the chart move
+    # together and Renovate has one thing to bump instead of two.
+    tag: ""
+    # NOT the upstream default of Always. Always re-contacts the registry on
+    # every pod start, which on a disconnected site turns a restart into an
+    # outage even though the image is already on the node.
+    pullPolicy: IfNotPresent
+
+  # Tockmox renders its own Ingress from global.internalDomain, same as every
+  # other console in this repo. The upstream one hardcodes a host and an
+  # nginx class.
+  ingress:
+    enabled: false
+
+  # ------------------------------------------------------------------------
+  # NO MODELS BY DEFAULT, AND NO ADDRESSES IN THIS FILE.
+  #
+  # A model endpoint is site-supplied by definition: it is an address on YOUR
+  # network. The list ships empty, and CI greps the full render to prove no
+  # shipped default points at a third-party API.
+  #
+  # Any OpenAI-compatible endpoint works ... llama.cpp, LM Studio, vLLM,
+  # Ollama's compat surface, a workstation on the LAN. Fill in the shape:
+  #
+  #   model_list:
+  #     - model_name: local-chat            # the name Open WebUI will show
+  #       litellm_params:
+  #         model: openai/<model-id-the-host-serves>
+  #         api_base: http://<your-model-host>:<port>/v1
+  #         api_key: os.environ/LOCAL_MODEL_KEY   # a Secret you inject, if the
+  #                                               # host wants one at all
+  #
+  # An empty list starts the proxy with nothing to route to. That is the
+  # honest default; it is also NOT the same as a working install, so treat
+  # "the pod is Running" as meaning nothing until a request returns.
+  # ------------------------------------------------------------------------
+  proxy_config:
+    model_list: []
+    general_settings:
+      # The proxy reads the key from the environment; the environment reads it
+      # from the Secret named below. No key ever appears in a values file.
+      master_key: os.environ/PROXY_MASTER_KEY
+
+  # ------------------------------------------------------------------------
+  # MASTER KEY ... from a Secret YOU create. Left empty, the upstream chart
+  # MINTS one with randAlphaNum, which under GitOps rotates on every render:
+  # the Application never reports Synced and every client key breaks on a
+  # sync you did not ask for. Naming an existing Secret disables that path.
+  # Until the Secret exists the pod waits in CreateContainerConfigError
+  # naming it, which is the documented contract in secrets.md.
+  # ------------------------------------------------------------------------
+  masterkeySecretName: tockmox-litellm
+  masterkeySecretKey: masterkey
+
+  # ------------------------------------------------------------------------
+  # THE MOUNT FOR modelGateway.hooks. Shipped here, in the defaults, so a site
+  # that loads hooks writes the files and the callback list and NOTHING ELSE.
+  #
+  # `optional: true` is what makes shipping it safe: with no hooks configured
+  # the ConfigMap does not exist, the volume projects an empty directory, and
+  # nothing about the proxy changes. (The migrations Job mounts the same two
+  # lists and is equally unaffected.)
+  #
+  # BOTH KEYS ARE LISTS, and Helm replaces a list wholesale. A site that sets
+  # `litellm.volumes` or `litellm.volumeMounts` for its own reasons therefore
+  # DROPS these entries unless it restates them, and the proxy then starts
+  # without its hooks. templates/preflight.yaml fails the render in exactly
+  # that case (hooks configured, mount missing), so the mistake is loud.
+  #
+  # The mount is a directory beside /etc/litellm/config.yaml, not over it, so
+  # the config file the subchart mounts is left alone.
+  # ------------------------------------------------------------------------
+  #
+  # THE SAME TWO LISTS ALSO CARRY THE SCRATCH VOLUME (TM-0596). With
+  # readOnlyRootFilesystem true the Deployment gets tmp, .cache and .npm
+  # emptyDirs from the subchart, but the migrations Job shares the security
+  # context and gets none, and a values-supplied `tmp` at /tmp would collide
+  # with the Deployment's (same volume name, same mountPath). So both pods get a
+  # volume the subchart does not know about, at a path it does not use, and
+  # TMPDIR (envVars below) points at it. The migration's post-migrate schema
+  # diff is the one thing that writes: it creates a temp directory.
+  volumes:
+    - name: tockmox-hooks
+      configMap:
+        name: tockmox-litellm-hooks
+        optional: true
+    - name: tockmox-scratch
+      emptyDir:
+        sizeLimit: 500Mi
+  volumeMounts:
+    - name: tockmox-hooks
+      mountPath: /etc/litellm/hooks
+      readOnly: true
+    - name: tockmox-scratch
+      mountPath: /scratch
+
+  db:
+    # The bundled Bitnami postgresql subchart stays OFF. It carries a password
+    # in values and `bitnamilegacy` images; the platform layer already runs
+    # the CNPG operator, so the database is a CR instead ... see
+    # modelGateway.database above, which renders it.
+    deployStandalone: false
+    useExisting: true
+    # The CNPG read/write Service. MUST be `<modelGateway.database.name>-rw`;
+    # a preflight guard fails the render if it is not.
+    endpoint: tockmox-litellm-db-rw
+    database: litellm
+    secret:
+      # Same operator-created Secret that CNPG bootstraps the database owner
+      # from, so the credential has exactly one source. Type must be
+      # kubernetes.io/basic-auth, and `username` must equal the initdb owner.
+      #
+      # MINT THAT PASSWORD URL-SAFE. The upstream chart assembles DATABASE_URL
+      # by substituting the password into a connection string, so a `/`, `@`,
+      # `:` or `#` in it produces a URL that parses as something else and an
+      # authentication error that names the wrong thing. `openssl rand -base64`
+      # emits `/` and `+`; use `openssl rand -hex 32` instead.
+      #
+      # That is ONE of that command's two hazards. The other is that it wraps at
+      # 64 columns, which put a newline inside AUTHENTIK_SECRET_KEY and broke the
+      # authentik embedded outpost on every by-the-book install (TM-0662). Both
+      # are stated together in docs/administration/secrets.md, which is the rule
+      # to follow when minting anything; `rand -hex` sidesteps both at any
+      # length. tools/mint-secrets.sh refuses a control character outright.
+      name: tockmox-litellm-db
+      usernameKey: username
+      passwordKey: password
+
+  # Coordination Redis is only needed for cross-pod rate limits and spend
+  # locking, which a single replica does not have. Leaving it off also keeps
+  # another Bitnami subchart out of the deployment.
+  redis:
+    enabled: false
+
+  # ------------------------------------------------------------------------
+  # A GREEN MIGRATIONS JOB MUST MEAN THE MIGRATION RAN. Upstream's migration
+  # entrypoint treats a failed migration as advisory: it logs "Database
+  # migration failed but continuing startup" and exits 0, so the Job reports
+  # Complete even when the database was never reachable (observed on a fresh
+  # install 2026-08-19: P1001 against a database still bootstrapping, Job
+  # Complete 1/1 in 31s). With enforcement on, the entrypoint exits non-zero
+  # and the Job's backoffLimit / restartPolicy retry until the database
+  # answers, which is what those settings exist for. The proxy reads the same
+  # variable at startup; it already fails hard without a reachable database,
+  # so this changes nothing there beyond making the two paths agree.
+  #
+  # FROM LITELLM 1.105.0 THE VARIABLE IS READ NOWHERE: upstream made a failed
+  # migration fail the entrypoint and the proxy unconditionally (the 1.105.0
+  # `litellm/proxy/prisma_migration.py` says so in its docstring, and the
+  # wheel contains no reference to the name). It stays because it costs
+  # nothing and a site that pins an older image under `litellm.image.tag`
+  # (the reference site runs 1.100.3) still needs it for the property above.
+  # ------------------------------------------------------------------------
+  envVars:
+    ENFORCE_PRISMA_MIGRATION_CHECK: "true"
+    # Where the migrations Job (and anything else in the image) puts temp files
+    # now that the root filesystem is read-only. See litellm.volumes above.
+    TMPDIR: /scratch
+
+  # Schema migrations run in their own Job rather than racing on proxy startup.
+  #
+  # THE ARGO PreSync HOOK IS TURNED OFF, AND TURNING IT BACK ON DEADLOCKS
+  # THE SYNC. It is
+  # upstream's default and it is correct for upstream, where the database is a
+  # subchart Helm installs first. It deadlocks here.
+  #
+  # Argo runs PreSync hooks to completion BEFORE applying any of the
+  # Application's normal resources. The database in this layer is a CNPG
+  # Cluster that this same Application creates, so a PreSync migration Job
+  # waits on a Service that the sync phase has not been allowed to create yet:
+  #
+  #   PreSync   migrations Job -> tockmox-litellm-db-rw   (does not exist)
+  #   Sync      the Cluster that would create it          (never starts)
+  #
+  # Observed exactly that on 2026-08-15: the Job ran, the Cluster was never
+  # created, and the Application sat there. Nothing failed loudly, because a
+  # Job retrying is not an error.
+  #
+  # With the hook off the Job is an ordinary synced resource applied alongside
+  # the Cluster. Its own backoffLimit and restartPolicy: OnFailure cover the
+  # seconds while CNPG bootstraps, which is what those settings are for.
+  #
+  # Adopting a chart means adopting its assumptions about what else exists.
+  # This is the seam where wrapping the database changed one of them.
+  # AND THE TTL IS REMOVED, for the same reason the hook is off: this Job is
+  # managed by ArgoCD, and a GitOps-managed Job with a TTL churns forever.
+  #
+  # Upstream defaults `ttlSecondsAfterFinished: 120`. Measured on a throwaway
+  # single-node install 2026-09-11 (TM-0495): the Job completes, the TTL
+  # deletes it two minutes later, ArgoCD sees an object in desired state and
+  # absent from the cluster, `selfHeal` recreates it, it runs again. Twelve
+  # recreations in fifty-five minutes on an exact 300-second period ... the TTL
+  # plus the reconcile interval.
+  #
+  # A LARGER TTL DOES NOT FIX THIS, it only slows the cycle. Any finite TTL
+  # eventually deletes an object the reconciler is holding in desired state,
+  # and the reconciler puts it back. The only value that does not churn is no
+  # TTL at all.
+  #
+  # What it costs: one completed Job object stays in the namespace. That is
+  # cheap, and it is the same evidence `ENFORCE_PRISMA_MIGRATION_CHECK` above
+  # exists to make meaningful ... a green migrations Job you can still read is
+  # the record that the migration ran.
+  #
+  # What the churn cost instead: `tockmox-ai` sat `OutOfSync` roughly ninety
+  # per cent of the time, because the Job exists for ~30s out of every 300. Any
+  # readiness bar that forbids OutOfSync fails against this layer almost always,
+  # and passes in the ten per cent window ... which is how a release gate read
+  # it green once.
+  migrationJob:
+    # FALSE, AND THE MIGRATION STILL RUNS. This switch is the SUBCHART's own
+    # Job, which is named the same whatever its pod template holds, so any
+    # template change (including a LiteLLM image bump) wedges an existing site
+    # on `field is immutable`. tockmox-ai renders the Job itself instead
+    # (templates/litellm-migrations-job.yaml), named after a hash of its pod
+    # template, and it reads every other setting in this block. Setting this
+    # true refuses to render. TM-0596, 2026-10-06.
+    enabled: false
+    # THE JOB MUST OUTLAST THE DATABASE'S BOOTSTRAP, and upstream's default of 4
+    # does not. Measured on a cold single-node install 2026-09-12:
+    #
+    #   02:19:08  migrations Job created
+    #   02:23:45  Job FAILED, backoffLimit 4 exhausted after 4m37s
+    #   02:31:12  the CNPG database finally reported Ready
+    #
+    # The Job gave up SEVEN AND A HALF MINUTES before the thing it waits for
+    # existed. Nothing recreates a Failed Job that is present in desired state,
+    # so the schema is never created: the model gateway runs against an empty
+    # database, the nightly backup captures nothing, and the weekly restore
+    # drill correctly writes FAIL. **Every layer still reports Synced.**
+    #
+    # This was MASKED until 2026-09-11 by the churn TM-0495 removed. A finite
+    # `ttlSecondsAfterFinished` deletes a FAILED Job as readily as a completed
+    # one, ArgoCD's selfHeal put it straight back, and each recreation bought
+    # four more attempts ... so the migration eventually won, by accident, via a
+    # mechanism that was itself a defect. Removing the churn removed the
+    # recovery. Both behaviours were wrong; the old one failed in the direction
+    # that worked.
+    #
+    # 20 rather than a bigger number because Kubernetes backs off 10s, 20s, 40s,
+    # 80s, 160s, 320s and then caps at 6 minutes: 20 attempts is roughly 94
+    # minutes of waiting, against a 12-minute bootstrap on the slowest install
+    # measured. Raise it if a substrate is slower; do NOT solve this by
+    # reintroducing a TTL.
+    backoffLimit: 20
+    # TM-0903: peak 1287.7 MiB (prisma migrate deploy, the run that completed),
+    # measured on a 0.8.0 greenfield, 2026-10-08. limit = peak x 1.5 = 1931.6,
+    # rounded up to 2048Mi. The 1536Mi limit TM-0595 tried from a 953.1 MiB
+    # sample was OOMKilled on 2026-10-06 (1309Mi read ten seconds before the
+    # kill), which is why this is sized from the full run. Setting it changes
+    # the pod template, so the Job gets a new name (TM-0596) and the old one is
+    # pruned. Request = the peak rounded down to a 128Mi step.
+    resources:
+      requests:
+        memory: 1280Mi
+      limits:
+        memory: 2048Mi
+    # THE DEADLINE MUST AGREE WITH THE RETRY BUDGET ABOVE, and upstream's does
+    # not. litellm-helm 1.100.1 introduced `activeDeadlineSeconds`, defaulting
+    # to 1800. It is a WALL-CLOCK cap that ignores backoffLimit entirely: at
+    # 1800 the Job is marked DeadlineExceeded after 30 minutes no matter how
+    # many attempts remain, and DeadlineExceeded is terminal in exactly the way
+    # TM-0516 was about. 30 minutes clears the 12-minute bootstrap we measured,
+    # but that measurement is one substrate on NVMe ... a slower disk is the
+    # scenario this whole block exists for, so the default is the wrong side of
+    # thin. 5400 keeps a real ceiling on a genuinely wedged Job while sitting
+    # just under the ~94 minutes of retry the backoffLimit above buys.
+    #
+    # The field is emitted under `with`, so a falsy value removes it. Prefer
+    # raising it to removing it: a Job with no deadline and twenty retries can
+    # sit Active for an hour and a half with nothing saying why.
+    activeDeadlineSeconds: 5400
+    # EMPTY STRING, NOT null. The subchart emits this field unconditionally
+    # (litellm-helm/templates/migrations-job.yaml), so the only way to get "no
+    # TTL" is to make it render empty ... which YAML reads as null and the API
+    # server reads as the field being unset.
+    #
+    # `null` was tried first and is NOT portable. Helm's treatment of an
+    # explicit null differs by version and by WHERE it is written, and the two
+    # disagreements point opposite ways. Measured 2026-09-11 on this chart:
+    #
+    #   this file, null   ... helm 3.16.3 renders empty, helm 4.2.1 renders 120
+    #   a site file, null ... helm 3.16.3 renders 120,   helm 4.2.1 renders empty
+    #   either file, ""   ... both render empty
+    #
+    # That mattered because the CI gates then ran helm 3.16.3 while ArgoCD
+    # shipped 4.2.1, so the `null` form passed every gate and was inert on the
+    # cluster: a fresh install on 2026-09-11 produced a live Job reading 120
+    # with the fix committed. See TM-0495.
+    #
+    # The gates moved to helm 4.3.0 on 2026-09-12 (TM-0508), which closes that
+    # particular gap but does not retire the rule. `""` was re-measured under
+    # 4.3.0 on the same day and still renders empty. Keep the empty string: it
+    # is the only form measured to behave the same in both files under every
+    # helm tried, and the next divergence will arrive the same way this one
+    # did ... silently, in a version nobody was comparing.
+    ttlSecondsAfterFinished: ""
+    hooks:
+      argocd:
+        enabled: false
+      helm:
+        enabled: false
+
+  replicaCount: 1
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits:   { memory: 2Gi }
+
+  # NON-ROOT AND READ-ONLY, MEASURED ON A LAB CLUSTER 2026-10-05 (TM-0596) against
+  # ghcr.io/berriai/litellm-database:1.100.1. The older note here said the image
+  # writes to its own filesystem at startup and ships no non-root user. Neither
+  # held: uid 1000 starts the proxy with the root filesystem read-only and only
+  # an emptyDir at /tmp, answers a chat completion, an embedding and a key
+  # creation, and writes NOTHING outside the mounted volumes (HOME is `/`, and
+  # nothing touches it). The migrations Job as uid 1000 on a read-only root
+  # builds the full schema on an empty database (78 tables, the same as a
+  # writable root) and exits 0. The one failure either way is `prisma generate`
+  # trying to copy schema.prisma into site-packages: PermissionError as uid
+  # 1000, EROFS read-only. The migration script logs it as a WARNING and
+  # carries on with the client baked in at image build, so it is not a defect.
+  #
+  # What this does NOT cover: a site's own callback hooks (mounted at
+  # /etc/litellm/hooks) that write to the filesystem, and a LiteLLM upgrade that
+  # starts writing somewhere new. Re-measure on a LiteLLM bump; the symptom is a
+  # CrashLoop with `Read-only file system` in the log.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile: { type: RuntimeDefault }
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities: { drop: ["ALL"] }
+    readOnlyRootFilesystem: true
+
+  # /metrics on the LiteLLM proxy is an enterprise feature, so no
+  # ServiceMonitor is shipped: a scrape target that returns 404 reads as
+  # coverage on a dashboard and is not.
+  serviceMonitor:
+    enabled: false

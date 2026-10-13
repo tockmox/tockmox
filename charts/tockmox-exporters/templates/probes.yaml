@@ -1,0 +1,185 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+Probe objects for the blackbox exporter.
+
+WHAT WAS WRONG. The exporter shipped, ran, reported healthy, and probed nothing:
+zero Probe objects, and its own ServiceMonitor off as well. So the entire
+exporters layer produced no series. Confirmed on the reference deployment
+2026-08-15 ... `probe_success` did not exist as a metric name.
+
+An exporter with no targets is the purest version of the failure this repo keeps
+finding: it applies cleanly, runs healthy, costs memory, and answers no question.
+
+WHAT THESE PROBE, AND WHY THAT SET. The consoles this install actually creates,
+by their derived hostnames, from inside the cluster through the same ingress a
+person would use. That path covers what an internal health check misses: DNS,
+the LoadBalancer address, Traefik's routing, and certificate validity, in one
+signal.
+
+THEY ARE CORRELATED ON PURPOSE. All of these resolve through one ingress
+controller, so if Traefik stops the whole set goes red together. That is useful
+information rather than noise: one alert per console tells you which console,
+and all of them at once tells you it is not the consoles.
+
+TLS VERIFICATION IS ON. The default issuer is a private CA, and the trust
+bundle work in August 2026 exists so in-cluster clients trust it. If probes fail
+verification, that is the finding, not a reason to set insecure_skip_verify ...
+it means the CA is not where the components expect and server-side OIDC is
+about to break in a way that only locks out federated users.
+*/ -}}
+{{- $monitors := include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") }}
+{{- $bbOn := include "tockmox.appEnabled" (dict "ctx" $ "app" "blackbox") }}
+{{- $domain := .Values.global.internalDomain | default "" }}
+{{- if and $monitors $bbOn .Values.probes.enabled $domain }}
+{{- $scheme := ternary "https" "http" (ne (.Values.global.certIssuer | default "") "") }}
+{{- /*
+A probe is only added when the component that SERVES that hostname is actually
+deployed. Without this, declining a capability leaves a probe against a console
+nobody installed, and TockmoxConsoleUnreachable fires forever with no action
+that can clear it. An alert that cannot be satisfied trains people to ignore
+alerts, which costs more than the missing probe.
+
+The values namespace is shared across layers, so this layer can read the app
+switches the other layers own. A values file that omits them resolves to nil,
+which is falsy, so the probe is left out ... failing closed, which is the right
+direction for a check that would otherwise page.
+*/ -}}
+{{- $servedBy := dict "auth" "authentik" "chat" "openWebui" "grafana" "kubePrometheusStack" "workflows" "argoWorkflows" "llm" "litellm" }}
+{{- /*
+THE HOSTNAME IS THE ONE THE INGRESS USES (TM-0820). Each console's Ingress takes
+`ingress.apps.<app>.host` from its own layer, falling back to <svc>.<domain>.
+This layer reads the same key from the shared values file, so a site that moves
+Open WebUI to another host does not get a permanent TockmoxConsoleUnreachable
+for a name nothing serves. Unset or blank derives, as before.
+*/ -}}
+{{- $ingressKey := dict "auth" "authentik" "chat" "openWebui" "grafana" "grafana" "workflows" "argoWorkflows" "llm" "litellm" }}
+{{- $ingressApps := dig "ingress" "apps" dict (.Values | toYaml | fromYaml) }}
+{{- /*
+THE PATH, FOR THE ONE CONSOLE WHOSE ROOT IS NOT A HEALTH SIGNAL (TM-0905).
+Authentik answers `/` with a redirect into whatever onboarding flow it is in,
+and on the lab that was `/setup`, answering 500 for as long as nobody had run
+initial setup in a browser: TockmoxConsoleUnreachable critical, around the
+clock, while Authentik served every login (blackbox log, reference lab,
+2026-10-06: "Received redirect location=/setup", then status_code=500). Its
+documented readiness endpoint, `/-/health/ready/`, answers 200 once it can
+reach its database, through the same ingress, DNS, LoadBalancer and
+certificate, which is everything this probe exists to cover. Every other
+console's root already answers 200, 30x or 401.
+*/ -}}
+{{- $probePath := dict "auth" "/-/health/ready/" }}
+{{- /*
+A COMPONENT THAT SHIPS OFF NEEDS ITS SWITCH SEEN ON (2026-10-06, wave 080 lab,
+TM-0910), and since 0.8.0 no console component ships off (TM-0460). Through
+0.7.x the AI layer shipped `apps.litellm.enabled: false`, and that default
+lived in the AI layer's values, not here. So this layer, reading a site that
+left LiteLLM alone, saw no switch, fell back to the capability, and probed
+llm.<domain> on every install that never deployed it: TockmoxConsoleUnreachable,
+critical, ten minutes after the first sync. The fix was this map: a component
+in it was probed only when the site's values said it was on.
+
+The map is EMPTY now, and kept so the mechanism stays beside its reason:
+LiteLLM follows the aiPlane capability like Open WebUI, so the probe follows
+the capability too, which is what the comment above already promised. The
+cross-layer rule is unchanged in the other direction: a site that turns the
+gateway OFF must say so in a values file this layer also reads (global.yaml,
+or exporters.yaml), or the probe pages for a host nothing serves.
+*/}}
+{{- $shipsOff := dict }}
+{{- $targets := list }}
+{{- range $svc, $on := .Values.probes.consoles }}
+  {{- if $on }}
+    {{- $app := index $servedBy $svc }}
+    {{- $deployed := true }}
+    {{- if $app }}
+      {{- $deployed = include "tockmox.appEnabled" (dict "ctx" $ "app" $app) }}
+      {{- if and $deployed (hasKey $shipsOff $app) }}
+        {{- $deployed = eq (toString (dig $app "enabled" false ($.Values.apps | default dict | toYaml | fromYaml))) "true" }}
+      {{- end }}
+    {{- end }}
+    {{- if $deployed }}
+      {{- $override := dig ((index $ingressKey $svc) | default $svc) "host" "" $ingressApps }}
+      {{- $targets = append $targets (printf "%s://%s%s" $scheme ($override | default (printf "%s.%s" $svc $domain)) (index $probePath $svc | default "")) }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- if $targets }}
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: tockmox-consoles
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  jobName: tockmox-blackbox
+  interval: {{ .Values.probes.interval }}
+  scrapeTimeout: {{ .Values.probes.scrapeTimeout }}
+  module: {{ .Values.probes.module }}
+  prober:
+    {{- /*
+    Host:port with NO scheme. The operator adds the scheme and the path itself,
+    so writing one here produces http://http://... and every probe fails with a
+    parse error naming the target rather than this field.
+
+    tockmox.namespace takes a plain string, not a dict ... passing a dict
+    rendered the namespace as "tockmox-map[...]" and broke the document.
+    */}}
+    url: {{ printf "%s-prometheus-blackbox-exporter.%s.svc:9115" .Release.Name .Values.namespaces.monitoring }}
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        {{- range $targets }}
+        - {{ . | quote }}
+        {{- end }}
+      labels:
+        tockmox_tier: internal
+{{- if .Values.probes.alerts.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tockmox-probes
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    prometheus: kube-prometheus-stack
+    role: alert-rules
+spec:
+  groups:
+    - name: tockmox.probes
+      interval: 1m
+      rules:
+        - alert: TockmoxConsoleUnreachable
+          expr: probe_success{job="tockmox-blackbox"} == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ `{{ $labels.instance }}` }} has failed its probe for 10 minutes"
+            description: >-
+              The console did not answer through its ingress. If every Tockmox
+              console is firing at once the ingress controller is the cause, not
+              the consoles.
+        - alert: TockmoxConsoleCertificateExpiringSoon
+          {{- /*
+          This overlaps TockmoxCertificateExpiringSoon in the platform layer and
+          the overlap is deliberate: that one reads cert-manager's own view of
+          what it believes it issued, and this one reads the certificate a
+          client is actually served. They disagree exactly when it matters ...
+          a renewed Certificate that Traefik never picked up looks healthy to
+          cert-manager and expired to every browser.
+          */}}
+          expr: (probe_ssl_earliest_cert_expiry{job="tockmox-blackbox"} - time()) < (14 * 24 * 3600)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "The certificate served at {{ `{{ $labels.instance }}` }} expires in under 14 days"
+            description: >-
+              This reads the certificate presented to a client, not the one
+              cert-manager thinks it issued. If the platform's certificate alert
+              is quiet while this one fires, the certificate was renewed and the
+              ingress controller is still serving the old one.
+{{- end }}
+{{- end }}
+{{- end }}

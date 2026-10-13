@@ -1,0 +1,786 @@
+{{- if and (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "dataProtection" "app" "garage")) .Values.garage.bootstrap.enabled }}
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+WHAT MAKES GARAGE USABLE RATHER THAN MERELY RUNNING.
+
+A fresh Garage node starts, answers 503 on /health, and does nothing. It needs a
+cluster layout assigned and applied before it will accept a single byte, and
+then a bucket and an access key before anything can write to it. Every one of
+those is a CLI call against the running node, and none of them can be expressed
+as a manifest.
+
+So the alternative to this Job is a runbook, and a backup target that depends on
+somebody following a runbook is the same unshipped prerequisite this component
+was added to remove.
+
+WHAT IT DOES, ONCE:
+  1. mints the RPC secret and admin token, if the Secret does not exist
+  2. waits for the node to answer
+  3. assigns and applies a layout
+  4. creates the bucket
+  5. creates an access key, grants it read/write on the bucket
+  6. writes the S3 credentials into a Secret the ObjectStore reads
+  7. (Longhorn on) points Longhorn's backup target at the store
+  8. (web serving on) for each static site: creates its bucket with a global
+     alias equal to the site host, turns website access on, and, when the site
+     wants one, mints a writer key scoped to that bucket into a Secret
+
+EVERY STEP IS IDEMPOTENT and the Job re-runs safely: it checks before it
+creates, and a second run against a configured cluster is a series of no-ops
+that still ends by confirming the bucket is reachable. That matters because
+Helm hooks re-run on upgrade.
+
+IT NEVER OVERWRITES A CREDENTIAL. If the Secret exists, its values are used as
+they are. Rotating a key is a deliberate act: delete the Secret and let this
+run again, knowing that anything holding the old key stops working.
+*/ -}}
+{{- $g := .Values.garage -}}
+{{- $name := "tockmox-garage" -}}
+{{- $sites := include "tockmox.garageWeb.sites" . | fromYamlArray -}}
+{{- /*
+STEP 7 (Longhorn's default BackupTarget -> the shipped Garage) RUNS ONLY WHEN IT
+IS WANTED, decided at render time so the Role, the Secret and the script all
+agree (TM-0216).
+
+It is skipped when EITHER
+  - `garage.bootstrap.wireLonghornBackupTarget` is false, or
+  - the site set `longhorn.defaultBackupStore.backupTarget`. The Longhorn
+    subchart writes that into its `longhorn-default-resource` ConfigMap and
+    Longhorn creates the default BackupTarget from it. A site that named an
+    off-cluster target has already said where backups go, so this Job must not
+    ALSO patch the slot. (The script still leaves a BackupTarget alone that
+    points anywhere other than the shipped store; this render-time skip is what
+    stops the Job creating a credential Secret and holding a patch permission
+    the site never asked for.)
+*/ -}}
+{{- $siteLHTarget := dig "defaultBackupStore" "backupTarget" "" (.Values.longhorn | default dict) -}}
+{{- $wireLH := and .Values.apps.longhorn.enabled $g.bootstrap.wireLonghornBackupTarget (not $siteLHTarget) -}}
+{{- /*
+STEP 9, THE ONE-SHOT SITE PUBLISH (garage.web.syncAtInstall). The hourly sync
+CronJobs (garage-web.yaml) leave a fresh install's site empty until their first
+tick. This Job starts one run of each right after step 8 has made the buckets
+and the writer Secrets, with `kubectl create job --from=cronjob/...`, and does
+not wait for it. See garage-web.yaml for why it is NOT a plain Job or a hook.
+$syncJobs is the list of {cronjob, job} pairs; the Job name carries the chart
+version so an upgrade publishes the new content once and a re-sync of the same
+version finds the name taken and does nothing.
+*/ -}}
+{{- $hasPlaceholder := false -}}
+{{- range $sites }}{{- if .placeholder }}{{- $hasPlaceholder = true }}{{- end }}{{- end -}}
+{{- $syncJobs := list -}}
+{{- if dig "web" "syncAtInstall" true $g -}}
+{{- range $sites -}}
+{{- if .contentImage -}}
+{{- $jn := printf "%s-sync-%s-%s" $name .name ($.Chart.Version | replace "." "-" | replace "+" "-") -}}
+{{- if gt (len $jn) 63 -}}{{- fail (printf "garage.web.syncAtInstall: the one-shot Job name %q is %d characters, over the 63 a Job name may have. Shorten the site name %q or set garage.web.syncAtInstall: false." $jn (len $jn) .name) -}}{{- end -}}
+{{- $syncJobs = append $syncJobs (dict "cronjob" (printf "%s-sync-%s" $name .name) "job" $jn) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- /*
+THE CREDENTIALS JOB IS NAMED AFTER ITS OWN POD TEMPLATE, and it has to be.
+
+A Job's `spec.template` is IMMUTABLE. `tockmox.labels` puts `helm.sh/chart` into
+that template, and `helm.sh/chart` renders from this chart's version. So a
+version bump alone ... with no template file changed anywhere ... produces a Job
+the API server refuses to update:
+
+  Job.batch "tockmox-garage-credentials" is invalid: spec.template:
+    Invalid value: {... "helm.sh/chart":"tockmox-platform-0.6.1" ...}:
+    field is immutable
+
+Measured on the reference lab 2026-09-21 during the v0.6.1 upgrade leg. The
+Job sits in sync wave -1, so the refusal stranded 21 downstream resources: the
+Garage StatefulSet, its Services and ConfigMap, three Certificates, both
+ClusterIssuers, the MetalLB pool and L2Advertisement, the PrometheusRule, the
+Longhorn VolumeSnapshotClass and the cross-namespace credential RBAC. ArgoCD
+retried to its limit of 5 and stopped, reporting phase "Running" with finishedAt
+already set ... a failed sync wearing a running label.
+
+WHY THE NAME AND NOT A HOOK. The sibling bootstrap Job below solves this with
+`hook: PostSync` + `hook-delete-policy: BeforeHookCreation`. This Job cannot copy
+that: the StatefulSet reads the minted Secret via secretKeyRef, which the kubelet
+resolves BEFORE the container starts, so minting must land in an earlier wave.
+It was in the PostSync Job once and could never succeed (2026-08-15, `secret
+"tockmox-garage" not found`). PreSync is no better ... the ServiceAccount and
+RBAC this Job runs as are in wave -2, INSIDE the sync, so a PreSync Job would run
+before its own identity exists on a greenfield install.
+
+A version-suffixed name changes no sync ordering and no hook semantics, so the
+greenfield install path is untouched. Each release gets a fresh Job; `prune: true`
+removes the previous one. The Job is idempotent by design (it exits 0 when the
+Secret already exists), so the re-run an upgrade causes is a no-op.
+
+WHY A HASH AND NOT THE VERSION (TM-1022). The name used to be
+`tockmox-garage-credentials-<chart version>`, which assumed the pod template
+only changes when the version does. A dependency bump breaks that: Renovate
+moved `garage.bootstrap.image` (alpine/k8s 1.36.2 to 1.37.1) inside 0.8.0, the
+homelab moved between two 0.8.0 heads on 2026-10-11, and the platform sync
+failed `field is immutable` five times with everything after wave -1 left
+behind (Longhorn, Traefik, Garage, the backup plugin) until the old Job was
+deleted by hand. Naming the Job after the sha256 of its rendered pod template,
+like the LiteLLM migrations Job and the console-key Job (TM-0596), covers every
+case at once: a version bump changes the template (`helm.sh/chart` is in it),
+so the name moves; an image or argument change moves it too; an rc and its
+final tag render the same template, so promoting an rc does not recreate it.
+tools/check-immutable-fields.sh --perturb-images proves it: every image tag in
+the charts is changed and no surviving Job may keep its name.
+*/ -}}
+{{- $credPod := include "tockmox-platform.garageCredentialsPod" (dict "ctx" . "g" $g "name" $name) -}}
+{{- $credName := printf "%s-credentials-%s" $name ($credPod | sha256sum | trunc 10) -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}-bootstrap
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # Ahead of the credentials Job in wave -1, which is ahead of the StatefulSet
+    # in the default wave. Identity, then credentials, then the thing that needs
+    # them.
+    argocd.argoproj.io/sync-wave: "-2"
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-bootstrap
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+rules:
+  # Narrow on purpose: the two Secrets this Job owns, by name. It mints
+  # credentials, so it must not be able to read anybody else's.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ $g.secretName | quote }}, {{ $g.credentialsSecretName | quote }}, "tockmox-longhorn-backup"{{- range $sites }}{{- if .writerKey }}, {{ .secret | quote }}{{- end }}{{- end }}]
+    verbs: ["get", "patch", "update"]
+{{- if $syncJobs }}
+  # Step 9 starts one run of each site sync CronJob: read the CronJob it copies
+  # (by name), create a Job. `create` cannot be restricted by name in RBAC, so
+  # this is the whole verb on Jobs in this namespace; it grants no read on Jobs.
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    resourceNames: [{{ range $i, $j := $syncJobs }}{{ if $i }}, {{ end }}{{ $j.cronjob | quote }}{{ end }}]
+    verbs: ["get"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create"]
+{{- end }}
+{{- if $wireLH }}
+  # Step 7 wires Longhorn's default BackupTarget at the shipped store. Get
+  # to read the operator's current choice, patch to set ours only when the
+  # slot is empty or already ours.
+  - apiGroups: ["longhorn.io"]
+    resources: ["backuptargets"]
+    resourceNames: ["default"]
+    verbs: ["get", "patch"]
+{{- end }}
+{{- /*
+Extra labels on the namespaces created below (TM-0816, TM-0815):
+global.namespaceLabels for every one, garage.credentialsNamespaceLabels.<ns> for
+one (Pod Security labels, an admission mutator's opt-out). The per-namespace map
+wins on a clash; the four labels this chart sets are refused.
+*/ -}}
+{{- $nsOwned := list "name" "app.kubernetes.io/part-of" "tockmox.com/managed-by" "tockmox.com/layer" }}
+{{- range $ns := ($g.createCredentialsNamespaces | default list) }}
+{{- $extra := merge (deepCopy ((index ($g.credentialsNamespaceLabels | default dict) $ns) | default dict)) (deepCopy ($.Values.global.namespaceLabels | default dict)) }}
+{{- range $k, $_ := $extra }}
+{{- if has $k $nsOwned }}
+{{- fail (printf "namespace labels for %q set %q, which this chart owns" $ns $k) }}
+{{- end }}
+{{- end }}
+---
+# A copy target nobody else creates before this layer syncs (wave 2). Wave -3:
+# ahead of the Role and RoleBinding below (applied into it) and everything else
+# here. Prune=false and Delete=false: removing the name from the list, or this
+# Application, must never delete a namespace that may by then hold the app's
+# data. Listing a namespace here that the policy layer also creates is refused by
+# tools/check-upgrade-safety.sh F6 (two owners).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+  labels:
+    name: {{ $ns }}
+    app.kubernetes.io/part-of: tockmox
+    tockmox.com/managed-by: tockmox
+    tockmox.com/layer: platform
+{{- range $k, $v := $extra }}
+    {{ $k | quote }}: {{ $v | quote }}
+{{- end }}
+---
+# TM-0759 (CIS 5.1.5): the namespace controller creates `default`; rendering it here lets it carry
+# automountServiceAccountToken: false. Prune=false,Delete=false: removing this object must never
+# delete the account, which Kubernetes recreates anyway; no Tockmox pod runs as it, and no
+# Role or ClusterRole binds it (tools/check-sa-tokens.sh asserts the first).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: {{ $ns }}
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+  labels:
+    app.kubernetes.io/part-of: tockmox
+    tockmox.com/managed-by: tockmox
+    tockmox.com/layer: platform
+automountServiceAccountToken: false
+{{- end }}
+{{- range $ns := $g.credentialsNamespaces }}
+{{- if ne $ns $.Release.Namespace }}
+---
+# The copy target needs its own Role: RBAC is namespaced, and a ClusterRole for
+# this would grant Secret access everywhere to mint two keys in one place.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-bootstrap
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ $g.credentialsSecretName | quote }}]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-bootstrap
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ $name }}-bootstrap }
+subjects:
+  - { kind: ServiceAccount, name: {{ $name }}-bootstrap, namespace: {{ $.Release.Namespace }} }
+{{- end }}
+{{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-bootstrap
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ $name }}-bootstrap }
+subjects:
+  - { kind: ServiceAccount, name: {{ $name }}-bootstrap, namespace: {{ .Release.Namespace }} }
+---
+{{/*
+THE CREDENTIALS JOB, AND WHY IT IS SEPARATE FROM THE ONE BELOW.
+
+The StatefulSet reads GARAGE_RPC_SECRET and GARAGE_ADMIN_TOKEN from this Secret
+via secretKeyRef, which the kubelet resolves BEFORE the container starts. The
+configuration Job below is a PostSync hook, because layout and buckets need a
+Garage that is answering. Minting was in that same Job, and that combination
+cannot ever succeed:
+
+  the pod cannot start        without the Secret
+  the Secret is not created   until PostSync
+  PostSync does not run       until the resources are healthy
+  the pod is never healthy
+
+Observed on the reference lab 2026-08-15 as
+  Error: secret "tockmox-garage" not found
+and it stayed hidden for hours behind an unrelated Longhorn capacity failure,
+which is worth remembering: the second fault only appears once the first is
+fixed, so "it is broken for a different reason now" is progress, not a setback.
+
+The comment this replaced said the StatefulSet "needs a restart to pick these
+up; it is starting for the first time, so it already will." That reasoning was
+about a pod that starts and later re-reads. This pod never starts at all.
+
+So: minting needs no running Garage and lives in an earlier sync wave.
+Configuration needs a running Garage and stays PostSync. Splitting on that
+question is the whole fix.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Named after its own pod template (TM-1022): a changed template is a new Job,
+  # never `field is immutable`. Full argument at the top of this file.
+  name: {{ $credName }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  backoffLimit: 4
+  template:
+    {{- $credPod | nindent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-bootstrap
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    # PostSync, not a Helm hook. The StatefulSet has to exist and be answering
+    # before any of this means anything, and ArgoCD is what installs this chart.
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        {{- include "tockmox.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ $name }}-bootstrap
+      # Needs the API: kubectl creates and reads Secrets (the Role below). Token kept on
+      # purpose (TM-0759); gate allowlist in tools/check-sa-tokens.sh.
+      automountServiceAccountToken: true
+      {{- with $g.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: bootstrap
+          image: {{ include "tockmox.image" (dict "ctx" $ "repo" $g.bootstrap.image) }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits:   { memory: 256Mi }
+          env:
+            - { name: HOME,   value: /tmp }
+            - { name: NS,     value: {{ .Release.Namespace | quote }} }
+            - { name: SVC,    value: {{ $name | quote }} }
+            - { name: SEC,    value: {{ $g.secretName | quote }} }
+            - { name: CREDS,  value: {{ $g.credentialsSecretName | quote }} }
+            - { name: BUCKET, value: {{ $g.bucket | quote }} }
+            - { name: REGION, value: {{ $g.region | quote }} }
+            - { name: ZONE,   value: {{ $g.zone | quote }} }
+            - { name: CAPACITY, value: {{ $g.capacity | quote }} }
+            # Namespaces that need the S3 credentials. A CNPG ObjectStore reads
+            # its Secret from its OWN namespace, so the database layer cannot
+            # reach a Secret sitting here. One source, copied, beats an operator
+            # copying it by hand and beats two Secrets that can drift.
+            - { name: COPY_TO, value: {{ join " " $g.credentialsNamespaces | quote }} }
+{{- if $syncJobs }}
+            # Step 9: one line per site sync CronJob: cronjob-name job-name.
+            - name: SYNC_JOBS
+              value: |
+{{- range $syncJobs }}
+                {{ .cronjob }} {{ .job }}
+{{- end }}
+{{- end }}
+{{- if $sites }}
+            # One line per static site: name host index errorDocument writerKey
+            # placeholder. `-` stands for "no error document" so every line has
+            # six fields. placeholder is true for the docs site only.
+            - name: SITES
+              value: |
+{{- range $sites }}
+                {{ .name }} {{ .host }} {{ .index }} {{ .errorDocument | default "-" }} {{ .writerKey }} {{ .placeholder }}
+{{- end }}
+{{- end }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+{{- if $hasPlaceholder }}
+            - { name: placeholder, mountPath: /placeholder, readOnly: true }
+{{- end }}
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              say() { echo "[$(date -u +%H:%M:%S)] $*"; }
+              # PER-POD DNS through the headless Service, not the load-balanced
+              # one. The regular Service drops a pod that is not Ready, and
+              # Garage is not Ready until this Job has applied a layout.
+              ADMIN="http://${SVC}-0.${SVC}-headless.${NS}.svc:3903"
+
+              # ---- 1. the credentials must ALREADY exist ---------------------
+              # Minted by the -credentials Job in sync wave -1, because the
+              # StatefulSet cannot start without them and this Job does not run
+              # until the StatefulSet is healthy. If they are missing, say so
+              # rather than minting a second set that nothing is using.
+              if ! kubectl -n "$NS" get secret "$SEC" >/dev/null 2>&1; then
+                say "FATAL: $SEC does not exist."
+                say "It is minted by the ${SVC}-credentials-<chart-version> Job in sync wave -1."
+                say "The name carries the chart version; list Jobs in $NS to find it."
+                say "Check that Job rather than this one; without the Secret the"
+                say "Garage pod cannot have started, so this Job should not be"
+                say "running at all."
+                exit 1
+              fi
+              TOKEN=$(kubectl -n "$NS" get secret "$SEC" -o jsonpath='{.data.admin-token}' | base64 -d)
+              AUTH="Authorization: Bearer ${TOKEN}"
+
+              # ---- 2. wait for the node --------------------------------------
+              say "waiting for $ADMIN"
+              for i in $(seq 1 60); do
+                code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 -H "$AUTH" "$ADMIN/health" || echo 000)
+                [ "$code" = "200" ] && { say "  healthy"; break; }
+                [ "$code" = "503" ] && { say "  503 (no layout yet, expected)"; break; }
+                sleep 5
+              done
+
+              # ---- 3. layout -------------------------------------------------
+              # A node with no layout answers 503 and stores nothing. This is
+              # the step that has no manifest form and is the reason this Job
+              # exists at all.
+              STATUS=$(curl -s --max-time 10 -H "$AUTH" "$ADMIN/v2/GetClusterStatus" || echo '{}')
+              # Single-line python throughout. A multi-line -c script inside a
+              # YAML block scalar has to stay at or beyond the block's
+              # indentation, and one that does not silently ENDS the block, so
+              # the rest of the script gets parsed as YAML.
+              NODE=$(echo "$STATUS" | python3 -c 'import sys,json; d=json.load(sys.stdin); ns=d.get("nodes") or []; print(ns[0].get("id","") if ns else "")' 2>/dev/null || echo "")
+              if [ -z "$NODE" ]; then
+                say "FAIL: the node reported no identity. Garage is not answering the admin API."
+                echo "$STATUS" | head -c 500; exit 1
+              fi
+              say "node ${NODE:0:16}..."
+
+              LAYOUT=$(curl -s --max-time 10 -H "$AUTH" "$ADMIN/v2/GetClusterLayout" || echo '{}')
+              ASSIGNED=$(echo "$LAYOUT" | python3 -c 'import sys,json; print(len((json.load(sys.stdin).get("roles") or [])))' 2>/dev/null || echo 0)
+              if [ "$ASSIGNED" -gt 0 ]; then
+                say "layout already applied ($ASSIGNED role(s)), skipping"
+              else
+                say "assigning layout: zone=$ZONE capacity=$CAPACITY"
+                # THE PAYLOAD IS AN OBJECT WITH A `roles` LIST, not a bare
+                # array. A bare array is what the v1 API took and what the
+                # obvious reading of the v2 docs suggests; v2.3.0 answers it
+                # with `invalid type: map, expected a sequence`, which points
+                # at the wrong end of the problem. Measured against a running
+                # node 2026-08-15.
+                curl -sf --max-time 15 -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+                  -d "{\"roles\":[{\"id\":\"$NODE\",\"zone\":\"$ZONE\",\"capacity\":$CAPACITY,\"tags\":[]}]}" \
+                  "$ADMIN/v2/UpdateClusterLayout" >/dev/null
+                # A staged change leaves `version` where it was and `roles`
+                # empty; applying it promotes both. So the version to apply is
+                # always the current one plus one.
+                VER=$(curl -s --max-time 10 -H "$AUTH" "$ADMIN/v2/GetClusterLayout" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("version",0)+1)')
+                curl -sf --max-time 15 -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+                  -d "{\"version\":$VER}" "$ADMIN/v2/ApplyClusterLayout" >/dev/null
+                say "layout applied at version $VER"
+              fi
+
+              # ---- 4. bucket -------------------------------------------------
+              if curl -s --max-time 10 -H "$AUTH" "$ADMIN/v2/GetBucketInfo?globalAlias=$BUCKET" | grep -q '"id"'; then
+                say "bucket $BUCKET exists"
+              else
+                say "creating bucket $BUCKET"
+                curl -sf --max-time 15 -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+                  -d "{\"globalAlias\":\"$BUCKET\"}" "$ADMIN/v2/CreateBucket" >/dev/null
+              fi
+              BID=$(curl -s --max-time 10 -H "$AUTH" "$ADMIN/v2/GetBucketInfo?globalAlias=$BUCKET" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("id",""))')
+
+              # ---- 5. key + grant, and the Secret the ObjectStore reads -------
+              if kubectl -n "$NS" get secret "$CREDS" >/dev/null 2>&1; then
+                say "credentials secret $CREDS exists, leaving it alone"
+                # ... except the REGION key, which older secrets lack and the
+                # ObjectStore now references: patch it in without touching the
+                # key material, so upgrades do not strand barman on a missing
+                # secret key.
+                if [ -z "$(kubectl -n "$NS" get secret "$CREDS" -o jsonpath='{.data.REGION}')" ]; then
+                  kubectl -n "$NS" patch secret "$CREDS" --type merge \
+                    -p "{\"stringData\":{\"REGION\":\"$REGION\"}}"
+                  say "added REGION to $CREDS"
+                fi
+              else
+                say "creating access key"
+                KEY=$(curl -sf --max-time 15 -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+                  -d "{\"name\":\"tockmox-backups\"}" "$ADMIN/v2/CreateKey")
+                AK=$(echo "$KEY" | python3 -c 'import sys,json;print(json.load(sys.stdin)["accessKeyId"])')
+                SK=$(echo "$KEY" | python3 -c 'import sys,json;print(json.load(sys.stdin)["secretAccessKey"])')
+                say "granting read/write on $BUCKET"
+                curl -sf --max-time 15 -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+                  -d "{\"bucketId\":\"$BID\",\"accessKeyId\":\"$AK\",\"permissions\":{\"read\":true,\"write\":true,\"owner\":false}}" \
+                  "$ADMIN/v2/AllowBucketKey" >/dev/null
+                kubectl -n "$NS" create secret generic "$CREDS" \
+                  --from-literal=ACCESS_KEY_ID="$AK" \
+                  --from-literal=ACCESS_SECRET_KEY="$SK" \
+                  --from-literal=REGION="$REGION"
+                say "wrote $CREDS"
+              fi
+
+              # ---- 6. hand the credentials to the namespaces that consume them
+              for target in $COPY_TO; do
+                [ "$target" = "$NS" ] && continue
+                if kubectl -n "$target" get secret "$CREDS" >/dev/null 2>&1; then
+                  say "$CREDS already present in $target"
+                  if [ -z "$(kubectl -n "$target" get secret "$CREDS" -o jsonpath='{.data.REGION}')" ]; then
+                    kubectl -n "$target" patch secret "$CREDS" --type merge \
+                      -p "{\"stringData\":{\"REGION\":\"$REGION\"}}"
+                    say "added REGION to $CREDS in $target"
+                  fi
+                else
+                  AK=$(kubectl -n "$NS" get secret "$CREDS" -o jsonpath='{.data.ACCESS_KEY_ID}' | base64 -d)
+                  SK=$(kubectl -n "$NS" get secret "$CREDS" -o jsonpath='{.data.ACCESS_SECRET_KEY}' | base64 -d)
+                  kubectl -n "$target" create secret generic "$CREDS" \
+                    --from-literal=ACCESS_KEY_ID="$AK" --from-literal=ACCESS_SECRET_KEY="$SK" \
+                    --from-literal=REGION="$REGION"
+                  say "copied $CREDS to $target"
+                fi
+              done
+
+{{- if $wireLH }}
+              # ---- 7. Longhorn's backup target, at the shipped store ---------
+              # Longhorn wants its own credential format (AWS_* keys plus the
+              # endpoint IN the secret), and its default BackupTarget is a CR
+              # the manager creates ... so this is a patch, not a manifest, and
+              # it respects an operator who already pointed the target
+              # somewhere better (an off-cluster store is the better answer;
+              # backup-restore.md says so and this wiring does not argue).
+              LH_SEC="tockmox-longhorn-backup"
+              LH_URL="s3://${BUCKET}@${REGION}/longhorn"
+              if kubectl -n "$NS" get secret "$LH_SEC" >/dev/null 2>&1; then
+                say "$LH_SEC exists"
+              else
+                AK=$(kubectl -n "$NS" get secret "$CREDS" -o jsonpath='{.data.ACCESS_KEY_ID}' | base64 -d)
+                SK=$(kubectl -n "$NS" get secret "$CREDS" -o jsonpath='{.data.ACCESS_SECRET_KEY}' | base64 -d)
+                kubectl -n "$NS" create secret generic "$LH_SEC" \
+                  --from-literal=AWS_ACCESS_KEY_ID="$AK" \
+                  --from-literal=AWS_SECRET_ACCESS_KEY="$SK" \
+                  --from-literal=AWS_ENDPOINTS="http://${SVC}.${NS}.svc:3900"
+                say "wrote $LH_SEC (Longhorn credential format)"
+              fi
+              # The manager creates the default BackupTarget on its own
+              # schedule; on a fresh install this Job can beat it. Bounded
+              # wait, then a clear message rather than a failure ... database
+              # backups do not depend on this step, and the next bootstrap
+              # run (any sync that changes this Job) retries.
+              TGT=""
+              for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+                TGT=$(kubectl -n "$NS" get backuptargets.longhorn.io default -o jsonpath='{.metadata.name}' 2>/dev/null || true)
+                [ -n "$TGT" ] && break
+                sleep 10
+              done
+              if [ -z "$TGT" ]; then
+                say "default BackupTarget CR never appeared; Longhorn volume backups stay unwired this run (databases unaffected)"
+              else
+                CUR=$(kubectl -n "$NS" get backuptargets.longhorn.io default -o jsonpath='{.spec.backupTargetURL}' 2>/dev/null || true)
+                if [ -n "$CUR" ] && [ "$CUR" != "$LH_URL" ]; then
+                  say "BackupTarget already points at $CUR ... an operator's choice, leaving it"
+                else
+                  kubectl -n "$NS" patch backuptargets.longhorn.io default --type=merge \
+                    -p "{\"spec\":{\"backupTargetURL\":\"$LH_URL\",\"credentialSecret\":\"$LH_SEC\",\"pollInterval\":\"5m0s\"}}"
+                  say "default BackupTarget -> $LH_URL"
+                fi
+              fi
+{{- end }}
+{{- if $sites }}
+
+              # ---- 8. static sites (TM-0215) ---------------------------------
+              # One bucket per site, with the HOST as its global alias: the web
+              # endpoint finds a bucket by matching the request Host against
+              # aliases. Website access is what makes the bucket readable on
+              # :3902 at all, and it is anonymous, so a bucket is only ever
+              # created here for a host the operator listed.
+              #
+              # IDEMPOTENT OVER CARRIED DATA (the design rule for this step).
+              # A cluster can arrive with its Garage volumes already holding
+              # buckets, aliases and website flags, because an operator re-binds
+              # an existing store under this StatefulSet. So every check below
+              # reads what is there first and only adds what is missing:
+              #   - a bucket that already answers to the alias is kept, never
+              #     recreated (a recreate would orphan its objects);
+              #   - website access already ON is kept as it is, with whatever
+              #     index and error documents it already has; only a bucket
+              #     that has it off gets the values from the site list;
+              #   - a writer Secret that exists is never overwritten, and its
+              #     key is not re-minted;
+              #   - a grant that cannot be made (the Secret names a key this
+              #     Garage does not know) is logged and skipped, not fatal.
+              # Each skip prints a line saying so. The only things that fail the
+              # Job are the ones that leave a site unserved: no bucket id, or a
+              # bucket whose website flag cannot be turned on.
+              while read -r sname shost sindex serror swriter splace; do
+                [ -z "$sname" ] && continue
+                say "site $sname: alias $shost"
+                INFO=$(curl -s --max-time 10 -H "$AUTH" "$ADMIN/v2/GetBucketInfo?globalAlias=$shost" || echo '{}')
+                if echo "$INFO" | grep -q '"id"'; then
+                  say "  bucket exists, keeping it"
+                else
+                  say "  creating bucket"
+                  # Not -f: a create that loses a race answers with an error
+                  # body, and the re-read below is the real test.
+                  curl -s --max-time 15 -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+                    -d "{\"globalAlias\":\"$shost\"}" "$ADMIN/v2/CreateBucket" >/dev/null || true
+                  INFO=$(curl -s --max-time 10 -H "$AUTH" "$ADMIN/v2/GetBucketInfo?globalAlias=$shost" || echo '{}')
+                fi
+                SBID=$(echo "$INFO" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("id",""))' 2>/dev/null || true)
+                [ -n "$SBID" ] || { say "FAIL: no bucket id for $shost"; exit 1; }
+                WEB=$(echo "$INFO" | python3 -c 'import sys,json;print("on" if json.load(sys.stdin).get("websiteAccess") else "off")' 2>/dev/null || echo off)
+                if [ "$WEB" = "on" ]; then
+                  say "  website access already on, keeping its index and error documents"
+                else
+                  if [ "$serror" = "-" ]; then ERRJ=null; else ERRJ="\"$serror\""; fi
+                  say "  website access on: index=$sindex error=$serror"
+                  curl -sf --max-time 15 -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+                    -d "{\"websiteAccess\":{\"enabled\":true,\"indexDocument\":\"$sindex\",\"errorDocument\":$ERRJ}}" \
+                    "$ADMIN/v2/UpdateBucket?id=$SBID" >/dev/null
+                fi
+                if [ "$swriter" = "true" ]; then
+                  SSEC="tockmox-garage-site-$sname"
+                  if kubectl -n "$NS" get secret "$SSEC" >/dev/null 2>&1; then
+                    say "  writer secret $SSEC exists, leaving it alone"
+                  else
+                    say "  minting writer key for $shost"
+                    KEY=$(curl -sf --max-time 15 -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+                      -d "{\"name\":\"tockmox-site-$sname\"}" "$ADMIN/v2/CreateKey")
+                    AK=$(echo "$KEY" | python3 -c 'import sys,json;print(json.load(sys.stdin)["accessKeyId"])')
+                    SK=$(echo "$KEY" | python3 -c 'import sys,json;print(json.load(sys.stdin)["secretAccessKey"])')
+                    kubectl -n "$NS" create secret generic "$SSEC" \
+                      --from-literal=ACCESS_KEY_ID="$AK" --from-literal=ACCESS_SECRET_KEY="$SK" \
+                      --from-literal=REGION="$REGION" --from-literal=BUCKET="$shost" \
+                      --from-literal=ENDPOINT="http://${SVC}.${NS}.svc:3900"
+                    say "  wrote $SSEC"
+                  fi
+                  # The grant is repeated on every run from the Secret's own
+                  # key id (a grant is a set, so repeating it changes nothing),
+                  # which also gives a bucket that was recreated its writer back.
+                  AK=$(kubectl -n "$NS" get secret "$SSEC" -o jsonpath='{.data.ACCESS_KEY_ID}' | base64 -d)
+                  if curl -sf --max-time 15 -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+                    -d "{\"bucketId\":\"$SBID\",\"accessKeyId\":\"$AK\",\"permissions\":{\"read\":true,\"write\":true,\"owner\":false}}" \
+                    "$ADMIN/v2/AllowBucketKey" >/dev/null; then
+                    say "  writer key has read/write on $shost only"
+                  else
+                    say "  WARN: could not grant $AK on $shost (key unknown to this Garage?); leaving it, the site still serves"
+                  fi
+                fi
+{{- if $hasPlaceholder }}
+                # The docs site's placeholder page, ONLY into an empty bucket
+                # (TM-0808; garage-web-placeholder.yaml says why). Best effort
+                # and never fatal, like step 9: this Job is a PostSync hook.
+                # "Empty" means the listing has no object at all, so published
+                # docs, the publish script's version marker or anything an
+                # operator put there all keep it from being overwritten.
+                if [ "$splace" = "true" ] && [ "$swriter" = "true" ]; then
+                  printf '[default]\ns3 =\n  addressing_style = path\n' > /tmp/aws-config
+                  export AWS_CONFIG_FILE=/tmp/aws-config AWS_DEFAULT_REGION="$REGION" \
+                    AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+                  AWS_ACCESS_KEY_ID=$(kubectl -n "$NS" get secret "tockmox-garage-site-$sname" -o jsonpath='{.data.ACCESS_KEY_ID}' | base64 -d)
+                  AWS_SECRET_ACCESS_KEY=$(kubectl -n "$NS" get secret "tockmox-garage-site-$sname" -o jsonpath='{.data.ACCESS_SECRET_KEY}' | base64 -d)
+                  export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+                  S3EP="http://${SVC}.${NS}.svc:3900"
+                  if COUNT=$(aws s3api list-objects-v2 --bucket "$shost" --max-items 1 --endpoint-url "$S3EP" --query 'length(Contents || `[]`)' --output text 2>&1); then
+                    if [ "$COUNT" = "0" ]; then
+                      if aws s3 cp /placeholder/index.html "s3://$shost/$sindex" --content-type 'text/html; charset=utf-8' --no-progress --endpoint-url "$S3EP" >/dev/null 2>&1; then
+                        say "  bucket empty: uploaded the placeholder page as $sindex"
+                      else
+                        say "  WARN: could not upload the placeholder page to $shost; the site answers 404 until tools/publish-docs.sh runs"
+                      fi
+                    else
+                      say "  bucket has content, leaving it (no placeholder)"
+                    fi
+                  else
+                    say "  WARN: could not list $shost ($COUNT); no placeholder uploaded"
+                  fi
+                  unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+                fi
+{{- end }}
+              done <<< "$SITES"
+{{- end }}
+{{- if $syncJobs }}
+
+              # ---- 9. publish the site content once (best effort) ------------
+              # Never fatal: this Job is an Argo PostSync hook, and a failed
+              # hook fails the platform sync operation and makes ArgoCD retry
+              # it (the 0.7.0 lab finding F3). Whatever happens here, the hourly
+              # CronJob is the fallback. The Job started is NOT waited for, so
+              # a content image that cannot be pulled fails that Job after its
+              # own deadline, in the namespace, and nowhere in ArgoCD.
+              while read -r cj jobname; do
+                [ -z "$cj" ] && continue
+                if out=$(kubectl -n "$NS" create job "$jobname" --from="cronjob/$cj" 2>&1); then
+                  say "site sync: started Job $jobname from CronJob $cj"
+                elif printf '%s' "$out" | grep -q 'AlreadyExists'; then
+                  say "site sync: Job $jobname already exists (this chart version was already published, or is running); leaving it"
+                else
+                  say "WARN: could not start $jobname from $cj: $out"
+                  say "  the CronJob publishes at its next tick instead"
+                fi
+              done <<< "$SYNC_JOBS"
+{{- end }}
+              say "DONE. bucket=$BUCKET region=$REGION endpoint=http://${SVC}.${NS}.svc:3900"
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- if $hasPlaceholder }}
+        - name: placeholder
+          configMap:
+            name: tockmox-garage-docs-placeholder
+{{- end }}
+{{- end }}
+{{- define "tockmox-platform.garageCredentialsPod" -}}
+{{- /* The credentials Job's pod template, rendered once so its sha256 can name the
+Job (TM-1022). Arguments: ctx (root context), g (.Values.garage), name. */ -}}
+{{- $c := .ctx -}}{{- $g := .g -}}{{- $name := .name -}}
+metadata:
+  labels:
+    {{- include "tockmox.labels" $c | nindent 4 }}
+spec:
+  restartPolicy: OnFailure
+  serviceAccountName: {{ $name }}-bootstrap
+  # Needs the API: kubectl creates and reads Secrets (the Role below), so the token
+  # stays. Left implicit (TM-0759); tools/check-sa-tokens.sh lists it as the one
+  # allowed implicit token.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+    seccompProfile: { type: RuntimeDefault }
+  containers:
+    - name: credentials
+      image: {{ include "tockmox.image" (dict "ctx" $c "repo" $g.bootstrap.image) }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: { drop: ["ALL"] }
+      resources:
+        requests: { cpu: 25m, memory: 64Mi }
+        limits:   { memory: 128Mi }
+      env:
+        - { name: HOME, value: /tmp }
+        - { name: NS,   value: {{ $c.Release.Namespace | quote }} }
+        - { name: SEC,  value: {{ $g.secretName | quote }} }
+      volumeMounts:
+        - { name: tmp, mountPath: /tmp }
+      command: ["/bin/bash", "-c"]
+      args:
+        - |
+          set -euo pipefail
+          say() { echo "[$(date -u +%H:%M:%S)] $*"; }
+          # Idempotent by design: re-minting on every sync would rotate the
+          # RPC secret under a running cluster and partition it from itself.
+          if kubectl -n "$NS" get secret "$SEC" >/dev/null 2>&1; then
+            say "$SEC exists, leaving it alone"
+            exit 0
+          fi
+          say "minting $SEC"
+          kubectl -n "$NS" create secret generic "$SEC" \
+            --from-literal=rpc-secret="$(head -c32 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
+            --from-literal=admin-token="$(head -c32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+          say "minted"
+  volumes:
+    - name: tmp
+      emptyDir: {}
+{{- end -}}

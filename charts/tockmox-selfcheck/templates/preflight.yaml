@@ -1,0 +1,18 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+Render-time guards for this layer. Emits no objects.
+*/ -}}
+{{- /*
+CAPABILITY COHERENCE. A component switched on individually while the capability
+that owns it is off leaves a part with no whole. Failing beats delivering half,
+and beats silently promoting the capability back on because of one key.
+*/ -}}
+{{- /*
+`serviceMonitors` is deliberately NOT guarded here (TM-0825). Declining the
+observability capability while pinning `apps.serviceMonitors.enabled: true` is
+the documented "run your own Prometheus operator" route: the capability says
+"do not deploy a monitoring stack", the component says "but render the monitors
+and rules for the operator I already have". Refusing it made the route
+unreachable in every layer.
+*/ -}}

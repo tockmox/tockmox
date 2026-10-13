@@ -1,0 +1,57 @@
+# Reading order for the generated section READMEs (tools/gen-docs-index.sh).
+# One page stem per line, first to read at the top. A page in docs/<section>/
+# that is not listed here fails the docs-index gate, so a new page has to be
+# given a place in the order when it is added.
+
+[deployment]
+prerequisites
+hardware-platforms
+sizing
+virtual-machines
+fresh-install
+existing-cluster
+profiles
+registry
+time-sync
+airgap
+verify
+install
+upgrade
+upgrade-foundations
+
+[administration]
+configuration
+capabilities
+values-contract
+secrets
+identity
+tls-and-trust
+argocd
+load-balancing
+storage
+api-endpoint
+audit-logging
+external-integrations
+customising
+adding-an-application
+removing-an-application
+serving-static-sites
+inference-nodes
+model-lifecycle
+tockmox-ui
+posture-probe
+
+[operations]
+day-2
+monitoring
+troubleshooting
+backup-restore
+sealed-secrets-key-escrow
+kube-bench
+uninstall
+
+[usage]
+getting-started
+what-you-get
+ai-plane
+working-with-an-agent

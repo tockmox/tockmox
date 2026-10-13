@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}{{ feature.name }}{% endblock %}
+{% block main %}
+<h1>{{ feature.name }}</h1>
+<p class="lede">This feature is installed. Its view is not built in this version of the Tockmox UI yet.</p>
+{% if feature.options.url %}<p><a href="{{ feature.options.url }}">Open {{ feature.name }}</a></p>{% endif %}
+{% endblock %}

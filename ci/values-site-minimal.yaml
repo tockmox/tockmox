@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE SMALLEST VALUES A REAL SITE SUPPLIES. Not a profile, not a demo: exactly
+# the keys `tockmox-install.sh` writes and every layer's schema requires, and
+# nothing else.
+#
+# WHY THIS FILE EXISTS, and it is the whole point of it.
+#
+# `ci/values.yaml` is MORE COMPLETE than any real deployment. It carries every
+# layer's keys in one file, so a template that reads a key belonging to another
+# layer finds it there and renders fine. A real site keeps one values file per
+# layer, so that same read finds nil, which is not falsy in a chain ... it is a
+# nil-pointer error that fails the entire render.
+#
+# That is not hypothetical. On 2026-08-15 `tockmox-selfcheck` grew a read of
+# `.Values.notifications.enabled`, a key declared only in the OBSERVABILITY
+# layer. Nine charts linted, nine templated, every gate passed, and it was CI
+# green. The first real deployment to pull it failed to render the selfcheck
+# layer entirely, and the message named a value nobody had set.
+#
+# So: every layer must render against THIS file, with only these keys. If a
+# template needs something not here, either the key belongs to this layer or
+# the read needs a nil guard. Adding a key here to make a render pass is
+# nearly always the wrong fix, and the review question is "would a first-time
+# operator have known to set this?"
+global:
+  # Required by every layer's schema.
+  internalDomain: int.example.com
+  # Required by the policy layer: it admits syslog and Prometheus from the LAN.
+  lanCIDR: 192.168.1.0/24
+  # Named deliberately rather than left empty, because empty means "whatever
+  # the cluster default happens to be" and that quietly undoes the storage
+  # policy. See docs/administration/storage.md.
+  storageClass: longhorn
+  localStorageClass: local-path
+# Required by the platform layer: MetalLB with no pool leaves every
+# LoadBalancer Service Pending forever with nothing explaining why.
+addressPool:
+  range: 192.168.1.200-192.168.1.220
+# Required by the policy layer since 0.8.0 (TM-0798): the platform policy
+# refuses to render without the nodes' gateway sources, rather than falling
+# back to admitting the whole pod network. A real site adds this in install.md
+# step 1f from `tockmox-install.sh --print-netpol-node-sources`; one entry per
+# node, so a single-node site supplies one.
+platformNetpol:
+  nodeOriginSources:
+    - 10.42.0.0/31

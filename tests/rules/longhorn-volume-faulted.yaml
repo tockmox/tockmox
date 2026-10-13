@@ -1,0 +1,151 @@
+# TockmoxLonghornVolumeFaulted ... TM-0836 (and the 2026-08-18 fault it was built for).
+#
+# DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
+#
+# THE INCIDENT THIS PINS (lab, 2026-10-03): a cold boot left every Longhorn
+# volume reading faulted for two 60s scrapes while longhorn-manager started,
+# then healthy. The old duty-cycle form (avg_over_time[30m] > 0.05) scored that
+# 0.069 and paged critical on eight volumes. Each case asserts both directions.
+#
+#   1  REBOOT at the shipped 60s interval: 2 faulted samples, then healthy,
+#      on a series that starts at boot. SILENT throughout (the old rule fired).
+#   2  REBOOT, longer blip: 3 faulted samples. SILENT. This is the case the
+#      `offset 5m` half exists for: min_over_time alone sees only the three
+#      samples a new series has and calls it sustained.
+#   3  REBOOT at 30s: 4 faulted samples (two minutes). SILENT.
+#   4  SUSTAINED fault mid-life: silent at 16m (pending), FIRING by 20m, on
+#      the faulted volume only (a healthy neighbour never fires).
+#   5  FAULTED FROM BOOT and staying faulted: FIRES (the boot exemption must
+#      not swallow a real fault that starts at boot).
+#   6  FLAPPING, the 2026-08-18 shape at 60s: one faulted sample every 8
+#      minutes. Silent at 20m (two episodes), FIRING at 30m and 40m, RESOLVED
+#      at 60m once it stopped flapping at 39m.
+#   7  Two episodes an hour (a reboot plus one later blip): SILENT.
+evaluation_interval: 1m
+
+tests:
+  # 1 + 4 together: one volume reboots, one faults for real later.
+  - interval: 1m
+    input_series:
+      - series: 'longhorn_volume_robustness{state="faulted", volume="pvc-boot", pvc="data-boot", pvc_namespace="tockmox-platform", node="n1"}'
+        values: "1 1 0x120"
+      - series: 'longhorn_volume_robustness{state="faulted", volume="pvc-real", pvc="data-real", pvc_namespace="tockmox-ai", node="n1"}'
+        values: "0x10 1x60"
+      - series: 'longhorn_volume_robustness{state="faulted", volume="pvc-ok", pvc="data-ok", pvc_namespace="tockmox-ai", node="n1"}'
+        values: "0x120"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts:
+          - exp_labels: {severity: critical, volume: pvc-real, pvc: data-real, pvc_namespace: tockmox-ai}
+            exp_annotations:
+              summary: "Longhorn volume tockmox-ai/data-real is faulted"
+              description: "The volume has no healthy replica and cannot serve I/O. Anything mounting it will fail to attach."
+      - eval_time: 30m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts:
+          - exp_labels: {severity: critical, volume: pvc-real, pvc: data-real, pvc_namespace: tockmox-ai}
+            exp_annotations:
+              summary: "Longhorn volume tockmox-ai/data-real is faulted"
+              description: "The volume has no healthy replica and cannot serve I/O. Anything mounting it will fail to attach."
+
+  # 2. A three-sample boot blip on a new series.
+  - interval: 1m
+    input_series:
+      - series: 'longhorn_volume_robustness{state="faulted", volume="pvc-boot3", pvc="data-boot3", pvc_namespace="tockmox-platform", node="n1"}'
+        values: "1 1 1 0x120"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts: []
+
+  # 3. The reboot at a 30s scrape: two minutes faulted.
+  - interval: 30s
+    input_series:
+      - series: 'longhorn_volume_robustness{state="faulted", volume="pvc-boot30", pvc="data-boot30", pvc_namespace="tockmox-platform", node="n1"}'
+        values: "1 1 1 1 0x240"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts: []
+
+  # 5. Faulted from the first sample and never recovers.
+  - interval: 1m
+    input_series:
+      - series: 'longhorn_volume_robustness{state="faulted", volume="pvc-dead", pvc="data-dead", pvc_namespace="tockmox-platform", node="n1"}'
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts:
+          - exp_labels: {severity: critical, volume: pvc-dead, pvc: data-dead, pvc_namespace: tockmox-platform}
+            exp_annotations:
+              summary: "Longhorn volume tockmox-platform/data-dead is faulted"
+              description: "The volume has no healthy replica and cannot serve I/O. Anything mounting it will fail to attach."
+
+  # 6. Flapping: one faulted sample every 8 minutes (t=7,15,23,31,39), then quiet.
+  - interval: 1m
+    input_series:
+      - series: 'longhorn_volume_robustness{state="faulted", volume="pvc-flap", pvc="data-flap", pvc_namespace="tockmox-ai", node="n1"}'
+        values: "0x6 1 0x6 1 0x6 1 0x6 1 0x6 1 0x80"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts:
+          - exp_labels: {severity: critical, volume: pvc-flap, pvc: data-flap, pvc_namespace: tockmox-ai}
+            exp_annotations:
+              summary: "Longhorn volume tockmox-ai/data-flap is faulted"
+              description: "The volume has no healthy replica and cannot serve I/O. Anything mounting it will fail to attach."
+      - eval_time: 40m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts:
+          - exp_labels: {severity: critical, volume: pvc-flap, pvc: data-flap, pvc_namespace: tockmox-ai}
+            exp_annotations:
+              summary: "Longhorn volume tockmox-ai/data-flap is faulted"
+              description: "The volume has no healthy replica and cannot serve I/O. Anything mounting it will fail to attach."
+      - eval_time: 60m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts: []
+
+  # 7. Two separate episodes in an hour: a boot blip and one later blip.
+  - interval: 1m
+    input_series:
+      - series: 'longhorn_volume_robustness{state="faulted", volume="pvc-two", pvc="data-two", pvc_namespace="tockmox-ai", node="n1"}'
+        values: "1 1 0x20 1 0x60"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: TockmoxLonghornVolumeFaulted
+        exp_alerts: []

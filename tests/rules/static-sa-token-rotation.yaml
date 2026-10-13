@@ -1,0 +1,73 @@
+# StaticSATokenRotationOverdue ... TM-0519.
+#
+# DO NOT SET rule_files. tools/check-alert-rules.sh injects the rules extracted
+# from `helm template`, so this case always tests the expression the tree
+# actually renders rather than a copy of it. The gate refuses a case that sets
+# it, because a copy that passes proves only that the copy works.
+#
+# BOTH DIRECTIONS ARE THE POINT. The alert must fire on the tokens Tockmox
+# mints and must NOT fire on the one kube-prometheus-stack 90.1.1 started
+# shipping into the monitoring namespace for Prometheus' own scrape auth.
+# Before the 2026-09-12 narrowing, the second assertion below failed: the rule
+# matched upstream's Secret too, and its remediation text ("delete and recreate
+# the Secret, update the off-cluster consumer") would have broken scraping for
+# a consumer that does not exist.
+#
+# Ages are set by putting `kube_secret_created` 91 days BEFORE t=0, so the rule
+# crosses its 90-day threshold immediately and the case stays a few samples long
+# instead of 131,000.
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      # OURS ... charts/tockmox-devops/templates/argo-sso-rbac.yaml mints these
+      # two deliberately, for consumers outside the cluster. They are exactly
+      # what the alert is for.
+      - series: 'kube_secret_created{namespace="tockmox-devops",secret="tockmox-argo-admin.service-account-token"}'
+        values: '-7862400+0x200'
+      - series: 'kube_secret_type{namespace="tockmox-devops",secret="tockmox-argo-admin.service-account-token",type="kubernetes.io/service-account-token"}'
+        values: '1+0x200'
+      - series: 'kube_secret_created{namespace="tockmox-devops",secret="tockmox-argo-viewer.service-account-token"}'
+        values: '-7862400+0x200'
+      - series: 'kube_secret_type{namespace="tockmox-devops",secret="tockmox-argo-viewer.service-account-token",type="kubernetes.io/service-account-token"}'
+        values: '1+0x200'
+
+      # UPSTREAM'S ... shipped by the kube-prometheus-stack chart, managed by
+      # ArgoCD, no off-cluster consumer. Same type, same namespace prefix, same
+      # age. The ONLY thing separating it is the name.
+      - series: 'kube_secret_created{namespace="tockmox-monitoring",secret="tockmox-observability-kube-prometheus-token"}'
+        values: '-7862400+0x200'
+      - series: 'kube_secret_type{namespace="tockmox-monitoring",secret="tockmox-observability-kube-prometheus-token",type="kubernetes.io/service-account-token"}'
+        values: '1+0x200'
+
+      # A YOUNG token of ours, to prove the age threshold still does its job and
+      # the rule has not degenerated into "fires on everything named right".
+      - series: 'kube_secret_created{namespace="tockmox-devops",secret="tockmox-fresh.service-account-token"}'
+        values: '0+0x200'
+      - series: 'kube_secret_type{namespace="tockmox-devops",secret="tockmox-fresh.service-account-token",type="kubernetes.io/service-account-token"}'
+        values: '1+0x200'
+
+    alert_rule_test:
+      # `for: 1h`, so evaluate past it.
+      - eval_time: 2h
+        alertname: StaticSATokenRotationOverdue
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: tockmox-devops
+              secret: tockmox-argo-admin.service-account-token
+            exp_annotations:
+              summary: "Static SA token tockmox-argo-admin.service-account-token is overdue for rotation (>90d)"
+              description: "The long-lived ServiceAccount token Secret tockmox-devops/tockmox-argo-admin.service-account-token is older than 90 days. Static tokens do not expire on their own: delete and recreate the Secret, update the off-cluster consumer, and verify the old token is rejected."
+          - exp_labels:
+              severity: warning
+              namespace: tockmox-devops
+              secret: tockmox-argo-viewer.service-account-token
+            exp_annotations:
+              summary: "Static SA token tockmox-argo-viewer.service-account-token is overdue for rotation (>90d)"
+              description: "The long-lived ServiceAccount token Secret tockmox-devops/tockmox-argo-viewer.service-account-token is older than 90 days. Static tokens do not expire on their own: delete and recreate the Secret, update the off-cluster consumer, and verify the old token is rejected."
+      # Before the threshold nothing fires at all, including ours.
+      - eval_time: 30m
+        alertname: StaticSATokenRotationOverdue
+        exp_alerts: []

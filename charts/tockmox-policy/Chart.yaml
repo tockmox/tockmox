@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v2
+name: tockmox-policy
+description: "Tockmox: namespaces, network policies, RBAC, diagnostic identity."
+type: application
+version: 0.8.0
+appVersion: "0.1.0"
+annotations:
+  tockmox.com/sync-wave: "1"
+dependencies:
+  - name: tockmox-common
+    version: 0.8.0
+    repository: "file://../tockmox-common"

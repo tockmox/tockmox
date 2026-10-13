@@ -1,0 +1,92 @@
+{{/*
+SPDX-License-Identifier: Apache-2.0
+
+K8 ... SCRAPE ARGOCD, THE ONE PREREQUISITE NOTHING WATCHED.
+
+ArgoCD reconciles every layer in this product and, until now, exported nothing
+Prometheus could see. That is a blind spot with a specific shape: when Argo
+stops reconciling, every OTHER signal stays green, because the workloads it
+last applied keep running. The cluster looks healthy right up until a drift or
+a failed sync matters.
+
+CHANGED 0.7.1 (TM-0739): THIS NOW FOLLOWS capabilities.observability, like the
+rest. The section below is the reason it used to be off, and still describes
+what a monitor selects on an ArgoCD without metrics (nothing). It was turned on
+by default so TockmoxArgoCDCannotCompare renders on every install; the install
+docs (fresh-install.md §6) turn the metrics on in the install command, and
+TockmoxArgoCDMetricsAbsent only fires while the metrics Services exist, so an
+ArgoCD without metrics gets an empty board and no false alert.
+
+WHY THIS WAS OPT-IN AND EVERYTHING ELSE IN THIS CHART WAS NOT.
+
+ArgoCD is a PREREQUISITE (prerequisites.md §2), not a component Tockmox
+installs. It cannot bootstrap itself and self-managing it is a known failure
+mode, so the operator installs it out of band and Tockmox never touches it.
+
+The consequence for monitoring is concrete and was MEASURED on a clean install
+2026-08-30: the argo-cd Helm chart ships all three metrics services DISABLED,
+so `ns/argocd` carries `argocd-server`, `argocd-repo-server`, `argocd-redis`
+and `argocd-applicationset-controller` and NOT ONE metrics endpoint. A
+ServiceMonitor rendered by default would select nothing, forever, on every
+stock install ... which is the failure this chart already refuses elsewhere: a
+policy that selects no pod reads as protection to whoever audits next, and a
+monitor that selects no service reads as coverage.
+
+So this used to render only when you said so BY NAME, after enabling metrics on your
+own ArgoCD. prerequisites.md §2 carries the three values to set.
+
+THE BOARD IS GATED ON THE SAME KEY, deliberately ... see dashboards.yaml. A
+site that has not opted in gets neither the monitor nor the dashboard, so it
+never sees a wall of "No data" that reads as breakage. They arrive together or
+not at all.
+*/ -}}
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") }}
+{{- if include "tockmox.appEnabled" (dict "ctx" $ "app" "argocdMonitoring") }}
+{{- $ns := $.Values.argocd.namespace }}
+{{- /*
+THESE THREE ROWS ARE COPIED FROM THE ARGO-CD CHART, NOT INVENTED. Measured
+against argo-cd chart 10.7.2 / ArgoCD v3.5.2 on 2026-09-04, and two of the three
+`svc` values plus ALL THREE ports were wrong, which is why this rendered, was
+selected by Prometheus, appeared in the generated scrape config, and produced
+ZERO targets:
+
+  - the port is named `http-metrics` on every one of the three Services, not
+    `metrics`. The port-name keep-rule therefore dropped every discovered
+    endpoint ... 757 dropped targets, no active scrape pool, and
+    `argocd_app_info` empty. A ServiceMonitor whose port name is wrong fails
+    SILENTLY: nothing errors, the job is in the config, and the pool simply
+    never appears.
+  - the application-controller's Service is labelled `argocd-metrics`, not
+    `argocd-application-controller-metrics` (which is its Service NAME, not its
+    label).
+  - the repo-server's Service is labelled `argocd-repo-server-metrics`; the
+    row here dropped the `-metrics` suffix and matched nothing.
+
+Re-check these against `kubectl -n <argocd-ns> get svc --show-labels` after any
+argo-cd chart bump; they are upstream's names and upstream can move them.
+*/ -}}
+{{- range $c := list
+      (dict "name" "application-controller" "svc" "argocd-metrics"              "port" "http-metrics")
+      (dict "name" "server"                 "svc" "argocd-server-metrics"       "port" "http-metrics")
+      (dict "name" "repo-server"            "svc" "argocd-repo-server-metrics"  "port" "http-metrics") }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tockmox-argocd-{{ $c.name }}
+  namespace: {{ $.Values.namespaces.monitoring }}
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: tockmox-argocd-{{ $c.name }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $c.svc }}
+  namespaceSelector:
+    matchNames: [{{ $ns }}]
+  endpoints:
+    - port: {{ $c.port }}
+      interval: 30s
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Add: {{ kind.name }}{% endblock %}
+{% block main %}
+<h1>Add: {{ kind.name }}</h1>
+<p class="lede">{{ kind.examples }}. Runs {{ kind.os }}. Do the setup on the node, then let this page ask it what it serves. If the node is already serving, go straight to the last section.</p>
+
+<form method="get" action="/nodes/add/{{ ntype }}" class="panel inline">
+  <label for="engine">Serving engine</label>
+  <select id="engine" name="engine">{% for e in kind.engines %}<option value="{{ e }}" {% if e == engine %}selected{% endif %}>{{ engines[e].name }}</option>{% endfor %}</select>
+  <button class="btn-ghost" type="submit">Show the steps for it</button>
+</form>
+<p class="muted">{{ eng.note }}</p>
+
+<section class="panel steps" aria-labelledby="setup-h">
+  <h2 id="setup-h">Set up the node</h2>
+  {% include "onboarding/" ~ kind.onboarding ~ ".html" %}
+</section>
+
+<section class="panel" aria-labelledby="probe-h">
+  <h2 id="probe-h">Ask the node what it serves</h2>
+  {% if probe_on %}
+  <p>This sends read-only GET requests (version, model list; up to about fifteen per port) from this page's server to the host you name, on the ports {{ kind.name }} engines use, plus any you add. Allowed ranges: {% for c in allowed %}<code>{{ c }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.</p>
+  <form method="post" action="/nodes/probe" class="stack">
+    <input type="hidden" name="csrf" value="{{ user.csrf }}">
+    <input type="hidden" name="ntype" value="{{ ntype }}">
+    <label for="host">Host name or IP address</label>
+    <input id="host" name="host" type="text" required autocomplete="off" spellcheck="false">
+    <label for="name">Display name <span class="muted">(optional)</span></label>
+    <input id="name" name="name" type="text" autocomplete="off" placeholder="for example Mac Studio M5">
+    <label for="node_id">Node id <span class="muted">(optional; lowercase, digits, dashes)</span></label>
+    <input id="node_id" name="node_id" type="text" autocomplete="off" pattern="[a-z0-9][a-z0-9-]{0,39}">
+    {% if kind.presets %}
+    <label for="preset">Hardware</label>
+    <select id="preset" name="preset"><option value="">Not listed: I will type the memory</option>{% for p in kind.presets %}<option value="{{ p.id }}">{{ p.label }}</option>{% endfor %}</select>
+    {% endif %}
+    <label for="memory_gib">Memory in GiB <span class="muted">({{ "GPU memory" if kind.memory_kind == "gpu" else "unified memory" }}; overrides the preset)</span></label>
+    <input id="memory_gib" name="memory_gib" type="text" inputmode="decimal" autocomplete="off">
+    <label for="ports">Other ports to try <span class="muted">(up to four, comma-separated)</span></label>
+    <input id="ports" name="ports" type="text" inputmode="numeric" autocomplete="off" placeholder="8082, 8083">
+    <label for="token">Bearer token, if the engine needs one <span class="muted">(sent on these requests only, over the scheme the engine uses, so plain HTTP unless it serves HTTPS; never stored or shown again)</span></label>
+    <input id="token" name="token" type="password" autocomplete="off">
+    <button class="btn" type="submit">Probe it</button>
+  </form>
+  {% else %}
+  <p>Probing is off on this platform (<code>inferenceNodes.probe.allowedCidrs</code> is empty), so this page cannot ask the node anything. Record the node by hand in your site values with the shape below, or import it from the gateway once it has a route.</p>
+<pre tabindex="0"><code>inferenceNodes:
+  nodes:
+    - id: my-node
+      name: My node
+      type: {{ ntype }}
+      address: NODE_ADDRESS
+      endpoints:
+        - id: {{ engine }}-{{ eng.port }}
+          engine: {{ engine }}
+          url: http://NODE_ADDRESS:{{ eng.port }}</code></pre>
+  {% endif %}
+</section>
+{% endblock %}

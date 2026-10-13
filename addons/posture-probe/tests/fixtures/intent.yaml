@@ -1,0 +1,11 @@
+version: v0
+intents:
+  - subject: "app->database"
+    dimension: ns-to-ns
+    intent: allow
+  - subject: "monitoring->database"
+    dimension: ns-to-ns
+    intent: deny
+  - subject: "frontend->payments"
+    dimension: ns-to-ns
+    intent: deny

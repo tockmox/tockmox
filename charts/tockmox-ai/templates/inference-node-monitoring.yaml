@@ -1,0 +1,94 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+Monitoring for the inference nodes (REQ-0047 AC-47.7, TM-0920). OFF by default: set
+inferenceNodes.monitoring.enabled, with the observability capability's serviceMonitors on.
+
+Two objects, both read by the Prometheus the observability layer ships (its Probe and ScrapeConfig
+selectors take every namespace):
+
+  ScrapeConfig tockmox-inference-nodes   one target per exporter a node lists under `metrics`
+                                         (node_exporter, macmon, dcgm ...), at <address>:<port>.
+  Probe        tockmox-inference-nodes   one blackbox target per engine endpoint: <url>/api/version
+                                         for Ollama, <url>/v1/models for everything else.
+
+THE INSTANCE LABEL IS THE CONTRACT. The Tockmox UI reads node health from Prometheus and matches on it:
+an exporter by `instance == <address>:<port>`, an endpoint by an `instance` that starts with
+`<url>/` (app/sources.py, InferenceNodesSource). Both are what Prometheus sets by default for these
+targets, so neither object relabels `instance`. tools/check-inference-nodes.sh asserts the targets.
+
+The probe module defaults to http_inference, which the exporters layer defines: it accepts 401 (an
+engine that wants a bearer token answers 401 to a probe that has none, and that still proves the engine
+is up) and HTTP/1.0, which mlx-lm's Python server speaks (lab F6, 2026-10-08: under http_console every
+mlx-lm node probed 0 while serving). A probe never carries a node's token.
+
+What this does NOT do: install an exporter on the node (the setup steps do), or open the node's
+firewall to the cluster for the exporter ports (the setup steps list them).
+*/ -}}
+{{- $in := .Values.inferenceNodes | default dict -}}
+{{- $mon := $in.monitoring | default dict -}}
+{{- if and $mon.enabled (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors")) -}}
+{{- $nodes := $in.nodes | default list -}}
+{{- $scrape := list -}}
+{{- $probe := list -}}
+{{- range $n := $nodes -}}
+{{- if not $n.address -}}{{- fail (printf "inferenceNodes.nodes: node %s has no address, so its exporters cannot be scraped" $n.id) -}}{{- end -}}
+{{- range $exp, $port := ($n.metrics | default dict) -}}
+{{- $scrape = append $scrape (dict "target" (printf "%s:%v" $n.address $port) "node" $n.id "exporter" $exp) -}}
+{{- end -}}
+{{- range $ep := ($n.endpoints | default list) -}}
+{{- $path := ternary "/api/version" "/v1/models" (eq $ep.engine "ollama") -}}
+{{- $probe = append $probe (dict "target" (printf "%s%s" (trimSuffix "/" $ep.url) $path) "node" $n.id "endpoint" $ep.id "engine" $ep.engine) -}}
+{{- end -}}
+{{- end -}}
+{{- $monNs := ((.Values.namespaces | default dict).monitoring) | default "tockmox-monitoring" -}}
+{{- $prober := $mon.blackboxProber | default (printf "tockmox-exporters-prometheus-blackbox-exporter.%s.svc:9115" $monNs) -}}
+{{- if contains "://" $prober -}}{{- fail "inferenceNodes.monitoring.blackboxProber is host:port with no scheme (the operator adds it)" -}}{{- end -}}
+{{- if $scrape }}
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: tockmox-inference-nodes
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  jobName: tockmox-inference-nodes
+  scheme: HTTP
+  metricsPath: /metrics
+  scrapeInterval: {{ $mon.interval | default "30s" }}
+  scrapeTimeout: {{ $mon.scrapeTimeout | default "10s" }}
+  staticConfigs:
+    {{- range $scrape }}
+    - targets: [{{ .target | quote }}]
+      labels:
+        tockmox_tier: inference
+        tockmox_node: {{ .node | quote }}
+        exporter: {{ .exporter | quote }}
+    {{- end }}
+{{- end }}
+{{- if $probe }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: tockmox-inference-nodes
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  jobName: tockmox-inference-nodes-probe
+  interval: {{ $mon.interval | default "30s" }}
+  scrapeTimeout: {{ $mon.scrapeTimeout | default "10s" }}
+  module: {{ $mon.probeModule | default "http_inference" }}
+  prober:
+    url: {{ $prober }}
+    path: /probe
+  targets:
+    staticConfig:
+      static:
+        {{- range $probe }}
+        - {{ .target | quote }}
+        {{- end }}
+      labels:
+        tockmox_tier: inference
+{{- end }}
+{{- end }}

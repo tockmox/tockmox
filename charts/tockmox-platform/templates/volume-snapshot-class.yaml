@@ -1,0 +1,102 @@
+{{- if and .Values.apps.longhorn.enabled (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "dataProtection" "app" "snapshotController")) }}
+# SPDX-License-Identifier: Apache-2.0
+#
+# The piece that makes the snapshot control plane USABLE rather than merely
+# installed. The snapshot-controller dependency ships the CRDs and the
+# controller; without a VolumeSnapshotClass naming a driver, `kubectl get
+# volumesnapshotclasses` returns nothing and every VolumeSnapshot a user
+# creates sits Pending with an error that names the missing class, not this
+# chart. Observed on a fresh 2026-08-19 install: six snapshot.storage.k8s.io
+# CRDs present, zero classes ... installed-but-inert, the shipped-but-not-wired
+# shape this repository keeps finding.
+#
+# Gated on BOTH longhorn (the only CSI driver this chart ships that can take
+# the snapshot) and the snapshotController app (the CRDs this object needs).
+# A site that brings its own CSI driver names its own class; neither class here
+# is marked default-class, because "which class snapshots use" is a choice the
+# site should make visibly, the same argument as the StorageClass contract.
+#
+# TWO CLASSES, AND WHY (TM-0216, decided 2026-09-29).
+#
+# This file used to ship one class and argue that `type: bak` conflates "a
+# point-in-time copy" with "an off-volume backup". The argument was right about
+# the conflation and wrong about the remedy: the answer is two classes with two
+# names, so the operator picks the guarantee on purpose, not one class that
+# quietly picks for them. They are different operations, not tuning of one:
+#
+#   longhorn-snapshot  type snap  Seconds. A copy-on-write snapshot held by the
+#                                 volume's own replicas. Cheap enough to take
+#                                 before every risky change. It is GONE when the
+#                                 volume is, and it never leaves the node(s)
+#                                 that hold the replicas.
+#   longhorn-backup    type bak   Minutes, and size-dependent. Longhorn takes a
+#                                 snapshot and then UPLOADS it to the
+#                                 BackupTarget. It survives losing the volume,
+#                                 and survives losing the cluster IF the target
+#                                 is off-cluster.
+#
+# WHY THE BARMAN PATH DOES NOT MAKE THE SECOND CLASS REDUNDANT. The barman path
+# (docs/operations/backup-restore.md) protects CNPG databases, at the database
+# level, with point-in-time recovery. It protects nothing else. A volume with no
+# application-level backup of its own (an AI model cache you do not want to
+# re-pull, an application's file store, anything a site adds) has exactly one
+# off-volume protection available, and it is a VolumeSnapshot of THIS class. Without
+# it that volume is a hole, and the chart would be silent about it. Databases
+# should keep using the barman path, not this class: a crash-consistent block
+# copy of a running Postgres is the weaker answer to a question barman answers
+# properly.
+#
+# WHAT `longhorn-backup` IS ONLY AS GOOD AS: the BackupTarget. Out of the box that
+# is the chart's own Garage, which runs on Longhorn in the SAME cluster, so a
+# backup taken into it does not survive losing the cluster or Longhorn itself.
+# That is fine for an evaluation install and not for data you care about. Point
+# the target off-cluster: `longhorn.defaultBackupStore.backupTarget` in values,
+# NFS recommended. See docs/operations/backup-restore.md and the comment above
+# `garage.bootstrap.wireLonghornBackupTarget` in values.yaml.
+#
+# DELETION POLICY. `longhorn-snapshot` is Delete: the copy is local and cheap,
+# and it should not outlive the object that asked for it. `longhorn-backup` is
+# Retain, on purpose. With Delete, removing the VolumeSnapshot object removes the
+# backup from the target, and deleting a namespace removes every VolumeSnapshot
+# in it, which is the exact accident an off-volume backup exists to survive. The
+# cost of Retain is real and stated: deleting a VolumeSnapshot leaves its
+# VolumeSnapshotContent and the backup behind until someone removes them
+# (`kubectl delete volumesnapshotcontent`, then the backup in Longhorn), so an
+# operator who takes many backups must prune them. Longhorn recurring jobs are
+# the better tool for scheduled retention and are not wired by this chart.
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: longhorn-snapshot
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    # Same-chart CRD race as the MetalLB pool above: the CRD this object needs
+    # arrives from a dependency of this same chart, so skip the dry-run check
+    # until it exists and apply late in the wave.
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    argocd.argoproj.io/sync-wave: "5"
+driver: driver.longhorn.io
+deletionPolicy: Delete
+parameters:
+  # `snap` creates a Longhorn in-cluster snapshot only. Off-volume is the class
+  # below.
+  type: snap
+---
+# See "TWO CLASSES, AND WHY" above. Same CRD race, so same annotations.
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: longhorn-backup
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    argocd.argoproj.io/sync-wave: "5"
+driver: driver.longhorn.io
+deletionPolicy: Retain
+parameters:
+  # `bak` snapshots the volume, then uploads it to Longhorn's BackupTarget. Slow
+  # and size-dependent by design. Only as durable as that target.
+  type: bak
+{{- end }}

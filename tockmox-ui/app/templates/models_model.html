@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}{{ e.model }}{% endblock %}
+{% block main %}
+<p><a href="/models">Models</a></p>
+<h1><code>{{ e.model }}</code></h1>
+
+
+<section class="panel" aria-labelledby="src-h">
+  <h2 id="src-h">Where it comes from</h2>
+  <p>{{ badge({"promoted": "ok", "candidate": "warning", "retired": "unknown"}[e.stage], e.stage) }}
+{% if e.stage == "candidate" %}Admitted for evaluation: it is on the eval gateway only, and no agent can call it.{% elif e.stage == "retired" %}No longer served.{% elif e.adopted %}In service since before it was catalogued (adopted {{ e.adopted }}).{% else %}Promoted with passing comparisons on record.{% endif %}</p>
+  <dl class="facts">
+    <div><dt>Source</dt><dd>{{ e.source.kind }} <code>{{ e.source.ref }}</code></dd></div>
+    <div><dt>Pinned build</dt><dd>{% if e.source.revision %}<code>{{ e.source.revision }}</code>{% else %}<span class="muted">none: the watcher cannot tell you when it changes</span>{% endif %}</dd></div>
+    {% if e.pending %}<div><dt>Newer build seen</dt><dd><code>{{ e.pending.revision }}</code>{% if e.pending.seen %} <span class="muted">({{ e.pending.seen[:10] }})</span>{% endif %}</dd></div>{% endif %}
+    {% if e.base_model %}<div><dt>Base model</dt><dd><code>{{ e.base_model }}</code>{% if e.quant %} <span class="muted">quantised {{ e.quant }}</span>{% endif %}</dd></div>{% endif %}
+    {% if e.size_gib is not none %}<div><dt>Size</dt><dd>{{ e.size_gib }} GiB</dd></div>{% endif %}
+    <div><dt>Watching for</dt><dd>{{ e.track|join(", ") or "nothing" }}</dd></div>
+  </dl>
+  {% if src_links %}
+  <ul class="plain">{% for label, url in src_links %}<li><a href="{{ url }}" rel="noopener noreferrer">{{ label }}</a></li>{% endfor %}</ul>
+  {% else %}<p class="muted">No upstream page can be derived from this source.</p>{% endif %}
+  <p class="muted">These links are built from the catalog entry. This page does not contact them. Hugging Face and Ollama have no release-notes field: the model card and its history are the closest thing.</p>
+</section>
+
+<section class="panel" aria-labelledby="links-h">
+  <h2 id="links-h">Release notes and other links</h2>
+  {% if e.links %}<ul class="plain">{% for x in e.links %}<li><a href="{{ x.url }}" rel="noopener noreferrer">{{ x.title }}</a></li>{% endfor %}</ul>
+  {% else %}<p class="empty">None added. Add release notes, a license or a vendor post to the entry as <code>links: [{title: ..., url: https://...}]</code>.</p>{% endif %}
+</section>
+
+<section class="panel" aria-labelledby="routes-h">
+  <h2 id="routes-h">Where it is served</h2>
+  {% if routes %}<ul class="plain">{% for x in routes %}<li><code>{{ x.route.alias }}</code> on {{ x.route.node }} · {{ x.gateway }} gateway</li>{% endfor %}</ul>
+  {% else %}<p class="muted">No node route uses it.{% if e.source.kind == "hosted" %} Hosted models are entries in a gateway's own list.{% endif %}</p>{% endif %}
+</section>
+
+{% if e.promotion %}
+<section class="panel" aria-labelledby="promo-h">
+  <h2 id="promo-h">Promotion record</h2>
+  <p><code>{{ e.promotion.alias or e.promotion.aliases|join(", ") }}</code>{% if e.promotion.from %} moved from <code>{{ e.promotion.from }}</code>{% endif %}{% if e.promotion.class %}, class {{ e.promotion.class }}{% endif %}{% if e.promotion.required %}, {{ e.promotion.required }} passing comparison(s) required{% endif %}{% if e.promotion.tags %}, tagged {{ e.promotion.tags|join(", ") }}{% endif %}.</p>
+  {% if e.promotion.evidence is iterable and e.promotion.evidence is not string %}
+  <ul>{% for x in e.promotion.evidence %}<li><code>{{ x.runId }}</code> {{ x.date }}{% if x.grader %} · graded by {{ x.grader }}{% endif %} · <code>{{ x.path }}</code></li>{% endfor %}</ul>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if cands %}
+<section class="panel" aria-labelledby="c-h">
+  <h2 id="c-h">What the watcher found newer</h2>
+  <ul class="plain">{% for c in cands %}<li><code>{{ c.model }}</code> <span class="muted">{{ c.detail }}</span>{% if c.url %} · <a href="{{ c.url }}" rel="noopener noreferrer">upstream page</a>{% endif %}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+{% endblock %}

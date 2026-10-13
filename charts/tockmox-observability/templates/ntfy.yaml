@@ -1,0 +1,304 @@
+{{- $notify := include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "notifications" "override" .Values.notifications.enabled) }}
+{{- if and $notify .Values.notifications.ntfy.enabled }}
+{{- /*
+ntfy ... the delivery end of the alerting path.
+
+WHY THIS SHIPS AT ALL. Alertmanager's upstream default routes every alert to a
+null receiver. This chart previously replaced that with a receiver you had to
+fill in ... and shipped nothing to fill it in WITH. That is alerting that can
+page nobody, which looks exactly like coverage until the night it matters.
+
+WHY ntfy SPECIFICALLY. It is the only push path that reaches a phone without a
+third party holding the message. Android goes via Firebase; iOS needs a wakeup
+relay (see upstreamBaseURL below) and even then only a topic name transits the
+relay ... the message body is fetched from this server. On the fully offline
+default, neither is used and the web UI is the surface.
+
+NAMESPACE. This runs in the monitoring namespace, alongside Alertmanager and
+the bridge, deliberately. The policy layer already carries an
+allow-intra-namespace rule there, so the whole alert path needs no new
+NetworkPolicy ... one fewer thing that can silently drop alerts.
+*/ -}}
+{{- $ns := .Values.namespaces.monitoring -}}
+{{- $scheme := ternary "https" "http" (ne .Values.global.certIssuer "") -}}
+{{- $host := .Values.notifications.ntfy.host | default (include "tockmox.internalHost" (dict "svc" "ntfy" "ctx" $)) -}}
+{{- $baseURL := .Values.notifications.ntfy.baseURL | default (printf "%s://%s" $scheme $host) -}}
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tockmox-ntfy
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-ntfy
+spec:
+  accessModes: ["ReadWriteOnce"]
+  # Omitted entirely when unset. The empty string is NOT the same as absent
+  # here: "" binds only to a classless PV and leaves the claim Pending.
+  {{- with .Values.global.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  # storageClassName DELIBERATELY ABSENT ... omitting it uses the cluster's
+  # default StorageClass. Setting it to "" binds only to a classless PV and
+  # leaves the pod Pending forever. Same contract as Prometheus above.
+  resources:
+    requests:
+      storage: {{ .Values.notifications.ntfy.persistence.size }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-ntfy
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-ntfy
+data:
+  server.yml: |
+    # Managed by the tockmox-observability chart. Edit values, not this file.
+    base-url: {{ $baseURL | quote }}
+    listen-http: ":80"
+
+    # Message cache. An alert stream needs hours, not months.
+    cache-file: "/data/cache.db"
+    cache-duration: {{ .Values.notifications.ntfy.cacheDuration | quote }}
+    attachment-cache-dir: "/data/attachments"
+
+    behind-proxy: true
+    web-root: {{ .Values.notifications.ntfy.webRoot | quote }}
+
+    # Nobody signs themselves up on an alert server.
+    enable-signup: false
+    enable-login: true
+
+    # AUTH. deny-all is the only defensible default for an alert stream: without
+    # it, anyone who can reach the Service can both read every alert you have
+    # and publish convincing fake ones.
+    #
+    # Users, ACL entries and tokens are provisioned DECLARATIVELY from the
+    # Secret named in values (NTFY_AUTH_USERS / NTFY_AUTH_ACCESS /
+    # NTFY_AUTH_TOKENS ... see the Deployment). Verified against the v2.27.0
+    # tag source, not the docs: server/server.yml documents auth-users,
+    # auth-access and auth-tokens at that tag.
+    auth-file: "/data/auth.db"
+    auth-default-access: {{ .Values.notifications.ntfy.auth.defaultAccess | quote }}
+
+    # METRICS on a DEDICATED port, not the main listener. ntfy's own docs warn
+    # that /metrics may be sensitive; served on :9090 it is scrapeable in-cluster
+    # and cannot be reached through the Ingress at all.
+    metrics-listen-http: ":9090"
+    {{- with .Values.notifications.ntfy.upstreamBaseURL }}
+
+    # iOS wakeup relay. Set ONLY if you want lock-screen notifications on iOS:
+    # Apple requires APNs and a self-hosted server cannot talk to APNs. Must be
+    # literally https://ntfy.sh. Only the wakeup and the topic NAME transit the
+    # relay; bodies stay here. Empty (the default) keeps the path fully offline.
+    upstream-base-url: {{ . | quote }}
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tockmox-ntfy
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-ntfy
+spec:
+  # One replica on purpose, and not a value (TM-0779): ntfy keeps its message
+  # cache and auth database in SQLite on the ReadWriteOnce volume below, and two
+  # pods cannot both write one SQLite file. A second replica would at best
+  # Multi-Attach-fail and at worst split the cache. The cost is a gap during
+  # every restart or node drain; TockmoxNtfyDown (notification-rules.yaml) is
+  # the alarm for it, and alerts sent during the gap count as failed on the
+  # bridge (tockmox_notify_failed_total).
+  replicas: 1
+  # ReadWriteOnce PVC ... RollingUpdate deadlocks on the volume.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-ntfy
+  template:
+    metadata:
+      labels:
+        {{- include "tockmox.labels" . | nindent 8 }}
+        app.kubernetes.io/name: tockmox-ntfy
+      annotations:
+        # Roll the pod when the server config changes. Without this a retention
+        # or base-url edit sits in the ConfigMap, synced and green, unread.
+        # Hashed from the VALUES rather than the rendered ConfigMap: including
+        # this template inside itself is infinite recursion, and the values are
+        # the only thing the ConfigMap derives from.
+        tockmox.com/config-hash: {{ printf "%s|%s" (toYaml .Values.notifications.ntfy) $baseURL | sha256sum | trunc 16 | quote }}
+    spec:
+      # No Kubernetes API calls: a ServiceAccount of its own and no token (TM-0759,
+      # CIS 5.1.5 and 5.1.6).
+      serviceAccountName: tockmox-ntfy
+      automountServiceAccountToken: false
+      priorityClassName: {{ .Values.notifications.priorityClassName }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: ntfy
+          image: {{ include "tockmox.image" (dict "ctx" $ "repo" .Values.notifications.ntfy.image) }}
+          args: ["serve"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            # NOT readOnlyRootFilesystem: ntfy writes its SQLite databases and
+            # attachment cache under /data, which is a volume, but it also
+            # writes temp files to the container filesystem on startup.
+          env:
+            - name: TZ
+              value: {{ .Values.global.timezone | quote }}
+          envFrom:
+            # Users, ACLs and tokens. A Secret YOU create ... see
+            # docs/administration/secrets.md. optional so the pod starts and
+            # says so loudly rather than wedging in CreateContainerConfigError;
+            # the sink-down alert below is what makes the absence visible.
+            #
+            # envFrom is read ONCE, when the container starts, and that alone
+            # lost every alert on a greenfield install (lab F11, 2026-10-08):
+            # ntfy started at 04:33:18, sealed-secrets wrote this Secret at
+            # 04:33:19, ntfy came up with no users, every delivery was a 401,
+            # and every layer read Synced/Healthy. The liveness probe below is
+            # what restarts it onto the Secret. See the note there.
+            - secretRef:
+                name: {{ .Values.notifications.ntfy.auth.existingSecret }}
+                optional: true
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /etc/ntfy
+              readOnly: true
+            - name: data
+              mountPath: /data
+            # The same Secret as a volume, read only by the liveness probe. No
+            # subPath: kubelet does not update a subPath mount.
+            - name: ntfy-auth
+              mountPath: /etc/tockmox/ntfy-auth
+              readOnly: true
+          resources:
+            {{- toYaml .Values.notifications.ntfy.resources | nindent 12 }}
+          # RESTART ONTO THE AUTH SECRET (lab F11). The probe fails when ntfy's
+          # health endpoint does not answer (what the httpGet probe did) OR when
+          # the auth Secret as MOUNTED differs from the environment this
+          # container started with. kubelet repopulates an optional Secret
+          # volume when the Secret appears and when it changes (measured
+          # 2026-09-10 for the bridge's identical mount: 53 s and 77 s), and on
+          # the restart it resolves envFrom again. So a Secret that arrives
+          # after the pod, or is rotated, is picked up within about three
+          # minutes with no one restarting anything. No Secret and none at start
+          # compares equal: a site that runs ntfy without auth is unaffected.
+          #
+          # Why not the alternatives. A checksum annotation from `lookup` is
+          # empty under Argo CD, which renders without cluster access, so it
+          # would never change. A non-optional envFrom would hold the container
+          # in CreateContainerConfigError until the Secret exists, which heals
+          # the first start but not a rotation, and is the wedge the note above
+          # chose against. Only busybox sh, wget and cat are used: the image is
+          # FROM alpine (binwiederhier/ntfy), and `$(...)` strips the trailing
+          # newline on both sides of the comparison alike.
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  wget -q -O /dev/null http://127.0.0.1:80/v1/health || exit 1
+                  for k in NTFY_AUTH_USERS NTFY_AUTH_ACCESS NTFY_AUTH_TOKENS; do
+                    eval "v=\"\${$k-}\""
+                    if [ "$(cat "/etc/tockmox/ntfy-auth/$k" 2>/dev/null)" != "$(printf '%s' "$v")" ]; then
+                      echo "$k differs from the mounted Secret: restarting onto it"; exit 1
+                    fi
+                  done
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 10
+          readinessProbe:
+            httpGet: { path: /v1/health, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: tockmox-ntfy
+        - name: data
+          persistentVolumeClaim:
+            claimName: tockmox-ntfy
+        - name: ntfy-auth
+          secret:
+            secretName: {{ .Values.notifications.ntfy.auth.existingSecret }}
+            optional: true
+---
+# TM-0759: this workload's own identity, with no token. The namespace's `default`
+# account is not used (CIS 5.1.5 and 5.1.6).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-ntfy
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tockmox-ntfy
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-ntfy
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: tockmox-ntfy
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+{{- /*
+The ServiceMonitor is the only object here that needs a Prometheus operator, so
+it follows serviceMonitors while the workload follows notifications. Someone
+who declines the observability stack still gets a working notification path;
+they just do not get a monitor for an operator that is not there.
+*/ -}}
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tockmox-ntfy
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-ntfy
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-ntfy
+  namespaceSelector:
+    matchNames: [{{ $ns }}]
+  endpoints:
+    - port: metrics
+      interval: 30s
+{{- end }}
+{{- end }}

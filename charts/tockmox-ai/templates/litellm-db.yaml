@@ -1,0 +1,349 @@
+{{- if (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm")) }}
+{{- /*
+The model gateway's database.
+
+WHY A CR AND NOT THE SUBCHART. The upstream litellm-helm chart can deploy its
+own PostgreSQL, as a Bitnami subchart with the password in values and images
+that now resolve only under `bitnamilegacy`. The platform layer already runs
+the CloudNativePG operator, so the database is one CR instead ... same
+operator, same backup story, same restore drill as every other database here.
+That is the pattern docs/administration/adding-an-application.md documents.
+
+WHY NO NAMESPACE FIELD. Deliberate: it is what keeps a release inside the
+namespace it was installed into. Every object in this
+chart lands in its release's namespace, which is the namespace the LiteLLM
+Deployment lands in too. Pinning a namespace here would let a release into a
+different namespace split the proxy from its database, and the symptom would
+be a pod retrying DNS rather than anything that names the cause.
+
+CREDENTIALS. The owner's username and password come from a Secret YOU create
+(docs/administration/secrets.md). CNPG will happily mint its own if none is
+named; this chart names one so that exactly one object holds the credential
+and the proxy and the database read the same one. It must be type
+kubernetes.io/basic-auth.
+*/ -}}
+{{- $db := .Values.modelGateway.database -}}
+{{- $backupOn := include "tockmox-ai.dbBackupEnabled" . | eq "true" -}}
+{{- $expected := printf "%s-rw" $db.name -}}
+{{- if ne .Values.litellm.db.endpoint $expected -}}
+{{- fail (printf "litellm.db.endpoint is %q but the CNPG Cluster this chart renders serves reads and writes at %q. They must match, or the proxy resolves nothing and retries forever without ever saying why. Set litellm.db.endpoint to %q, or rename modelGateway.database.name." .Values.litellm.db.endpoint $expected $expected) -}}
+{{- end -}}
+{{- $os := $db.backup.objectStore | default dict -}}
+{{- if and $backupOn $db.backup.objectStoreName $os.create -}}
+{{- fail "modelGateway.database.backup names an objectStoreName AND asks this chart to create one. Both would exist and only one would be used, silently. Either name your own ObjectStore and set backup.objectStore.create to false, or leave objectStoreName empty and let this chart render one against the shipped object store." -}}
+{{- end -}}
+{{- if and $backupOn (not $db.backup.objectStoreName) (not $os.create) -}}
+{{- fail "modelGateway.database backups are on (backup.enabled true, or unset with capabilities.dataProtection on) with no destination: objectStoreName is empty and backup.objectStore.create is false. A backup with no destination is not a backup. Either set create to true, which points it at the object store the platform layer ships, or create your own ObjectStore and name it (docs/operations/backup-restore.md)." -}}
+{{- end -}}
+{{- /* The effective name, whichever way it was supplied. */ -}}
+{{- $storeName := $db.backup.objectStoreName | default $os.name -}}
+{{- /*
+RECOVERY (TM-0820 C1). `bootstrap.recovery` instead of `initdb`, reading a base
+backup and WAL from an ObjectStore under the server name they were archived as.
+Off by default: the shipped bootstrap is unchanged.
+
+The two guards are the two ways this goes wrong quietly. A recovered cluster
+that then ARCHIVES to the same store under the same server name finds the
+archive not empty and its WAL archiver fails (the CNPG "expected empty archive"
+refusal), so recovering from your own store needs a NEW backup.serverName.
+And a recovery with no named source store or server name has nothing to read.
+*/ -}}
+{{- $rec := $db.recovery | default dict -}}
+{{- $recStore := "" -}}
+{{- $recServer := "" -}}
+{{- $recSource := "" -}}
+{{- if $rec.enabled -}}
+{{- $recStore = $rec.objectStoreName | default (ternary $storeName "" $backupOn) -}}
+{{- $recServer = $rec.serverName | default "" -}}
+{{- $recSource = $rec.sourceName | default (printf "%s-origin" $db.name) -}}
+{{- if or (not $recStore) (not $recServer) -}}
+{{- fail "modelGateway.database.recovery.enabled needs the ObjectStore to read from (recovery.objectStoreName, or backup.enabled with the chart's own store) and recovery.serverName, the server name the backups were archived under. Without both there is nothing to recover from." -}}
+{{- end -}}
+{{- if and $backupOn (eq $recStore $storeName) (eq $recServer ($db.backup.serverName | default $db.name)) -}}
+{{- fail (printf "modelGateway.database.recovery reads store %q under server name %q, and backup would archive the recovered cluster to the same place. CNPG refuses to archive into a non-empty path. Set modelGateway.database.backup.serverName to a NEW name (for example %q) so the recovered cluster writes its own archive." $recStore $recServer (printf "%s-r1" $db.name)) -}}
+{{- end -}}
+{{- end -}}
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ $db.name }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $db.name }}
+spec:
+  instances: {{ $db.instances }}
+  {{- with $db.imageName }}
+  imageName: {{ . | quote }}
+  {{- end }}
+  {{- with $db.priorityClassName }}
+  priorityClassName: {{ . | quote }}
+  {{- end }}
+  {{- with $db.resources }}
+  # The postgres container's requests and limits (TM-0595). CNPG rolls the
+  # instance pods when this changes, so at instances: 1 a change is a restart.
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  monitoring:
+    # THE BACKUP STORY HAD NO METRIC BEHIND IT. CNPG's instance pods export
+    # `cnpg_collector_last_available_backup_timestamp` and friends on :9187,
+    # and the operator only creates the PodMonitor that scrapes them when this
+    # is true. It shipped false, so a stock Tockmox had no continuous signal
+    # that backups were still happening ... you would have found out at restore
+    # time. Measured on the reference lab 2026-08-15: zero `cnpg_*` series and
+    # zero PodMonitors.
+    #
+    # The network path was already open. The policy layer's
+    # `allow-prometheus-scrape` in this namespace selects every pod and
+    # restricts no port, so nothing else has to change.
+    #
+    # Set false if you have no Prometheus operator. The CRD has to exist for
+    # the operator to create the PodMonitor at all; on a full Tockmox install
+    # `tockmox-crds` ships it.
+    enablePodMonitor: {{ and $db.monitoring.enablePodMonitor (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") | not | not) }}
+  storage:
+    # THE CLASS FOLLOWS THE REPLICA COUNT, because the storage policy is
+    # "replicate at exactly one layer" and this is the one component in the
+    # repo that changes layer depending on how it is configured.
+    #
+    #   instances: 1   nothing else holds a copy, so the VOLUME has to.
+    #                  Replicated class.
+    #   instances: 3+  Postgres streams to its own replicas. Replicating the
+    #                  volume underneath triples the disk and adds latency to
+    #                  every commit for a copy Postgres was already keeping.
+    #                  Local class.
+    #
+    # Set `storageClass` below to override; it is deliberately not the default,
+    # because the right answer is derivable and an operator who changes
+    # `instances` should not have to remember a second key.
+    #
+    # THE FIELD IS OMITTED WHEN THE RESOLVED CLASS IS EMPTY, and that is not
+    # the same as safe. Omitting it uses the cluster's default StorageClass,
+    # which on k3s is `local-path`: node-local, one copy, no snapshots, no
+    # backup target. This chart shipped alongside Longhorn for weeks and wrote
+    # every database to local-path anyway, because nothing named a class and
+    # Longhorn does not mark itself default.
+    #
+    # Setting it to the empty STRING is a third, worse thing ... that binds only
+    # to a classless PV and leaves the instance Pending forever. Hence the
+    # `with`, which omits the key entirely rather than emitting "".
+    {{- $class := $db.storageClass | default "" -}}
+    {{- if not $class }}
+      {{- if ge (int $db.instances) 3 }}
+        {{- $class = .Values.global.localStorageClass | default "" }}
+      {{- else }}
+        {{- $class = .Values.global.storageClass | default "" }}
+      {{- end }}
+    {{- end }}
+    {{- with $class }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+    size: {{ $db.storage }}
+  bootstrap:
+    {{- if $rec.enabled }}
+    recovery:
+      source: {{ $recSource | quote }}
+      database: {{ .Values.litellm.db.database | quote }}
+      owner: {{ $db.owner | quote }}
+      secret:
+        name: {{ .Values.litellm.db.secret.name | quote }}
+    {{- else }}
+    initdb:
+      database: {{ .Values.litellm.db.database | quote }}
+      owner: {{ $db.owner | quote }}
+      secret:
+        name: {{ .Values.litellm.db.secret.name | quote }}
+    {{- end }}
+  {{- if $rec.enabled }}
+  externalClusters:
+    - name: {{ $recSource | quote }}
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: {{ $recStore | quote }}
+          serverName: {{ $recServer | quote }}
+  {{- end }}
+  {{- if $backupOn }}
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      enabled: true
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: {{ $storeName | quote }}
+        {{- with $db.backup.serverName }}
+        serverName: {{ . | quote }}
+        {{- end }}
+  {{- end }}
+{{- if $backupOn }}
+---
+# WAL segments archive continuously from the moment the plugin is enabled;
+# base backups follow this schedule. Prove one now rather than at 03:00 ...
+# backup-restore.md shows the one-off Backup CR and what to assert on.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ $db.name }}-scheduled
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  schedule: {{ $db.backup.schedule | quote }}
+  backupOwnerReference: self
+  cluster:
+    name: {{ $db.name }}
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+{{- end }}
+{{- if and $backupOn $db.monitoring.enablePodMonitor (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors")) }}
+---
+# THE CONTINUOUS BACKUP SIGNAL, and why it is not "hours since last backup".
+#
+# CNPG's backup-age metrics (cnpg_collector_last_available_backup_timestamp,
+# cnpg_collector_first_recoverability_point, cnpg_collector_last_failed_backup
+# _timestamp) are deprecated since operator 1.26 and, per the CNPG monitoring
+# page, keep working only for the in-core Barman Cloud and volume-snapshot
+# paths. This chart backs up through the barman-cloud PLUGIN, where they
+# report 0 with a completed backup on disk and the Cluster showing
+# LastBackupSucceeded=True (measured on the reference lab, 2026-08-15). An
+# alert on `time() - last_available_backup_timestamp` would therefore fire
+# forever on a healthy system, which is the false-alarm generator that
+# teaches people to mute the channel.
+#
+# What does work under the plugin: cnpg_collector_pg_wal_archive_status
+# counts the files in pg_wal/archive_status, labelled value="ready" (waiting
+# to be archived) and value="done". On a healthy instance ready sits at 0 and
+# done climbs. A rising ready count is the archiver having stalled ... wrong
+# credentials, a region mismatch, an unreachable endpoint ... which is the
+# failure that produces no symptom until a restore needs WAL that was never
+# shipped. Every base backup also depends on the archive, so this one metric
+# covers the path the deprecated timestamps were meant to.
+#
+# THRESHOLD. CNPG sets archive_timeout to 5 minutes, so a stalled archiver
+# accrues a segment at least every 5 minutes; `> 3` for 15 minutes means the
+# backlog has stood at four or more segments for three evaluations, which a
+# burst on a healthy archiver does not do. Only the primary archives, so the
+# per-pod maximum is the right shape; replicas stay at 0.
+#
+# This rule was rendered and unit-tested with promtool on 2026-09-03; it has
+# not yet been observed firing on a live cluster with a deliberately broken
+# archive. Until that is done on the lab, treat the threshold as reasoned,
+# not measured.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $db.name }}-backup-health
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: tockmox.ai.wal-archive
+      interval: 5m
+      rules:
+        - alert: TockmoxWalArchiveBacklog
+          expr: >-
+            max by (namespace, pod) (
+              cnpg_collector_pg_wal_archive_status{namespace={{ .Values.namespaces.ai | quote }}, value="ready"}
+            ) > 3
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "WAL archiving is backing up on {{ "{{ $labels.pod }}" }} ({{ "{{ $value }}" }} segments waiting)"
+            description: >-
+              {{ "{{ $value }}" }} WAL segments have been waiting in pg_wal/archive_status
+              on {{ "{{ $labels.namespace }}" }}/{{ "{{ $labels.pod }}" }} for over 15 minutes.
+              The archiver is stalled, which means every point-in-time recovery
+              after the last shipped segment is already lost and the next base
+              backup will fail its pre-flight. Check the Cluster's status
+              (`kubectl -n {{ .Values.namespaces.ai }} describe cluster {{ $db.name }}`,
+              the ContinuousArchiving condition), then the ObjectStore
+              credential, endpoint and region ... a region mismatch is the one
+              docs/operations/backup-restore.md has already caught live.
+{{- end }}
+{{- if and $backupOn $os.create }}
+---
+{{/*
+The backup destination, rendered rather than left as a prerequisite.
+
+Until 1.0 this object lived in the operator's site repository, which meant the
+charts rendered a ScheduledBackup pointing at a CR that may or may not exist,
+against an S3 endpoint that definitely did not ship. Two unshipped
+prerequisites under the claim the README leads with.
+
+STILL NOT A SECOND SITE. The endpoint below is in this cluster. Losing the
+cluster loses both the database and its backups. Point `endpoint` somewhere
+else the moment you have somewhere else.
+*/ -}}
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: {{ $os.name }}
+  namespace: {{ .Values.namespaces.ai }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  configuration:
+    destinationPath: {{ $os.destinationPath | quote }}
+    endpointURL: {{ $os.endpoint | quote }}
+    s3Credentials:
+      accessKeyId:
+        name: {{ $os.credentialsSecretName }}
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: {{ $os.credentialsSecretName }}
+        key: ACCESS_SECRET_KEY
+      # Garage validates the SigV4 region on EVERY operation and its region is
+      # "garage", not us-east-1. Without this, the barman transfer client works
+      # (it resolves the region) but the pre-flight check client signs with the
+      # boto default and gets 400 on HeadBucket, which aborts WAL archiving ...
+      # a backup store that restores fine and silently archives nothing. Found
+      # live in the 2026-08-19 DR rehearsal.
+      region:
+        name: {{ $os.credentialsSecretName }}
+        key: REGION
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+{{- end }}
+{{- if and (not $backupOn) (ne (toString $db.backup.unbackedAlert) "false") (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors")) }}
+---
+# THE UNBACKED-DATABASE SIGNAL (TM-0312). This database holds the gateway's
+# API keys, spend and teams. With backups off, no metric says so: every
+# cnpg_* series looks the same on a database that is backed up and one that is
+# not, and a restore drill that is not rendered cannot report that it never ran.
+# So the absence is rendered as the alert. The expression is a constant on
+# purpose ... it fires for exactly as long as THIS render has backups off, and
+# stops on the upgrade that turns them on. `backup.unbackedAlert: false` removes
+# it for a site whose cover lives outside this chart.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $db.name }}-unbacked
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: tockmox.ai.unbacked-database
+      interval: 5m
+      rules:
+        - alert: TockmoxModelGatewayDatabaseUnbacked
+          expr: vector(1)
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The model gateway's database ({{ $db.name }}) has no backup configured"
+            description: >-
+              modelGateway.database.backup resolves to off in this release,
+              so {{ .Values.namespaces.ai }}/{{ $db.name }}, which holds the
+              gateway's API keys, spend history and teams, is not archived
+              and not backed up. Turn backups on (leave
+              modelGateway.database.backup.enabled unset with
+              capabilities.dataProtection on, or set it true) or, if
+              something outside this chart covers the database, set
+              modelGateway.database.backup.unbackedAlert to false.
+              See docs/operations/backup-restore.md.
+{{- end }}
+{{- end }}

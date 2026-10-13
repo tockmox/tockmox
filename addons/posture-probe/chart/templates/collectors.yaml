@@ -1,0 +1,95 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+The black-box collectors. One CronJob per declared namespace, running as that
+namespace's default ServiceAccount under that namespace's own NetworkPolicies:
+the vantage of an ordinary workload there. One more per identity vantage, running
+as that ServiceAccount, asking the oracle what it may do.
+
+No NetworkPolicy here selects these pods, deliberately: one would change the
+thing being measured. They connect to the declared endpoints and nothing else,
+send no byte after the handshake, and put their report in the termination
+message for the differential Job to read from pod status. ttlSecondsAfterFinished
+removes the finished pod, and with it that copy of the report, once the
+differential has had its window.
+*/ -}}
+{{- if .Values.enabled -}}
+{{- $m := include "pp.model" . | fromJson -}}
+{{- $tm := .Values.timeouts | default dict -}}
+{{- $collect := int ($tm.collectSeconds | default 240) -}}
+{{- $jobs := list -}}
+{{- range $m.config.namespaces -}}
+{{- $jobs = append $jobs (dict "ns" . "name" "posture-probe-collect" "sa" "" "file" "endpoints.json" "mount" false) -}}
+{{- end -}}
+{{- range $m.config.identityVantages -}}
+{{- $jobs = append $jobs (dict "ns" .namespace "name" "posture-probe-identity" "sa" .serviceAccount "file" "endpoints-empty.json" "mount" (.mountToken | default false)) -}}
+{{- end -}}
+{{- range $i, $j := $jobs }}
+{{- if $i }}
+---
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $j.name }}
+  namespace: {{ $j.ns }}
+  labels:
+    {{- include "pp.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: collector
+spec:
+  schedule: {{ $.Values.schedule | quote }}
+  suspend: {{ $.Values.suspend | default false }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: posture-probe
+        app.kubernetes.io/component: collector
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: {{ $collect }}
+      ttlSecondsAfterFinished: {{ add $collect 360 }}
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: posture-probe
+            app.kubernetes.io/part-of: posture-probe
+            app.kubernetes.io/component: collector
+        spec:
+          restartPolicy: Never
+          {{- if $j.sa }}
+          serviceAccountName: {{ $j.sa }}
+          {{- end }}
+          {{- if $j.mount }}
+          automountServiceAccountToken: true
+          {{- end }}
+          {{- include "pp.podSecurity" $ | nindent 10 }}
+          containers:
+            - name: probe
+              image: {{ $.Values.image | quote }}
+              imagePullPolicy: {{ $.Values.imagePullPolicy | default "IfNotPresent" }}
+              args: ["collect"]
+              env:
+                - { name: PROBE_OUTPUT, value: termination }
+                - { name: PROBE_ENDPOINTS, value: /etc/probe/{{ $j.file }} }
+                - { name: PROBE_TIMEOUT, value: {{ $tm.connectSeconds | default 2 | toString | quote }} }
+                - { name: PROBE_SETTLE, value: /etc/probe/settle.json }
+                - name: PROBE_NAMESPACE
+                  valueFrom: { fieldRef: { fieldPath: metadata.namespace } }
+                - name: PROBE_POD_IP
+                  valueFrom: { fieldRef: { fieldPath: status.podIP } }
+              terminationMessagePath: /dev/termination-log
+              terminationMessagePolicy: File
+              {{- include "pp.containerSecurity" $ | nindent 14 }}
+              resources:
+                {{- toYaml $.Values.resources | nindent 16 }}
+              volumeMounts:
+                - { name: endpoints, mountPath: /etc/probe, readOnly: true }
+          volumes:
+            - name: endpoints
+              configMap: { name: posture-probe-endpoints }
+{{- end }}
+{{- end }}

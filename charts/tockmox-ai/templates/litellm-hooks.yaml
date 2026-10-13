@@ -1,0 +1,28 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+Site-supplied LiteLLM hook files (TM-0787).
+
+Renders ONE ConfigMap from modelGateway.hooks.files, plus the policy gate's
+module and policy when modelGateway.policyGate.enabled (TM-0383; see
+_policy-gate.tpl), and nothing else. The mount
+that puts it in the proxy pod is the shipped `litellm.volumes` /
+`litellm.volumeMounts` default in values.yaml, and the registration is the
+site's `litellm.proxy_config.litellm_settings.callbacks`. templates/preflight.yaml
+is what checks that the three agree.
+
+THE NAME IS FIXED, not derived from the release name. The subchart takes its
+`volumes` list as literal values, so a name that varied per release could not be
+written into it. `tockmox-litellm-db` is fixed for the same reason.
+*/ -}}
+{{- $files := include "tockmox.ai.hookFiles" . | fromYaml | default dict -}}
+{{- if and $files (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm")) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-litellm-hooks
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+data:
+  {{- toYaml $files | nindent 2 }}
+{{- end }}

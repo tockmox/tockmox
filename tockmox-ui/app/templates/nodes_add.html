@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Add a node{% endblock %}
+{% block main %}
+<h1>Add an inference node</h1>
+<p class="lede">Choose what kind of machine it is. The next page has the setup steps for that kind, with your site's values filled in, and then asks the node what it serves.</p>
+<ul class="apps types">
+{% for tid, t in catalog.items() %}
+  <li><a class="app" href="/nodes/add/{{ tid }}"><span class="app-text"><span class="app-name">{{ t.name }}</span><span class="app-desc">{{ t.examples }}</span><span class="app-short">{% for e in t.engines %}{{ engines[e].name }}{% if not loop.last %}, {% endif %}{% endfor %}</span></span></a></li>
+{% endfor %}
+</ul>
+<p class="muted">Already serving and already in the gateway? <a href="/nodes/import">Import it instead</a>.</p>
+{% endblock %}

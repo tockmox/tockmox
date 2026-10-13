@@ -1,0 +1,771 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# COUNTABLE CLAIMS THE DOCUMENTATION MAKES ABOUT THIS TREE.
+#
+# Read tools/check-doc-claims.sh first; it explains why this file exists. The
+# short version: everything GENERATED here is checked and prose is not, and the
+# prose that states real numbers is the highest-value prose on the site because
+# the project's credibility rests on it. `docs/administration/configuration.md`
+# asserted four countable things at once and all four had stopped being true.
+#
+# FORMAT. Blocks separated by blank lines, any key order:
+#
+#   page:   path from the repo root. Must exist.
+#   claim:  literal text that must still appear on that page. NOT a regex.
+#   test:   a shell command, run from the repo root. Its stdout is trimmed.
+#   expect: what that command must print.
+#   states: OPTIONAL regex. Every match on the page has its FIRST TOKEN read as
+#           a number, and each one must equal `expect`. Number words count up
+#           to twenty; above that, write digits (house style does anyway).
+#
+# THREE ways to fail, and each catches a different lie.
+#
+#   test != expect   the TREE changed and the page is now wrong.
+#   claim not found  THIS FILE is wrong -- somebody rewrote the sentence and the
+#                    assertion outlived it, still passing, guarding nothing. An
+#                    assertion registry that can rot silently is worse than none,
+#                    because it is believed.
+#   states mismatch  the page states a number the tree contradicts. This is the
+#                    one that catches an edit to the sentence itself, and it
+#                    exists because the first version of this gate did NOT have
+#                    it and passed its own poison test -- see the note in
+#                    check-doc-claims.sh. Add `states` to every entry whose
+#                    claim contains a count.
+#
+#   class mismatch    ANY page in scope states a number for a kind of thing the
+#                    tree can count, and it is wrong. This is the one that does
+#                    not depend on somebody having registered the sentence; see
+#                    the CLASSES section at the bottom. Added 2026-09-04 after
+#                    three contradictions sat green because none was listed.
+#
+# WHAT BELONGS HERE. A sentence a reader would quote back at us, whose truth a
+# command can decide. "Nine layers" belongs. "Fast" does not. "Ships Harbor"
+# belongs, because `Chart.yaml` settles it. If the same noun is counted on more
+# than one page, make it a `class:` rather than a second `page:` entry.
+#
+# WHAT DOES NOT BELONG HERE YET, and it is deliberate: claims that need a helm
+# render of ALL NINE charts to settle, such as `what-you-get.md`'s "528
+# rendered resources" and `airgap.md`'s "59 of 59 pods". They are real claims of
+# exactly this class and they are the ones most likely to drift.
+#
+# THEY DID DRIFT, and the sentence above predicted it: on 2026-09-12, reading
+# the release preflight's WARN list by hand turned up 526 where the tree renders
+# 528, and an observability row reading 156 where it renders 158. Nobody had
+# mis-edited anything; the numbers simply moved and nothing re-measured them.
+# Fixed by hand, which is the fix that will be needed again at the next release.
+# A one-chart render is now paid for three times over (see the NetworkPolicy
+# entries); a nine-chart one is a different order of cost and still waits on the
+# artifact. They are not here because CI already
+# renders 27 times in a job that owns the chart machinery, and paying for a
+# 28th render inside a docs check is the wrong place to spend it. The entry
+# format supports them the moment someone wires `test` to that job's artifact.
+# Not listing them is a KNOWN COVERAGE GAP, named here rather than left to be
+# discovered as a surprise.
+#
+# WHAT ALSO DOES NOT BELONG: a grep for a version string. See the v0.1.0 entry
+# at the bottom, which was written the narrow way for a reason.
+
+page:   docs/architecture.md
+claim:  Nine charts, six waves
+test:   grep -o 'echo [0-9]' install/tockmox-install.sh | sort -u | wc -l
+expect: 6
+states: [A-Za-z0-9]+ waves
+
+page:   docs/usage/what-you-get.md
+claim:  nine layers
+test:   grep -L '^type: library' charts/*/Chart.yaml | wc -l
+expect: 9
+states: [A-Za-z0-9]+ layers
+
+# This page's own instruction is "Count them rather than trusting a number in
+# prose". This entry is that sentence made executable.
+page:   docs/administration/values-contract.md
+claim:  closes its root
+test:   grep -l '"additionalProperties": false' charts/*/values.schema.json | wc -l
+expect: 9
+
+# Stated NEGATIVELY on the page, in the retrospective of what this section got
+# wrong: it says four of the nine schemas WERE claimed byte-identical and had
+# stopped being so. The assertion is therefore that the md5s stay distinct. If
+# two schemas ever converge, the retrospective becomes wrong in the same
+# direction the original error ran.
+#
+# cksum and not md5sum: md5sum is GNU-only and this repo's gates are run by
+# hand on macOS as well as in CI, where a missing tool would make the entry
+# error rather than measure.
+page:   docs/administration/configuration.md
+claim:  schemas were byte-identical
+test:   cksum charts/*/values.schema.json | awk '{print $1}' | sort -u | wc -l
+expect: 9
+
+# The self-contradiction class: a page said `tockmox-devops` ships Harbor four
+# lines under a banner saying Tockmox stopped shipping a registry. Chart.yaml
+# settles it, so a command can.
+page:   docs/deployment/registry.md
+claim:  was removed for that
+test:   grep -c 'name: harbor' charts/tockmox-devops/Chart.yaml || true
+expect: 0
+
+# The alternatives register names defaults the release does not ship (zot, Tempo,
+# Docling, SearXNG). It says so in a table, and the images list settles it.
+# TM-0749.
+page:   docs/alternatives.md
+claim:  | Container registry | zot | Not shipped
+test:   grep -ciE 'zot|tempo|docling|searxng' images.txt || true
+expect: 0
+
+# THE NARROW ONE, and the narrowness is the point (TM-0270).
+#
+# The obvious form of this check is `grep -r v0.1.0 install/ docs/` returning
+# nothing, and that was the assert TM-0270 shipped with. It is wrong. A version
+# grep cannot tell GUIDANCE from HISTORY: `configuration.md` legitimately
+# contains the string v0.1.0 inside a retrospective of the four claims that
+# page used to make falsely, and deleting the number would make the correction
+# unreadable. The broad grep goes red on a correct page, which is how a gate
+# earns an exemption list and then stops being believed.
+#
+# So this asserts what actually matters: no file OFFERS a dead tag as a VALUE.
+# Only assignment positions count -- `revision:` and `targetRevision:` -- which
+# is exactly where a copied-and-pasted number does damage.
+page:   install/tockmox.yaml.example
+claim:  revision: v0.8.0
+test:   grep -rhoE '^\s*(target)?[Rr]evision:\s*v0\.1\.0' install/ docs/ | wc -l
+expect: 0
+
+# The air-gap mirror list, added 2026-09-02 after the CNPG move (TM-0326)
+# swapped one Helm repository for one OCI registry. The count stayed at 13,
+# which is exactly the kind of number that survives a change unnoticed and then
+# stops surviving the next one.
+#
+# The derivation MATCHES tools/helm-deps.sh deliberately. That script builds its
+# repo list the same way, so if the two ever disagree the page is describing a
+# list nobody assembles.
+#
+# `states` is DIGITS-ONLY, and that is not laziness. "repositories" is
+# overloaded on this page: line 43 says ArgoCD "reads two repositories on every
+# reconcile", meaning GIT repositories, and a pattern accepting number words
+# would read that as a contradicting count of chart repos. A gate that flags a
+# correct sentence earns an exemption list and then stops being believed. The
+# failure mode of the narrow form is safe: rewrite "13" as "thirteen" and the
+# pattern matches nothing, which this checker treats as a failure rather than a
+# pass, so the entry gets fixed instead of silently going hollow.
+page:   docs/deployment/airgap.md
+claim:  from these 14 repositories
+test:   grep -h 'repository:' charts/*/Chart.yaml | sed -E 's/.*repository:[[:space:]]*"?([^"]+)"?.*/\1/' | grep -vE '^file://' | sort -u | wc -l
+expect: 14
+states: [0-9]+ repositories
+
+# Same table row, the other half of the sentence. Counts every dependency that
+# is fetched rather than sourced from file://../tockmox-common.
+page:   docs/deployment/airgap.md
+claim:  19 dependencies across 14 repositories
+test:   grep -h 'repository:' charts/*/Chart.yaml | grep -vc 'file://'
+expect: 19
+states: [0-9]+ dependencies
+
+# THE IMAGE COUNT, phrased the ways the `images` class cannot match. Added
+# 2026-10-04 (TM-0887): the list went 45 -> 44 in 0.7.1, the four sentences that
+# say "44 images" were updated, and the four below, which say the same number
+# another way, stayed at 45 and passed every gate. An outside reader found them.
+page:   docs/deployment/airgap.md
+claim:  carries 44 non-comment lines
+test:   grep -v '^#' images.txt | grep -c .
+expect: 44
+states: [0-9]+ non-comment lines
+
+page:   docs/deployment/airgap.md
+claim:  second prints 44 image references
+test:   grep -v '^#' images.txt | grep -c .
+expect: 44
+states: [0-9]+ image references
+
+page:   docs/deployment/airgap.md
+claim:  `44 entries, 44 present, 0 missing`
+test:   grep -v '^#' images.txt | grep -c .
+expect: 44
+states: [0-9]+ entries, [0-9]+ present
+
+page:   docs/deployment/airgap.md
+claim:  | Tockmox's own workload images | 44 |
+test:   grep -v '^#' images.txt | grep -c .
+expect: 44
+states: [0-9]+ \| `images\.txt`
+
+page:   docs/deployment/airgap.md
+claim:  The first prints 47 lines
+test:   wc -l < images.txt | tr -d ' '
+expect: 47
+states: [0-9]+ lines: every image reference
+
+# THE GATE COUNT, added 2026-09-02. `testing-standard.md` opens by naming how
+# many CI gates this project runs, and that sentence is the premise of the whole
+# document -- the argument is "26 of them and not one executes a procedure", so
+# the number is doing real work rather than decorating.
+#
+# It went stale within days of being written: check-doc-claims.sh (this gate)
+# was the 27th, and adding a gate is exactly the commit least likely to make
+# anyone re-read a paragraph about how many gates there are. Found by trying to
+# write this entry, which is the argument for the entry.
+#
+# Counts NAMED steps in ci.yaml only. The unnamed `uses:` steps (checkout,
+# setup-helm) are plumbing rather than gates, and they carry no name precisely
+# because they assert nothing.
+# 2026-10-08: 38 -> 39, the Tockmox UI's test suite (TM-0975).
+page:   docs/testing-standard.md
+claim:  CI gates. Thirty-eight are static analysis
+test:   grep -cE '^      - name: ' .github/workflows/ci.yaml
+expect: 39
+states: [0-9]+ CI gates
+
+# THE DENOMINATOR THE INVENTORY MEASURES ITSELF AGAINST.
+#
+# tests/executed-docs/INVENTORY.md is the coverage statement for the executed
+# documentation harness, and it opens by sizing the surface it is drawn from.
+# Those numbers decide whether "seven paths execute" reads as a start or as
+# coverage, so they are the numbers a reader would quote back.
+#
+# They were unasserted until now, in the one file whose entire argument is that
+# unasserted claims are how defects survive. The page count was already wrong by
+# one when this entry was written.
+#
+# Note the scan is `docs/` and NOT `tests/`: the inventory is counting the
+# documentation surface a reader walks, not its own fixtures.
+#
+# THE PATTERN IS `^[ \t]*```bash$`, NOT `^```bash$`, and the correction is worth
+# more than the two blocks it found. Every count in this family was anchored at
+# column one, so a fence indented inside a numbered list was invisible to all of
+# them ... and the two it missed on `fresh-install.md` are real NODE commands
+# (`sudo snapper list`, and the transactional-update/rebootmgr disable). The
+# damage was not the total being 329 instead of 331. It was the ROUTING claim
+# below: "zero blocks are unrouted, and if one ever is, both numbers move and
+# this goes red." That invariant held only because the numerator and the
+# denominator excluded the SAME two blocks. An anchored pattern can make a
+# consistency check agree with itself about a subset and report the agreement as
+# coverage. `tools/check-pasteable-blocks.sh` had the identical gap, proven with
+# a fixture: the same bytes caught flush-left passed clean indented by two
+# spaces. Corrected 2026-09-13, both directions verified.
+# 2026-09-14: 335 -> 336, the one diagnostic block of troubleshooting.md's new
+# CRD-establishment-race entry (TM-0609). Recorded because the same session
+# updated the PAGE first and left this `expect:` behind, and the gate duly went
+# red in CI: the page and the registry are two edits, not one, and a proxy grep
+# over the page proves only half of it.
+# 2026-10-06: 389 -> 392, upgrade.md's two 0.8.0 migrations-Job blocks (TM-0596)
+# and install.md's model-grant block (TM-0912).
+# 2026-10-07: 392 -> 393, uninstall.md's Name the cluster block (TM-0844).
+# 2026-10-08: 393 -> 394, fresh-install.md 4e's findmnt propagation check (TM-0623); fresh-install.md 41 -> 42 blocks, 28 -> 29 on a node.
+# 2026-10-08: 394 -> 410 and 36 -> 37 pages, upgrade-foundations.md (TM-0907).
+# 2026-10-09: 410 -> 414, fresh-install.md 42 -> 46 blocks, 29 -> 33 on a node: the MicroOS 4c/4d variants, the 4d worker unit block and 4e worker check (TM-0622).
+# 2026-10-09: 414 -> 416, ai-plane.md's two blocks under "When the gateway rejects the console's key" (TM-0982).
+# 2026-10-12: 416 -> 415, verify.md's "verifying v0.5.0" block removed for the first public release.
+page:   tests/executed-docs/INVENTORY.md
+claim:  fenced bash blocks across
+test:   grep -rhE '^[ \t]*```bash$' docs/ | wc -l | tr -d ' '
+expect: 415
+states: [0-9]+ fenced bash blocks
+
+# TM-0469 added the KUBE_CONTEXT export block to fresh-install.md, which moved
+# the total above and ALSO moved a second, unregistered number in the same file
+# ... the "(30 bash blocks)" in the prose under "every procedure section". The
+# registered claim went red and the prose one did not, in the file whose whole
+# argument is that unasserted claims are how defects survive. So it is asserted
+# now. Scan is that ONE page, not docs/, because that is what the sentence says.
+page:   tests/executed-docs/INVENTORY.md
+claim:  the procedures live on `fresh-install.md`
+test:   grep -cE '^[ \t]*```bash$' docs/deployment/fresh-install.md | tr -d ' '
+expect: 46
+states: [0-9]+ bash blocks
+
+# 31 is the PAGE count and it is unchanged. It briefly read 35 on 2026-09-11
+# because a line-anchored bulk edit moved every `expect: 31` and two unrelated
+# entries happened to share that value: this one, and fresh-install.md's block
+# count directly above, which really did go 31 -> 35. Line-anchoring is not
+# sufficient protection when the collision is on the VALUE rather than on a
+# substring. Edit entries one at a time, or match on the `test:` line.
+page:   tests/executed-docs/INVENTORY.md
+claim:  fenced bash blocks across 37 pages
+test:   grep -rlE '^[ \t]*```bash$' docs/ | wc -l | tr -d ' '
+expect: 37
+states: [0-9]+ pages
+
+# The console transcripts are counted separately because the inventory draws a
+# line between them and bash blocks: a transcript is recorded OUTPUT, not an
+# instruction, so it is not a path and must not inflate the denominator. If that
+# distinction ever stops holding the number is the first thing to notice.
+page:   tests/executed-docs/INVENTORY.md
+claim:  console transcripts, which are recorded output
+test:   grep -rh '^```console$' docs/ | wc -l | tr -d ' '
+expect: 8
+states: [0-9]+ console transcripts
+
+# ---------------------------------------------------------------------------
+# ADDED 2026-09-03, after an external reviewer found three countable
+# contradictions in an hour that this gate was green on. All three were in its
+# stated remit and none was enumerated here, which is the real finding: a
+# registry only checks what somebody remembered to add. See TM-0394 for the
+# structural fix; these four entries close the specific holes.
+# ---------------------------------------------------------------------------
+
+# The gate count was asserted by hand in TWO files and they disagreed: the
+# workflow said 26, the README said 28. Nothing re-measured either. Especially
+# quotable in a repository that ships a gate for exactly this class of drift.
+#
+# `states` here is `[0-9]+ gates` and NOT `ci.yaml runs [0-9]+ gates`, which is
+# what these two entries carried from 2026-09-03 to 2026-09-04. The first
+# token of that match is "ci.yaml", which is not a number, so the checker
+# skipped every match and the entries asserted nothing for a day while
+# reporting ok. Found by the STATES YIELDS NO NUMBER guard on the day it was
+# added. The first token of a `states` match must be the count.
+page:   .github/workflows/executed-docs.yaml
+claim:  ci.yaml runs 39 gates
+test:   grep -c '^      - name:' .github/workflows/ci.yaml | tr -d ' '
+expect: 39
+states: [0-9]+ gates
+
+page:   tests/executed-docs/README.md
+claim:  runs 39 gates
+test:   grep -c '^      - name:' .github/workflows/ci.yaml | tr -d ' '
+expect: 39
+states: [0-9]+ gates
+
+# The board count drifted the other way: what-you-get.md said five while nine
+# ship, and the three it still listed under "Not yet built" had shipped two
+# weeks earlier. monitoring.md was the source of the drift, since it headlined
+# the five-board component subset and added the rest further down.
+page:   docs/usage/what-you-get.md
+claim:  Tockmox-authored boards** ship
+test:   ls charts/tockmox-observability/dashboards/*.json | wc -l | tr -d ' '
+expect: 9
+states: [A-Za-z]+ Tockmox-authored boards
+
+page:   docs/operations/monitoring.md
+claim:  Tockmox-authored boards** ship under
+test:   ls charts/tockmox-observability/dashboards/*.json | wc -l | tr -d ' '
+expect: 9
+states: [A-Za-z]+ Tockmox-authored boards
+
+# CONTRIBUTING gained the count on 2026-09-03 when it stopped listing a subset
+# of gates and started pointing at check-all.sh. A third hand-written 28 is a
+# third thing to drift, so it is registered like the other two.
+# NOTE for whoever adds the next gate: this entry's `claim:` does not contain
+# the number, so grepping the tree for the OLD count does not find it. Adding a
+# gate on 2026-09-11 found the other seven surfaces that way and missed this
+# one, which the gate then caught. Eight edits, and the eighth is invisible to
+# the obvious search. Use `grep -n "expect: <old>" tools/doc-claims.txt` as
+# well, and edit each entry by its `test:` line.
+page:   CONTRIBUTING.md
+claim:  which runs
+test:   grep -c '^      - name:' .github/workflows/ci.yaml | tr -d ' '
+expect: 39
+states: [0-9]+ gates
+
+# ---------------------------------------------------------------------------
+# ADDED 2026-09-04 (TM-0403). The site-repository clone path was the most
+# substituted value in the docs and was spelled two ways across pages, split
+# cleanly along page boundaries, so every page was internally consistent and
+# no reviewer could see it. It is now the exported variable SITE_REPO, and the
+# documentation standard (rule 5) says so. These two entries are the gate the
+# standard's sentence promises.
+# ---------------------------------------------------------------------------
+
+# No angle-bracket spelling of the site-repo placeholder survives, in any
+# case, with hyphens, underscores or spaces, with or without a suffix. The
+# scan is docs/ and every .md in it; a new page that reintroduces one goes red
+# here, which is the point. `--include` keeps the binary assets out of the
+# scan, where a GNU/BSD grep difference in how a binary match is reported
+# would otherwise make the count unstable.
+page:   docs/documentation-standard.md
+claim:  never an angle-bracket placeholder
+test:   grep -rhoiE --include='*.md' '<your[-_ ]site[-_ ]repo[^>]*>' docs/ | wc -l | tr -d ' '
+expect: 0
+
+# Every fenced bash block that READS $SITE_REPO carries the guard somewhere in
+# the block, or is the preamble that exports it. A block that reads the
+# variable unguarded is the one the standard's own paragraph warns about:
+# pasted into a fresh shell, `cd $SITE_REPO` is `cd` to home. Counts violating
+# blocks. ONE awk invocation over every page (find -print0 | xargs -0), never
+# `-exec ... +`, which may split into several invocations each printing its
+# own END total. Only ```bash fences are read, which is the fence the
+# executed-docs denominator counts; a ```sh block is outside both.
+# 2026-09-11 (TM-0484): the match is now WORD-BOUNDARY aware. It used to read
+# `$SITE_REPO` as a plain substring, so `$SITE_REPO_URL` -- introduced on
+# install.md when the site-repo URL became a variable alongside the path --
+# counted as an unguarded use of `$SITE_REPO`, and its own correct
+# `${SITE_REPO_URL:?...}` guard did not match the guard pattern. Two correctly
+# guarded blocks read as violations. A gate that goes red on correct work
+# teaches people to route around it, so the fix is the regex rather than the
+# page. Verified both directions: an unguarded `cd "$SITE_REPO"` still trips it.
+page:   docs/documentation-standard.md
+claim:  carries the guard
+test:   find docs -name '*.md' -print0 | xargs -0 awk '{L=$0; sub(/^[ \t]+/,"",L)} L=="```bash"{b=1;u=0;g=0;next} L=="```"{if(b&&u&&!g)n++;b=0;next} b{if($0~/\$SITE_REPO([^A-Z_0-9]|$)/||$0~/\$\{SITE_REPO[:}]/)u=1;if($0~/\$\{SITE_REPO:\?/||$0~/^export SITE_REPO=/)g=1} END{print n+0}'
+expect: 0
+
+# TM-0498, 2026-09-11. Two pages told the reader to configure models under
+# `modelGateway`, which is a REAL key holding only `modelGateway.database` and
+# which does NOT close `additionalProperties`. So a model list written there was
+# accepted, rendered past and silently ignored: empty model list, console up,
+# every layer Synced and Healthy, nothing red. The prose is fixed; this entry is
+# what stops it drifting back.
+#
+# Asserted against values.yaml rather than values.schema.json ON PURPOSE.
+# `litellm` and `litellm.proxy_config` are open maps, so the schema does not
+# enumerate `model_list` and cannot be asked whether the documented path exists.
+# values.yaml is where the shipped default actually lives.
+#
+# The awk walks the nesting rather than grepping for the bare word, because
+# `model_list` appears in a comment block on this same file and a flat grep
+# would pass while the key sat at the wrong depth ... which is the exact defect
+# this entry exists to catch.
+page:   docs/usage/ai-plane.md
+claim:  litellm.proxy_config.model_list
+test:   awk '/^litellm:/{L=1;next} L && /^[a-zA-Z]/{L=0} L && /^  proxy_config:/{P=1;next} L && P && /^  [a-zA-Z]/{P=0} L && P && /^    model_list:/{f=1} END{print f+0}' charts/tockmox-ai/values.yaml
+expect: 1
+
+# The other half, stated negatively: modelGateway must NOT grow a model list. If
+# it ever does, the pages above become wrong in the opposite direction and this
+# entry is how that gets noticed.
+page:   docs/usage/getting-started.md
+claim:  litellm.proxy_config.model_list
+test:   awk '/^modelGateway:/{M=1;next} M && /^[a-zA-Z]/{M=0} M && /model_list/{f=1} END{print f+0}' charts/tockmox-ai/values.yaml
+expect: 0
+
+# ---------------------------------------------------------------------------
+# CLASSES, added 2026-09-04 (TM-0394). The structural half of the 2026-09-03
+# finding: the entries above check sentences somebody remembered to register,
+# and an outside reader found three countable contradictions in an hour on a
+# tree they were all green on. A class measures one kind of thing from the tree
+# and then reads EVERY page in scope for a number attached to that noun, so a
+# page nobody registered is still held to the count.
+#
+# FORMAT.
+#
+#   class:  a name for the report
+#   match:  regex; the FIRST TOKEN of each match is read as the number, so it
+#           must begin with the count. Non-numeric first tokens ("upstream
+#           layers") are ignored; a class whose matches never yield a number
+#           is refused, same as `states`.
+#   test:   how the tree is measured, run from the repo root
+#   expect: what it must print
+#   scope:  OPTIONAL space-separated files/dirs/globs; default is DOC_SCOPE in
+#           check-doc-claims.sh (docs/, the root pages, chart READMEs, the
+#           executed-docs pages ... and NOT CHANGELOG.md, whose numbers are
+#           dated history and must be allowed to disagree with today).
+#
+#   waive:  a page
+#   match:  regex on the matched phrase, e.g. `three layers`
+#   why:    the reason this number is not the class count ... a subset, a
+#           distance, a measured figure with its own derivation
+#
+# A waiver that matches nothing fails (WAIVER UNUSED), so the waiver list rots
+# no more quietly than the registry does. Prose only: fenced blocks, inline
+# code, link targets and frontmatter are stripped before matching.
+#
+# WHAT IS NOT A CLASS, and why, so nobody adds it and then adds forty waivers:
+#   namespaces     "nine", "seven", "five" and "four namespaces" are all true
+#                  on different pages ... created, application-bearing,
+#                  policy-owned, left behind by uninstall. Four senses, one noun.
+#   Applications   "nine layer Applications" and "eleven Applications" (nine
+#                  plus root plus the ApplicationSet's) are both right.
+#   NetworkPolicies still not a class, but the reason changed on 2026-09-12.
+#                  The old reason was that "33" needs a helm render. It does,
+#                  and the render turned out to be affordable: three `page:`
+#                  entries now run it, because three pages state the number and
+#                  two of them had drifted to 32. Pinning each is enough while
+#                  the set is three and enumerable. Make it a class the moment
+#                  a fourth page states it, or the moment somebody has to guess
+#                  which pages are covered.
+#   consoles       "three shipped consoles" (behind SSO) and "the four
+#                  consoles" (off-by-default port-forward) are different sets.
+#   charts         "nine charts" (installable), "ten charts" (with the library
+#                  chart) and "2 charts" (of a subset) are all true.
+# ---------------------------------------------------------------------------
+
+class:  layers
+match:  [A-Za-z0-9*]+ layers\b
+test:   grep -L '^type: library' charts/*/Chart.yaml | wc -l | tr -d ' '
+expect: 9
+
+# Seven of the nine layers fetch at least one dependency from a chart
+# repository; policy and selfcheck depend only on file://../tockmox-common.
+# Two pages state that subset, and the number is derivable, so the waivers
+# carry the derivation rather than an opinion.
+waive:  docs/deployment/airgap.md
+match:  ^7 layers$
+why:    the layers with upstream dependencies; for f in charts/*/Chart.yaml; do grep repository: $f | grep -qv file:// && echo $f; done | wc -l = 7
+
+waive:  docs/administration/values-contract.md
+match:  ^seven layers$
+why:    the layers whose schema prints 41 in the measured 2026-09-01 jq run, with two printing 42; a measured subset, not the layer count
+
+waive:  README.md
+match:  ^six layers$
+why:    "wired through six layers" describes how far a stable key reaches, measured 2026-09-03; the same sentence is quoted in values-contract.md
+
+waive:  docs/administration/values-contract.md
+match:  ^six layers$
+why:    same sentence as the README waiver above: reach of a stable key, not the layer count
+
+waive:  docs/administration/argocd.md
+match:  ^two layers$
+why:    "a single commit changes two layers that depend on each other" is a scenario, not a count
+
+waive:  docs/operations/troubleshooting.md
+match:  ^three layers$
+why:    "three layers from the symptom" is a distance through the dependency chain, not a count
+
+waive:  docs/deployment/install.md
+match:  ^three layers$
+why:    same phrase as troubleshooting.md: a distance, not a count
+
+waive:  docs/agent-skills/troubleshoot-install/SKILL.md
+match:  ^three layers$
+why:    same phrase again, in the agent skill that mirrors the troubleshooting table
+
+class:  Tockmox-authored boards
+match:  [A-Za-z0-9*]+ Tockmox-authored boards
+test:   ls charts/tockmox-observability/dashboards/*.json | wc -l | tr -d ' '
+expect: 9
+
+class:  schemas
+match:  [A-Za-z0-9*]+ schemas\b
+test:   ls charts/*/values.schema.json | wc -l | tr -d ' '
+expect: 9
+
+class:  waves
+match:  [A-Za-z0-9*]+ waves\b
+test:   grep -o 'echo [0-9]' install/tockmox-install.sh | sort -u | wc -l | tr -d ' '
+expect: 6
+
+# Digits-only classes. The word forms of these nouns are overloaded ("five
+# dependencies" is the five-part air-gap surface, "two images" is anything),
+# and every page that states the tree-wide figure writes it in digits.
+class:  images (digits)
+match:  [0-9]+ (runtime )?images\b
+test:   grep -v '^#' images.txt | grep -c .
+expect: 44
+
+class:  chart repositories (digits)
+match:  [0-9]+ repositories\b
+test:   grep -h 'repository:' charts/*/Chart.yaml | sed -E 's/.*repository:[[:space:]]*"?([^"]+)"?.*/\1/' | grep -vE '^file://' | sort -u | wc -l | tr -d ' '
+expect: 14
+
+class:  chart dependencies (digits)
+match:  [0-9]+ dependencies\b
+test:   grep -h 'repository:' charts/*/Chart.yaml | grep -vc 'file://'
+expect: 19
+
+class:  CI gates (digits)
+match:  [0-9]+ (CI |static )?gates\b
+test:   grep -c '^      - name:' .github/workflows/ci.yaml | tr -d ' '
+expect: 39
+
+# The node/workstation SPLIT on fresh-install.md, pinned 2026-09-12 (TM-0470).
+# The comment above records TM-0469 moving an unregistered number in this same
+# file while the registered one went red. This is the pair that was still
+# unregistered, and it had been wrong since before anyone noticed: the page
+# claimed 21 node blocks while routing 24. Counted by nearest preceding bold
+# marker, which is exactly what the page says it does. Zero blocks are
+# unrouted, and if one ever is, both numbers move and this goes red.
+page:   docs/deployment/fresh-install.md
+claim:  blocks run on a node
+test:   awk '{L=$0; sub(/^[ \t]+/,"",L)} L~/^\*\*NODE\*\*/{c="N"} L~/^\*\*WORKSTATION\*\*/{c="W"} L=="```bash"{n[c]++} END{print n["N"]}' docs/deployment/fresh-install.md | tr -d ' '
+expect: 33
+states: [0-9]+ blocks run on a node
+
+page:   docs/deployment/fresh-install.md
+claim:  blocks run on your workstation
+test:   awk '{L=$0; sub(/^[ \t]+/,"",L)} L~/^\*\*NODE\*\*/{c="N"} L~/^\*\*WORKSTATION\*\*/{c="W"} L=="```bash"{n[c]++} END{print n["W"]}' docs/deployment/fresh-install.md | tr -d ' '
+expect: 13
+states: [0-9]+ blocks run on your workstation
+
+# THE POLICY COUNTS BELOW RENDER WITH apps.kube_bench.enabled=false. ci/values.yaml
+# turns the opt-in kube-bench scan on (so its image reaches images.txt and its
+# objects reach the gates), and that adds one Namespace, one NetworkPolicy and
+# one `enforce: privileged` label. The pages state the STOCK install's figures,
+# which are the ones an operator who did not opt in will see; the opt-in's
+# additions are stated beside them in charts/tockmox-policy/README.md.
+#
+# The policy layer's own counts, pinned 2026-09-12 (33), moved to 40 on 2026-09-29
+# by TM-0273: six AI-namespace egress policies and the platform S3 allow; 42 -> 43
+# on 2026-10-09 by TM-0982, the console-key check's egress rule.
+# The NetworkPolicy number
+# read 24 over five namespaces while the chart rendered 33 over seven, under
+# BOTH ci/values.yaml and ci/values-all-on.yaml ... a stale count on a security
+# surface, in the README of the layer whose entire job is guardrails. Same shape
+# as the node/workstation split above and the thirty-second-gate ordinal before
+# it: a number in prose that nothing re-measured.
+page:   charts/tockmox-policy/README.md
+claim:  over seven namespaces
+test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c '^kind: NetworkPolicy' | tr -d ' '
+expect: 43
+states: [0-9]+ over seven namespaces
+
+# The same number, on the two pages that RESTATE it. Added hours after the entry
+# above, because correcting the layer README did not correct the two pages that
+# repeat its count: both still read 32 while the chart rendered 33. That is the
+# failure the entry above was written to stop, one page over ... an owner gets
+# fixed and its restatements do not. Pinning the restatement is the only thing
+# that catches it, since nothing links the sentences to each other.
+#
+# Entries run the same one-chart render. That is the price of not making this a
+# class yet; see the NetworkPolicies note in the CLASSES section. (The
+# docs/architecture.md restatement was removed by TM-0840: the layer table is now
+# generated and carries no count.)
+page:   docs/usage/what-you-get.md
+claim:  NetworkPolicies in total
+test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c '^kind: NetworkPolicy' | tr -d ' '
+expect: 43
+states: [A-Za-z0-9]+ NetworkPolicies
+
+# A FOURTH restating page, found 2026-09-14 by executing install.md's own
+# render-and-compare block (P09): its illustrative table still read 32 two days
+# after the three entries above were pinned. The page's block renders with two
+# arbitrary --set values rather than ci/values.yaml, and gives the same count.
+page:   docs/deployment/install.md
+claim:  NetworkPolicy
+test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c '^kind: NetworkPolicy' | tr -d ' '
+expect: 43
+states: [0-9]+ NetworkPolicy$
+
+# Pod Security: the label says `restricted` on all seven namespaces and, from
+# 0.7.0, `enforce` is set on five. The two numbers make the distinction
+# checkable: an enforce label added or removed without the prose moving goes red
+# rather than the prose quietly becoming wrong. The enforce pin counts the
+# `enforce:` label only, not `enforce-version:`, which renders beside it.
+page:   charts/tockmox-policy/README.md
+claim:  namespaces carry the
+test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c 'pod-security.kubernetes.io/warn:' | tr -d ' '
+expect: 7
+states: [0-9]+ namespaces carry the
+
+page:   charts/tockmox-policy/README.md
+claim:  namespaces carry an enforce label
+test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c 'pod-security.kubernetes.io/enforce:' | tr -d ' '
+expect: 5
+states: [0-9]+ namespaces carry an enforce label
+
+# The policy README's own header count, pinned 2026-09-12. It read 54 against a
+# render of 55 and was the only layer README making the claim at all, so nothing
+# compared it to anything.
+page:   charts/tockmox-policy/README.md
+claim:  resources
+test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c '^kind: ' | tr -d ' '
+expect: 72
+states: [0-9]+ resources
+
+# NOT PINNED, deliberately, and the reason is worth keeping: the placeholder
+# file count (thirteen on an all-layers site) is one per ENABLED layer plus
+# root, site-apps, site-secrets and the README, so it is a property of a
+# generated SITE and not a constant of this tree. No cheap shell test measures
+# it, and the number is spelled as a word in the prose, which this registry
+# cannot read anyway. An entry that cannot fail is worse than no entry ... it
+# reads as covered. It drifted twice in two days (site-apps, then site-secrets),
+# so if it drifts again the answer is a test in tests/installer/, not a claim
+# here.
+
+# The exemption count, registered 2026-09-13. It read 21 in prose while the
+# gate's list was about to become 22, and nothing connected the two ... the
+# exact drift TM-0533 describes: correcting a count in its owner leaves every
+# page that restates it wrong. A site on the fallback path wires these images by
+# hand, so the number is operational, not decorative.
+page:   docs/deployment/airgap.md
+claim:  exemptions at the 0.8.0 tree
+test:   sed -n '/^EXEMPT="/,/^"/p' tools/check-airgap.sh | sed '1d;$d' | sed '/^$/d' | sort -u | wc -l | tr -d ' '
+expect: 22
+states: [0-9]+ exemptions
+
+# TM-0533. Every count that needs a render of ALL NINE charts, read from the
+# counts CI writes in "every layer renders a non-zero number of resources"
+# (tools/render-counts.sh), not rendered again here. --read prints STALE or
+# MISSING rather than a number when the file does not describe this tree, so
+# a skipped render fails these with a reason. The live-cluster pod counts
+# (airgap.md's "59 of 59", what-you-get.md's "47 healthy") are dated
+# measurements of one install and are deliberately NOT pinned to a render.
+page:   docs/usage/what-you-get.md
+claim:  rendered resources
+test:   tools/render-counts.sh --read total
+expect: 600
+states: [0-9]+ rendered resources
+
+page:   docs/architecture.md
+claim:  resources** render with the CI values
+test:   tools/render-counts.sh --read total
+expect: 600
+states: [0-9]+ resources\*\* render
+
+page:   docs/usage/what-you-get.md
+claim:  | crds | 10 | Cross-layer CRDs
+test:   tools/render-counts.sh --read crds
+expect: 10
+states: [0-9]+ \| Cross-layer CRDs
+
+page:   docs/usage/what-you-get.md
+claim:  | policy | 75 | Namespaces, 43 NetworkPolicies
+test:   tools/render-counts.sh --read policy
+expect: 75
+states: [0-9]+ \| Namespaces, 43 NetworkPolicies
+
+page:   docs/usage/what-you-get.md
+claim:  | platform | 234 | Traefik, MetalLB
+test:   tools/render-counts.sh --read platform
+expect: 234
+states: [0-9]+ \| Traefik, MetalLB
+
+page:   docs/usage/what-you-get.md
+claim:  | observability | 171 | kube-prometheus-stack, Loki
+test:   tools/render-counts.sh --read observability
+expect: 171
+states: [0-9]+ \| kube-prometheus-stack, Loki
+
+page:   docs/usage/what-you-get.md
+claim:  | exporters | 7 | blackbox / SNMP
+test:   tools/render-counts.sh --read exporters
+expect: 7
+states: [0-9]+ \| blackbox / SNMP
+
+page:   docs/usage/what-you-get.md
+claim:  | identity | 32 | Authentik. Its
+test:   tools/render-counts.sh --read identity
+expect: 32
+states: [0-9]+ \| Authentik. Its
+
+page:   docs/usage/what-you-get.md
+claim:  | devops | 35 | Argo Workflows (client
+test:   tools/render-counts.sh --read devops
+expect: 35
+states: [0-9]+ \| Argo Workflows \(client
+
+page:   docs/usage/what-you-get.md
+claim:  | ai | 31 | Open WebUI with
+test:   tools/render-counts.sh --read ai
+expect: 31
+states: [0-9]+ \| Open WebUI with
+
+page:   docs/usage/what-you-get.md
+claim:  | selfcheck | 5 | Alert rules for
+test:   tools/render-counts.sh --read selfcheck
+expect: 5
+states: [0-9]+ \| Alert rules for
+
+# frontend-posture.md states the shipped Open WebUI version because its licence
+# paragraph was checked against LICENSE at that tag (TM-0908). A bump makes this
+# go red ON PURPOSE: re-read LICENSE at the new tag before changing `expect`.
+page:   docs/frontend-posture.md
+claim:  The Open WebUI version this release ships is `0.12.0`
+test:   grep -E '^\s+image: ghcr.io/open-webui/open-webui:' charts/tockmox-ai/values.yaml | head -1 | sed 's/.*://'
+expect: 0.12.0
+
+# THE MEASURED INSTALL TIME (TM-0284). A wall-clock time cannot be decided from
+# the tree, so this entry guards the two things that can rot: the profile the
+# measurement names must still exist, and the sentence must keep saying the run
+# was scripted. If the profile is renamed or the label is edited away, the
+# number is no longer what it says it is. Replace the figure only from a new
+# recorded run; the evidence for this one is the 2026-10-06 wave-080 lab log.
+page:   README.md
+claim:  **11m22s from a cluster with nothing on it to the first chat reply**
+test:   test -f profiles/household-sso.yaml && echo present
+expect: present
+
+page:   README.md
+claim:  a **scripted** run, not a person following these
+test:   test -f profiles/household-sso.yaml && echo present
+expect: present

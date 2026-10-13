@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, state_icon, app_icon, source_line %}
+{% block title %}{{ verdict_text[verdict][0] }}{% endblock %}
+{% block main %}
+<section class="verdict st-{{ verdict }}" aria-labelledby="verdict-h">
+  <img class="verdict-mascot" src="/static/brand/tockmox-mascot.webp" alt="" width="360" height="413">
+  <div class="verdict-ico">{{ state_icon(verdict) }}</div>
+  <div>
+    <h1 id="verdict-h">{{ verdict_text[verdict][0] }}</h1>
+    <p>{{ verdict_text[verdict][1] }}</p>
+    {% if user.is_admin %}
+    <ul class="srcs">
+      {% for k, r in readings.items() %}<li>{{ source_line(r) }}</li>{% endfor %}
+    </ul>
+    <p><a class="link-strong" href="/status">See the full status</a></p>
+    {% endif %}
+  </div>
+</section>
+
+{% if user.is_admin and version %}
+<section class="panel ver-strip" aria-labelledby="ver-h">
+  <h2 id="ver-h" class="visually-hidden">Version</h2>
+  <p>
+    {% if version.state == "single" %}Running <strong>Tockmox {{ version.version }}</strong>.
+    {% elif version.state == "floating" %}{{ badge("warning", "Not a release") }} The layers track <code>{{ version.ref }}</code>, not a release tag.
+    {% elif version.state == "mixed" %}{{ badge("warning", "Mixed versions") }} Layers are on different revisions.
+    {% else %}{{ badge("unknown", "Version unknown") }} The running version could not be read.{% endif %}
+    {% if target %}
+      <a class="link-strong" href="/version">A newer version is available</a>
+    {% else %}<a href="/version">Version and release notes</a>{% endif %}
+  </p>
+</section>
+{% endif %}
+
+<section aria-labelledby="apps-h">
+  <h2 id="apps-h">Your apps</h2>
+  {% if apps %}
+  <ul class="apps">
+    {% for a in apps %}
+    <li>
+      <a class="app" href="/{{ a.id }}/" rel="noopener" target="_blank">
+        {{ app_icon(a.icon) }}
+        <span class="app-text"><span class="app-name">{{ a.name }}<span class="visually-hidden"> (opens in a new tab)</span></span>
+        {% if a.description %}<span class="app-desc">{{ a.description }}</span>{% endif %}
+        <span class="app-short">{{ site.domain and ("tockmox." ~ site.domain ~ "/" ~ a.id) or ("/" ~ a.id) }}</span></span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">No apps are assigned to your account yet. Ask a platform administrator to add you to a group.</p>
+  {% endif %}
+  {% if site.account_url %}<p class="muted">Manage your password and sign-in methods in <a href="{{ site.account_url }}">your account settings</a>.</p>{% endif %}
+</section>
+
+<section aria-labelledby="docs-h">
+  <h2 id="docs-h">Documentation</h2>
+  <ul class="docs-links">
+    {% if site.docs_url %}<li><a href="{{ site.docs_url }}/" rel="noopener" target="_blank">{{ app_icon("book") }} Tockmox documentation<span class="visually-hidden"> (opens in a new tab)</span></a></li>{% endif %}
+    <li><a href="{{ docs_repo_link }}" rel="noopener" target="_blank">{{ app_icon("git") }} The same docs on GitHub<span class="visually-hidden"> (opens in a new tab)</span></a> <span class="muted">for when this platform is down or powered off</span></li>
+  </ul>
+</section>
+{% endblock %}

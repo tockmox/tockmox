@@ -1,0 +1,1352 @@
+# SPDX-License-Identifier: Apache-2.0
+global:
+  internalDomain: ""
+  certIssuer: "tockmox-ca"
+  imageRegistry: ""
+  timezone: "UTC"
+  clusterCIDR: "10.42.0.0/16"
+  serviceCIDR: "10.43.0.0/16"
+  lanCIDR: ""
+  # THE STORAGE CONTRACT. Empty means "use whatever the cluster's default
+  # StorageClass happens to be", which is not the same as "use the storage this
+  # platform ships". On k3s the default is `local-path`: node-local, one copy,
+  # no snapshots, no backup target. Tockmox shipped Longhorn and, because
+  # nothing named a class, wrote every PVC to local-path anyway.
+  #
+  # Name it. `longhorn` on a stock install with apps.longhorn enabled;
+  # `local-path` if you have deliberately chosen node-local storage; the name of
+  # your own CSI class if you brought one. A preflight refuses the combination
+  # that used to fail silently.
+  storageClass: ""
+
+  # THE SECOND HALF OF THE STORAGE CONTRACT: the class for data whose
+  # application already protects it, or that can be re-derived.
+  #
+  # The policy is "replicate at exactly one layer". If an application keeps its
+  # own copies (Postgres streaming to replicas, an object store spreading
+  # across nodes) or the data can be rebuilt (a metrics TSDB), then replicating
+  # the volume underneath buys nothing and costs two to three times the disk
+  # plus write latency on the hot path. Those workloads get THIS class.
+  # Everything else gets `storageClass` above.
+  #
+  # `local-path` is k3s's own provisioner and is the shipped default here.
+  # prerequisites.md tells you to UN-DEFAULT it rather than delete it, and this
+  # is why. Node-local means a rescheduled pod finds an empty volume, which is
+  # the trade this class exists to make; do not point it at anything whose loss
+  # you would mind.
+  #
+  # Empty falls back to the cluster default, which un-does the policy without
+  # complaining. Set it to a class you have.
+  localStorageClass: "local-path"
+namespaces:
+  monitoring: tockmox-monitoring
+
+# Where your ArgoCD lives. Only read when apps.argocdMonitoring.enabled is
+# true; Tockmox does not install or manage ArgoCD (prerequisites.md §2).
+argocd:
+  namespace: argocd
+
+# ---------------------------------------------------------------------------
+# CAPABILITIES: functional stories you can decline.
+#
+# `apps.*` is one switch per piece of software, which is the wrong unit for the
+# decision people actually make. Nobody chooses "a Garage", "a barman plugin"
+# and "a snapshot controller" separately; they choose whether this deployment
+# protects its data, or whether they already run Velero and want none of it.
+#
+# A capability is that decision, named, on one switch, spanning whatever
+# components it takes and whichever layers they live in.
+#
+# HOW IT RESOLVES, and the tri-state is the point:
+#   apps.<x>.enabled unset   follow the capability that owns the component
+#   apps.<x>.enabled: true   on, even if the capability is off
+#   apps.<x>.enabled: false  off, even if the capability is on
+#
+# So declining a capability turns off everything it owns, and a component you
+# named yourself still means what you said. Turning a single component on while
+# its capability is off fails the render rather than half-building the story.
+#
+# THIS BLOCK IS BYTE-IDENTICAL IN ALL NINE LAYERS, and that is deliberate. The
+# values namespace is shared across layers, so one profile sets a capability
+# once and every layer owning part of it reads the same answer. Editing one copy
+# and not the others is the failure the uniformity exists to prevent, and
+# tools/check-capabilities.sh fails CI on any drift between them.
+#
+# Full list, what each one contains, and why you would decline it:
+# docs/administration/capabilities.md
+# ---------------------------------------------------------------------------
+capabilities:
+  # Metrics, logs and the rules that read them ... everything answering "what is
+  # this platform doing right now". Off means Tockmox ships no Prometheus, no
+  # Loki, no Alloy, and none of its own ServiceMonitors or alert rules.
+  #
+  # Running your own Prometheus operator is the case worth naming. Decline the
+  # capability and set `apps.serviceMonitors.enabled: true`, and Tockmox renders
+  # its monitors and rules for YOUR operator to collect, without standing up a
+  # second stack beside the one you already run.
+  observability:
+    enabled: true
+
+  # Alerts that reach a person: the notification sink, the bridge that feeds it
+  # and the heartbeat that proves the path still works when nothing is wrong.
+  # Off means alerts fire into Alertmanager and stop there.
+  #
+  # The component switch for this one is `notifications.enabled` rather than an
+  # `apps` key, because it predates this framework and is a contract key. It has
+  # the same tri-state: unset follows the capability, set means what you said.
+  notifications:
+    enabled: true
+
+  # One sign-in across every console, and the identity provider behind it. Off
+  # means Tockmox ships no Authentik and each console falls back to its own
+  # local login, unless you point `sso` at an issuer you already run.
+  identity:
+    enabled: true
+
+  # The private AI plane: a chat console and the model gateway in front of it.
+  # Off leaves Tockmox as a platform and nothing else, which is a legitimate way
+  # to run it and the right answer if you are here for the infrastructure.
+  aiPlane:
+    enabled: true
+
+  # Backups that go somewhere, restores that are exercised, and the CSI
+  # plumbing underneath both. Off means Tockmox ships no object store, no
+  # backup plugin and no snapshot control plane, and expects you to have your
+  # own or to not want one.
+  dataProtection:
+    enabled: true
+
+  # Telemetry from PHYSICAL hardware: disk SMART attributes, and SNMP from
+  # switches, UPSes and appliances.
+  #
+  # OFF BY DEFAULT, unlike every other capability here, because the reference
+  # deployment is a virtual machine: there is no physical disk to ask and no
+  # switch to poll, and an exporter scraping nothing still alerts on its own
+  # absence. Turn it on when the hardware is real, and both exporters follow.
+  hardwareTelemetry:
+    enabled: false
+
+  # Jobs running inside the cluster on a schedule or an event, with a console to
+  # watch them. Off means no Argo Workflows.
+  workflowAutomation:
+    enabled: true
+
+  # Default-deny between namespaces, so a compromised workload cannot reach a
+  # neighbour it was never meant to.
+  #
+  # Off is the honest setting on a cluster whose CNI does not enforce
+  # NetworkPolicy at all. Flannel without a policy plugin accepts every object
+  # here and enforces none of them, and a control that is only decoration is
+  # worse than no control, because it gets counted.
+  networkPolicy:
+    enabled: true
+
+apps:
+  kubePrometheusStack: {}   # unset: follows capabilities.observability
+  loki: {}                  # unset: follows capabilities.observability
+  alloy: {}                 # unset: follows capabilities.observability
+  # The ServiceMonitor, PodMonitor and PrometheusRule objects THIS REPO writes,
+  # as distinct from the stack that consumes them.
+  #
+  # It is a separate component so that "I run my own Prometheus operator" is one
+  # key rather than a fork. Decline capabilities.observability to drop the stack,
+  # set this true, and Tockmox still renders its monitors and rules for your
+  # operator to collect. Unset, it follows the capability, so the common case
+  # needs no decision at all.
+  serviceMonitors: {}   # unset: follows capabilities.observability
+  # Tockmox-authored Grafana boards (Traefik, cert-manager, MetalLB,
+  # Authentik, Admission & Policy), imported by the sidecar from ConfigMaps
+  # under ../dashboards/. Unset follows the capability like its siblings;
+  # set false to drop ONLY the boards while keeping the stack.
+  dashboards: {}   # unset: follows capabilities.observability
+
+  # ArgoCD monitoring (K8, TM-0739). Unset: follows capabilities.observability,
+  # so the three ServiceMonitors, the ArgoCD board and the sync-state alert
+  # rules render on every install with observability on. Until 0.7.1 this was
+  # the one app key that defaulted OFF, because ArgoCD is a PREREQUISITE this
+  # product does not install (prerequisites.md §2) and the argo-cd chart ships
+  # its metrics services disabled (measured 2026-08-30: ns/argocd exposed none).
+  #
+  # What the default now means on each kind of install:
+  #   - Installed per fresh-install.md §6, which turns the three metrics
+  #     Services on in the install command (TM-0628): everything scrapes, the
+  #     board has data and TockmoxArgoCDCannotCompare can fire.
+  #   - An ArgoCD you installed yourself WITHOUT metrics: the monitors select
+  #     nothing and the board reads "No data". TockmoxArgoCDMetricsAbsent stays
+  #     silent there, because it only fires while ArgoCD's metrics Services exist
+  #     (kube_service_info), so no install gets a false alert. You also get no
+  #     sync-state alert; turn the metrics on (argocd.md) or set this false.
+  # Set false to drop the monitors, board and rules together.
+  argocdMonitoring: {}   # unset: follows capabilities.observability
+  # EMBEDDED etcd ON k3s, scraped without an Endpoints object.
+  # kube-prometheus-stack builds its etcd target from an Endpoints object, and
+  # Argo CD 3.x excludes Endpoints from sync, so on a GitOps install etcd had no
+  # target and nothing said so. This renders a ScrapeConfig (job `kube-etcd`)
+  # with the static addresses you list instead. Off by default because the
+  # targets are your control-plane nodes: `<node-ip>:2381` each, with k3s
+  # started with `etcd-expose-metrics: true`. When you turn it on, also set
+  # `kube-prometheus-stack.kubeEtcd.enabled: false` so etcd is scraped once.
+  etcdScrapeConfig:
+    enabled: false
+    targets: []
+    interval: 30s
+    scheme: HTTP
+
+# ---------------------------------------------------------------------------
+# Single sign-on (consumes the identity layer's Authentik). On by default;
+# harmless without it ... the env Secret this renders is referenced
+# optionally, so with sso disabled or identity absent, Grafana simply keeps
+# local login only. Client secret: operator-created `tockmox-sso-grafana`
+# (key `client-secret`), the same value the identity layer's `tockmox-sso`
+# Secret carries as GRAFANA_CLIENT_SECRET. See docs/administration/secrets.md.
+# ---------------------------------------------------------------------------
+sso:
+  enabled: true
+  # Changing clientId or a group name after install needs a rollout restart of
+  # the console: envFrom does not roll the pod and GitOps reports the layer
+  # healthy while it keeps the old value. Exact command and why:
+  # docs/administration/identity.md.
+  clientId: tockmox-grafana      # must match the identity layer's blueprint
+  adminGroup: tockmox-admins
+
+# ---------------------------------------------------------------------------
+# The way in. Hostnames derive from global.internalDomain:
+# `grafana.<internalDomain>`. Set global.certIssuer for TLS; empty serves
+# plain HTTP, per the documented contract.
+#
+# Grafana is exposed by default: it has its own login. Prometheus and
+# Alertmanager are NOT ... neither ships authentication, and an unauthenticated
+# admin surface is not a default. Reach them with `kubectl port-forward`, or
+# enable them here once something in front of them does auth.
+# ---------------------------------------------------------------------------
+ingress:
+  # Empty uses the cluster's DEFAULT IngressClass ... the Traefik the platform
+  # layer ships marks itself default, and its class name derives from the
+  # release (`tockmox-platform-traefik` on a stock install), so naming it here
+  # would break on rename. Set this only to pin a specific class.
+  className: ""
+  annotations: {}
+  apps:
+    grafana:
+      enabled: true
+      host: ""            # override the derived grafana.<internalDomain>
+    prometheus:
+      enabled: false
+      host: ""
+    alertmanager:
+      enabled: false
+      host: ""
+    # ntfy IS exposed: it has its own authentication, and the web app is how a
+    # human subscribes to the alert topic. Its metrics port is not routed here.
+    ntfy:
+      enabled: true
+      host: ""            # override the derived ntfy.<internalDomain>
+
+# ---------------------------------------------------------------------------
+# NOTIFICATIONS ... how an alert reaches a person.
+#
+# Alertmanager decides WHEN to tell you. This decides HOW. Without it the
+# alerting stack is complete right up to the last hop and then delivers to
+# nobody, which is worse than no alerting because it looks like coverage.
+#
+# The path:
+#   Prometheus -> Alertmanager -> tockmox-alert-bridge -> ntfy (or Apprise)
+#
+# The bridge exists because neither sink speaks Alertmanager's webhook envelope.
+# It also publishes its own delivery health as metrics, so a broken delivery
+# path is VISIBLE on a dashboard rather than being announced by the very
+# mechanism that is broken. See templates/notification-rules.yaml.
+#
+# ONE THING YOU MUST DO: create the `tockmox-ntfy-auth` Secret. ntfy defaults to
+# deny-all, so until that Secret exists nothing can publish or subscribe and
+# TockmoxNotificationSinkDown fires. docs/administration/secrets.md has the
+# exact commands, including how to generate the password hash and token.
+# ---------------------------------------------------------------------------
+notifications:
+  # UNSET, and that is the tri-state rather than an oversight: absent means this
+  # follows capabilities.notifications, `true` means on whatever the capability
+  # says, `false` means off. It keeps its own key instead of moving under `apps`
+  # because it is a contract key and moving it would be a major version for a
+  # cosmetic gain.
+  enabled:
+  # Delivery is infrastructure: it must outrank application workloads when a
+  # node is under pressure, or the first thing evicted is the thing that would
+  # have told you about the pressure.
+  priorityClassName: tockmox-infrastructure
+
+  ntfy:
+    enabled: true
+    image: binwiederhier/ntfy:v2.29.0
+    # The topic alerts are published to. Anything subscribed to it gets paged.
+    topic: alerts
+    host: ""              # override the derived ntfy.<internalDomain>
+    # Public URL used in the links the mobile app opens. Empty derives it from
+    # global.internalDomain, and the scheme follows global.certIssuer.
+    baseURL: ""
+    cacheDuration: "24h"
+    webRoot: "app"
+    # EMPTY = fully offline, and iOS gets no lock-screen notifications: Apple
+    # requires APNs and a self-hosted server cannot reach APNs. Set to
+    # "https://ntfy.sh" to relay a WAKEUP (topic name only, never the message
+    # body) through the one server that is APNs-connected. Android is
+    # unaffected either way. This is the only value in this file that causes
+    # any traffic to leave your network, and it is off.
+    upstreamBaseURL: ""
+    auth:
+      # read-write here would mean anyone who can reach the Service can read
+      # every alert and publish convincing fake ones.
+      defaultAccess: deny-all
+      # Secret YOU create. Keys: NTFY_AUTH_USERS, NTFY_AUTH_ACCESS,
+      # NTFY_AUTH_TOKENS, NTFY_BRIDGE_TOKEN. See secrets.md.
+      existingSecret: tockmox-ntfy-auth
+    persistence:
+      size: 2Gi
+    resources:
+      requests: {cpu: 10m, memory: 64Mi}
+      limits: {memory: 256Mi}
+
+  # Fan-out to everything that is not ntfy: email, Slack, Discord, Matrix,
+  # Gotify, SMS. OFF until you have somewhere to send ... an Apprise with no
+  # URLs accepts every alert and delivers none of them, and reports Healthy
+  # while doing it.
+  apprise:
+    enabled: false
+    image: caronc/apprise:2.0.1     # no "v" from 2.0 on
+    # Secret YOU create, holding one key whose value is a newline-separated
+    # list of Apprise URLs. Those URLs contain credentials, which is why this
+    # is a Secret and not a value.
+    configSecret: tockmox-apprise-config
+    configKey: tockmox
+    resources:
+      requests: {cpu: 10m, memory: 64Mi}
+      limits: {memory: 256Mi}
+
+  bridge:
+    enabled: true
+    # Standard library only, so this runs unchanged on a mirrored image in an
+    # airgapped cluster. No pip install at container start.
+    image: python:3.14-slim
+    replicas: 2
+    # "ntfy" or "apprise". Set to apprise (and enable it) to fan out; put an
+    # ntfy:// URL in your Apprise config to keep the phone path as well.
+    sink: ntfy
+    resources:
+      requests: {cpu: 10m, memory: 32Mi}
+      limits: {memory: 64Mi}
+
+# ---------------------------------------------------------------------------
+# Retention ... the single most common thing an operator wants to change, and
+# the single most common way to fill a disk by accident. The knobs live where
+# the upstream charts read them:
+#   metrics window:  kube-prometheus-stack.prometheus.prometheusSpec.retention
+#   metrics disk cap: ...prometheusSpec.retentionSize
+#   logs window:     loki.loki.limits_config.retention_period
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# GRAFANA ON CLOUDNATIVEPG (TM-0786). Off by default.
+#
+# Grafana keeps its users, org membership, preferences, annotations and
+# alert-rule state in a database. By default that is SQLite on the 5Gi volume
+# below, which pins Grafana to ONE replica (a ReadWriteOnce volume cannot be
+# shared) and puts the whole console's state on one file on one disk; the
+# reference site lost its dashboards for that reason on 2026-06-07 and has run
+# Grafana on CNPG since. Turning this on renders a CNPG Cluster in this
+# namespace and points Grafana at it:
+#
+#   - CNPG creates the database, the owner and the credential itself, in the
+#     Secret <name>-app. Nothing for you to mint.
+#   - Grafana reads the host, database and user from a Secret this chart
+#     renders (tockmox-observability-grafana-db-env, through envFromSecrets
+#     below) and the password from <name>-app (envValueFrom below). Both are
+#     referenced as optional, so with this off Grafana stays on SQLite.
+#   - ROLL GRAFANA ONCE after the sync that turns this on:
+#       kubectl -n tockmox-monitoring rollout restart deployment/<release>-grafana
+#     envFrom is not a restart trigger, so until then it keeps SQLite.
+#
+# MORE THAN ONE REPLICA is then two kube-prometheus-stack.grafana values you
+# set yourself (the subchart's values are not templated from this block):
+#   kube-prometheus-stack:
+#     grafana:
+#       replicas: 2
+#       persistence: { enabled: false }
+# templates/preflight.yaml refuses replicas above one while this is off, or
+# while persistence is still on.
+#
+# MOVING AN EXISTING GRAFANA is a clean slate, not a migration: the new database
+# starts empty. Dashboards come back (they are ConfigMaps), SSO users come back
+# on their next sign-in, the local admin comes from tockmox-grafana-admin. What
+# does not come back: preferences, annotations, local accounts other than the
+# admin, and anything built in the UI rather than in git. The reference site
+# moved the same way. docs/operations/monitoring.md has the steps.
+# ---------------------------------------------------------------------------
+grafanaDatabase:
+  enabled: false
+  name: tockmox-grafana-db
+  database: grafana
+  owner: grafana
+  instances: 1
+  storage: 2Gi
+  storageClass: ""
+  imageName: ""
+  resources:
+    requests:
+      memory: 128Mi
+    limits:
+      memory: 320Mi
+  priorityClassName: ""
+  backup:
+    objectStoreName: ""
+    serverName: ""
+    schedule: "0 30 2 * * *"
+
+kube-prometheus-stack:
+  prometheus-node-exporter:
+    resources:
+      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # peak 32.9 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 33.4 MiB in the pre-migration namespace (30 days); average 26.9 MiB.
+      # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+      # request = average, rounded up to 16Mi. Re-measure before changing.
+      requests:
+        memory: 32Mi
+      limits:
+        memory: 64Mi
+  crds:
+    enabled: false    # wave 0
+
+  # ---------------------------------------------------------------------------
+  # THE OPERATOR'S ADMISSION WEBHOOK HAS ITS CA AND A HEALTHY BACKEND BEFORE THIS
+  # LAYER'S RULES ARE APPLIED (fail-open fix, v0.7.0-rc1 greenfield, 2026-09-30).
+  #
+  # What happened. The stack ships the prometheus-operator admission webhooks
+  # with failurePolicy Ignore and patches the caBundle with a Helm post-install
+  # Job, which ArgoCD runs as a PostSync hook: AFTER the sync phase that applies
+  # this layer's own rules. So on a greenfield install the webhook configuration
+  # existed, nothing behind it could answer, and every rule was admitted
+  # unvalidated and counted: apiserver_admission_webhook_fail_open_count read 66
+  # for each of prometheusrulemutate and prometheusrulevalidate on a healthy
+  # install, and the Admission board's "Webhook fail-open events" panel read 66
+  # in red. 66 is twice 33 and 33 is the 32 rules this layer renders plus one
+  # more; that each is requested twice (a dry run, then the apply) is INFERRED,
+  # and so is which other layer's rule was the 33rd.
+  #
+  # The mechanism, two parts that only work together. failurePolicy is left at
+  # the upstream Ignore on purpose (ruled 2026-09-30): ordering only.
+  #   1. The two webhook configurations and the caBundle patch Job are PreSync
+  #      hooks, in that order (wave 1, wave 2), after the certificate Job and its
+  #      RBAC (helm hooks the stack already maps to PreSync, wave 0). An
+  #      argocd.argoproj.io/hook annotation wins over the Helm one, so the patch
+  #      Job leaves PostSync. The webhook therefore has its CA before the sync
+  #      phase starts.
+  #   2. Every PrometheusRule this layer renders is sync wave 1 of the sync
+  #      phase (defaultRules.annotations below, and templates/notification-
+  #      rules.yaml), so ArgoCD applies it only after wave 0 is healthy, which
+  #      includes the operator Deployment that serves the webhook.
+  #
+  # NOT COVERED. Rules shipped by OTHER layers (policy, platform, exporters) can
+  # still be applied before the webhook answers on a first install, and then
+  # fail open and are counted. policy (wave 1) and platform (wave 2) apply before
+  # this layer exists; exporters shares this layer's wave. tools/check-alert-
+  # rules.sh lints the rules we author with promtool.
+  #
+  # Not proven without a cluster: that ArgoCD runs the three hooks in this order
+  # and keeps the webhook configurations across syncs, and that wave 1 waits for
+  # the operator. tools/check-upgrade-safety.sh F4 asserts the rendered
+  # annotations, which is necessary and not sufficient. The greenfield counters
+  # are the proof. One new coupling: rules wait for ALL wave-0 resources of this
+  # layer to be healthy, not only the operator.
+  #
+  # If you run your own operator and turn the stack off, none of this applies.
+  # If you remove an annotation here, F4 goes red: each one is load bearing.
+  prometheusOperator:
+    resources:
+      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # peak 61.6 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 87.4 MiB in the pre-migration namespace (30 days); average 50.0 MiB.
+      # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+      # request = average, rounded up to 16Mi. Re-measure before changing.
+      requests:
+        memory: 64Mi
+      limits:
+        memory: 160Mi
+    admissionWebhooks:
+      mutatingWebhookConfiguration:
+        annotations:
+          argocd.argoproj.io/hook: PreSync
+          argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+          argocd.argoproj.io/sync-wave: "1"
+      validatingWebhookConfiguration:
+        annotations:
+          argocd.argoproj.io/hook: PreSync
+          argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+          argocd.argoproj.io/sync-wave: "1"
+      patch:
+        annotations:
+          argocd.argoproj.io/hook: PreSync
+          argocd.argoproj.io/sync-wave: "2"
+  defaultRules:
+    annotations:
+      argocd.argoproj.io/sync-wave: "1"
+    # KubeJobFailed is upstream's rule, re-shipped by templates/kube-job-failed.yaml
+    # with the console-key check's Jobs left out (TM-0982, lab L6 F-L6-2): that
+    # check keeps 24 failed Jobs on purpose and the upstream rule fired one
+    # warning per kept Job, beside the alert that owns the condition. The
+    # template renders exactly when this is true; set it false to have the
+    # upstream copy back (and the noise), never both.
+    disabled:
+      KubeJobFailed: true
+
+  # ---------------------------------------------------------------------------
+  # THE k3s ONE-PROCESS REALITY. Upstream kube-prometheus-stack assumes kubeadm,
+  # where the control-plane components are separate pods with their own metrics
+  # endpoints. k3s runs apiserver, controller-manager, scheduler and kube-proxy
+  # INSIDE ONE PROCESS and exposes no separate endpoints for three of them.
+  #
+  # Left at upstream defaults, the stack creates scrape targets that can never
+  # come up and alert rules that therefore fire forever. Observed on a single-node reference install
+  # 2026-08-18: KubeControllerManagerDown, KubeSchedulerDown and KubeProxyDown
+  # all firing and delivered to Alertmanager, permanently, on a healthy cluster.
+  #
+  # Three always-on alerts is not a cosmetic problem. It is the noise floor
+  # every real page has to compete with, and the first thing a new operator
+  # sees. On the same day these three were firing, a genuinely faulted Longhorn
+  # volume produced no storage alert at all ... the signal that mattered would
+  # have arrived into a channel already carrying three permanent false alarms.
+  #
+  # Tockmox ships for k3s (see docs and the tested-k3s statement), so k3s
+  # reality is the right default. IF YOU RUN A KUBEADM-STYLE CLUSTER where these
+  # components are separately scrapeable, set these back to `true` in your site
+  # values ... you will lose real coverage otherwise. kubelet stays enabled
+  # because k3s does expose it.
+  # ---------------------------------------------------------------------------
+  kubeControllerManager:
+    enabled: false
+  kubeScheduler:
+    enabled: false
+  kubeProxy:
+    enabled: false
+
+  # ---------------------------------------------------------------------------
+  # CNPG CLUSTER PHASE AS A METRIC (TM-0518).
+  #
+  # WHY THIS EXISTS. A CNPG Cluster sat in `Instance Status Extraction Error`
+  # for an entire install on 2026-09-12 and nothing anywhere went red. The
+  # database was up and its own `cnpg_collector_*` metrics were green the whole
+  # time, because the fault was the OPERATOR being unable to see the instance,
+  # not the instance being unwell. So no instance-level signal could ever have
+  # caught it.
+  #
+  # Two gaps, measured on the live cluster that day:
+  #   - the CNPG operator is not scraped at all (`up{job=~".*cnpg.*"}` is empty)
+  #   - `status.phase` lives only on the CR and is not a metric
+  #
+  # cert-manager's alerts work because cert-manager publishes its own CRD status
+  # as `certmanager_certificate_ready_status`. CNPG publishes no equivalent, so
+  # kube-state-metrics reads the CR directly. This is the same trick, one level
+  # more manual.
+  #
+  # `rbac.customResourceState.createClusterRoleRules` defaults to true and does
+  # NOT generate a rule for this group ... measured on the live cluster
+  # 2026-09-12, where the flag was on, the config loaded, the store was active,
+  # and ksm then logged:
+  #
+  #   Failed to watch ... clusters.postgresql.cnpg.io is forbidden:
+  #   User "system:serviceaccount:...:kube-state-metrics" cannot list resource
+  #   "clusters" in API group "postgresql.cnpg.io" at the cluster scope
+  #
+  # So the permission is written out explicitly below. Worth knowing because
+  # every symptom EXCEPT that one log line looks like success: the deployment
+  # rolls, the config-file arg appears, `Custom resource state added metrics`
+  # is logged with both family names, and the resource shows up in
+  # `Active resources`. Only the metric never arrives.
+  kube-state-metrics:
+    resources:
+      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # peak 134.8 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 65.6 MiB in the pre-migration namespace (30 days); average 123.1 MiB.
+      # limit = max peak x 3, rounded up (32Mi steps to 512Mi, 128Mi above). This one grows
+      # with the cluster, not the chart: x3 is a starting point, and a bigger cluster
+      # should override it here from its own measured peak.
+      # request = average, rounded up to 16Mi. Re-measure before changing.
+      requests:
+        memory: 128Mi
+      limits:
+        memory: 416Mi
+    rbac:
+      extraRules:
+        - apiGroups: ["postgresql.cnpg.io"]
+          resources: ["clusters"]
+          verbs: ["list", "watch"]
+    customResourceState:
+      enabled: true
+      config:
+        spec:
+          resources:
+            - groupVersionKind:
+                group: postgresql.cnpg.io
+                version: v1
+                kind: Cluster
+              metricNamePrefix: tockmox_cnpg
+              labelsFromPath:
+                name: [metadata, name]
+                namespace: [metadata, namespace]
+              metrics:
+                # An Info metric, not a StateSet. A StateSet needs the full list
+                # of possible phases hardcoded, and CNPG's phase strings are
+                # prose ("Cluster in healthy state") that upstream is free to
+                # reword ... a list would go stale silently and in the direction
+                # that stops matching. Info carries whatever the CR says as a
+                # label, so a reworded phase still produces a series and the
+                # alert still fires; only the healthy-phase comparison needs
+                # revisiting, and that one is asserted by a test.
+                # NAME IT WITH THE `_info` SUFFIX EXPLICITLY. ksm logs
+                # `Info metric does not have _info suffix` and exposes the family
+                # under the name given, so `cluster_status` would have produced
+                # `tockmox_cnpg_cluster_status` while every convention (and the
+                # alert) expects `..._info`. A warning in a log is not a rename.
+                - name: cluster_status_info
+                  help: "CNPG Cluster status.phase, carried as a label"
+                  each:
+                    type: Info
+                    info:
+                      labelsFromPath:
+                        phase: [status, phase]
+                - name: cluster_ready_instances
+                  help: "CNPG Cluster status.readyInstances"
+                  each:
+                    type: Gauge
+                    gauge:
+                      path: [status, readyInstances]
+                # ADDED 2026-09-16 (TM-0659). The rc4 Phase E soak found a site
+                # app's database with ContinuousArchiving=False and a failed
+                # nightly backup for thirteen hours, and NOTHING could alert on
+                # it. The reason is worth stating because it is not obvious:
+                # every `cnpg_collector_*` and `cnpg_pg_stat_archiver_*` series
+                # in that cluster existed for `tockmox-ai` ALONE ... the
+                # database pods in other namespaces are not scrape targets at
+                # all. An instance-level metric cannot be un-pinned from a
+                # namespace it never covered.
+                #
+                # kube-state-metrics reads the CR from the API, so it sees every
+                # Cluster in every namespace by construction, the same way the
+                # phase metric above already does. That is why the fix lives
+                # here and not in the AI chart's rule.
+                #
+                # Gauge over the conditions array, per kube-state-metrics'
+                # documented pattern for Kubernetes status conditions: `type`
+                # becomes a label and the condition's `status` becomes the
+                # value, because ksm maps the strings "True"/"False" to 1/0
+                # (case-insensitive). `reason` is carried too ... it is the
+                # field that says WHY, and on the finding above it read
+                # `while getting secret miniflux-garage-backup: not found`.
+                - name: cluster_condition
+                  help: "CNPG Cluster status.conditions, one series per condition type"
+                  each:
+                    type: Gauge
+                    gauge:
+                      path: [status, conditions]
+                      labelsFromPath:
+                        type: [type]
+                        reason: [reason]
+                      valueFrom: [status]
+
+  prometheus:
+    # REPLICAS. Left unset, so upstream's default of ONE Prometheus applies. If
+    # you raise prometheusSpec.replicas, the two replicas evaluate rules
+    # independently and can disagree about ALERTS (their `for:` clocks start
+    # when each pod started), while the Service below round-robins between
+    # them. `service.sessionAffinity: ClientIP` makes each consumer stick to one
+    # replica; it is NOT set here, because it is a rendered default change and
+    # means nothing at one replica. What it does and does not guarantee, and the
+    # single-pod alternative, are in docs/operations/monitoring.md (TM-0781).
+    prometheusSpec:
+      # Tockmox does NOT restrict rule/monitor discovery by Helm release.
+      # Upstream defaults to matching only its own release's objects, which
+      # silently ignores every PrometheusRule you add from your site repo.
+      # That is the most confusing observability failure there is.
+      ruleSelectorNilUsesHelmValues: false
+      serviceMonitorSelectorNilUsesHelmValues: false
+      podMonitorSelectorNilUsesHelmValues: false
+      probeSelectorNilUsesHelmValues: false
+      scrapeConfigSelectorNilUsesHelmValues: false
+      # IMAGE (TM-0820 A5). The vendored kube-prometheus-stack ships Prometheus
+      # v3.14.0, and the reference deployment's TSDB was written by v3.15.0. A
+      # restore-with-data install on the subchart default opens a newer TSDB with
+      # an older binary, which is a downgrade. Pinned to the 3.15 line the
+      # reference deployment runs; the operator (v0.94) drives any 3.x. Raise it
+      # with the subchart, not past it: a TSDB written by a newer Prometheus than
+      # this tag is the same downgrade.
+      image:
+        tag: v3.15.0-distroless
+      retention: 15d
+      # retentionSize bounds the DISK as well as the window. Time-only
+      # retention on a filling disk is how a metrics store takes a node down.
+      retentionSize: 40GiB
+      priorityClassName: tockmox-infrastructure
+      resources:
+        requests: {cpu: 200m, memory: 2Gi}
+        limits: {memory: 4Gi}
+      # WITHOUT THIS Prometheus runs on emptyDir: every pod restart or node
+      # reboot loses all history, silently.
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            # NOT THE DEFAULT CLASS. The storage policy is "replicate at
+            # exactly one layer", and the TSDB is the clearest case for not
+            # replicating the volume:
+            #
+            #   it is high-churn and append-only, so synchronous replication
+            #   pays a write-latency tax on the hot path continuously;
+            #   it is re-derivable, because the thing it holds is a copy of
+            #   what the targets already reported;
+            #   and when it is lost you restore from a backup or accept the
+            #   gap, not from a replica ... a corrupted TSDB replicates its
+            #   corruption faithfully.
+            #
+            # `local-path` is node-local, so a rescheduled pod finds an empty
+            # volume and Prometheus starts a new TSDB. That is the trade being
+            # made, stated rather than glossed: history is worth less than the
+            # write path is worth, at this size.
+            #
+            # IT MUST EXIST. k3s ships this class; prerequisites.md tells you
+            # to UN-DEFAULT it rather than delete it, and this is the second
+            # reason for that. If your cluster has no such class, set this to
+            # one it does have, or to null to fall back to the cluster default.
+            # A class that does not exist leaves the PVC Pending, which
+            # `KubePersistentVolumeErrors` alerts on.
+            storageClassName: local-path
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 50Gi
+  grafana:
+    # kube-prometheus-stack 92 stopped excluding Grafana's chart tests from its
+    # package, so the render gained a `helm.sh/hook: test` Pod, ServiceAccount
+    # and ConfigMap in namespace `default` (TM-1010). Nothing here runs
+    # `helm test`, and Argo CD does not; off, as the render was before.
+    testFramework:
+      enabled: false
+    # Admin credentials come from a Secret YOU create ... the chart does not
+    # generate them. A generated password is randomized on every render, which
+    # under GitOps means a credential that rotates on every sync and an
+    # Application that never reports Synced. Create it before (or right after)
+    # the first sync; Grafana waits with a config error, loudly, until it
+    # exists:
+    #
+    #   kubectl -n tockmox-monitoring create secret generic tockmox-grafana-admin \
+    #     --from-literal=admin-user=admin \
+    #     --from-literal=admin-password="$(openssl rand -base64 24)"
+    #
+    # Seal it into your site repo for the durable version ... see
+    # docs/administration/secrets.md.
+    admin:
+      existingSecret: tockmox-grafana-admin
+      userKey: admin-user
+      passwordKey: admin-password
+    # SSO wiring: config env from the parent-rendered Secret (absent when
+    # sso disabled ... hence optional), client secret from the operator's.
+    envFromSecrets:
+      - name: tockmox-observability-sso-env
+        optional: true
+      # Grafana's database settings when grafanaDatabase.enabled (TM-0786).
+      # Rendered by this chart only then; optional, so absent means SQLite.
+      - name: tockmox-observability-grafana-db-env
+        optional: true
+    envValueFrom:
+      # The database password CNPG generated (grafanaDatabase, TM-0786). The
+      # Secret exists only when that is on, hence optional. The name follows
+      # grafanaDatabase.name: change both together, or the preflight refuses.
+      GF_DATABASE_PASSWORD:
+        secretKeyRef:
+          name: tockmox-grafana-db-app
+          key: password
+          optional: true
+      GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET:
+        secretKeyRef:
+          name: tockmox-sso-grafana
+          key: client-secret
+          optional: true
+    defaultDashboardsEnabled: true
+    # NO PHONE-HOME FROM THE OBSERVABILITY CONSOLE (TM-0671, 2026-09-16).
+    #
+    # Grafana's own defaults are `check_for_updates = true`, `reporting_enabled
+    # = true` and a news feed that is on. None of them were overridden here, so
+    # a stock Tockmox install shipped all three — on a product whose README
+    # leads with the claim that your data does not leave your hardware.
+    #
+    # WHAT WAS MEASURED, on the 0.6.0-rc5 gate, rather than assumed:
+    #   - the deployed `grafana.ini` ConfigMap carried `[analytics]
+    #     check_for_updates = true`, straight from the subchart
+    #   - ONE load of the Grafana home page made 11 requests off-cluster: one to
+    #     `grafana.com/blog/news.xml` and TEN to `a-us.storyblok.com`, a CDN no
+    #     document in this repo has ever named
+    #   - those fetches come from the OPERATOR'S BROWSER, not the server, so the
+    #     exposure is whatever network the operator is on
+    #   - a pod in `tockmox-monitoring` reached `grafana.com` with a 200 in
+    #     239ms, and there are no egress NetworkPolicies here, so nothing would
+    #     have stopped the server-side update check either
+    #
+    # THE CI GATE DID NOT AND COULD NOT CATCH THIS. `ci.yaml`'s "no cloud egress
+    # in default values" step greps three vendor hostnames in `value:` position;
+    # Grafana's addresses are in the binary, not in any values file. The same
+    # trap was already written down one chart over, for Open WebUI's version
+    # check, and was fixed for that console rather than turned into a check.
+    # Replacing the gate's assertion is the rest of TM-0671 and is NOT this.
+    grafana.ini:
+      analytics:
+        check_for_updates: false
+        reporting_enabled: false
+      news:
+        news_feed_enabled: false
+    # 512Mi WAS measured, and it was still too low. Both halves of that sentence
+    # matter, so the original finding is kept rather than overwritten.
+    #
+    # The 256Mi finding, unchanged and still the reason the floor is not lower:
+    # at 256Mi a live Grafana v13 sat 69KB under the ceiling with 231k
+    # memory-high events and no OOM kill ... perpetual page-cache reclaim that
+    # surfaced as 46-second sqlite stalls and a readiness probe flapping the UI
+    # in and out of 503.
+    #
+    # RAISED TO 1Gi 2026-09-13, TM-0240 Phase D2, after an OOM KILL on the
+    # reference lab. Measured, in this order:
+    #   - steady state 454-459 MiB for EIGHT HOURS with nobody using it, which
+    #     is 89% of a 512Mi ceiling before a single dashboard is opened
+    #   - one SSO login plus dashboard loading took it over: exit code 137,
+    #     OOMKilled at 17:51:58, container up since 09:32:04
+    #   - Traefik then had no upstream, so the operator saw `502 Bad Gateway`
+    #     and "no content loads" ... a memory limit wearing a gateway's face
+    #   - after restart it settled at 473 MiB, 92%, and would have done it again
+    #   - it was the ONLY container near its limit in the whole install and the
+    #     only OOM kill ever recorded there; next worst was LiteLLM at 39%
+    #
+    # 1Gi IS A JUDGEMENT, NOT A MEASUREMENT, and the distinction is the point:
+    # you cannot measure the peak of a process the kernel kills at the ceiling,
+    # so the true working-set peak under dashboard load is UNKNOWN. What is
+    # measured is only that 512Mi is too low. Requests go to 512Mi so the
+    # scheduler stops placing this pod as though it were a 256Mi workload.
+    # If a future Grafana sits above ~700Mi steady, re-measure rather than
+    # doubling again on reflex.
+    #
+    # RAISED TO 1.5Gi 2026-10-05, TM-0595, on that instruction: re-measured, not
+    # doubled. The prod install at v0.7.2 peaked at 820.8 MiB, 80.2% of 1Gi, in
+    # under four days ... over TM-0553's own line (below 80% after a session).
+    # Per-pod average working set ran 305-744 MiB across the pods in that window,
+    # so the average HAS crossed ~700Mi. 1.5Gi puts that peak at 53%. The request
+    # follows TM-0595's rule (the highest per-pod average, rounded up to 16Mi),
+    # 512Mi -> 752Mi.
+    resources:
+      requests: {cpu: 50m, memory: 752Mi}
+      limits: {memory: 1536Mi}
+    persistence:
+      enabled: true
+      size: 5Gi
+      # THE STORAGE CLASS, and why this one is a LITERAL while Alertmanager
+      # below threads the global. The Grafana chart does not run `tpl` over
+      # this value: feeding it a template expression emits the expression
+      # verbatim into the PVC and breaks the YAML parse outright
+      # (`invalid map key: map[...]{".Values.global.storageClass"}`), tested
+      # 2026-08-18. Alertmanager's chart does `tpl` it. Same repo, same
+      # release, two different mechanisms, because subchart coverage decides
+      # what is possible rather than what is tidy.
+      #
+      # Until 2026-08-18 this key was ABSENT, so the PVC fell through to
+      # whatever the cluster default happened to be, silently, while the
+      # storage contract elsewhere claimed to govern it. Observed on
+      # the reference install: Grafana on local-path while the site named longhorn.
+      #
+      # `longhorn` because Grafana is a single replica with no application
+      # redundancy and its contents are not re-derivable: users, org
+      # membership, preferences, annotations and alert-rule state live in that
+      # file. Dashboards are ConfigMaps and would survive; nothing else would.
+      # 5Gi, so replication costs almost nothing.
+      #
+      # IF YOU DO NOT RUN LONGHORN, set this to a class your cluster provides.
+      # A class that does not exist leaves the PVC Pending, which
+      # KubePersistentVolumeErrors alerts on.
+      storageClassName: longhorn
+    # TM-0903: the subchart's init-chown-data (a chown over the data volume).
+    # It finishes in under a second, so no sample could be taken; 32Mi is the
+    # shell-only init-container floor.
+    initChownData:
+      resources:
+        requests:
+          memory: 8Mi
+        limits:
+          memory: 32Mi
+    # Datasource discovery scoped to monitoring. Dashboards stay ALL, which is
+    # the documented extension point; datasources do not, because anyone able
+    # to write a labelled ConfigMap anywhere could otherwise point Grafana at
+    # an endpoint of their choosing.
+    sidecar:
+      resources:
+        # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+        # peak 99.6 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 103.4 MiB in the pre-migration namespace (30 days); average 97.2 MiB.
+        # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+        # request = average, rounded up to 16Mi. Re-measure before changing.
+        requests:
+          memory: 112Mi
+        limits:
+          memory: 160Mi
+      dashboards:
+        enabled: true
+        # Discover dashboards from ANY namespace, so a user can drop one in
+        # their own. This is the documented extension point.
+        searchNamespace: ALL
+        label: grafana_dashboard
+      datasources:
+        enabled: true
+    # ------------------------------------------------------------------------
+    # IN-CLUSTER TRUST. Grafana performs the OIDC token and userinfo calls from
+    # inside its own container, so the CA has to be trusted there.
+    #
+    # NO initContainer, because Grafana is Go and Go does not need one:
+    # `crypto/x509` reads SSL_CERT_FILE **and** the default certificate
+    # directories and unions them, so the CA alone yields the CA plus every
+    # public root. Measured on the lab 2026-08-15.
+    #
+    # This shipped with a concatenating initContainer earlier the same day. It
+    # worked, and it was one moving part more than the runtime requires; the
+    # same construct on the Argo server could not start at all, because that
+    # image is distroless. Python still needs the concatenation, and the AI
+    # layer still does it, because `requests` and `httpx` treat the file as the
+    # whole trust store rather than an addition to it.
+    # ------------------------------------------------------------------------
+    env:
+      SSL_CERT_FILE: /etc/tockmox/ca/ca.crt
+      # Rolls Grafana when the parent-rendered sso-env Secret changes. Grafana
+      # reads that Secret through envFromSecrets, and envFrom is not a restart
+      # trigger. Grafana runs `tpl` over env VALUES, so this resolves; it does
+      # not do so for podAnnotations, which is why this is not the usual
+      # checksum annotation. Coverage is stated on `tockmox.ssoEnvRevision`.
+      TOCKMOX_SSO_ENV_REVISION: '{{ include "tockmox.ssoEnvRevision" . }}'
+    # A ONE-SHOT READER HAS TO BE SEQUENCED. TM-0632.
+    #
+    # Grafana is Go: crypto/x509 builds the root pool ONCE, lazily, at the first
+    # TLS handshake, reading SSL_CERT_FILE exactly then, and caches it for the
+    # life of the process. cert-manager issues `grafana-tls` asynchronously after
+    # this Deployment is applied, so a pod that starts first mounts an EMPTY
+    # `optional: true` volume, builds its pool from the public roots alone and
+    # NEVER rebuilds it. Server-side OIDC then fails forever with
+    # `x509: certificate signed by unknown authority` while /api/health stays
+    # green and the local admin login keeps working, so nothing looks broken.
+    #
+    # NOT A HYPOTHESIS. On the 0.6.0-rc4 gate, 2026-09-16:
+    #   grafana container startedAt   00:28:42Z
+    #   grafana-tls created           00:28:43Z   <- one second
+    #   restartCount                  0
+    # SSO was broken for every group-bound user until the Deployment was
+    # restarted by hand, which fixed it and proved the mechanism.
+    #
+    # This is the SAME fix the blackbox exporter already carries, and the reason
+    # is stated in that chart: "A one-shot reader has to be sequenced; a
+    # re-reader does not." Grafana is a one-shot reader.
+    #
+    # WHY THIS IS NOT THE APP'S OWN IMAGE. The trust-bundle initContainer in the
+    # AI layer must run the application's image, because the BUNDLE it writes is
+    # that image's trust store. This one writes nothing ... it only waits for a
+    # file ... so any image with a shell is correct, and Grafana's is distroless
+    # (`13.2.1-distroless`, no /bin/sh). Running grafana's own image here is the
+    # Argo `Init:CrashLoopBackOff` trap from 2026-08-15. busybox is already in
+    # this pod for init-chown-data and already in `images.txt`, so this adds no
+    # image, and the registry expression is copied from the subchart's own
+    # init-chown-data so `global.imageRegistry` still redirects it.
+    #
+    # `extraInitContainers` runs through `tpl` in this subchart
+    # (grafana/templates/_pod.tpl: `tpl (toYaml .) $root`), which is what lets a
+    # static values block ask about global.certIssuer. With no issuer there is no
+    # Secret to wait for and this renders to nothing.
+    extraInitContainers:
+      - name: wait-for-ca
+        image: '{{ .Values.global.imageRegistry | default .Values.initChownData.image.registry }}/{{ .Values.initChownData.image.repository }}:{{ .Values.initChownData.image.tag }}'
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            set -eu
+            # THIS SUBCHART RENDERS extraInitContainers AS `tpl (toYaml .)`, so
+            # the value has to be a LIST ... a `|-` string is toYaml'd into a
+            # block scalar and the deployment fails to parse. A list cannot be
+            # made conditional at render time, so the container always exists
+            # and decides here. The substitution below happens at render.
+            if [ -z "{{ .Values.global.certIssuer }}" ]; then
+              echo "global.certIssuer is empty: no CA is coming, nothing to wait for."
+              exit 0
+            fi
+            ca=/etc/tockmox/ca/ca.crt
+            i=0
+            while [ ! -s "$ca" ]; do
+              i=$((i + 1))
+              if [ "$i" -gt 60 ]; then
+                echo "FATAL: $ca is still absent after 300s."
+                echo "global.certIssuer is set, so Grafana's OIDC token exchange is"
+                echo "https to the Tockmox CA. Starting without this file would"
+                echo "break SSO permanently, because the Go root pool is built"
+                echo "once and cached, while the process still reports healthy."
+                exit 1
+              fi
+              if [ "$((i % 6))" -eq 1 ]; then
+                echo "waiting for $ca (attempt $i, 5s apart) ..."
+              fi
+              sleep 5
+            done
+            echo "CA present, $(wc -c < "$ca") bytes; starting."
+        # TM-0903: 0.6 MiB peak measured; 32Mi is the init-container floor.
+        resources:
+          requests: {memory: 8Mi}
+          limits: {memory: 32Mi}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 472
+          seccompProfile:
+            type: RuntimeDefault
+        volumeMounts:
+          - name: tockmox-ca
+            mountPath: /etc/tockmox/ca
+            readOnly: true
+    extraContainerVolumes:
+      # Grafana's OWN ingress certificate Secret. cert-manager writes `ca.crt`
+      # into it in this namespace and renews it with the certificate.
+      - name: tockmox-ca
+        secret:
+          secretName: grafana-tls
+          optional: true
+          items:
+            - key: ca.crt
+              path: ca.crt
+    extraVolumeMounts:
+      - name: tockmox-ca
+        mountPath: /etc/tockmox/ca
+        readOnly: true
+  alertmanager:
+    alertmanagerSpec:
+      priorityClassName: tockmox-infrastructure
+      resources:
+        requests: {cpu: 20m, memory: 64Mi}
+        limits: {memory: 128Mi}
+      storage:
+        volumeClaimTemplate:
+          spec:
+            # THREADED from the global, because this chart DOES run `tpl` over
+            # it (tested 2026-08-18), unlike Grafana above. Until 2026-08-18
+            # the key was absent and this PVC fell through to the cluster
+            # default with nothing saying so.
+            #
+            # It follows `global.storageClass` (the protect-this-data class)
+            # rather than `localStorageClass`, and that is the arguable one in
+            # this file. The case for local-path: the notification log is
+            # re-derivable within one repeat_interval, the data is high-churn,
+            # and at replicas 1 there is no gossip partner to resync from
+            # anyway. The case for the protected class, which is the one taken
+            # here: SILENCES ARE NOT RE-DERIVABLE. Losing them un-suppresses
+            # every alert someone deliberately quieted, and the moment you lose
+            # a node is exactly when a flood of already-acknowledged alerts is
+            # most expensive. At 5Gi the replication cost is noise.
+            #
+            # To take the other side, change this one line to
+            # `{{ .Values.global.localStorageClass }}`.
+            #
+            # AN UNSET GLOBAL RENDERS `storageClassName: ''` HERE, and an empty
+            # string is NOT "use the default" ... Kubernetes reads it as "use NO
+            # class", which opts the claim out of dynamic provisioning and binds
+            # it only to a pre-existing PV that also has no class. The claim
+            # sits Pending forever with no event naming a cause.
+            #
+            # It cannot be fixed in this file: a values map is data, and the
+            # subchart runs `tpl` over the VALUE, not over the surrounding YAML,
+            # so a `{{ if }}` around the key emits nothing useful. The guard is
+            # therefore in this layer's own preflight, which refuses to render
+            # when the class is unset. Found 2026-09-04.
+            storageClassName: '{{ .Values.global.storageClass }}'
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 5Gi
+    # The upstream default routes EVERY alert to a null receiver. A monitoring
+    # stack that cannot tell you anything is worse than none, because it looks
+    # like coverage.
+    #
+    # THE URL BELOW IS A LITERAL, AND IT IS CHECKED. Helm cannot template a
+    # values file, so the bridge's address is written out rather than derived
+    # from namespaces.monitoring. Rename that namespace and this string goes
+    # stale, and Alertmanager then POSTs into a name that does not resolve --
+    # silently, forever. So templates/notification-rules.yaml compares this
+    # string against the Service the chart actually creates and REFUSES TO
+    # RENDER if they disagree, with the corrected block in the error message.
+    #
+    # Disabling notifications? Set notifications.enabled: false AND remove the
+    # webhook_configs below, or you are routing at a Service that no longer
+    # exists.
+    #
+    # RESTATING `routes` REPLACES THE LIST (Helm replaces lists, it does not
+    # merge them), including the Watchdog route below. If you add a route with
+    # `continue: true` (a ticketing lane, say), end your list with a route that
+    # has NO matchers and `receiver: tockmox-default`. Without it, an alert that
+    # matched only the continue route reaches that lane and never the phone
+    # (observability-cutover A3, found on the 2026-10-02 window).
+    config:
+      route:
+        group_by: ["alertname", "namespace"]
+        receiver: tockmox-default
+        routes:
+          - matchers: ['alertname = "Watchdog"']
+            receiver: tockmox-watchdog
+            repeat_interval: 1m
+      receivers:
+        - name: tockmox-default
+          webhook_configs:
+            - url: http://tockmox-alert-bridge.tockmox-monitoring.svc:80/
+              # Resolutions matter: an alert that fires and never visibly
+              # clears trains you to ignore the next one.
+              send_resolved: true
+        # Watchdog stays a null receiver ON PURPOSE. It is the always-firing
+        # heartbeat that proves the pipeline works; delivering it to a phone
+        # every minute is how people mute the phone.
+        - name: tockmox-watchdog
+
+loki:
+  # `Monolithic` is the 18.x spelling of what the 7.x chart called
+  # `SingleBinary`. The 18.x chart still accepts `SingleBinary` but marks it
+  # deprecated and its own default is now `Monolithic`, so this says what
+  # is meant instead of relying on the deprecated alias (TM-0777). The values
+  # block below is still named `singleBinary` in both lineages.
+  deploymentMode: Monolithic
+  # The Loki sidecar watches ConfigMaps and Secrets cluster-wide for ruler rule
+  # files, and the chart binds a ClusterRole granting get/watch/list on
+  # `secrets` cluster-wide to Loki's ServiceAccount to let it. Both chart
+  # lineages default this to true. Nothing in this repo ships a Loki rule
+  # ConfigMap (alert rules are Prometheus rules, evaluated by Prometheus), so
+  # the grant buys nothing and reaches every Secret in the cluster. Off by
+  # default; an operator who runs Loki ruler rules from ConfigMaps turns it
+  # back on knowingly. Not proven here: that turning it back on works end to
+  # end in this chart, because no gate exercises it.
+  sidecar:
+    rules:
+      enabled: false
+  # THE GATEWAY MUST BE ABLE TO ROLL ON ONE NODE (0.7.0 lab pass, findings F2).
+  # The 18.x chart ships the gateway with a REQUIRED podAntiAffinity on
+  # hostname and a RollingUpdate strategy that surges (25%, which rounds up to
+  # one extra pod). The surge pod cannot share a node with the old one, so on a
+  # single node it stays Pending forever. Measured 2026-09-30 on the
+  # single-node reference platform: the upgrade from 0.6.2 left the new
+  # gateway pod Pending, the Service (whose port was renamed `http-metrics` to
+  # `http` in the same release) had no endpoints from the old pod, and Alloy
+  # dropped log batches for about 34 minutes until the old pod was deleted by
+  # hand.
+  #
+  # Two changes, both needed. The rollout surges nothing (`maxSurge: 0`,
+  # `maxUnavailable: 1`), so the old pod is removed before the new one is
+  # scheduled: setting only the affinity is NOT enough on an upgrade, because
+  # the OLD pod still carries the required rule and repels the new one
+  # (measured: `affinity: null` alone still left the new pod Pending). The
+  # affinity becomes a PREFERRED rule, so replicas spread over nodes when there
+  # are several and still schedule when there is one.
+  # `requiredDuringSchedulingIgnoredDuringExecution: []` is needed because
+  # Helm deep-merges maps and would otherwise keep the upstream required rule.
+  # An EMPTY LIST, not null: Helm 3 deletes a subchart default when the parent
+  # sets it to null, Helm 4 does not (measured 2026-09-30: under Helm 4.3.0 the
+  # null form still rendered the required rule, and the upgrade-safety gate
+  # went red). Lists are replaced, never merged, on both, and an empty required
+  # list is no constraint to the scheduler.
+  #
+  # WHY NOT `type: Recreate`, which the first lab fix used. Switching an
+  # EXISTING Deployment from RollingUpdate to Recreate fails on the API server
+  # under ArgoCD's ServerSideApply: the live object still carries the
+  # `strategy.rollingUpdate` it was defaulted with, the apply does not remove
+  # it, and the API refuses "may not be specified when strategy type is
+  # 'Recreate'" (measured 2026-09-30: the Deployment never rolled and the
+  # Service had no endpoints for 9 min 25 s). `rollingUpdate: null` cannot be
+  # used to clear it: Helm 3 drops the key before it renders. Keeping the type
+  # RollingUpdate and changing only the two numbers is an ordinary field update
+  # that applies over the 0.6.2 object, and needs no annotation on the
+  # Deployment.
+  #
+  # What this costs: a rollout of the gateway has a gap with no gateway pod
+  # (one pod's start time; Alloy retries its batches). Multi-node sites that
+  # run `gateway.replicas` above 1 lose no capacity beyond one pod at a time
+  # and keep the spread. A site that wants surging back sets
+  # `loki.gateway.deploymentStrategy.rollingUpdate.maxSurge` in its own values
+  # and restores the required rule.
+  gateway:
+    metrics:
+      resources:
+        # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+        # peak 34.9 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2); average 28.7 MiB.
+        # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+        # request = average, rounded up to 16Mi. Re-measure before changing.
+        requests:
+          memory: 32Mi
+        limits:
+          memory: 64Mi
+    resources:
+      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # peak 15.2 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2); average 13.7 MiB.
+      # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+      # request = average, rounded up to 16Mi. Re-measure before changing.
+      requests:
+        memory: 16Mi
+      limits:
+        memory: 32Mi
+    deploymentStrategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxSurge: 0
+        maxUnavailable: 1
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution: []
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: gateway
+                  app.kubernetes.io/name: '{{ include "loki.name" . }}'
+                  app.kubernetes.io/instance: '{{ .Release.Name }}'
+              topologyKey: kubernetes.io/hostname
+  loki:
+    auth_enabled: false
+    # Single-node filesystem storage. The chart requires bucketNames even in
+    # filesystem mode; they are unused but must be present or the template
+    # fails with a message that does not mention filesystem at all.
+    storage:
+      type: filesystem
+      bucketNames:
+        chunks: chunks
+        ruler: ruler
+        admin: admin
+    commonConfig:
+      replication_factor: 1
+    schemaConfig:
+      configs:
+        - from: "2024-04-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: index_
+            period: 24h
+    limits_config:
+      retention_period: 168h
+    # No usage reporting to stats.grafana.org (TM-0671): Loki's
+    # analytics.reporting_enabled defaults true. Sovereignty: no unrequested
+    # outbound calls.
+    analytics:
+      reporting_enabled: false
+    # Loki deletes NOTHING without the compactor, whatever retention_period
+    # says. This is the difference between a retention policy and a wish.
+    compactor:
+      retention_enabled: true
+      delete_request_store: filesystem
+  singleBinary:
+    replicas: 1
+    persistence:
+      # Same call as the Prometheus TSDB above, for the same reason: Loki's
+      # own durability story is an object store, not a replicated block
+      # device, and chunks are large, write-heavy and cheap to lose relative
+      # to what replicating them costs. In filesystem mode there is no object
+      # store, so what you are choosing is "a week of logs on one disk", which
+      # is the honest description of this deployment either way.
+      #
+      # This one is a LITERAL rather than a value threaded from a global,
+      # because the Loki chart does not run `tpl` over it. Three of the five
+      # storage keys in this repo do and two do not, so nothing here is
+      # threaded ... a mechanism that covers an arbitrary subset while looking
+      # complete is worse than one that is written out.
+      storageClass: local-path
+      size: 20Gi
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {memory: 1Gi}
+  read:
+    replicas: 0
+  write:
+    replicas: 0
+  backend:
+    replicas: 0
+  chunksCache:
+    enabled: false
+  resultsCache:
+    enabled: false
+
+  monitoring:
+    serviceMonitor:
+      enabled: true
+alloy:
+  alloy:
+    # No usage reporting to stats.grafana.org (TM-0671): enableReporting
+    # defaults true and adds nothing we need. Sovereignty: no unrequested
+    # outbound calls.
+    enableReporting: false
+    mounts:
+      varlog: true
+    # THE PIPELINE, actually authored. Until 2026-08-19 this block did not
+    # exist: the chart shipped Alloy with its default config ... discovery
+    # components and nothing else, no loki.source, no loki.write ... and the
+    # comment here claimed container logs were shipping to Loki while Loki
+    # sat empty. Found by querying Loki's label values on a live install
+    # (an empty success), the shipped-but-not-wired shape again, this time
+    # wearing a comment.
+    #
+    # Two tails:
+    #   1. Container logs: /var/log/pods (already mounted above), CRI
+    #      format, labelled namespace/pod/container from the path.
+    #   2. The Kubernetes AUDIT log at /var/log/kubernetes/audit.log,
+    #      job="kubernetes-audit". This matches NOTHING until the operator
+    #      sets the api-server audit flags per
+    #      docs/administration/audit-logging.md, and self-activates the
+    #      moment the file exists ... no values change, no restart. A tail
+    #      on an absent path is free.
+    configMap:
+      content: |
+        loki.write "default" {
+          endpoint {
+            url = "http://tockmox-observability-loki-gateway/loki/api/v1/push"
+          }
+        }
+
+        local.file_match "pods" {
+          path_targets = [{
+            __path__ = "/var/log/pods/*/*/*.log",
+          }]
+        }
+
+        loki.source.file "pods" {
+          targets    = local.file_match.pods.targets
+          forward_to = [loki.process.pods.receiver]
+        }
+
+        loki.process "pods" {
+          stage.cri { }
+          // /var/log/pods/<namespace>_<pod>_<uid>/<container>/N.log
+          stage.regex {
+            source     = "filename"
+            expression = "/var/log/pods/(?P<namespace>[^_]+)_(?P<pod>[^_]+)_[^/]+/(?P<container>[^/]+)/"
+          }
+          stage.labels {
+            values = { namespace = "", pod = "", container = "" }
+          }
+          stage.static_labels {
+            values = { job = "pod-logs" }
+          }
+          forward_to = [loki.write.default.receiver]
+        }
+
+        local.file_match "audit" {
+          path_targets = [{
+            __path__ = "/var/log/kubernetes/audit.log",
+          }]
+        }
+
+        loki.source.file "audit" {
+          targets    = local.file_match.audit.targets
+          forward_to = [loki.process.audit.receiver]
+        }
+
+        loki.process "audit" {
+          stage.static_labels {
+            values = { job = "kubernetes-audit" }
+          }
+          forward_to = [loki.write.default.receiver]
+        }

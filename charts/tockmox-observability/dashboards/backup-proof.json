@@ -1,0 +1,437 @@
+{
+ "editable": true,
+ "graphTooltip": 1,
+ "links": [
+  {
+   "asDropdown": true,
+   "icon": "external link",
+   "includeVars": false,
+   "keepTime": true,
+   "tags": [
+    "tockmox"
+   ],
+   "targetBlank": false,
+   "title": "Tockmox dashboards",
+   "type": "dashboards"
+  }
+ ],
+ "panels": [
+  {
+   "datasource": null,
+   "gridPos": {
+    "h": 2,
+    "w": 24,
+    "x": 0,
+    "y": 0
+   },
+   "options": {
+    "content": "<!--tockmox-logo--><div style=\"display:flex;align-items:center;height:100%;padding:0 16px;box-sizing:border-box;border-bottom:2px solid #2FB44A;\"><img src=\"data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA3MTg3IDE3OTgiPjxpbWFnZSB3aWR0aD0iMTc5OCIgaGVpZ2h0PSIxNzk4IiBocmVmPSJkYXRhOmltYWdlL3dlYnA7YmFzZTY0LFVrbEdSaElhQUFCWFJVSlFWbEE0V0FvQUFBQVFBQUFBWHdBQVh3QUFRVXhRU0xvREFBQUJEa3EzclozVnBlamVXN1p0MjNiYlZzdTYvQVZsL1FOWE5lMldxM3EyYmR0S3pubkgrRTZTZ3p6cDd5ZjdmWjlFQkFPM2JSdlpIZW0rTzF4bitnSk16VmhSd3dPUE9kcjd6aDg0NXFrYXBxWjFqNERzWTFlaU55aXFESTBLaVFGWXZ2SVN4Q2IvRGdlcTBMNkxXSG5WNVFFWUc1TUlySHpXczA5b1dqSUJSN25CeUFlN0tKUS9xdnIrckpXQnBERmgrNnMvZGVTaXlFWXdYY3A4Qk0rZzVTZkJJcEw5MWRzM0pPc0JEL3puV09UMngrWnhHakl6M0ZvRklqTUxRZnMvQ20va2Z3OGNFRGNnWmxqcUNqOGdqWTlFSmE3NVNqWHdTaCtWYUc1T0duaGppTElHSE94ZWxGNkR4blA3UXk2NjhkbWZXTVBRZDNySW11ZU9MRW5ZN2xFRFRveVZ2M1BERVZULy84bE54UEMvbHArTHRqSm0yWjdXZUUrNmdoVU92VGV0ZzVyM05ZOWhmTExHajJkaVdVbElyM1U1V1JZbmMxVEw4THcyVkZLU0dSaENFUlNBem90T20zTm1RbVBBUEMwUE1qcjFEekF2V3ZiU2ZnQ1JBV2Q4TmhqT0JvclB6b2hnU0lEUUw4TzhLVHZEUXNmODBnd3BOcmpEelpTNkFRTHNVdSs0RU5sVThpVXNqSHltdzVuZk9Cdk9EbXI4cHNQdXdkR01sMHdoSm5OeW9WVFBQNTRraTlrNlJqN1oweXUxNE1LSkN6QmRWdmxXQXhMS0dWTkJvdklOK3pDWmlibmdmV2MxSDdvQm1sWS9ZVmlRVE5ab2luMUduYmR4cXZrT0FaalFYRTdmUER4MVlvczRaQyt4YUJyR1BnczZSY0ZkZnhvMEhLVUlOdFhRa2VIcHBqMmpUdFd2VTV3cElkQk5sSkprakFGeXZSK0hqUmRVL1JFSkk4UTBqaythajd0SGZ2UGUzZWpHcFZIM3ZtQ1hGU0xnVkFsMWtaNm5BbGdoMk41YUtacmlFVGY4d3E0NjlUc2RTQURVVHUwZjhlb3NDcFhlc08zL0hEcHgxUCs1TFVwZWh1dGR6a0hoVFV4V05XK2daeDlsNVFYS04yNUFnUVMvQ1pFQ1Z1cHNJbW5zUnA3T2Y3M3dNdUVOblVhcXF6enVaSHBHUHQ2clFvR0Z2MG8weG01aFpaMm4yUHBoaVk0M2FNMXdqYlAvSElqcWVvby9Rd1NyM2J3dDMxRVcyUFZ4cUo4UWpwVFc5Y0FqbzFvWUZsTllDNTRkckI2M3k4UHRWV2dTelBSbGVRR056VUtpbFFwWC9WMVdUbElaVnExdVl6WTY3Sklibm5jQzJTRWNaa2wwNE50L09NSHNyVHZCY1pCN21mT0M5eUJQT0JxUTdBRGRNUnhLaHRMTGgveUEvQ3p5S3hMZnIxc3dMb2tmVjJYUEMvTG50UmJNeXkxWVY3UmhYZFNDZFozMGRXa2IxdFhTOXdVdDJOZkkzNWVKMzFmSzN4ZUwzOWZMUDVlUWZLN1Nqbk1od2VkYUxUaVhrMyt1MklKejBSYWM2NG8vbDI3QnVicDR2WUI0dllaNHZZeDR2Wko0dlpoNHZaNTR2YVI0dmFwZ3ZiQjR2WFlMOVBMeTd4WEl2aGZSaG5zZDB1K2x0UHRlamZoN1FRQldVRGdnTWhZQUFEQklBSjBCS21BQVlBQStLUTZGUXFHSGo3NEdBS0V0Z0JPbVVKQ0s5by9LTDJHS2wvU3Z3aC9ZL2NCMmE4cStZUjR6K21mOUwrNS9tQjczdlVMK1ZQMWMrQUQ5UFAxNTZ5SG1BL1pqMVlQUU4vYlA5QjdBSDlQLzIzV0FmM1gxQVAyNzlNLzJLZjdmL3dQM1ArQW45dFAveDdBSG9BY0lCL0FQTm4ydi9RUHhPL2IzMVQvRS9rbjZyL1hmMkUvdGYvZjl6citRNzRYTDMrSzlDUDRsOWlmdi85WC9iUDgxL2c3L00rQVB4WS9odlVDL0ZQNUgvYy82OSsxbjlnL2RENWhmWC83cDJsZWFmNDMvaWVvRjZwL052OEovYlAycS92dm9GZnMzNUVlNGYxZS96MzVBZnpuN0FQNUIvTFA4Ri9ZUDIvL3MzLzMrb1A2Ly9lUEViKzIvNHIvT2U0Qi9JLzVoL2hQOEwrM2Y5OS8vLzJmL3VYKysvdzMrSS83ditqOW12NVgvWS85SC9mdnlIK3dMK00veTcvRC8yVC9NZjlML0EvLy8vdS9jLzdMZjFvOWpQOVgvbi9kM0FDMWxGdm45Z2M1VW5mKysyb2RJa3YrTUc4azNjY0NQR2pZMlhFTVAvbmlXYUR0aE4vRDI1N1ZEdUREU1J4cnBJS2FGOWg4NU9MckJCdEJ6ZlBCVUJFc3QvN2lYZHlSeENJRWVGSW9UcDladjVwaUZ6MEhUME9ZbHZaM3Rqa3hnZlN3Q0hrWHBPU2M5SFBJaWM5VFcrUnJUaCtla2hha215YXc2UEcwcXZWOFJSamhFVTZ4WjF6WGpyeEFMS2EzZXdnaDJ0NHpVYTd6QUt3NGE4NFZ2SGNBUExyOCsySEtIRWxUejMyMGd0MDE1T2lEWER0YkpHMzNwZEZJbE9FZjNwYzd6cTJsem94R1h0Y0ttVVY4YUsrM3pYZ2NWalVWUExWbGlMNkQ0NEhSVTI2UkVzTmQvVnl3cDFmRk9qRXBOTDUyQ3pST2xCYjRaUndNekpnQUEvdis2Smd5LytlS3Y1RmZVaUNOWFFzSENFWDAzZExZb1JrekxnVTZ3ZFp4QWliMkl5bFFSY2plWXBMT1VkQUJYSmxJYnRKeG9SSERaN0I5eHQ0NTJZK3FFcGQ2Z2pvMDJFVXVZRXJ6UnZXcTBFa2dGWXIxTHc0OXU4bTcxN1FPWndqUkVGY0FLa0JCRkRMVEN3aGZwVXhUb3NhdjJsdTBTZ3Q0aFo5Vit3OUZmOVhrdTlpOFBCbkVjbXpKM1c0Zm5kSXNsVzJ0NHZueVJYcW5idzRCemxWZlhIQnd3bzl2eG9wYktQdVA1OUxmQjNoRytrZWZRTytPTFNEYmZDTVBXb1BZaitOaU51SlNoWXlYd1Z2ZWgyazBnSlI1c1o0Q1Y0cjVHSkNtbmxZWE9lTzJYYzBXWXRpSytjcVJ4RjNhQmhQTnJZZ1BZeVl3MlpIS3hhM2ZSR2RSK3FZcTBIL2JjUEJVenBnODI1dFZiWFY0ZmpIT2UwbmhPZ0k0N2lTaURDSnVjeXAxK0V1aDlTdU1Ebk9sYjExSjRqUVpTbExnNTEzRXVZZXFrbHNpVnhmZHI2eW9BbDlIWlFqYUpIcUNvRE51V01naWx6N3BYQXcrUVVvWTdFNmNuVS9sNmZ5Yi9SVGRNN1RGRDNoOE1DQTdrMlJJUitTYklNQTczMW5CN1g4azZMeXlOUjRaWUJ1cC8xeGRpYVFQOUNJTVB5cDRPNTZuVStsYmdZNWxpMUpMeUJEaFdUR3cvTStZUEY4d3czVWk4amZjOENpdUVYYU96OXhVN3A3WHpOeEFIL1ptalI5RzEyVjVVb0NMandKTHhUWUx5dFlqUEg1ZVRkcnpLR21QUmxMZjF2ZkQwLy81eERiV3g3c01YNVNXSitVYUp0N2VZNFZNeFozQ1Z6bXJremF3QWxLQ1l4bnBKMEhDbDV6SG0rRCtaMXYvSDNnV25jSlcvOGtHSVA3SlhmN0lEVWhDNkRmWXFlRDN5MUtPVHExMTAvQVBUcE5nS3pSVEFsN1dzbEpkVGdnT2tQOURLVWp0dXl5ZnBLczF1WXhEV2p5L0VYNHVucW5hNjhob2hpVHBMcjdSOG9sbkZmNUN4TmhCeVZrRFEyZmlVNTBFbzYwWXNtc1dhTDRLaHNNNzNOK2RacUc1L1lpdGN5Tkd2eE00cmZaMko3L0phVENXQlI3Vk40QVNhSmlieHUxM0JkbWIvalRqN1lYbFFMeXJ3VlpZRk9JMEJWOG10UmJCczY1dHpjNWp2UEhXeGJkWlB1NDJvVmIxSko5dEI4a1ZtQzJ1dEJsU2Nid2pRems4TjR2SjNWTzVaUVkrYmtRY1Y4clREQm1aaGdFQUdWK1V2VEtydldwamhPNTExMW1taFBpSXpETmJidGxPR3lkdGtaRHAraHVybzhFZmh4c0JMQ1FyaXQxSXdKci9udHY5Q1kxVWFjd3hMYVA4SjVvUGRwMnQwWjRXMk8raW5aLytwdnltWU5yb2gwdGtkUE1ma3pEaU1sVUtNemZsQng0U3hOZ2tGREF1eDQrSjZNb1N4bkJtRHVZTVkvWWQwdUk2OW5Ya0o1cVhUeVM5USt0RnlML3BlY0xFTFpabFFkQklHVFVyRmV1ckV3WDlzb2IxSXJYVFBnTE9NbXVudVYzVnBTUFNvTDl6cjg1aWMxWXQ5THppc0J0QVhrK1Z3SjZSMXpZd1RXUXM5dXZNNS9PWWJ1c29hL0pMd1RiT1VkcER4VlNFU2ZZRDh2MGVoaDJQUXJMOWxaYWFQOFJnNjhGeHhiVlVFR2pjcFY1TVV3SDZycHBSNnZpOWdYS01tOXNnR25YcmlGRWIrZW05SWRQM2RMaEFzUHg4Tk1wOXdSUzNkaDNTQno4VzYvdUZuMEJYRlpJTkhEOWNvcDlEa2N3VTFUbzVGSmQyYnhFRlZlbzNWMnlyelY0eER3SER2d0JwZDJNTUxtYlg5a0tHcFZKSkVxcXJQSkE2OWpwV3RtT2lmQlM3c3F4dEMrK29CWGhQNVBRWGNxNGlUajkreklNKzVrR1ZaQVlNc0lTMWhwbkRxcXFBMzg3Zm4xdkNnVkRjZmpmR2pBU3hBaXFpQlIra2kxTFVCdUFic2Ewckl1UW1pNXhtY1ZuVit2eVhBR0pva3ZudlVaS1U0S2MrNkZJbWVBaHFoL280akZGckxVbHp2MWloRnU1eHJOaWo2VmdBdUxqM29aZ250WlpBblVjNG1PbW5ySVJCNXRqWjVuYkNXYlBRMkxSc1pKL0g5YmRnbkYxSWczK3p2Sit2MXhWYVJkY0RMK1d5dE85MnJ6Vnl6YStiZU9CTkx6bkRqRndJbmZ2dWFNL09zYXRnajRtQVFwS1huYWZGbjdJZktKYW9TTzRDNXErWC90ZVNYaEJRV2pGMWhORmVxRzU5bnFSaHd5RlJhbzNxWjVXNVJVV0QrRWF0UnQxRG5VWC9UTzV0aFZ0U3M1bHBQcnpndVkxSTFwek5zUmRoMG9Uc2FmZU1Gcmk0RWJZc2FwZGo4NUZOTDM4ZTduWlN1T2ZWeUtjRktpTWVNdVh2SG1Kd1VITER1ZHNFZm1HUHNJZm5SVGFVRzVIWjNWbi9nOW56amorTG5jVDU3NEl3UEVFK29KdndobFoyTVZOSjVraFdkVkQxSDB3c1BVblVlZDQvdXNmUnQ5ZFE3Y0pVZTlXajFlMzBabnRISG9vSnJwK0E1QlgwK0w2ZjI4OGRZdm5HWG81cTJPRTBPQWp5dFdtdkZHZERqa1NCTFZzOTRMbGVaWFBnM1BRc2d3UHhpZjdIdTVwclMvblBFZGNoNEJhcisxMW1RV01xQTVlUXlqYVA3QmxRWndIYWZ1ZFhxZnc1anVHODhKSGhuYkhyeS9YQVR2aENVOHZCNHpZS2hOZldLaW56U3ZDK1A3VVpjeFZYNFhhRXNaV0JWazZDMjVZN0I0R0I4ZTNPTENzSUM2VzVwN0VLWlU2VWZWaUZldUhLdmJKUklVL1ZaS0hEeithN2FydzlVcVd3UWlEYVhrWjF6eGJWclZLa1ZUL3NPb3c1Qzlmb2xXeDZ1eHR6ZzZBYmUzMTJXWFNNRkpZblRpV0pXNitRN2NwTFNMbzNsZWo2dVg4ZlBNVTdDajAzMVNZV3lPZ0piQ2VlNTZKc1BiZEs4ZEFQVXZBNEU0RlVzVjdQbmhldFhaMEErVG9rWGxQb2FnV2lEdmxIUm9Ham1BM3JmSmVOellNT2xraU5na2lpR1BHd3cvdndDQlRZR3RiQWxrb0daVG43NzdTQk5penVpTVU2dUl0STVnMjJxSXYzeWJFMlYxR1ZpZkpBbGxMckp6cXBGbmpGL0xVQlRUM1VCZjMzSmh3ZUIwRDlqc083Sk9FeWFwaDEzUHRGSFNrWDQvL1Q2M2JzNmZ1YldjaVlwZEQ3cldlN3BGWndRbDJNL0dhZUlaOWNpeG83c2QzT3RweGlDNVMzWU5EZzBOazV4UHJJRVFqbmdyTUZBbDZxYWNFazFUUFd6RmlEVnYveFd5OEg3dkthSEozRlUvOTV3UWZpTHE1anU4a2tNdGl3aUx2WjFCSU1XRVZyMWJ6dzJYRjJFbldlZENQY1JWbG9oVDhGZ2F1a0d2aVpRR3AzdVVLelBRdlY4U2I5N2Vidm1tTjdHQkUzcW4veXM1NStmdGQ4elJDZE5jdjBkREdiNjgvOW55T3EwYXkrUDQ5UElHVHpoMVJkQWU3YjBLY0xpVEtSeXdGbFplWDhocVQ5dHBNTjBocVRSakxLQ0c3T0l0WDJSSC9ETU1iUzVkMHJxRjIvYTlqY3lnWThlTjNhR3BTT0ovYXQ4SlpaNlQ4OWhyVFVTd3h5aE9DM0FuaFZRSW1QOHdFR29jZ3RudjFUZVNxS0tadk0wMXpja28wQkswbGNJK2ZMdy9MSGdURUVuZUJ6V205UGhndlprVkR3WE5Udnk1L1c0UDFVVW5QWitJVmViVzVET1h6K0VEZ2MyQndXMEVDUHZUY3BMRTdXWDhqVUV4R1hLRk5SeUxKWGNhQVV4RVMzZGlwODI0Wk54cnBUenp1c0UwWTVpSDdPRFZXQlJQV3A5dVNZaExYVTkzVkZQam00NUhjbkdiSTVmUWd6bVpjMDRIdzFTQjY2dU9pL1VTLzZmRnQyRGNnTWxuNlJtZW5wcXRUNnJvU3pHKzBpN3UvcjRIUVphc3JZcjZtWncrbGxCdklTWU1JVVZ6cVZJSk5VclpEY1BuWmwyUDZ2WFNiZTJ2VTJFaWQ2ZnpnM25PU0VtSlI3Z3FKSUVPRFZTOWV5VjRENHo4S1p1WkN5MGtQWTZKTW1KcGZ3VGRXZ1VsMHNJQlI4Y1dJQkMvRHNsT1ZERS9qWGdheENYS0pGdDNiOE9MM2VzSGdKNUt1L3Vqbno4dHlMRjJtc1RVYzY1dllDWnpzeTdSMnJFN3BHelo3aC8rU3BTQzR1UUFzRnYrSEliTVJKRVRucDBFQWwvaUdoeVhGTEM1dE9ST0pLTzN2dWwxdFZ2MlFHWUhhdllna0FERjN5S3hTTWlUVm01RStVcC9PNjlWOXFyTmtzMkJjeTMrTllmenFvRUJVaW9qV0djZFF0L09CVjdyeitRZ3dHWXVjUEdpS29DbzNGKzBNb20zWXdJZEJNcVJiSW1hWi9mT1ZTQUdEcnc5UlowZXptTytmOW1CVklQQWpJOVF4UXR5d21vTXFoLzRuMXZabFI3SmFsVGVnNVZtaldtZ1hRVHlwVXBpemZEWVl4dHN5NDlGU21CZTlncmZwQ0tLVjlEWVg2R3NPcHVaOVNTUzM1cEsrK04xZExYN1J0a010WXEvUW05ZVpvUG96WU9GU0c1RTNjblA5WW1RSllCVDEvMDV1MWlwWWFCZDQwT1hpT3A2bU5tb3V0VnZnV05KcVhwUlhKV2Z2ZEowdmo1aUVkQitDSEE5d2hjeE5PNVkzMi84WEN2SFNXWlVIc2MvaldmeUhLUEs2N01CQ3BBaFp4U0wxZGE2eFU2Qml0cW9ScEZwTmd3dkJ4Y3lRWlF4VnRka1BDT2p0UHF4cE9rNGNvaHh1elN0RzgzN3AyNW1EeVV2b0llUlZ2MzhmcVRrMU01di9HYldTa0pjcUlBL2ZwY1Uya0MrdW5oRkZVMCtJNllxbUJUelkxWHV1cFIrbU10cGM1RStNWHhOVlFaZGdGeFhjalBqVy9LbURMWUw1Z0I3ZWx3T2lZeG5lOXZ5OTZxaUVRbGRFQTBLUDlGcHBOV21tb05uYktDQTg1SzJHSitNQ1JkdjI4eW5RL1NDczFjQk9YTWpVS0NSbHBiU3BsMHdyYjJXM3FNZ3Z1NWdWMGFtVVl3a0dZR1hDZWQ5RFdNQjUyejczdHNPTTRrUzdoQzlBcWplWEsxb0pkSGl6bGQ1MGdBV1BJeVNQNEFMRGFDY0hzcjIydG1lMUJNTkNPTFZZV1ByMm5pUjlBMWV3aVZ0NVZKempWN2Z2ZVgvdHpPVkRYbE0zT2l0MXg5eWpQNmRmajJnQ2FRUzRhZGZYZlpWN1BnYU5CMUluNzllTnZjaGFIUlNId0lCdCtGVDY1blE5eWszanA0QS9RS1NQODVyY3lsRWo5d2FBZDYvRU52MlR0cURwZ21FY3pSZ1ZjWlo3cTJ2SDd1NTYvdFlDTWhmM3ZkZmJwWE5wWVkybzNRbno4S3FtdlpsQUg2N0ZxQjBaK1JlYkw4d0pCdGxFdGl1R2Z0MnhiYlhFaHI0d2hlYVNuK2ZScXJxd2pUMk9HMWliZ1o4SWowbWRqdFlydzhIY2Q4eUN3b1hBeFhpaDZLOE9TMmtuK0JDRzFMTkttZHYybWxRYUx6dHVwdG5ZNURQS0VmWTJpa3l3TjBwcmRCZjMzQzdRYUlZbEQ4SExiZWRtQjkrYll4TDd0ZmRnVThBMFpXK3NMRW9TN21OTGhEU1NUeFlMQml3VTU0S0ZTdllOeXlXeUFQakRnV1orNjFNZGx4NzdmMXphOGxQdzVXSXk5SFJvN1R6dlhyZmlDY2FVcFhoN1VUbHNxQ2hDY3dGVG9rREcwRzNsTHUrejVEM2hFKy9wcVkwbElRM2ZXZnJPYzZEUi96VEpXRC9HaGFVWHNBdzBSaVpxUk54NkFDckdQWHNSTEVWMlZJUmZ0cmE3clJpclByN0tDM2tWVFpuTzdzZXZsVEVLdTA1eVNselliTjV3UHFCY2NXQk1YWUJmWXQydnVZSFh4WnJyUDI0NW8xS2I1TXRkZVlqN3VjY3c1N0tLUUEvM005U2Q2emtwMGZ2cmdUZGVRSWNEYjdKK2gxQ3plV2tQcExrVTM1blpXbEsyaWJpdHBLZE9xaGwzSnZKYjlxTXJ3UVYxblh5TlkwS0tQUi8ycFFGQ2F5UHNjb2s0WlVMcExqQVdNVDJsK3Z1YjV6L1laQ2tBUHZMQndOOVVmNHFSR0RPR0NFQklvTTJhc3JBTGhhRGYwOUgyOGJhR3Q5QVJrZFVDUkRPcUVnZ3l0M0ZaRDN6SjB0R3NyNHEvWlJsdE9rdU84cUdVZjdXZnVLK3FMRE9wVEpUL3U2alRQekNxMFMwZmZRaXlHVzAxTGRxekR6S0hpVktOOWJxbjc2SGhWUTE1azF3ZVpYN2ltZ1VYWHJybHZaZmd1YWF5dHcwLzlHZDFBalhpaVAydUxIQU1LSHRxVi9MUEFZSjFQalhwVi8xVFFVN2Y3Z0pXUi93WHdrYWpYelZTeE5yaGM1MWJoRUNtbms4RlhOOWppVTk5YXNTU1ZtZURYaGM2a0ZFSTBFSUYyWFkzZVJ5a1F5RHdiMm93MHdRZWxFeWNEaG1KYWNSdUR2d2VJS1I0VHdYcG1CcGZwbmgrY1hHZ0RUbmg0OE9DdmNpQ0MwYW5Ec1dJZnUrMGxla3gveStqYzEvRGdZanFmMG9RSEZMcXc5bG5TVEk2R2I3WFJxOVNGcDB6WmVEQ3V0YmxHdklXYzI3SUV1OEdLUklSaXNLSEpxbC95dVdWemxXdTNEZFBMUm1KTjhNOTRNKzhyK0VjN091RlpGWGxqMDU0c0lvbFQ2UitGcUVoNzdna2NIcit4MWZJMFY5OWpRRTVpYXdHTHVPQ3RtVkxwaDdNOEltaGowZ2FyK3VlMHRhaWNJdWgvRWoxRU5WNWlaeTJBVk9SYnMwOUFzc21Id0VNeEhCWlVUSnU1eGxRMEZ3VWg2ZHE0WG45ZkZMMDRXRzU5c08zWXpNb1VnTklJZjNYRE5JZ2NDSUFWV0xnVmo5M3JkczFwTmhUTGwyYUF3V2VxalR1OVd1b3NKT09UMjIrYXhvVHR5RU50M1N2TURHWldxSDQvWVBjZExCUHZYVzhjZitNTk1xK1NYOGhqWG5Qb1k1ZWR5ZjRDRWpoMVhFNFdQMm1uSEdmTWJ4ZHRaT2hHYkVYYTNjUXAzVXBsRFFxQmpOQS9QbDhTbHM1MHhQaythUHNnKzcvRjljQ2xKdGQycjJmZHdIV0pnQlh2OFdtbUlseEhjLzhzNmFadyt1MFg3MW1IelRRSndCK3BNTi9QUGplZ1c3M09laUpaM2cxRGxza2t5QVEzZlg4Z2h2TnRUbE5XcTBvRjRKVlNYNzZUNDdkRmcvekIxU20zUVIrQ0hOeGxKd3dvSzBkT0VLZ2NJOGROTHd0V0UzM3pYOFkxNDZ3R0hlaDJ0ZXJRMjdZNkQyUmtCYmo2RWwzOUEwNE1lNVVoSWtYSU91UXNJVjNpV0plc2FybnRWM2hwNjFudnVCTTFXcVBCcTVreXc5NE42VHYrMWdBVk1WcUFqZGxJcUpDTEt1cWtMd2VQeGN0ZC9LVzYweDBLNFVCSU1HR3k2YlFjZzg2S0orQnBMUEJCRTRNa0syb2ZkQ0grbHB0UWNjSlZhVXQrb2NxT3hvYWlSUTQ5eGRxV1ZtRlBYWWl0U3RjUVlpa3RkZzRKZjNFR250YlBWZnF5TzYvazlOZzRwV28rcDM3aTZFNzZ5ZkRHS3R4bi9YWGIwaCtIOVlOWXhEL0RyTDdHUXZNYkd3ZE1nanRSOG1nN1QrejdITmVtaUNwNVhubUgxK2dCNTJ2SC96R0laTm1lTEhNQ3phckxxMDJRK0IwMkQzdjlNUkxaZ3cwUWkwbElJS244NVV3b0czN2FxQ2ZMZUxhL0VYcFQ4RjdrUTNCTmE4NnlQS1VOUkNjdjJlNzV2UE4rekRYZng4NFl1QU9DWGlySjgzeThvUklnV2xyMHBsYlhxZDdaSzZiVFdXZS85QThrV0N3VlFCOEF6VHAyUkJwd1NUUHMvN3Nma3paUUVSSGpraWNsbHY3eHMyR3JyUzkwSWErRnp1eFFGOVI1ZDNsYllCeEtYYnBrRkphWnE2OGJOVkRzbXJ5bU5SWXlYbGp2ZElicjd3Vi9oL0daNlJOYlVtbFByMGpCSTN6N0N1UUkwbTU5eURzM09aeFBZRDB4L2lLdGZKK2JyWXlEWGQyUXVGVUJnZUdMTFFpTUhRUEN6Z1NpTGQveWVUNFJHV05Ncm1abjQ3RDNDeTdKcWp2RlJ3ampYVnd4d2tuQ1hrZ0o1SGtNSGV2bXovQ1J5TGo3eWRnSXFNWnkzMUMzS2hBU242YytNZWNoMm95bnNlQVgzM2NtTEJqMmp0elYwWEZrV1pDR3ZvYm1YT2djQXU4elJFN1BUZmZnU3pCVjIxM1pCWndMM09Rb0N3VnlTcC9Mb29NM2pVOWFLTVY1bTFQNEpEVm8reWxkYkwrYlJqeFdTZW0yUWt3T3pINUt0eXR4MzI1MitWMGdUY2R3MUFoRE1wK0U0OUl6ZTFNbWVUYUVuU2UveERXMnhJc3dEYk95b3hBYmtteEdjbWtEREwxQzJtSlhoNWdnMVRTUlNWNWpwTjRUUDVkZDFWdHIwRC9jb09jNG1aYVRTcXZlYW95TEQ0T1hGSVNyaU5qWkhyYUlFMlZWZGlnSmxMSE9TSTZad254REVKc3JubjRneEVtT2RXRGNBOGJGeEJBUnljR2dsUGUzYy9vU1o1WTd1VDhNYUdmVEFBQT09Ii8+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTk4OSAxMzMwKSI+PHBhdGggZD0iTTgxMSAtNTIyIDc0OCAtNDk1IDYwNiAtNzAwSDUyMlYtMTAxTDYzNSAtNzNMNTk5IDBIMjMwVi02NEwzMjQgLTEzOFYtNzAwSDI0MkwxMDAgLTQ5NUwzOCAtNTIyVi04MDRMMTE1IC03ODZINzMzTDgxMSAtODA0Wk0xMzg2IC0yODhRMTM4NiAtMjA5IDEzMzQuMCAtMTQwLjBRMTI4MiAtNzEgMTIwMy41IC0zMC41UTExMjUgMTAgMTA1MiAxMFE5NzcgMTAgOTE3LjAgLTI0LjVRODU3IC01OSA4MjMuNSAtMTE5LjBRNzkwIC0xNzkgNzkwIC0yNTNRNzkwIC0zMzMgODQyLjAgLTQwMS41UTg5NCAtNDcwIDk3Mi4wIC01MTAuNVExMDUwIC01NTEgMTEyMyAtNTUxUTExOTkgLTU1MSAxMjU5LjAgLTUxNi41UTEzMTkgLTQ4MiAxMzUyLjUgLTQyMS41UTEzODYgLTM2MSAxMzg2IC0yODhaTTk5MCAtMzAxUTk5MCAtMjIwIDEwMjEuNSAtMTY3LjVRMTA1MyAtMTE1IDExMTAgLTExNVExMTQ3IC0xMTUgMTE2Ni41IC0xNDcuMFExMTg2IC0xNzkgMTE4NiAtMjQxUTExODYgLTMyMiAxMTU0LjUgLTM3NC4wUTExMjMgLTQyNiAxMDY1IC00MjZRMTAyOSAtNDI2IDEwMDkuNSAtMzk0LjVROTkwIC0zNjMgOTkwIC0zMDFaTTIwMDQgLTUxNFYtMzE5SDE5MzNRMTg5NiAtMzY5IDE4NDkuMCAtMzk3LjVRMTgwMiAtNDI2IDE3NTAgLTQyNlExNzE3IC00MjYgMTY5OC4wIC0zOTMuNVExNjc5IC0zNjEgMTY3OSAtMzAxUTE2NzkgLTIyNSAxNzExLjUgLTE3NC41UTE3NDQgLTEyNCAxODA0IC0xMjRRMTg3MSAtMTI0IDE5OTkgLTE4MUwyMDI5IC0xMTlMMTg4OSAtN1ExODI5IDEwIDE3NDYgMTBRMTY3MSAxMCAxNjExLjAgLTI0LjVRMTU1MSAtNTkgMTUxNy41IC0xMTkuMFExNDg0IC0xNzkgMTQ4NCAtMjUzUTE0ODQgLTMzMyAxNTMyLjUgLTQwMS41UTE1ODEgLTQ3MCAxNjU0LjUgLTUxMC41UTE3MjggLTU1MSAxNzk3IC01NTFRMTg0NiAtNTUxIDE5MTAuMCAtNTM5LjVRMTk3NCAtNTI4IDIwMDQgLTUxNFpNMjQ0OSAtNzMgMjQxMyAwSDIwODVWLTY0TDIxNzQgLTE0MFYtNjY2TDIwODUgLTcyNVYtNzg5TDIyODggLTg3M0gyMzU5Vi0xMDJaTTI3NjkgMEgyNTUxTDIzOTYgLTI2OUwyNTY3IC00MDNMMjQzOCAtNDY4TDI0NzQgLTU0MUgyNzc4Vi00NzdMMjU3OSAtMzE3TDI3MDQgLTExMkwyODA1IC03M1pNMzgxMiAtM0gzNTc0Vi0zMzRRMzU3NCAtMzcwIDM1NjIuNSAtMzg1LjBRMzU1MSAtNDAwIDM1MjIgLTQwMFEzNDc5IC00MDAgMzQzNyAtMzczVi0xMDJMMzUxOSAtNzVMMzQ4MiAtMkgzMjUyVi0zMzNRMzI1MiAtMzY5IDMyNDAuNSAtMzg0LjBRMzIyOSAtMzk5IDMyMDAgLTM5OVEzMTU3IC0zOTkgMzExNSAtMzcyVi0xMDFMMzE5NyAtNzRMMzE2MCAtMUgyODQxVi02NUwyOTMwIC0xNDFWLTM1MUwyODQxIC00MDhWLTQ3MkwzMDYxIC01NjBMMzEwMSAtNDQ4TDMyMTcgLTU0M1EzMjQxIC01NTEgMzI3MiAtNTUxUTMzMzEgLTU1MSAzMzcxLjUgLTUyNS4wUTM0MTIgLTQ5OSAzNDI4IC00NTNMMzUzOSAtNTQzUTM1NjMgLTU1MSAzNTk0IC01NTFRMzY3MCAtNTUxIDM3MTQuNSAtNTA5LjVRMzc1OSAtNDY4IDM3NTkgLTM5N1YtMTAyTDM4NDkgLTc2Wk00NDg5IC0yODhRNDQ4OSAtMjA5IDQ0MzcuMCAtMTQwLjBRNDM4NSAtNzEgNDMwNi41IC0zMC41UTQyMjggMTAgNDE1NSAxMFE0MDgwIDEwIDQwMjAuMCAtMjQuNVEzOTYwIC01OSAzOTI2LjUgLTExOS4wUTM4OTMgLTE3OSAzODkzIC0yNTNRMzg5MyAtMzMzIDM5NDUuMCAtNDAxLjVRMzk5NyAtNDcwIDQwNzUuMCAtNTEwLjVRNDE1MyAtNTUxIDQyMjYgLTU1MVE0MzAyIC01NTEgNDM2Mi4wIC01MTYuNVE0NDIyIC00ODIgNDQ1NS41IC00MjEuNVE0NDg5IC0zNjEgNDQ4OSAtMjg4Wk00MDkzIC0zMDFRNDA5MyAtMjIwIDQxMjQuNSAtMTY3LjVRNDE1NiAtMTE1IDQyMTMgLTExNVE0MjUwIC0xMTUgNDI2OS41IC0xNDcuMFE0Mjg5IC0xNzkgNDI4OSAtMjQxUTQyODkgLTMyMiA0MjU3LjUgLTM3NC4wUTQyMjYgLTQyNiA0MTY4IC00MjZRNDEzMiAtNDI2IDQxMTIuNSAtMzk0LjVRNDA5MyAtMzYzIDQwOTMgLTMwMVpNNTE1NCAxSDQ5NDhMNDgxMSAtMTkwTDQ3MzAgLTExNkw0ODE4IC03MUw0NzgyIDJINDU0NlYtNjJMNDc2MyAtMjUzTDQ2MzYgLTQxOEw0NTM2IC00NjdMNDU3MiAtNTQwSDQ3NzhMNDkxOSAtMzUyTDQ5OTYgLTQyM0w0OTA2IC00NjhMNDk0MyAtNTQxSDUxNzhWLTQ3N0w0OTYyIC0yODdMNTA3OCAtMTM3TDUxOTAgLTcyWiIgZmlsbD0iI0ZGRkZGRiIvPjwvZz48L3N2Zz4=\" alt=\"Tockmox\" style=\"height:44px;width:auto;\" /><span style=\"margin-left:20px;color:#9AA5A0;font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;font-family:'Nunito Sans',system-ui,sans-serif;\">Magic is just well-documented engineering</span></div>",
+    "mode": "html"
+   },
+   "pluginVersion": "11.0.0",
+   "title": "",
+   "transparent": true,
+   "type": "text"
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "decimals": 0,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#808080",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 0
+       },
+       {
+        "color": "yellow",
+        "value": 1
+       },
+       {
+        "color": "red",
+        "value": 4
+       }
+      ]
+     },
+     "unit": "none"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 0,
+    "y": 2
+   },
+   "options": {
+    "graphMode": "area",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "max(cnpg_collector_pg_wal_archive_status{value=\"ready\"}) OR on() vector(-1)",
+     "refId": "A"
+    }
+   ],
+   "title": "WAL segments waiting to archive",
+   "type": "stat",
+   "description": "The continuous backup signal. cnpg_collector_pg_wal_archive_status{value=\"ready\"} counts WAL segments the archiver has not shipped to the object store yet; a healthy primary sits at 0 and a rising count is archiving having stalled, which shows no other symptom until a restore needs WAL that never left the node. This panel replaced \"Hours since last database backup\": CNPG's cnpg_collector_last_available_backup_timestamp is deprecated since operator 1.26 and reports 0 under the barman-cloud PLUGIN path this platform uses, even with a completed backup on disk, so an age computed from it read as hundreds of thousands of hours on a healthy cluster. Base-backup success is read from the Backup objects (kubectl get backup) and proven by the weekly drill in the panel to the right. TockmoxWalArchiveBacklog fires at > 3 for 15m. Grey -1 means the cnpg_* family is not being scraped at all (enablePodMonitor off, or the observability capability declined), which is a different problem from a backlog."
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "decimals": 1,
+     "unit": "d"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 6,
+    "y": 2
+   },
+   "options": {
+    "graphMode": "area",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "(time() - min(cnpg_collector_first_recoverability_point > 0)) / 86400 OR on() vector(0)",
+     "refId": "A"
+    }
+   ],
+   "title": "Recoverability window (days)",
+   "type": "stat",
+   "description": "cnpg_collector_first_recoverability_point is deprecated since CNPG 1.26 and stays 0 under the barman-cloud plugin path this platform uses; the > 0 filter drops that zero so the panel shows 0 days (\"no signal\") rather than 20,000. Read the real window from the ObjectStore's retention and the Backup objects."
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "decimals": 1,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 8
+       },
+       {
+        "color": "red",
+        "value": 15
+       }
+      ]
+     },
+     "unit": "d"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 12,
+    "y": 2
+   },
+   "options": {
+    "graphMode": "area",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "(time() - max(kube_cronjob_status_last_successful_time{cronjob=~\".*-db-drill\"})) / 86400 OR on() vector(-1)",
+     "refId": "A"
+    }
+   ],
+   "title": "Days since last restore-drill PASS",
+   "type": "stat"
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "decimals": 1,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "yellow",
+        "value": 26
+       },
+       {
+        "color": "red",
+        "value": 50
+       }
+      ]
+     },
+     "unit": "h"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 6,
+    "x": 18,
+    "y": 2
+   },
+   "options": {
+    "graphMode": "area",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "(time() - max(kube_cronjob_status_last_successful_time{cronjob=\"tockmox-authentik-db-backup\"})) / 3600 OR on() vector(-1)",
+     "refId": "A"
+    }
+   ],
+   "title": "Hours since last identity dump",
+   "type": "stat"
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "fillOpacity": 12
+     },
+     "unit": "dateTimeAsIso"
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 6
+   },
+   "options": {
+    "legend": {
+     "calcs": [
+      "lastNotNull",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "right"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "max(cnpg_collector_last_available_backup_timestamp > 0)",
+     "legendFormat": "last good backup (in-core Barman only; absent under the plugin)",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "max(cnpg_collector_last_failed_backup_timestamp > 0)",
+     "legendFormat": "last FAILED backup (in-core Barman only; absent under the plugin)",
+     "refId": "B"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "max(kube_cronjob_status_last_successful_time{cronjob=~\".*-db-drill|tockmox-authentik-db-backup\"}) by (cronjob)",
+     "legendFormat": "{{cronjob}} last success",
+     "refId": "C"
+    }
+   ],
+   "title": "Backup timestamps advancing (flat lines mean stalled)",
+   "type": "timeseries",
+   "description": "Series A and B come from CNPG metrics deprecated since operator 1.26 that report 0 under the barman-cloud plugin path this platform uses. Both are filtered > 0 so a permanent zero does not draw a flat line at 1970 that reads as \"stalled since forever\"; under the plugin they are simply absent and the CronJob series (C) and the WAL backlog panel above carry the signal. If A ever appears, the operator is on the in-core Barman Cloud path, not the plugin."
+  },
+  {
+   "datasource": {
+    "type": "prometheus",
+    "uid": "${datasource}"
+   },
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "cronjob"
+      },
+      "properties": [
+       {
+        "id": "custom.wrapText",
+        "value": true
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "namespace"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 170
+       },
+       {
+        "id": "custom.wrapText",
+        "value": true
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byRegexp",
+       "options": "^(suspended|Value)$"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 100
+       }
+      ]
+     }
+    ]
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 6
+   },
+   "options": {},
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "kube_cronjob_spec_suspend{cronjob=~\".*-db-drill|tockmox-authentik-db-backup|.*backup.*\"}",
+     "format": "table",
+     "instant": true,
+     "refId": "A"
+    }
+   ],
+   "title": "Protection jobs: schedule state",
+   "type": "table",
+   "transformations": [
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time": true,
+       "__name__": true,
+       "container": true,
+       "endpoint": true,
+       "instance": true,
+       "job": true,
+       "pod": true,
+       "service": true
+      },
+      "indexByName": {
+       "cronjob": 0,
+       "namespace": 1,
+       "Value": 2
+      },
+      "renameByName": {
+       "Value": "suspended"
+      }
+     }
+    }
+   ]
+  }
+ ],
+ "refresh": "1m",
+ "schemaVersion": 39,
+ "tags": [
+  "platform",
+  "tockmox"
+ ],
+ "templating": {
+  "list": [
+   {
+    "current": {
+     "text": "Prometheus",
+     "value": "Prometheus"
+    },
+    "hide": 0,
+    "label": "Data source",
+    "name": "datasource",
+    "query": "prometheus",
+    "type": "datasource"
+   }
+  ]
+ },
+ "time": {
+  "from": "now-24h",
+  "to": "now"
+ },
+ "title": "Tockmox / Backup & Restore Proof",
+ "uid": "tockmox-backup-proof"
+}

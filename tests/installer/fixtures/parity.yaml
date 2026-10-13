@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The SAME answers as fixtures/interactive-answers.txt, expressed as a config
+# file. run.sh asserts that both routes produce a byte-identical site
+# repository.
+#
+# That assertion is the contract this file exists to hold: the README offers
+# interactive and --config as equal options, and testing-standard.md says that
+# where alternatives are offered as equals, BOTH are paths ... "the untested one
+# is the one a stranger picks, because it is listed first". Interactive is listed
+# first in README.md's quickstart and was the untested one.
+#
+# Keys omitted on purpose, to prove the defaults are the same on both routes:
+#   tockmox.revision   both fall through to v<VERSION>
+#   tockmox.repoURL    both fall through to the upstream URL
+#   global.certIssuer  both empty
+#   global.imageRegistry  both empty
+#   layers.*           both install all nine
+#   namespaces.*       neither overrides anything
+#   argocd.autoSync / selfHeal   both true
+site:
+  name: ci-interactive
+  path: ./tockmox-site
+
+global:
+  internalDomain: int.example.test
+  lanCIDR: 192.168.77.0/24
+  clusterCIDR: 10.42.0.0/16
+  serviceCIDR: 10.43.0.0/16
+  timezone: UTC
+  storageClass: longhorn
+  localStorageClass: local-path
+
+addressPool:
+  range: 192.168.77.200-192.168.77.210
+
+argocd:
+  namespace: argocd

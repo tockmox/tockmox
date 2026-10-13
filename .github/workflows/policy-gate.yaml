@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE POLICY GATE, PROVEN (TM-0383). Its own workflow rather than a ci.yaml step
+# because it installs and runs a real LiteLLM proxy, which ci.yaml's static
+# gates deliberately do not, and because a failure here should read as "the
+# sovereignty claim broke", not as one red line among forty.
+#
+#   tools/check-policy-gate.sh   the config invariant (REQ-0003 AC-3.2), on the
+#                                render: fifteen bad configs refused by name
+#   tests/policy-gate/run.sh     the forced failure (REQ-0002 AC-2.2): the local
+#                                backend killed, a restricted request with a
+#                                client fallback to an external model, and
+#                                nothing reaching the external backend
+#
+# LiteLLM is installed at the version the chart vendors, read from the vendored
+# chart, so the test always runs the gate in the proxy that ships it.
+name: policy-gate
+on:
+  pull_request:
+  push:
+    branches: [main, 'release-*']
+
+permissions:
+  contents: read
+
+env:
+  HELM_VERSION: "v4.3.0"
+
+jobs:
+  policy-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: vendored chart dependencies
+        run: bash tools/helm-deps.sh
+      - name: the config invariant refuses every bad config by name
+        run: bash tools/check-policy-gate.sh
+      - name: install LiteLLM at the vendored version
+        run: |
+          ver="$(helm show chart charts/tockmox-ai/charts/litellm-helm-*.tgz | sed -n 's/^appVersion: *//p' | tr -d '"')"
+          test -n "$ver" || { echo "::error::could not read the vendored LiteLLM appVersion"; exit 1; }
+          python3 -m venv "$RUNNER_TEMP/litellm"
+          "$RUNNER_TEMP/litellm/bin/pip" install --quiet "litellm[proxy]==${ver}"
+          echo "LITELLM_BIN=$RUNNER_TEMP/litellm/bin/litellm" >> "$GITHUB_ENV"
+          echo "LiteLLM ${ver}"
+      - name: the forced failure - local backend down, nothing reaches external
+        run: bash tests/policy-gate/run.sh

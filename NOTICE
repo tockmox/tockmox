@@ -1,0 +1,53 @@
+Tockmox
+Copyright 2026 Tockmox LLC
+
+This repository is the Tockmox platform: Helm charts, installer and
+documentation for a self-hosted AI and infrastructure platform.
+
+https://github.com/tockmox/tockmox
+
+Code and configuration in this repository are licensed under the Apache
+License, Version 2.0 (see LICENSE). Documentation, runbooks, and README
+files are licensed under the Creative Commons Attribution 4.0
+International license (see LICENSE-docs).
+
+The Tockmox brand assets under charts/tockmox-identity/brand/,
+tockmox-ui/app/static/brand/ and docs/assets/ are trademarks, not licensed
+by either licence.
+
+Third-party application icons under charts/tockmox-identity/brand/, named
+app-*.svg, identify the upstream projects whose consoles this platform
+deploys. They are vendored rather than fetched at runtime so that an
+air-gapped installation renders correctly.
+
+  app-grafana.svg, app-openwebui.svg, app-ntfy.svg
+      from the homarr-labs/dashboard-icons collection, Apache License 2.0
+      https://github.com/homarr-labs/dashboard-icons
+  app-argo-workflows.svg
+      from the CNCF artwork repository
+      https://github.com/cncf/artwork
+
+All product names, logos and trademarks are the property of their respective
+owners. They appear here for identification only and do not imply endorsement
+of Tockmox by those projects, nor any affiliation with them.
+
+The third-party software this platform DEPLOYS (as opposed to what this
+repository contains) is pulled unmodified from each project's own registry at
+install time and is governed by each project's own license. The register of
+those components, their licenses, and the caveats worth knowing (the AGPL
+set, the Open WebUI license, Redis 7.4, and the Authentik and LiteLLM
+open-core boundaries) is docs/third-party-licenses.md.
+
+"Tockmox" and the Tockmox marks are trademarks of Tockmox LLC and are not
+licensed by either license (see TRADEMARKS.md).
+
+The reserved namespace is likewise outside both licenses. Every component
+this repository ships carries the reserved Kubernetes prefix "tockmox-" or
+"tx-" (namespaces, release names, labels, resource names, and the values
+keys that set them). Those prefixes identify Tockmox-shipped objects and are
+part of the Tockmox marks: the copyright licenses above grant permission to
+copy, modify and redistribute the code and documentation, and grant no
+permission to present other software under the reserved prefixes or under
+the Tockmox name. A modified or forked distribution renames its own additions
+out of the reserved prefixes and states that it is derived from Tockmox. The
+policy, including what needs no permission, is TRADEMARKS.md.

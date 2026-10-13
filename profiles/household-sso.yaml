@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE HOUSEHOLD-SSO PROFILE ... small, single node, WITH single sign-on (TM-0276).
+#
+# The two other profiles are "everything" (reference.yaml) and "small, without
+# single sign-on" (minimal.yaml). This is the shape in between: one node, one
+# household, a handful of people who each sign in once and reach the chat
+# console and the model gateway through Authentik.
+#
+# Pass it the same way as minimal.yaml: after your global values, before your
+# per-layer overrides. docs/deployment/profiles.md, "Pass it to every layer",
+# has both shapes written out.
+#
+# THE SHAPE: minimal.yaml with single sign-on put back. Longhorn, Loki and
+# Alloy stay off as there; Authentik and SSO are on; Prometheus, Grafana and
+# Alertmanager stay, as the floor minimal.yaml already keeps. Deploy the same
+# layers minimal.yaml does, tockmox-identity included.
+#
+# WHY NOT SMALLER. The obvious next cut is the observability capability, and it
+# is its own file: profiles/observability-off.yaml (TM-0825). List it after
+# this one to go further. It is not folded in here because the capability alone
+# is not enough (the vendored subcharts' monitor switches have to be turned off
+# too, and platform and identity refuse to render with only half of that done),
+# and because a household that wants single sign-on may well still want its
+# dashboards.
+#
+# WHAT IT TAKES AWAY, the same losses minimal.yaml names:
+#
+#   no log aggregation      Loki and Alloy are off. `kubectl logs` still works.
+#   no replicated storage   Longhorn is off and storage falls to local-path.
+#                           One node has nothing to replicate to. A rescheduled
+#                           pod finds an empty volume; database backups are what
+#                           stands between you and loss.
+#   shorter metric history  Prometheus keeps 7 days and scrapes every 60s.
+#
+# WHAT IT KEEPS: the policy layer and network policy, the platform's ingress,
+# TLS and private CA (the path single sign-on depends on), the CNPG operator and
+# the backup path, Prometheus, Grafana and Alertmanager, Authentik, and the
+# whole AI plane.
+#
+# THE MODEL GATEWAY (LiteLLM) IS ON, as it is in every profile since 0.8.0
+# (TM-0460, ruling C1: "required" means on in the smallest profile too). It
+# costs about 0.5Gi here, the proxy plus a one-instance CNPG, and the console
+# goes through it on a key the chart mints, so there is no post-install key
+# step. Turning it off and pointing Open WebUI straight at a LAN model
+# endpoint is a site's choice, made in global.yaml plus ai.yaml
+# (docs/usage/ai-plane.md, "Running without the gateway"), and it gives up
+# scoped keys, request logging and routing. This file was run to a browser on
+# a lab cluster 2026-10-06 with the gateway on; the 0.8.0 default has not been
+# synced on a cluster yet.
+
+global:
+  # REQUIRED with Longhorn off; the platform layer refuses to render without
+  # it. `local-path` on k3s; name yours if it differs.
+  storageClass: local-path
+
+apps:
+  longhorn:
+    enabled: false
+  loki:
+    enabled: false
+  alloy:
+    enabled: false
+  authentik:
+    enabled: true
+
+# Every layer that consumes SSO reads this key. On is the point of the profile.
+sso:
+  enabled: true
+
+kube-prometheus-stack:
+  prometheus:
+    prometheusSpec:
+      retention: 7d
+      scrapeInterval: 60s
+  grafana:
+    persistence:
+      # Longhorn is off in this profile, and global.storageClass above says
+      # `local-path`. Grafana's chart does not run tpl over this key, so it
+      # cannot follow the global: without this line it keeps the chart's
+      # `longhorn` and the claim sits Pending on a cluster with no Longhorn.
+      # Shipped that way until 0.8.0 (TM-0146); the observability layer now
+      # refuses to render the mismatch.
+      storageClassName: local-path

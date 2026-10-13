@@ -1,0 +1,133 @@
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "networkPolicy" "app" "authentik_netpol") }}
+# SPDX-License-Identifier: Apache-2.0
+---
+# Default-deny INGRESS for the authentik namespace (egress untouched).
+# Highest-blast-radius namespace: a missed allow = silent SSO break
+# (break-glass), so know the flows before you tighten further.
+#
+# Why Traefik is the only external allow: every OIDC client (Grafana, Harbor,
+# Argo, Open WebUI, ...) reaches authentik via `auth.<internalDomain>`
+# (-> Traefik), and any forward-auth middleware calls authentik's Service FROM
+# the Traefik pod. So all external ingress to authentik originates at Traefik
+# (rule below). No app pod connects to authentik's service directly.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: default-deny-ingress
+  namespace: {{ .Values.namespaces.authentik }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Intra-namespace: authentik server <-> worker <-> redis <-> authentik-postgresql
+# (CNPG), plus the in-namespace authentik-postgres-backup CronJob -> *-rw:5432
+# and CNPG inter-instance replication + isolationCheck peer:8000.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-intra-namespace
+  namespace: {{ .Values.namespaces.authentik }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.authentik }}
+---
+# Traefik (own namespace) -> authentik. Covers ALL external ingress:
+#  - browser SSO flows over auth.int.example.com,
+#  - OIDC backchannel token exchange (clients call auth.int.example.com, which
+#    resolves to MetalLB -> Traefik -> authentik; source seen here is Traefik),
+#  - forward-auth outpost calls (Traefik middleware -> authentik-server.svc,
+#    executed from the Traefik pod).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-from-traefik
+  namespace: {{ .Values.namespaces.authentik }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.traefik }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+---
+# CNPG operator (cnpg-system) -> authentik-postgresql instances: instance-manager
+# status/management on 8000 and Postgres on 5432. Mirrors the monitoring/ai
+# CNPG allow. Same-namespace clients + peer isolationCheck covered by intra-ns.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-cnpg-operator
+  namespace: {{ .Values.namespaces.authentik }}
+spec:
+  # ANY CNPG instance in this namespace, not one cluster by name. See the long
+  # note on the same rule in ai-default-deny.yaml: a name-matched selector
+  # excluded a second CNPG cluster and left the operator unable to read its
+  # status, with a phase that blamed the restore.
+  #
+  # The name this used to carry was `authentik-postgresql`, which is a cluster that exists
+  # in the maintainer's homelab and has never existed in a Tockmox install ...
+  # Authentik here uses the bundled PostgreSQL StatefulSet, not CNPG. So this rule guarded nothing, and
+  # tools/check-no-ghost-policies.sh could not see it, because that gate works
+  # at NAMESPACE granularity and this namespace is far from empty.
+  #
+  # Matching cnpg.io/podRole makes it correct whether or not such a database is
+  # ever added here, instead of being a name copied from somewhere else.
+  podSelector:
+    matchLabels:
+      cnpg.io/podRole: instance
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.cnpg_system }}
+      ports:
+        - protocol: TCP
+          port: 8000
+        - protocol: TCP
+          port: 5432
+---
+# Prometheus (monitoring) -> authentik metrics + the authentik-postgresql CNPG
+# metrics exporter. Port-unrestricted like the harbor pattern (covers authentik's
+# own metrics endpoint and the CNPG :9187 exporter without enumerating).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-prometheus-scrape
+  namespace: {{ .Values.namespaces.authentik }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.monitoring }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+{{- end }}

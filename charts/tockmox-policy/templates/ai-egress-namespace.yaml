@@ -1,0 +1,332 @@
+{{- if and (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "networkPolicy" "app" "ai_namespace")) .Values.aiEgress.namespaceDefaultDeny }}
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+EGRESS DEFAULT-DENY FOR THE WHOLE AI NAMESPACE (TM-0273 fix 1).
+
+ai-egress.yaml contains the chat console. This file closes the rest: the model
+gateway, which holds provider keys and is the pod the card named as the
+priority, its database, and anything else that lands here. It renders behind the
+SAME toggle as the namespace's ingress default-deny (apps.ai_namespace).
+
+SELECTING A POD MAKES IT DEFAULT-DENY, and a bare egress deny cuts more than the
+internet. Measured on a throwaway k3s with kube-router (evidence in the card,
+2026-09-06 and 2026-09-07): DNS fails, AND a pod can no longer reach its own
+namespace neighbours, which would have broken Open WebUI -> LiteLLM and LiteLLM
+-> its database. So every policy below except the deny itself is a companion the
+deny cannot ship without:
+
+  allow-egress-dns              kube-dns 53, every pod
+  allow-egress-intra-namespace  the namespace itself, every pod not labelled tockmox.com/isolated
+  allow-egress-cnpg             CNPG pods: Kubernetes API, Garage S3 (3900)
+  allow-egress-restore-drill    the drill's kubectl: Kubernetes API
+  allow-egress-gateway-key      the console-key Job's kubectl: Kubernetes API (TM-0460)
+  allow-egress-console-key-check  the console-key check: the model gateway, port 4000 (TM-0982)
+  allow-egress-litellm          both gateways (production, eval): provider egress, LAN/cluster excluded
+
+The Open WebUI policy in ai-egress.yaml is additive to these and is NOT widened
+by them: what it already allows (DNS, the namespace, Traefik) is the same
+set, and the rules that add reach (provider, API, Garage) select other pods.
+
+NOT PROVEN by rendering: every path here except the ones the card measured
+(DNS, intra-namespace) is derived from the templates. The CNPG instance manager
+reaching the API server on the address the CNI evaluates after service DNAT, and
+the barman sidecar doing all its S3 work over 3900, are INFERRED until a live
+run with backups on shows the Cluster healthy and a Backup completing.
+*/ -}}
+{{- $ai := .Values.namespaces.ai -}}
+{{- $lg := .Values.aiEgress.litellm -}}
+{{- $cn := .Values.aiEgress.cnpg -}}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: default-deny-egress
+  namespace: {{ $ai }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-egress-dns
+  namespace: {{ $ai }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Without this a pod cannot reach its OWN namespace: Open WebUI -> LiteLLM,
+# LiteLLM -> its database, Open WebUI -> its Redis, the drill -> the cluster it
+# restored. Measured 2026-09-07, not assumed.
+#
+# Pods labelled tockmox.com/isolated (the Tockmox UI, the model watcher, the
+# eval gateway; TM-0920) are left out, as they are from every namespace-wide
+# ingress allow in ai-default-deny.yaml. Their own NetworkPolicies say what they
+# may reach, and none of them needs a neighbour. With `podSelector: {}` here the
+# watcher, whose pages say it reaches "not the cluster", answered 200 from the
+# model gateway, and so did the UI and the eval gateway (lab F10, 2026-10-08).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-egress-intra-namespace
+  namespace: {{ $ai }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: tockmox.com/isolated, operator: DoesNotExist }
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $ai }}
+---
+# THE CNPG PODS. `cnpg.io/cluster` is on every pod CNPG creates for a Cluster
+# (instances and the recovery/join Jobs), so the restore drill's temporary
+# cluster is covered as well as the gateway's database. Two paths:
+#
+#   the Kubernetes API   the instance manager watches and patches its own
+#                        Cluster and Pod objects. Without it the instance stops
+#                        reporting and the operator loses it.
+#   Garage S3, 3900      the barman-cloud plugin's WAL archive and base backups,
+#                        against the shipped object store in the platform
+#                        namespace. ONLY the S3 port: the admin port 3903 is the
+#                        one the measured hole exposed. The platform namespace
+#                        needs the matching ingress rule, and has one
+#                        (allow-s3-from-backup-clients).
+#
+# A backup pointed at YOUR object store is not on this list; add it to
+# aiEgress.cnpg.extraEgress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-egress-cnpg
+  namespace: {{ $ai }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: cnpg.io/cluster
+        operator: Exists
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        {{- if $cn.apiServerCIDRs }}
+        {{- range $cn.apiServerCIDRs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+        {{- else }}
+        - ipBlock:
+            cidr: {{ .Values.global.serviceCIDR }}
+        - ipBlock:
+            cidr: {{ .Values.global.lanCIDR }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.platform }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tockmox-garage
+      ports:
+        - protocol: TCP
+          port: 3900
+    {{- with $cn.extraEgress }}
+    # Site-supplied, appended verbatim.
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+---
+# The weekly restore drill's CronJob pod runs kubectl: it creates the drill
+# Cluster, waits on it, patches the register ConfigMap and deletes the Cluster
+# (templates/restore-drill.yaml in the ai layer). It needs the API and nothing
+# else beyond the namespace. Inert where the drill is off.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-egress-restore-drill
+  namespace: {{ $ai }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-restore-drill
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        {{- if $cn.apiServerCIDRs }}
+        {{- range $cn.apiServerCIDRs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+        {{- else }}
+        - ipBlock:
+            cidr: {{ .Values.global.serviceCIDR }}
+        - ipBlock:
+            cidr: {{ .Values.global.lanCIDR }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+---
+# The console-key Job (templates/gateway-key.yaml in the ai layer, TM-0460) runs
+# kubectl once: it reads and creates the console's virtual-key Secret. The
+# gateway itself it reaches through allow-egress-intra-namespace. It needs the
+# API and nothing else. Same shape and the same address list as the drill's
+# rule above; inert where the Job is off (modelGateway.consoleKey.enabled).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-egress-gateway-key
+  namespace: {{ $ai }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-gateway-key
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        {{- if $cn.apiServerCIDRs }}
+        {{- range $cn.apiServerCIDRs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+        {{- else }}
+        - ipBlock:
+            cidr: {{ .Values.global.serviceCIDR }}
+        - ipBlock:
+            cidr: {{ .Values.global.lanCIDR }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+---
+# The console-key check (templates/console-key-check.yaml in the ai layer,
+# TM-0982) sends one request with the console's key to the production gateway
+# every quarter hour. Its pod carries tockmox.com/isolated, so the namespace
+# allow above does not reach it, and this is the ONLY path it has besides
+# DNS: the gateway's pods, on the proxy port. Not the API server (it has no
+# token), not the LAN, not the eval gateway. Inert where the check is off.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-egress-console-key-check
+  namespace: {{ $ai }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-console-key-check
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: litellm
+      ports:
+        - protocol: TCP
+          port: 4000
+---
+# THE MODEL GATEWAYS. They hold the provider credentials, so their outbound path is
+# the one the card cares about most. Both of them: the production gateway
+# (app.kubernetes.io/name=litellm) and the eval gateway
+# (tockmox-litellm-eval, REQ-0048) serve the same nodes and providers, and the
+# eval gateway with no egress answered every candidate with "Connection error"
+# (lab F5, 2026-10-08). Its isolation is about who reaches IT (its own policy in
+# the AI layer); where it may send is the production gateway's, entry for entry,
+# including extraEgress. The default is TCP 443 to anywhere EXCEPT
+# the cluster, the Service range, the LAN and link-local: hosted providers keep
+# working, and the gateway cannot use that path to reach another pod, the API
+# server, a LAN device or a cloud metadata address. A model host on the LAN is
+# deliberately NOT reachable by default; add it to aiEgress.litellm.extraEgress.
+#
+# The in-cluster model path (Ollama, when the site enables it, lives in this
+# namespace) is covered by allow-egress-intra-namespace, so it needs nothing
+# here. A model server in ANOTHER namespace needs an extraEgress entry.
+#
+# The except list is added only to a cidr of exactly 0.0.0.0/0: the API server
+# rejects an `except` that is not inside its cidr, so a narrowed provider list
+# is rendered as written.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-egress-litellm
+  namespace: {{ $ai }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/name, operator: In, values: [litellm, tockmox-litellm-eval] }
+  policyTypes:
+    - Egress
+  {{- if or $lg.providerAllow $lg.extraEgress }}
+  egress:
+    {{- range $lg.providerAllow }}
+    - to:
+        - ipBlock:
+            cidr: {{ .cidr }}
+            {{- if eq .cidr "0.0.0.0/0" }}
+            except:
+              - {{ $.Values.global.clusterCIDR }}
+              - {{ $.Values.global.serviceCIDR }}
+              - {{ $.Values.global.lanCIDR }}
+              - 169.254.0.0/16
+            {{- end }}
+      {{- with .ports }}
+      ports:
+        {{- range . }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+    {{- with $lg.extraEgress }}
+    # Site-supplied, appended verbatim. Every entry is a deliberate hole.
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- else }}
+  egress: []
+  {{- end }}
+{{- end }}

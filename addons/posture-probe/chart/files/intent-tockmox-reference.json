@@ -1,0 +1,448 @@
+{
+ "version": "v0",
+ "name": "tockmox-reference-pilot",
+ "status": "PILOT INTENT ... derived from the chart's own stated design, for Jeff to ratify. Rows test declared intent only; namespaces with no stated egress intent (authentik, devops, selfcheck) are deliberately not asserted (TM-0273 tracks egress).",
+ "intents": [
+  {
+   "subject": "tockmox-ai->tockmox-authentik",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-ai->tockmox-devops",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-ai->tockmox-diagnostic",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-ai->tockmox-monitoring",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-ai->tockmox-platform",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-ai->tockmox-selfcheck",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-authentik->tockmox-ai",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-authentik->tockmox-devops",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-authentik->tockmox-diagnostic",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-authentik->tockmox-monitoring",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-authentik->tockmox-platform",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-authentik->tockmox-selfcheck",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-devops->tockmox-ai",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-devops->tockmox-authentik",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-devops->tockmox-diagnostic",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-devops->tockmox-monitoring",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-devops->tockmox-platform",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-devops->tockmox-selfcheck",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-diagnostic->tockmox-ai",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-diagnostic->tockmox-authentik",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-diagnostic->tockmox-devops",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-diagnostic->tockmox-monitoring",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-diagnostic->tockmox-platform",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-diagnostic->tockmox-selfcheck",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-monitoring->tockmox-ai",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-monitoring->tockmox-authentik",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-monitoring->tockmox-devops",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-monitoring->tockmox-diagnostic",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-monitoring->tockmox-platform",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-monitoring->tockmox-selfcheck",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-platform->tockmox-ai",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-platform->tockmox-authentik",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-platform->tockmox-devops",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-platform->tockmox-diagnostic",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-platform->tockmox-monitoring",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-platform->tockmox-selfcheck",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-selfcheck->tockmox-ai",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-selfcheck->tockmox-authentik",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-selfcheck->tockmox-devops",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-selfcheck->tockmox-diagnostic",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-selfcheck->tockmox-monitoring",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-selfcheck->tockmox-platform",
+   "dimension": "ns-to-ns",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable"
+  },
+  {
+   "subject": "tockmox-ai->internet",
+   "dimension": "egress",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "ai-default-deny: default-deny-egress; only litellm is allowed 0.0.0.0/0:443"
+  },
+  {
+   "subject": "tockmox-diagnostic->internet",
+   "dimension": "egress",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "diagnostic default-deny Ingress+Egress; egress allowed only to DNS, API, monitoring"
+  },
+  {
+   "subject": "tockmox-platform->internet",
+   "dimension": "egress",
+   "intent": "allow",
+   "tier": "claimed",
+   "basis": "platform-netpol header: egress is wide by design (Longhorn, ACME, Barman)"
+  },
+  {
+   "subject": "tockmox-monitoring->internet",
+   "dimension": "egress",
+   "intent": "allow",
+   "tier": "claimed",
+   "basis": "monitoring bundle: ingress-only by design"
+  },
+  {
+   "subject": "tockmox-ai->kube-api",
+   "dimension": "api-egress",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "API egress in tockmox-ai is pod-scoped (cnpg, restore-drill); an arbitrary ai pod has none"
+  },
+  {
+   "subject": "tockmox-diagnostic->kube-api",
+   "dimension": "api-egress",
+   "intent": "allow",
+   "tier": "claimed",
+   "basis": "allow-dns-api-telemetry: the diagnostic agent needs the API"
+  },
+  {
+   "subject": "tockmox-diagnostic:tockmox-diagnostic",
+   "dimension": "rbac:list secrets @*",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded"
+  },
+  {
+   "subject": "tockmox-diagnostic:tockmox-diagnostic",
+   "dimension": "rbac:get secrets @kube-system",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded"
+  },
+  {
+   "subject": "tockmox-diagnostic:tockmox-diagnostic",
+   "dimension": "rbac:list secrets @tockmox-diagnostic",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded"
+  },
+  {
+   "subject": "tockmox-diagnostic:tockmox-diagnostic",
+   "dimension": "rbac:create pods @tockmox-diagnostic",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded"
+  },
+  {
+   "subject": "tockmox-diagnostic:tockmox-diagnostic",
+   "dimension": "rbac:create pods/exec @tockmox-diagnostic",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded"
+  },
+  {
+   "subject": "tockmox-diagnostic:tockmox-diagnostic",
+   "dimension": "rbac:list pods @*",
+   "intent": "allow",
+   "tier": "claimed",
+   "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded"
+  },
+  {
+   "subject": "tockmox-diagnostic:tockmox-diagnostic",
+   "dimension": "rbac:list nodes @*",
+   "intent": "allow",
+   "tier": "claimed",
+   "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded"
+  },
+  {
+   "subject": "tockmox-diagnostic:tockmox-diagnostic",
+   "dimension": "rbac:list namespaces @*",
+   "intent": "allow",
+   "tier": "claimed",
+   "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded"
+  },
+  {
+   "subject": "tockmox-diagnostic:tockmox-diagnostic",
+   "dimension": "rbac:create networking.k8s.io/networkpolicies @tockmox-diagnostic",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded"
+  },
+  {
+   "subject": "tockmox-diagnostic:tockmox-diagnostic",
+   "dimension": "rbac:delete networking.k8s.io/networkpolicies @tockmox-diagnostic",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded"
+  },
+  {
+   "subject": "tockmox-diagnostic:tockmox-diagnostic",
+   "dimension": "rbac:create rbac.authorization.k8s.io/rolebindings @tockmox-diagnostic",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded"
+  },
+  {
+   "subject": "tockmox-diagnostic:tockmox-diagnostic",
+   "dimension": "rbac:create rbac.authorization.k8s.io/clusterrolebindings @*",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded"
+  },
+  {
+   "subject": "tockmox-diagnostic:tockmox-diagnostic",
+   "dimension": "rbac:impersonate serviceaccounts @*",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded"
+  },
+  {
+   "subject": "tockmox-diagnostic:tockmox-diagnostic",
+   "dimension": "rbac:escalate rbac.authorization.k8s.io/clusterroles @*",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded"
+  },
+  {
+   "subject": "tockmox-diagnostic:tockmox-diagnostic",
+   "dimension": "rbac:create apps/deployments @tockmox-diagnostic",
+   "intent": "deny",
+   "tier": "claimed",
+   "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded"
+  }
+ ]
+}

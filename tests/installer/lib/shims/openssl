@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Wraps the real openssl. ONLY `rand` is replaced: it returns a value carrying a
+# known marker, so a test can grep everything it captured for a credential that
+# should never have reached disk, stdout or stderr. Everything else (base64,
+# enc, dgst) is the real thing. This is a test seam that lives in the tests
+# and not in tools/mint-secrets.sh, so production code has no switch that makes
+# its secrets predictable.
+S="${FAKE_STATE:?FAKE_STATE not set}"
+if [ "${1:-}" = "rand" ]; then
+  n=$(( $(cat "$S/rand.count" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$S/rand.count"
+  printf 'openssl %s\n' "$*" >> "$S/calls.log"
+  printf 'SECRETMARKER-%s\n' "$n"
+  exit 0
+fi
+exec "${REAL_OPENSSL:?REAL_OPENSSL not set}" "$@"

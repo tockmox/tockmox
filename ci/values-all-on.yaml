@@ -1,0 +1,78 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE ALL-ON OVERLAY: every shipped path that defaults off, forced on, so the
+# gates render surfaces the defaults never exercise. Applied ON TOP of
+# ci/values.yaml by the lint step, the ghost-policy gate's second pass, and
+# the netpol-selector gate's second pass.
+#
+# WHY THIS EXISTS, twice over on the same night (2026-08-19): the ghost
+# gate's "every shipped application enabled" pass rendered byte-identically
+# to its defaults pass because nothing flipped anything, and a
+# lint-breaking template defect in the backup path shipped invisibly because
+# ci/values.yaml never renders backups. Coverage that reads as more than it
+# is, is the exact defect class half the tools/ directory exists to catch.
+#
+# WHAT DELIBERATELY STAYS OFF, so this file does not rot into a lie:
+#   - The site-supplied NetworkPolicy bundles (forgejo, tailscale,
+#     syslog_ingest, harbor). They guard workloads Tockmox does not ship;
+#     enabling one without its workload is an operator's call, and the ghost
+#     gate exists to fail exactly that combination.
+#   - Anything requiring a site-supplied VALUE to be meaningful (real
+#     hostnames, external endpoints) keeps the CI stand-in from
+#     ci/values.yaml rather than inventing new ones here.
+
+capabilities:
+  # Off by default because the reference deployment is a VM with no physical
+  # disk to ask; ON here because the exporters and their monitors must render.
+  hardwareTelemetry:
+    enabled: true
+
+modelGateway:
+  database:
+    backup:
+      # The path the 2026-08-19 lint defect hid in. Renders the ObjectStore,
+      # the ScheduledBackup, the WAL-archiver plugin config, the restore
+      # drill CronJob + RBAC + register + freshness rules.
+      enabled: true
+
+ingress:
+  apps:
+    # Auth posture is why this defaults off; render coverage is why it is on
+    # here. An Ingress that only renders in a site nobody lints is the
+    # netpol-selector story with a hostname.
+    longhorn:
+      enabled: true
+
+traefik:
+  ingressRoute:
+    dashboard:
+      # Same reasoning as the Longhorn console above; subchart key, so it
+      # lives at the subchart path rather than under ingress.apps.
+      enabled: true
+
+sso:
+  # Off by default (an empty list renders nothing); on here so the PostSync Job
+  # that adds admin members renders, and tools/check-pod-security.sh measures
+  # it against `restricted` in tockmox-authentik (TM-0820).
+  adminUsers:
+    - admin
+
+# tockmox-observability: Grafana on CloudNativePG (TM-0786), so the CNPG
+# Cluster, its env Secret and the preflight's agreement checks are rendered and
+# linted, and the CNPG netpol, storage and memory gates see the database.
+grafanaDatabase:
+  enabled: true
+
+# tockmox-ai: the Tockmox UI (experimental, off by default), so its objects and
+# its PrometheusRule (TM-1013: sign-in failures, unreachable UI) render here and
+# tools/check-alert-rules.sh lints and unit-tests them. The image is a stand-in,
+# as in ci/values-inference-nodes.yaml.
+tockmoxUi:
+  enabled: true
+  image: registry.example/tockmox/tockmox-ui:0.8.0-site
+  config:
+    site: {name: Example, domain: int.example.com}
+    oidc:
+      issuer: https://auth.int.example.com/application/o/tockmox-ui
+      clientId: tockmox-ui
+      redirectUrl: https://tockmox.int.example.com/auth/callback

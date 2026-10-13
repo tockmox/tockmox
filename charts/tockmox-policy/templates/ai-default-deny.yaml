@@ -1,0 +1,196 @@
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "networkPolicy" "app" "ai_namespace") }}
+# SPDX-License-Identifier: Apache-2.0
+---
+# Default-deny INGRESS for the AI namespace. The layer most worth locking
+# first: it holds chat history and whatever documents users upload to it.
+#
+# INGRESS ONLY (deliberate, phase 1). policyTypes does NOT include Egress, so
+# egress stays open: DNS, model-host connections and image pulls keep working
+# untouched. Egress lockdown is a later phase ... it is the high-risk half
+# (breaks DNS/pulls/OIDC if a rule is missed) and buys little while the
+# sensitive data is guarded by the ingress posture.
+#
+# The allows below follow the same recipe as the other guarded namespaces:
+# intra-namespace for app -> its own backing services, the Traefik pod for
+# anything behind ingress, and Prometheus for scrape targets.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: default-deny-ingress
+  namespace: {{ .Values.namespaces.ai }}
+spec:
+  podSelector: {}          # every pod in the namespace
+  policyTypes:
+    - Ingress              # Egress intentionally omitted (stays open)
+---
+# Open WebUI -> its Redis lives entirely inside the namespace; one
+# intra-namespace allow covers it and any future same-namespace backing store.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-intra-namespace
+  namespace: {{ .Values.namespaces.ai }}
+spec:
+  # Pods labelled tockmox.com/isolated (the eval gateway, REQ-0048) are left
+  # out: their own NetworkPolicy names who may reach them, and an allow here
+  # would add every pod in the namespace to that list.
+  podSelector:
+    matchExpressions:
+      - { key: tockmox.com/isolated, operator: DoesNotExist }
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.ai }}
+---
+# Traefik -> Open WebUI, for `chat.<internalDomain>`. Scoped to the Traefik
+# pod, not its whole namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-from-traefik
+  namespace: {{ .Values.namespaces.ai }}
+spec:
+  # Pods labelled tockmox.com/isolated (the eval gateway, REQ-0048) are left
+  # out: their own NetworkPolicy names who may reach them, and an allow here
+  # would add every pod in the namespace to that list.
+  podSelector:
+    matchExpressions:
+      - { key: tockmox.com/isolated, operator: DoesNotExist }
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.traefik }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+---
+# Prometheus -> anything in this namespace that exposes /metrics. Mirrors the
+# allow-prometheus-scrape rule the other guarded namespaces carry.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-prometheus-scrape
+  namespace: {{ .Values.namespaces.ai }}
+spec:
+  # Pods labelled tockmox.com/isolated (the eval gateway, REQ-0048) are left
+  # out: their own NetworkPolicy names who may reach them, and an allow here
+  # would add every pod in the namespace to that list.
+  podSelector:
+    matchExpressions:
+      - { key: tockmox.com/isolated, operator: DoesNotExist }
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.monitoring }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+{{- end }}
+{{/*
+THIS FOLLOWS THE networkPolicy CAPABILITY, like every other netpol app, and the
+fix for TM-0518 was to stop it doing anything else.
+
+`ai_cnpg_netpol` has always been in `capabilityOwners` under `networkPolicy`.
+But `tockmox-policy/values.yaml` also pinned it to `{ enabled: false }`, and an
+explicit entry beats the capability ... so the one netpol that keeps the CNPG
+operator able to see its database was the one netpol turned off by default,
+while every sibling followed the capability and was on.
+
+What that cost, measured on a cold install 2026-09-12: the site set
+`apps.litellm.enabled: true` (the only switch any documentation page names),
+this policy did not render, `default-deny-ingress` ... empty podSelector, so
+every pod in the namespace ... covered the database, and the CNPG operator in
+tockmox-platform was denied :8000 permanently. The Cluster sat in
+`Instance Status Extraction Error: HTTP communication issue`, `tockmox-ai`
+reported ArgoCD health `Unknown` for the whole run, and NOTHING went red.
+
+A stock cloudnative-pg on the same node with no Tockmox reported healthy, which
+is what localised it to us rather than upstream.
+
+**The first fix attempted here was to follow `apps.litellm`, and it was wrong in
+a way worth recording**: `apps.litellm` lives in the site's `ai.yaml`, and the
+policy Application loads only `global.yaml` + `policy.yaml`. It would have
+passed CI, where one values file carries every layer's keys, and failed on every
+real multi-source install. Cross-layer values do not exist; the capability is
+the only thing all nine layers can see.
+*/}}
+{{- if (include "tockmox.appEnabled" (dict "ctx" $ "app" "ai_cnpg_netpol")) }}
+---
+# CNPG operator -> the model gateway's database. Same shape as the authentik and
+# monitoring rules: :8000 is the instance-manager status endpoint the operator
+# polls, :5432 is postgres itself for the bootstrap and switchover paths.
+#
+# Separate flag rather than folded into ai_namespace above, because this rule
+# selects a CNPG Cluster that only exists when apps.litellm is on in
+# tockmox-ai. Rendering it unconditionally would ship a policy matching no pod,
+# which is what tools/check-no-ghost-policies.sh exists to prevent ... and that
+# gate compares at NAMESPACE granularity, so it would not have caught this one.
+# The two flags are turned on together.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-cnpg-operator
+  namespace: {{ .Values.namespaces.ai }}
+spec:
+  # SELECTS EVERY CNPG INSTANCE IN THIS NAMESPACE, not one cluster by name, and
+  # that distinction was found by running the restore drill rather than by
+  # reading this file.
+  #
+  # It used to match `cnpg.io/cluster: <the gateway database>`. The restore
+  # drill creates a SECOND CNPG cluster in this namespace, so its pods carried a
+  # different value and the operator's status probe to :8000 was denied. The
+  # restore itself worked ... the recovery Job completed, the pod came up 1/1,
+  # archiving reported working ... and the Cluster sat in
+  #
+  #     Instance Status Extraction Error: HTTP communication issue
+  #
+  # forever, with a phaseReason that names NetworkPolicy and is easy to read
+  # past. A drill would have failed weekly with a timeout whose stated cause was
+  # the restore, not the policy.
+  #
+  # `cnpg.io/podRole: instance` is the label CNPG puts on every instance pod of
+  # every cluster it manages. Matching it means the operator can reach the
+  # instance-manager of any database in this namespace, which is what the
+  # operator's job actually is, and a new database no longer needs a new rule.
+  #
+  # Still renders no policy over an empty namespace: with apps.litellm off there
+  # are no CNPG pods here at all, which is what the separate flag is for.
+  podSelector:
+    matchLabels:
+      cnpg.io/podRole: instance
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.cnpg_system }}
+      ports:
+        # The instance-manager status endpoint the operator polls. Denying it
+        # does not stop the database; it stops the operator knowing anything
+        # about it.
+        - protocol: TCP
+          port: 8000
+        # Postgres itself, for the bootstrap and switchover paths.
+        - protocol: TCP
+          port: 5432
+{{- end }}

@@ -1,0 +1,465 @@
+# SPDX-License-Identifier: Apache-2.0
+global:
+  internalDomain: ""
+  certIssuer: "tockmox-ca"
+  imageRegistry: ""
+  timezone: "UTC"
+  clusterCIDR: "10.42.0.0/16"
+  serviceCIDR: "10.43.0.0/16"
+  lanCIDR: ""
+  # THE STORAGE CONTRACT. Empty means "use whatever the cluster's default
+  # StorageClass happens to be", which is not the same as "use the storage this
+  # platform ships". On k3s the default is `local-path`: node-local, one copy,
+  # no snapshots, no backup target. Tockmox shipped Longhorn and, because
+  # nothing named a class, wrote every PVC to local-path anyway.
+  #
+  # Name it. `longhorn` on a stock install with apps.longhorn enabled;
+  # `local-path` if you have deliberately chosen node-local storage; the name of
+  # your own CSI class if you brought one. A preflight refuses the combination
+  # that used to fail silently.
+  storageClass: ""
+
+  # THE SECOND HALF OF THE STORAGE CONTRACT: the class for data whose
+  # application already protects it, or that can be re-derived.
+  #
+  # The policy is "replicate at exactly one layer". If an application keeps its
+  # own copies (Postgres streaming to replicas, an object store spreading
+  # across nodes) or the data can be rebuilt (a metrics TSDB), then replicating
+  # the volume underneath buys nothing and costs two to three times the disk
+  # plus write latency on the hot path. Those workloads get THIS class.
+  # Everything else gets `storageClass` above.
+  #
+  # `local-path` is k3s's own provisioner and is the shipped default here.
+  # prerequisites.md tells you to UN-DEFAULT it rather than delete it, and this
+  # is why. Node-local means a rescheduled pod finds an empty volume, which is
+  # the trade this class exists to make; do not point it at anything whose loss
+  # you would mind.
+  #
+  # Empty falls back to the cluster default, which un-does the policy without
+  # complaining. Set it to a class you have.
+  localStorageClass: "local-path"
+# ---------------------------------------------------------------------------
+# CAPABILITIES: functional stories you can decline.
+#
+# `apps.*` is one switch per piece of software, which is the wrong unit for the
+# decision people actually make. Nobody chooses "a Garage", "a barman plugin"
+# and "a snapshot controller" separately; they choose whether this deployment
+# protects its data, or whether they already run Velero and want none of it.
+#
+# A capability is that decision, named, on one switch, spanning whatever
+# components it takes and whichever layers they live in.
+#
+# HOW IT RESOLVES, and the tri-state is the point:
+#   apps.<x>.enabled unset   follow the capability that owns the component
+#   apps.<x>.enabled: true   on, even if the capability is off
+#   apps.<x>.enabled: false  off, even if the capability is on
+#
+# So declining a capability turns off everything it owns, and a component you
+# named yourself still means what you said. Turning a single component on while
+# its capability is off fails the render rather than half-building the story.
+#
+# THIS BLOCK IS BYTE-IDENTICAL IN ALL NINE LAYERS, and that is deliberate. The
+# values namespace is shared across layers, so one profile sets a capability
+# once and every layer owning part of it reads the same answer. Editing one copy
+# and not the others is the failure the uniformity exists to prevent, and
+# tools/check-capabilities.sh fails CI on any drift between them.
+#
+# Full list, what each one contains, and why you would decline it:
+# docs/administration/capabilities.md
+# ---------------------------------------------------------------------------
+capabilities:
+  # Metrics, logs and the rules that read them ... everything answering "what is
+  # this platform doing right now". Off means Tockmox ships no Prometheus, no
+  # Loki, no Alloy, and none of its own ServiceMonitors or alert rules.
+  #
+  # Running your own Prometheus operator is the case worth naming. Decline the
+  # capability and set `apps.serviceMonitors.enabled: true`, and Tockmox renders
+  # its monitors and rules for YOUR operator to collect, without standing up a
+  # second stack beside the one you already run.
+  observability:
+    enabled: true
+
+  # Alerts that reach a person: the notification sink, the bridge that feeds it
+  # and the heartbeat that proves the path still works when nothing is wrong.
+  # Off means alerts fire into Alertmanager and stop there.
+  #
+  # The component switch for this one is `notifications.enabled` rather than an
+  # `apps` key, because it predates this framework and is a contract key. It has
+  # the same tri-state: unset follows the capability, set means what you said.
+  notifications:
+    enabled: true
+
+  # One sign-in across every console, and the identity provider behind it. Off
+  # means Tockmox ships no Authentik and each console falls back to its own
+  # local login, unless you point `sso` at an issuer you already run.
+  identity:
+    enabled: true
+
+  # The private AI plane: a chat console and the model gateway in front of it.
+  # Off leaves Tockmox as a platform and nothing else, which is a legitimate way
+  # to run it and the right answer if you are here for the infrastructure.
+  aiPlane:
+    enabled: true
+
+  # Backups that go somewhere, restores that are exercised, and the CSI
+  # plumbing underneath both. Off means Tockmox ships no object store, no
+  # backup plugin and no snapshot control plane, and expects you to have your
+  # own or to not want one.
+  dataProtection:
+    enabled: true
+
+  # Telemetry from PHYSICAL hardware: disk SMART attributes, and SNMP from
+  # switches, UPSes and appliances.
+  #
+  # OFF BY DEFAULT, unlike every other capability here, because the reference
+  # deployment is a virtual machine: there is no physical disk to ask and no
+  # switch to poll, and an exporter scraping nothing still alerts on its own
+  # absence. Turn it on when the hardware is real, and both exporters follow.
+  hardwareTelemetry:
+    enabled: false
+
+  # Jobs running inside the cluster on a schedule or an event, with a console to
+  # watch them. Off means no Argo Workflows.
+  workflowAutomation:
+    enabled: true
+
+  # Default-deny between namespaces, so a compromised workload cannot reach a
+  # neighbour it was never meant to.
+  #
+  # Off is the honest setting on a cluster whose CNI does not enforce
+  # NetworkPolicy at all. Flannel without a policy plugin accepts every object
+  # here and enforces none of them, and a control that is only decoration is
+  # worse than no control, because it gets counted.
+  networkPolicy:
+    enabled: true
+
+namespaces:
+  identity: tockmox-authentik
+
+# ---------------------------------------------------------------------------
+# The way in. `auth.<internalDomain>` by default; global.certIssuer adds TLS.
+# The upstream chart's own `authentik.server.ingress` stays off: its host is a
+# static string, and Tockmox derives hostnames from one place.
+# ---------------------------------------------------------------------------
+ingress:
+  # Empty uses the cluster's DEFAULT IngressClass ... the Traefik the platform
+  # layer ships marks itself default, and its class name derives from the
+  # release (`tockmox-platform-traefik` on a stock install), so naming it here
+  # would break on rename. Set this only to pin a specific class.
+  className: ""
+  annotations: {}
+  apps:
+    authentik:
+      enabled: true
+      host: ""            # override the derived auth.<internalDomain>
+
+apps:
+  authentik: {}   # unset: follows capabilities.identity
+
+# ---------------------------------------------------------------------------
+# BRANDING ... the login page and the application tiles.
+#
+# A tiny nginx serving the Tockmox marks from a ConfigMap at /tockmox on the
+# Authentik host, plus a blueprint pointing Authentik's branding fields at it.
+# Nothing is fetched from the internet: a login page that loads its logo from a
+# CDN is a login page that looks broken on an air-gapped install.
+#
+# REPLACING THE MARKS. "Tockmox" and the Tockmox logo are trademarks
+# (TRADEMARKS.md): a modified distribution must not identify itself as Tockmox.
+# Swap the SVGs in charts/tockmox-identity/brand/ for your own and set `title`,
+# or set enabled: false for stock Authentik branding.
+# ---------------------------------------------------------------------------
+brand:
+  enabled: true
+  title: Tockmox
+  # The UNPRIVILEGED nginx, not the stock one. Stock nginx starts as root to
+  # chown its temp directories and then drops; under runAsNonRoot with a
+  # read-only root it fails during startup with a permission error that names a
+  # path, not a cause. This variant listens on 8080 as UID 101 by design, and
+  # the observability layer already pulls the same image family.
+  image: nginxinc/nginx-unprivileged:1.31-alpine
+  priorityClassName: tockmox-apps
+  resources:
+    requests: {cpu: 10m, memory: 16Mi}
+    limits: {memory: 64Mi}
+
+# ---------------------------------------------------------------------------
+# SINGLE SIGN-ON ... on by default. Enabling the identity layer means the
+# other consoles use it.
+#
+# This chart ships Authentik BLUEPRINTS declaring an OAuth2 provider and an
+# Application per shipped UI, with redirect URIs derived from
+# global.internalDomain, plus two groups every app's role mapping keys on:
+#   tockmox-admins  -> Grafana Admin, Open WebUI admin, Argo admin
+#   tockmox-users   -> Grafana Viewer, Open WebUI user, Argo read-only
+#
+# Client secrets NEVER appear in values or blueprints. Blueprints read them
+# with !Env from the `tockmox-sso` Secret you create (see
+# docs/administration/secrets.md); each consuming app reads ITS copy from its
+# own per-app Secret. Until the secrets exist, Authentik runs with the
+# blueprints unresolved and the consoles keep their local logins ... loud in
+# the blueprint status, nothing crashes.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# THE IDENTITY DATABASE'S BACKUP. Authentik runs on the chart's bundled
+# Postgres, which has no CNPG underneath and therefore no Barman path; until
+# the planned CNPG migration this nightly pg_dump to the shipped object store
+# is the honest bridge. Seven-object weekday rotation ... self-pruning, fixed
+# ceiling, seven-day restore window, stated plainly. Requires the platform
+# layer's Garage bootstrap to have copied `tockmox-garage-credentials` into
+# this namespace (it does by default). Needs dataProtection on; follows it
+# off. Restore: gunzip < dump | psql, per backup-restore.md.
+# ---------------------------------------------------------------------------
+databaseBackup:
+  enabled: true
+  # Five-field Kubernetes cron. 03:10, between the reference site's other
+  # nightly jobs so one small Garage is not absorbing three streams at once.
+  schedule: "10 3 * * *"
+  suspend: false
+  endpoint: http://tockmox-garage.tockmox-platform.svc:3900
+  bucket: tockmox-backups
+  # THE pg_dump CLIENT, and it has to track the SERVER the authentik subchart
+  # runs. These are two independent pins: the server tag comes from whatever
+  # authentik's vendored postgresql subchart happens to ship, and this one is
+  # ours. They drifted apart on the 2026-09-12 bump to authentik 2026.8.2 ...
+  # server went to 17.11, this stayed at 17.10, and images.txt grew a second
+  # postgres line, which is how it was noticed at all.
+  #
+  # A patch-level gap is harmless. A MAJOR gap is not: pg_dump refuses to run
+  # against a server newer than itself, and this runs in a CronJob, so the
+  # failure surfaces in a log nobody reads rather than at install. Re-check
+  # this line against the rendered StatefulSet on every authentik bump ...
+  # tools/check-identity-seams.sh S10 now fails the build when the two majors
+  # differ (TM-1023), and `grep -c postgres: images.txt` reads 1 when they agree.
+  postgresImage: docker.io/library/postgres:17.11-bookworm
+  uploaderImage: alpine/k8s:1.37.1
+
+sso:
+  enabled: true
+  # Group names, overridable but consistent everywhere (the app charts carry
+  # the same defaults in their role mappings).
+  adminGroup: tockmox-admins
+  userGroup: tockmox-users
+  # Usernames to ADD to the admin group (TM-0820). Default empty renders nothing.
+  # Non-empty renders one Argo PostSync Job that runs inside the Authentik server
+  # image and, for each name, adds the user to the admin group: it never removes
+  # a member, reports a name that does not exist yet as `not-found` in the Job
+  # log and still exits 0, and is safe to run on every sync. A group blueprint
+  # could not do this (its `users` list is a set, and a missing user poisons
+  # blueprint discovery), which is why this is a Job. Usernames only, no
+  # whitespace. docs/administration/identity.md.
+  adminUsers: []
+  # Launch consoles from the portal in their own tab. Default true: without it
+  # authentik navigates the portal tab itself, and the way back to the other
+  # consoles is the browser Back button, which after an SSO redirect does not
+  # reliably return to the portal.
+  #
+  # DECLARED HERE RATHER THAN DEFAULTED IN THE TEMPLATE, and that is the point
+  # of this comment. `{{ .Values.sso.openInNewTab | default true }}` would be
+  # WRONG: Helm's `default` fires on any empty value and `false` is empty, so
+  # an operator who deliberately set `false` would be silently flipped back to
+  # `true`. A declared key has no such failure mode.
+  #
+  # It is a UX opinion, not a correctness property ... a kiosk or single-console
+  # deployment may legitimately want the opposite.
+  openInNewTab: true
+  # Who may reach each application, enforced by Authentik BEFORE the console
+  # sees the login. Without a binding Authentik authorizes every authenticated
+  # user for every application, whatever group they are in, and the two groups
+  # above only decide the role a console hands out afterwards. With
+  # `access.enabled` (the default) every shipped application is bound to the
+  # group(s) its `access` names, and a user in neither group is refused at
+  # Authentik. `false` renders no bindings and restores the open shape ... a
+  # way back for an operator who has locked out the only admin, not a
+  # configuration to run.
+  #
+  # Changing a group name is an SSO configuration change: the consoles need
+  # the restart described in docs/administration/identity.md.
+  access:
+    enabled: true
+  # Client IDs are public identifiers, not secrets. Changing a clientId also
+  # needs the console restart in docs/administration/identity.md; GitOps will
+  # report the layer healthy while the console keeps the old value.
+  #
+  # `access` per application: `admin` (the admin group only) or `users` (the
+  # user group and the admin group). The shipped defaults keep every console
+  # reachable by both groups, because the consoles already sort admins from
+  # users by role (Admin/Viewer in Grafana, admin/user in Open WebUI, the two
+  # Argo ServiceAccounts). Set a console to `admin` to hide it from users
+  # entirely.
+  #
+  # `host` per application is the hostname the blueprint registers as the OIDC
+  # redirect URI and the tile's launch URL. Empty derives it from the app's
+  # usual prefix (`grafana.`, `chat.`, `workflows.`) plus global.internalDomain.
+  # Set it to the SAME value as the app's own ingress host override
+  # (`ingress.apps.openWebui.host` in the AI layer, and so on): the layers
+  # cannot read each other's values, so a site that moves Open WebUI to
+  # `llm.<domain>` states it twice, and a mismatch is a redirect_uri error at
+  # login (TM-0820).
+  #
+  # `subMode` is how Authentik derives the OIDC `sub` claim. Empty renders
+  # nothing, and Authentik's own default (`hashed_user_id`) applies. A site
+  # migrating accounts from another provider needs the value the old provider
+  # used (commonly `user_username`), because Grafana and Open WebUI key their
+  # existing accounts on `sub` or email and refuse a login whose `sub`
+  # changed. One of: hashed_user_id, user_id, user_uuid,
+  # user_username, user_email. Per-app `subMode` wins over `sso.subMode`.
+  # Changing it on a live provider changes every user's `sub`.
+  subMode: ""
+  apps:
+    grafana:
+      clientId: tockmox-grafana
+      access: users
+      host: ""
+      subMode: ""
+    openWebui:
+      clientId: tockmox-openwebui
+      access: users
+      host: ""
+      subMode: ""
+    argoWorkflows:
+      clientId: tockmox-argo
+      access: users
+      host: ""
+      subMode: ""
+
+authentik:
+  # -------------------------------------------------------------------------
+  # Credentials come from Secrets YOU create ... never from these values.
+  #   tockmox-authentik           AUTHENTIK_SECRET_KEY,
+  #                               AUTHENTIK_POSTGRESQL__PASSWORD
+  #   tockmox-authentik-postgres  password (SAME value as
+  #                               AUTHENTIK_POSTGRESQL__PASSWORD ... the
+  #                               database and the server must agree)
+  #   tockmox-sso                 <app>_client_secret keys for the blueprints
+  # Generator commands: docs/administration/secrets.md. Until they exist the
+  # pods wait with a visible config error naming the missing Secret.
+  # -------------------------------------------------------------------------
+  # NOT authentik.existingSecret: that replaces the chart's ENTIRE generated
+  # config secret ... host, database, user, all of it ... not just the
+  # sensitive keys, and the pod then dials postgres on localhost. Explicit
+  # env entries beat envFrom in Kubernetes precedence, so the two secrets
+  # override the (empty) generated values while the generated connection
+  # config survives. Found live; the kind of thing only a rollout shows.
+  global:
+    env:
+      - name: AUTHENTIK_SECRET_KEY
+        valueFrom:
+          secretKeyRef:
+            name: tockmox-authentik
+            key: AUTHENTIK_SECRET_KEY
+      - name: AUTHENTIK_POSTGRESQL__PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: tockmox-authentik
+            key: AUTHENTIK_POSTGRESQL__PASSWORD
+    envFrom:
+      - secretRef:
+          name: tockmox-sso
+          optional: true    # sso.enabled=false installs run without it
+  blueprints:
+    configMaps:
+      - tockmox-sso-blueprints
+  # No outbound version or usage calls (TM-0671): authentik checks for new
+  # versions and sends startup analytics unless told not to. Sovereignty: no
+  # unrequested outbound calls. (error_reporting is already off upstream.)
+  authentik:
+    disable_update_check: true
+    disable_startup_analytics: true
+  server:
+    resources:
+      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # peak 859.7 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 870.0 MiB in the pre-migration namespace (30 days); average 769.8 MiB.
+      # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+      # request = average, rounded up to 16Mi. Re-measure before changing.
+      requests:
+        memory: 784Mi
+      limits:
+        memory: 1408Mi
+    ingress:
+      enabled: false        # Tockmox renders its own; see ingress above
+    # ITS OWN SERVICEACCOUNT, NO TOKEN (TM-0759, found on the 0.7.1-rc2 gate).
+    # The server serves HTTP and never calls the Kubernetes API; the worker holds
+    # the outpost RBAC (ServiceAccount `authentik`). Upstream leaves the server on
+    # the namespace's `default` account, and 0.7.1 turns that account's token off
+    # from the policy layer ... but the identity layer syncs at the same time, and
+    # on the rc2 greenfield the server pod was created one second before the
+    # policy layer's patch landed, so it kept a token until it restarted. Naming
+    # an account here makes "no token" a property of the pod, not of sync order.
+    # The account is rendered by templates/server-serviceaccount.yaml; the
+    # upstream chart applies automountServiceAccountToken only when
+    # serviceAccountName is set, which it now is.
+    serviceAccountName: tockmox-authentik-server
+    automountServiceAccountToken: false
+    # POD SECURITY (TM-0635). Upstream ships both contexts empty, which left the
+    # server and the worker failing four `restricted` fields each:
+    # allowPrivilegeEscalation, capabilities.drop, runAsNonRoot and
+    # seccompProfile. Set here, in the chart an adopter inherits, so that
+    # tockmox-authentik can carry pod-security enforce: restricted (see
+    # `podSecurity` in tockmox-policy values) without an exemption.
+    #
+    # runAsUser 1000 is the user the upstream image already runs as, stated so
+    # that runAsNonRoot is verifiable by the kubelet (a non-numeric image USER
+    # makes it refuse to start). INFERRED, not measured: that the image's USER is
+    # 1000 and that server and worker start with every capability dropped. Both
+    # are what upstream documents for its own commented-out example, marked
+    # there as "not all tested". readOnlyRootFilesystem is deliberately NOT set:
+    # it is not a restricted field and it is untested. Verify on a lab before
+    # relying on it: the worker reaches Ready and completes a blueprint run.
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+    metrics:
+      serviceMonitor:
+        enabled: true
+      enabled: true
+  postgresql:
+    enabled: true
+    auth:
+      existingSecret: tockmox-authentik-postgres
+    primary:
+      resources:
+        # TM-0903, measured on a 0.8.0 greenfield (household-sso profile), 2026-10-08:
+        # peak 129.7 MiB working set over ~1 h of the lab's sign-ins and probes.
+        # limit = peak x 1.5, rounded up to a 32Mi step (224Mi). The request,
+        # 128Mi, is the peak rounded down to a 32Mi step: no average was
+        # recorded. Re-measure under a real user load before changing.
+        requests:
+          memory: 128Mi
+        limits:
+          memory: 224Mi
+  worker:
+    resources:
+      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # peak 482.3 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 475.8 MiB in the pre-migration namespace (30 days); average 423.7 MiB.
+      # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+      # request = average, rounded up to 16Mi. Re-measure before changing.
+      requests:
+        memory: 432Mi
+      limits:
+        memory: 768Mi
+    # POD SECURITY (TM-0635): same contexts, same reasoning and same INFERRED
+    # caveat as the server block above.
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+    metrics:
+      serviceMonitor:
+        enabled: true
+      enabled: true

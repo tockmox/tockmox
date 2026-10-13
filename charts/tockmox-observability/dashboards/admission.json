@@ -1,0 +1,459 @@
+{
+  "description": "ValidatingAdmissionPolicy (rbac-guardrails) + admission webhook health. Real denies vs policy CEL errors, webhook request/rejection/latency, fail-open counts.",
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [
+    {
+      "asDropdown": true,
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "tags": [
+        "tockmox"
+      ],
+      "targetBlank": false,
+      "title": "Tockmox dashboards",
+      "type": "dashboards"
+    }
+  ],
+  "panels": [
+    {
+      "description": "ValidatingAdmissionPolicy denials that are actual policy decisions: enforcement_action deny with error_type invalid_error, which is how the apiserver labels an ordinary violation (it never emits an empty error_type; an earlier version of this panel filtered for one and always read 0, TM-0976). compile_error and out_of_budget denials are CEL errors and are counted on the CEL errors panel instead. Known limit: a runtime CEL error under failurePolicy Fail carries the same labels as a violation, so it is counted here.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(increase(apiserver_validating_admission_policy_check_total{job=\"apiserver\", enforcement_action=\"deny\", error_type=\"invalid_error\"}[$__range])) OR on() vector(0)",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "VAP real denies (selected range)",
+      "type": "stat"
+    },
+    {
+      "description": "Policy CEL that failed to compile or ran out of cost budget (error_type compile_error or out_of_budget), plus any evaluation error under failurePolicy Ignore (enforcement_action allow with error_type invalid_error). An ordinary violation is NOT counted: the apiserver labels it invalid_error too, with enforcement_action deny, audit or warn (TM-0914). Not counted: a runtime CEL error under failurePolicy Fail, which the metric labels like a violation.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.001
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(sum(rate(apiserver_validating_admission_policy_check_total{job=\"apiserver\", error_type=~\"compile_error|out_of_budget\"}[5m])) OR on() vector(0)) + (sum(rate(apiserver_validating_admission_policy_check_total{job=\"apiserver\", enforcement_action=\"allow\", error_type=\"invalid_error\"}[5m])) OR on() vector(0))",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "VAP CEL errors (rate/5m)",
+      "type": "stat"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(increase(apiserver_admission_webhook_rejection_count{job=\"apiserver\"}[$__range]))",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Webhook rejections (selected range)",
+      "type": "stat",
+      "description": "Window follows the dashboard's time range. It was a fixed [24h], which on a cluster younger than the window makes increase() extrapolate: a healthy 12-minute-old install rendered 'Webhook fail-open events (24h): 74.2' in red, and none of those events happened. Measured 2026-09-12."
+    },
+    {
+      "description": "Observed counter delta across the selected range: max_over_time minus min_over_time. Deliberately NOT increase(), which extrapolates across the full range and therefore reports a fractional count of events that never happened on any cluster younger than the window ... 74.2 on 2026-09-12 and 70.2 on 2026-09-15, both on healthy clusters where no webhook had failed open (TM-0532). Switching the window to $__range in 2026-09-13 fixed the title, not the extrapolation, because the dashboard's default range is 24h.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(sum(max_over_time(apiserver_admission_webhook_fail_open_count{job=\"apiserver\"}[$__range])) - sum(min_over_time(apiserver_admission_webhook_fail_open_count{job=\"apiserver\"}[$__range]))) OR on() vector(0)",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Webhook fail-open events (selected range, observed)",
+      "type": "stat"
+    },
+    {
+      "description": "Rows are per-second rates over the trailing 5 minutes, at the moment the panel was evaluated ... not counts, and not the selected range. Zero-rate series are filtered out (`> 0`) so that a row appearing here means something is happening now. Before 2026-09-15 a dormant `error_type` label combination rendered identically to an active one and read as a finding (TM-0644).",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "id": 5,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Value"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (policy, enforcement_action, error_type) (rate(apiserver_validating_admission_policy_check_total{job=\"apiserver\"}[5m])) > 0",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "VAP checks by policy (rate/5m > 0, split by action + error_type)",
+      "type": "table",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "indexByName": {
+              "policy": 0,
+              "enforcement_action": 1,
+              "error_type": 2,
+              "Value": 3
+            },
+            "renameByName": {
+              "enforcement_action": "action",
+              "error_type": "error"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "policy"
+            },
+            "properties": [
+              {
+                "id": "custom.wrapText",
+                "value": true
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(action|enforcement_action)$"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(error|error_type)$"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 125
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 95
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "id": 6,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (name) (rate(apiserver_admission_webhook_request_total{job=\"apiserver\"}[5m]))",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Admission webhook request rate by name",
+      "type": "timeseries"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 0
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "id": 7,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "right"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, name) (rate(apiserver_admission_webhook_admission_duration_seconds_bucket{job=\"apiserver\"}[5m])))",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Admission webhook latency p99 by name",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "5m",
+  "schemaVersion": 39,
+  "tags": [
+    "platform",
+    "tockmox",
+    "security",
+    "admission"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "name": "datasource",
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "title": "Tockmox / Admission & Policy",
+  "uid": "tockmox-admission"
+}

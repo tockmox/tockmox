@@ -1,0 +1,16 @@
+# SUPERSEDED. Do not apply this file.
+#
+# It previously held a single ApplicationSet with a hardcoded site repoURL,
+# which conflicted with what install/tockmox-install.sh generates and with
+# every install document. Two incompatible bootstrap paths shipped at once.
+#
+# Bootstrap artefacts are now GENERATED into your own site repository, because
+# they must reference a git repo only you can create:
+#
+#     ./install/tockmox-install.sh --config tockmox.yaml
+#
+# That produces bootstrap/root.yaml (the app-of-apps parent, the only thing you
+# apply by hand) and bootstrap/applications/*.yaml, one per layer, sync-wave
+# ordered.
+#
+# See bootstrap/README.md and docs/deployment/install.md.

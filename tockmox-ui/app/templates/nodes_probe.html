@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}Probe {{ host }}{% endblock %}
+{% block main %}
+<h1>What {{ host }} serves</h1>
+{% if refused %}
+<p>{{ badge("critical", "Not probed") }} {{ refused }}</p>
+<p><a href="/nodes/add/{{ ntype }}">Back to the setup page</a></p>
+{% else %}
+<p class="lede">Asked {{ result.address }} on {{ result.findings|length }} port(s). Nothing has changed yet: choose what to keep, then generate the change.</p>
+<form method="post" action="/nodes/change">
+  <input type="hidden" name="csrf" value="{{ user.csrf }}">
+  <input type="hidden" name="draft" value="{{ draft }}">
+  <section class="panel" aria-labelledby="node-h">
+    <h2 id="node-h">The node</h2>
+    <label for="n-name">Display name</label><input id="n-name" name="node.0.name" type="text" value="{{ node.name }}">
+    <label for="n-id">Node id</label><input id="n-id" name="node.0.id" type="text" value="{{ node.id }}" pattern="[a-z0-9][a-z0-9-]{0,39}">
+    {% if node.metrics %}
+    <fieldset class="plainset"><legend>Exporters this node runs <span class="muted">(health and memory come from them; one that is listed but absent reads Unknown)</span></legend>
+      <input type="hidden" name="node.0.metrics.present" value="1">
+      {% for k, p in node.metrics.items() %}<label class="check"><input type="checkbox" name="node.0.metric.{{ k }}" value="1" {% if k != "dcgm" %}checked{% endif %}> {{ k }} on port {{ p }}</label>{% endfor %}
+    </fieldset>
+    {% endif %}
+    <p>Hardware: {% if node.hardware %}{% for k, f in node.hardware.items() %}{{ k|replace("_gib", " (GiB)") }} {{ f.value }} <span class="muted">({{ f.source }})</span>{% if not loop.last %}; {% endif %}{% endfor %}{% else %}<span class="muted">not recorded; the fit check will say so</span>{% endif %}</p>
+  </section>
+
+  <section class="panel" aria-labelledby="ports-h">
+    <h2 id="ports-h">Ports</h2>
+    <div class="table-wrap" role="region" aria-labelledby="ports-cap" tabindex="0">
+    <table>
+      <caption id="ports-cap">What answered on each port</caption>
+      <thead><tr><th scope="col">Port</th><th scope="col">Engine</th><th scope="col">Detail</th></tr></thead>
+      <tbody>
+      {% for f in result.findings %}
+        <tr><th scope="row">{{ f.port }}</th>
+          <td>{% if f.engine %}{{ badge("ok", engines[f.engine].name) }}{% elif f.auth_required %}{{ badge("warning", "Needs a token") }}{% else %}{{ badge("unknown", "Nothing recognised") }}{% endif %}</td>
+          <td>{% if f.version %}version {{ f.version }}. {% endif %}{% if f.engine %}{{ f.models|length }} model(s).{% endif %} {{ f.reason }} {{ f.hint }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% set epi = namespace(i=0) %}
+    {% for f in result.found %}
+      <label for="ep-{{ loop.index0 }}">Engine on port {{ f.port }}</label>
+      <select id="ep-{{ loop.index0 }}" name="node.0.ep.{{ loop.index0 }}.engine">{% for eid, e in engines.items() %}<option value="{{ eid }}" {% if eid == (f.suggested or f.engine) %}selected{% endif %}>{{ e.name }}</option>{% endfor %}</select>
+      {% if engines[f.suggested or f.engine].auth == "bearer" or auth_hint %}
+      <label for="sec-{{ loop.index0 }}">Secret holding the token for port {{ f.port }} <span class="muted">(name only)</span></label>
+      <input id="sec-{{ loop.index0 }}" name="node.0.ep.{{ loop.index0 }}.secret" type="text" pattern="[a-z0-9][a-z0-9-]{0,39}" autocomplete="off">
+      {% endif %}
+    {% endfor %}
+  </section>
+
+  {% set routes = draft_routes %}
+  <section class="panel" aria-labelledby="routes-h">
+    <h2 id="routes-h">Models to route through the gateway</h2>
+    {% if routes %}
+    <p>Tick the models the gateway should offer, and name each one. The name is what users and agents ask for.</p>
+    <div class="table-wrap" role="region" aria-labelledby="routes-cap" tabindex="0">
+    <table>
+      <caption id="routes-cap">Models found on {{ host }}</caption>
+      <thead><tr><th scope="col">Route it</th><th scope="col">Model</th><th scope="col">Gateway alias</th><th scope="col">Kind</th><th scope="col">Size</th></tr></thead>
+      <tbody>
+      {% for r in routes %}
+        <tr><td><input type="hidden" name="route.{{ loop.index0 }}.present" value="1"><input type="checkbox" id="inc-{{ loop.index0 }}" name="route.{{ loop.index0 }}.include" value="1" aria-label="Route {{ r.model }}"></td>
+          <th scope="row"><code>{{ r.model }}</code></th>
+          <td><input type="text" name="route.{{ loop.index0 }}.alias" value="{{ r.alias }}" aria-label="Alias for {{ r.model }}"></td>
+          <td><select name="route.{{ loop.index0 }}.kind" aria-label="Kind for {{ r.model }}">{% for k in ("chat", "embedding", "rerank") %}<option {% if k == r.kind %}selected{% endif %}>{{ k }}</option>{% endfor %}</select></td>
+          <td>{% if r.sizeGiB is defined and r.sizeGiB is not none %}{{ r.sizeGiB }} GiB <span class="muted">({{ "engine" if size_src.get(r.model) == "engine" else "estimate" }})</span>{% else %}<span class="muted">unknown</span>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}<p>No models were listed. You can still record the node and place models on it later.</p>{% endif %}
+  </section>
+  <button class="btn" type="submit">Generate the change</button>
+</form>
+{% endif %}
+{% endblock %}

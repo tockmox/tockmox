@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# gitleaks configuration for `ci / secrets` (.github/workflows/ci.yaml).
+#
+# WHY THIS FILE EXISTS. The tree scanned clean at the CI-pinned gitleaks 8.21.2
+# and reported two `generic-api-key` findings at 8.30.1, both in
+# docs/deployment/verify.md, both the SAME string: the SSH ED25519 public key
+# fingerprint (`SHA256:EWYd...`) quoted inside `git verify-tag` output. The
+# page's subject is signature verification, so the fingerprint is there on
+# purpose, and a PUBLIC key fingerprint is publishable by definition ... it is
+# what a reader compares against, not something a reader could use. Without
+# this file, the grouped CI tool-pin bump that carries gitleaks past 8.21.2
+# turns `ci / secrets` red on a page nobody edited (TM-0324).
+#
+# WHAT IS ALLOWED, precisely. ONE string, on ONE path, and both conditions must
+# hold (`condition = "AND"`). The same fingerprint planted in any other file is
+# still reported, and any other secret planted in verify.md is still reported.
+# Both were measured on 2026-09-03 against a scratch copy of the tree at
+# gitleaks 8.30.1: a planted copy of the fingerprint in README.md was flagged,
+# and a planted GitHub PAT in verify.md was flagged at both 8.30.1 and 8.21.2.
+# The real tree scanned clean at both versions with this file in place.
+#
+# WHAT IS DELIBERATELY NOT DONE. No path-only exemption for the page, no
+# rule-wide exemption for `generic-api-key`, no `--no-git`. A broad exemption
+# on a security gate is how the gate stops meaning anything, and this repo's
+# whole argument is that its gates are real. If a second finding of the same
+# class ever appears, add a second `[[allowlists]]` block naming the string and
+# the reason; do not widen this one.
+#
+# THE FORM MATTERS, AND THE FIRST FORM WAS WRONG (measured 2026-09-04, TM-0324).
+# This file first carried a TOP-LEVEL `[[allowlists]]` block with `condition =
+# "AND"`, `paths` and `regexes`, and its comment claimed a planted PAT in
+# verify.md was still flagged. Re-measured at 8.28.0 and 8.30.1 with a scratch
+# copy of the tree: a GitHub PAT planted in verify.md was NOT flagged, and it
+# stayed hidden even with the regex replaced by a string that matches nothing.
+# At those versions a global allowlist that names `paths` skips the file
+# outright; the `condition` and the regex never get a vote. That is the
+# path-only exemption the paragraph above says this file must not be, and it
+# had been shipping as one. (8.24.3 ignores the block entirely and reports the
+# two findings, which is how the CI pin bump surfaced this.)
+#
+# The RULE-SCOPED form below does what the comment always promised. Measured
+# at 8.28.0 and 8.30.1 on the same scratch tree: the fingerprint on verify.md
+# is allowed; the same fingerprint planted in README.md is flagged
+# (generic-api-key); a PAT planted in verify.md is flagged (github-pat); a
+# generic key planted in architecture.md is flagged, so extending the rule did
+# not replace its regex. The CI pin moved 8.21.2 -> 8.30.1 in the same change;
+# any pin below 8.28 has not been measured against this form.
+
+title = "Tockmox"
+
+[extend]
+useDefault = true
+
+# Rule-scoped, not global: a global `[[allowlists]]` with `paths` skips the
+# whole file at 8.28+ regardless of `condition`. Scoping the allowlist to the
+# one rule that fires on the fingerprint keeps every other rule live on the
+# page, and `paths` + `regexes` under AND keeps the string itself unallowed
+# everywhere else.
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "SSH ED25519 public key fingerprint quoted from git verify-tag output on the signature-verification page. A public key fingerprint, not a secret."
+condition = "AND"
+paths = ['''docs/deployment/verify\.md''']
+regexes = ['''SHA256:EWYdV82fKSzUvXc5RPMuUH35J/CiQmBm7egYCDEmGDY''']
+regexTarget = "line"
+
+[[rules.allowlists]]
+description = "Fixture token in the notify-and-drill gate (TM-0780): the gate passes this fake value to the alert bridge under test and then asserts the bridge's delivery log line does NOT contain it. It must look like a token for the assertion to mean anything. Not a credential."
+condition = "AND"
+paths = ['''tools/check-notify-and-drill\.sh''']
+regexes = ['''tok-SECRET-9f3a''']
+regexTarget = "line"

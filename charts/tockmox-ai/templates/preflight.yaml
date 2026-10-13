@@ -1,0 +1,291 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+Render-time guards for the AI layer. This file emits no objects; it exists so
+that misconfigurations fail the render with a sentence that names the cause,
+rather than deploying something that looks healthy and behaves wrongly.
+
+THE ONE THIS FILE EXISTS FOR. The upstream open-webui chart decides which
+OpenAI environment variables to emit by walking a chain of conditions over
+enableOpenaiApi, openaiBaseApiUrl, openaiBaseApiUrls and pipelines.enabled.
+One combination falls off the end of that chain and matches NO branch:
+
+    enableOpenaiApi: true
+    openaiBaseApiUrl: ""        (and no openaiBaseApiUrls, pipelines off)
+
+In that case the pod spec carries no OPENAI_API_BASE_URL and no
+ENABLE_OPENAI_API=False either, so the Open WebUI image applies its OWN
+built-in default ... https://api.openai.com/v1. The result is a console that
+renders correctly, starts correctly, reports Ready, and sends prompts to a
+third-party API on a platform sold on the opposite promise.
+
+Nothing about the manifest looks wrong, which is exactly why this is a guard
+and not a comment.
+*/ -}}
+{{- /*
+CAPABILITY COHERENCE, FIRST. A component switched on individually while the
+capability that owns it is off leaves a part with no whole. Failing beats
+delivering half, and beats silently promoting the capability back on because of
+one key. It runs before every other guard so that `apps.openWebui: true` under
+a declined aiPlane is reported as that, not as the console pointing at a
+gateway the declined capability also turned off.
+*/ -}}
+{{- include "tockmox.capabilityCoherent" (dict "ctx" $ "capability" "aiPlane" "apps" (list "openWebui" "litellm")) -}}
+{{- $owui := index .Values "open-webui" | default dict -}}
+{{- /*
+Every guard on the console's backend runs only when the console itself renders.
+The subchart's values are present whether or not the subchart is loaded, so
+with capabilities.aiPlane off (no console, no gateway) the shipped defaults
+would otherwise trip the gateway-exists guard below on a layer that renders
+nothing at all.
+*/ -}}
+{{- $consoleOn := include "tockmox.appEnabled" (dict "ctx" $ "app" "openWebui") -}}
+{{- /*
+The URL is rendered through `tpl` exactly as the subchart renders it
+(open-webui/templates/workload-manager.yaml), so the shipped default
+"http://{{ .Release.Name }}-litellm:4000/v1" compares as the Service name it
+becomes, not as the template text.
+*/ -}}
+{{- $url := tpl ($owui.openaiBaseApiUrl | default "" | toString) $ -}}
+{{- if and $consoleOn $owui.enableOpenaiApi -}}
+{{- $urls := $owui.openaiBaseApiUrls | default list -}}
+{{- $pipelines := (($owui.pipelines) | default dict).enabled | default false -}}
+{{- if and (not $url) (not $urls) (not $pipelines) -}}
+{{- fail "open-webui.enableOpenaiApi is true but no endpoint is set. The upstream chart emits NO OpenAI environment at all in this combination, so the image falls back to its built-in default of https://api.openai.com/v1 and your prompts leave the building. Set open-webui.openaiBaseApiUrl ... to this layer's model gateway (http://<release>-litellm:4000/v1, the shipped default) or to a model host you run ... or set enableOpenaiApi to false." -}}
+{{- end -}}
+{{- if and $owui.openaiApiKeyExistingSecret (not $owui.openaiApiKeyExistingSecretKey) -}}
+{{- fail "open-webui.openaiApiKeyExistingSecret names a Secret but openaiApiKeyExistingSecretKey is empty. The upstream template renders a secretKeyRef with an empty key, which the API server accepts and the kubelet then fails to resolve, leaving the pod in CreateContainerConfigError naming the Secret rather than the key." -}}
+{{- end -}}
+{{- end -}}
+{{- /*
+IN-CLUSTER TRUST. The console does its own OIDC token exchange, so the CA has to
+be trusted inside the container, not only in the operator's browser. The wiring
+is four subchart keys and every one of them is a LIST: a site that sets any of
+them replaces the shipped value rather than adding to it. That is how the
+devtest site dropped `enableOpenaiApi` in August 2026 ... a restated list with
+one entry missing, rendering and linting cleanly.
+
+The failure mode this catches is specific and quiet: SSO breaks at the token
+step with CERTIFICATE_VERIFY_FAILED while local break-glass login keeps working,
+so the console looks up and only federated users are locked out.
+*/ -}}
+{{- /*
+Guard the trust assertions on the SAME expression that decides whether the
+subchart renders at all, not on the subchart's own `enabled` key. Those two
+disagreed the moment capabilities arrived: declining aiPlane left this block
+running against a subchart that was not loaded, so `.Subcharts "open-webui"`
+was nil and the assertion reported the image as "%!s(<nil>)". A preflight that
+fires when the thing it checks is absent is worse than no preflight, because
+the message sends you looking at a value you did not set.
+*/ -}}
+{{- if and (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "aiPlane" "app" "openWebui")) ($owui.enabled | default true) -}}
+{{- $init := $owui.extraInitContainers | default list -}}
+{{- $vols := $owui.volumes | default list -}}
+{{- $mounts := ($owui.volumeMounts | default dict).container | default list -}}
+{{- $env := $owui.extraEnvVars | default list -}}
+{{- $hasInit := false -}}{{- $initImage := "" -}}
+{{- range $init }}{{- if eq .name "tockmox-trust-bundle" }}{{- $hasInit = true }}{{- $initImage = .image }}{{- end }}{{- end -}}
+{{- $hasTrustVol := false -}}{{- $hasCaVol := false -}}
+{{- range $vols }}{{- if eq .name "tockmox-trust" }}{{- $hasTrustVol = true }}{{- end }}{{- if eq .name "tockmox-ca" }}{{- $hasCaVol = true }}{{- end }}{{- end -}}
+{{- $hasMount := false -}}
+{{- range $mounts }}{{- if eq .name "tockmox-trust" }}{{- $hasMount = true }}{{- end }}{{- end -}}
+{{- $hasSslEnv := false -}}{{- $hasReqEnv := false -}}
+{{- range $env }}{{- if eq .name "SSL_CERT_FILE" }}{{- $hasSslEnv = true }}{{- end }}{{- if eq .name "REQUESTS_CA_BUNDLE" }}{{- $hasReqEnv = true }}{{- end }}{{- end -}}
+{{- include "tockmox.trustBundle.assertWiring" (dict "component" "Open WebUI" "checks" (list
+    (dict "present" $hasInit "detail" "open-webui.extraInitContainers has no `tockmox-trust-bundle` entry, so nothing builds the bundle")
+    (dict "present" $hasTrustVol "detail" "open-webui.volumes has no `tockmox-trust` emptyDir for the bundle to be written into")
+    (dict "present" $hasCaVol "detail" "open-webui.volumes has no `tockmox-ca` entry, so the CA is never presented to the initContainer")
+    (dict "present" $hasMount "detail" "open-webui.volumeMounts.container does not mount `tockmox-trust`, so the application cannot read the bundle")
+    (dict "present" $hasSslEnv "detail" "open-webui.extraEnvVars has no SSL_CERT_FILE, which is what httpx, aiohttp and urllib read")
+    (dict "present" $hasReqEnv "detail" "open-webui.extraEnvVars has no REQUESTS_CA_BUNDLE, which is what `requests` reads ... it ignores SSL_CERT_FILE")
+    (dict "present" (or (not .Values.global.certIssuer) (contains "TOCKMOX_EXPECT_CA" (toYaml ((index .Values "open-webui").extraInitContainers | default list)))) "detail" "the open-webui trust-bundle initContainer does not read TOCKMOX_EXPECT_CA, so it cannot tell a CA that is seconds away from a plain-HTTP install where none is coming ... it builds the bundle without the CA and every https client in the pod is wrong for the life of the pod (TM-0632)")
+  )) -}}
+{{- /*
+And the image the initContainer runs must be the image the application runs,
+because the bundle it writes is that image's own trust store.
+*/ -}}
+{{- if $hasInit -}}
+{{- $img := $owui.image | default dict -}}
+{{- $tag := $img.tag | default (ternary (printf "%s-slim" (index .Subcharts "open-webui").Chart.AppVersion) (index .Subcharts "open-webui").Chart.AppVersion ($img.useSlim | default false)) -}}
+{{- include "tockmox.trustBundle.assertImage" (dict
+    "key" "open-webui.extraInitContainers[tockmox-trust-bundle].image"
+    "component" "Open WebUI"
+    "expected" (printf "%s:%s" $img.repository $tag)
+    "actual" $initImage) -}}
+{{- end -}}
+{{- end -}}
+{{- /*
+`serviceMonitors` is deliberately NOT guarded here (TM-0825). Declining the
+observability capability while pinning `apps.serviceMonitors.enabled: true` is
+the documented "run your own Prometheus operator" route: the capability says
+"do not deploy a monitoring stack", the component says "but render the monitors
+and rules for the operator I already have". Refusing it made the route
+unreachable in every layer.
+*/ -}}
+{{- /*
+SITE HOOKS FOR THE MODEL GATEWAY (TM-0787). Three things have to agree for a
+hook to load, and they live in three different places: the files
+(modelGateway.hooks.files), the mount (litellm.volumes / litellm.volumeMounts,
+which are LISTS and so are replaced wholesale by a site that sets them), and the
+registration (litellm.proxy_config.litellm_settings.callbacks, written by the
+site). Each way of getting one wrong renders cleanly and then either loads
+nothing or, worse, crashes the proxy at startup on an import error, so each is a
+sentence here instead.
+
+Only callbacks under `hooks.` are examined. Any other entry is a LiteLLM
+built-in or a module the site ships some other way, and none of this chart's
+business.
+*/ -}}
+{{- $hookFiles := include "tockmox.ai.hookFiles" . | fromYaml | default dict -}}
+{{- $lit := .Values.litellm | default dict -}}
+{{- $settings := dig "proxy_config" "litellm_settings" dict $lit -}}
+{{- $regs := list -}}
+{{- range (list "callbacks" "success_callback" "failure_callback") -}}
+{{- range (index $settings . | default list) -}}
+{{- if and (kindIs "string" .) (hasPrefix "hooks." .) }}{{- $regs = append $regs . }}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $litellmOn := include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm") -}}
+{{- if and $hookFiles (not $litellmOn) -}}
+{{- fail "modelGateway.hooks.files is set but the model gateway is not enabled, so the ConfigMap is not rendered and nothing loads the hooks. Enable apps.litellm (and capabilities.aiPlane), or remove modelGateway.hooks.files." -}}
+{{- end -}}
+{{- if and (or $hookFiles $regs) $litellmOn -}}
+{{- $hasVol := false -}}
+{{- range ($lit.volumes | default list) -}}
+{{- if and (eq .name "tockmox-hooks") (eq ((.configMap | default dict).name | default "") "tockmox-litellm-hooks") }}{{- $hasVol = true }}{{- end -}}
+{{- end -}}
+{{- $hasMount := false -}}
+{{- range ($lit.volumeMounts | default list) -}}
+{{- if and (eq .name "tockmox-hooks") (eq (.mountPath | default "") "/etc/litellm/hooks") }}{{- $hasMount = true }}{{- end -}}
+{{- end -}}
+{{- if not $hasVol -}}
+{{- fail "LiteLLM hooks are in use but litellm.volumes has no `tockmox-hooks` volume backed by the ConfigMap `tockmox-litellm-hooks`. litellm.volumes is a list, and a site that sets it replaces the shipped entry; restate it: {name: tockmox-hooks, configMap: {name: tockmox-litellm-hooks, optional: true}}." -}}
+{{- end -}}
+{{- if not $hasMount -}}
+{{- fail "LiteLLM hooks are in use but litellm.volumeMounts does not mount `tockmox-hooks` at /etc/litellm/hooks. LiteLLM resolves a callback path relative to the config file's directory (/etc/litellm), so `hooks.<file>.<object>` is read from /etc/litellm/hooks/<file>.py. litellm.volumeMounts is a list, and a site that sets it replaces the shipped entry; restate it: {name: tockmox-hooks, mountPath: /etc/litellm/hooks, readOnly: true}." -}}
+{{- end -}}
+{{- if and $hookFiles (not $regs) (not (include "tockmox.ai.policyGateOn" $)) -}}
+{{- fail "modelGateway.hooks.files renders a ConfigMap and mounts it, but no callback under `hooks.` is registered, so LiteLLM loads none of it. Add to litellm.proxy_config.litellm_settings.callbacks an entry of the form hooks.<file without .py>.<object>, for example hooks.policy_gate.gate." -}}
+{{- end -}}
+{{- range $regs -}}
+{{- $parts := splitList "." (trimPrefix "hooks." .) -}}
+{{- if ne (len $parts) 2 -}}
+{{- fail (printf "callback %q must have the form hooks.<file without .py>.<object>. Hook files are flat modules in /etc/litellm/hooks, so there is exactly one name between `hooks.` and the object." .) -}}
+{{- end -}}
+{{- $file := printf "%s.py" (first $parts) -}}
+{{- if not (hasKey $hookFiles $file) -}}
+{{- fail (printf "callback %q reads /etc/litellm/hooks/%s, but modelGateway.hooks.files has no key %q. The mount would be an empty directory and the proxy fails at startup with an import error." . $file $file) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- /*
+THE POLICY GATE (TM-0383). The module is generic and every decision it makes
+comes from config, so a config that cannot support the invariant must not
+render. These are REQ-0003 AC-3.2's checks, from config alone and with no model
+invoked, run on the site's own values at render time rather than in a CI job
+that only ever sees a fixture. Ported from the reference site's
+check_policy_gate.py (invariants 1 to 6; its seventh is about an alert that
+reference site carries and this chart does not).
+*/ -}}
+{{- if include "tockmox.ai.policyGateOn" . -}}
+{{- $pg := .Values.modelGateway.policyGate -}}
+{{- $pc := $lit.proxy_config | default dict -}}
+{{- if not $litellmOn -}}
+{{- fail "modelGateway.policyGate.enabled is true but the model gateway is not enabled, so nothing loads the gate. Enable apps.litellm, or turn the gate off." -}}
+{{- end -}}
+{{- if not (has "hooks.tockmox_gate.tockmox_gate" (dig "litellm_settings" "callbacks" list $pc)) -}}
+{{- fail "modelGateway.policyGate.enabled is true, but litellm.proxy_config.litellm_settings.callbacks does not list hooks.tockmox_gate.tockmox_gate, so the module is mounted and never loaded: every request would pass ungated while the values say otherwise. Add that entry to the callbacks list." -}}
+{{- end -}}
+{{- if ne (toJson $pg.classes.restricted) (toJson (list "local")) -}}
+{{- fail (printf "modelGateway.policyGate.classes.restricted must be exactly [local], got %s. A restricted request that may reach an external tier is the one thing this gate exists to prevent." (toJson $pg.classes.restricted)) -}}
+{{- end -}}
+{{- if ne (dig "router_settings" "enable_tag_filtering" false $pc) true -}}
+{{- fail "modelGateway.policyGate.enabled is true, but litellm.proxy_config.router_settings.enable_tag_filtering is not true. The gate tags each request with its class and relies on the router honouring the tags; without tag filtering, a deployment behind an alias can serve a class it is not tagged for." -}}
+{{- end -}}
+{{- $fb := regexFindAll "(?m)^\\s*-?\\s*(fallbacks|default_fallbacks|context_window_fallbacks):" (toYaml $pc) -1 -}}
+{{- if $fb -}}
+{{- fail (printf "litellm.proxy_config carries a fallback key (%s). A fallback is an edge from one deployment to another that no class decision sees: a restricted request whose local model is down would be retried on whatever the fallback names. Remove it; the gate also strips fallbacks a client sends." (first $fb | trim)) -}}
+{{- end -}}
+{{- $aliases := list -}}
+{{- range $i, $e := ($pc.model_list | default list) -}}
+{{- $name := $e.model_name | default (printf "model_list[%d]" $i) -}}
+{{- $aliases = append $aliases $name -}}
+{{- $lp := $e.litellm_params | default dict -}}
+{{- $tier := dig "model_info" "endpoint_tier" "" $e -}}
+{{- if not (has $tier (list "local" "external")) -}}
+{{- fail (printf "model %q has no model_info.endpoint_tier of local or external (got %q). The gate reads an entry with no tier as external, so it would refuse every restricted request to it; say which it is." $name $tier) -}}
+{{- end -}}
+{{- if not $lp.tags -}}
+{{- fail (printf "model %q has no litellm_params.tags. With tag filtering on, an untagged deployment serves no class. List the classes it may serve." $name) -}}
+{{- end -}}
+{{- range $tag := $lp.tags -}}
+{{- if not (hasKey $pg.classes $tag) -}}
+{{- fail (printf "model %q is tagged %q, which is not a policy class (open, internal, restricted)." $name $tag) -}}
+{{- end -}}
+{{- if not (has $tier (index $pg.classes $tag)) -}}
+{{- fail (printf "model %q is tagged %q but is a %s-tier endpoint, and class %q may only use %s. That tag is a route from that class to a tier it is forbidden: remove it." $name $tag $tier $tag (toJson (index $pg.classes $tag))) -}}
+{{- end -}}
+{{- end -}}
+{{- $key := printf "%v" ($lp.api_key | default "") -}}
+{{- if and (eq $tier "local") (hasPrefix "os.environ/" $key) -}}
+{{- fail (printf "model %q is local-tier but reads a provider key from %s. A local endpoint that needs a cloud credential is probably not local; check its tier." $name $key) -}}
+{{- end -}}
+{{- if and (eq $tier "external") (not (hasPrefix "os.environ/" $key)) -}}
+{{- fail (printf "model %q is external-tier with no os.environ/ key reference. An external endpoint that needs no credential is unusual enough to be a misclassified local one; check its tier." $name) -}}
+{{- end -}}
+{{- if not (hasKey ($pg.routePosture | default dict) $name) -}}
+{{- fail (printf "model %q has no entry in modelGateway.policyGate.routePosture. Every alias declares its class explicitly, so the escalation grant is written down rather than inherited." $name) -}}
+{{- end -}}
+{{- $posture := index $pg.routePosture $name -}}
+{{- if not (has $posture $lp.tags) -}}
+{{- fail (printf "routePosture %q is %q, but the model is not tagged %q, so a request of that class could not be served by it." $name $posture $posture) -}}
+{{- end -}}
+{{- if not (has $tier (index $pg.classes $posture)) -}}
+{{- fail (printf "routePosture %q is %q, which may not use the %s tier this model is on." $name $posture $tier) -}}
+{{- end -}}
+{{- end -}}
+{{- range $alias, $_ := ($pg.routePosture | default dict) -}}
+{{- if not (has $alias $aliases) -}}
+{{- fail (printf "modelGateway.policyGate.routePosture names %q, which is not a model_name in litellm.proxy_config.model_list." $alias) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- /*
+Open WebUI reaching the model gateway requires the gateway to exist. Since
+0.8.0 the shipped default points the console at this release's gateway
+(TM-0460), so a site that turns the gateway off and changes nothing else has a
+console resolving nothing and showing an empty model list with no error. That
+is the case this refuses, and the message names the two ways out. Naming a
+gateway URL that is NOT this release's Service is not fatal ... the endpoint
+may be a LiteLLM this chart does not manage ... so the condition is narrow on
+purpose: only the in-release Service name. It runs LAST: every narrower guard
+above (hooks or the policy gate configured with the gateway off) names its own
+cause first, and this one names the consequence a site reaches by turning the
+gateway off and changing nothing else.
+*/ -}}
+{{- if and $consoleOn $owui.enableOpenaiApi (not (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm"))) -}}
+{{- $expected := printf "%s-litellm" .Release.Name -}}
+{{- if contains $expected $url -}}
+{{- fail (printf "open-webui.openaiBaseApiUrl points at %q, which is the Service this release renders for the model gateway, but apps.litellm.enabled is false so nothing renders it. Open WebUI would resolve nothing and show an empty model list with no error. Since 0.8.0 the gateway is the shipped default (TM-0460); to run without it set open-webui.enableOpenaiApi: false (a console with no backend) or point open-webui.openaiBaseApiUrl at a model host you run, and set apps.litellm.enabled: false in global.yaml so every layer sees it. Either re-opens REQ-0004 AC-4.1 on this site; docs/usage/ai-plane.md says what that costs." $expected) -}}
+{{- end -}}
+{{- end -}}
+{{- /* THE SCRATCH VOLUME (TM-0596, TM-1005). The shipped envVars point TMPDIR at
+/scratch because the root filesystem is read-only, and the shipped volumes and
+volumeMounts lists carry the emptyDir behind it. A site that sets either list
+replaces it, drops the scratch entry, and the migrations Job (which gets no
+/tmp from the subchart) then has nowhere to write: its post-migrate schema diff
+fails at runtime, long after the render looked fine. Found by reading the
+reference homelab's values against 0.8.0; refuse it here instead. It runs after the hooks guard, which names a dropped
+tockmox-hooks entry first when a site replaced both. */ -}}
+{{- if and $litellmOn (eq (toString (dig "envVars" "TMPDIR" "" $lit)) "/scratch") -}}
+{{- $hasScratchVol := false -}}
+{{- range ($lit.volumes | default list) }}{{- if eq .name "tockmox-scratch" }}{{- $hasScratchVol = true }}{{- end }}{{- end -}}
+{{- $hasScratchMount := false -}}
+{{- range ($lit.volumeMounts | default list) }}{{- if and (eq .name "tockmox-scratch") (eq (.mountPath | default "") "/scratch") }}{{- $hasScratchMount = true }}{{- end }}{{- end -}}
+{{- if not $hasScratchVol -}}
+{{- fail "litellm.envVars.TMPDIR is /scratch, but litellm.volumes has no `tockmox-scratch` volume. With the read-only root filesystem the migrations Job then has nowhere to write and fails after the render passed. litellm.volumes is a list, and a site that sets it replaces the shipped entries; restate it: {name: tockmox-scratch, emptyDir: {sizeLimit: 500Mi}}." -}}
+{{- end -}}
+{{- if not $hasScratchMount -}}
+{{- fail "litellm.envVars.TMPDIR is /scratch, but litellm.volumeMounts does not mount `tockmox-scratch` at /scratch. With the read-only root filesystem the migrations Job then has nowhere to write. litellm.volumeMounts is a list, and a site that sets it replaces the shipped entries; restate it: {name: tockmox-scratch, mountPath: /scratch}." -}}
+{{- end -}}
+{{- end -}}

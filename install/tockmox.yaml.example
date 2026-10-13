@@ -1,0 +1,231 @@
+# SPDX-License-Identifier: Apache-2.0
+# ============================================================================
+# Tockmox site configuration
+# ============================================================================
+#
+# Copy this file, edit it, and feed it to the installer:
+#
+#     cp install/tockmox.yaml.example tockmox.yaml
+#     $EDITOR tockmox.yaml
+#     ./install/tockmox-install.sh --config tockmox.yaml
+#
+# This is YOUR input. The installer turns it into a site repository containing
+# Helm values files. It is not itself a Helm values file.
+#
+# Every setting below is either REQUIRED (no sensible default exists) or has a
+# default shown. Defaults are chosen to work on a stock k3s cluster.
+#
+# ============================================================================
+
+
+# ----------------------------------------------------------------------------
+# site ... who you are and where this is going
+# ----------------------------------------------------------------------------
+site:
+  # A short name for this deployment. Used in generated file headers and in
+  # the site repo's README. Letters, digits, hyphens.
+  # REQUIRED. Example: "acme-lab", "home", "hq-cluster"
+  name: ""
+
+  # Where the installer writes your site repository.
+  # Default: ./tockmox-site
+  path: ./tockmox-site
+
+
+# ----------------------------------------------------------------------------
+# tockmox ... which release you are running
+# ----------------------------------------------------------------------------
+tockmox:
+  # The Tockmox release your cluster tracks. Use a TAG, not a branch.
+  #
+  # Upgrading later means changing this one line and syncing. Tracking a branch
+  # means your cluster changes when someone else pushes: an upgrade you did not
+  # choose is the failure mode GitOps exists to remove. `main` is a fine choice
+  # for a lab you are happy to have move under you, and a poor one for anything
+  # you rely on.
+  #
+  # Pre-1.0, values keys can still move between releases, so read CHANGELOG.md
+  # before you change this line.
+  #
+  # The installer resolves this against the repository and refuses to generate
+  # a site ArgoCD could not fetch, so a typo is caught here rather than three
+  # phases later in an error that names neither this file nor this setting.
+  #
+  # Default: the current release
+  revision: v0.8.0
+
+  # Where to fetch Tockmox from. Change this if you mirror the repo internally.
+  # Default: https://github.com/tockmox/tockmox.git
+  repoURL: https://github.com/tockmox/tockmox.git
+
+
+# ----------------------------------------------------------------------------
+# global ... values every layer reads
+# ----------------------------------------------------------------------------
+global:
+  # Base domain for internal service hostnames. Tockmox builds hostnames from
+  # it, so grafana becomes grafana.<internalDomain>.
+  #
+  # This does NOT need to be a public domain, and for most deployments it
+  # should not be. A .internal or split-horizon subdomain you control is right.
+  #
+  # REQUIRED. Example: int.example.com
+  internalDomain: ""
+
+  # cert-manager Issuer or ClusterIssuer for certificates Tockmox requests.
+  #
+  # SET THIS TO tockmox-ca UNLESS YOU HAVE AN ISSUER OF YOUR OWN.
+  #
+  # The platform layer CREATES a ClusterIssuer called `tockmox-ca` on every
+  # stock install and it comes up Ready ... it is on by default
+  # (certIssuer.selfSigned.enabled). Leaving this key empty does not "skip
+  # certificate creation" in any harmless sense: it builds that issuer and
+  # then never points anything at it. Every console then serves plain HTTP,
+  # and SSO does not work, because the token exchange the consoles perform
+  # server-side will not run over http. The install reaches its documented end
+  # state and the product does not work, with nothing reporting red.
+  #
+  # Default: "" ... which is why this comment is this long.
+  # Recommended: tockmox-ca
+  # If you have a real domain and an ACME account, name that issuer instead;
+  # nothing else changes, because every layer only reads the issuer's NAME.
+  certIssuer: "tockmox-ca"
+
+  # The LAN or node network your cluster sits on.
+  #
+  # NetworkPolicies use this to admit traffic that originates OUTSIDE the
+  # cluster ... syslog from a switch, image pulls by the node's own container
+  # runtime. Tockmox refuses to guess: too narrow silently breaks ingest, too
+  # wide opens a hole.
+  #
+  # REQUIRED. Example: 192.168.1.0/24
+  lanCIDR: ""
+
+  # Pod and Service networks. The defaults are k3s's.
+  # Change only if you configured your cluster differently.
+  clusterCIDR: 10.42.0.0/16
+  serviceCIDR: 10.43.0.0/16
+
+  # IANA timezone for scheduled jobs. Affects when backups and drills run.
+  # Default: UTC
+  timezone: UTC
+
+  # Registry prefix for all images.
+  #
+  # Empty pulls from upstream registries, which is what you want when online.
+  # For an air-gapped install, mirror the images in images.txt into your own
+  # registry and set this to it. See docs/deployment/airgap.md.
+  #
+  # Default: "" (pull from upstream)
+  # Example: harbor.int.example.com/mirror
+  imageRegistry: ""
+
+  # ---------------------------------------------------------------------------
+  # The storage contract: replicate at exactly one layer.
+  #
+  # storageClass       data whose ONLY copy is the volume. Grafana, ntfy, the
+  #                    consoles, a single-instance database.
+  # localStorageClass  data the application already replicates, or that can be
+  #                    rebuilt: the metrics TSDB, log chunks, a Postgres cluster
+  #                    streaming to its own replicas. Node-local by design.
+  #
+  # Leaving either empty falls through to whatever the cluster's default
+  # StorageClass happens to be, which is the failure this contract exists to
+  # remove. Name both. Full reasoning: docs/administration/storage.md
+  #
+  # Defaults: longhorn (when the platform layer is on), local-path
+  # ---------------------------------------------------------------------------
+  storageClass: longhorn
+  localStorageClass: local-path
+
+
+# ----------------------------------------------------------------------------
+# addressPool ... LoadBalancer IPs
+# ----------------------------------------------------------------------------
+addressPool:
+  # The range MetalLB hands to LoadBalancer Services (Traefik takes the first).
+  # Inside lanCIDR, outside your DHCP pool. MetalLB refuses to render without
+  # it: a pool-less LoadBalancer stays Pending forever with no obvious cause.
+  # REQUIRED. Example: 192.168.1.200-192.168.1.220
+  #
+  # A list works too, for a site that already has a VIP in service and wants to
+  # keep it beside a free block:
+  #   range:
+  #     - 192.168.1.50/32
+  #     - 192.168.1.200-192.168.1.220
+  range: ""
+
+
+# ----------------------------------------------------------------------------
+# layers ... what to install
+# ----------------------------------------------------------------------------
+#
+# Every layer can be disabled. Dependencies are NOT resolved for you: turning
+# off platform while leaving observability on will produce workloads with
+# nowhere to store data. The installer warns about the combinations it knows
+# are broken.
+# ----------------------------------------------------------------------------
+layers:
+  crds: true            # every CustomResourceDefinition. Leave on.
+  policy: true          # namespaces, NetworkPolicies, RBAC guardrails
+  platform: true        # storage, networking, ingress, certificates
+  observability: true   # metrics, logs, dashboards, alerting
+  exporters: true       # hardware/service exporters. Off if your hardware differs
+  identity: true        # single sign-on
+  devops: true          # git, registry, object store, workflows
+  ai: true              # the local AI plane
+  selfcheck: true       # deterministic self-monitoring. Strongly recommended.
+
+
+# ----------------------------------------------------------------------------
+# namespaces ... adopting Tockmox into an EXISTING cluster
+# ----------------------------------------------------------------------------
+#
+# Defaults carry the reserved `tockmox-` prefix, so a fresh install is
+# prefix-clean and Tockmox-managed objects are trivially distinguishable from
+# yours.
+#
+# If you are adopting Tockmox into a cluster that ALREADY has these namespaces,
+# override them here to your existing names. Do NOT rename your namespaces to
+# match: renaming a namespace in Kubernetes means deleting and recreating
+# everything inside it.
+#
+# Uncomment and edit only what you need.
+# ----------------------------------------------------------------------------
+# namespaces:
+#   ai: ai
+#   monitoring: monitoring
+#   platform: platform      # the whole platform layer: Traefik, storage, certs
+#   traefik: platform       # where NetworkPolicies expect Traefik's pod
+#   authentik: authentik
+#   selfcheck: selfcheck
+#   devops: devops          # Argo Workflows lands here
+#
+#   # The three names below are used ONLY by NetworkPolicy bundles that are off
+#   # by default, because nothing Tockmox ships lands in these namespaces.
+#   # `harbor` is on this list and that surprises people: Harbor is a subchart
+#   # of the devops layer, so it deploys into `devops` above.
+#   # See docs/administration/external-integrations.md
+#   forgejo: forgejo
+#   tailscale: tailscale
+#   harbor: harbor
+
+
+# ----------------------------------------------------------------------------
+# argocd ... where the GitOps controller lives
+# ----------------------------------------------------------------------------
+argocd:
+  # Namespace ArgoCD is installed in. You installed it; we just need to know.
+  # Default: argocd
+  namespace: argocd
+
+  # Sync automatically when the repo changes, and revert manual cluster edits.
+  #
+  # Leaving selfHeal on is the recommendation, and it has a consequence worth
+  # understanding: editing resources with kubectl will not stick. Change your
+  # site repo instead. If that is intolerable during a migration, turn it off
+  # temporarily and turn it back on.
+  #
+  # Defaults: true, true
+  autoSync: true
+  selfHeal: true

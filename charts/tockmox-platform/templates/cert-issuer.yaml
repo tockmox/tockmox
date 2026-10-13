@@ -1,0 +1,135 @@
+{{- /*
+THE GUARD THAT MAKES THE NEW DEFAULT SAFE (2026-09-11, TM-0497).
+
+`global.certIssuer` now defaults to `tockmox-ca` rather than "". That closes the
+defect where a stock install BUILT this issuer and then pointed nothing at it:
+every console served plain HTTP, SSO did not work, and all eleven Applications
+reported Synced and Healthy while the product did not function.
+
+The cost of that default is a new way to be wrong: a site that turns
+cert-manager or this issuer OFF while leaving `global.certIssuer` naming it gets
+Certificates that never issue, which is the ORIGINAL bug this file was written
+to close. So refuse the render instead. A `fail` here is loud, immediate, and
+names both keys; the alternative is Certificates stuck Pending behind an error
+that names cert-manager rather than the value that caused it.
+
+Only the exact self-signed name is guarded. An operator who points
+`global.certIssuer` at their own ACME or corporate issuer is doing the supported
+thing and this template has no opinion about it.
+*/ -}}
+{{- if eq (.Values.global.certIssuer | default "") .Values.certIssuer.selfSigned.name }}
+  {{- if not .Values.certIssuer.selfSigned.enabled }}
+    {{- fail (printf "global.certIssuer is %q but certIssuer.selfSigned.enabled is false, so nothing creates that ClusterIssuer. Either set certIssuer.selfSigned.enabled=true, or point global.certIssuer at an issuer you create yourself, or set it to \"\" to serve plain HTTP deliberately." .Values.global.certIssuer) -}}
+  {{- end }}
+  {{- if not .Values.apps.certManager.enabled }}
+    {{- fail (printf "global.certIssuer is %q but apps.certManager.enabled is false. A ClusterIssuer needs cert-manager, so no certificate would ever issue. Either enable cert-manager, or point global.certIssuer at an issuer served by something you run, or set it to \"\" to serve plain HTTP deliberately." .Values.global.certIssuer) -}}
+  {{- end }}
+{{- end }}
+{{- if and .Values.apps.certManager.enabled .Values.certIssuer.selfSigned.enabled }}
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+THE DEFAULT ON-RAMP FOR TLS.
+
+cert-manager has shipped in this layer since the beginning and no issuer ever
+shipped with it, so `global.certIssuer` had nothing to point at: setting it
+named a ClusterIssuer that did not exist, every Certificate stayed Pending, and
+every console kept serving plain HTTP. This file closes that.
+
+WHY A CA, AND NOT A BARE SELF-SIGNED ISSUER. cert-manager's `selfSigned` issuer
+signs each Certificate with its own throwaway key. Point five consoles at it and
+you get five unrelated certificates with no common root, so the operator has to
+add five exceptions to five trust stores ... and again on every renewal, because
+the new certificate shares nothing with the old one. That is not an on-ramp, it
+is a chore that teaches people to click through warnings.
+
+So this renders three objects instead of one:
+
+  1. a `selfSigned` ClusterIssuer used for exactly one thing, minting the CA
+  2. a CA Certificate, self-signed by (1), stored as a Secret
+  3. the ClusterIssuer everything actually uses, of type `ca`, reading (2)
+
+The operator trusts ONE certificate, once. Every console certificate chains to
+it, and renewals keep chaining to it because the CA outlives them.
+
+WHERE THE SECRET LIVES, and why it is not configurable. A `ca` ClusterIssuer
+reads its Secret from cert-manager's cluster resource namespace, which the
+upstream chart sets to `--cluster-resource-namespace=$(POD_NAMESPACE)` ... the
+namespace cert-manager itself runs in, which is this release's namespace. Naming
+any other namespace here produces an issuer that reports
+`secret "..." not found` while the Secret sits in plain view somewhere else.
+
+THIS IS NOT A PUBLIC CA. Browsers will reject these certificates until the CA is
+trusted, which is a deliberate trade: it works with no internet, no DNS
+delegation and no ACME account, on a platform that is expected to run
+disconnected. Sites with a real domain should point `global.certIssuer` at an
+ACME issuer instead; nothing else has to change, because every layer only ever
+reads the issuer's NAME.
+*/ -}}
+{{- $ci := .Values.certIssuer.selfSigned -}}
+{{- if not $ci.name -}}
+{{- fail "certIssuer.selfSigned.name is empty. It is the name every layer's global.certIssuer points at, so an empty name produces Ingresses annotated with no issuer and Certificates that never issue." -}}
+{{- end -}}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ $ci.name }}-bootstrap
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    # Wave 3, together with every other cert-manager.io resource this chart
+    # authors: these are validated by cert-manager's admission webhook, which
+    # is itself starting in wave 0 of this same first sync. Applied flat, the
+    # webhook rejects them and the sync wedges waiting on health that cannot
+    # arrive ... reproduced on two consecutive greenfield installs. Wave 3
+    # means cert-manager is Healthy before anything it validates is applied.
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  # Used ONCE, to sign the CA below. Do not point global.certIssuer at this one:
+  # it would work, and every console would get an unrelated certificate that has
+  # to be trusted separately and again on each renewal.
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $ci.name }}-ca
+  # MUST be cert-manager's cluster resource namespace ... see the note above.
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  isCA: true
+  commonName: {{ $ci.commonName | quote }}
+  secretName: {{ $ci.caSecretName }}
+  # Long by intent. This is the certificate a human installs into a trust store
+  # by hand; expiring it yearly means doing that on every machine, yearly, which
+  # is how a lab ends up with everyone ignoring certificate warnings again.
+  duration: {{ $ci.duration | quote }}
+  renewBefore: {{ $ci.renewBefore | quote }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ $ci.name }}-bootstrap
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ $ci.name }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  # THIS is what global.certIssuer should name. It stays NotReady until the
+  # Certificate above has written its Secret, which takes a few seconds on a
+  # first install ... a Certificate elsewhere that is Pending during that window
+  # is waiting correctly, not broken.
+  ca:
+    secretName: {{ $ci.caSecretName }}
+{{- end }}

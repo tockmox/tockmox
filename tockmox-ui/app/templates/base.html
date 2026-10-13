@@ -1,0 +1,54 @@
+{% from "macros.html" import badge, state_icon %}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ site.site_name }}{% endblock %} · Tockmox</title>
+<link rel="icon" href="/static/brand/tockmox-favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/brand/tockmox-tokens.css">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+  <div class="top-inner">
+    <a class="brand" href="/"><img src="/static/brand/tockmox-lockup-horizontal-white.svg" alt="Tockmox home" width="180" height="45" class="logo-dark"><img src="/static/brand/tockmox-lockup-horizontal-ink.svg" alt="Tockmox home" width="180" height="45" class="logo-light"></a>
+    {% if user %}
+    <nav aria-label="Main">
+      <ul class="nav">
+        <li><a href="/" {% if path == "/" %}aria-current="page"{% endif %}>Home</a></li>
+        {% if user.is_admin %}
+        <li><a href="/status" {% if path == "/status" %}aria-current="page"{% endif %}>Status</a></li>
+        <li><a href="/version" {% if path in ("/version", "/upgrade") %}aria-current="page"{% endif %}>Version</a></li>
+        <li><a href="/nodes" {% if path.startswith("/nodes") %}aria-current="page"{% endif %}>Inference Nodes</a></li>
+        <li><a href="/models" {% if path.startswith("/models") %}aria-current="page"{% endif %}>Models</a></li>
+        <li><a href="/capabilities" {% if path == "/capabilities" %}aria-current="page"{% endif %}>Capabilities</a></li>
+        {% endif %}
+        {% for t in tabs %}
+        <li><a href="/tabs/{{ t.id }}" {% if path == "/tabs/" ~ t.id %}aria-current="page"{% endif %}>{{ t.name }}</a></li>
+        {% endfor %}
+      </ul>
+    </nav>
+    <div class="who">
+      <span class="who-name">{{ user.name }}{% if user.is_admin %} <span class="role">admin</span>{% endif %}</span>
+      <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ user.csrf }}"><button class="btn-ghost" type="submit">Sign out</button></form>
+    </div>
+    {% endif %}
+  </div>
+</header>
+<main id="main" tabindex="-1">
+{% block main %}{% endblock %}
+</main>
+<footer class="foot">
+  <p>{{ site.site_name }} ·
+    {%- if footer and footer.state == "single" %} Tockmox {{ footer.version }}
+    {%- elif footer and footer.state == "floating" %} Tockmox <code>{{ footer.ref[:12] }}</code> (not a release)
+    {%- elif footer and footer.state == "mixed" %} Tockmox (layers on mixed revisions)
+    {%- else %} Tockmox{% endif %}
+    {%- if footer and footer.newer %} <a class="pill" href="/version">New version available: {{ footer.newer }}</a>{% endif %}
+    · read-only
+    {%- if site.docs_url %} · <a href="{{ site.docs_url }}" rel="noopener">Documentation</a>{% endif %}
+    · <a href="/recovery">If something is down</a></p>
+</footer>
+</body>
+</html>

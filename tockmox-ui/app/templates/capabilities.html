@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, source_line %}
+{% block title %}Capabilities{% endblock %}
+{% block main %}
+<h1>Capabilities</h1>
+<p class="lede">Each capability is one switch for a whole story, such as single sign-on or backups. <em>Set to</em> is the switch as your site values turn it, read by the AI layer. <em>Deployed</em> is what Argo CD reports the owning layer actually runs. They should agree; a row where they do not is worth a look.</p>
+<p>{{ source_line(apps_reading) }}</p>
+<div class="table-wrap" role="region" aria-labelledby="caps-cap" tabindex="0">
+<table>
+  <caption id="caps-cap">Tockmox capabilities</caption>
+  <thead><tr><th scope="col">Capability</th><th scope="col">Set to</th><th scope="col">Deployed</th><th scope="col">What it is</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <th scope="row">{{ r.name }}<br><code class="muted">{{ r.key }}</code></th>
+      <td>{% if r.configured == "on" %}{{ badge("ok", "On") }}{% elif r.configured == "off" %}{{ badge("unknown", "Off") }}{% else %}{{ badge("unknown", "Not stated") }}{% endif %}</td>
+      <td>{% if r.deployed == "on" %}{{ badge("ok", "Running") }}{% elif r.deployed == "off" %}{{ badge("unknown", "Not deployed") }}{% else %}{{ badge("unknown", "Unknown") }}{% endif %}
+        {% if not r.agree %}<br>{{ badge("warning", "Disagrees") }}{% endif %}
+        <br><span class="muted">{{ r.evidence }}</span></td>
+      <td>{{ r.what }}<br><span class="muted">{{ r.components }}</span></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted">To change a capability, set <code>capabilities.&lt;name&gt;.enabled</code> in your site values and commit it; this page changes nothing. A site may set it in one layer's values file only, so the AI layer's view can differ from another layer's, which this page would show as a disagreement.</p>
+{% endblock %}

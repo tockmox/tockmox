@@ -1,0 +1,75 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+Stand-in listeners: one per declared namespace, serving an empty directory on
+targets.standinPort, so every ns-to-ns row has a KNOWN listener. A refused
+connect to a known listener is a policy reject; to an unknown port it proves
+nothing. They carry no token and no data. No NetworkPolicy here selects them:
+they stand for an ordinary workload, so the namespace's own policies govern them.
+*/ -}}
+{{- if and .Values.enabled (.Values.standins | default dict).enabled -}}
+{{- $m := include "pp.model" . | fromJson -}}
+{{- $port := int ((.Values.targets | default dict).standinPort | default 8080) -}}
+{{- range $i, $ns := $m.config.namespaces }}
+{{- if $i }}
+---
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: posture-standin
+  namespace: {{ $ns }}
+  labels:
+    {{- include "pp.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: standin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: posture-standin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: posture-standin
+        app.kubernetes.io/part-of: posture-probe
+        app.kubernetes.io/component: standin
+    spec:
+      automountServiceAccountToken: false
+      {{- include "pp.podSecurity" $ | nindent 6 }}
+      containers:
+        - name: listener
+          image: {{ $.Values.image | quote }}
+          imagePullPolicy: {{ $.Values.imagePullPolicy | default "IfNotPresent" }}
+          args: ["standin"]
+          env:
+            - { name: STANDIN_PORT, value: {{ $port | toString | quote }} }
+            - { name: STANDIN_DIR, value: /tmp/standin }
+          ports:
+            - { name: http, containerPort: {{ $port }} }
+          readinessProbe:
+            tcpSocket: { port: http }
+            periodSeconds: 10
+          {{- include "pp.containerSecurity" $ | nindent 10 }}
+          resources:
+            {{- toYaml $.Values.resources | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 1Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: posture-standin
+  namespace: {{ $ns }}
+  labels:
+    {{- include "pp.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: standin
+spec:
+  selector:
+    app.kubernetes.io/name: posture-standin
+  ports:
+    - { name: http, port: {{ $port }}, targetPort: http }
+{{- end }}
+{{- end }}

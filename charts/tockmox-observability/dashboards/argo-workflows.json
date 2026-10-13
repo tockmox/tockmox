@@ -1,0 +1,536 @@
+{
+ "description": "Argo Workflows self-monitoring spine (REQ-0016/ADR-0010) + restore-drill CronWorkflows. Controller health, workflow phases, cron triggers, queue depth, API pressure.",
+ "editable": true,
+ "graphTooltip": 1,
+ "links": [
+  {
+   "asDropdown": true,
+   "icon": "external link",
+   "includeVars": false,
+   "keepTime": true,
+   "tags": [
+    "tockmox"
+   ],
+   "targetBlank": false,
+   "title": "Tockmox dashboards",
+   "type": "dashboards"
+  }
+ ],
+ "panels": [
+  {
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "mappings": [
+      {
+       "options": {
+        "0": {
+         "color": "red",
+         "text": "No leader"
+        },
+        "1": {
+         "color": "green",
+         "text": "Leader OK"
+        }
+       },
+       "type": "value"
+      }
+     ],
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "red",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 5,
+    "x": 0,
+    "y": 0
+   },
+   "id": 1,
+   "options": {
+    "colorMode": "background",
+    "graphMode": "none",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "max(argo_workflows_is_leader)",
+     "instant": true,
+     "refId": "A"
+    }
+   ],
+   "title": "Controller leader",
+   "type": "stat"
+  },
+  {
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "fixedColor": "blue",
+      "mode": "fixed"
+     }
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 5,
+    "x": 5,
+    "y": 0
+   },
+   "id": 2,
+   "options": {
+    "colorMode": "value",
+    "graphMode": "area",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "max(argo_workflows_gauge{phase=\"Running\"})",
+     "instant": true,
+     "refId": "A"
+    }
+   ],
+   "title": "Running",
+   "type": "stat"
+  },
+  {
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "mode": "thresholds"
+     },
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "red",
+        "value": 1
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 7,
+    "x": 10,
+    "y": 0
+   },
+   "id": 3,
+   "options": {
+    "colorMode": "background",
+    "graphMode": "none",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "sum(max by (phase) (argo_workflows_gauge{phase=~\"Failed|Error\"}))",
+     "instant": true,
+     "refId": "A"
+    }
+   ],
+   "title": "Failed + Error (current)",
+   "type": "stat"
+  },
+  {
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "fixedColor": "green",
+      "mode": "fixed"
+     }
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 7,
+    "x": 17,
+    "y": 0
+   },
+   "id": 4,
+   "options": {
+    "colorMode": "value",
+    "graphMode": "area",
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ]
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "max(argo_workflows_gauge{phase=\"Succeeded\"})",
+     "instant": true,
+     "refId": "A"
+    }
+   ],
+   "title": "Succeeded",
+   "type": "stat"
+  },
+  {
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 15,
+      "stacking": {
+       "mode": "normal"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 4
+   },
+   "id": 5,
+   "options": {
+    "legend": {
+     "calcs": [
+      "lastNotNull",
+      "max"
+     ],
+     "displayMode": "table",
+     "placement": "right"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "max by (phase) (argo_workflows_gauge)",
+     "legendFormat": "{{phase}}",
+     "refId": "A"
+    }
+   ],
+   "title": "Workflows by phase",
+   "type": "timeseries"
+  },
+  {
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 10,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 4
+   },
+   "id": 6,
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "sum by (worker_type) (argo_workflows_queue_depth_gauge)",
+     "legendFormat": "{{worker_type}}",
+     "refId": "A"
+    }
+   ],
+   "title": "Controller queue depth",
+   "type": "timeseries"
+  },
+  {
+   "fieldConfig": {
+    "defaults": {
+     "color": {
+      "fixedColor": "red",
+      "mode": "fixed"
+     },
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 0,
+    "y": 12
+   },
+   "id": 7,
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "single"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "sum(rate(argo_workflows_error_count[5m]))",
+     "legendFormat": "errors/s",
+     "refId": "A"
+    }
+   ],
+   "title": "Controller errors (rate/5m)",
+   "type": "timeseries"
+  },
+  {
+   "fieldConfig": {
+    "defaults": {
+     "custom": {
+      "drawStyle": "line",
+      "fillOpacity": 10
+     }
+    },
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "operation p95 (s)"
+      },
+      "properties": [
+       {
+        "id": "custom.axisPlacement",
+        "value": "right"
+       },
+       {
+        "id": "unit",
+        "value": "s"
+       }
+      ]
+     }
+    ]
+   },
+   "gridPos": {
+    "h": 7,
+    "w": 12,
+    "x": 12,
+    "y": 12
+   },
+   "id": 8,
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "sum(rate(argo_workflows_k8s_request_total[5m]))",
+     "legendFormat": "k8s req/s",
+     "refId": "A"
+    },
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "histogram_quantile(0.95, sum by (le) (rate(argo_workflows_operation_duration_seconds_bucket[5m])))",
+     "legendFormat": "operation p95 (s)",
+     "refId": "B"
+    }
+   ],
+   "title": "K8s API request rate + operation p95",
+   "type": "timeseries"
+  },
+  {
+   "description": "How often each CronWorkflow fired in the last 7 days. Restore-drill and other scheduled workflows show here; a row dropping to 0 means a schedule stopped firing.",
+   "gridPos": {
+    "h": 9,
+    "w": 24,
+    "x": 0,
+    "y": 19
+   },
+   "id": 9,
+   "options": {
+    "showHeader": true,
+    "sortBy": [
+     {
+      "desc": true,
+      "displayName": "Value"
+     }
+    ]
+   },
+   "targets": [
+    {
+     "datasource": {
+      "type": "prometheus",
+      "uid": "${datasource}"
+     },
+     "expr": "sum by (name, namespace) (increase(argo_workflows_cronworkflows_triggered_total[7d]))",
+     "format": "table",
+     "instant": true,
+     "refId": "A"
+    }
+   ],
+   "title": "CronWorkflow triggers (7d) \u2014 restore-drills + scheduled",
+   "type": "table",
+   "transformations": [
+    {
+     "id": "organize",
+     "options": {
+      "excludeByName": {
+       "Time": true
+      },
+      "indexByName": {
+       "name": 0,
+       "namespace": 1,
+       "Value": 2
+      }
+     }
+    }
+   ],
+   "fieldConfig": {
+    "defaults": {},
+    "overrides": [
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "name"
+      },
+      "properties": [
+       {
+        "id": "custom.wrapText",
+        "value": true
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "namespace"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 190
+       }
+      ]
+     },
+     {
+      "matcher": {
+       "id": "byName",
+       "options": "Value"
+      },
+      "properties": [
+       {
+        "id": "custom.width",
+        "value": 100
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ],
+ "refresh": "5m",
+ "schemaVersion": 39,
+ "tags": [
+  "platform",
+  "tockmox",
+  "workflows",
+  "restore-drill"
+ ],
+ "templating": {
+  "list": [
+   {
+    "current": {},
+    "hide": 0,
+    "name": "datasource",
+    "query": "prometheus",
+    "refresh": 1,
+    "regex": "",
+    "type": "datasource"
+   }
+  ]
+ },
+ "time": {
+  "from": "now-7d",
+  "to": "now"
+ },
+ "title": "Tockmox / Argo Workflows",
+ "uid": "tockmox-argo-workflows"
+}

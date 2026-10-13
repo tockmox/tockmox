@@ -1,0 +1,418 @@
+{
+  "bomFormat": "CycloneDX",
+  "components": [
+    {
+      "name": "alpine/k8s",
+      "purl": "pkg:oci/k8s?repository_url=alpine/k8s&tag=1.37.1",
+      "type": "container",
+      "version": "1.37.1"
+    },
+    {
+      "name": "binwiederhier/ntfy",
+      "purl": "pkg:oci/ntfy?repository_url=binwiederhier/ntfy&tag=v2.29.0",
+      "type": "container",
+      "version": "v2.29.0"
+    },
+    {
+      "name": "caronc/apprise",
+      "purl": "pkg:oci/apprise?repository_url=caronc/apprise&tag=2.0.1",
+      "type": "container",
+      "version": "2.0.1"
+    },
+    {
+      "name": "docker.io/aquasec/kube-bench",
+      "purl": "pkg:oci/kube-bench?repository_url=docker.io/aquasec/kube-bench&tag=v0.16.0",
+      "type": "container",
+      "version": "v0.16.0"
+    },
+    {
+      "name": "docker.io/grafana/alloy",
+      "purl": "pkg:oci/alloy?repository_url=docker.io/grafana/alloy&tag=v1.20.1",
+      "type": "container",
+      "version": "v1.20.1"
+    },
+    {
+      "name": "docker.io/grafana/grafana",
+      "purl": "pkg:oci/grafana?repository_url=docker.io/grafana/grafana&tag=13.2.3-distroless",
+      "type": "container",
+      "version": "13.2.3-distroless"
+    },
+    {
+      "name": "docker.io/grafana/loki-canary",
+      "purl": "pkg:oci/loki-canary?repository_url=docker.io/grafana/loki-canary&tag=3.7.8",
+      "type": "container",
+      "version": "3.7.8"
+    },
+    {
+      "name": "docker.io/grafana/loki",
+      "purl": "pkg:oci/loki?repository_url=docker.io/grafana/loki&tag=3.7.8",
+      "type": "container",
+      "version": "3.7.8"
+    },
+    {
+      "name": "docker.io/library/busybox",
+      "purl": "pkg:oci/busybox?repository_url=docker.io/library/busybox&tag=1.38.0",
+      "type": "container",
+      "version": "1.38.0"
+    },
+    {
+      "name": "docker.io/library/postgres",
+      "purl": "pkg:oci/postgres?repository_url=docker.io/library/postgres&tag=17.11-bookworm",
+      "type": "container",
+      "version": "17.11-bookworm"
+    },
+    {
+      "name": "docker.io/longhornio/longhorn-manager",
+      "purl": "pkg:oci/longhorn-manager?repository_url=docker.io/longhornio/longhorn-manager&tag=v1.13.0",
+      "type": "container",
+      "version": "v1.13.0"
+    },
+    {
+      "name": "docker.io/longhornio/longhorn-share-manager",
+      "purl": "pkg:oci/longhorn-share-manager?repository_url=docker.io/longhornio/longhorn-share-manager&tag=v1.13.0",
+      "type": "container",
+      "version": "v1.13.0"
+    },
+    {
+      "name": "docker.io/longhornio/longhorn-ui",
+      "purl": "pkg:oci/longhorn-ui?repository_url=docker.io/longhornio/longhorn-ui&tag=v1.13.0",
+      "type": "container",
+      "version": "v1.13.0"
+    },
+    {
+      "name": "docker.io/nginxinc/nginx-unprivileged",
+      "purl": "pkg:oci/nginx-unprivileged?repository_url=docker.io/nginxinc/nginx-unprivileged&tag=1.31-alpine",
+      "type": "container",
+      "version": "1.31-alpine"
+    },
+    {
+      "name": "docker.io/traefik",
+      "purl": "pkg:oci/traefik?repository_url=docker.io/traefik&tag=v3.7.14",
+      "type": "container",
+      "version": "v3.7.14"
+    },
+    {
+      "name": "dxflrs/garage",
+      "purl": "pkg:oci/garage?repository_url=dxflrs/garage&tag=v2.4.1",
+      "type": "container",
+      "version": "v2.4.1"
+    },
+    {
+      "name": "ghcr.io/berriai/litellm-database",
+      "purl": "pkg:oci/litellm-database?repository_url=ghcr.io/berriai/litellm-database&tag=1.105.0",
+      "type": "container",
+      "version": "1.105.0"
+    },
+    {
+      "name": "ghcr.io/cloudnative-pg/cloudnative-pg",
+      "purl": "pkg:oci/cloudnative-pg?repository_url=ghcr.io/cloudnative-pg/cloudnative-pg&tag=1.30.1",
+      "type": "container",
+      "version": "1.30.1"
+    },
+    {
+      "name": "ghcr.io/cloudnative-pg/plugin-barman-cloud",
+      "purl": "pkg:oci/plugin-barman-cloud?repository_url=ghcr.io/cloudnative-pg/plugin-barman-cloud&tag=v0.15.1",
+      "type": "container",
+      "version": "v0.15.1"
+    },
+    {
+      "name": "ghcr.io/goauthentik/server",
+      "purl": "pkg:oci/server?repository_url=ghcr.io/goauthentik/server&tag=2026.8.3",
+      "type": "container",
+      "version": "2026.8.3"
+    },
+    {
+      "name": "ghcr.io/jkroepke/access-log-exporter",
+      "purl": "pkg:oci/access-log-exporter?repository_url=ghcr.io/jkroepke/access-log-exporter&tag=0.4.21",
+      "type": "container",
+      "version": "0.4.21"
+    },
+    {
+      "name": "ghcr.io/jkroepke/kube-webhook-certgen",
+      "purl": "pkg:oci/kube-webhook-certgen?repository_url=ghcr.io/jkroepke/kube-webhook-certgen&tag=1.8.9",
+      "type": "container",
+      "version": "1.8.9"
+    },
+    {
+      "name": "ghcr.io/kubereboot/kured",
+      "purl": "pkg:oci/kured?repository_url=ghcr.io/kubereboot/kured&tag=1.23.0",
+      "type": "container",
+      "version": "1.23.0"
+    },
+    {
+      "name": "ghcr.io/open-webui/open-webui",
+      "purl": "pkg:oci/open-webui?repository_url=ghcr.io/open-webui/open-webui&tag=0.12.0",
+      "type": "container",
+      "version": "0.12.0"
+    },
+    {
+      "name": "nginxinc/nginx-unprivileged",
+      "purl": "pkg:oci/nginx-unprivileged?repository_url=nginxinc/nginx-unprivileged&tag=1.31-alpine",
+      "type": "container",
+      "version": "1.31-alpine"
+    },
+    {
+      "name": "python",
+      "purl": "pkg:oci/python?tag=3.14-slim",
+      "type": "container",
+      "version": "3.14-slim"
+    },
+    {
+      "name": "quay.io/argoproj/argocli",
+      "purl": "pkg:oci/argocli?repository_url=quay.io/argoproj/argocli&tag=v4.1.4",
+      "type": "container",
+      "version": "v4.1.4"
+    },
+    {
+      "name": "quay.io/argoproj/workflow-controller",
+      "purl": "pkg:oci/workflow-controller?repository_url=quay.io/argoproj/workflow-controller&tag=v4.1.4",
+      "type": "container",
+      "version": "v4.1.4"
+    },
+    {
+      "name": "quay.io/jetstack/cert-manager-cainjector",
+      "purl": "pkg:oci/cert-manager-cainjector?repository_url=quay.io/jetstack/cert-manager-cainjector&tag=v1.21.2",
+      "type": "container",
+      "version": "v1.21.2"
+    },
+    {
+      "name": "quay.io/jetstack/cert-manager-controller",
+      "purl": "pkg:oci/cert-manager-controller?repository_url=quay.io/jetstack/cert-manager-controller&tag=v1.21.2",
+      "type": "container",
+      "version": "v1.21.2"
+    },
+    {
+      "name": "quay.io/jetstack/cert-manager-startupapicheck",
+      "purl": "pkg:oci/cert-manager-startupapicheck?repository_url=quay.io/jetstack/cert-manager-startupapicheck&tag=v1.21.2",
+      "type": "container",
+      "version": "v1.21.2"
+    },
+    {
+      "name": "quay.io/jetstack/cert-manager-webhook",
+      "purl": "pkg:oci/cert-manager-webhook?repository_url=quay.io/jetstack/cert-manager-webhook&tag=v1.21.2",
+      "type": "container",
+      "version": "v1.21.2"
+    },
+    {
+      "name": "quay.io/kiwigrid/k8s-sidecar",
+      "purl": "pkg:oci/k8s-sidecar?repository_url=quay.io/kiwigrid/k8s-sidecar&tag=2.14.1",
+      "type": "container",
+      "version": "2.14.1"
+    },
+    {
+      "name": "quay.io/metallb/controller",
+      "purl": "pkg:oci/controller?repository_url=quay.io/metallb/controller&tag=v0.16.1",
+      "type": "container",
+      "version": "v0.16.1"
+    },
+    {
+      "name": "quay.io/metallb/speaker",
+      "purl": "pkg:oci/speaker?repository_url=quay.io/metallb/speaker&tag=v0.16.1",
+      "type": "container",
+      "version": "v0.16.1"
+    },
+    {
+      "name": "quay.io/prometheus-operator/prometheus-config-reloader",
+      "purl": "pkg:oci/prometheus-config-reloader@sha256:142a1f11df8dd165f00375b0b1826aecb9c9adeb05c39855893138d7c7575ff7?repository_url=quay.io/prometheus-operator/prometheus-config-reloader&tag=v0.94.0",
+      "type": "container",
+      "version": "sha256:142a1f11df8dd165f00375b0b1826aecb9c9adeb05c39855893138d7c7575ff7"
+    },
+    {
+      "name": "quay.io/prometheus-operator/prometheus-operator",
+      "purl": "pkg:oci/prometheus-operator?repository_url=quay.io/prometheus-operator/prometheus-operator&tag=v0.94.1",
+      "type": "container",
+      "version": "v0.94.1"
+    },
+    {
+      "name": "quay.io/prometheus/alertmanager",
+      "purl": "pkg:oci/alertmanager?repository_url=quay.io/prometheus/alertmanager&tag=v0.34.1",
+      "type": "container",
+      "version": "v0.34.1"
+    },
+    {
+      "name": "quay.io/prometheus/blackbox-exporter",
+      "purl": "pkg:oci/blackbox-exporter?repository_url=quay.io/prometheus/blackbox-exporter&tag=v0.29.0",
+      "type": "container",
+      "version": "v0.29.0"
+    },
+    {
+      "name": "quay.io/prometheus/node-exporter",
+      "purl": "pkg:oci/node-exporter?repository_url=quay.io/prometheus/node-exporter&tag=v1.12.1-distroless",
+      "type": "container",
+      "version": "v1.12.1-distroless"
+    },
+    {
+      "name": "quay.io/prometheus/prometheus",
+      "purl": "pkg:oci/prometheus?repository_url=quay.io/prometheus/prometheus&tag=v3.15.0-distroless",
+      "type": "container",
+      "version": "v3.15.0-distroless"
+    },
+    {
+      "name": "redis",
+      "purl": "pkg:oci/redis?tag=7.4.2-alpine3.21",
+      "type": "container",
+      "version": "7.4.2-alpine3.21"
+    },
+    {
+      "name": "registry.k8s.io/kube-state-metrics/kube-state-metrics",
+      "purl": "pkg:oci/kube-state-metrics?repository_url=registry.k8s.io/kube-state-metrics/kube-state-metrics&tag=v2.20.0",
+      "type": "container",
+      "version": "v2.20.0"
+    },
+    {
+      "name": "registry.k8s.io/sig-storage/snapshot-controller",
+      "purl": "pkg:oci/snapshot-controller?repository_url=registry.k8s.io/sig-storage/snapshot-controller&tag=v8.6.0",
+      "type": "container",
+      "version": "v8.6.0"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-ai",
+      "name": "open-webui",
+      "purl": "pkg:generic/helm/open-webui@17.0.0",
+      "type": "application",
+      "version": "17.0.0"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-ai",
+      "name": "litellm-helm",
+      "purl": "pkg:generic/helm/litellm-helm@1.105.0",
+      "type": "application",
+      "version": "1.105.0"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-crds",
+      "name": "prometheus-operator-crds",
+      "purl": "pkg:generic/helm/prometheus-operator-crds@32.0.1",
+      "type": "application",
+      "version": "32.0.1"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-devops",
+      "name": "argo-workflows",
+      "purl": "pkg:generic/helm/argo-workflows@2.0.11",
+      "type": "application",
+      "version": "2.0.11"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-exporters",
+      "name": "prometheus-blackbox-exporter",
+      "purl": "pkg:generic/helm/prometheus-blackbox-exporter@11.20.0",
+      "type": "application",
+      "version": "11.20.0"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-exporters",
+      "name": "prometheus-snmp-exporter",
+      "purl": "pkg:generic/helm/prometheus-snmp-exporter@9.18.1",
+      "type": "application",
+      "version": "9.18.1"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-exporters",
+      "name": "prometheus-smartctl-exporter",
+      "purl": "pkg:generic/helm/prometheus-smartctl-exporter@0.17.1",
+      "type": "application",
+      "version": "0.17.1"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-identity",
+      "name": "authentik",
+      "purl": "pkg:generic/helm/authentik@2026.8.3",
+      "type": "application",
+      "version": "2026.8.3"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-observability",
+      "name": "kube-prometheus-stack",
+      "purl": "pkg:generic/helm/kube-prometheus-stack@92.2.0",
+      "type": "application",
+      "version": "92.2.0"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-observability",
+      "name": "loki",
+      "purl": "pkg:generic/helm/loki@18.15.0",
+      "type": "application",
+      "version": "18.15.0"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-observability",
+      "name": "alloy",
+      "purl": "pkg:generic/helm/alloy@1.13.1",
+      "type": "application",
+      "version": "1.13.1"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-platform",
+      "name": "cert-manager",
+      "purl": "pkg:generic/helm/cert-manager@v1.21.2",
+      "type": "application",
+      "version": "v1.21.2"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-platform",
+      "name": "metallb",
+      "purl": "pkg:generic/helm/metallb@0.16.1",
+      "type": "application",
+      "version": "0.16.1"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-platform",
+      "name": "traefik",
+      "purl": "pkg:generic/helm/traefik@41.7.0",
+      "type": "application",
+      "version": "41.7.0"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-platform",
+      "name": "longhorn",
+      "purl": "pkg:generic/helm/longhorn@1.13.0",
+      "type": "application",
+      "version": "1.13.0"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-platform",
+      "name": "cloudnative-pg",
+      "purl": "pkg:generic/helm/cloudnative-pg@0.29.1",
+      "type": "application",
+      "version": "0.29.1"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-platform",
+      "name": "plugin-barman-cloud",
+      "purl": "pkg:generic/helm/plugin-barman-cloud@0.8.1",
+      "type": "application",
+      "version": "0.8.1"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-platform",
+      "name": "kured",
+      "purl": "pkg:generic/helm/kured@6.1.0",
+      "type": "application",
+      "version": "6.1.0"
+    },
+    {
+      "description": "Helm chart dependency of tockmox-platform",
+      "name": "snapshot-controller",
+      "purl": "pkg:generic/helm/snapshot-controller@5.3.0",
+      "type": "application",
+      "version": "5.3.0"
+    }
+  ],
+  "metadata": {
+    "component": {
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "name": "tockmox",
+      "type": "application",
+      "version": "0.8.0"
+    }
+  },
+  "specVersion": "1.5",
+  "version": 1
+}

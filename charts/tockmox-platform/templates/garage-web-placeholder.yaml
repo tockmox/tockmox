@@ -1,0 +1,49 @@
+{{- if and (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "dataProtection" "app" "garage")) .Values.garage.bootstrap.enabled }}
+{{- $placeholder := false -}}
+{{- range (include "tockmox.garageWeb.sites" . | fromYamlArray) }}{{- if .placeholder }}{{- $placeholder = true }}{{- end }}{{- end }}
+{{- if $placeholder }}
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+THE DOCS SITE'S PLACEHOLDER PAGE (TM-0808, TM-0805).
+
+The product documentation is published from the operator's checkout by
+tools/publish-docs.sh; no container image carries it (ADR-0036). Between the
+install and that first publish the docs bucket would be empty and the Ingress
+would answer 404. This ConfigMap holds one page that says so and names the
+command. The bootstrap Job (garage-bootstrap.yaml, step 8) uploads it to the
+docs bucket ONLY WHEN THE BUCKET HOLDS NO OBJECT AT ALL, so a bootstrap re-run
+after an upgrade never overwrites published documentation, and the next
+publish-docs.sh run replaces it (its `sync --delete` removes anything the
+published site does not contain).
+
+It is static text with no script, no font and no external reference, and it
+names no host: the page is served on the operator's own docs host and does not
+need to know it.
+*/ -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-garage-docs-placeholder
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+data:
+  index.html: |
+    <!doctype html>
+    <html lang="en">
+    <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Tockmox documentation: not published yet</title>
+    <style>body{font-family:system-ui,sans-serif;max-width:40rem;margin:4rem auto;padding:0 1rem;line-height:1.5}code{background:#eee;padding:.1rem .3rem}</style>
+    </head>
+    <body>
+    <h1>The documentation for this Tockmox install has not been published yet</h1>
+    <p>This site is served from the object store in this cluster. Tockmox does not ship a container image of its documentation, so whoever runs the install publishes it from their checkout of the Tockmox repository, at the tag that is deployed:</p>
+    <p><code>tools/publish-docs.sh --context YOUR-KUBECONTEXT</code></p>
+    <p>The same documentation is in the <code>docs/</code> directory of that checkout, and the page <code>docs/administration/serving-static-sites.md</code> describes the command. This placeholder is replaced by the first successful publish.</p>
+    </body>
+    </html>
+{{- end }}
+{{- end }}

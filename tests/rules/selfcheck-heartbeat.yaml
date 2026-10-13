@@ -1,0 +1,166 @@
+# TockmoxSelfCheckStale ... TM-0531.
+#
+# DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
+#
+# THE CASE THIS ALERT EXISTS FOR, and the case it USED TO GET WRONG, are the
+# same fifteen minutes. Measured on a greenfield 2026-09-12: cluster up 00:46,
+# TockmoxSelfCheckStale FIRING at severity critical from ~00:52, first heartbeat
+# Job completed 01:01:25, alert cleared by itself at 01:01:29. Nothing was wrong
+# at any point. `kube_cronjob_status_last_successful_time` does not exist until
+# the first successful run, and on the shipped `*/15` schedule that is up to
+# fifteen minutes after install, so the expression's `absent()` arm is true for
+# the whole of a correct cold start. With `for: 5m` it fired at five minutes and
+# stayed firing until the first tick.
+#
+# The fix was `for: 5m` -> `for: 20m`, and it shipped in 0.6.0. What did NOT
+# ship was any test, which is why this file exists at 0.6.1: the only evidence
+# was one hand-watched install, and a single observation of an absence cannot be
+# replayed, cannot run on a pull request, and says nothing about the two arms it
+# did not exercise. Case 2 below is the one that keeps the fix honest ... a
+# longer `for` is also how you accidentally disable an alert, and nothing else
+# in the tree would notice.
+#
+# CASE 1 IS THE COLD INSTALL. CASE 2 PROVES THE FIX DID NOT SILENCE THE ALARM.
+# Cases 3 and 4 hold the staleness arm the fix deliberately did not touch.
+#
+# Timing note, since `for: 20m` is the whole subject: promtool's clock starts at
+# 0, so a metric whose value is 900 at t=15m means "last success at 15 minutes",
+# and `time() - 900` at t=30m is 900 seconds ... well inside the 2700-second
+# (45-minute) staleness threshold. Every value below is a unix timestamp in that
+# same test-relative frame, not a duration.
+#
+# THE FIRST DRAFT OF THIS FILE FAILED, and what it got wrong is worth keeping,
+# because both errors produced a test that looked reasonable and measured
+# nothing.
+#
+# 1. THE NAMESPACE. Every input series was labelled
+#    `namespace="tockmox-selfcheck"`, the namespace the chart installs into. But
+#    `check-alert-rules.sh` renders with `helm template` and no `--namespace`, so
+#    `{{ .Release.Namespace }}` becomes `default` and the rule selects
+#    `namespace="default"`. Nothing matched the selector, `absent()` was
+#    therefore true in every case including the ones asserting silence, and the
+#    alert fired at 25m, 30m, 44m, 50m, 1h, 1h4m and 1h15m. **A rendered rule's
+#    selectors are a property of the RENDER, not of the deployment.**
+#
+# 2. THE LABEL SETS DIFFER BY ARM, which is a property of the rule worth knowing
+#    independently of this test. `max()` with no `by()` aggregates away every
+#    label, so when the STALENESS arm fires the alert carries only `severity`.
+#    `absent()` returns the labels of its equality matchers, so when the ABSENT
+#    arm fires the same alert also carries `namespace` and `cronjob`. Cases 2 and
+#    3 assert the two different sets deliberately. Routing or deduplicating on
+#    `namespace` would therefore behave differently depending on which arm
+#    fired ... not fixed here, and not a patch-sized change.
+#
+# Both were found by running it. `tools/check-alert-rules.sh` SKIPS with exit 2
+# when promtool is absent rather than passing, so this file was unexamined
+# rather than falsely green while it was being written.
+evaluation_interval: 1m
+
+tests:
+  # 1. THE COLD INSTALL, reproduced. The series is absent for the first fifteen
+  #    minutes (no successful run yet), then appears carrying the timestamp of
+  #    that first tick. The `absent()` arm is therefore true for 15 minutes and
+  #    false thereafter, which never reaches `for: 20m`.
+  #
+  #    The 19m assertion is the regression guard and is deliberately one minute
+  #    short of the threshold: under the shipped 20m it must be silent, and
+  #    under the old 5m it would have been firing for fourteen minutes by then.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="default",cronjob="tockmox-heartbeat"}'
+        # Absent for the first fifteen minutes, then the timestamp of each tick,
+        # HELD between ticks. The value is a clock reading, not a counter: it
+        # changes only when a run succeeds, so it steps every fifteen minutes
+        # rather than climbing every scrape. An earlier draft of this case wrote
+        # `900+900x8`, which increments once a MINUTE and models a heartbeat
+        # ticking sixty times an hour ... it would have passed, while testing a
+        # schedule the chart does not ship.
+        values: '_x15 900+0x14 1800+0x14 2700+0x14 3600+0x14'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TockmoxSelfCheckStale
+        exp_alerts: []
+      - eval_time: 19m
+        alertname: TockmoxSelfCheckStale
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: TockmoxSelfCheckStale
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: TockmoxSelfCheckStale
+        exp_alerts: []
+
+  # 2. THE FIX DID NOT SILENCE THE ALARM. kube-state-metrics never produces the
+  #    series at all, which is the condition the `absent()` arm is FOR: a dead
+  #    kube-state-metrics means nothing is watching the heartbeat either. It
+  #    must stay silent through the cold-start window and then fire.
+  #
+  #    Without this case, `for: 20m` could be raised to any value at all and
+  #    every other test here would still pass. That is the shape of a check that
+  #    cannot go red, and this alert has already been through three expressions.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="kube-state-metrics"}'
+        values: '1+0x60'
+    alert_rule_test:
+      - eval_time: 19m
+        alertname: TockmoxSelfCheckStale
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: TockmoxSelfCheckStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: default
+              cronjob: tockmox-heartbeat
+            exp_annotations:
+              summary: "Tockmox self-check has gone silent"
+              description: >-
+                No successful heartbeat for 45 minutes. The platform is not necessarily broken ... but nothing is watching it, which means a green dashboard is currently meaningless. Treat this as an outage of the monitoring plane.
+
+  # 3. THE STALENESS ARM, which the fix deliberately did not touch. The heartbeat
+  #    ran once at t=0 and then stopped. `time() - 0` crosses staleAfterSeconds
+  #    (2700) at 45 minutes, and `for: 20m` puts the alert at 65 minutes.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="default",cronjob="tockmox-heartbeat"}'
+        values: '0+0x80'
+    alert_rule_test:
+      - eval_time: 44m
+        alertname: TockmoxSelfCheckStale
+        exp_alerts: []
+      - eval_time: 64m
+        alertname: TockmoxSelfCheckStale
+        exp_alerts: []
+      - eval_time: 66m
+        alertname: TockmoxSelfCheckStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "Tockmox self-check has gone silent"
+              description: >-
+                No successful heartbeat for 45 minutes. The platform is not necessarily broken ... but nothing is watching it, which means a green dashboard is currently meaningless. Treat this as an outage of the monitoring plane.
+
+  # 4. STEADY STATE. The heartbeat ticks every fifteen minutes as scheduled and
+  #    the alert is silent for the whole hour. The silent half of the pair: an
+  #    alert with no quiet case is an alert nobody has shown to be quiet.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="default",cronjob="tockmox-heartbeat"}'
+        # Same shape as case 1 and for the same reason: a tick every FIFTEEN
+        # minutes, held in between, covering the whole 75m window. An earlier
+        # draft wrote `0+900x8`, which steps every minute and runs out of samples
+        # at t=9m ... the series then goes stale, absent() turns true, and this
+        # "steady state" case would have asserted a firing alert as silence.
+        values: '0+0x14 900+0x14 1800+0x14 2700+0x14 3600+0x14 4500+0x5'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: TockmoxSelfCheckStale
+        exp_alerts: []
+      - eval_time: 50m
+        alertname: TockmoxSelfCheckStale
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: TockmoxSelfCheckStale
+        exp_alerts: []

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Fake age, enough to exercise the flags bootstrap-secrets.sh passes: `age -r R`
+# encrypts stdin, `age -d -i FILE` decrypts it. NOT real age: it proves the
+# invocation shape and the header the script checks for, and nothing about age.
+S="${FAKE_STATE:?FAKE_STATE not set}"; OSSL="${REAL_OPENSSL:-openssl}"
+printf 'age %s\n' "$*" >> "$S/calls.log"
+if [ "${1:-}" = "-d" ]; then
+  [ "${2:-}" = "-i" ] && [ -r "${3:-}" ] || { echo "fake age: -d needs -i IDENTITY" >&2; exit 1; }
+  sed 1,2d | "$OSSL" base64 -d -A
+  exit 0
+fi
+[ "${1:-}" = "-r" ] && [ -n "${2:-}" ] || { echo "fake age: needs -r RECIPIENT" >&2; exit 1; }
+printf 'age-encryption.org/v1\n-> fake %s\n' "$2"
+"$OSSL" base64 -A

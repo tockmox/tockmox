@@ -1,0 +1,95 @@
+/*
+ * Tockmox brand for mkdocs-material.
+ *
+ * Ported from the homelab documentation site
+ * (container-images/docs/theme/tockmox.css) so the public docs and the internal
+ * ones are recognisably the same product. Colour literals come from the brand
+ * kit token file; they are literals here rather than var() references because
+ * this stylesheet has to stand alone inside a docs bundle that does not ship
+ * the token file, and a var() pointing at nothing fails silently to no colour
+ * at all.
+ *
+ * WHY A THEME AND NOT PER-PAGE MARKUP: branding applied once in the theme
+ * cannot go stale per page, cannot break when a page moves between
+ * directories, and cannot leave a broken-image icon on a site that carries a
+ * subset of docs/. All three happened with the first attempt at this.
+ */
+
+:root {
+  --tx-bg: #0A0D0B; --tx-surface: #111512; --tx-border: #2A312E;
+  --tx-text: #E4E9E6; --tx-muted: #9AA5A0;
+  --tx-emerald: #2FB44A; --tx-emerald-bright: #4ED36A;
+  --tx-copper: #B98A45; --tx-ember: #F0833F;
+}
+
+/* Brand fonts, self-hosted beside this stylesheet (assets/fonts/, SIL Open
+   Font License). Material otherwise pulls Roboto from Google Fonts on every
+   page load, which is a live internet dependency on the documentation for a
+   platform whose first claim is that it keeps working when the internet does
+   not. `font: false` in mkdocs.yml is the other half of this. The URLs are
+   relative to this file, so they survive the docs being served under a
+   subpath. */
+@font-face { font-family: "Nunito Sans"; src: url("fonts/nunito-sans-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Nunito Sans"; src: url("fonts/nunito-sans-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Inknut Antiqua"; src: url("fonts/inknut-antiqua-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+/* Material composes --md-text-font-family itself, on body, from --md-text-font
+   (with `_` as the placeholder when unset), so overriding the -family variable
+   on :root loses to Material's own body-level rule. Before brand v2 that is
+   exactly what happened: the system stack declared here never applied. Set the
+   documented input variables instead. */
+:root {
+  --md-text-font: "Nunito Sans";
+  --md-code-font: "JetBrains Mono";
+}
+.md-typeset h1, .md-typeset h2, .md-typeset h3 { font-family: "Inknut Antiqua", Georgia, serif; font-weight: 700; line-height: 1.35; }
+.md-header__title { font-family: "Inknut Antiqua", Georgia, serif; }
+
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: var(--tx-bg);
+  --md-primary-fg-color: var(--tx-emerald);
+  --md-accent-fg-color: var(--tx-emerald-bright);
+  --md-typeset-a-color: var(--tx-emerald-bright);
+}
+
+/* The header takes the surface colour, NOT the emerald primary. A full-width
+   accent header reads as a marketing site; documentation wants the accent
+   spent on links and code, where it carries meaning. */
+.md-header { background: var(--tx-surface); border-bottom: 1px solid var(--tx-border); }
+
+/* Tockmox banner header (matches the Grafana dashboard banner: small, subtle).
+   Rules are scoped under .md-banner so the logo height beats Material's
+   .md-typeset img { max-width:100%; height:auto }, which otherwise stretches
+   the lockup to full width. */
+.md-banner { background: var(--tx-bg); color: var(--tx-text); }
+.md-banner .md-banner__inner { margin: 0; max-width: none; }
+.md-banner .tx-banner { display: flex; align-items: center; padding: 5px 16px; border-bottom: 2px solid var(--tx-emerald); box-sizing: border-box; }
+.md-banner img.tx-banner-logo { height: 45px !important; width: auto !important; max-width: none !important; margin: 0; }
+.md-banner .tx-banner-tagline { margin-left: 16px; color: #9aa0a6; font-size: 11px; line-height: 1.2; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; font-family: "Nunito Sans", system-ui, sans-serif; }
+@media screen and (max-width: 480px) { .md-banner .tx-banner-tagline { display: none; } }
+
+/* Status badges, same vocabulary as the homelab docs. */
+.tx-badge { display: inline-block; font-size: .72rem; font-weight: 600; padding: .1rem .5rem; border-radius: .4rem; letter-spacing: .02em; text-transform: uppercase; }
+.tx-validated, .tx-executed, .tx-active { background: rgba(47,180,74,.15); color: #7FE596; border: 1px solid #2FB44A; }
+.tx-draft, .tx-planned { background: rgba(240,131,63,.15); color: #F7A468; border: 1px solid #F0833F; }
+.tx-legacy, .tx-retired { background: rgba(154,165,160,.12); color: #9AA5A0; border: 1px solid #56605B; }
+
+/* Material grid cards, branded: emerald icons and an emerald hover edge. */
+.md-typeset .grid.cards > ul > li { background: var(--tx-surface); border-color: var(--tx-border); transition: border-color .15s ease; }
+.md-typeset .grid.cards > ul > li:hover { border-color: var(--tx-emerald); }
+.md-typeset .grid.cards .twemoji.lg { color: var(--tx-emerald); }
+
+/* Tables: the docs lean on them heavily, and Material's default header is
+   nearly invisible on a dark surface. */
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) th { background-color: var(--tx-surface); color: var(--tx-text); }
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) { border: 1px solid var(--tx-border); }
+
+/* Copper is the trim colour in this brand: rules, seals, thin rings. Spent
+   here on blockquote edges so the accent stays emerald. */
+[data-md-color-scheme="slate"] .md-typeset blockquote { border-left-color: var(--tx-copper); color: var(--tx-muted); }
+[data-md-color-scheme="slate"] .md-typeset hr { border-bottom-color: var(--tx-border); }
+
+/* The generated per-page licence line, and the site footer copyright. Present
+   and findable, not competing with the content above them. */
+[data-md-color-scheme="slate"] .md-typeset sub { color: var(--tx-muted); }
+[data-md-color-scheme="slate"] .md-footer-meta { background-color: var(--tx-surface); }

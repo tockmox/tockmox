@@ -1,0 +1,128 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE MINIMAL PROFILE ... the smallest deployment that is still Tockmox.
+#
+# Pass it to EVERY layer, after your global values and before your per-layer
+# overrides. Copy this file into your site repository first ... the
+# Applications tockmox-install.sh generates declare exactly one `ref`, and it
+# is `ref: site`, so a `$tockmox/` prefix resolves to nothing:
+#
+#   helm:
+#     valueFiles:
+#       - $site/site/values/global.yaml
+#       - $site/site/values/profile.yaml
+#       - $site/site/values/<layer>.yaml
+#
+# Referencing it straight out of the Tockmox repo instead, as
+# `$tockmox/profiles/minimal.yaml`, requires ADDING a third source carrying
+# `ref: tockmox`. That is a supported route and it is not the default one.
+# Both shapes, written out in full:
+# docs/deployment/profiles.md, "Pass it to every layer".
+#
+# One file for all nine layers. Each chart reads the keys it recognises and
+# ignores the rest.
+#
+# WHAT THIS IS FOR. Tockmox's defaults describe the reference deployment: a
+# homelab that wants the whole thing. That is roughly 9.8Gi of memory across
+# ~65 containers on a one-node cluster, measured 2026-08-15. Plenty of people
+# want the AI plane and the platform underneath it and do not want a log
+# aggregation stack, replicated storage, or an identity provider.
+#
+# This profile is that deployment. It removes about 2.3Gi, a quarter of the
+# total, and more of the ongoing DATA growth than that, because the two
+# largest consumers of disk over time are Loki's chunks and Prometheus's TSDB.
+#
+# WHAT IT TAKES AWAY, stated plainly, because each of these is a real loss:
+#
+#   no log aggregation      Loki and Alloy are off. `kubectl logs` still works.
+#                           Nothing retains logs after a pod dies.
+#   no replicated storage   Longhorn is off and storage falls to your cluster's
+#                           local provisioner. A rescheduled pod finds an empty
+#                           volume. Database backups still work and are the only
+#                           thing standing between you and data loss.
+#   no single sign-on       Authentik is off; every console uses its own local
+#                           login. Break-glass accounts become THE accounts.
+#   shorter metric history  Prometheus keeps 7 days instead of 30 and scrapes
+#                           every 60s instead of 30s.
+#
+# WHAT IT KEEPS, because these are the floor rather than features: the policy
+# layer, the CNPG operator and the backup path, cert-manager and the TLS
+# on-ramp, Traefik, Prometheus and Grafana, the self-check spine, and the whole
+# AI plane. A Tockmox that cannot prove a restore is not Tockmox, and none of
+# the removals above touch that.
+#
+# THE MODEL GATEWAY IS PART OF THAT FLOOR since 0.8.0 (TM-0460, ruling C1):
+# LiteLLM follows the aiPlane capability in every profile, the console goes
+# through it on a key the chart mints, and it costs about 0.5Gi here (the
+# proxy plus a one-instance CNPG). Whether the ~1.9Gi AI-plane figure above
+# included it was not recorded with the 2026-08-15 measurement; re-measure
+# before quoting either number.
+#
+# TO GO FURTHER, the next things to reach for and roughly what they return:
+#   the AI plane off        ~1.9Gi   `capabilities.aiPlane` false; or
+#                                    `apps.openWebui` and `apps.litellm` false
+#                                    in global.yaml (the gateway alone also
+#                                    needs open-webui.enableOpenaiApi false)
+#   Grafana off             ~0.6Gi   metrics but no dashboards
+# Both are below the line where this stops being a useful platform, which is
+# why they are comments rather than settings.
+
+global:
+  # REQUIRED when Longhorn is off, and the platform layer refuses to render
+  # without it. Naming the class is the point: an install that falls through to
+  # whatever default the cluster happened to have is the failure the storage
+  # contract exists to stop. `local-path` on k3s; name yours if it differs.
+  storageClass: local-path
+
+apps:
+  # -- platform ----------------------------------------------------------
+  # Longhorn is the single largest component after the observability stack:
+  # ~724Mi across roughly 15 containers (manager, UI, driver deployer, engine
+  # image, instance manager, and four CSI sidecar sets). Off, you keep the CSI
+  # your distribution ships.
+  longhorn:
+    enabled: false
+
+  # -- observability -----------------------------------------------------
+  # Loki (~340Mi) and Alloy (~240Mi) plus the Loki canary and gateway. Together
+  # the second-largest saving here, and the largest saving in disk growth over
+  # time. Prometheus, Grafana and Alertmanager all stay: alerting is part of
+  # the floor, and it delivers through ntfy or Apprise regardless.
+  loki:
+    enabled: false
+  alloy:
+    enabled: false
+
+  # -- identity ----------------------------------------------------------
+  # Authentik is ~970Mi across server, worker and its bundled PostgreSQL. Off,
+  # each console keeps its local login. Read the note on `sso` below before
+  # deciding: this is the removal most likely to be regretted.
+  authentik:
+    enabled: false
+
+# Every layer that consumes SSO reads this key. With Authentik off it must be
+# false, or each console renders an OIDC config pointing at an issuer that does
+# not answer and the login page offers a button that always fails.
+sso:
+  enabled: false
+
+kube-prometheus-stack:
+  prometheus:
+    prometheusSpec:
+      # 7 days rather than 30. Retention is the dominant term in Prometheus
+      # disk use, and on a single-node homelab a week of history is usually
+      # what gets looked at.
+      retention: 7d
+      # 60s rather than 30s halves series volume and therefore both memory and
+      # disk. It also halves your resolution, which matters if you are chasing
+      # something short-lived; raise it back while you do.
+      scrapeInterval: 60s
+  grafana:
+    persistence:
+      # Longhorn is off in this profile, and global.storageClass above says
+      # `local-path`. Grafana's chart does not run tpl over this key, so it
+      # cannot follow the global: without this line it keeps the chart's
+      # `longhorn` and the claim sits Pending on a cluster with no Longhorn.
+      # Shipped that way until 0.8.0 (TM-0146); the observability layer now
+      # refuses to render the mismatch.
+      storageClassName: local-path

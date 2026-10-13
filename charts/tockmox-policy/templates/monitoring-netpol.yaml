@@ -1,0 +1,359 @@
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "networkPolicy" "app" "monitoring_netpol") }}
+# SPDX-License-Identifier: Apache-2.0
+---
+# Default-deny INGRESS for the monitoring namespace (egress untouched, so
+# Prometheus's outbound scrapes are unaffected).
+#
+# What lives here and how it's reached:
+#  - Prom / Alertmanager / Grafana / Loki / Alloy(DaemonSet) / exporters /
+#    kube-state-metrics / operator ... almost all traffic is intra-namespace.
+#  - node-exporter is hostNetwork, so NetworkPolicy does not apply to it.
+#  - Prometheus SCRAPES targets in other namespaces; that is egress from here
+#    (untouched) and ingress at the target (already allow-prometheus-scrape'd).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: default-deny-ingress
+  namespace: {{ .Values.namespaces.monitoring }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# The monitoring mesh is overwhelmingly same-namespace: Prom<->AM<->Grafana<->
+# Loki<->Alloy<->exporters, Grafana->its database if you add one,
+# Prometheus scraping in-ns targets, CNPG inter-instance replication +
+# isolationCheck peer:8000. One intra-namespace allow covers all of it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-intra-namespace
+  namespace: {{ .Values.namespaces.monitoring }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.monitoring }}
+---
+# Traefik -> the UIs: Grafana (`grafana.<internalDomain>`), and Prometheus /
+# Alertmanager if you enable their ingress entries. Scoped to the Traefik pod,
+# not its whole namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-from-traefik
+  namespace: {{ .Values.namespaces.monitoring }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.traefik }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+---
+# CNPG operator -> any CNPG-managed Postgres you add in this namespace:
+# instance-manager status/management on 8000 and Postgres on 5432.
+# Same-namespace clients (Grafana) and the peer isolationCheck are already
+# covered by allow-intra-namespace above.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-cnpg-operator
+  namespace: {{ .Values.namespaces.monitoring }}
+spec:
+  # ANY CNPG instance in this namespace, not one cluster by name. See the long
+  # note on the same rule in ai-default-deny.yaml: a name-matched selector
+  # excluded a second CNPG cluster and left the operator unable to read its
+  # status, with a phase that blamed the restore.
+  #
+  # The name this used to carry was `grafana-postgresql`, which is a cluster that exists
+  # in the maintainer's homelab and has never existed in a Tockmox install ...
+  # Grafana here uses its own embedded database, not CNPG. So this rule guarded nothing, and
+  # tools/check-no-ghost-policies.sh could not see it, because that gate works
+  # at NAMESPACE granularity and this namespace is far from empty.
+  #
+  # Matching cnpg.io/podRole makes it correct whether or not such a database is
+  # ever added here, instead of being a name copied from somewhere else.
+  podSelector:
+    matchLabels:
+      cnpg.io/podRole: instance
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.cnpg_system }}
+      ports:
+        - protocol: TCP
+          port: 8000
+        - protocol: TCP
+          port: 5432
+---
+# kube-apiserver -> prometheus-operator admission webhook
+# (kube-prometheus-stack-operator svc :443, validates PrometheusRule +
+# AlertmanagerConfig). The API server is host-network, so the call arrives
+# from a node IP (or the pod CIDR after SNAT) rather than a pod ... allow both
+# CIDRs by ipBlock. NOTE: both webhooks are failurePolicy=Ignore, so blocking
+# this would only SKIP validation, not break admission ... this rule preserves
+# validation rather than preventing an outage. Scoped to the operator pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-operator-admission-webhook
+  namespace: {{ .Values.namespaces.monitoring }}
+spec:
+  podSelector:
+    matchLabels:
+      app: kube-prometheus-stack-operator
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: {{ .Values.global.lanCIDR }}
+        - ipBlock:
+            cidr: {{ .Values.global.clusterCIDR }}
+---
+{{- if .Values.namespaces.agent_sandbox }}
+# agent-sandbox (an operator-supplied debug namespace; see values.yaml) ->
+# read-only diagnostic access to the observability backends: Prometheus :9090,
+# Alertmanager :9093, Loki :3100. Lets a site-supplied diagnostic agent query
+# telemetry directly. Kept deliberately narrow: these three ports only, and
+# the whole rule disappears when `namespaces.agent_sandbox` is blank.
+#
+# THE GUARD ABOVE WAS MISSING UNTIL 2026-08-18, and the comment claiming the
+# rule "disappears when blank" described behaviour the template did not
+# implement. With the default `agent_sandbox: ""` it rendered:
+#
+#     namespaceSelector:
+#       matchLabels:
+#         kubernetes.io/metadata.name: ""
+#
+# Every namespace carries that label set to its own name, so the empty string
+# matches NO namespace and the policy granted nothing. Observed live on
+# the reference install: the object existed, Argo reported it Synced and Healthy, and it
+# permitted zero traffic.
+#
+# Failing closed is the lucky direction for an ingress allow-rule, so nothing
+# was ever exposed. The cost was that a documented capability silently did not
+# exist, and the only site that would notice is one that set the value. Its
+# sibling `allow-intra-namespace` has a real value in the same field, which is
+# what made this read as correct on a side-by-side review.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-from-agent-sandbox
+  namespace: {{ .Values.namespaces.monitoring }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [prometheus, alertmanager, loki]
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.agent_sandbox }}
+      ports:
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 9093
+        - protocol: TCP
+          port: 3100
+{{- end }}
+---
+# selfcheck heartbeat -> Alertmanager :9093. The heartbeat CronJob posts a
+# Watchdog-style alert to prove the alerting path itself works; without this
+# allow, the layer that exists to catch silent failures fails silently.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-from-selfcheck
+  namespace: {{ .Values.namespaces.monitoring }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.selfcheck }}
+      ports:
+        - protocol: TCP
+          port: 9093
+---
+# kured -> Prometheus :9090 ONLY. kured's alert gate (prometheusUrl +
+# alertFilterRegexp in the platform layer's values) queries Prometheus before
+# every reboot, and kured FAILS CLOSED: a query error is treated as "reboot
+# blocked", identically to a real firing alert. Without this rule the gate
+# query dies against a default-deny namespace and nodes silently never
+# reboot ... a failure mode that surfaces weeks later as unpatched nodes, not
+# as an error anyone sees.
+#
+# Scope: :9090 only, and no Alertmanager :9093 ... kured reads the alert
+# surface to decide whether to reboot; it has no business on the control
+# surface. Mirrors allow-from-tockmox-agent below.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-from-kured
+  namespace: {{ .Values.namespaces.monitoring }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.kured }}
+      ports:
+        - protocol: TCP
+          port: 9090
+---
+# diagnostic identity -> Prometheus :9090 and Loki :3100 only. The read-only
+# diagnostic identity (see diagnostic-identity.yaml) exists so an automated
+# agent can root-cause incidents from telemetry. Narrower than agent-sandbox
+# (no Alertmanager :9093): the agent reads metrics and logs, not the alerting
+# control surface.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-from-tockmox-agent
+  namespace: {{ .Values.namespaces.monitoring }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [prometheus, loki]
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.diagnostic_identity }}
+      ports:
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 3100
+---
+# The Tockmox UI (tockmox-ai, TM-0920) -> Prometheus :9090 and Alertmanager :9093. It reads node health, targets and
+# firing alerts from both; its own egress policy (tockmox-ai, templates/tockmox-ui.yaml) already allows exactly these,
+# and without this rule the default-deny above refused them, so every status read "unreachable" and node health
+# stayed Unknown (lab F8, 2026-10-08).
+#
+# NOT CONDITIONAL ON tockmoxUi.enabled, deliberately: that key lives in the AI layer's values, which this layer
+# never loads (the same lesson as ai_cnpg_netpol below: cross-layer values do not exist). The rule is inert where
+# the UI is off, because it admits only pods that carry BOTH the UI's name label and tockmox.com/isolated in the AI
+# namespace, and the AI layer renders such a pod only with tockmoxUi.enabled. Read-only use of :9093 is the UI's;
+# Alertmanager's API on that port also takes silences, which is why the source is one pod, not the namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-from-tockmox-ui
+  namespace: {{ .Values.namespaces.monitoring }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [prometheus, alertmanager]
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.ai }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tockmox-ui
+              tockmox.com/isolated: "true"
+      ports:
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 9093
+{{- with ($.Values.platformNetpol | default dict).extraMonitoringClientNamespaces }}
+---
+# Site clients of the monitoring namespace (TM-0820, observability-cutover A1):
+# a site's own Alloy, capacity jobs or alert publishers living in namespaces of
+# their own. Listed in platformNetpol.extraMonitoringClientNamespaces, empty by
+# default so this object does not render. Reaches Prometheus :9090, Loki :3100,
+# ntfy :80 and :8080 and nothing else; Alertmanager's control surface
+# (:9093) is not offered here.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+  name: allow-from-site-clients
+  namespace: {{ $.Values.namespaces.monitoring }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [prometheus, loki, tockmox-ntfy]
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        {{- range . }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 3100
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 80
+{{- end }}
+{{- end }}

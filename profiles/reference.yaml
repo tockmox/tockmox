@@ -1,0 +1,58 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE REFERENCE PROFILE ... everything on, stated rather than inherited.
+#
+# Pass it to every layer, the same way as `minimal.yaml`.
+#
+# This file sets almost nothing the chart defaults do not already set. It
+# exists anyway, for one reason: **the defaults are a decision, and a decision
+# nobody wrote down is indistinguishable from an accident.** Reading this file
+# tells you what a full Tockmox is meant to be. Reading nine values.yaml files
+# tells you the same thing in an hour.
+#
+# It is also the measured baseline. Every footprint number in
+# docs/deployment/profiles.md is taken against this, on a one-node cluster,
+# 2026-08-15.
+#
+# WHAT A REFERENCE DEPLOYMENT IS: roughly 9.8Gi of memory across ~65
+# containers. Replicated storage, a full metrics and logs stack, an identity
+# provider with single sign-on across every console, the AI plane, and the
+# backup path with a drilled restore.
+#
+# WHAT IT IS NOT: a production sizing guide. These are observed numbers from a
+# lab under no load. Prometheus alone was 1.5Gi at the time of measurement and
+# will grow with your series count. Plan against your own observation.
+
+global:
+  # The platform layer marks Longhorn's StorageClass default, so this line is
+  # belt and braces ... and it is the line that makes the intent explicit.
+  # Naming it also means the platform preflight has nothing to complain about
+  # whatever you do to `apps.longhorn` later.
+  #
+  # ON k3s YOU MUST STILL REMOVE ITS local-path DEFAULT, or the cluster has two
+  # defaults and resolves them by creation timestamp. See
+  # docs/deployment/prerequisites.md.
+  storageClass: longhorn
+
+apps:
+  longhorn:
+    enabled: true
+  loki:
+    enabled: true
+  alloy:
+    enabled: true
+  authentik:
+    enabled: true
+
+# One login across Grafana, Open WebUI and Argo Workflows, with local accounts
+# kept alongside as break-glass. Requires the identity layer above.
+sso:
+  enabled: true
+
+kube-prometheus-stack:
+  prometheus:
+    prometheusSpec:
+      # The upstream defaults, written down. 30 days is a month of history,
+      # which is the horizon most capacity questions need.
+      retention: 30d
+      scrapeInterval: 30s

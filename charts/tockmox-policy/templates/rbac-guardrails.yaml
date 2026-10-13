@@ -1,0 +1,426 @@
+{{- if .Values.apps.rbac_guardrails.enabled }}
+# SPDX-License-Identifier: Apache-2.0
+---
+# RBAC privilege-escalation guardrails.
+#
+# Makes RBAC self-defending: a ValidatingAdmissionPolicy (k8s-native, no new
+# controller) that flags any attempt to create/update a ClusterRoleBinding to
+# cluster-admin, or a ClusterRole with a full */*/* wildcard, outside an
+# explicit allowlist. The motivating case: an upstream chart quietly binding a
+# ServiceAccount to cluster-admin, which is exactly the kind of grant that
+# should be a decision somebody made on purpose.
+#
+# Enforcement mode is a value. See values.yaml.
+#   - validationActions: [Audit, Warn]  -> violations are logged to the API audit
+#     log and returned as a warning to the client, but NOTHING is blocked.
+#   - failurePolicy: Ignore             -> even a policy evaluation error cannot
+#     block a request during the audit phase.
+# Every ClusterRoleBinding create/update (e.g. ArgoCD reconciles) passes through
+# this, so audit-mode is essential before enforcing. ENFORCE later by changing
+# BOTH bindings to validationActions: [Deny] AND each policy failurePolicy: {{ .Values.rbacGuardrails.denyPrivilegedRbac.failurePolicy }},
+# after confirming the audit log shows only the known allowlisted objects.
+#
+# Allowlist = the legitimate cluster-admin holders (bootstrap + Longhorn
+# support-bundle). Add names here only with intent.
+#
+# IDENTIFYING AUDIT-MODE HITS (needed before the promote-to-Deny call):
+#   1. Warn action: the violation message is returned inline to the client
+#      (kubectl warning / ArgoCD sync message).
+#   2. Metric: apiserver_validating_admission_policy_check_total feeds the
+#      ClusterAdminBindingAttempt alert below.
+#
+# auditAnnotations DELIBERATELY ABSENT: two reasons, and either one alone
+# would be enough.
+# (a) A stock k3s apiserver has no audit backend configured
+# (apiserver_audit_event_total == 0), so annotations land nowhere. (b) The
+# apiserver's CEL type-checker rejects BOTH conditional-annotation forms:
+# the documented `bool ? 'msg' : null` ternary (no (bool,string,null)
+# overload) and the dyn()-wrapped variant (output must statically be
+# [string null_type], dyn fails) ... either one blocks every subsequent patch
+# to the policy with a SyncError loop. Re-add annotations only WITH an audit
+# backend AND a fix for the CEL type-unification (retest on each k8s minor).
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: deny-privileged-rbac
+spec:
+  # ENFORCE-MODE by default: on a greenfield cluster the allowlist IS the set
+  # of legitimate holders. Adopting into an existing cluster? Audit first ...
+  # revert to Ignore and see values.yaml.
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["clusterrolebindings"]
+  matchConditions:
+    # Exempt the API server's own bootstrap identity. Without this, a control
+    # plane restart can be blocked from reconciling built-in roles.
+    - name: not-apiserver
+      expression: "request.userInfo.username != 'system:apiserver'"
+  variables:
+    # Names are configuration, not identity. The previous version keyed the
+    # allowlist on the BINDING NAME, which meant an attacker who could name a
+    # binding could name it something allowlisted. This keys on what the
+    # binding actually grants and to whom.
+    - name: allowlist
+      expression: '[{{ range $i, $n := .Values.rbacGuardrails.clusterAdminAllowlist }}{{ if $i }}, {{ end }}"{{ $n }}"{{ end }}]'
+    - name: grantsClusterAdmin
+      expression: >-
+        object.roleRef.kind == 'ClusterRole' && object.roleRef.name == 'cluster-admin'
+    - name: isAllowlisted
+      expression: "object.metadata.name in variables.allowlist"
+    # A subject that is a group or an anonymous/unauthenticated identity is
+    # categorically worse than a named ServiceAccount, and is never allowed
+    # regardless of the allowlist.
+    - name: hasDangerousSubject
+      expression: >-
+        has(object.subjects) && object.subjects.exists(s,
+          s.kind == 'Group' ||
+          (has(s.name) && (s.name == 'system:anonymous' ||
+                           s.name == 'system:unauthenticated' ||
+                           s.name == 'system:authenticated')))
+    - name: isViolation
+      expression: >-
+        variables.grantsClusterAdmin &&
+        (variables.hasDangerousSubject || !variables.isAllowlisted)
+  validations:
+    - expression: '!variables.isViolation'
+      messageExpression: >-
+        "ClusterRoleBinding '" + object.metadata.name +
+        "' grants cluster-admin" +
+        (variables.hasDangerousSubject
+          ? " to a group or unauthenticated subject, which is never permitted"
+          : " and is not in rbacGuardrails.clusterAdminAllowlist") +
+        ". See docs/operations/troubleshooting.md"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: deny-privileged-rbac
+spec:
+  policyName: deny-privileged-rbac
+  # Enforce by default. Revert to ["Audit", "Warn"] + failurePolicy Ignore on
+  # the policy above to return to audit ... both via values.yaml.
+  validationActions: {{ .Values.rbacGuardrails.denyPrivilegedRbac.validationActions | toJson }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: deny-wildcard-clusterrole
+spec:
+  failurePolicy: {{ .Values.rbacGuardrails.denyWildcardClusterrole.failurePolicy }}
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["clusterroles"]
+  variables:
+    - name: allowlist
+      expression: '[{{ range $i, $n := .Values.rbacGuardrails.wildcardClusterRoleAllowlist }}{{ if $i }}, {{ end }}"{{ $n }}"{{ end }}]'
+    # Shared hit predicate (see deny-privileged-rbac note).
+    - name: isViolation
+      expression: >-
+        !(object.metadata.name in variables.allowlist)
+        && has(object.rules)
+        && object.rules.exists(r,
+             has(r.apiGroups) && ('*' in r.apiGroups)
+             && has(r.resources) && ('*' in r.resources)
+             && has(r.verbs) && ('*' in r.verbs))
+  validations:
+    - expression: '!variables.isViolation'
+      messageExpression: >-
+        "ClusterRole '" + object.metadata.name +
+        "' grants full */*/* wildcard and is not in the deny-wildcard-clusterrole allowlist"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: deny-wildcard-clusterrole
+spec:
+  policyName: deny-wildcard-clusterrole
+  # AUDIT-MODE by default. To enforce, set BOTH in your site values:
+  #   rbacGuardrails.denyWildcardClusterrole.validationActions: ["Deny"]
+  #   rbacGuardrails.denyWildcardClusterrole.failurePolicy: Fail
+  # Raising validationActions alone still lets a CEL evaluation error through,
+  # because Ignore is what decides that case.
+  validationActions: {{ .Values.rbacGuardrails.denyWildcardClusterrole.validationActions | toJson }}
+{{- /*
+TM-0825: this PrometheusRule is one of the monitor kinds the observability capability
+owns, so it follows the same `serviceMonitors` component as every other rule this repo
+writes. It used to render unconditionally, which left tockmox-policy applying a
+monitoring.coreos.com object on a cluster whose CRDs tockmox-crds had (correctly) not
+installed. The ValidatingAdmissionPolicies around it do not depend on a monitoring
+stack and stay.
+*/ -}}
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") }}
+---
+# Alert on any caught cluster-admin ClusterRoleBinding attempt. Lives in the
+# monitoring ns; kube-prometheus-stack discovers it via the cluster-wide
+# ruleSelector and routes it through your Alertmanager receiver.
+#
+# Detection: the apiserver VAP metric apiserver_validating_admission_policy_check_total
+# increments error_type="invalid_error" when a validation FAILS (a violation). The
+# deny-privileged-rbac policy only fails for a NON-allowlisted binding to cluster-admin,
+# so any increase is a real privilege-escalation attempt (caught). In audit-mode the
+# binding is still created (only logged), which makes this MORE urgent, not less; in
+# enforce-mode it is blocked. sum(increase()) rather than a raw counter, so the
+# alert fires reliably across counter resets.
+#
+# Scope is deny-privileged-rbac only on purpose: the deny-wildcard-clusterrole policy
+# stays audit-only first (chart reconciles re-touch legit wildcard ClusterRoles), so
+# review its audit log to tighten the allowlist BEFORE alerting on it.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: rbac-privilege-escalation
+  namespace: {{ .Values.namespaces.monitoring }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    prometheus: kube-prometheus-stack
+    role: alert-rules
+spec:
+  groups:
+    - name: rbac.guardrails
+      interval: 1m
+      rules:
+        - alert: ClusterAdminBindingAttempt
+          expr: >-
+            sum by (policy) (
+              increase(apiserver_validating_admission_policy_check_total{
+                job="apiserver",
+                policy="deny-privileged-rbac",
+                error_type="invalid_error"
+              }[15m])
+            ) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Privilege escalation: a ClusterRoleBinding to cluster-admin was attempted"
+            description: >-
+              The deny-privileged-rbac admission policy caught a non-allowlisted
+              ClusterRoleBinding to cluster-admin. In audit-mode the binding is created
+              and only logged ... investigate immediately via the API audit log and the
+              ClusterRoleBinding list, then remove it or add it to the policy allowlist
+              with intent. Flip the policy to enforce (Deny) once audit is clean.
+        # Detect ACTUAL use of the allowlisted longhorn-support-bundle
+        # cluster-admin SA. That SA has no standing token; it is only consumed
+        # by the transient support-bundle-manager pod during deliberate
+        # support-bundle generation. So a matching pod appearing = the
+        # cluster-admin identity is in use. Expected when YOU generate a
+        # bundle; investigate if not.
+        - alert: LonghornSupportBundleClusterAdminInUse
+          expr: >-
+            count(kube_pod_info{namespace="{{ .Values.namespaces.longhorn_system }}", pod=~".*support-bundle.*"}) > 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn support-bundle (cluster-admin SA) is active"
+            description: >-
+              A support-bundle-manager pod is running in the Longhorn namespace, which
+              uses the longhorn-support-bundle ServiceAccount bound to cluster-admin.
+              This is expected ONLY during a support-bundle generation you initiated.
+              If you did not start one, treat it as potential misuse of the allowlisted
+              cluster-admin SA and investigate immediately.
+    - name: identity.token-hygiene
+      interval: 15m
+      rules:
+        # Long-lived static ServiceAccount token Secrets do not expire on their
+        # own. Tockmox ships none, but off-cluster tooling commonly adds them
+        # (a CI system, an external agent) ... so enforce a rotation cadence on
+        # ANY static token Secret in a tockmox- namespace: fire when one is
+        # older than 90 days. Rotate by deleting and recreating the Secret,
+        # updating the off-cluster consumer, and verifying the old token is
+        # rejected.
+        #
+        # A ROTATION ALARM, NOT AN EXISTENCE ALARM, AND THAT IS DELIBERATE.
+        # The reference site runs a stricter local rule, StaticSATokenExists,
+        # which fires on any Secret of this type anywhere in the cluster on the
+        # day it appears, because that site's standard is zero static tokens:
+        # every off-cluster consumer mints a short-TTL token via TokenRequest.
+        # That is a site policy, not a product one. A site that has not made
+        # that cutover, or whose off-cluster tooling has no better option,
+        # legitimately holds a static token, and for that site an existence
+        # alarm is noise from day one while a rotation cadence is exactly the
+        # right control. So this rule is the product default and the 90 days is
+        # a threshold, not a recommendation to keep static tokens. Do not read
+        # the difference between the two as this chart lagging the site. A site
+        # that wants the zero-tokens form adds it as a local rule beside this
+        # one; nothing in this chart needs to change for that.
+        #
+        # This comment is a `#` and not a template comment on purpose: it
+        # renders into the deployed PrometheusRule, where the operator reading
+        # the live object is the person who needs to know.
+        #
+        # `and on (namespace, secret)` keeps the age series whose Secret has a
+        # kube_secret_type series of this type, and drops the rest. The earlier
+        # form multiplied the age by that series' value instead, which worked
+        # only because kube_secret_type is always 1; the set operator states
+        # the intent and does not depend on that. Proven equivalent with
+        # `promtool test rules` (same firing set, same values, with duplicate
+        # kube-state-metrics scrapes present) on 2026-09-03.
+        # SCOPED TO THE TOKENS TOCKMOX MINTS, and the scope is the whole point.
+        # This alert assumed a static SA token in a `tockmox-*` namespace could
+        # only be one we created for an off-cluster consumer. kube-prometheus-
+        # stack 90.1.1 broke that assumption by shipping its own
+        # `kubernetes.io/service-account-token` Secret into the monitoring
+        # namespace for Prometheus' own scrape auth. Unscoped, this rule fires
+        # on it 90 days after every install and tells the operator to delete and
+        # recreate a Secret the chart manages and to update an off-cluster
+        # consumer that does not exist ... and following that advice breaks
+        # scraping until ArgoCD puts it back.
+        #
+        # MEASURED with `promtool test rules`, 2026-09-12, not read off the
+        # expression: the unscoped form fires on BOTH our
+        # `tockmox-argo-admin.service-account-token` and upstream's
+        # `tockmox-observability-kube-prometheus-token`; this form fires only on
+        # ours. Test case in tests/rules/, and it asserts both directions.
+        #
+        # The `.service-account-token` suffix is OUR naming convention
+        # (charts/tockmox-devops/templates/argo-sso-rbac.yaml), so it is a thing
+        # we control rather than a property of upstream's we are hoping holds.
+        # `tools/check-sa-token-naming.sh` fails the build if any SA-token Secret
+        # Tockmox renders stops matching it, which is what keeps this scope from
+        # silently narrowing to nothing. TM-0519.
+        - alert: StaticSATokenRotationOverdue
+          expr: >-
+            (time() - kube_secret_created{namespace=~"tockmox-.*", secret=~".+\\.service-account-token"}
+              and on (namespace, secret)
+              kube_secret_type{type="kubernetes.io/service-account-token"}
+            ) > (90 * 24 * 3600)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Static SA token {{ "{{ $labels.secret }}" }} is overdue for rotation (>90d)"
+            description: >-
+              The long-lived ServiceAccount token Secret {{ "{{ $labels.namespace }}" }}/{{ "{{ $labels.secret }}" }}
+              is older than 90 days. Static tokens do not expire on their own: delete and
+              recreate the Secret, update the off-cluster consumer, and verify the old
+              token is rejected.
+{{- end }}
+---
+{{/*
+The namespaced sibling.
+
+deny-privileged-rbac only matches ClusterRoleBindings. A RoleBinding that
+references the cluster-admin ClusterRole grants full control *within its
+namespace* and was previously unmatched entirely ... a complete bypass of the
+guardrail using a different, equally common object.
+
+NOTE this comment closes WITHOUT a right-trim marker, deliberately. A comment
+that trims both sides collapses onto the document separator above it and emits
+"---apiVersion:" on a single line. `helm template` hides that, because its
+manifest splitter re-normalises the output; `helm lint` parses the raw render
+and fails. Rule: never right-trim in the first action after a separator.
+*/}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: deny-privileged-rolebinding
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  failurePolicy: {{ .Values.rbacGuardrails.denyPrivilegedRbac.failurePolicy }}
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["rolebindings"]
+  variables:
+    - name: isViolation
+      expression: >-
+        object.roleRef.kind == 'ClusterRole' &&
+        object.roleRef.name in ['cluster-admin', 'admin']
+  validations:
+    - expression: '!variables.isViolation'
+      messageExpression: >-
+        "RoleBinding '" + object.metadata.name + "' in namespace '" +
+        object.metadata.namespace + "' references the " + object.roleRef.name +
+        " ClusterRole, granting full control of that namespace."
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: deny-privileged-rolebinding
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  policyName: deny-privileged-rolebinding
+  validationActions: {{ .Values.rbacGuardrails.denyPrivilegedRolebinding.validationActions | toJson }}
+---
+{{- if .Values.rbacGuardrails.denyAggregationInjection.enabled }}
+{{- /*
+Aggregation-label injection.
+
+A ClusterRole carrying rbac.authorization.k8s.io/aggregate-to-admin (or -edit,
+or -cluster-admin) has its rules merged into the corresponding built-in role by
+the controller. Neither of the policies above sees this: no binding is created
+and no wildcard need appear. It is the quietest of the escalation paths.
+
+Closes without a right-trim marker, for the reason given above. The left-trim
+here chains through the `if` on the preceding line, so a right-trim would pull
+this document up onto the separator two lines above.
+*/}}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: deny-rbac-aggregation-injection
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  failurePolicy: {{ .Values.rbacGuardrails.denyPrivilegedRbac.failurePolicy }}
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["rbac.authorization.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["clusterroles"]
+  variables:
+    - name: allowlist
+      expression: '[{{ range $i, $n := .Values.rbacGuardrails.aggregationAllowlist }}{{ if $i }}, {{ end }}"{{ $n }}"{{ end }}]'
+    - name: aggregates
+      expression: >-
+        has(object.metadata.labels) && (
+          object.metadata.labels.exists(k, k.startsWith('rbac.authorization.k8s.io/aggregate-to-'))
+        )
+    - name: isViolation
+      expression: >-
+        variables.aggregates && !(object.metadata.name in variables.allowlist)
+  validations:
+    - expression: '!variables.isViolation'
+      messageExpression: >-
+        "ClusterRole '" + object.metadata.name +
+        "' carries an rbac.authorization.k8s.io/aggregate-to-* label, which " +
+        "merges its rules into a built-in role. Add it to " +
+        "rbacGuardrails.aggregationAllowlist if that is intended."
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: deny-rbac-aggregation-injection
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  policyName: deny-rbac-aggregation-injection
+  validationActions: {{ .Values.rbacGuardrails.denyAggregationInjection.validationActions | toJson }}
+{{- end }}
+{{- end }}

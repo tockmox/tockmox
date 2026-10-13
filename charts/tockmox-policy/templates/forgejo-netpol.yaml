@@ -1,0 +1,99 @@
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "networkPolicy" "app" "forgejo_netpol") }}
+{{- if not .Values.namespaces.forgejo }}
+{{- fail "\n\napps.forgejo_netpol.enabled is true but namespaces.forgejo is blank.\nSet it to the namespace your Forgejo runs in, and add `forgejo` to\nnamespaces.create if you want this chart to create it.\n" }}
+{{- end }}
+# SPDX-License-Identifier: Apache-2.0
+---
+# SITE-SUPPLIED. Tockmox ships no Forgejo chart (see the note in
+# charts/tockmox-devops/values.yaml). This bundle is off by default and exists
+# for operators who install Forgejo themselves.
+#
+# Default-deny INGRESS for the forgejo namespace (phase-1; egress untouched).
+# Forgejo is reached three ways: Traefik (HTTP/web on 3000), a MetalLB
+# LoadBalancer VIP (git SSH on 22), and an optional Prometheus scrape. Any
+# backup CronJob receives no ingress.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: default-deny-ingress
+  namespace: {{ .Values.namespaces.forgejo }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Web UI / git-over-HTTPS via Traefik (its own namespace) on the Forgejo HTTP
+# port 3000.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-from-traefik
+  namespace: {{ .Values.namespaces.forgejo }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.traefik }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 3000
+---
+# git-over-SSH on 22 via the shared MetalLB LoadBalancer. External clients hit
+# the VIP; after kube-proxy DNAT the source is a node/pod IP (externalTrafficPolicy
+# Cluster), so an in-cluster podSelector can't match it ... allow 22 from any
+# source. SSH key auth is the real gate; the perimeter firewall scopes who can
+# reach the VIP at all.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-git-ssh
+  namespace: {{ .Values.namespaces.forgejo }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 22
+---
+# Optional Prometheus scrape of Forgejo metrics (same HTTP port 3000).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-prometheus-scrape
+  namespace: {{ .Values.namespaces.forgejo }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.monitoring }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 3000
+{{- end }}

@@ -1,0 +1,1525 @@
+{
+  "schemaVersion": "v0",
+  "probeVersion": "0.1.0-mvp",
+  "run": {
+    "id": "r3",
+    "mode": "differential",
+    "startedAt": "2026-10-05T03:38:23.885608+00:00",
+    "clusterIdentifier": "posture-probe-01 (throwaway, tockmox-policy 0.7.2)"
+  },
+  "namespaces": [
+    {
+      "name": "tockmox-ai",
+      "podIP": "10.42.0.33",
+      "identity": {
+        "serviceAccount": "none",
+        "tokenMounted": false,
+        "apiServer": "no-token"
+      },
+      "exposure": {},
+      "reachability": [
+        {
+          "endpoint": "posture-standin.tockmox-authentik.svc.cluster.local:8080",
+          "ip": "10.43.246.114",
+          "dstNamespace": "tockmox-authentik",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 118
+        },
+        {
+          "endpoint": "posture-standin.tockmox-devops.svc.cluster.local:8080",
+          "ip": "10.43.230.7",
+          "dstNamespace": "tockmox-devops",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 112
+        },
+        {
+          "endpoint": "posture-standin.tockmox-diagnostic.svc.cluster.local:8080",
+          "ip": "10.43.183.141",
+          "dstNamespace": "tockmox-diagnostic",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 95
+        },
+        {
+          "endpoint": "posture-standin.tockmox-monitoring.svc.cluster.local:8080",
+          "ip": "10.43.129.50",
+          "dstNamespace": "tockmox-monitoring",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 73
+        },
+        {
+          "endpoint": "posture-standin.tockmox-platform.svc.cluster.local:8080",
+          "ip": "10.43.83.72",
+          "dstNamespace": "tockmox-platform",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 92
+        },
+        {
+          "endpoint": "posture-standin.tockmox-selfcheck.svc.cluster.local:8080",
+          "ip": "10.43.108.53",
+          "dstNamespace": "tockmox-selfcheck",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 183
+        },
+        {
+          "endpoint": "1.1.1.1:443",
+          "ip": "1.1.1.1",
+          "dstNamespace": null,
+          "dimension": "egress",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 1002
+        },
+        {
+          "endpoint": "10.43.0.1:443",
+          "ip": "10.43.0.1",
+          "dstNamespace": null,
+          "dimension": "api-egress",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 1024
+        }
+      ]
+    },
+    {
+      "name": "tockmox-authentik",
+      "podIP": "10.42.0.34",
+      "identity": {
+        "serviceAccount": "none",
+        "tokenMounted": false,
+        "apiServer": "no-token"
+      },
+      "exposure": {},
+      "reachability": [
+        {
+          "endpoint": "posture-standin.tockmox-ai.svc.cluster.local:8080",
+          "ip": "10.43.10.222",
+          "dstNamespace": "tockmox-ai",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 141
+        },
+        {
+          "endpoint": "posture-standin.tockmox-devops.svc.cluster.local:8080",
+          "ip": "10.43.230.7",
+          "dstNamespace": "tockmox-devops",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 43
+        },
+        {
+          "endpoint": "posture-standin.tockmox-diagnostic.svc.cluster.local:8080",
+          "ip": "10.43.183.141",
+          "dstNamespace": "tockmox-diagnostic",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 128
+        },
+        {
+          "endpoint": "posture-standin.tockmox-monitoring.svc.cluster.local:8080",
+          "ip": "10.43.129.50",
+          "dstNamespace": "tockmox-monitoring",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 185
+        },
+        {
+          "endpoint": "posture-standin.tockmox-platform.svc.cluster.local:8080",
+          "ip": "10.43.83.72",
+          "dstNamespace": "tockmox-platform",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 0
+        },
+        {
+          "endpoint": "posture-standin.tockmox-selfcheck.svc.cluster.local:8080",
+          "ip": "10.43.108.53",
+          "dstNamespace": "tockmox-selfcheck",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 311
+        },
+        {
+          "endpoint": "1.1.1.1:443",
+          "ip": "1.1.1.1",
+          "dstNamespace": null,
+          "dimension": "egress",
+          "result": "open",
+          "observed": "allowed",
+          "latencyMs": 11
+        },
+        {
+          "endpoint": "10.43.0.1:443",
+          "ip": "10.43.0.1",
+          "dstNamespace": null,
+          "dimension": "api-egress",
+          "result": "open",
+          "observed": "allowed",
+          "latencyMs": 0
+        }
+      ]
+    },
+    {
+      "name": "tockmox-devops",
+      "podIP": "10.42.0.35",
+      "identity": {
+        "serviceAccount": "none",
+        "tokenMounted": false,
+        "apiServer": "no-token"
+      },
+      "exposure": {},
+      "reachability": [
+        {
+          "endpoint": "posture-standin.tockmox-ai.svc.cluster.local:8080",
+          "ip": "10.43.10.222",
+          "dstNamespace": "tockmox-ai",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 11
+        },
+        {
+          "endpoint": "posture-standin.tockmox-authentik.svc.cluster.local:8080",
+          "ip": "10.43.246.114",
+          "dstNamespace": "tockmox-authentik",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 0
+        },
+        {
+          "endpoint": "posture-standin.tockmox-diagnostic.svc.cluster.local:8080",
+          "ip": "10.43.183.141",
+          "dstNamespace": "tockmox-diagnostic",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 154
+        },
+        {
+          "endpoint": "posture-standin.tockmox-monitoring.svc.cluster.local:8080",
+          "ip": "10.43.129.50",
+          "dstNamespace": "tockmox-monitoring",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 10
+        },
+        {
+          "endpoint": "posture-standin.tockmox-platform.svc.cluster.local:8080",
+          "ip": "10.43.83.72",
+          "dstNamespace": "tockmox-platform",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 171
+        },
+        {
+          "endpoint": "posture-standin.tockmox-selfcheck.svc.cluster.local:8080",
+          "ip": "10.43.108.53",
+          "dstNamespace": "tockmox-selfcheck",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 1
+        },
+        {
+          "endpoint": "1.1.1.1:443",
+          "ip": "1.1.1.1",
+          "dstNamespace": null,
+          "dimension": "egress",
+          "result": "open",
+          "observed": "allowed",
+          "latencyMs": 10
+        },
+        {
+          "endpoint": "10.43.0.1:443",
+          "ip": "10.43.0.1",
+          "dstNamespace": null,
+          "dimension": "api-egress",
+          "result": "open",
+          "observed": "allowed",
+          "latencyMs": 0
+        }
+      ]
+    },
+    {
+      "name": "tockmox-diagnostic",
+      "podIP": "10.42.0.36",
+      "identity": {
+        "serviceAccount": "none",
+        "tokenMounted": false,
+        "apiServer": "no-token"
+      },
+      "exposure": {},
+      "reachability": [
+        {
+          "endpoint": "posture-standin.tockmox-ai.svc.cluster.local:8080",
+          "ip": "10.43.10.222",
+          "dstNamespace": "tockmox-ai",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 23
+        },
+        {
+          "endpoint": "posture-standin.tockmox-authentik.svc.cluster.local:8080",
+          "ip": "10.43.246.114",
+          "dstNamespace": "tockmox-authentik",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 1
+        },
+        {
+          "endpoint": "posture-standin.tockmox-devops.svc.cluster.local:8080",
+          "ip": "10.43.230.7",
+          "dstNamespace": "tockmox-devops",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 1
+        },
+        {
+          "endpoint": "posture-standin.tockmox-monitoring.svc.cluster.local:8080",
+          "ip": "10.43.129.50",
+          "dstNamespace": "tockmox-monitoring",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 70
+        },
+        {
+          "endpoint": "posture-standin.tockmox-platform.svc.cluster.local:8080",
+          "ip": "10.43.83.72",
+          "dstNamespace": "tockmox-platform",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 150
+        },
+        {
+          "endpoint": "posture-standin.tockmox-selfcheck.svc.cluster.local:8080",
+          "ip": "10.43.108.53",
+          "dstNamespace": "tockmox-selfcheck",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 1
+        },
+        {
+          "endpoint": "1.1.1.1:443",
+          "ip": "1.1.1.1",
+          "dstNamespace": null,
+          "dimension": "egress",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 1007
+        },
+        {
+          "endpoint": "10.43.0.1:443",
+          "ip": "10.43.0.1",
+          "dstNamespace": null,
+          "dimension": "api-egress",
+          "result": "open",
+          "observed": "allowed",
+          "latencyMs": 1
+        }
+      ]
+    },
+    {
+      "name": "tockmox-monitoring",
+      "podIP": "10.42.0.38",
+      "identity": {
+        "serviceAccount": "none",
+        "tokenMounted": false,
+        "apiServer": "no-token"
+      },
+      "exposure": {},
+      "reachability": [
+        {
+          "endpoint": "posture-standin.tockmox-ai.svc.cluster.local:8080",
+          "ip": "10.43.10.222",
+          "dstNamespace": "tockmox-ai",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 9
+        },
+        {
+          "endpoint": "posture-standin.tockmox-authentik.svc.cluster.local:8080",
+          "ip": "10.43.246.114",
+          "dstNamespace": "tockmox-authentik",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 0
+        },
+        {
+          "endpoint": "posture-standin.tockmox-devops.svc.cluster.local:8080",
+          "ip": "10.43.230.7",
+          "dstNamespace": "tockmox-devops",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 1
+        },
+        {
+          "endpoint": "posture-standin.tockmox-diagnostic.svc.cluster.local:8080",
+          "ip": "10.43.183.141",
+          "dstNamespace": "tockmox-diagnostic",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 1
+        },
+        {
+          "endpoint": "posture-standin.tockmox-platform.svc.cluster.local:8080",
+          "ip": "10.43.83.72",
+          "dstNamespace": "tockmox-platform",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 192
+        },
+        {
+          "endpoint": "posture-standin.tockmox-selfcheck.svc.cluster.local:8080",
+          "ip": "10.43.108.53",
+          "dstNamespace": "tockmox-selfcheck",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 1
+        },
+        {
+          "endpoint": "1.1.1.1:443",
+          "ip": "1.1.1.1",
+          "dstNamespace": null,
+          "dimension": "egress",
+          "result": "open",
+          "observed": "allowed",
+          "latencyMs": 10
+        },
+        {
+          "endpoint": "10.43.0.1:443",
+          "ip": "10.43.0.1",
+          "dstNamespace": null,
+          "dimension": "api-egress",
+          "result": "open",
+          "observed": "allowed",
+          "latencyMs": 0
+        }
+      ]
+    },
+    {
+      "name": "tockmox-platform",
+      "podIP": "10.42.0.37",
+      "identity": {
+        "serviceAccount": "none",
+        "tokenMounted": false,
+        "apiServer": "no-token"
+      },
+      "exposure": {},
+      "reachability": [
+        {
+          "endpoint": "posture-standin.tockmox-ai.svc.cluster.local:8080",
+          "ip": "10.43.10.222",
+          "dstNamespace": "tockmox-ai",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 10
+        },
+        {
+          "endpoint": "posture-standin.tockmox-authentik.svc.cluster.local:8080",
+          "ip": "10.43.246.114",
+          "dstNamespace": "tockmox-authentik",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 0
+        },
+        {
+          "endpoint": "posture-standin.tockmox-devops.svc.cluster.local:8080",
+          "ip": "10.43.230.7",
+          "dstNamespace": "tockmox-devops",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 0
+        },
+        {
+          "endpoint": "posture-standin.tockmox-diagnostic.svc.cluster.local:8080",
+          "ip": "10.43.183.141",
+          "dstNamespace": "tockmox-diagnostic",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 0
+        },
+        {
+          "endpoint": "posture-standin.tockmox-monitoring.svc.cluster.local:8080",
+          "ip": "10.43.129.50",
+          "dstNamespace": "tockmox-monitoring",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 0
+        },
+        {
+          "endpoint": "posture-standin.tockmox-selfcheck.svc.cluster.local:8080",
+          "ip": "10.43.108.53",
+          "dstNamespace": "tockmox-selfcheck",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 90
+        },
+        {
+          "endpoint": "1.1.1.1:443",
+          "ip": "1.1.1.1",
+          "dstNamespace": null,
+          "dimension": "egress",
+          "result": "open",
+          "observed": "allowed",
+          "latencyMs": 10
+        },
+        {
+          "endpoint": "10.43.0.1:443",
+          "ip": "10.43.0.1",
+          "dstNamespace": null,
+          "dimension": "api-egress",
+          "result": "open",
+          "observed": "allowed",
+          "latencyMs": 0
+        }
+      ]
+    },
+    {
+      "name": "tockmox-selfcheck",
+      "podIP": "10.42.0.39",
+      "identity": {
+        "serviceAccount": "none",
+        "tokenMounted": false,
+        "apiServer": "no-token"
+      },
+      "exposure": {},
+      "reachability": [
+        {
+          "endpoint": "posture-standin.tockmox-ai.svc.cluster.local:8080",
+          "ip": "10.43.10.222",
+          "dstNamespace": "tockmox-ai",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 9
+        },
+        {
+          "endpoint": "posture-standin.tockmox-authentik.svc.cluster.local:8080",
+          "ip": "10.43.246.114",
+          "dstNamespace": "tockmox-authentik",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 0
+        },
+        {
+          "endpoint": "posture-standin.tockmox-devops.svc.cluster.local:8080",
+          "ip": "10.43.230.7",
+          "dstNamespace": "tockmox-devops",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 0
+        },
+        {
+          "endpoint": "posture-standin.tockmox-diagnostic.svc.cluster.local:8080",
+          "ip": "10.43.183.141",
+          "dstNamespace": "tockmox-diagnostic",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 0
+        },
+        {
+          "endpoint": "posture-standin.tockmox-monitoring.svc.cluster.local:8080",
+          "ip": "10.43.129.50",
+          "dstNamespace": "tockmox-monitoring",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 0
+        },
+        {
+          "endpoint": "posture-standin.tockmox-platform.svc.cluster.local:8080",
+          "ip": "10.43.83.72",
+          "dstNamespace": "tockmox-platform",
+          "dimension": "ns-to-ns",
+          "result": "refused",
+          "observed": "denied",
+          "latencyMs": 0
+        },
+        {
+          "endpoint": "1.1.1.1:443",
+          "ip": "1.1.1.1",
+          "dstNamespace": null,
+          "dimension": "egress",
+          "result": "open",
+          "observed": "allowed",
+          "latencyMs": 10
+        },
+        {
+          "endpoint": "10.43.0.1:443",
+          "ip": "10.43.0.1",
+          "dstNamespace": null,
+          "dimension": "api-egress",
+          "result": "open",
+          "observed": "allowed",
+          "latencyMs": 0
+        }
+      ]
+    },
+    {
+      "name": "tockmox-diagnostic",
+      "podIP": "10.42.0.40",
+      "identity": {
+        "serviceAccount": "tockmox-diagnostic",
+        "tokenMounted": true,
+        "resolvedRules": [
+          "create selfsubjectaccessreviews,selfsubjectrulesreviews",
+          "create selfsubjectreviews",
+          "get,list,watch *",
+          "get,list,watch pods,pods/log,services,endpoints,namespaces,nodes,events,configmaps,persistentvolumes,persistentvolumeclaims,serviceaccounts,replicationcontrollers,resourcequotas,limitranges"
+        ],
+        "accessChecks": [
+          {
+            "verb": "list",
+            "resource": "secrets",
+            "namespace": "tockmox-diagnostic",
+            "allowed": false
+          },
+          {
+            "verb": "list",
+            "resource": "secrets",
+            "namespace": "*",
+            "allowed": false
+          },
+          {
+            "verb": "get",
+            "resource": "secrets",
+            "namespace": "kube-system",
+            "allowed": false
+          },
+          {
+            "verb": "create",
+            "resource": "pods",
+            "namespace": "tockmox-diagnostic",
+            "allowed": false
+          },
+          {
+            "verb": "create",
+            "resource": "pods/exec",
+            "namespace": "tockmox-diagnostic",
+            "allowed": false
+          },
+          {
+            "verb": "list",
+            "resource": "pods",
+            "namespace": "*",
+            "allowed": true
+          },
+          {
+            "verb": "list",
+            "resource": "nodes",
+            "namespace": "*",
+            "allowed": true
+          },
+          {
+            "verb": "list",
+            "resource": "namespaces",
+            "namespace": "*",
+            "allowed": true
+          },
+          {
+            "verb": "create",
+            "resource": "networking.k8s.io/networkpolicies",
+            "namespace": "tockmox-diagnostic",
+            "allowed": false
+          },
+          {
+            "verb": "delete",
+            "resource": "networking.k8s.io/networkpolicies",
+            "namespace": "tockmox-diagnostic",
+            "allowed": false
+          },
+          {
+            "verb": "create",
+            "resource": "rbac.authorization.k8s.io/rolebindings",
+            "namespace": "tockmox-diagnostic",
+            "allowed": false
+          },
+          {
+            "verb": "create",
+            "resource": "rbac.authorization.k8s.io/clusterrolebindings",
+            "namespace": "*",
+            "allowed": false
+          },
+          {
+            "verb": "impersonate",
+            "resource": "serviceaccounts",
+            "namespace": "*",
+            "allowed": false
+          },
+          {
+            "verb": "escalate",
+            "resource": "rbac.authorization.k8s.io/clusterroles",
+            "namespace": "*",
+            "allowed": false
+          },
+          {
+            "verb": "create",
+            "resource": "apps/deployments",
+            "namespace": "tockmox-diagnostic",
+            "allowed": false
+          }
+        ],
+        "apiServer": "reachable"
+      },
+      "exposure": {
+        "visibleSecrets": "denied(403)"
+      },
+      "reachability": []
+    }
+  ],
+  "differential": [
+    {
+      "subject": "tockmox-ai->internet",
+      "dimension": "egress",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "egress denied (3 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "ai-default-deny: default-deny-egress; only litellm is allowed 0.0.0.0/0:443",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-ai->kube-api",
+      "dimension": "api-egress",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "egress denied (3 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "API egress in tockmox-ai is pod-scoped (cnpg, restore-drill); an arbitrary ai pod has none",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-ai->tockmox-authentik",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "egress denied (3 selecting policies, no matching rule); ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-ai->tockmox-devops",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "egress denied (3 selecting policies, no matching rule); ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-ai->tockmox-diagnostic",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "egress denied (3 selecting policies, no matching rule); ingress denied (1 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-ai->tockmox-monitoring",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "egress denied (3 selecting policies, no matching rule); ingress denied (3 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-ai->tockmox-platform",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "egress denied (3 selecting policies, no matching rule); ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-ai->tockmox-selfcheck",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "egress denied (3 selecting policies, no matching rule); ingress denied (3 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-authentik->tockmox-ai",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-authentik->tockmox-devops",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-authentik->tockmox-diagnostic",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (1 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-authentik->tockmox-monitoring",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (3 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-authentik->tockmox-platform",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-authentik->tockmox-selfcheck",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (3 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-devops->tockmox-ai",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-devops->tockmox-authentik",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-devops->tockmox-diagnostic",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (1 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-devops->tockmox-monitoring",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (3 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-devops->tockmox-platform",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-devops->tockmox-selfcheck",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (3 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic->internet",
+      "dimension": "egress",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "egress denied (2 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "diagnostic default-deny Ingress+Egress; egress allowed only to DNS, API, monitoring",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic->kube-api",
+      "dimension": "api-egress",
+      "intent": "allow",
+      "observed": "allowed",
+      "raw": "open",
+      "bucket": "confirmed-safe",
+      "config": "allowed",
+      "configWhy": "egress allowed by allow-dns-api-telemetry",
+      "tier": "claimed",
+      "basis": "allow-dns-api-telemetry: the diagnostic agent needs the API",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic->tockmox-ai",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "egress denied (2 selecting policies, no matching rule); ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic->tockmox-authentik",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "egress denied (2 selecting policies, no matching rule); ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic->tockmox-devops",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "egress denied (2 selecting policies, no matching rule); ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic->tockmox-monitoring",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "egress denied (2 selecting policies, no matching rule); ingress denied (3 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic->tockmox-platform",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "egress denied (2 selecting policies, no matching rule); ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic->tockmox-selfcheck",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "egress denied (2 selecting policies, no matching rule); ingress denied (3 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic:tockmox-diagnostic",
+      "dimension": "rbac:list secrets @*",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "oracle",
+      "bucket": "confirmed-safe",
+      "config": "oracle",
+      "tier": "claimed",
+      "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic:tockmox-diagnostic",
+      "dimension": "rbac:get secrets @kube-system",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "oracle",
+      "bucket": "confirmed-safe",
+      "config": "oracle",
+      "tier": "claimed",
+      "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic:tockmox-diagnostic",
+      "dimension": "rbac:list secrets @tockmox-diagnostic",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "oracle",
+      "bucket": "confirmed-safe",
+      "config": "oracle",
+      "tier": "claimed",
+      "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic:tockmox-diagnostic",
+      "dimension": "rbac:create pods @tockmox-diagnostic",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "oracle",
+      "bucket": "confirmed-safe",
+      "config": "oracle",
+      "tier": "claimed",
+      "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic:tockmox-diagnostic",
+      "dimension": "rbac:create pods/exec @tockmox-diagnostic",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "oracle",
+      "bucket": "confirmed-safe",
+      "config": "oracle",
+      "tier": "claimed",
+      "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic:tockmox-diagnostic",
+      "dimension": "rbac:list pods @*",
+      "intent": "allow",
+      "observed": "allowed",
+      "raw": "oracle",
+      "bucket": "confirmed-safe",
+      "config": "oracle",
+      "tier": "claimed",
+      "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic:tockmox-diagnostic",
+      "dimension": "rbac:list nodes @*",
+      "intent": "allow",
+      "observed": "allowed",
+      "raw": "oracle",
+      "bucket": "confirmed-safe",
+      "config": "oracle",
+      "tier": "claimed",
+      "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic:tockmox-diagnostic",
+      "dimension": "rbac:list namespaces @*",
+      "intent": "allow",
+      "observed": "allowed",
+      "raw": "oracle",
+      "bucket": "confirmed-safe",
+      "config": "oracle",
+      "tier": "claimed",
+      "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic:tockmox-diagnostic",
+      "dimension": "rbac:create networking.k8s.io/networkpolicies @tockmox-diagnostic",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "oracle",
+      "bucket": "confirmed-safe",
+      "config": "oracle",
+      "tier": "claimed",
+      "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic:tockmox-diagnostic",
+      "dimension": "rbac:delete networking.k8s.io/networkpolicies @tockmox-diagnostic",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "oracle",
+      "bucket": "confirmed-safe",
+      "config": "oracle",
+      "tier": "claimed",
+      "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic:tockmox-diagnostic",
+      "dimension": "rbac:create rbac.authorization.k8s.io/rolebindings @tockmox-diagnostic",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "oracle",
+      "bucket": "confirmed-safe",
+      "config": "oracle",
+      "tier": "claimed",
+      "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic:tockmox-diagnostic",
+      "dimension": "rbac:create rbac.authorization.k8s.io/clusterrolebindings @*",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "oracle",
+      "bucket": "confirmed-safe",
+      "config": "oracle",
+      "tier": "claimed",
+      "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic:tockmox-diagnostic",
+      "dimension": "rbac:impersonate serviceaccounts @*",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "oracle",
+      "bucket": "confirmed-safe",
+      "config": "oracle",
+      "tier": "claimed",
+      "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic:tockmox-diagnostic",
+      "dimension": "rbac:escalate rbac.authorization.k8s.io/clusterroles @*",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "oracle",
+      "bucket": "confirmed-safe",
+      "config": "oracle",
+      "tier": "claimed",
+      "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-diagnostic:tockmox-diagnostic",
+      "dimension": "rbac:create apps/deployments @tockmox-diagnostic",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "oracle",
+      "bucket": "confirmed-safe",
+      "config": "oracle",
+      "tier": "claimed",
+      "basis": "diagnostic-identity.yaml: read-only; core group enumerated so secrets are excluded",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-monitoring->internet",
+      "dimension": "egress",
+      "intent": "allow",
+      "observed": "allowed",
+      "raw": "open",
+      "bucket": "confirmed-safe",
+      "config": "allowed",
+      "configWhy": "no egress policy selects the source",
+      "tier": "claimed",
+      "basis": "monitoring bundle: ingress-only by design",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-monitoring->tockmox-ai",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-monitoring->tockmox-authentik",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-monitoring->tockmox-devops",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-monitoring->tockmox-diagnostic",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (1 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-monitoring->tockmox-platform",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-monitoring->tockmox-selfcheck",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (3 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-platform->internet",
+      "dimension": "egress",
+      "intent": "allow",
+      "observed": "allowed",
+      "raw": "open",
+      "bucket": "confirmed-safe",
+      "config": "allowed",
+      "configWhy": "no egress policy selects the source",
+      "tier": "claimed",
+      "basis": "platform-netpol header: egress is wide by design (Longhorn, ACME, Barman)",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-platform->tockmox-ai",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-platform->tockmox-authentik",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-platform->tockmox-devops",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-platform->tockmox-diagnostic",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (1 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-platform->tockmox-monitoring",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (3 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-platform->tockmox-selfcheck",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (3 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-selfcheck->tockmox-ai",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-selfcheck->tockmox-authentik",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-selfcheck->tockmox-devops",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-selfcheck->tockmox-diagnostic",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (1 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-selfcheck->tockmox-monitoring",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (3 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    },
+    {
+      "subject": "tockmox-selfcheck->tockmox-platform",
+      "dimension": "ns-to-ns",
+      "intent": "deny",
+      "observed": "denied",
+      "raw": "refused",
+      "bucket": "confirmed-safe",
+      "config": "denied",
+      "configWhy": "no egress policy selects the source; ingress denied (4 selecting policies, no matching rule)",
+      "tier": "claimed",
+      "basis": "chart: default-deny-ingress; cross-namespace allows are pod-scoped (traefik, prometheus) or port/peer-scoped; tockmox-platform header: 'everything BEHIND the front door stops being' reachable",
+      "severity": "info"
+    }
+  ],
+  "summary": {
+    "driftCount": 0,
+    "unintendedDenyCount": 0,
+    "confirmedSafeCount": 63,
+    "unknownCount": 0,
+    "enforcementDriftCount": 0,
+    "gateExit": 0
+  }
+}

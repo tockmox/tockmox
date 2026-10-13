@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v2
+name: tockmox-ai
+description: "The local AI plane. Independently adoptable."
+type: application
+version: 0.8.0
+appVersion: "0.1.0"
+annotations:
+  tockmox.com/sync-wave: "5"
+dependencies:
+  - name: tockmox-common
+    version: 0.8.0
+    repository: "file://../tockmox-common"
+  - name: open-webui
+    version: 17.0.0
+    repository: "https://helm.openwebui.com"
+    condition: apps.openWebui.enabled,capabilities.aiPlane.enabled
+  # The model gateway. Aliased to `litellm` so the values key reads as the
+  # component rather than the chart. Adopted rather than authored: see the
+  # build-or-adopt note at the top of values.yaml.
+  #
+  # OCI, so `helm dependency build` pulls it directly and tools/helm-deps.sh
+  # needs no repo registration (that script only registers http(s) repos).
+  # The published tarball VENDORS its own postgresql and redis subcharts, so
+  # nothing reaches Bitnami at dependency time even though the upstream
+  # Chart.yaml lists them.
+  - name: litellm-helm
+    alias: litellm
+    version: "1.105.0"
+    repository: "oci://ghcr.io/berriai"
+    condition: apps.litellm.enabled,capabilities.aiPlane.enabled

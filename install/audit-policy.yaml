@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The Kubernetes API-server audit policy Tockmox recommends. Applying it is a
+# HOST-side step your Kubernetes distribution owns, not something a chart can
+# do; docs/administration/audit-logging.md has the k3s flags and the why.
+#
+# The shape: record WHO DID WHAT at metadata level for everything that
+# matters, record request bodies only where a change's content is the whole
+# point (RBAC, policy), and never record secret payloads ... an audit log
+# that contains secret data is a second copy of every credential with a
+# longer retention policy.
+apiVersion: audit.k8s.io/v1
+kind: Policy
+# Don't audit the stages that only add noise.
+omitStages:
+  - RequestReceived
+rules:
+  # Never log request or response bodies for secrets and their kin: the
+  # metadata (who touched which secret, when, verb) is the audit trail; the
+  # payload is the credential.
+  - level: Metadata
+    resources:
+      - group: ""
+        resources: ["secrets", "configmaps"]
+      - group: "bitnami.com"
+        resources: ["sealedsecrets"]
+
+  # The changes whose CONTENT is the point: record the full request for
+  # RBAC and admission-policy mutations. This is the evidence trail a
+  # just-in-time elevation model audits against.
+  - level: RequestResponse
+    verbs: ["create", "update", "patch", "delete"]
+    resources:
+      - group: "rbac.authorization.k8s.io"
+      - group: "admissionregistration.k8s.io"
+
+  # High-churn read noise nobody audits: drop it entirely rather than pay
+  # storage to ignore it.
+  - level: None
+    verbs: ["get", "list", "watch"]
+    resources:
+      - group: ""
+        resources: ["events", "endpoints"]
+      - group: "coordination.k8s.io"
+        resources: ["leases"]
+  - level: None
+    users: ["system:kube-proxy", "system:apiserver"]
+  - level: None
+    userGroups: ["system:nodes"]
+    verbs: ["get", "list", "watch"]
+
+  # Everything else: who, what, when ... without bodies.
+  - level: Metadata

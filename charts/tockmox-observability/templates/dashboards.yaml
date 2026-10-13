@@ -1,0 +1,94 @@
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "dashboards") }}
+# SPDX-License-Identifier: Apache-2.0
+#
+# TOCKMOX-AUTHORED DASHBOARDS, one ConfigMap per JSON file under
+# ../dashboards/. The kube-prometheus-stack Grafana sidecar imports anything
+# labelled `grafana_dashboard: "1"` in this namespace ... the same extension
+# point the docs hand to operators, used by the product itself.
+#
+# The JSON lives in files, not inline, on purpose: Grafana JSON is full of
+# double-brace legend templates (pod, instance, le) that Go's template engine
+# would eat, and escaping them inline is a maintenance tax that ends in a
+# corrupted board. `.Files.Get` passes the bytes through untouched. Do not
+# write a literal double-brace example in this comment either ... Go parses
+# template directives before comments exist, and the first draft of this
+# file failed the render on exactly that.
+#
+# WHICH BOARDS SHIP, decided on evidence rather than inventory: each board
+# here queries metric families VERIFIED PRESENT on a fresh install
+# (2026-08-19, live Prometheus: traefik_* 13 series, certmanager_* 8,
+# metallb_* 1, authentik_* 1, apiserver_validating_admission_policy_* 9).
+# The homelab's ArgoCD, Argo Workflows and Trivy boards were deliberately
+# NOT ported: their metric families count zero here (not scraped, or not
+# shipped), and a dashboard over series that do not exist renders as a wall
+# of "No data" that reads as breakage ... the lying-dashboard class the
+# monitoring documentation names. Port each when its scrape exists.
+#
+# Argo Workflows was ported 2026-08-19 when the devops layer enabled its
+# metrics. ArgoCD is ported now (K8) under the OPTIONAL glob below, and
+# Trivy stays out because Tockmox does not ship it.
+#
+# THE OPTIONAL SET, and why a second glob rather than one more file.
+#
+# ArgoCD is the one board whose scrape THIS CHART CANNOT CREATE. ArgoCD is a
+# prerequisite (prerequisites.md section 2), Tockmox never installs it, and
+# the argo-cd chart ships its metrics services disabled ... measured on a
+# clean install 2026-08-30: ns/argocd exposes no metrics service at all. So
+# the rule above cannot be satisfied by shipping the file: on a stock install
+# its scrape does not exist and never will until the operator acts.
+#
+# Rather than weaken the rule, the board moves behind the SAME key as its
+# ServiceMonitors (apps.argocdMonitoring, see argocd-monitoring.yaml), so the
+# scrape and the board arrive together. Since 0.7.1 (TM-0739) that key follows
+# capabilities.observability instead of defaulting off, which relaxes the rule
+# for one case: an ArgoCD installed WITHOUT metrics gets the board and an empty
+# scrape. The documented install turns the metrics on; set the key false to drop
+# the board where they are off.
+#
+# THE ConfigMap KEY (the file name the sidecar writes) IS PREFIXED `tockmox-`.
+# The sidecar flattens every ConfigMap into one folder, so a site
+# dashboard called `authentik.json` and this chart's `authentik.json` overwrote
+# each other every minute and Grafana logged "deprecatedInternalID ... is already
+# in use". Only the key changes: the ConfigMap names and the dashboard UIDs are
+# as before. A file that already starts `tockmox-` is not prefixed twice.
+#
+# UIDs are stable (`tockmox-<name>`) so operator boards can link to them and
+# a replacement via the documented match-the-UID path works.
+{{- range $path, $bytes := .Files.Glob "dashboards/*.json" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-dashboard-{{ base $path | trimSuffix ".json" }}
+  namespace: {{ $.Values.namespaces.monitoring }}
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  {{ include "tockmox.dashboardKey" $path }}: |-
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- end }}
+
+{{/* The optional set: gated on apps.argocdMonitoring, never on the glob alone. */}}
+{{- if include "tockmox.appEnabled" (dict "ctx" $ "app" "argocdMonitoring") }}
+{{- range $path, $bytes := .Files.Glob "dashboards-optional/*.json" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-dashboard-{{ base $path | trimSuffix ".json" }}
+  namespace: {{ $.Values.namespaces.monitoring }}
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  {{ include "tockmox.dashboardKey" $path }}: |-
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- end }}
+
+{{- define "tockmox.dashboardKey" -}}
+{{- $f := base . -}}
+{{- if hasPrefix "tockmox-" $f }}{{ $f }}{{ else }}tockmox-{{ $f }}{{ end -}}
+{{- end }}

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Your change{% endblock %}
+{% block main %}
+<h1>Your change</h1>
+<p class="lede">Nothing has changed yet. This is the new <code>inferenceNodes</code> block for <code>{{ values_file }}</code> in your site repository. Commit it and Argo CD applies it: this page then reads the new nodes' health. The gateway gets the routes once your chart derives them from this block (TM-0920); until then, add the entries under "What the gateway will get" to its <code>model_list</code> by hand.</p>
+<section class="panel" aria-labelledby="sum-h">
+  <h2 id="sum-h">What it does</h2>
+  <ul>
+    {% for n in summary.new_nodes %}<li>Adds node <strong>{{ n.name }}</strong> ({{ n.id }}, {{ n.endpoints|length }} engine endpoint(s))</li>{% endfor %}
+    {% for n in summary.changed_nodes %}<li>Replaces node <strong>{{ n.name }}</strong> ({{ n.id }})</li>{% endfor %}
+    {% for r in summary.new_routes %}<li>Adds route <code>{{ r.alias }}</code> to {{ r.model }} on {{ r.node }}</li>{% endfor %}
+    {% for r in summary.changed_routes %}<li>Changes route <code>{{ r.alias }}</code> (now {{ r.model }} on {{ r.node }})</li>{% endfor %}
+  </ul>
+  {% if secrets %}<p>Before committing, create {{ "this Secret" if secrets|length == 1 else "these Secrets" }} in the AI namespace, each holding the engine's token under the key <code>token</code>: {% for x in secrets %}<code>{{ x }}</code>{% if not loop.last %}, {% endif %}{% endfor %}. The change names {{ "it" if secrets|length == 1 else "them" }} and never contains a token.</p>{% endif %}
+</section>
+<section class="panel steps" aria-labelledby="yaml-h">
+  <h2 id="yaml-h">The values block</h2>
+  <p>The whole block, so it replaces what is there rather than merging by hand: {{ text.count("\n") }} lines.</p>
+  <form method="post" action="/nodes/change">
+    <input type="hidden" name="csrf" value="{{ user.csrf }}">
+    <input type="hidden" name="draft" value="{{ draft }}">
+    <input type="hidden" name="format" value="yaml">
+    <button class="btn" type="submit">Download it</button>
+  </form>
+  <details><summary>Show the block</summary>
+<pre tabindex="0"><code>{{ text }}</code></pre>
+  </details>
+</section>
+{% if model_list %}
+<section class="panel steps" aria-labelledby="ml-h">
+  <h2 id="ml-h">What the gateway will get</h2>
+  <p>The chart derives these gateway entries from the block above. If you maintain the gateway's <code>model_list</code> by hand instead, these are the entries to add.</p>
+<pre tabindex="0"><code>{{ model_list }}</code></pre>
+</section>
+{% endif %}
+{% if eval_list %}
+<section class="panel steps" aria-labelledby="el-h">
+  <h2 id="el-h">What the eval gateway will get</h2>
+  <p><code>-next</code> routes are candidates. They go to the eval gateway only, with the live route each is compared against, so no agent can call a candidate before it is promoted.</p>
+<pre tabindex="0"><code>{{ eval_list }}</code></pre>
+</section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, source_line %}
+{% block title %}Security posture{% endblock %}
+{% block main %}
+<h1>Security posture</h1>
+<p class="lede">Does what the cluster actually enforces match what you declared? The posture probe answers with evidence; this tab shows its latest report. It is a read-only view.</p>
+{% set r = reading %}
+<p>{{ source_line(r) }}</p>
+{# "Last answered 0s ago" is the age of the READ, which is always fresh; what a
+   reader needs is the age of the REPORT, the run the probe made (TM-0904). #}
+{% if r.data and r.data.run and r.data.run.startedAt %}<p class="muted">Report measured at {{ r.data.run.startedAt }}{% if report_age %} ({{ report_age }} ago){% endif %}.</p>{% endif %}
+{% if r.data %}
+{% set s = r.data.summary %}
+<section class="panel" aria-labelledby="pv-h">
+  <h2 id="pv-h">{% if s.gateExit == 0 %}{{ badge("ok", "No drift") }}{% elif s.gateExit == 2 %}{{ badge("critical", "Drift found") }}{% else %}{{ badge("unknown", "Could not run") }}{% endif %}</h2>
+  <dl class="counts">
+    <div><dt>Drift</dt><dd>{{ s.driftCount }}</dd></div>
+    <div><dt>Unintended deny</dt><dd>{{ s.unintendedDenyCount }}</dd></div>
+    <div><dt>Confirmed safe</dt><dd>{{ s.confirmedSafeCount }}</dd></div>
+    {% if s.unknownCount is defined %}<div><dt>Unknown</dt><dd>{{ s.unknownCount }}</dd></div>{% endif %}
+  </dl>
+  <p class="muted">Run {{ r.data.run.id or "?" }}{% if r.data.run.startedAt %}, {{ r.data.run.startedAt }}{% endif %} · report schema {{ r.data.schemaVersion }}</p>
+</section>
+{% if r.data.findings %}
+<section class="panel" aria-labelledby="pf-h">
+  <h2 id="pf-h">Findings</h2>
+  <div class="table-wrap" role="region" aria-labelledby="pf-cap" tabindex="0">
+  <table>
+    <caption id="pf-cap">Rows where what you declared and what the cluster did disagree</caption>
+    <thead><tr><th scope="col">Subject</th><th scope="col">Declared</th><th scope="col">Observed</th><th scope="col">Finding</th><th scope="col">Cause</th><th scope="col">Severity</th></tr></thead>
+    <tbody>
+    {% for f in r.data.findings %}
+      <tr><th scope="row"><code>{{ f.subject }}</code></th><td>{{ f.intent }}</td><td>{{ f.observed }}</td>
+      <td>{{ badge("critical" if f.bucket == "drift" else "warning", "Drift" if f.bucket == "drift" else "Unintended deny") }}</td>
+      <td>{{ f.cause or "" }}</td><td>{{ f.severity }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+{% if feature.options.rendererUrl %}<p><a href="{{ feature.options.rendererUrl }}">Open the full report</a></p>{% endif %}
+{% endif %}
+{% endblock %}

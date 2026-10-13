@@ -1,0 +1,230 @@
+{{- if and (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "dataProtection" "app" "garage")) (include "tockmox.garageWeb.enabled" .) }}
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+STATIC SITES FROM GARAGE (TM-0215): the way in, and the Job that fills a bucket.
+
+The endpoint itself is in garage.yaml ([s3_web], port 3902), and the buckets, the
+aliases, website access and writer keys are made by garage-bootstrap.yaml. This
+file has the two things left: an Ingress per site that wants one, and a sync Job
+per site whose content ships as an image (`content.image`, the operator's own).
+The product documentation is neither: it has a bucket, a writer key and an
+Ingress here, and no sync Job. The operator publishes it from their checkout
+with tools/publish-docs.sh (TM-0805, ADR-0036: Tockmox publishes no image), and
+until then the bootstrap Job puts a placeholder page in the bucket.
+
+THE INGRESS is sync wave 8, AFTER the Traefik LoadBalancer Service (wave 7).
+ArgoCD calls an Ingress Healthy only once it has an address, and the address
+comes from that Service. In wave 0 (no annotation) the Ingress waits for an
+address the later waves would grant, so the first sync of a fresh install hung
+for good (0.7.0-rc2 greenfield, 2026-10-01; rc1 never hit it because the docs
+Ingress was off). It is ordering, not a health-check skip: `ignore-healthcheck`
+does not change wave progression (see the sync Job note below). The shared helper
+takes it as `wave`.
+
+It is the Longhorn console's shape (the shared `tockmox.ingress`
+helper), routing the site host to the Garage Service on 3902. With
+global.certIssuer set, the helper's cert-manager annotation and tls block make
+cert-manager's ingress-shim issue the site's Certificate, so no Certificate
+object is authored here. It ships UNAUTHENTICATED by design for the docs: they
+are the product's public documentation and the web endpoint is anonymous
+anyway. There is no forward-auth in this chart; if a site's content must not be
+public, do not give it `ingress: true` and put your own authenticating proxy in
+front of :3902.
+
+THE SYNC JOB is a CronJob, NOT an Argo hook (0.7.0 lab pass, finding F3). It
+started life as a PostSync hook in wave 1, so that it ran after the bootstrap
+Job had made the bucket and the writer Secret, and re-published on every sync.
+The lab showed what a hook costs when the content image cannot be pulled (the
+first docs site used an image that was never published):
+a failed PostSync hook fails the whole sync operation, ArgoCD retries the
+operation five times with a full re-sync of the Application each time, and the
+platform Application had an operation "Running" for about 100 minutes, during
+which no new revision could be synced, before it ended Failed. A sync that only
+publishes documentation must not be able to do that to the storage, network and
+certificate layer. As a plain CronJob the Application is Synced and Healthy the
+moment the CronJob exists; a Job that fails shows as a failed Job in the
+namespace and nowhere in ArgoCD. The bootstrap Job ordering problem goes away
+too: a Pod that starts before the writer Secret exists waits in
+CreateContainerConfigError and the next run finds it.
+
+What is given up: publishing is on a schedule (`garage.web.syncSchedule`,
+hourly by default), not at sync time, so new content reaches the bucket at the
+next tick; `kubectl create job --from=cronjob/<name>` publishes now.
+
+ONE RUN AT INSTALL (garage.web.syncAtInstall, default true; Jeff's ruling
+2026-09-30, so a fresh install's site is not empty for up to an hour). The
+bootstrap Job (garage-bootstrap.yaml, step 9) starts one Job from each CronJob
+with `kubectl create job --from=cronjob/...` after it has made the buckets and
+writer Secrets, and does not wait for it. The Job's pod template is therefore
+this CronJob's jobTemplate by construction, with no second copy to drift. Its
+name carries the chart version, so an upgrade publishes the new content once
+and a re-sync of the same version finds the name taken.
+
+WHY NOT A PLAIN JOB IN THIS CHART. A Job that is an ordinary manifest in the
+sync is Progressing until it completes, and ArgoCD does not start PostSync
+hooks until every sync resource is Healthy. The writer Secret this Job reads is
+made by the PostSync bootstrap Job. So a plain Job waits in
+CreateContainerConfigError for a Secret that cannot appear until the Job is
+Healthy, until activeDeadlineSeconds fails it, and a Degraded resource fails
+the sync: the F3 loop again, on every fresh install. `ignore-healthcheck` does
+not rescue it (it affects the Application's health display, not wave
+progression: argoproj/argo-cd#22940, maintainers' reading). Also not
+`ttlSecondsAfterFinished` on a managed Job: selfHeal would recreate the
+deleted Job and publish again every TTL.
+Concurrency is Forbid and only the last Job of each outcome is kept.
+
+  initContainer  the content image copies its files into an emptyDir. The
+                 content image needs a shell and `cp` and nothing else, so it
+                 cannot fetch anything at run time.
+  container      an S3 client (the image the bootstrap already uses, so no new
+                 image) syncs the emptyDir into the bucket with --delete, so an
+                 object removed from the content is removed from the site.
+
+Two guards against the ways a sync goes wrong quietly. An empty or index-less
+source is refused, because `sync --delete` of an empty directory empties the
+bucket. And every file is touched before the sync, because `aws s3 sync` skips
+a same-size file that is not newer than the stored object, and a reproducible
+docs build stamps every file with a fixed old mtime: without the touch, an edit
+that keeps a page's byte length would never be published.
+*/ -}}
+{{- $g := .Values.garage -}}
+{{- $name := "tockmox-garage" -}}
+{{- range $s := (include "tockmox.garageWeb.sites" . | fromYamlArray) }}
+{{- if $s.ingress }}
+---
+{{ include "tockmox.ingress" (dict "ctx" $ "name" (printf "garage-web-%s" $s.name) "prefix" $s.name "host" $s.host "service" $name "port" 3902 "wave" "8") }}
+{{- end }}
+{{- if $s.contentImage }}
+---
+# TM-0759: this workload's own identity, with no token. The namespace's `default`
+# account is not used (CIS 5.1.5 and 5.1.6).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}-sync-{{ $s.name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}-sync-{{ $s.name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+spec:
+  schedule: {{ $g.web.syncSchedule | default "23 * * * *" | quote }}
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 600
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      # EACH RUN MUST BE ABLE TO FAIL. An image that cannot be pulled
+      # (ErrImagePull, ImagePullBackOff) never fails a Pod, it leaves it
+      # Pending, so `backoffLimit` alone bounds nothing: the Job would stay
+      # Active for ever and, with Forbid, block every later run. Measured
+      # 2026-09-30, when the docs image did not exist at the chart version.
+      # `activeDeadlineSeconds` counts wall-clock from the Job's start, pull
+      # time included, and turns that into a Failed Job after 15 minutes, far
+      # longer than an ~8 MB sync needs.
+      backoffLimit: 4
+      activeDeadlineSeconds: 900
+      # Jobs started by hand or by the bootstrap Job's one-shot (version-named,
+      # so they would otherwise pile up one per upgrade) clean themselves up
+      # after a week. A scheduled run is already limited by the history limits.
+      ttlSecondsAfterFinished: 604800
+      template:
+        metadata:
+          labels:
+            {{- include "tockmox.labels" $ | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          serviceAccountName: {{ $name }}-sync-{{ $s.name }}
+          automountServiceAccountToken: false
+          {{- with $g.priorityClassName }}
+          priorityClassName: {{ . }}
+          {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile: { type: RuntimeDefault }
+          initContainers:
+            - name: content
+              image: {{ include "tockmox.image" (dict "ctx" $ "repo" $s.contentImage) }}
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              resources:
+                requests: { cpu: 25m, memory: 32Mi }
+                limits:   { memory: 128Mi }
+              env:
+                - { name: SRC, value: {{ $s.contentPath | quote }} }
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  [ -d "$SRC" ] || { echo "FATAL: $SRC is not a directory in this image" >&2; exit 1; }
+                  cp -a "$SRC"/. /work/
+                  echo "copied $(find /work -type f | wc -l) file(s) from $SRC"
+              volumeMounts:
+                - { name: work, mountPath: /work }
+          containers:
+            - name: sync
+              image: {{ include "tockmox.image" (dict "ctx" $ "repo" $g.bootstrap.image) }}
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits:   { memory: 256Mi }
+              env:
+                - { name: HOME,       value: /tmp }
+                - { name: AWS_CONFIG_FILE, value: /tmp/aws-config }
+                - { name: BUCKET,     value: {{ $s.host | quote }} }
+                - { name: INDEX,      value: {{ $s.index | quote }} }
+                - { name: ENDPOINT,   value: {{ printf "http://%s.%s.svc:3900" $name $.Release.Namespace | quote }} }
+                - { name: AWS_DEFAULT_REGION, value: {{ $g.region | quote }} }
+                # Recent AWS CLI builds add a default checksum trailer to every
+                # upload, and some S3-compatible stores reject it. Asking only when
+                # required is harmless if Garage accepts it and necessary if not;
+                # INFERRED, not yet run against Garage v2.3.
+                - { name: AWS_REQUEST_CHECKSUM_CALCULATION, value: when_required }
+                - { name: AWS_RESPONSE_CHECKSUM_VALIDATION, value: when_required }
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom: { secretKeyRef: { name: {{ $s.secret | quote }}, key: ACCESS_KEY_ID } }
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: {{ $s.secret | quote }}, key: ACCESS_SECRET_KEY } }
+              volumeMounts:
+                - { name: work, mountPath: /work }
+                - { name: tmp,  mountPath: /tmp }
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  say() { echo "[$(date -u +%H:%M:%S)] $*"; }
+                  # Path-style addressing: the Service name is not under Garage's
+                  # s3 root_domain, and a dotted bucket name breaks virtual-host style.
+                  printf '[default]\ns3 =\n  addressing_style = path\n' > "$AWS_CONFIG_FILE"
+                  [ -f "/work/$INDEX" ] || { say "FATAL: /work/$INDEX is missing. Refusing to sync: --delete of an incomplete source would empty the site."; exit 1; }
+                  find /work -type f -exec touch {} +
+                  say "syncing $(find /work -type f | wc -l) file(s) to s3://$BUCKET with --delete"
+                  aws s3 sync /work "s3://$BUCKET" --delete --no-progress --endpoint-url "$ENDPOINT"
+                  say "DONE. $BUCKET now matches the content image"
+          volumes:
+            - name: work
+              emptyDir: {}
+            - name: tmp
+              emptyDir: {}
+{{- end }}
+{{- end }}
+{{- end }}

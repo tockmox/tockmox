@@ -1,0 +1,10 @@
+{
+  "runId": "fixture-drift",
+  "clusterIdentifier": "fixture",
+  "evidenceRef": "fixtures/observed-drift.json",
+  "observations": [
+    {"subject": "app->database", "dimension": "ns-to-ns", "observed": "allowed"},
+    {"subject": "monitoring->database", "dimension": "ns-to-ns", "observed": "denied"},
+    {"subject": "frontend->payments", "dimension": "ns-to-ns", "observed": "allowed"}
+  ]
+}

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Fake container runtime that answers as the ntfy image would. The password
+# arrives on stdin and is never logged; the "hash" is derived from it.
+S="${FAKE_STATE:?FAKE_STATE not set}"
+printf 'docker %s\n' "$*" >> "$S/calls.log"
+[ "${1:-}" = "info" ] && exit 0
+case " $* " in
+  *" user hash "*)
+    in="$(cat)"
+    # As ntfy 2.28.0 does (measured 2026-10-06, TM-0631): bcrypt refuses a
+    # password longer than 72 BYTES, and ntfy prints why and exits non-zero.
+    first="$(printf '%s\n' "$in" | head -1)"
+    if [ "$(printf '%s' "$first" | LC_ALL=C wc -c | tr -d ' ')" -gt 72 ]; then
+      printf 'password: confirm: failed to hash password: bcrypt: password length exceeds 72 bytes\n'; exit 1
+    fi
+    h="$(printf '%s' "$in" | "${REAL_OPENSSL:-openssl}" dgst -sha256 -r | cut -d' ' -f1)"
+    printf 'password: confirm: $2a$10$%s\n' "${h:0:53}"; exit 0 ;;
+  *" token generate "*) echo "tk_fakefaketoken0123456789abcdef"; exit 0 ;;
+esac
+echo "fake docker: unhandled: $*" >&2; exit 1

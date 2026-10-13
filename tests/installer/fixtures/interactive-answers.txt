@@ -1,0 +1,41 @@
+# Answers for a default interactive run, in prompt order. One per line.
+# A BLANK LINE accepts the bracketed default, which is what Enter does, and
+# blank lines here are the point of the fixture rather than laziness: the
+# defaults are where the derived values live, and a derived value is what broke.
+#
+# Keep in step with the `ask` sequence in install/tockmox-install.sh. If a
+# prompt is added, inserted or removed and this file is not updated, the answers
+# shift by one and the run fails on a validation message naming the wrong
+# setting ... which is a true report of a real problem (the prompt order changed)
+# even though it reads like a fixture bug. tests/installer/run.sh asserts the
+# prompt COUNT separately for exactly that reason, so the failure says which.
+#
+#  1 Deployment name                                  REQUIRED
+ci-interactive
+#  2 Write site repo to                               default ./tockmox-site
+
+#  3 Tockmox release                                  default v<VERSION>
+
+#  4 Internal base domain                             REQUIRED
+int.example.test
+#  5 cert-manager issuer                              default empty
+
+#  6 LAN/node CIDR                                    REQUIRED
+192.168.77.0/24
+#  7 MetalLB range                                    REQUIRED
+192.168.77.200-192.168.77.210
+#  8 Pod CIDR                                         default 10.42.0.0/16
+
+#  9 Service CIDR                                     default 10.43.0.0/16
+
+# 10 Timezone                                         default UTC
+
+# 11 Mirror registry                                  default empty
+
+# 12 StorageClass for protected data    DERIVED default: longhorn, via
+#    default_storage_class(). THIS IS THE PROMPT THAT CRASHED.
+
+# 13 StorageClass for replaceable data                default local-path
+
+# 14 ArgoCD namespace                                 default argocd
+

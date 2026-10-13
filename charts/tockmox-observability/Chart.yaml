@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v2
+name: tockmox-observability
+description: "Metrics, logs, dashboards, alerting."
+type: application
+version: 0.8.0
+appVersion: "0.1.0"
+annotations:
+  tockmox.com/sync-wave: "3"
+dependencies:
+  - name: tockmox-common
+    version: 0.8.0
+    repository: "file://../tockmox-common"
+  - name: kube-prometheus-stack
+    version: 92.2.0
+    repository: "https://prometheus-community.github.io/helm-charts"
+    condition: apps.kubePrometheusStack.enabled,capabilities.observability.enabled
+  - name: loki
+    version: "18.15.0"
+    repository: "https://grafana-community.github.io/helm-charts"
+    condition: apps.loki.enabled,capabilities.observability.enabled
+  - name: alloy
+    version: 1.13.1
+    repository: "https://grafana.github.io/helm-charts"
+    condition: apps.alloy.enabled,capabilities.observability.enabled

@@ -1,0 +1,142 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+THE CONSOLE'S VIRTUAL KEY, MINTED BY THE CHART (TM-0460 ruling B1, 2026-10-08).
+
+Open WebUI authenticates to the model gateway with a LiteLLM virtual key, and
+LiteLLM is the only thing that can issue one, so the Secret cannot exist before
+the first sync. Through 0.7.x that made it a manual post-install step, and a
+fresh install sat with its console in CreateContainerConfigError until an
+operator ran install.md's "Mint the console's model-gateway key". This Job is
+that step. The values comment above modelGateway.consoleKey says what it holds,
+why it is an ordinary resource rather than a hook, and why its name carries a
+hash of its pod template.
+
+What it does, in order, and what each step refuses:
+  1. Poll the gateway's readiness endpoint until it answers 200, or the
+     attempt's waitSeconds run out and the Job's backoff retries.
+  2. If the Secret already exists, ask the gateway whether it still accepts
+     the key (GET /v1/models with it). 200: say so, exit 0, so a re-sync, an
+     upgrade or a new Job name never rotates a working key. 401: the key is
+     dead (the gateway was turned off and on again, which prunes its database
+     and every key in it, TM-0977), so carry on and replace it. Anything
+     else: exit 1 and let the backoff retry, because a key this Job cannot
+     prove dead is never deleted.
+  3. POST /key/generate with the master key from the environment. If LiteLLM
+     refuses the alias (a key with that alias already exists, which happens
+     when the Secret was deleted by hand), retry once with a timestamp suffix
+     and say so in the log.
+  4. Refuse an answer with no `key` in it, loudly, rather than writing an empty
+     Secret the console would start with and fail every request on.
+  5. Create the Secret with exactly the configured name and key, or, when
+     step 2 found a dead key, replace it in place.
+  6. Only after a replacement: delete the console's pods by name so the
+     StatefulSet restarts them on the new key (the console reads the Secret
+     at pod start and never again). If that fails the Job fails, so the
+     layer reads Degraded rather than Healthy with a console that cannot chat.
+
+Why those verbs and no wider ones: `update` on the one Secret name replaces
+the key without a moment in which no Secret exists; `delete` on the console's
+pod names restarts the console without being able to change what it runs
+(a `patch` on the StatefulSet, which is what `kubectl rollout restart` does,
+could rewrite its pod template). Both are scoped by resourceName.
+
+The master key reaches the pod the same way it reaches the gateway: a Secret
+reference. Until that Secret exists the pod waits in CreateContainerConfigError
+naming it, which is the documented contract in secrets.md and does not count
+against the Job's backoff.
+*/ -}}
+{{- $ck := .Values.modelGateway.consoleKey | default dict -}}
+{{- $owui := index .Values "open-webui" | default dict -}}
+{{- $secretName := $ck.secretName | default "tockmox-openwebui-gateway" -}}
+{{- $secretKey := $ck.secretKey | default "api-key" -}}
+{{- /* Whether the Job renders, and the three refusals, live in
+       tockmox-ai.consoleKeyOn (_gateway-key.tpl) so the check CronJob in
+       console-key-check.yaml (TM-0982) follows exactly the same answer. */ -}}
+{{- $on := eq (include "tockmox-ai.consoleKeyOn" .) "true" -}}
+{{- if $on }}
+{{- $ns := .Values.namespaces.ai -}}
+{{- $gateway := printf "http://%s-litellm:4000" .Release.Name -}}
+{{- $lit := .Values.litellm | default dict -}}
+{{- /* The console's pod names: the open-webui subchart's fullname (its own
+       helper, mirrored) plus the StatefulSet's ordinal for each replica. */ -}}
+{{- $owuiName := $owui.nameOverride | default "open-webui" -}}
+{{- $owuiFull := $owui.fullnameOverride | default (ternary .Release.Name (printf "%s-%s" .Release.Name $owuiName) (contains $owuiName .Release.Name)) | trunc 63 | trimSuffix "-" -}}
+{{- $consolePods := list -}}
+{{- range $i := until (int ($owui.replicaCount | default 1)) -}}
+{{- $consolePods = append $consolePods (printf "%s-%d" $owuiFull $i) -}}
+{{- end -}}
+{{- $pod := include "tockmox-ai.gatewayKeyPod" (dict "ctx" $ "ck" $ck "ns" $ns "gateway" $gateway "secretName" $secretName "secretKey" $secretKey "lit" $lit "consolePods" (join " " $consolePods)) -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-gateway-key
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tockmox-gateway-key
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+rules:
+  # `get` and `update` on the ONE Secret this Job writes: the idempotence
+  # check reads it, and a key the gateway rejects is replaced in place.
+  # Kubernetes RBAC scopes get, update and delete by name and cannot scope a
+  # create by name (the request carries no name to authorize against), so
+  # `create` below is on secrets as a resource and the script is the guard
+  # that writes only {{ $secretName }}. No list, no delete, and nothing on
+  # any other Secret: a compromised Job pod can read and rewrite one Secret
+  # that holds a key it just minted, and create Secrets it cannot then read.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ $secretName | quote }}]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  # `delete` on the console's pods, by name, so a replaced key reaches the
+  # console (it reads the Secret at pod start). Nothing on the StatefulSet
+  # itself: a patch there could change what the console runs; a pod delete
+  # can only make it start again as rendered.
+  - apiGroups: [""]
+    resources: ["pods"]
+    resourceNames: {{ $consolePods | toJson }}
+    verbs: ["delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tockmox-gateway-key
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tockmox-gateway-key
+subjects:
+  - kind: ServiceAccount
+    name: tockmox-gateway-key
+    namespace: {{ $ns }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Named after its own pod template, like the migrations Job (TM-0596): a
+  # changed template is a new Job, never a `field is immutable` sync failure,
+  # and the new Job finds the Secret, checks its key still works, and exits.
+  name: {{ .Release.Name }}-gateway-key-{{ $pod | sha256sum | trunc 10 }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-gateway-key
+spec:
+  backoffLimit: {{ $ck.backoffLimit | default 20 }}
+  activeDeadlineSeconds: {{ $ck.activeDeadlineSeconds | default 5400 }}
+  template:
+    {{- $pod | nindent 4 }}
+{{- end }}

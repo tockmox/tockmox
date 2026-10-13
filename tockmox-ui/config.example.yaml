@@ -1,0 +1,42 @@
+# Rendered from chart values in a real install (TM-0902). Nothing here is read at request time
+# from the user, which is what keeps the launcher and the short-path redirects safe.
+site:
+  name: "My Tockmox"
+  domain: int.example.com
+  accountUrl: https://auth.int.example.com/if/user/
+# Optional. Unset, the Tockmox layers are the Applications whose source path is
+# charts/tockmox-<layer>, whichever repository serves them (a mirror included).
+# Set it to match on one repository URL instead.
+tockmoxRepo: https://github.com/tockmox/tockmox
+roles:
+  adminGroup: tockmox-admins        # sso.adminGroup in the identity chart
+apps:                               # one per console; groups: ["*"] = every signed-in user
+  - {id: chat,      name: Chat,       url: https://chat.int.example.com,      icon: chat,    description: "Ask your models",            groups: ["*"]}
+  - {id: grafana,   name: Grafana,    url: https://grafana.int.example.com,   icon: chart,   description: "Dashboards and history",     groups: [tockmox-users, tockmox-admins]}
+  - {id: workflows, name: Workflows,  url: https://workflows.int.example.com, icon: flow,    description: "Argo Workflows",             groups: [tockmox-admins]}
+  - {id: llm,       name: Model gateway, url: https://llm.int.example.com,    icon: gateway, description: "LiteLLM admin",              groups: [tockmox-admins]}
+  - {id: ntfy,      name: Alerts on your phone, url: https://ntfy.int.example.com, icon: bell, description: "Subscribe to the alert topic", groups: [tockmox-admins]}
+  - {id: longhorn,  name: Storage,    url: https://longhorn.int.example.com,  icon: disk,    description: "Longhorn volumes",           groups: [tockmox-admins]}
+sources:
+  kubernetes: {argocdNamespace: argocd}
+  prometheus: {url: "http://tockmox-observability-prometheus.tockmox-monitoring.svc:9090"}
+  alertmanager: {url: "http://tockmox-observability-alertmanager.tockmox-monitoring.svc:9093"}
+  timeoutSeconds: 4
+features:
+  posture:  {enabled: false, apiUrl: "", reportFile: ""}
+  scanning: {enabled: false}
+  agents:   {enabled: false}
+updateCheck:
+  enabled: false                    # OFF by default: no request leaves the cluster
+  feedUrl: https://tockmox.com/releases/feed.json   # or a mirror, or file:///feed/releases.json
+  publicKeys: []                    # base64 Ed25519 public keys; a list, for rotation
+  intervalSeconds: 86400
+oidc:
+  issuer: https://auth.int.example.com/application/o/tockmox-ui
+  clientId: tockmox-ui
+  clientSecretFile: /etc/tockmox-ui/oidc/client-secret
+  redirectUrl: https://tockmox.int.example.com/auth/callback
+session:
+  secretFile: /etc/tockmox-ui/session/secret
+  maxAgeSeconds: 28800
+  secureCookies: true

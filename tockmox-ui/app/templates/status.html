@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, argo_badge, source_line %}
+{% block title %}Status{% endblock %}
+{% block main %}
+<h1>Platform status</h1>
+<p>{{ badge(verdict, verdict_text[verdict][0]) }}</p>
+<p class="lede">Sync and health are shown as two separate facts: <em>Synced</em> means Argo CD applied what git says; <em>Healthy</em> means it came up.</p>
+
+{% set ar = readings["apps"] %}
+<section class="panel" aria-labelledby="layers-h">
+  <h2 id="layers-h">Layers and applications</h2>
+  <p>{{ source_line(ar) }}</p>
+  {% if ar.data %}
+  <div class="table-wrap" role="region" aria-labelledby="layers-cap" tabindex="0">
+  <table>
+    <caption id="layers-cap">Argo CD applications{% if ar.state == "unknown" %} (last known, may be stale){% endif %}</caption>
+    <thead><tr><th scope="col">Application</th><th scope="col">Revision</th><th scope="col">Sync</th><th scope="col">Health</th></tr></thead>
+    <tbody>
+    {% for a in ar.data %}
+      <tr><th scope="row">{{ a.name }}</th><td><code>{{ a.revision or "?" }}</code></td><td>{{ argo_badge(a.sync, "sync") }}</td><td>{{ argo_badge(a.health, "health") }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</section>
+
+{% set nr = readings["nodes"] %}
+<section class="panel" aria-labelledby="nodes-h">
+  <h2 id="nodes-h">Nodes</h2>
+  <p>{{ source_line(nr) }}</p>
+  {% if nr.data %}
+  <div class="table-wrap" role="region" aria-labelledby="nodes-cap" tabindex="0">
+  <table>
+    <caption id="nodes-cap">Kubernetes nodes</caption>
+    <thead><tr><th scope="col">Node</th><th scope="col">Ready</th><th scope="col">Kubelet</th></tr></thead>
+    <tbody>
+    {% for n in nr.data %}
+      <tr><th scope="row">{{ n.name }}</th><td>{{ badge("ok" if n.ready == "Ready" else ("critical" if n.ready == "NotReady" else "unknown"), n.ready) }}</td><td><code>{{ n.version }}</code></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</section>
+
+{% set am = readings["alertmanager"] %}
+<section class="panel" aria-labelledby="alerts-h">
+  <h2 id="alerts-h">Alerts firing</h2>
+  <p>{{ source_line(am) }}</p>
+  {# The heartbeat is the pipeline's "I am alive", not a problem (TM-0904): it is
+     named once as that, and never as a firing row. Which alert it is comes from
+     config (sources.alertmanager.heartbeat), so a site that renamed it
+     (TockmoxHeartbeat, DeadMansSwitch) is not shown its own heartbeat as a fault. #}
+  {% set hb_on = (am.data or []) | selectattr("name", "equalto", heartbeat) | list %}
+  {% if am.state != "unknown" or hb_on %}<p class="muted">{% if hb_on %}{{ badge("ok", "Alive") }} Alerting pipeline: <code>{{ heartbeat }}</code> is firing, as it always should.{% else %}{{ badge("unknown", "Silent") }} Alerting pipeline: <code>{{ heartbeat }}</code> is not firing, so nothing shows alerts can arrive.{% endif %}</p>{% endif %}
+  {# Every OTHER always-firing heartbeat (TockmoxHeartbeat, TM-1014) reads Alive when present, and is
+     never a firing row. Absent says nothing: the self-check is optional, and its own alerting is
+     the dead-man's switch off-cluster, not this page. #}
+  {% for name, why in hb_purpose.items() if name != heartbeat %}{% if (am.data or []) | selectattr("name", "equalto", name) | list %}
+  <p class="muted">{{ badge("ok", "Alive") }} <code>{{ name }}</code> is firing, as it always should: {{ why }}.</p>{% endif %}{% endfor %}
+  {% set real = (am.data or []) | rejectattr("name", "in", pipeline) | list %}
+  {% if real %}
+  <div class="table-wrap" role="region" aria-labelledby="alerts-cap" tabindex="0">
+  <table>
+    <caption id="alerts-cap">Active, not silenced, not inhibited: {{ real|length }}{% if real|length > 10 %} (first 10 shown){% endif %}</caption>
+    <thead><tr><th scope="col">Alert</th><th scope="col">Severity</th><th scope="col">Namespace</th><th scope="col">Summary</th></tr></thead>
+    <tbody>
+    {% for a in real[:10] %}
+      <tr><th scope="row">{{ a.name }}</th><td>{{ badge("critical" if a.severity == "critical" else "warning", a.severity) }}</td><td>{{ a.namespace }}</td><td>{{ a.summary }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% elif am.state != "unknown" %}<p class="empty">Nothing is firing.</p>{% endif %}
+</section>
+
+{% set pr = readings["prometheus"] %}
+<section class="panel" aria-labelledby="prom-h">
+  <h2 id="prom-h">Metrics collection</h2>
+  <p>{{ source_line(pr) }}</p>
+  {% set down = (pr.data or []) | rejectattr("up") | list %}
+  {% if down %}
+  <ul class="plain">{% for t in down[:10] %}<li>{{ badge("warning", "Down") }} <code>{{ t.job }}</code> {{ t.instance }}</li>{% endfor %}</ul>
+  {% endif %}
+</section>
+{% if readings.get("inference_nodes") %}{% set inr = readings["inference_nodes"] %}
+<section class="panel" aria-labelledby="inodes-h">
+  <h2 id="inodes-h">Inference Nodes</h2>
+  <p>{{ source_line(inr) }}</p>
+  {% if inr.data %}
+  <ul class="plain">{% for x in inr.data %}<li>{{ badge(x.state if inr.fetched_at else "unknown") }} <a href="/nodes/{{ x.id }}">{{ x.id }}</a>{% if x.why %}<span class="muted">: {{ x.why }}</span>{% endif %}</li>{% endfor %}</ul>
+  {% endif %}
+</section>
+{% endif %}
+<p class="muted">For dashboards and history, open {% if grafana %}<a href="{{ grafana.url }}/" rel="noopener" target="_blank">Grafana<span class="visually-hidden"> (opens in a new tab)</span></a>{% else %}Grafana{% endif %}. This page reads Argo CD, Kubernetes, Prometheus and Alertmanager directly and changes nothing.</p>
+{% endblock %}

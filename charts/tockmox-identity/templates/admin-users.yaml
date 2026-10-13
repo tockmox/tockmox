@@ -1,0 +1,188 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+ADMIN MEMBERSHIP (TM-0820, A3). Adds the users named in `sso.adminUsers` to the
+admin group, and does nothing else. The default (an empty list) renders NOTHING.
+
+WHY A JOB AND NOT A BLUEPRINT. A blueprint's `users:` on a group is a SET: it
+removes everyone not listed. A user-side `groups:` is a set too, and drops the
+user's other groups. `!Find` on a user that does not exist resolves to null, and
+a null in that list fails the blueprint, which poisons discovery for all of them
+(the GREENFIELD RULE in sso-blueprints.yaml). None of those is "add, never
+remove, tolerate a name that is not there yet". The ORM call is:
+group.users.add(user).
+
+WHY POSTSYNC. The Authentik server has to be answering, which also means its
+migrations have run, before there is a database to write to. A PostSync hook runs
+after every resource in the sync is Healthy; the garage bootstrap Job in the
+platform layer is the precedent. BeforeHookCreation deletes the previous Job on
+the next sync so a re-sync recreates it (a Job's pod template is immutable) and
+the last run's log stays readable. Not HookSucceeded: that would delete the log
+the operator reads to learn which names were not found.
+
+WHY A CONFIGMAP AS WELL (found on the 0.7.1-rc1 gate). A hook is not part of
+Argo's diff, so on a RUNNING install adding a name to the list changed nothing
+Argo compares, no sync started, and the Job never ran. The ConfigMap at the end
+of this file is an ordinary resource carrying the same group and list: a changed
+list is now a diff, automated sync applies it, and this PostSync hook runs after
+that sync. Nothing reads the ConfigMap; it exists to be compared.
+
+THE BOOTSTRAP USER (found on the 0.7.1-rc3 gate). akadmin does not exist until
+the worker applies the system/bootstrap.yaml blueprint, and on a fresh install
+this Job ran one second before it did: `not-found akadmin`, exit 0, and with the
+list unchanged nothing ever ran it again. The Job now waits for that blueprint
+instance to report successful (or disabled), at most 300 s, then continues
+either way. Names that do not exist yet are still reported and skipped.
+
+THE GROUP. get_or_create, not get. The worker applies the groups blueprint
+asynchronously after it starts, so on a fresh install this Job can run first;
+creating the group by name is the same object the blueprint's `state: present`
+entry identifies by name, so the blueprint then finds it and updates it. Nothing
+is removed from a group that already exists.
+
+IMAGE AND ENV are the server's, derived from the same values the vendored
+authentik chart reads: the repository and tag overrides, the global and server
+env lists, and the generated config Secret (host, database, user) plus the
+operator's `tockmox-authentik` Secret. The tag falls back to the authentik
+dependency's version in Chart.yaml, which authentik keeps equal to its appVersion
+(the chart's own default tag); the parent chart cannot read a subchart's
+appVersion, and a second pin here would drift on every bump.
+*/ -}}
+{{- $users := .Values.sso.adminUsers | default list -}}
+{{- if and $users (include "tockmox.appEnabled" (dict "ctx" $ "app" "authentik")) .Values.sso.enabled }}
+{{- range $u := $users }}
+{{- if or (not (kindIs "string" $u)) (eq $u "") (regexMatch "\\s" $u) }}
+{{- fail (printf "sso.adminUsers entries must be non-empty usernames with no whitespace; got %q" (toString $u)) }}
+{{- end }}
+{{- end }}
+{{- $ak := .Values.authentik }}
+{{- $akGlobal := mergeOverwrite (deepCopy (.Values.global | default dict)) (deepCopy ($ak.global | default dict)) }}
+{{- $fullCtx := dict "Values" (dict "global" $akGlobal "nameOverride" ($ak.nameOverride | default "") "fullnameOverride" ($ak.fullnameOverride | default "")) "Chart" (dict "Name" "authentik") "Release" .Release }}
+{{- $cfgSecret := (($ak.authentik | default dict).existingSecret | default dict).secretName | default (include "authentik.fullname" $fullCtx) }}
+{{- $img := (($ak.server | default dict).image | default dict) }}
+{{- $gimg := (($ak.global | default dict).image | default dict) }}
+{{- $depTag := "" }}
+{{- range .Chart.Dependencies }}{{- if eq .Name "authentik" }}{{- $depTag = .Version }}{{- end }}{{- end }}
+{{- $tag := $img.tag | default $gimg.tag | default $depTag }}
+{{- if not (regexMatch "^[0-9]" $tag) }}
+{{- fail (printf "sso.adminUsers: cannot derive the authentik image tag (got %q). Pin the authentik dependency in Chart.yaml to an exact version or set authentik.global.image.tag." $tag) }}
+{{- end }}
+{{- $repo := $img.repository | default $gimg.repository | default "ghcr.io/goauthentik/server" }}
+{{- $digest := $img.digest | default $gimg.digest | default "" }}
+{{- $pull := $img.pullPolicy | default $gimg.pullPolicy | default "IfNotPresent" }}
+{{- $srv := $ak.server | default dict }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tockmox-authentik-admin-users
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "tockmox.labels" . | nindent 8 }}
+        app.kubernetes.io/name: tockmox-authentik-admin-users
+    spec:
+      restartPolicy: Never
+      # No Kubernetes API calls: a ServiceAccount of its own and no token (TM-0759,
+      # CIS 5.1.5 and 5.1.6). It runs `ak shell` against the database.
+      # An Argo hook with BeforeHookCreation, so changing the pod template is safe on upgrade.
+      serviceAccountName: tockmox-admin-users
+      automountServiceAccountToken: false
+      {{- with ($srv.imagePullSecrets | default $ak.global.imagePullSecrets) }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: admin-users
+          image: {{ $repo }}:{{ $tag }}{{ if $digest }}@{{ $digest }}{{ end }}
+          imagePullPolicy: {{ $pull }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi }
+          args:
+            - shell
+            - -c
+            - |
+              import os
+              from authentik.core.models import Group, User
+              gname = os.environ["TOCKMOX_ADMIN_GROUP"]
+              names = os.environ["TOCKMOX_ADMIN_USERS"].split()
+              group, made = Group.objects.get_or_create(name=gname, defaults={"is_superuser": False})
+              print("group %s: %s" % (gname, "created" if made else "found"))
+              # The bootstrap blueprint creates akadmin. Wait for it (bounded), or
+              # a first install reports akadmin not-found and never retries.
+              import time
+              from authentik.blueprints.models import BlueprintInstance
+              deadline = time.monotonic() + 300
+              while True:
+                  boot = BlueprintInstance.objects.filter(path="system/bootstrap.yaml").first()
+                  if boot is not None and (boot.status == "successful" or not boot.enabled):
+                      print("bootstrap blueprint: %s" % ("applied" if boot.enabled else "disabled"))
+                      break
+                  if time.monotonic() > deadline:
+                      print("bootstrap blueprint: not applied after 300 s, continuing")
+                      break
+                  time.sleep(5)
+              for name in names:
+                  user = User.objects.filter(username=name).first()
+                  if user is None:
+                      print("not-found %s" % name)
+                  elif group.users.filter(pk=user.pk).exists():
+                      print("already-member %s" % name)
+                  else:
+                      group.users.add(user)
+                      print("added %s" % name)
+          env:
+            {{- with (concat ($ak.global.env | default list) ($srv.env | default list)) }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            - name: TOCKMOX_ADMIN_GROUP
+              value: {{ .Values.sso.adminGroup | quote }}
+            - name: TOCKMOX_ADMIN_USERS
+              value: {{ join " " $users | quote }}
+          envFrom:
+            - secretRef:
+                name: {{ $cfgSecret }}
+            {{- with (concat ($ak.global.envFrom | default list) ($srv.envFrom | default list)) }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+---
+# TM-0759: this workload's own identity, with no token. The namespace's `default`
+# account is not used (CIS 5.1.5 and 5.1.6).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-admin-users
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+# The diff that starts the sync this hook runs after (see WHY A CONFIGMAP above).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-admin-users-list
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+data:
+  group: {{ .Values.sso.adminGroup | quote }}
+  users: {{ join " " $users | quote }}
+{{- end }}

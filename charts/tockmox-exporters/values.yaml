@@ -1,0 +1,370 @@
+# SPDX-License-Identifier: Apache-2.0
+global:
+  internalDomain: ""
+  certIssuer: "tockmox-ca"
+  imageRegistry: ""
+  timezone: "UTC"
+  clusterCIDR: "10.42.0.0/16"
+  serviceCIDR: "10.43.0.0/16"
+  lanCIDR: ""
+  # THE STORAGE CONTRACT. Empty means "use whatever the cluster's default
+  # StorageClass happens to be", which is not the same as "use the storage this
+  # platform ships". On k3s the default is `local-path`: node-local, one copy,
+  # no snapshots, no backup target. Tockmox shipped Longhorn and, because
+  # nothing named a class, wrote every PVC to local-path anyway.
+  #
+  # Name it. `longhorn` on a stock install with apps.longhorn enabled;
+  # `local-path` if you have deliberately chosen node-local storage; the name of
+  # your own CSI class if you brought one. A preflight refuses the combination
+  # that used to fail silently.
+  storageClass: ""
+
+  # THE SECOND HALF OF THE STORAGE CONTRACT: the class for data whose
+  # application already protects it, or that can be re-derived.
+  #
+  # The policy is "replicate at exactly one layer". If an application keeps its
+  # own copies (Postgres streaming to replicas, an object store spreading
+  # across nodes) or the data can be rebuilt (a metrics TSDB), then replicating
+  # the volume underneath buys nothing and costs two to three times the disk
+  # plus write latency on the hot path. Those workloads get THIS class.
+  # Everything else gets `storageClass` above.
+  #
+  # `local-path` is k3s's own provisioner and is the shipped default here.
+  # prerequisites.md tells you to UN-DEFAULT it rather than delete it, and this
+  # is why. Node-local means a rescheduled pod finds an empty volume, which is
+  # the trade this class exists to make; do not point it at anything whose loss
+  # you would mind.
+  #
+  # Empty falls back to the cluster default, which un-does the policy without
+  # complaining. Set it to a class you have.
+  localStorageClass: "local-path"
+# ---------------------------------------------------------------------------
+# CAPABILITIES: functional stories you can decline.
+#
+# `apps.*` is one switch per piece of software, which is the wrong unit for the
+# decision people actually make. Nobody chooses "a Garage", "a barman plugin"
+# and "a snapshot controller" separately; they choose whether this deployment
+# protects its data, or whether they already run Velero and want none of it.
+#
+# A capability is that decision, named, on one switch, spanning whatever
+# components it takes and whichever layers they live in.
+#
+# HOW IT RESOLVES, and the tri-state is the point:
+#   apps.<x>.enabled unset   follow the capability that owns the component
+#   apps.<x>.enabled: true   on, even if the capability is off
+#   apps.<x>.enabled: false  off, even if the capability is on
+#
+# So declining a capability turns off everything it owns, and a component you
+# named yourself still means what you said. Turning a single component on while
+# its capability is off fails the render rather than half-building the story.
+#
+# THIS BLOCK IS BYTE-IDENTICAL IN ALL NINE LAYERS, and that is deliberate. The
+# values namespace is shared across layers, so one profile sets a capability
+# once and every layer owning part of it reads the same answer. Editing one copy
+# and not the others is the failure the uniformity exists to prevent, and
+# tools/check-capabilities.sh fails CI on any drift between them.
+#
+# Full list, what each one contains, and why you would decline it:
+# docs/administration/capabilities.md
+# ---------------------------------------------------------------------------
+capabilities:
+  # Metrics, logs and the rules that read them ... everything answering "what is
+  # this platform doing right now". Off means Tockmox ships no Prometheus, no
+  # Loki, no Alloy, and none of its own ServiceMonitors or alert rules.
+  #
+  # Running your own Prometheus operator is the case worth naming. Decline the
+  # capability and set `apps.serviceMonitors.enabled: true`, and Tockmox renders
+  # its monitors and rules for YOUR operator to collect, without standing up a
+  # second stack beside the one you already run.
+  observability:
+    enabled: true
+
+  # Alerts that reach a person: the notification sink, the bridge that feeds it
+  # and the heartbeat that proves the path still works when nothing is wrong.
+  # Off means alerts fire into Alertmanager and stop there.
+  #
+  # The component switch for this one is `notifications.enabled` rather than an
+  # `apps` key, because it predates this framework and is a contract key. It has
+  # the same tri-state: unset follows the capability, set means what you said.
+  notifications:
+    enabled: true
+
+  # One sign-in across every console, and the identity provider behind it. Off
+  # means Tockmox ships no Authentik and each console falls back to its own
+  # local login, unless you point `sso` at an issuer you already run.
+  identity:
+    enabled: true
+
+  # The private AI plane: a chat console and the model gateway in front of it.
+  # Off leaves Tockmox as a platform and nothing else, which is a legitimate way
+  # to run it and the right answer if you are here for the infrastructure.
+  aiPlane:
+    enabled: true
+
+  # Backups that go somewhere, restores that are exercised, and the CSI
+  # plumbing underneath both. Off means Tockmox ships no object store, no
+  # backup plugin and no snapshot control plane, and expects you to have your
+  # own or to not want one.
+  dataProtection:
+    enabled: true
+
+  # Telemetry from PHYSICAL hardware: disk SMART attributes, and SNMP from
+  # switches, UPSes and appliances.
+  #
+  # OFF BY DEFAULT, unlike every other capability here, because the reference
+  # deployment is a virtual machine: there is no physical disk to ask and no
+  # switch to poll, and an exporter scraping nothing still alerts on its own
+  # absence. Turn it on when the hardware is real, and both exporters follow.
+  hardwareTelemetry:
+    enabled: false
+
+  # Jobs running inside the cluster on a schedule or an event, with a console to
+  # watch them. Off means no Argo Workflows.
+  workflowAutomation:
+    enabled: true
+
+  # Default-deny between namespaces, so a compromised workload cannot reach a
+  # neighbour it was never meant to.
+  #
+  # Off is the honest setting on a cluster whose CNI does not enforce
+  # NetworkPolicy at all. Flannel without a policy plugin accepts every object
+  # here and enforces none of them, and a control that is only decoration is
+  # worse than no control, because it gets counted.
+  networkPolicy:
+    enabled: true
+
+namespaces:
+  monitoring: tockmox-monitoring
+
+# ---------------------------------------------------------------------------
+# These are the components most likely to be wrong for YOUR hardware, which is
+# why they are a separate layer you can disable in one flag rather than a
+# corner of observability you have to pick apart.
+#
+# blackbox  ... HTTP/TCP/ICMP probes. Useful everywhere. On by default.
+# snmp      ... switches, PDUs, UPSes. Off: needs a device list to be useful.
+# smartctl  ... physical disk health. Off: meaningless on cloud or virtual disks.
+# ---------------------------------------------------------------------------
+apps:
+  blackbox: {}   # unset: follows capabilities.observability
+  snmp: {}       # unset: follows capabilities.hardwareTelemetry
+  smartctl: {}   # unset: follows capabilities.hardwareTelemetry
+
+prometheus-blackbox-exporter:
+  resources:
+    # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+    # peak 51.1 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 58.3 MiB in the pre-migration namespace (30 days); average 44.1 MiB.
+    # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+    # request = average, rounded up to 16Mi. Re-measure before changing.
+    requests:
+      memory: 48Mi
+    limits:
+      memory: 96Mi
+  # A MODULE OF ITS OWN FOR THE CONSOLES (TM-0820 A6). http_2xx treats only 2xx
+  # as up, and a console that answers 401 at its root (an SSO-gated or
+  # forward-auth console does) read as down: TockmoxConsoleUnreachable fired for
+  # a console that was serving exactly as designed. 401 here means the server
+  # answered and refused an anonymous caller, which is the proof of life this
+  # probe exists to give; 301/302 are the login redirects. The rest of
+  # http_2xx is copied from the subchart's module so the probe behaves as
+  # before in every other respect, redirects followed, TLS verified. The subchart
+  # keeps http_2xx (Helm merges the maps), so a site's own Probes using it are
+  # untouched. probes.module below selects which one the consoles use.
+  config:
+    modules:
+      http_console:
+        prober: http
+        timeout: 5s
+        http:
+          valid_http_versions: ["HTTP/1.1", "HTTP/2.0"]
+          valid_status_codes: [200, 301, 302, 401]
+          follow_redirects: true
+          preferred_ip_protocol: "ip4"
+      # INFERENCE ENGINES (lab F6, 2026-10-08). The AI layer's inference-node Probe uses this one, not
+      # http_console. mlx-lm's server is Python's http.server and answers "HTTP/1.0 200 OK" (measured on the
+      # lab's Mac Studio: Server BaseHTTP/0.6 Python/3.14.7); http_console refuses that version, so every mlx-lm
+      # node read DOWN while serving completions. Identical to http_console otherwise, including 401 (an engine
+      # that wants a bearer token is up). The consoles keep refusing HTTP/1.0: nothing they run speaks it.
+      http_inference:
+        prober: http
+        timeout: 5s
+        http:
+          valid_http_versions: ["HTTP/1.0", "HTTP/1.1", "HTTP/2.0"]
+          valid_status_codes: [200, 301, 302, 401]
+          follow_redirects: true
+          preferred_ip_protocol: "ip4"
+  serviceMonitor:
+    # SCRAPE THE PLATFORM ITSELF. Measured on the reference lab 2026-08-15:
+    # Prometheus had 24 targets and not one was cert-manager, Longhorn, Traefik,
+    # MetalLB, Loki, Authentik or blackbox. Every one of them ships, exposes
+    # metrics, and defaults its ServiceMonitor to false because a standalone
+    # chart cannot assume the CRD exists. Tockmox ships that CRD, so the default
+    # that is correct upstream is wrong here.
+
+    # These follow capabilities.observability but CANNOT be templated: subchart
+    # values are static YAML. Declining the capability means setting these false
+    # too, which profiles/no-observability.yaml does and the preflight names.
+
+    # This shipped off, so the exporter ran, answered probes and delivered no
+    # metric to anyone. With zero Probe objects too, the layer measured nothing.
+    enabled: false
+    defaults:
+      labels:
+        prometheus: kube-prometheus-stack
+
+    selfMonitor:
+      enabled: true
+  # IN-CLUSTER TRUST FOR THE PROBER. Measured on the reference lab 2026-08-15:
+  # with the Probes shipped and no CA, all five consoles probed 0 with
+  #   x509: certificate signed by unknown authority
+  # and TockmoxConsoleUnreachable was ten minutes from paging. DNS resolved and
+  # the endpoints were healthy; the prober simply did not trust the issuer.
+
+  # SSL_CERT_FILE rather than a module tls_config.ca_file, and the difference is
+  # measured, not stylistic. blackbox_exporter is Go: crypto/x509 reads
+  # SSL_CERT_FILE AND the default certificate directories and UNIONS them, so
+  # naming the CA adds it without dropping a single public root, and an
+  # unreadable path falls through to the system store instead of failing.
+  # A module ca_file REPLACES the roots for that module, which would have made
+  # internal probes work and any public probe fail.
+
+  # Verified on the lab with this exact spec, in the blackbox image:
+  #   auth / grafana / chat / workflows   probe_success 1, HTTP 200
+  #   https://github.com                  probe_success 1
+  # The second line is the one that matters: it proves the public roots survived.
+
+  # THE SECRET IS THE OBSERVABILITY LAYER'S, and that coupling is deliberate
+  # rather than lazy: cert-manager writes ca.crt into every certificate Secret it
+  # issues, and Probes already require capabilities.observability, so there is no
+  # configuration in which these Probes exist and that layer does not. `optional`
+  # keeps the pod starting when certIssuer is empty, where probes are http and
+  # need no CA at all. Bringing your own issuer means editing this secretName.
+  extraVolumes:
+    - name: tockmox-ca
+      secret:
+        secretName: grafana-tls
+        optional: true
+        items:
+          - key: ca.crt
+            path: ca.crt
+  extraVolumeMounts:
+    - name: tockmox-ca
+      mountPath: /etc/tockmox/ca
+      readOnly: true
+  extraEnv:
+    - name: SSL_CERT_FILE
+      value: /etc/tockmox/ca/ca.crt
+
+  # THE MOUNT ABOVE IS NOT ENOUGH ON A GREENFIELD, AND THAT IS TM-0486.
+  # The trust configuration is correct and was verified on 2026-08-15. It
+  # still produced five permanently-failing probes on the 2026-09-10
+  # greenfield gate run, and the reason is ORDER, not configuration.
+  #
+  # blackbox_exporter is Go, and crypto/x509 builds the system root pool ONCE,
+  # lazily, at the first TLS handshake, then caches it for the life of the
+  # process. SSL_CERT_FILE is read exactly then. A pod that starts before
+  # cert-manager has issued the certificate reads a path that does not exist,
+  # builds its pool from the public roots alone, and NEVER rebuilds it -- so
+  # every https probe fails with `certificate signed by unknown authority`
+  # forever, including long after the file has appeared on disk.
+  #
+  # This is not a hypothesis. Measured on the 2026-09-10 install:
+  #   exporter pod started        22:23        CA issued  22:38:44
+  #   ca.crt mounted and readable 22:39:36     574 bytes, correct content
+  #   shipped exporter, 4h later   https://grafana...  probe_success 0
+  #                                https://github.com  probe_success 1
+  #   same image, same SSL_CERT_FILE, CA present BEFORE start:
+  #     all five consoles          probe_success 1, HTTP 200
+  #     https://github.com         probe_success 1
+  # The last line is still the one that matters: public roots survive.
+  #
+  # Note the contrast with the alert bridge (TM-0488), which had the same
+  # shape and the opposite fix. That process can re-read its file on every
+  # send, so the answer there was to mount and re-read. This one physically
+  # cannot re-read, so the only answer is to not start until the file is
+  # there. A one-shot reader has to be sequenced; a re-reader does not.
+  #
+  # `extraInitContainers` is a TEMPLATABLE STRING in this subchart (it runs
+  # through tpl), which is what makes a static subchart values block able to
+  # ask about global.certIssuer at all. With no issuer the probes are http,
+  # no CA is needed, and this renders to nothing.
+  extraInitContainers: |-
+    {{- if .Values.global.certIssuer }}
+    - name: wait-for-ca
+      image: {{ include "prometheus-blackbox-exporter.image" . }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -eu
+          ca=/etc/tockmox/ca/ca.crt
+          i=0
+          while [ ! -s "$ca" ]; do
+            i=$((i + 1))
+            if [ "$i" -gt 60 ]; then
+              echo "FATAL: $ca is still absent after 300s."
+              echo "global.certIssuer is set, so every probe is https and needs"
+              echo "this CA. Starting without it would fail every probe"
+              echo "permanently, because the Go root pool is built once and"
+              echo "cached. Exiting so kubelet retries instead."
+              echo "Expected: key ca.crt of the Secret named by"
+              echo "prometheus-blackbox-exporter.extraVolumes. Using your own"
+              echo "issuer means pointing that at your own Secret."
+              exit 1
+            fi
+            if [ "$((i % 6))" -eq 1 ]; then
+              echo "waiting for $ca (attempt $i, 5s apart) ..."
+            fi
+            sleep 5
+          done
+          echo "CA present, $(wc -c < "$ca") bytes; starting the exporter."
+      # TM-0903: 0.3 MiB peak measured; 32Mi is the init-container floor.
+      resources:
+        requests:
+          memory: 8Mi
+        limits:
+          memory: 32Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      volumeMounts:
+        - name: tockmox-ca
+          mountPath: /etc/tockmox/ca
+          readOnly: true
+    {{- end }}
+prometheus-snmp-exporter:
+  resources:
+    # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+    # peak 63.7 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 65.7 MiB in the pre-migration namespace (30 days); average 60.2 MiB.
+    # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+    # request = average, rounded up to 16Mi. Re-measure before changing.
+    requests:
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+  serviceMonitor:
+    enabled: true
+
+prometheus-smartctl-exporter:
+  serviceMonitor:
+    enabled: true
+probes:
+  enabled: true
+  interval: 30s
+  scrapeTimeout: 10s
+  # http_console, not http_2xx: accepts 200/301/302/401 (TM-0820 A6, see the
+  # blackbox config above). Set http_2xx to go back to 2xx-only.
+  module: http_console
+  consoles:
+    auth: true
+    chat: true
+    grafana: true
+    workflows: true
+    llm: true
+  alerts:
+    enabled: true

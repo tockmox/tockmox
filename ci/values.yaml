@@ -1,0 +1,89 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Values used ONLY by CI, to render every chart for validation.
+#
+# WHY THIS FILE EXISTS
+# Each required value used to be a --set flag repeated across five CI steps.
+# Adding a new required value meant editing five command lines, and forgetting
+# one produced "rendered ZERO resources" ... which is what happened when the
+# Authentik database guard was added. One file, edited once.
+#
+# NOTHING HERE IS A SECRET. These values exist to make templates render so they
+# can be linted and schema-checked. They are deliberately obvious placeholders
+# so that anyone reading a CI log knows they are not real.
+
+global:
+  internalDomain: int.example.com
+  # 10.0.0.0/16, not the 10.0.0.0/8 this file carried until 0.8.0. A /8 contains
+  # the k3s pod network (10.42.0.0/16), and since 0.8.0 the policy layer needs
+  # platformNetpol.nodeOriginSources (below), which refuses a lanCIDR that
+  # contains the pod network (TM-0790, TM-0798). The address pool sits inside it.
+  lanCIDR: 10.0.0.0/16
+  # Required as of the storage contract: the platform layer refuses to render
+  # when Longhorn is enabled, is not the cluster default, and nothing has named
+  # a class ... because that combination silently writes every PVC to whatever
+  # default the cluster already had. CI names one so the guard is exercised in
+  # its passing direction; the failing direction has its own negative test.
+  storageClass: longhorn
+
+# tockmox-platform: MetalLB refuses to render without a pool, by design.
+addressPool:
+  range: 10.0.0.200-10.0.0.220
+
+# tockmox-identity no longer needs render-time credentials: they moved to
+# operator-created Secrets referenced by name (see secrets.md), so a bare
+# render is complete.
+
+# Apprise ships DISABLED (it delivers nothing until you give it URLs). CI turns
+# it on anyway, for two reasons: the template gets linted and schema-checked
+# like everything else, and its image lands in images.txt. An airgap mirror list
+# that omits an optional component is a mirror list that fails on the day
+# somebody enables it, in the one environment where they cannot just pull it.
+notifications:
+  apprise:
+    enabled: true
+
+# LiteLLM follows the aiPlane capability since 0.8.0 (TM-0460); through 0.7.x
+# it shipped disabled and this line was what made CI render it at all. It stays
+# explicit here on purpose: a gate that reads this file must not depend on the
+# chart's default to see the gateway (the cloud-egress gate is only meaningful
+# against a rendered gateway), and the probe gates test the explicit switch
+# beside the capability fallback. check-capabilities.sh clears every component
+# override before it flips a capability, so this pin does not hide the
+# capability from that gate.
+apps:
+  litellm:
+    enabled: true
+  # PAIRED WITH litellm ABOVE, deliberately. The model gateway's CNPG database
+  # only exists when litellm is on, and the ingress rule that lets the CNPG
+  # OPERATOR reach that database's instance-manager (:8000) is a separate flag
+  # so it never renders a policy over an empty namespace. The policy template
+  # says "the two flags are turned on together"; until 2026-09-07 this file
+  # turned on only one, so every CI render shipped a database its operator
+  # could not reach ... which applies cleanly, reports Synced, and sits in
+  # 'Instance Status Extraction Error' forever. tools/check-cnpg-operator-reach.sh
+  # (in the local gate suite, tools/check-all.sh; not yet in ci.yaml) fails a
+  # render in that state, and this line is what keeps that suite green.
+  ai_cnpg_netpol:
+    enabled: true
+  # OFF in a real install, ON here for the same reason as litellm above: the
+  # kube-bench CronJob, its privileged namespace and its default-deny policy
+  # only render when it is on, so the gates that read renders (the ghost-policy
+  # gate, the netpol-selector gate, helm-lint, kubeconform) would otherwise never
+  # see them, and its image would be missing from images.txt, which is the
+  # air-gap mirror list. One key serves both layers here because CI passes one
+  # values file to every layer; a real site sets it in policy.yaml AND
+  # selfcheck.yaml. docs/operations/kube-bench.md.
+  kube_bench:
+    enabled: true
+
+# tockmox-policy: since 0.8.0 the platform namespace's node-network rule refuses
+# to render without the per-node gateway addresses (TM-0798). These are the
+# shape `install/tockmox-install.sh --print-netpol-node-sources` prints for a
+# three-node flannel cluster: one /31 per node podCIDR. Placeholders, like
+# everything else here.
+platformNetpol:
+  nodeOriginSources:
+    - 10.42.0.0/31
+    - 10.42.1.0/31
+    - 10.42.2.0/31

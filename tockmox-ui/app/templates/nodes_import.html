@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}Import from the gateway{% endblock %}
+{% block main %}
+<h1>Import nodes from the gateway</h1>
+<p class="lede">Reads the gateway's route list and groups the routes that go to machines on your network into nodes. Nothing is sent anywhere: this works from the text alone.</p>
+{% if error %}<p>{{ badge("critical", "Could not import") }} {{ error }}</p>{% endif %}
+{% if not proposal %}
+<form method="post" action="/nodes/import" class="panel">
+  <input type="hidden" name="csrf" value="{{ user.csrf }}">
+  <label for="pasted">Paste the gateway's <code>config.yaml</code>, its ConfigMap, or just the <code>model_list</code></label>
+  <textarea id="pasted" name="pasted" rows="14" spellcheck="false" required></textarea>
+  <p class="muted">API keys in the paste are not shown back or kept; references such as <code>os.environ/...</code> are carried into the routes as they are.</p>
+  <button class="btn" type="submit">Propose nodes</button>
+</form>
+{% else %}
+<p>From {{ origin }}: {{ proposal.inventory.nodes|length }} node(s), {{ proposal.inventory.routes|length }} route(s); {{ proposal.skipped|length }} entr{{ "y" if proposal.skipped|length == 1 else "ies" }} skipped.</p>
+<form method="post" action="/nodes/change">
+  <input type="hidden" name="csrf" value="{{ user.csrf }}">
+  <input type="hidden" name="draft" value="{{ draft }}">
+  {% for n in proposal.inventory.nodes %}{% set i = loop.index0 %}
+  <section class="panel" aria-labelledby="n{{ i }}-h">
+    <h2 id="n{{ i }}-h">{{ n.address }}{% if known.get(n.address) %} <span class="muted">(already recorded as {{ known[n.address] }}; importing replaces it)</span>{% endif %}</h2>
+    <label for="n{{ i }}-name">Display name</label><input id="n{{ i }}-name" name="node.{{ i }}.name" type="text" value="{{ names.get(n.address) or n.name }}">
+    <label for="n{{ i }}-id">Node id</label><input id="n{{ i }}-id" name="node.{{ i }}.id" type="text" value="{{ known.get(n.address) or n.id }}" pattern="[a-z0-9][a-z0-9-]{0,39}">
+    <label for="n{{ i }}-type">Kind of machine</label>
+    <select id="n{{ i }}-type" name="node.{{ i }}.type">{% for tid, t in catalog.items() %}<option value="{{ tid }}" {% if tid == n.type %}selected{% endif %}>{{ t.name }}</option>{% endfor %}</select>
+    <label><input type="checkbox" name="node.{{ i }}.metrics" value="default" checked> Expect the usual exporters for this kind of machine (health and memory come from them)</label>
+    <div class="table-wrap" role="region" aria-labelledby="n{{ i }}-cap" tabindex="0">
+    <table>
+      <caption id="n{{ i }}-cap">Endpoints and the routes that use them</caption>
+      <thead><tr><th scope="col">Endpoint</th><th scope="col">Engine</th><th scope="col">Routes</th></tr></thead>
+      <tbody>
+      {% for e in n.endpoints %}
+        <tr><th scope="row"><code>{{ e.url }}</code></th>
+          <td><select name="node.{{ i }}.ep.{{ loop.index0 }}.engine" aria-label="Engine at {{ e.url }}">{% for eid, en in engines.items() %}<option value="{{ eid }}" {% if eid == e.engine %}selected{% endif %}>{{ en.name }}</option>{% endfor %}</select></td>
+          <td>{% for r in proposal.inventory.routes if r.node == n.id and r.endpoint == e.id %}<code>{{ r.alias }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </section>
+  {% endfor %}
+  {% if proposal.notes %}<section class="panel" aria-labelledby="notes-h"><h2 id="notes-h">Check these</h2><ul>{% for x in proposal.notes %}<li>{{ x }}</li>{% endfor %}</ul></section>{% endif %}
+  {% if proposal.skipped %}<section class="panel" aria-labelledby="skip-h"><h2 id="skip-h">Not imported</h2><ul>{% for a, why in proposal.skipped %}<li><code>{{ a }}</code>: {{ why }}</li>{% endfor %}</ul></section>{% endif %}
+  {% for r in proposal.inventory.routes %}<input type="hidden" name="route.{{ loop.index0 }}.present" value="1"><input type="hidden" name="route.{{ loop.index0 }}.include" value="1">{% endfor %}
+  <button class="btn" type="submit">Generate the change</button>
+</form>
+{% endif %}
+{% endblock %}

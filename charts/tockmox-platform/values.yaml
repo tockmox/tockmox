@@ -1,0 +1,1183 @@
+# SPDX-License-Identifier: Apache-2.0
+# ---------------------------------------------------------------------------
+# Global site values. Documented once in docs/administration/configuration.md.
+# ---------------------------------------------------------------------------
+global:
+  internalDomain: ""
+  certIssuer: "tockmox-ca"
+  imageRegistry: ""
+  timezone: "UTC"
+  clusterCIDR: "10.42.0.0/16"
+  serviceCIDR: "10.43.0.0/16"
+  lanCIDR: ""
+  # THE STORAGE CONTRACT. Empty means "use whatever the cluster's default
+  # StorageClass happens to be", which is not the same as "use the storage this
+  # platform ships". On k3s the default is `local-path`: node-local, one copy,
+  # no snapshots, no backup target. Tockmox shipped Longhorn and, because
+  # nothing named a class, wrote every PVC to local-path anyway.
+  #
+  # Name it. `longhorn` on a stock install with apps.longhorn enabled;
+  # `local-path` if you have deliberately chosen node-local storage; the name of
+  # your own CSI class if you brought one. A preflight refuses the combination
+  # that used to fail silently.
+  storageClass: ""
+
+  # THE SECOND HALF OF THE STORAGE CONTRACT: the class for data whose
+  # application already protects it, or that can be re-derived.
+  #
+  # The policy is "replicate at exactly one layer". If an application keeps its
+  # own copies (Postgres streaming to replicas, an object store spreading
+  # across nodes) or the data can be rebuilt (a metrics TSDB), then replicating
+  # the volume underneath buys nothing and costs two to three times the disk
+  # plus write latency on the hot path. Those workloads get THIS class.
+  # Everything else gets `storageClass` above.
+  #
+  # `local-path` is k3s's own provisioner and is the shipped default here.
+  # prerequisites.md tells you to UN-DEFAULT it rather than delete it, and this
+  # is why. Node-local means a rescheduled pod finds an empty volume, which is
+  # the trade this class exists to make; do not point it at anything whose loss
+  # you would mind.
+  #
+  # Empty falls back to the cluster default, which un-does the policy without
+  # complaining. Set it to a class you have.
+  localStorageClass: "local-path"
+  # Extra labels for EVERY namespace a chart here creates (TM-0816): the policy
+  # layer's namespaces and the platform layer's createCredentialsNamespaces.
+  # For an admission mutator keyed on namespace labels, which would otherwise
+  # act on the first chart pod before you could label the namespace: Zarf's
+  # agent (`zarf.dev/agent: ignore`), Istio injection, a Kyverno selector. Empty
+  # adds nothing. A label the chart sets itself (name, app.kubernetes.io/part-of,
+  # tockmox.com/managed-by, tockmox.com/layer, and in policy pod-security.*) is
+  # refused at render time; Pod Security levels belong to `podSecurity`.
+  namespaceLabels: {}
+# ---------------------------------------------------------------------------
+# The way in ... for this layer's own UI. Longhorn's console ships with no
+# authentication of its own, and an unauthenticated storage console that can
+# delete volumes is not a default (same reasoning as the Traefik dashboard
+# below). Enable it once something in front of it does auth, or reach it with:
+#   kubectl -n <platform namespace> port-forward svc/longhorn-frontend 8080:80
+# ---------------------------------------------------------------------------
+ingress:
+  # Empty uses the cluster's DEFAULT IngressClass ... the Traefik the platform
+  # layer ships marks itself default, and its class name derives from the
+  # release (`tockmox-platform-traefik` on a stock install), so naming it here
+  # would break on rename. Set this only to pin a specific class.
+  className: ""
+  annotations: {}
+  apps:
+    longhorn:
+      enabled: false
+      host: ""            # override the derived longhorn.<internalDomain>
+
+# ---------------------------------------------------------------------------
+# Per-app toggles. Each maps to an upstream chart dependency.
+#
+# These are the components a platform cannot do without, which is why the
+# defaults are on. Turn one off when you already run your own: plenty of
+# clusters arrive with ingress or storage already chosen, and Tockmox should
+# not fight that.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# CAPABILITIES: functional stories you can decline.
+#
+# `apps.*` is one switch per piece of software, which is the wrong unit for the
+# decision people actually make. Nobody chooses "a Garage", "a barman plugin"
+# and "a snapshot controller" separately; they choose whether this deployment
+# protects its data, or whether they already run Velero and want none of it.
+#
+# A capability is that decision, named, on one switch, spanning whatever
+# components it takes and whichever layers they live in.
+#
+# HOW IT RESOLVES, and the tri-state is the point:
+#   apps.<x>.enabled unset   follow the capability that owns the component
+#   apps.<x>.enabled: true   on, even if the capability is off
+#   apps.<x>.enabled: false  off, even if the capability is on
+#
+# So declining a capability turns off everything it owns, and a component you
+# named yourself still means what you said. Turning a single component on while
+# its capability is off fails the render rather than half-building the story.
+#
+# THIS BLOCK IS BYTE-IDENTICAL IN ALL NINE LAYERS, and that is deliberate. The
+# values namespace is shared across layers, so one profile sets a capability
+# once and every layer owning part of it reads the same answer. Editing one copy
+# and not the others is the failure the uniformity exists to prevent, and
+# tools/check-capabilities.sh fails CI on any drift between them.
+#
+# Full list, what each one contains, and why you would decline it:
+# docs/administration/capabilities.md
+# ---------------------------------------------------------------------------
+capabilities:
+  # Metrics, logs and the rules that read them ... everything answering "what is
+  # this platform doing right now". Off means Tockmox ships no Prometheus, no
+  # Loki, no Alloy, and none of its own ServiceMonitors or alert rules.
+  #
+  # Running your own Prometheus operator is the case worth naming. Decline the
+  # capability and set `apps.serviceMonitors.enabled: true`, and Tockmox renders
+  # its monitors and rules for YOUR operator to collect, without standing up a
+  # second stack beside the one you already run.
+  observability:
+    enabled: true
+
+  # Alerts that reach a person: the notification sink, the bridge that feeds it
+  # and the heartbeat that proves the path still works when nothing is wrong.
+  # Off means alerts fire into Alertmanager and stop there.
+  #
+  # The component switch for this one is `notifications.enabled` rather than an
+  # `apps` key, because it predates this framework and is a contract key. It has
+  # the same tri-state: unset follows the capability, set means what you said.
+  notifications:
+    enabled: true
+
+  # One sign-in across every console, and the identity provider behind it. Off
+  # means Tockmox ships no Authentik and each console falls back to its own
+  # local login, unless you point `sso` at an issuer you already run.
+  identity:
+    enabled: true
+
+  # The private AI plane: a chat console and the model gateway in front of it.
+  # Off leaves Tockmox as a platform and nothing else, which is a legitimate way
+  # to run it and the right answer if you are here for the infrastructure.
+  aiPlane:
+    enabled: true
+
+  # Backups that go somewhere, restores that are exercised, and the CSI
+  # plumbing underneath both. Off means Tockmox ships no object store, no
+  # backup plugin and no snapshot control plane, and expects you to have your
+  # own or to not want one.
+  dataProtection:
+    enabled: true
+
+  # Telemetry from PHYSICAL hardware: disk SMART attributes, and SNMP from
+  # switches, UPSes and appliances.
+  #
+  # OFF BY DEFAULT, unlike every other capability here, because the reference
+  # deployment is a virtual machine: there is no physical disk to ask and no
+  # switch to poll, and an exporter scraping nothing still alerts on its own
+  # absence. Turn it on when the hardware is real, and both exporters follow.
+  hardwareTelemetry:
+    enabled: false
+
+  # Jobs running inside the cluster on a schedule or an event, with a console to
+  # watch them. Off means no Argo Workflows.
+  workflowAutomation:
+    enabled: true
+
+  # Default-deny between namespaces, so a compromised workload cannot reach a
+  # neighbour it was never meant to.
+  #
+  # Off is the honest setting on a cluster whose CNI does not enforce
+  # NetworkPolicy at all. Flannel without a policy plugin accepts every object
+  # here and enforces none of them, and a control that is only decoration is
+  # worse than no control, because it gets counted.
+  networkPolicy:
+    enabled: true
+
+apps:
+  certManager:
+    enabled: true
+  metallb:
+    enabled: true
+  traefik:
+    enabled: true
+  longhorn:
+    enabled: true
+  cnpg:
+    enabled: true
+  # The barman-cloud plugin for CloudNativePG. Without it the ObjectStore and
+  # ScheduledBackup objects the AI layer renders are inert: the CRDs exist, the
+  # operator accepts them, and nothing archives. On until you turn CNPG off.
+  # The CNPG backup plugin. Without it the ObjectStore and
+  # ScheduledBackup objects the AI layer renders are inert.
+  #
+  # DELIBERATELY UNSET rather than null. Helm warns
+  # `Condition path ... returned non-bool value` on every render when a
+  # condition path resolves to null, which is noise that reads like a
+  # defect. An absent key falls through to the capability silently.
+  # Set true or false here to override capabilities.dataProtection.
+  barmanPlugin: {}
+  kured:
+    enabled: true
+  # The CSI snapshot control plane: the CRDs and controller that make
+  # VolumeSnapshot a thing this cluster understands. Part of dataProtection.
+  # The CSI snapshot control plane: the CRDs and controller
+  # that make VolumeSnapshot a thing this cluster understands.
+  #
+  # DELIBERATELY UNSET rather than null. Helm warns
+  # `Condition path ... returned non-bool value` on every render when a
+  # condition path resolves to null, which is noise that reads like a
+  # defect. An absent key falls through to the capability silently.
+  # Set true or false here to override capabilities.dataProtection.
+  snapshotController: {}
+  # Object storage: the destination the backup path writes to.
+  #
+  # BUILD-OR-ADOPT: **Build**, per the 2026-08-15 landscape scan. Garage
+  # publishes no first-party Helm chart; Artifact Hub lists seven third-party
+  # ones, all from personal repositories, none official. For the component the
+  # flagship backup claim rests on, depending on somebody's personal chart is a
+  # worse trade than authoring a StatefulSet we control and can reason about.
+  #
+  # Capability tier, not Core: a site with its own S3 endpoint turns this off
+  # and points `objectStore.endpoint` at theirs.
+  # The object store the backup path writes to.
+  #
+  # DELIBERATELY UNSET rather than null. Helm warns
+  # `Condition path ... returned non-bool value` on every render when a
+  # condition path resolves to null, which is noise that reads like a
+  # defect. An absent key falls through to the capability silently.
+  # Set true or false here to override capabilities.dataProtection.
+  garage: {}
+  # The product's own documentation, served from the shipped Garage's web
+  # endpoint at docs.<global.internalDomain> (TM-0215). Needs the object store,
+  # so it is owned by dataProtection with it: declining that capability removes
+  # both, and turning this on with apps.garage off fails the render. Turn this
+  # off to keep the object store and not serve the docs.
+  #
+  # ON BY DEFAULT, and the bucket starts with a placeholder page, not the docs:
+  # Tockmox publishes no container image of the documentation (ADR-0036), so the
+  # operator publishes it from their checkout with tools/publish-docs.sh (the
+  # installer does this as its last step). See garage.web.sites below and
+  # docs/administration/serving-static-sites.md.
+  #
+  # DELIBERATELY UNSET rather than null, for the reason given on garage above.
+  docs: {}
+
+  # Tockmox-authored, not an upstream chart: a MetalLB address pool built from
+  # the range you supply below.
+  addressPool:
+    enabled: true
+
+# ---------------------------------------------------------------------------
+# TLS ON-RAMP. cert-manager shipped here from the start with no issuer to go
+# with it, so `global.certIssuer` named something that did not exist and every
+# console served plain HTTP. This renders one.
+#
+# It is a private CA, not a public one: a self-signed root, then a `ca`
+# ClusterIssuer that signs every console certificate from it. The operator
+# trusts ONE certificate once instead of one per console per renewal ... see the
+# reasoning in templates/cert-issuer.yaml, which is the part worth reading
+# before changing any of this.
+#
+# TO USE IT, set global.certIssuer to the `name` below. That is deliberately a
+# separate step: rendering an issuer is safe, and switching every console to
+# HTTPS changes URLs that people and OIDC redirect lists already have.
+#
+# TO USE SOMETHING ELSE, leave selfSigned.enabled false and point
+# global.certIssuer at your own ClusterIssuer ... ACME, Vault, an existing
+# corporate CA. Every layer reads only the issuer's NAME, so nothing else here
+# has to know which kind it is.
+# ---------------------------------------------------------------------------
+certIssuer:
+  selfSigned:
+    # ON by default, because the alternative is what shipped before: a TLS
+    # story with no way to start it. It renders three small objects and issues
+    # nothing until global.certIssuer names it.
+    enabled: true
+    # The ClusterIssuer name. This is the string global.certIssuer must match.
+    name: tockmox-ca
+    # Shown in browsers and trust stores as the authority's name, so make it
+    # recognisable on a machine that trusts several.
+    commonName: "Tockmox local CA"
+    # Lives in THIS release's namespace, which is cert-manager's cluster
+    # resource namespace. Not configurable on purpose.
+    caSecretName: tockmox-ca-root
+    # 10 years. This is installed into trust stores by hand; a short life means
+    # repeating that on every machine (see the note in the template).
+    duration: "87600h"
+    renewBefore: "720h"
+
+# ---------------------------------------------------------------------------
+# NAMESPACE MODEL, and it is worth understanding before you file a bug.
+#
+# Every component in this layer installs into the LAYER'S namespace, not into
+# the namespace its upstream project conventionally uses. cert-manager does
+# not land in `cert-manager`; MetalLB does not land in `metallb-system`. They
+# all land wherever this release is installed.
+#
+# That is how Helm subcharts work: one release, one namespace. It is not a
+# setting Tockmox withheld from you. Splitting components across their
+# traditional namespaces would mean one Helm release per component, which is
+# the chart-per-app layout this project deliberately did not choose.
+#
+# Consequences you should know about:
+#   - `kubectl get pods -n tockmox-platform` shows storage, ingress, certs
+#     and node lifecycle together. That is the intended view.
+#   - Documentation from upstream projects that says
+#     `kubectl -n cert-manager ...` needs the namespace changed.
+#   - Anything you write that targets a component by namespace should use the
+#     layer namespace.
+#
+# Found on a clean cluster 2026-08-13, when a resource targeting
+# `metallb-system` failed with "namespaces metallb-system not found" because
+# MetalLB was in `tockmox-platform` all along.
+
+# ---------------------------------------------------------------------------
+# MetalLB address pool.
+#
+# REQUIRED if metallb and addressPool are both enabled: MetalLB with no pool
+# leaves every LoadBalancer Service Pending forever, which is a confusing
+# failure. A range inside lanCIDR that your DHCP server does NOT hand out.
+#
+# Example: 192.168.1.200-192.168.1.220
+#
+# Accepts a STRING or a LIST. Use a list when the site already has a VIP in
+# service and wants to keep it beside a free block:
+#
+#   addressPool:
+#     range:
+#       - 192.168.1.50/32
+#       - 192.168.1.200-192.168.1.220
+# ---------------------------------------------------------------------------
+addressPool:
+  # @schema type:[string, array, null]
+  range: ""
+
+# ---------------------------------------------------------------------------
+# Upstream chart values. Anything not set here uses the upstream default.
+# Tockmox overrides only what it has an opinion about, so upgrading an
+# upstream chart does not fight our settings.
+# ---------------------------------------------------------------------------
+cert-manager:
+  cainjector:
+    resources:
+      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # peak 104.2 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 126.8 MiB in the pre-migration namespace (30 days); average 101.1 MiB.
+      # limit = max peak x 3, rounded up (32Mi steps to 512Mi, 128Mi above). This one grows
+      # with the cluster, not the chart: x3 is a starting point, and a bigger cluster
+      # should override it here from its own measured peak.
+      # request = average, rounded up to 16Mi. Re-measure before changing.
+      requests:
+        memory: 112Mi
+      limits:
+        memory: 384Mi
+  resources:
+    # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+    # peak 96.2 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 60.3 MiB in the pre-migration namespace (30 days); average 89.8 MiB.
+    # limit = max peak x 3, rounded up (32Mi steps to 512Mi, 128Mi above). This one grows
+    # with the cluster, not the chart: x3 is a starting point, and a bigger cluster
+    # should override it here from its own measured peak.
+    # request = average, rounded up to 16Mi. Re-measure before changing.
+    requests:
+      memory: 96Mi
+    limits:
+      memory: 320Mi
+  webhook:
+    resources:
+      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # peak 64.3 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 28.2 MiB in the pre-migration namespace (30 days); average 57.1 MiB.
+      # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+      # request = average, rounded up to 16Mi. Re-measure before changing.
+      requests:
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+  # CRDs stay WITH their chart. tockmox-crds carries only the CRDs used by
+  # more than one layer (prometheus-operator). Disabling these without
+  # installing them elsewhere is how you get a platform that cannot start.
+  crds:
+    enabled: true
+  global:
+    priorityClassName: tockmox-cluster-critical
+
+  prometheus:
+    enabled: true
+    servicemonitor:
+      enabled: true
+    podmonitor:
+      enabled: false
+metallb:
+  crds:
+    enabled: true
+  # CASCADE-CRITICAL, and it was named as such in tockmox-policy's own
+  # PriorityClass description ("CoreDNS, Longhorn data path, cert-manager,
+  # MetalLB, Traefik (all ingress), Authentik") while no chart ever assigned
+  # it. cert-manager was the only component in this layer that actually set a
+  # priorityClassName. Found 2026-08-30 comparing the render against a
+  # production cluster that had assigned all six by hand.
+  #
+  # Lose the MetalLB speaker and every LoadBalancer VIP goes ARP-silent, which
+  # takes ingress with it ... exactly the cascade the tier exists for. The
+  # class is created by tockmox-policy at sync-wave 1; this layer is wave 2, so
+  # it exists before any pod here references it.
+  controller:
+    resources:
+      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # peak 156.5 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2); average 150.4 MiB.
+      # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+      # request = average, rounded up to 16Mi. Re-measure before changing.
+      requests:
+        memory: 160Mi
+      limits:
+        memory: 256Mi
+    priorityClassName: tockmox-cluster-critical
+  speaker:
+    resources:
+      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # peak 51.6 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 46.8 MiB in the pre-migration namespace (30 days); average 45.2 MiB.
+      # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+      # request = average, rounded up to 16Mi. Re-measure before changing.
+      requests:
+        memory: 48Mi
+      limits:
+        memory: 96Mi
+    priorityClassName: tockmox-cluster-critical
+    frr:
+      enabled: false
+  # THE key that matters. speaker.frr.enabled toggles the deprecated backend;
+  # frrk8s is what actually runs, and it is a 9-container DaemonSet per node.
+  # Layer-2 mode needs none of it. Enable only if you run BGP.
+  frrk8s:
+    enabled: false
+
+  prometheus:
+    serviceMonitor:
+      enabled: true
+    podMonitor:
+      enabled: false
+    namespace: tockmox-monitoring
+    serviceAccount: tockmox-observability-kube-prometheus
+traefik:
+  resources:
+    # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+    # peak 180.9 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 127.5 MiB in the pre-migration namespace (30 days); average 164.6 MiB.
+    # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+    # request = average, rounded up to 16Mi. Re-measure before changing.
+    requests:
+      memory: 176Mi
+    limits:
+      memory: 288Mi
+  # NO PHONE-HOME FROM THE INGRESS CONTROLLER (TM-0785).
+  #
+  # Traefik's own defaults are `checkNewVersion: true` (it asks an upstream
+  # service whether a newer release exists) and `sendAnonymousUsage: false`
+  # (the chart already leaves the usage beacon off, but only by default of the
+  # upstream chart, which can change). This is a sovereignty product, so both are
+  # set here explicitly and the default is off. The subchart reads them from its
+  # own `global` map, so they are `traefik.global.*` and not top-level `global`.
+  #
+  # A site that wants either back sets it in its own values, for example
+  # `traefik.global.checkNewVersion: true`. Note the upstream template only
+  # emits a flag for `checkNewVersion: false` and for `sendAnonymousUsage: true`;
+  # `sendAnonymousUsage: false` renders NO argument, because Traefik's own
+  # default for it is already off.
+  global:
+    checkNewVersion: false
+    sendAnonymousUsage: false
+  # Cascade-critical for the same reason as MetalLB above: this is all ingress.
+  # See the note there for why the class is guaranteed to exist by this wave.
+  priorityClassName: tockmox-cluster-critical
+  # --------------------------------------------------------------------------
+  # HTTP -> HTTPS, ON BY DEFAULT. Added 2026-09-13, TM-0558.
+  #
+  # Before this the web entrypoint simply served http. A typed hostname, or any
+  # link without a scheme, stayed plaintext and nothing nudged it over. That is
+  # how a console read as unreachable during the rc3 gate: the operator hit
+  # http, got no redirect, and concluded the site was down.
+  #
+  # THIS HAS A PREREQUISITE AND IT IS NOT OPTIONAL: every host you route must
+  # terminate TLS. A host without a certificate does not fail politely when it
+  # is redirected here ... Traefik answers on :443 with its own self-signed
+  # `CN=TRAEFIK DEFAULT CERT`, so the user meets a browser interstitial instead
+  # of the app. Measured on the reference lab 2026-09-13, where the devtest
+  # site's `news` Ingress carried no `tls:` block and served exactly that,
+  # against `CN=Tockmox local CA` on every other console.
+  #
+  # `check-ingress-tls.sh` exists to make that failure loud at render time
+  # rather than in somebody's browser. If it goes red, fix the Ingress rather
+  # than turning this off.
+  ports:
+    web:
+      http:
+        redirections:
+          entryPoint:
+            to: websecure
+            scheme: https
+            permanent: true
+  service:
+    type: LoadBalancer
+    annotations:
+      # THE SYNC-WAVE THAT BREAKS A DEADLOCK. Do not remove this without
+      # reading the whole note; the failure it prevents makes a clean install
+      # produce a cluster nothing can reach, and it never recovers on its own.
+      #
+      # ArgoCD health-gates a Service of type LoadBalancer: it stays
+      # Progressing until .status.loadBalancer.ingress is populated. Waves are
+      # strictly ordered, so an unannotated Service sits in wave 0 and BLOCKS
+      # every later wave until it goes healthy.
+      #
+      # The IPAddressPool that would give it an address is wave 5. So wave 0
+      # waits on wave 5's output and wave 5 waits on wave 0 finishing. Neither
+      # moves. Observed on this cluster 2026-08-18, from the controller's own
+      # task list:
+      #
+      #   Sync/0 resource /Service:tockmox-platform/tockmox-platform-traefik
+      #       obj->obj (Synced,Running,...)
+      #   Sync/5 resource metallb.io/IPAddressPool:.../tockmox-default
+      #       nil->obj (,,)
+      #   Sync/6 resource metallb.io/L2Advertisement:.../tockmox-default
+      #       nil->obj (,,)
+      #
+      #   "Resuming in-progress operation. phase: Running, message: waiting
+      #    for healthy state of /Service/tockmox-platform-traefik"
+      #
+      # The empty `(,,)` triple is status/hookPhase/message on a task that was
+      # NEVER ATTEMPTED. Traefik reports <pending> forever.
+      #
+      # The second-order effect is what makes it permanent: the operation never
+      # terminates, so every reconcile logs
+      #
+      #   "Skipping auto-sync: another operation is in progress"
+      #
+      # and selfHeal and prune never run. They are not disabled ... they are
+      # starved. Deleting things and waiting does not help, and neither does
+      # restarting the application controller (both tried).
+      #
+      # Putting the Service AFTER the pool is also just the honest ordering: a
+      # LoadBalancer Service depends on the address pool that serves it, so it
+      # should sync after it. Moving the pool earlier instead would be wrong,
+      # because it would then race MetalLB's own CRDs.
+      argocd.argoproj.io/sync-wave: "7"
+  # ---------------------------------------------------------------------------
+  # THE DASHBOARD, and why it needs two keys rather than one.
+  #
+  # The chart's own dashboard route matches `PathPrefix(/dashboard)` and
+  # `PathPrefix(/api)` with NO Host rule and no authentication, so it answers on
+  # every internal hostname that routes to Traefik, and `/api` hands out router
+  # and service configuration. Off is the only correct default. Same reasoning
+  # as the Longhorn console above.
+  #
+  # What was missing until 2026-09-04 is the other half. Longhorn's console has
+  # a working `kubectl port-forward` escape hatch; Traefik's had none, and the
+  # docs did not say so. `api.dashboard: true` WITHOUT `api.insecure` serves the
+  # dashboard on no entrypoint at all ... it only makes it available to be
+  # ROUTED to `api@internal`. Measured on a stock install, Traefik v3.7.12:
+  # `/ping` on the traefik entrypoint answered `OK` while `/dashboard/` and
+  # `/api/overview` both returned 404. The dashboard was not merely awkward to
+  # reach, it was unreachable by any means an operator had.
+  #
+  # `api.insecure` below fixes the escape hatch. It is OFF by default and it
+  # should stay off on anything you did not build to be poked at: it
+  # authenticates nobody who reaches the entrypoint. What limits the damage is
+  # that the traefik entrypoint (:8080) is NOT published in the LoadBalancer
+  # Service, so reaching it needs pod-network access or a port-forward, and the
+  # policy layer's NetworkPolicies constrain the former.
+  #
+  # The routed, authenticated dashboard is the real answer and is NOT here yet:
+  # it needs a forward-auth middleware the platform chart does not ship. See
+  # TM-0425. Until then this is a break-glass path, which is the right shape
+  # anyway ... a console that tells you WHY routing is broken should not be
+  # reachable only through the routing you are trying to debug.
+  # ---------------------------------------------------------------------------
+  ingressRoute:
+    dashboard:
+      enabled: false        # off by default; an unauthenticated dashboard is not a default
+  api:
+    dashboard: true
+    # Serves the dashboard and API on the `traefik` entrypoint (:8080), which is
+    # not in the Service. With this false the dashboard exists but answers
+    # nowhere. Turn it on only when you want:
+    #   kubectl -n <platform namespace> port-forward deploy/<release>-traefik 8080:8080
+    #   # then http://127.0.0.1:8080/dashboard/
+    insecure: false
+  providers:
+    kubernetesCRD:
+      enabled: true
+    kubernetesIngress:
+      enabled: true
+
+  metrics:
+    prometheus:
+      serviceMonitor:
+        enabled: true
+      disableAPICheck: true
+longhorn:
+  longhornManager:
+    resources:
+      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # peak 295.7 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 1993.3 MiB in the pre-migration namespace (30 days); average 258.4 MiB.
+      # limit = max peak x 3, rounded up (32Mi steps to 512Mi, 128Mi above). This one grows
+      # with the cluster, not the chart: x3 is a starting point, and a bigger cluster
+      # should override it here from its own measured peak.
+      # request = average, rounded up to 16Mi. Re-measure before changing.
+      requests:
+        memory: 272Mi
+      limits:
+        memory: 6016Mi
+  # The pre-upgrade checker Job is a Helm HOOK. ArgoCD runs hooks as PreSync
+  # ... before the chart's ServiceAccount exists ... so on a GitOps install the
+  # Job cannot start and the sync wedges. Longhorn documents disabling it for
+  # exactly this case; upgrades are gated by the release-channel process
+  # instead.
+  preUpgradeChecker:
+    jobEnabled: false
+  persistence:
+    # MARKED DEFAULT. Everything else in the storage contract rests on this
+    # line.
+    #
+    # It used to be false, with the comment "you name your default StorageClass
+    # explicitly" ... and no key existed to name one with. So every PVC fell
+    # through to the cluster's pre-existing default, which on k3s is
+    # `local-path`. Longhorn ran healthy and completely unused, including under
+    # the databases the backup story depends on. Found on the reference lab
+    # 2026-08-15.
+    #
+    # Making it default is the only mechanism that reaches ALL of them. Threading
+    # global.storageClass into each subchart does not work uniformly: some
+    # upstream charts run `tpl` on that value and some take it literally, so a
+    # per-chart pass-through silently covers a subset. The cluster default covers
+    # every claim including ones a subchart renders without asking us.
+    #
+    # ------------------------------------------------------------------------
+    # CHANGED TO `false` ON 2026-09-04, and the reasoning above is kept rather
+    # than deleted because it was correct when it was written and is the record
+    # of why the naive answer loses.
+    #
+    # What changed is the premise, not the argument. The paragraph above says
+    # "no key existed to name one with" ... `global.storageClass` exists now,
+    # every subchart that needed a literal has one (Grafana and Loki, because
+    # their charts do not `tpl` the key), and the preflight below refuses to
+    # render when Longhorn is on and nothing has named a class. Measured
+    # 2026-09-04 with this key `false` and `global.storageClass: longhorn`: all
+    # EIGHT persistent claims the product ships name their class explicitly and
+    # not one falls through to the cluster default. The mechanism that made
+    # `false` unsafe in August is gone.
+    #
+    # WHY THAT MATTERS MORE THAN TIDINESS. `is-default-class` is a CLUSTER-WIDE
+    # SINGLETON and it is the admin's to set, not an installer's. Claiming it
+    # either loses (an existing default already holds it, and Kubernetes does
+    # not reject the second one) or silently redirects every class-less claim in
+    # the cluster ... including workloads that have nothing to do with Tockmox
+    # ... onto replicated storage they did not ask for. On stock k3s it produced
+    # exactly the two-default state the install docs then had to teach readers
+    # to unpick by hand, on every server node, after the fact.
+    #
+    # So Tockmox now names what it wants and leaves the default alone. The
+    # StorageClass is still created; it is simply not marked default, and
+    # `local-path` stays whatever the cluster already made it.
+    #
+    # Set true only if you WANT Longhorn to be the cluster-wide default for
+    # everything, including your own workloads. That is a legitimate choice on a
+    # cluster you built for this. It is not a safe one on a cluster you were
+    # given.
+    # ------------------------------------------------------------------------
+    defaultClass: false
+    # ------------------------------------------------------------------------
+    # ONE REPLICA, BECAUSE THE REFERENCE DEPLOYMENT IS ONE NODE.
+    #
+    # This shipped as 2 alongside `replicaSoftAntiAffinity: true`, and the
+    # combination is the worst of both: on a single node soft anti-affinity
+    # permits both replicas on the SAME disk, so you pay double the space and
+    # double the write amplification for two copies that die together. A
+    # correlated copy is not redundancy, it is a second bill.
+    #
+    # Replication protects against losing a NODE OR A DISK. With one of each,
+    # there is nothing for a second replica to survive. What protects a
+    # one-node deployment is the backup path, which is drilled.
+    #
+    # RAISE THIS TO 3 WHEN YOU HAVE 3 OR MORE NODES, and turn
+    # `replicaSoftAntiAffinity` OFF in the same change. Leaving it on lets all
+    # three replicas land on one host, which silently removes the property the
+    # extra nodes were bought for. Two nodes is not the halfway house it looks
+    # like: it tolerates zero control-plane failures, so it is strictly worse
+    # than one. See docs/deployment/sizing.md.
+    #
+    # 2 is never the right answer on any node count.
+    # ------------------------------------------------------------------------
+    defaultClassReplicaCount: 1
+    # ------------------------------------------------------------------------
+    # RECLAIM POLICY: RETAIN (TM-0789, changed for 0.7.1; upstream and 0.7.0
+    # shipped Delete).
+    #
+    # THE ARGUMENT. With Delete, removing a PVC removes the PersistentVolume and
+    # the Longhorn volume under it, replicas and snapshots included, at once and
+    # with no second chance. The accidents that do this are ordinary: a
+    # namespace deleted to "start over", a StatefulSet's claims pruned by a
+    # GitOps sync, `kubectl delete pvc` on the wrong name. Every database this
+    # product runs (Postgres, Garage, Loki, Prometheus) lives on these claims,
+    # and this product's other data-loss defaults already point the same way:
+    # `longhorn-backup` has deletionPolicy Retain for exactly this accident
+    # (TM-0216, volume-snapshot-class.yaml). A StorageClass that deletes the
+    # volume while the backup class keeps the backup is the inconsistent pair.
+    #
+    # THE COST, STATED. Retain leaves the PV (phase Released) and the Longhorn
+    # volume, and its disk space, behind until someone removes them. Uninstall
+    # and "start over" therefore need one more step (delete the Released PVs,
+    # then the volumes in Longhorn; docs/operations/uninstall.md). A Released PV
+    # is not rebound to a new claim of the same name on its own: to reattach the
+    # data, clear the PV's claimRef. That is the point, and it is also the
+    # recovery path.
+    #
+    # A new install gets Retain. This subchart renders the class as a ConfigMap
+    # (`longhorn-storageclass`) that longhorn-manager reconciles into the
+    # StorageClass. reclaimPolicy is immutable, so on an UPGRADE Longhorn
+    # deletes and recreates the `longhorn` class with Retain by itself; no step
+    # for you. MEASURED on a 0.7.0 -> 0.7.1 lab upgrade, 2026-10-03: class
+    # recreated with Retain during the platform sync, no claim lost, and all 8
+    # existing Longhorn PVs still Delete, because a PV copies the policy when
+    # it is provisioned and never re-reads the class. Existing data is
+    # therefore NOT protected by the upgrade. To change one PV in place:
+    #   kubectl patch pv <name> -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'
+    # Set "Delete" here for the old behaviour (a throwaway cluster that is rebuilt
+    # often).
+    # ------------------------------------------------------------------------
+    reclaimPolicy: Retain
+    # LEFTOVER PriorityClass `longhorn-critical` (TM-0789). This subchart renders
+    # a cluster-scoped PriorityClass by that name. One left by a previous
+    # Longhorn install (an uninstall does not remove it) carries another
+    # release's Helm ownership metadata, and `helm install` of this layer refuses
+    # it with "invalid ownership metadata". Argo CD does not check ownership and
+    # adopts it. On a direct helm install, delete it first:
+    #   kubectl delete priorityclass longhorn-critical
+    # (only if no Longhorn you still run is using it).
+  defaultSettings:
+    # No upgrade check to longhorn-upgrade-responder.rancher.io (TM-0671): the
+    # setting defaults on and reports the running version out. Sovereignty: no
+    # unrequested outbound calls. Upgrades follow this repo's releases.
+    upgradeChecker: false
+    # A single-node cluster cannot satisfy replica anti-affinity; without this
+    # a multi-replica volume stays Degraded and nobody tells you why. It is
+    # inert at replica count 1 and kept so that raising the count on a
+    # still-single node degrades rather than hangs.
+    #
+    # TURN THIS OFF at 3 or more nodes. See the note above: on by default plus
+    # three replicas is three copies with no guarantee they are on different
+    # hosts.
+    replicaSoftAntiAffinity: true
+    # Must match defaultClassReplicaCount above. This one governs volumes
+    # created outside the shipped StorageClass; they are the same decision and
+    # a disagreement between them is invisible until a volume is built.
+    defaultReplicaCount: 1
+
+  metrics:
+    serviceMonitor:
+      enabled: true
+
+# ---------------------------------------------------------------------------
+# OBJECT STORAGE. The destination the backup path writes to, so that a fresh
+# install has one instead of a documented prerequisite.
+#
+# WHAT THIS IS NOT: a second site. One node, one copy, in the cluster it
+# protects. That covers a dropped table, a bad migration, a corrupted database,
+# and it does not cover losing the machine. See
+# docs/operations/backup-restore.md, which says so in the same words.
+#
+# Turn it off and point `modelGateway.database.backup` at your own S3 endpoint
+# if you have one; that is the better answer and this is the answer for people
+# who do not.
+# ---------------------------------------------------------------------------
+garage:
+  image: dxflrs/garage:v2.4.1
+  # ONE COPY, honestly. A single replica cannot satisfy a higher factor, and
+  # claiming one would leave every write degraded while looking careful.
+  replicationFactor: 1
+  # Garage's `block_size` (TM-0782): the size objects are split into. EMPTY
+  # renders no `block_size` line at all, so Garage uses its own default, which the
+  # v2.4.1 configuration reference gives as 1MiB. That is what this chart has
+  # always run, so the default here changes nothing. (The 1MiB figure is from
+  # upstream's documentation, not measured on this chart.)
+  #
+  # WHY IT IS A VALUE. Upload cost in Garage grows with the number of blocks in
+  # an object (upstream issues #1366 and #662), so a store holding large backups
+  # or trace blocks pays for the small default. Upstream suggests something like
+  # 10MiB for large files over fast links. If you raise it, keep the multipart
+  # part size of what writes here (barman-cloud, Tempo) a multiple of it.
+  #
+  # A string, with units: "10MiB", "10M", or a byte count as a string. Anything
+  # else is refused by the schema, because Garage's own parse error at start-up
+  # would leave the pod crash-looping with the cause in its log.
+  #
+  # CHANGING IT ON A STORE THAT HOLDS DATA has a cost, and it is not a migration.
+  # Only objects uploaded AFTER the change use the new size; everything already
+  # stored keeps the old blocks and stays readable. Identical content uploaded
+  # before and after no longer deduplicates, so you can use more space than
+  # necessary until old objects are re-uploaded, and re-uploading them is the
+  # rewrite. Changing this key also changes the config checksum, which rolls the
+  # single Garage pod once: backups and the docs sync see a brief S3 outage.
+  blockSize: ""
+  # Garage's metadata engine (TM-0817): "sqlite" (what this chart has always run)
+  # or "lmdb" (upstream's long-time default, so most EXISTING Garage stores you
+  # might adopt are LMDB). The engine is not stored in the data: point a sqlite
+  # Garage at an LMDB metadata directory and it starts an EMPTY sqlite database
+  # beside the real one, the bootstrap then creates fresh buckets and keys, and
+  # everything reports success while your objects are unreachable. Found adopting
+  # a real store on 2026-10-01. So the Garage pod now runs a guard first: under
+  # sqlite it refuses to start when meta/ holds db.lmdb and no db.sqlite (and the
+  # mirror image under lmdb). Either set this to "lmdb", or convert once with
+  # `garage convert-db -a lmdb -i <meta>/db.lmdb -b sqlite -o <meta>/db.sqlite`
+  # (docs/operations/backup-restore.md, "Adopting an existing Garage").
+  # Changing it on a running store is that same conversion, not a setting.
+  dbEngine: sqlite
+  region: garage
+  zone: tockmox
+  # Advertised capacity for the layout, in bytes, AS A STRING. Unquoted, YAML
+  # renders ten billion as 1e+10 and Garage rejects the layout with a parse
+  # error that does not mention scientific notation. Not a quota; it reserves
+  # nothing.
+  capacity: "10000000000"
+  bucket: tockmox-backups
+  metaSize: 5Gi
+  # 10Gi, not 50. This is a BACKUP TARGET for a couple of small databases, and
+  # the old 50Gi default was speculative rather than measured: the gateway's
+  # database is 8Gi and compresses hard on the way in.
+  #
+  # It also has to fit. Longhorn refuses to schedule a replica when a node is
+  # below `storageMinimalAvailablePercentage`, which defaults to 25 percent, and
+  # it reports that as `no disks found on node ...` rather than as a capacity
+  # message. A 50Gi default on a machine with less headroom than that produces a
+  # faulted volume and a pod stuck in ContainerCreating, with the real cause two
+  # log levels down in the Longhorn manager. Observed on the reference lab
+  # 2026-08-15, at 90 percent full.
+  #
+  # Raise it when you have somewhere to put it, and read
+  # docs/deployment/sizing.md for what a real retention window costs.
+  dataSize: 10Gi
+  # Empty follows global.storageClass. Metadata is small, hot and the only
+  # copy, so it wants the replicated class regardless of what the data volume
+  # does.
+  metaStorageClass: ""
+  # Empty DERIVES the class from replicationFactor, the same way the model
+  # gateway's database derives it from its instance count: at factor 1 nothing
+  # else holds a copy so the volume must, at 3 or more Garage holds its own.
+  dataStorageClass: ""
+  # Infrastructure tier. Garage holds the backups; it is not on any request
+  # path, but evicting the backup target under memory pressure is how a night's
+  # ScheduledBackup silently fails. tockmox-policy names Garage in this tier
+  # already ... this is the line that makes the naming take effect.
+  priorityClassName: tockmox-infrastructure
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+  # Minted in-cluster by the bootstrap Job, once, and never overwritten.
+  secretName: tockmox-garage
+  # What the barman ObjectStore reads. Same rule: created once, left alone.
+  credentialsSecretName: tockmox-garage-credentials
+  # A CNPG ObjectStore reads its Secret from its OWN namespace, so the layer
+  # holding a database cannot reach one that lives here. The bootstrap copies it
+  # to each of these, once, and never overwrites. Add a namespace when you add a
+  # database that backs up here.
+  credentialsNamespaces:
+    - tockmox-ai
+    # The identity layer's nightly pg_dump uploads with these credentials
+    # (databaseBackup in tockmox-identity). Remove only if that is off.
+    - tockmox-authentik
+  # EVERY NAMESPACE LISTED ABOVE MUST EXIST WHEN THIS LAYER SYNCS (wave 2). This
+  # layer applies a Role and a RoleBinding into each, and the bootstrap Job copies
+  # a Secret into each; into a namespace that is not there yet the sync fails with
+  # `namespaces "<name>" not found`, and on a fresh install the next layers never
+  # start. The two defaults exist because the policy layer (wave 1) creates them.
+  # A namespace of your own, for example the one your worked-example app lives in
+  # (whose manifests sync later, in site-apps), does not exist yet: name it in
+  # `createCredentialsNamespaces` below and this layer creates it first, and
+  # delete the Namespace object from your app's manifests. Two Applications that
+  # both declare one Namespace fight over its tracking label.
+  #
+  # ON AN EXISTING INSTALL, DO NOT MOVE A NAMESPACE THAT ALREADY EXISTS. If the
+  # Application that declares it prunes, removing the Namespace from its manifests
+  # deletes the namespace and everything in it, data included. An existing install
+  # does not need this key at all (the namespace is already there); it is for new
+  # installs. To move one anyway, first annotate that Namespace in the app with
+  # `argocd.argoproj.io/sync-options: Prune=false` and sync, then remove it.
+  #
+  # (0.7.0 candidate greenfield, 2026-10-01: `news` was listed here and created
+  # only by the site's app manifests; the install failed on it. Present since
+  # the key was added, hidden on any cluster where the namespace already existed.)
+  createCredentialsNamespaces: []
+  # Labels per namespace named in createCredentialsNamespaces (TM-0815), on top
+  # of global.namespaceLabels (this map wins on a clash). The reason to use it:
+  # a namespace this layer creates cannot also be declared by your own
+  # Application (two owners fight over the tracking label), so labels you used to
+  # put on it, Pod Security warn/audit above all, have nowhere else to go.
+  #   credentialsNamespaceLabels:
+  #     my-app:
+  #       pod-security.kubernetes.io/warn: restricted
+  #       pod-security.kubernetes.io/audit: restricted
+  credentialsNamespaceLabels: {}
+  bootstrap:
+    # A fresh Garage node answers 503 and stores nothing until a layout is
+    # applied, and there is no manifest form for that. Turning this off means
+    # doing it by hand; docs/operations/backup-restore.md has the calls.
+    enabled: true
+    # Step 7 of the bootstrap Job points Longhorn's default BackupTarget at THIS
+    # Garage so `longhorn-backup` VolumeSnapshots work on a fresh install.
+    #
+    # READ THIS BEFORE RELYING ON IT: this Garage runs on Longhorn, in the same
+    # cluster. Backing Longhorn up into it does not survive losing the cluster or
+    # Longhorn itself. That is acceptable for an evaluation install and is NOT
+    # acceptable for data you care about. Point Longhorn at an off-cluster target
+    # instead, through the Longhorn subchart's own keys, for example an NFS
+    # export (the recommended choice, it needs no credentials):
+    #
+    #   longhorn:
+    #     defaultBackupStore:
+    #       backupTarget: nfs://nas.int.example.com:/volume1/longhorn-backup
+    #       pollInterval: "300"
+    #
+    # or an external S3 (create the credential Secret in the Longhorn namespace
+    # yourself, with AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and, for a
+    # non-AWS endpoint, AWS_ENDPOINTS):
+    #
+    #   longhorn:
+    #     defaultBackupStore:
+    #       backupTarget: s3://YOUR_BUCKET@YOUR_REGION/longhorn
+    #       backupTargetCredentialSecret: YOUR_SECRET_NAME
+    #
+    # When `longhorn.defaultBackupStore.backupTarget` is set, step 7 is not
+    # rendered at all, so this Job does not contest your choice. Longhorn reads
+    # that value when it CREATES the default BackupTarget, so it is a
+    # fresh-install setting; an existing install is repointed in the Longhorn UI
+    # or by patching the `default` BackupTarget, and the Job (which never
+    # overwrites a target that is not its own) leaves that alone too.
+    #
+    # Set this false to skip step 7 without naming a target, for a site that
+    # configures the BackupTarget by another route. The Garage and the database
+    # backup path are unaffected either way.
+    wireLonghornBackupTarget: true
+    image: alpine/k8s:1.37.1
+
+  # ---------------------------------------------------------------------------
+  # STATIC SITES SERVED FROM GARAGE (TM-0215): the web endpoint, and the list of
+  # sites it serves. Documentation for the product is the first site.
+  #
+  # Garage's web endpoint (`[s3_web]`, port 3902) serves a bucket as a website
+  # when the bucket has website access enabled AND the request Host header equals
+  # one of the bucket's GLOBAL ALIASES (or is `<bucket><rootDomain>`). So each
+  # site here is one bucket whose alias is its host. The bootstrap Job creates the
+  # bucket, the alias and the website flag; an Ingress routes the host to :3902.
+  #
+  # The endpoint is anonymous and read-only by construction: anyone who can reach
+  # :3902 can read every object in a website-enabled bucket. Do not put anything
+  # in such a bucket you would not publish.
+  #
+  # OFF unless something asks for it. It turns on when `apps.docs` resolves true
+  # (it does on a stock install: `apps.docs` follows `capabilities.dataProtection`),
+  # when `enabled` below is true, or when `sites` yields at least one site.
+  # ---------------------------------------------------------------------------
+  web:
+    # Force the endpoint on with no site listed. Sites in `sites` turn it on by
+    # themselves, so most operators never need this.
+    enabled: false
+    # Garage's `root_domain` for [s3_web]. Empty derives `.web.<global.internalDomain>`.
+    # A request whose Host ENDS WITH this is served from the bucket named by the
+    # rest of the Host; every other Host is matched whole against bucket aliases,
+    # which is the path all sites here use. So no site host may end with this
+    # value, and the render fails if one does. A leading dot is added if missing.
+    rootDomain: ""
+    # When the sites' sync CronJobs run (cron syntax, in the kube-controller-
+    # manager's time zone, UTC by default). The sync is a CronJob and not an Argo
+    # hook so that a content image that cannot be pulled never fails the
+    # platform Application's sync; see the header of templates/garage-web.yaml.
+    # New content reaches the bucket at the next tick, or now with
+    # `kubectl -n tockmox-platform create job --from=cronjob/tockmox-garage-sync-docs sync-now`.
+    syncSchedule: "23 * * * *"
+    # Also publish once when the bootstrap Job runs (a fresh install, and again
+    # once per chart version on an upgrade), so the docs site is not empty until
+    # the first tick. The bootstrap Job starts one run of each sync CronJob with
+    # `kubectl create job --from=cronjob/...` and does not wait for it, so a
+    # failed run cannot fail or loop the platform sync. False leaves publishing
+    # to the schedule alone. See templates/garage-web.yaml for why this is not a
+    # plain Job or an Argo hook.
+    syncAtInstall: true
+    # THE LIST OF SITES. HELM REPLACES A LIST, IT DOES NOT MERGE IT. The shipped
+    # list holds exactly one entry, the product documentation, the site named
+    # `docs`. If you set `garage.web.sites` in your site values you REPLACE it,
+    # and the docs site (its bucket, key and Ingress) disappear. To keep serving
+    # the docs, restate the `docs` entry below in your list alongside your own.
+    # If `apps.docs` is on and no entry is named `docs`, the render fails and
+    # says so. The name `docs` is reserved for the product documentation: it may
+    # not take `content.image`, and it must keep `writerKey: true`.
+    #
+    # Fields per site:
+    #   name          a DNS label of at most 32 characters (the sync CronJob
+    #                 `tockmox-garage-sync-<name>` may have 52, and 20 of those
+    #                 are the prefix); names the Ingress, the writer Secret and
+    #                 the sync CronJob. Unique.
+    #   host          the Host the site answers on AND the bucket's global alias.
+    #                 Empty derives `<name>.<global.internalDomain>`. At most 63
+    #                 characters (a bucket name limit).
+    #   index         the index document. Default index.html.
+    #   errorDocument the object served on a 404. Empty means none.
+    #   ingress       true renders an Ingress (and, with global.certIssuer set, a
+    #                 Certificate through cert-manager's ingress-shim) routing
+    #                 `host` to the Garage Service port 3902.
+    #   writerKey     true mints a key with read/write on this bucket only, into
+    #                 the Secret `tockmox-garage-site-<name>` in this namespace
+    #                 (ACCESS_KEY_ID, ACCESS_SECRET_KEY, REGION, BUCKET,
+    #                 ENDPOINT). For a site whose content is published from
+    #                 outside (a CI job). Minted once, never overwritten.
+    #   content       what fills the bucket, or nothing. `image` names an image
+    #                 holding a site OF YOUR OWN under `path` (default /site);
+    #                 a CronJob copies it into the bucket, and it implies a
+    #                 writer key. Empty means the bucket is filled by someone
+    #                 else: a CI job, or, for the `docs` entry, the operator
+    #                 running tools/publish-docs.sh from their checkout. The
+    #                 `docs` entry takes no `image`: Tockmox publishes none
+    #                 (ADR-0036).
+    #
+    # THE DOCS INGRESS SHIPS WITHOUT AUTHENTICATION, on purpose: the content is the
+    # same public product documentation that is published on GitHub, and there is
+    # no forward-auth in this chart to put in front of it. Every other site follows
+    # its own `ingress` flag and gets no authentication from this chart either; a
+    # site whose content must not be public should leave `ingress` false.
+    #
+    # THE DOCS BUCKET STARTS WITH A PLACEHOLDER. The `docs` entry has no content,
+    # so nothing fills its bucket by itself. The bootstrap Job uploads a one-page
+    # placeholder (ConfigMap tockmox-garage-docs-placeholder) into it ONLY WHEN
+    # THE BUCKET HOLDS NO OBJECT, so the Ingress answers with a page that names
+    # the publish command instead of 404. tools/publish-docs.sh replaces it.
+    #
+    # CARRIED DATA. The bootstrap Job reads before it writes: a bucket, alias or
+    # website flag that already exists (an operator re-bound an existing Garage
+    # volume under this StatefulSet) is kept and logged, never recreated, and a
+    # writer Secret that exists is never overwritten.
+    #
+    # The `docs` entry is skipped when `apps.docs` resolves false, so declining
+    # docs serving does not need this list edited.
+    sites:
+      - name: docs
+        host: ""
+        index: index.html
+        errorDocument: 404.html
+        ingress: true
+        writerKey: true
+        content: {}
+
+cloudnative-pg:
+  resources:
+    # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+    # peak 112.4 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 84.5 MiB in the pre-migration namespace (30 days); average 97.6 MiB.
+    # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+    # request = average, rounded up to 16Mi. Re-measure before changing.
+    requests:
+      memory: 112Mi
+    limits:
+      memory: 192Mi
+  crds:
+    create: true
+  # Infrastructure tier, not cascade-critical. The operator going away does not
+  # stop a running Postgres ... the instances keep serving; what stops is
+  # failover, backup scheduling and reconciliation. That is "important, a brief
+  # loss does not cascade", which is the tier tockmox-policy describes.
+  priorityClassName: tockmox-infrastructure
+  # SCRAPE THE OPERATOR. The subchart ships `podMonitorEnabled: false`,
+  # so adopting this layer dropped the operator's own scrape job
+  # (`cnpg_collector_*` from the controller, and the shape gate that counts
+  # scrape jobs saw `cnpg-system/cnpg-cloudnative-pg` disappear). Static YAML
+  # cannot follow `capabilities.observability`, so this joins the monitors above
+  # and below it in the KNOWN EXPOSURE described at kured: it renders a PodMonitor
+  # unconditionally, and a cluster without the PodMonitor CRD must set it false
+  # (tockmox-observability or your own operator provides the CRD; no label is
+  # needed, the Prometheus here selects every PodMonitor). This changes the
+  # rendered default for 0.7.1.
+  monitoring:
+    podMonitorEnabled: true
+
+plugin-barman-cloud:
+  resources:
+    # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+    # peak 65.4 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 29.9 MiB in the pre-migration namespace (30 days); average 56.7 MiB.
+    # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+    # request = average, rounded up to 16Mi. Re-measure before changing.
+    requests:
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+  # The subchart's own Issuer and Certificates are OFF and re-authored in
+  # templates/barman-plugin-certs.yaml, because the subchart cannot annotate
+  # its cert-manager.io resources and they need a sync wave: applied flat on
+  # a greenfield first sync they race cert-manager's own webhook and wedge
+  # the layer. The re-authored copies are spec-identical, at wave 3.
+  certificate:
+    createIssuer: false
+    createClientCertificate: false
+    createServerCertificate: false
+  # And the plugin's workload waits for the same wave, so it never sits
+  # unstartable waiting on TLS Secrets whose Certificates were rejected.
+  commonAnnotations:
+    argocd.argoproj.io/sync-wave: "3"
+
+kured:
+  resources:
+    # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+    # peak 37.5 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 35.0 MiB in the pre-migration namespace (30 days); average 28.8 MiB.
+    # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+    # request = average, rounded up to 16Mi. Re-measure before changing.
+    requests:
+      memory: 32Mi
+    limits:
+      memory: 64Mi
+  # Infrastructure tier. kured itself is not on any request path; what it does
+  # is decide WHEN nodes reboot, and an evicted kured means pending reboots
+  # queue rather than anything breaking.
+  priorityClassName: tockmox-infrastructure
+  # THE REBOOT LANE WAS UNOBSERVABLE. Both of these default to false upstream,
+  # so Tockmox shipped a component that decides when production nodes reboot
+  # and exported no metric about it: no `kured_reboot_required`, no way to see
+  # a node stuck waiting for the lock, and no series for an alert to read.
+  # Every other component in this layer already ships a ServiceMonitor;
+  # this one was the hole. Found 2026-08-30 against a production cluster that
+  # had turned both on by hand.
+  #
+  # `service.create` is the Service the monitor selects; kured's own template
+  # turns it on implicitly when metrics.create is set, and naming it here means
+  # the dependency is visible rather than inferred.
+  #
+  # KNOWN EXPOSURE, stated rather than hidden: this renders unconditionally,
+  # so on a cluster with no ServiceMonitor CRD the object is rejected. That is
+  # already true of the cert-manager, MetalLB, Traefik and Longhorn monitors
+  # above ... this line does not introduce the shape, it joins it. Helm gives
+  # no way to gate them behind capabilities.observability (subchart values are
+  # static YAML), so a site that declines the capability passes
+  # profiles/observability-off.yaml, which flips each subchart's own switch, and
+  # this layer refuses to render with the capability off and any of them still
+  # on (templates/preflight.yaml); tools/check-capability-monitors.sh asserts
+  # both (TM-0825).
+  service:
+    create: true
+  metrics:
+    create: true
+    interval: 60s
+  configuration:
+    # Reboot only inside a window you choose. The upstream default is any time,
+    # which will reboot a node during your working day.
+    startTime: "01:00"
+    endTime: "05:00"
+    timeZone: "UTC"
+    # Never reboot while a volume is rebuilding.
+    # With more than one Prometheus replica this gate can see different ALERTS
+    # on each request; see "Two Prometheus replicas and ALERTS" in
+    # docs/operations/monitoring.md (TM-0781) before pointing it at the Service.
+    prometheusUrl: ""
+    alertFilterRegexp: ""
+
+snapshot-controller:
+  # Annotate the snapshot CRDs `helm.sh/resource-policy: keep`. `keepCRDs` is a
+  # TOP-LEVEL key of this chart (added in 5.3.0), not a `controller.*` one, and
+  # it defaults to false. Without it, removing this release deletes the
+  # VolumeSnapshot CRDs and, with them, every VolumeSnapshot and
+  # VolumeSnapshotContent in the cluster. The controller image does not move:
+  # 5.2.0 and 5.3.0 both ship external-snapshotter v8.6.0, so this key is the
+  # whole reason for the bump. The maintainer's own deployment has run it since
+  # 2026-09-21.
+  keepCRDs: true
+  controller:
+    resources:
+      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # peak 67.6 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 37.0 MiB in the pre-migration namespace (30 days); average 61.1 MiB.
+      # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
+      # request = average, rounded up to 16Mi. Re-measure before changing.
+      requests:
+        memory: 64Mi
+      limits:
+        memory: 128Mi
+    # Infrastructure tier: losing the snapshot controller stops new
+    # VolumeSnapshots from being taken, which stops the restore drill, but no
+    # running workload notices.
+    priorityClassName: tockmox-infrastructure
+    # The other half of the reboot-lane hole above. The chart's key lives under
+    # `controller`, NOT at the top level ... a site that sets a top-level
+    # `serviceMonitor.create: true` gets silent acceptance and no monitor,
+    # because Helm takes unknown top-level keys without complaint. Observed on
+    # a production cluster 2026-08-30: the values file asked for the monitor,
+    # the operator believed it had one, and `kubectl get servicemonitor -A`
+    # showed none. The nesting is the whole point of writing it out here.
+    serviceMonitor:
+      create: true

@@ -1,0 +1,124 @@
+{{- if (.Values.apps.kube_bench | default dict).enabled }}
+{{- if not .Values.namespaces.kube_bench }}
+{{- fail "\n\napps.kube_bench.enabled is true but namespaces.kube_bench is blank.\n" }}
+{{- end }}
+# SPDX-License-Identifier: Apache-2.0
+{{- /*
+The CIS benchmark scanner as a weekly CronJob. Read docs/operations/kube-bench.md
+before relying on it; the short version is at the end of this comment.
+
+WHERE IT LIVES. In its own namespace (created, and labelled
+`pod-security.kubernetes.io/enforce: privileged`, by the POLICY layer when
+policy's apps.kube_bench is on). hostPID and hostPath are refused by the
+baseline Pod Security profile, so this pod cannot run in tockmox-selfcheck once
+that namespace enforces anything. This chart names the namespace explicitly on
+every object; the Argo Application's destination namespace is not it.
+
+WHAT IT MOUNTS. Only the host paths in kubeBench.hostMounts and
+extraHostMounts, every one read-only, at the same path inside the pod. The pod
+is not privileged, drops every capability and has no ServiceAccount token. It
+runs as root because the files it inspects are root's and mode 0600; that is
+why runAsNonRoot is false here and nowhere else in this chart.
+
+WHAT IT CANNOT DO. On k3s the API server, scheduler, controller manager and
+kubelet run inside one `k3s` process, and the benchmark finds their flags by
+running `journalctl -u k3s`. The kube-bench image is Alpine and carries no
+journalctl. Counted from the v0.16.0 k3s-cis-1.9 files, 53 of the 97 automated
+checks (130 checks in all, 33 of them manual) call it. What the pod reports for those is not measured (INFERRED:
+FAIL or an empty result, not PASS). File-permission checks and the process
+checks that do not go through the journal are the part that can be trusted.
+The posture page says the same thing in the operator's words.
+
+A Job that completes means the scan ran. kube-bench exits 0 whatever it found.
+*/ -}}
+{{- $bench := .Values.kubeBench }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tockmox-kube-bench
+  namespace: {{ .Values.namespaces.kube_bench }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  schedule: {{ $bench.schedule | quote }}
+  timeZone: {{ .Values.global.timezone | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ $bench.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ $bench.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: {{ $bench.activeDeadlineSeconds }}
+      template:
+        metadata:
+          labels:
+            {{- include "tockmox.labels" . | nindent 12 }}
+        spec:
+          restartPolicy: Never
+          hostPID: true
+          serviceAccountName: tockmox-kube-bench
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          {{- with $bench.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $bench.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: kube-bench
+              image: {{ include "tockmox.image" (dict "ctx" $ "repo" $bench.image) }}
+              # command replaces the image's ENTRYPOINT (entrypoint.sh, which is
+              # for copying the scanner onto a host), the same way upstream's
+              # own job manifests do. The result goes to stdout, so the pod log
+              # IS the report: `kubectl logs` reads it.
+              command:
+                - kube-bench
+                - run
+                - --benchmark
+                - {{ $bench.benchmark | quote }}
+                {{- if $bench.targets }}
+                - --targets
+                - {{ join "," $bench.targets | quote }}
+                {{- end }}
+              securityContext:
+                runAsUser: 0
+                runAsNonRoot: false
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              resources:
+                requests: { cpu: 50m, memory: 64Mi }
+                limits:   { memory: 256Mi }
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                {{- range concat $bench.hostMounts $bench.extraHostMounts }}
+                - name: {{ .name }}
+                  mountPath: {{ .path }}
+                  readOnly: true
+                {{- end }}
+          volumes:
+            - name: tmp
+              emptyDir: {}
+            {{- range concat $bench.hostMounts $bench.extraHostMounts }}
+            - name: {{ .name }}
+              hostPath:
+                path: {{ .path }}
+            {{- end }}
+---
+# TM-0759: this workload's own identity, with no token. The namespace's `default`
+# account is not used (CIS 5.1.5 and 5.1.6).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-kube-bench
+  namespace: {{ .Values.namespaces.kube_bench }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+{{- end }}

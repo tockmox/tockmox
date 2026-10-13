@@ -1,0 +1,47 @@
+# The containers Tockmox renders under ci/values-all-on.yaml WITHOUT a memory
+# limit, each with the reason it has none (TM-0595). Read by
+# tools/check-memory-limits.sh, which fails on a container missing from this
+# list AND on an entry here that now carries a limit or no longer renders, so
+# the list only shrinks. The count of entries IS the accepted residue.
+#
+# Format, one per line:
+#   <layer> <Kind> <object name> <container>   # no-limit: <why>
+# An entry without a `# no-limit:` reason fails the gate.
+#
+# The entries under the "no working-set sample" heading below are not an end
+# state. The 2026-10-08 lab pass (TM-0903) sized the rest on a household-sso
+# install; these containers do not run under that profile (loki and alloy are
+# off, smartctl follows hardwareTelemetry), so no sample could be taken. Each
+# leaves this list when a lab run under a profile that starts it gives it a
+# limit. (argo-workflows-server's wait-for-ca was here too, and left on
+# 2026-10-09: it is the same shell-and-sleep init container the lab sampled in
+# three other pods, so it took their 32Mi floor.) Only these entries carry that
+# reason's keyword (TM-0903): keep it out of comments and out of other entries'
+# reasons, so counting it counts entries.
+
+# --- a Job or hook that runs once --------------------------------------------
+ai            Pod         t-litellm-test-connection  wget                           # no-limit: helm test hook; runs only under `helm test`, which the Argo CD install never invokes
+ai            Pod         t-litellm-env-test         test                           # no-limit: helm test hook; runs only under `helm test`, which the Argo CD install never invokes
+observability Pod         t-loki-helm-test           loki-helm-test                 # no-limit: helm test hook; runs only under `helm test`, which the Argo CD install never invokes
+observability Job         t-kube-prometheus-stack-admission-create  create          # no-limit: pre-install/pre-upgrade hook Job that mints one certificate and exits
+observability Job         t-kube-prometheus-stack-admission-patch   patch           # no-limit: post-install/post-upgrade hook Job that patches one caBundle and exits
+platform      Job         t-cert-manager-startupapicheck  cert-manager-startupapicheck  # no-limit: post-install hook Job that polls the API once and exits
+platform      Job         longhorn-post-upgrade      longhorn-post-upgrade          # no-limit: post-upgrade hook Job; also renders no resources block upstream (longhorn 1.12.1)
+platform      Job         longhorn-uninstall         longhorn-uninstall             # no-limit: pre-delete hook Job; also renders no resources block upstream (longhorn 1.12.1)
+
+# --- the upstream template renders no resources block for it -----------------
+platform      DaemonSet   longhorn-manager           pre-pull-share-manager-image   # no-limit: longhorn 1.12.1 renders no resources for this container (longhornManager.resources reaches only longhorn-manager); a pause-style puller, 2.4 MiB peak
+platform      Deployment  longhorn-driver-deployer   wait-longhorn-manager          # no-limit: longhorn 1.12.1 renders no resources for this init container; 1.6 MiB peak
+platform      Deployment  longhorn-driver-deployer   longhorn-driver-deployer       # no-limit: longhorn 1.12.1 renders no resources for this container; 19.4 MiB peak
+platform      Deployment  longhorn-ui                longhorn-ui                    # no-limit: longhorn 1.12.1 renders no resources for this container; 14.3 MiB peak
+
+# --- new upstream containers that have never run anywhere we can measure ----
+# Each leaves on the first lab or homelab run that samples it (a limit from the
+# measured peak, as above).
+platform      Deployment  longhorn-global-manager    longhorn-global-manager        # no-limit: new in longhorn 1.13.0 (TM-1010); unmeasured, and longhornGlobalManager.resources is empty upstream; size it from the homelab after the upgrade
+
+# --- no working-set sample, the lab pass could not reach them ----------------
+exporters     DaemonSet   t-prometheus-smartctl-exporter-0  main                    # no-limit: not run under the lab profile, 2026-10-08
+observability DaemonSet   t-alloy                    alloy                          # no-limit: not run under the lab profile, 2026-10-08
+observability DaemonSet   t-alloy                    config-reloader                # no-limit: not run under the lab profile, 2026-10-08
+observability DaemonSet   t-loki-canary              canary                         # no-limit: not run under the lab profile, 2026-10-08

@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Runs when a release tag is pushed, and asserts what only a tag can be asked
+# about: that tockmox-site-template's `main` already pins the tag being cut
+# (TM-0534). A separate workflow on purpose: ci.yaml triggers on branches and
+# its step count is a pinned, documented number; this one is about the tag.
+#
+# A red run here does not stop the tag (it already exists); it is the alarm the
+# 0.6.0-rc2 re-pin never had. Fix the template, then re-run the job from the
+# Actions tab. The template is a public repository, so no token is needed.
+name: release-tag
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to assert the template against (e.g. v0.7.1-rc1)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  site-pin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: the comparison refuses what it claims to refuse (selftest)
+        run: tools/site-pin-at-tag.sh --selftest
+
+      - name: the site template pins this tag
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: tools/site-pin-at-tag.sh "$TAG"

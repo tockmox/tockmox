@@ -1,0 +1,235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tockmox:posture-probe:report:v0",
+  "title": "Security Posture Probe report, schemaVersion v0",
+  "description": "The published contract for the posture probe's report (TM-0882). Versioning: within v0 fields are only ADDED, never removed, renamed, retyped or repurposed, and enum values are only added; anything else is a new schemaVersion (v1) published as a new file beside this one. Consumers must ignore fields they do not know. Gate contract (the process exit code AND summary.gateExit, always equal): 0 clean, no drift and every declared row observed; 1 could not run, an error or any declared row with no usable observation; 2 drift, at least one row with bucket drift. unintended-deny rows are reported and do not set the exit code in v0.",
+  "x-tockmox-stability": "experimental",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "run",
+    "differential",
+    "summary"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "v0"
+    },
+    "probeVersion": {
+      "type": "string"
+    },
+    "run": {
+      "type": "object",
+      "required": [
+        "id",
+        "mode",
+        "startedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "finishedAt": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "black-box",
+            "white-box",
+            "differential"
+          ]
+        },
+        "clusterIdentifier": {
+          "type": "string"
+        },
+        "intentFileDigest": {
+          "type": "string"
+        },
+        "notObserved": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "namespace/job pairs whose collector produced no usable report; every intent row they owned is bucket unknown."
+        },
+        "presetRowsDropped": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Preset intent rows not measured because they name a namespace, target or identity this install does not measure."
+        },
+        "notSettled": {
+          "type": "object",
+          "description": "namespace/job -> why that collector could not settle (its pod was never seen policed: a control never read what it must, or readings kept changing). Its rows are bucket unknown."
+        }
+      }
+    },
+    "namespaces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "podIP": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "identity": {
+            "type": "object"
+          },
+          "exposure": {
+            "type": "object"
+          },
+          "reachability": {
+            "type": "array"
+          }
+        }
+      },
+      "description": "Per-namespace black-box detail. Secret NAMES only, never values. Blocks may be absent when a collector shed them to fit its termination message."
+    },
+    "baselineFindings": {
+      "type": "array",
+      "description": "Reserved: third-party scanner findings folded into the report. Not produced in v0."
+    },
+    "differential": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "subject",
+          "dimension",
+          "intent",
+          "observed",
+          "bucket"
+        ],
+        "properties": {
+          "subject": {
+            "type": "string"
+          },
+          "dimension": {
+            "type": "string"
+          },
+          "intent": {
+            "enum": [
+              "allow",
+              "deny"
+            ]
+          },
+          "observed": {
+            "enum": [
+              "allowed",
+              "denied",
+              "unknown"
+            ]
+          },
+          "bucket": {
+            "enum": [
+              "confirmed-safe",
+              "drift",
+              "unintended-deny",
+              "unknown"
+            ]
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "evidenceRef": {
+            "type": "string"
+          },
+          "config": {
+            "enum": [
+              "allowed",
+              "denied",
+              "oracle",
+              "n/a"
+            ],
+            "description": "White-box verdict from the declared NetworkPolicies; 'oracle' for RBAC rows, where the API server is both config and enforcer."
+          },
+          "configWhy": {
+            "type": "string",
+            "description": "Which policy decided the config verdict; notes CNI-dependent ipBlock matches."
+          },
+          "configNote": {
+            "type": "string"
+          },
+          "cause": {
+            "enum": [
+              "config",
+              "enforcement"
+            ],
+            "description": "Drift rows only. config: the policy never expressed the intent. enforcement: the policy denies it and the cluster allowed it."
+          },
+          "raw": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Raw connect result (open, refused, timeout, dns-fail) or 'oracle'."
+          },
+          "tier": {
+            "type": "string",
+            "description": "Intent tier carried from the intent file (claimed, aspirational)."
+          },
+          "basis": {
+            "type": "string",
+            "description": "Why the intent exists, carried from the intent file."
+          }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "driftCount",
+        "unintendedDenyCount",
+        "confirmedSafeCount",
+        "gateExit"
+      ],
+      "properties": {
+        "driftCount": {
+          "type": "integer"
+        },
+        "unintendedDenyCount": {
+          "type": "integer"
+        },
+        "confirmedSafeCount": {
+          "type": "integer"
+        },
+        "gateExit": {
+          "enum": [
+            0,
+            1,
+            2
+          ],
+          "description": "0 clean, 1 could not run (error or unobserved rows), 2 drift."
+        },
+        "unknownCount": {
+          "type": "integer",
+          "description": "Declared rows with no usable observation; any makes gateExit 1 (could not run)."
+        },
+        "enforcementDriftCount": {
+          "type": "integer"
+        }
+      }
+    },
+    "schema": {
+      "const": "urn:tockmox:posture-probe:report:v0",
+      "description": "Which published schema this report was written against. Added within v0; older v0 reports omit it."
+    }
+  }
+}

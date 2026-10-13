@@ -1,0 +1,8 @@
+{% include "onboarding/_sources.html" %}
+<p>Any server works if it meets these four conditions. Tockmox only needs to reach it over HTTP.</p>
+<ol>
+  <li><h3>It answers <code>GET /v1/models</code></h3><p>The OpenAI-compatible model list. Chat, embeddings and rerank routes go through the gateway's OpenAI and Infinity providers.</p></li>
+  <li><h3>It listens on the node's network address</h3><p>Not only on 127.0.0.1.</p></li>
+  <li><h3>It requires a token, or only the gateway can reach it</h3><p>Ideally both: a bearer token the gateway holds as a Secret, and a firewall rule admitting only {{ (sources or ["the gateway's source addresses"])|join(", ") }}.</p></li>
+  <li><h3>Its host exports metrics</h3><p>node_exporter at least, so this page can show whether the host is up. Without it the node reads Unknown.</p></li>
+</ol>

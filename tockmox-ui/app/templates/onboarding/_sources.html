@@ -1,0 +1,3 @@
+{#- `src` is set by the route (a {% set %} in an included template does not reach the includer:
+    the first executed-docs run, 2026-10-07, rendered a firewall step with no allow rule at all). -#}
+{%- if not sources %}<p class="warnbox">This platform has not told this page where gateway traffic comes from (<code>inferenceNodes.gateway.sourceCidrs</code>), so the firewall steps below say <code>GATEWAY_SOURCE_CIDR</code>: replace it before running them. On k3s it is your cluster nodes' addresses, because pod traffic leaves through the node.</p>{% endif -%}

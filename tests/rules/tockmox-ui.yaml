@@ -1,0 +1,122 @@
+# TockmoxUISignInFailing and TockmoxUIUnreachable ... TM-1013.
+#
+# DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
+#
+# THE CONTROL. The Tockmox UI counts each failed sign-in step in
+# tockmox_ui_oidc_failures_total{stage} (tockmox-ui/app/telemetry.py), and
+# every stage's series exists at 0 from the pod's start, so the FIRST failure
+# is an increase. The homelab case that forced it (2026-10-11): /login answered
+# 503 for every attempt because the UI's NetworkPolicy refused the issuer
+# behind a LoadBalancer VIP, and nothing said so.
+#
+# EVERY CASE ASSERTS ONE DIRECTION, AND THE FILE ASSERTS BOTH.
+#   sign-in: 1 (series at 0 throughout) and 4 (a failure 30m ago, aged out)
+#            are silent; 2 (first failure after a 0 sample) and 3 (repeated
+#            failures) fire.
+#   reach:   5 (up 1) is silent; 6 (up 0) and 7 (no up series at all) fire.
+#
+# The selectors are those of the RENDER (ci/values.yaml: namespaces.ai is
+# `tockmox-ai`; the ServiceMonitor's job is the Service name, tockmox-ui).
+
+evaluation_interval: 1m
+
+tests:
+  # CASE 1: both stages at 0 for an hour. Silent.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ui_oidc_failures_total{namespace="tockmox-ai", job="tockmox-ui", stage="discovery"}'
+        values: '0x60'
+      - series: 'tockmox_ui_oidc_failures_total{namespace="tockmox-ai", job="tockmox-ui", stage="token"}'
+        values: '0x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxUISignInFailing
+        exp_alerts: []
+
+  # CASE 2: ONE discovery failure at 20m, after the series sat at 0. Not yet
+  # past `for` at 22m; firing at 26m, naming the stage.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ui_oidc_failures_total{namespace="tockmox-ai", job="tockmox-ui", stage="discovery"}'
+        values: '0x19 1x40'
+      - series: 'tockmox_ui_oidc_failures_total{namespace="tockmox-ai", job="tockmox-ui", stage="token"}'
+        values: '0x60'
+    alert_rule_test:
+      - eval_time: 22m
+        alertname: TockmoxUISignInFailing
+        exp_alerts: []
+      - eval_time: 26m
+        alertname: TockmoxUISignInFailing
+        exp_alerts:
+          - exp_labels: {severity: warning, namespace: tockmox-ai, stage: discovery}
+            exp_annotations:
+              summary: "Tockmox UI sign-in is failing at the discovery step"
+              description: "The Tockmox UI could not complete the discovery step of sign-in (discovery: the issuer did not answer; token: its answer could not be exchanged or verified) in the last 15 minutes, so nobody without a live session can sign in. The pod log names the cause on a \"sign-in ... failed\" line: `kubectl -n tockmox-ai logs deploy/tockmox-ui | grep \"sign-in\"`. Connection refused to an issuer reached through a LoadBalancer address is usually this NetworkPolicy: add that address to tockmoxUi.networkPolicy.extraEgress (docs/administration/tockmox-ui.md, \"When sign-in is unavailable\")."
+
+  # CASE 3: every attempt fails at the token step, one a minute. Firing.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ui_oidc_failures_total{namespace="tockmox-ai", job="tockmox-ui", stage="token"}'
+        values: '0+1x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxUISignInFailing
+        exp_alerts:
+          - exp_labels: {severity: warning, namespace: tockmox-ai, stage: token}
+            exp_annotations:
+              summary: "Tockmox UI sign-in is failing at the token step"
+              description: "The Tockmox UI could not complete the token step of sign-in (discovery: the issuer did not answer; token: its answer could not be exchanged or verified) in the last 15 minutes, so nobody without a live session can sign in. The pod log names the cause on a \"sign-in ... failed\" line: `kubectl -n tockmox-ai logs deploy/tockmox-ui | grep \"sign-in\"`. Connection refused to an issuer reached through a LoadBalancer address is usually this NetworkPolicy: add that address to tockmoxUi.networkPolicy.extraEgress (docs/administration/tockmox-ui.md, \"When sign-in is unavailable\")."
+
+  # CASE 4: one failure at 10m, nothing after. Fired, then clears once it
+  # leaves the 15m window: silent at 45m.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ui_oidc_failures_total{namespace="tockmox-ai", job="tockmox-ui", stage="discovery"}'
+        values: '0x9 1x60'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: TockmoxUISignInFailing
+        exp_alerts: []
+
+  # CASE 5: scraped healthy throughout. Silent.
+  - interval: 1m
+    input_series:
+      - series: 'up{namespace="tockmox-ai", job="tockmox-ui", instance="10.42.0.9:9464"}'
+        values: '1x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxUIUnreachable
+        exp_alerts: []
+
+  # CASE 6: the scrape fails (pod not Ready, or the policy refuses Prometheus)
+  # from 5m. Firing after `for` (10m).
+  - interval: 1m
+    input_series:
+      - series: 'up{namespace="tockmox-ai", job="tockmox-ui", instance="10.42.0.9:9464"}'
+        values: '1x4 0x55'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TockmoxUIUnreachable
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: TockmoxUIUnreachable
+        exp_alerts:
+          - exp_labels: {severity: warning, namespace: tockmox-ai}
+            exp_annotations:
+              summary: "Prometheus cannot reach the Tockmox UI"
+              description: "No healthy scrape of tockmox-ai/tockmox-ui's metrics port (9464) for 10 minutes: the pod is not running, not Ready, or its NetworkPolicy no longer admits Prometheus. `kubectl -n tockmox-ai get pods -l app.kubernetes.io/name=tockmox-ui` first."
+
+  # CASE 7: no `up` series at all (no pod, so no endpoint to scrape); some
+  # other job is up. `up == 0` would read green here. Firing.
+  - interval: 1m
+    input_series:
+      - series: 'up{namespace="tockmox-ai", job="tockmox-litellm", instance="10.42.0.7:4000"}'
+        values: '1x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxUIUnreachable
+        exp_alerts:
+          - exp_labels: {severity: warning, namespace: tockmox-ai}
+            exp_annotations:
+              summary: "Prometheus cannot reach the Tockmox UI"
+              description: "No healthy scrape of tockmox-ai/tockmox-ui's metrics port (9464) for 10 minutes: the pod is not running, not Ready, or its NetworkPolicy no longer admits Prometheus. `kubectl -n tockmox-ai get pods -l app.kubernetes.io/name=tockmox-ui` first."

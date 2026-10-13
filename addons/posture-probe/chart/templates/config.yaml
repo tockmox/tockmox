@@ -1,0 +1,30 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+{{- if .Values.enabled -}}
+{{- $m := include "pp.model" . | fromJson -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: posture-probe-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pp.labels" . | nindent 4 }}
+data:
+  config.json: {{ $m.config | toJson | quote }}
+  intent.json: {{ dict "version" "v0" "intents" $m.rows | toPrettyJson | quote }}
+  targets.json: {{ dict "probeLabels" $m.probeLabels "targets" $m.targets | toPrettyJson | quote }}
+{{- range $m.config.namespaces }}
+---
+# What the collector in {{ . }} tries to reach: the declared list and nothing else.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: posture-probe-endpoints
+  namespace: {{ . }}
+  labels:
+    {{- include "pp.labels" $ | nindent 4 }}
+data:
+  endpoints.json: {{ $m.endpoints | toJson | quote }}
+  endpoints-empty.json: "[]"
+  settle.json: {{ dict . (get $m.settle .) | toJson | quote }}
+{{- end }}
+{{- end }}

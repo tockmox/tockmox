@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}Upgrade{% endblock %}
+{% block main %}
+<h1>Upgrade{% if tgt %} to {{ tgt_rev }}{% endif %}</h1>
+<p class="lede">This page changes nothing. It checks your platform, then shows the steps from the upgrade guide with your versions filled in. The upgrade itself is a one-line commit to your site repository, which Argo CD then applies.</p>
+
+{% if not cur %}
+<p>{{ badge("unknown", "Version unknown") }} The running version could not be read, so the steps below keep their placeholders.</p>
+{% endif %}
+{% if not tgt %}
+<form method="get" action="/upgrade" class="panel">
+  <label for="to">Version to upgrade to</label>
+  <input id="to" name="to" type="text" inputmode="text" autocomplete="off" placeholder="for example 0.8.0" pattern="v?[0-9]+\.[0-9]+\.[0-9]+.*" required>
+  <button class="btn" type="submit">Show the steps</button>
+  <p class="muted">Release tags are on the project's releases page. With the update check on, the newest one is filled in for you.</p>
+</form>
+{% else %}
+<p>From <strong>{{ cur_rev or "your current version" }}</strong> to <strong>{{ tgt_rev }}</strong>: a <strong>{{ kind }}</strong> upgrade.{% if feed.verified %} Release details come from the verified update feed.{% endif %}</p>
+{% endif %}
+
+<section class="panel" aria-labelledby="pre-h">
+  <h2 id="pre-h">Before you start</h2>
+  <p>{% if ready %}{{ badge("ok", "Ready") }} The checks this page can run all pass.{% else %}{{ badge("critical", "Not ready") }} Upgrading a cluster that is already unhealthy means you cannot tell the release from the fault. Fix these first.{% endif %}</p>
+  <ul class="checks">
+  {% for c in checks %}
+    <li>{{ badge(c.state) }} <span>{{ c.label }}</span>{% if c.detail %}<span class="muted">: {{ c.detail }}</span>{% endif %}</li>
+  {% endfor %}
+  </ul>
+</section>
+
+{% if breaking %}
+<section class="panel warnbox" aria-labelledby="brk-h">
+  <h2 id="brk-h">Breaking changes on the way</h2>
+  <p>Each release's breaking changes apply to you even if you skip past it. Make the edits in the same commit as the version bump.</p>
+  <ul>{% for v, b in breaking %}<li><strong>{{ v }}</strong>: {{ b }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+<section class="panel steps" aria-labelledby="steps-h">
+  <h2 id="steps-h">Steps</h2>
+  <p>Follow <em>Upgrade to a new release</em> (<code>docs/deployment/upgrade.md</code>). For a {{ kind if kind != "unknown" else "" }} upgrade it requires steps {{ steps|join(", ") }}. The commands below are the guide's, with your values set once at the top.</p>
+  <ol>
+    <li><h3>Set your values once</h3>
+      <p class="where">On your workstation</p>
+<pre tabindex="0"><code>export SITE_REPO=YOUR_SITE_REPO_PATH
+export CURRENT_REVISION={{ cur_rev or "YOUR_CURRENT_REVISION" }}
+export TARGET_REVISION={{ tgt_rev or "YOUR_TARGET_REVISION" }}
+test -f "$SITE_REPO/bootstrap/root.yaml" &amp;&amp; echo "SITE_REPO: $SITE_REPO"</code></pre></li>
+    <li><h3>Write down what you are on now (step 0)</h3>
+<pre tabindex="0"><code>kubectl -n {{ argocd_ns }} get applications -o \
+  custom-columns='LAYER:.metadata.name,REVISION:.spec.sources[0].targetRevision,SYNC:.status.sync.status,HEALTH:.status.health.status'</code></pre></li>
+    <li><h3>Read the release notes (step 1)</h3><p>Every version between {{ cur or "yours" }} and {{ tgt or "the target" }}. Breaking entries list the values you must add.</p></li>
+    {% if 2 in steps %}<li><h3>Back up, check customisations, diff the render (steps 2 to 4)</h3><p>The guide's steps 2, 3 and 4. A backup you have restored at least once is the only way back from a prune.</p></li>{% endif %}
+    <li><h3>Move the revision (step 5)</h3>
+      <p class="where">In your site repository clone</p>
+<pre tabindex="0"><code>cd "$SITE_REPO"
+sed -i.bak "s|targetRevision: $CURRENT_REVISION|targetRevision: $TARGET_REVISION|" \
+  bootstrap/applications/*.yaml
+rm -f bootstrap/applications/*.bak
+git diff --stat
+git commit -am "upgrade Tockmox to $TARGET_REVISION"
+git push</code></pre>
+      <p>Leave lines reading <code>targetRevision: main</code> alone. Those track your own repository.</p></li>
+    <li><h3>Watch it land (steps 6 and 7)</h3><p><a href="/status">The status page</a> shows each layer's revision, sync and health as Argo CD reconciles. Every layer should reach {{ tgt or "the new revision" }}, Synced and Healthy. Then open the consoles you use and sign in: that is the only check that proves sign-in still works.</p></li>
+  </ol>
+</section>
+{% endblock %}

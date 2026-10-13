@@ -1,0 +1,90 @@
+{{- if include "tockmox.appEnabled" (dict "ctx" $ "app" "barmanPlugin") }}
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+THE BARMAN PLUGIN'S CERTIFICATES, AUTHORED HERE SO THEY CAN CARRY A SYNC WAVE.
+
+The plugin-barman-cloud subchart renders its own selfSigned Issuer and two
+Certificates, and its templates put commonAnnotations on the Deployment but
+not on the cert-manager.io resources ... which are exactly the ones that need
+an annotation. On a greenfield first sync those resources are validated by
+cert-manager's admission webhook, which the SAME sync is still starting;
+applied flat at wave 0, the webhook rejects the Issuer, the plugin Deployment
+then waits forever on TLS Secrets that can never issue, and the whole layer
+wedges. Reproduced on two consecutive greenfield installs (2026-08-19).
+
+So the subchart's issuer and certificate creation are switched OFF in values
+(certificate.createIssuer / createClientCertificate / createServerCertificate)
+and the same three objects are rendered here, byte-equivalent in spec, at
+wave 3 ... after cert-manager reports Healthy. The names, secret names and
+usages MUST match what the subchart's Deployment mounts; they are pinned by
+upstream (the values file says in caps not to change the service name because
+the certificate derives from it).
+
+If a plugin-barman-cloud upgrade ever adds annotation support to these
+templates, delete this file and re-enable the subchart's own.
+*/ -}}
+{{- $svcName := (index .Values "plugin-barman-cloud" "service" | default dict).name | default "barman-cloud" }}
+{{- $issuer := printf "%s-plugin-barman-cloud-selfsigned-issuer" .Release.Name }}
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{ $issuer }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: barman-cloud-client
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  commonName: barman-cloud-client
+  duration: 2160h
+  isCA: false
+  issuerRef:
+    group: cert-manager.io
+    kind: Issuer
+    name: {{ $issuer }}
+  renewBefore: 360h
+  secretName: barman-cloud-client-tls
+  usages:
+    - client auth
+  privateKey:
+    rotationPolicy: Always
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: barman-cloud-server
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  commonName: {{ $svcName }}
+  dnsNames:
+    - {{ $svcName }}
+  duration: 2160h
+  isCA: false
+  issuerRef:
+    group: cert-manager.io
+    kind: Issuer
+    name: {{ $issuer }}
+  renewBefore: 360h
+  secretName: barman-cloud-server-tls
+  usages:
+    - server auth
+  privateKey:
+    rotationPolicy: Always
+{{- end }}

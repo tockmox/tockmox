@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The gates run on macOS too, not only on Linux (TM-1004).
+#
+# On 2026-10-09 tools/check-all.sh failed five gates on the maintainer's Mac
+# with CI's own helm, bash and yq. Every one was BSD userland: a bare `sed -i`
+# that BSD sed reads as a backup suffix, `wc -l` padding its count, a grep
+# alternation BSD does not anchor. The gates had only ever run on ubuntu-latest,
+# so a Mac was the first place they could fail (TM-0996). This job makes a
+# GitHub macOS runner that first place instead of a contributor's laptop.
+#
+# It is its own workflow, not a step in ci.yaml, on purpose: ci.yaml's named
+# steps are a counted, pinned surface (tools/doc-claims.txt, "ci.yaml runs N
+# gates") and this proves portability of the existing gates rather than adding
+# one. Gates that need a tool this runner does not get (promtool, gitleaks,
+# kubeconform, the MkDocs venv) report SKIPPED, as they do on a laptop.
+#
+# WHEN IT RUNS. Weekly and by hand, NEVER on a pull request (TM-1006, Jeff
+# 2026-10-11). It ran on every PR touching tools/**, which on a release night
+# was most of them, and a macOS runner took longer than the rest of CI put
+# together for a portability signal that changes rarely. A BSD-userland break
+# now surfaces at the Monday run, or at `gh workflow run portability-macos.yaml`
+# before a release; the Linux check-all stays the per-PR gate.
+name: portability-macos
+on:
+  schedule:
+    - cron: '23 9 * * 1'   # Mondays 09:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  HELM_VERSION: "v4.3.0"
+
+jobs:
+  check-all-macos:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: the laptop toolchain CONTRIBUTING.md names
+        # bash 4+ (check-capabilities.sh and check-trust-wiring.sh use
+        # associative arrays), mikefarah yq, and PyYAML. Homebrew's bash lands
+        # first on PATH on these runners, which is also how the maintainer's
+        # Mac is set up. sed, grep, wc and awk stay BSD: that is the point.
+        shell: bash -euo pipefail {0}
+        run: |
+          brew list bash >/dev/null 2>&1 || brew install bash
+          brew list yq   >/dev/null 2>&1 || brew install yq
+          python3 -m pip install -q pyyaml 2>/dev/null \
+            || python3 -m pip install -q --break-system-packages pyyaml
+          echo "bash:   $(bash --version | head -1) at $(command -v bash)"
+          echo "helm:   $(helm version --short)"
+          echo "yq:     $(yq --version)"
+          echo "sed:    $(sed --version 2>&1 | head -1)"
+          echo "python: $(python3 --version) PyYAML $(python3 -c 'import yaml; print(yaml.__version__)')"
+
+      - name: every static gate, on BSD userland
+        shell: bash -euo pipefail {0}
+        run: bash tools/check-all.sh

@@ -1,0 +1,178 @@
+# TockmoxArgoCDCannotCompare and TockmoxArgoCDMetricsAbsent ... TM-0739.
+#
+# DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules
+# (the rule renders at the chart defaults, apps.argocdMonitoring following
+# capabilities.observability).
+#
+# THE INCIDENT THIS PINS (2026-09-17, a lab install): nine Applications could not
+# read the product repository for 2.5 days, every one reading Health=Healthy.
+# The only signal was sync_status="Unknown". Each case below asserts BOTH
+# directions, because a rule that fires on everything and a rule that fires on
+# nothing both pass a one-sided test.
+#
+#   1  Unknown for the whole window FIRES, on the Applications that are
+#      Unknown and on no other, and carries severity critical. Silent at 29m,
+#      the minute before the `for: 30m` window completes.
+#   2  A short Unknown that clears (a refresh in flight, a repo-server restart)
+#      does NOT fire. This is what the 30m window is for.
+#   3  OutOfSync is NOT cannot-compare. ArgoCD read the desired state and it
+#      differs; selfHeal acts on it. This alert must stay silent for it, for as
+#      long as it likes, or the two states are no longer told apart.
+#   4  Health flapping while sync stays Unknown STILL FIRES. The series label set
+#      changes every five minutes (health_status flips); aggregating by
+#      (name, project) is what keeps the `for:` clock running. A rule on the
+#      raw series would reset on every flip and stay silent through the whole
+#      incident, the alert-series-churn family.
+#   5  Health=Healthy with sync Unknown fires: the incident's exact shape.
+#   6  TockmoxArgoCDMetricsAbsent: ArgoCD's metrics Services exist
+#      (kube_service_info) and no argocd_app_info series fires after 15m;
+#      present series (even Unknown ones) never fire it; and NO metrics Services
+#      means metrics are off, which must stay silent because the rule renders by
+#      default (TM-0739): a false alert on every install without ArgoCD metrics.
+evaluation_interval: 1m
+
+tests:
+  # 1 + 5. Two Applications, one Unknown and Healthy, one Synced.
+  - interval: 1m
+    input_series:
+      - series: 'argocd_app_info{name="tockmox-selfcheck", project="default", sync_status="Unknown", health_status="Healthy", job="argocd-metrics"}'
+        values: "1x60"
+      - series: 'argocd_app_info{name="tockmox-platform", project="default", sync_status="Synced", health_status="Healthy", job="argocd-metrics"}'
+        values: "1x60"
+    alert_rule_test:
+      - eval_time: 29m
+        alertname: TockmoxArgoCDCannotCompare
+        exp_alerts: []
+      - eval_time: 31m
+        alertname: TockmoxArgoCDCannotCompare
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              name: tockmox-selfcheck
+              project: default
+            exp_annotations:
+              summary: "ArgoCD cannot compare tockmox-selfcheck against its repository ... sync status Unknown, not OutOfSync"
+              runbook: docs/administration/argocd.md#when-argocd-cannot-read-the-repository-and-what-alerts
+              description: >-
+                ArgoCD has not been able to read the desired state of Application
+                tockmox-selfcheck (project default) for 30 minutes. This
+                is not OutOfSync: nothing is being compared, selfHeal has nothing to
+                heal toward, prune is not running, and the Application will keep
+                reporting Health Healthy because what it last applied is still
+                running. Usual causes are an expired or revoked repository
+                credential, a repoURL that no longer matches the credential's url,
+                or a revision that no longer exists. Read the reason with
+                `kubectl -n argocd get application tockmox-selfcheck -o
+                jsonpath='{.status.conditions}'`. If many Applications are listed
+                at once the cause is shared: the repository credential.
+
+  # 2. A 12-minute Unknown that clears must not page.
+  - interval: 1m
+    input_series:
+      - series: 'argocd_app_info{name="tockmox-selfcheck", project="default", sync_status="Unknown", health_status="Healthy", job="argocd-metrics"}'
+        values: "1x12 stale"
+      - series: 'argocd_app_info{name="tockmox-selfcheck", project="default", sync_status="Synced", health_status="Healthy", job="argocd-metrics"}'
+        values: "_x13 1x47"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: TockmoxArgoCDCannotCompare
+        exp_alerts: []
+
+  # 3. OutOfSync for three hours is a different alert (or none), never this one.
+  - interval: 1m
+    input_series:
+      - series: 'argocd_app_info{name="tockmox-platform", project="default", sync_status="OutOfSync", health_status="Healthy", job="argocd-metrics"}'
+        values: "1x180"
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: TockmoxArgoCDCannotCompare
+        exp_alerts: []
+
+  # 4. health_status flips every five minutes while sync stays Unknown.
+  - interval: 1m
+    input_series:
+      - series: 'argocd_app_info{name="tockmox-policy", project="default", sync_status="Unknown", health_status="Healthy", job="argocd-metrics"}'
+        values: "1 1 1 1 1 stale stale stale stale stale 1 1 1 1 1 stale stale stale stale stale 1 1 1 1 1 stale stale stale stale stale 1 1 1 1 1 stale stale stale stale stale 1 1 1 1 1 stale stale stale stale stale"
+      - series: 'argocd_app_info{name="tockmox-policy", project="default", sync_status="Unknown", health_status="Progressing", job="argocd-metrics"}'
+        values: "stale stale stale stale stale 1 1 1 1 1 stale stale stale stale stale 1 1 1 1 1 stale stale stale stale stale 1 1 1 1 1 stale stale stale stale stale 1 1 1 1 1 stale stale stale stale stale 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 29m
+        alertname: TockmoxArgoCDCannotCompare
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: TockmoxArgoCDCannotCompare
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              name: tockmox-policy
+              project: default
+            exp_annotations:
+              summary: "ArgoCD cannot compare tockmox-policy against its repository ... sync status Unknown, not OutOfSync"
+              runbook: docs/administration/argocd.md#when-argocd-cannot-read-the-repository-and-what-alerts
+              description: >-
+                ArgoCD has not been able to read the desired state of Application
+                tockmox-policy (project default) for 30 minutes. This
+                is not OutOfSync: nothing is being compared, selfHeal has nothing to
+                heal toward, prune is not running, and the Application will keep
+                reporting Health Healthy because what it last applied is still
+                running. Usual causes are an expired or revoked repository
+                credential, a repoURL that no longer matches the credential's url,
+                or a revision that no longer exists. Read the reason with
+                `kubectl -n argocd get application tockmox-policy -o
+                jsonpath='{.status.conditions}'`. If many Applications are listed
+                at once the cause is shared: the repository credential.
+
+  # 6a. Metrics Services exist, nothing scraped: absent fires after 15m, silent before.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="unrelated"}'
+        values: "1x40"
+      - series: 'kube_service_info{namespace="argocd", service="argocd-metrics"}'
+        values: "1x40"
+      - series: 'kube_service_info{namespace="argocd", service="argocd-server-metrics"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TockmoxArgoCDMetricsAbsent
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: TockmoxArgoCDMetricsAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "No ArgoCD application metrics ... the sync-state alert cannot fire"
+              runbook: docs/administration/argocd.md#its-metrics-are-off-until-you-turn-them-on
+              description: >-
+                ArgoCD's metrics Services exist, but Prometheus holds no
+                argocd_app_info series. TockmoxArgoCDCannotCompare is blind until
+                they return. Check that metrics are enabled on your ArgoCD
+                (controller.metrics.enabled) and that its metrics Service carries
+                the `argocd-metrics` label and an `http-metrics` port, which is what
+                the ServiceMonitor selects.
+
+  # 6b. Series present (Unknown ones included): the absent alert stays silent.
+  - interval: 1m
+    input_series:
+      - series: 'argocd_app_info{name="tockmox-selfcheck", project="default", sync_status="Unknown", health_status="Healthy", job="argocd-metrics"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxArgoCDMetricsAbsent
+        exp_alerts: []
+
+  # 6c. NO metrics Services (ArgoCD installed without metrics) and no series:
+  # metrics are off, not broken. Must stay silent for hours. Other Services in
+  # the argocd namespace and a same-named Service elsewhere must not count.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="unrelated"}'
+        values: "1x180"
+      - series: 'kube_service_info{namespace="argocd", service="argocd-server"}'
+        values: "1x180"
+      - series: 'kube_service_info{namespace="other", service="argocd-server-metrics"}'
+        values: "1x180"
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: TockmoxArgoCDMetricsAbsent
+        exp_alerts: []

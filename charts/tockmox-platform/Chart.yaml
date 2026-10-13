@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v2
+name: tockmox-platform
+description: "Storage, networking, ingress, certificates, node lifecycle, database operators."
+type: application
+version: 0.8.0
+appVersion: "0.1.0"
+annotations:
+  tockmox.com/sync-wave: "2"
+dependencies:
+  - name: tockmox-common
+    version: 0.8.0
+    repository: "file://../tockmox-common"
+
+  - name: cert-manager
+    version: v1.21.2
+    repository: "https://charts.jetstack.io"
+    condition: apps.certManager.enabled
+
+  - name: metallb
+    version: "0.16.1"
+    repository: "https://metallb.github.io/metallb"
+    condition: apps.metallb.enabled
+
+  - name: traefik
+    version: 41.7.0
+    repository: "https://traefik.github.io/charts"
+    condition: apps.traefik.enabled
+
+  - name: longhorn
+    version: "1.13.0"
+    repository: "https://charts.longhorn.io"
+    condition: apps.longhorn.enabled
+
+  # OCI, not the Pages URL, and the reason is not a preference (TM-0326).
+  # `https://cloudnative-pg.github.io/charts` answers 301 to
+  # `https://cloudnative-pg.io/charts/index.yaml` -- so the dependency was on a
+  # vendor-controlled apex domain that nothing here disclosed. On 2026-09-02
+  # that name stopped resolving and every CI run failed at `helm repo add`,
+  # reported as missing subcharts a dozen steps later. The OCI path is the
+  # project's own registry, is digest-addressed, needs no index.yaml, and has
+  # no redirect to a third host.
+  - name: cloudnative-pg
+    version: "0.29.1"
+    repository: "oci://ghcr.io/cloudnative-pg/charts"
+    condition: apps.cnpg.enabled
+
+  # The CNPG backup path, as a shipped component rather than a prerequisite.
+  #
+  # BUILD-OR-ADOPT: **Adopt**, per the 2026-08-15 landscape scan. This is the
+  # CloudNativePG project's own chart, from the same repository as the operator
+  # above, and it is what the barman ObjectStore and ScheduledBackup CRs the AI
+  # layer renders actually need in order to do anything.
+  #
+  # Until now those CRs rendered against a plugin the operator had to install by
+  # hand, which meant the flagship backup claim had an unshipped prerequisite
+  # underneath it.
+  - name: plugin-barman-cloud
+    version: 0.8.1
+    repository: "oci://ghcr.io/cloudnative-pg/charts"
+    # The comma list is a FALLBACK, not an AND: Helm uses the first path
+    # that resolves. Unset apps.barmanPlugin.enabled therefore follows the
+    # capability, and setting it wins either way. Same four outcomes as
+    # `tockmox.capabilityEnabled` gives Tockmox-authored templates, which
+    # is the point: one rule, both mechanisms.
+    condition: apps.barmanPlugin.enabled,capabilities.dataProtection.enabled
+
+  - name: kured
+    version: "6.1.0"
+    repository: "https://kubereboot.github.io/charts"
+    condition: apps.kured.enabled
+
+  # The CSI snapshot control plane. Nothing on a stock cluster provides
+  # `snapshot.storage.k8s.io`, and Longhorn's own snapshot CRD is a different,
+  # storage-internal thing that looks like it covers this and does not.
+  #
+  # BUILD-OR-ADOPT: **Adopt**, per the 2026-08-15 landscape scan. The Piraeus
+  # chart is the one the wider ecosystem uses and the one the maintainer's own
+  # deployment has run for months.
+  - name: snapshot-controller
+    version: "5.3.0"
+    repository: "https://piraeus.io/helm-charts/"
+    condition: apps.snapshotController.enabled,capabilities.dataProtection.enabled

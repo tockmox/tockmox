@@ -1,0 +1,161 @@
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "networkPolicy" "app" "devops_netpol") }}
+{{- if not .Values.namespaces.devops }}
+{{- fail "\n\napps.devops_netpol.enabled is true but namespaces.devops is blank.\nThis bundle guards the namespace tockmox-devops installs into. Either name it\nor set apps.devops_netpol.enabled=false.\n" }}
+{{- end }}
+# SPDX-License-Identifier: Apache-2.0
+---
+# Default-deny INGRESS for the devops namespace.
+#
+# THIS is the bundle that guards the Harbor this repository ships. Harbor is a
+# SUBCHART of tockmox-devops, so Helm installs it into that release's
+# namespace, which the installer sets to `namespaces.devops`. The separate
+# `apps.harbor_netpol` bundle targets `namespaces.harbor` and is for a Harbor
+# you installed as its own release elsewhere; it has never guarded this one.
+# One namespace, one bundle, and this is the one that matches shipped reality.
+#
+# TWO workloads live here, not one, and that is why this is its own file rather
+# than the harbor bundle with the namespace swapped. Argo Workflows is in this
+# namespace too. A default-deny written for a Harbor component mesh would take
+# the workflows UI and API offline in the same breath as it protected the
+# registry, and the failure would look like Argo breaking rather than like a
+# policy landing.
+#
+# INGRESS ONLY, deliberately, the same phase-1 posture as the ai namespace.
+# `policyTypes` omits Egress, so egress stays open. The reason is the workflow
+# controller: it talks to the API server and to whatever artifact store the
+# operator points it at, and that store is site-specific by definition, so
+# enumerating it here is not possible. Locking egress without enumerating it
+# first produces workflows that fail to fetch or archive with a timeout, which
+# reads as a network fault for as long as it takes to find this file.
+#
+# CORRECTED 2026-09-02: this comment previously also cited Harbor's proxy cache
+# and trivy's vulnerability-database fetch. Neither ships ... Harbor stopped
+# being a component in 0.1.0 (see docs/deployment/registry.md) and trivy was
+# never ported. Naming two absent components as the reason for a security
+# posture made the posture look less considered than it is.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: default-deny-ingress
+  namespace: {{ .Values.namespaces.devops }}
+spec:
+  podSelector: {}          # every pod in the namespace
+  policyTypes:
+    - Ingress              # Egress intentionally omitted (stays open)
+---
+# Allow 1 of 3: the intra-namespace mesh, which covers both workloads.
+#
+# Harbor's component graph is entirely internal, so one rule closes all of it:
+# the chart's own nginx fronts core, portal and registry; core reaches
+# database:5432 and redis:6379; core and jobservice exchange work; jobservice
+# drives registry for garbage collection and replication; core calls trivy for
+# scans; registry calls back to core's token service to authorize every pull.
+# Seven components, every leg starting and ending in this namespace.
+#
+# The same rule carries Argo Workflows: the server reaches the workflow
+# controller, workflow pods land in this namespace unless you have told the
+# controller to run them elsewhere, and a daemoned step is reached by later
+# steps on its pod IP. Those are all intra-namespace as well.
+#
+# This is the one rule in the bundle that actually blocks traffic today.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-intra-namespace
+  namespace: {{ .Values.namespaces.devops }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.devops }}
+---
+# Allow 2 of 3: Traefik, for BOTH ingresses this layer publishes.
+#
+#   harbor.<internalDomain>     -> Service `harbor`, port 80. In clusterIP
+#                                  expose mode that Service is the chart's own
+#                                  nginx, which routes portal, core API and
+#                                  registry paths behind a single name.
+#   workflows.<internalDomain>  -> Service `<release>-argo-workflows-server`,
+#                                  port 2746.
+#
+# This rule is also the pull path for the proxy cache. When a node's containerd
+# is configured to mirror through `harbor.<internalDomain>`, the pull goes node
+# -> Traefik's LoadBalancer address -> Traefik pod -> here. Harbor sees the
+# Traefik pod as the source, never the node, which is why this bundle grants no
+# ipBlock for `global.lanCIDR` and does not need one. If you instead expose
+# Harbor to nodes on a Service IP or a NodePort, that is a different source and
+# this rule will not admit it.
+#
+# Scoped to the Traefik pod, not its whole namespace. Ports are left open on
+# purpose: the two backends listen on different ports, the restriction that
+# matters is which pod may open the connection, and a port list here fails
+# silently the first time an upstream chart moves one.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-from-traefik
+  namespace: {{ .Values.namespaces.devops }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.traefik }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+---
+# Allow 3 of 3: Prometheus scrape.
+#
+# Stated plainly, because the other bundles carry the same rule and it is easy
+# to read more into it: on a stock install this rule admits nothing, because
+# neither workload emits metrics yet. Harbor ships `metrics.enabled: false`,
+# and the argo-workflows chart ships `controller.metricsConfig.enabled: false`,
+# so no metrics Service and no ServiceMonitor exist to scrape.
+#
+# It ships anyway so that turning either one on is a values change instead of a
+# values change plus a policy change, and so that the first person to enable
+# Harbor's exporter does not debug a scrape failure that is really a
+# NetworkPolicy. Harbor's exporter and the controller's port 9090 are both
+# covered the moment they appear.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-prometheus-scrape
+  namespace: {{ .Values.namespaces.devops }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.monitoring }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+        {{- range (($.Values.platformNetpol | default dict).extraPrometheusNamespaces | default list) }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+        {{- end }}
+{{- end }}

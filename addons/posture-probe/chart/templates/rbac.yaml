@@ -1,0 +1,71 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+THE VERB SET IS THE SAFETY CONTRACT (threat model s1). The differential's
+identity may:
+  get, list   namespaces (cluster-wide: labels decide namespaceSelector matches)
+  get, list   pods and networkpolicies, in the declared namespaces only (Roles,
+              not a ClusterRole: it reads nothing outside the scope you declared)
+  create      selfsubjectaccessreviews, the authorization oracle: a create there
+              returns a verdict and changes nothing. It is how the Job proves, at
+              the start of every run, that this list is still all it holds.
+Nothing else: no update, patch, delete or deletecollection anywhere, no create on
+any other resource, no secrets, no pods/exec, pods/attach or pods/log, no
+impersonate, escalate or bind, no wildcard. tools/check-posture-probe.sh refuses
+a render that adds any of them; the Job refuses to run with any of them.
+*/ -}}
+{{- if .Values.enabled -}}
+{{- $m := include "pp.model" . | fromJson -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: posture-probe
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pp.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: posture-probe-read-namespaces
+  labels:
+    {{- include "pp.labels" . | nindent 4 }}
+rules:
+  - { apiGroups: [""], resources: [namespaces], verbs: [get, list] }
+  - { apiGroups: [authorization.k8s.io], resources: [selfsubjectaccessreviews], verbs: [create] }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: posture-probe-read-namespaces
+  labels:
+    {{- include "pp.labels" . | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: posture-probe-read-namespaces }
+subjects:
+  - { kind: ServiceAccount, name: posture-probe, namespace: {{ .Release.Namespace }} }
+{{- range $m.config.namespaces }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: posture-probe-read
+  namespace: {{ . }}
+  labels:
+    {{- include "pp.labels" $ | nindent 4 }}
+rules:
+  - { apiGroups: [""], resources: [pods], verbs: [get, list] }
+  - { apiGroups: [networking.k8s.io], resources: [networkpolicies], verbs: [get, list] }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: posture-probe-read
+  namespace: {{ . }}
+  labels:
+    {{- include "pp.labels" $ | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: posture-probe-read }
+subjects:
+  - { kind: ServiceAccount, name: posture-probe, namespace: {{ $.Release.Namespace }} }
+{{- end }}
+{{- end }}

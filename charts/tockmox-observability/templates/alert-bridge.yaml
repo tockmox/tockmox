@@ -1,0 +1,524 @@
+{{- $notify := include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "notifications" "override" .Values.notifications.enabled) }}
+{{- if and $notify .Values.notifications.bridge.enabled }}
+{{- /*
+Alertmanager -> ntfy / Apprise bridge.
+
+WHY A BRIDGE EXISTS AT ALL. Alertmanager's webhook_configs posts its own native
+envelope ({"alerts":[...],"status":...}). ntfy wants the message in the BODY
+with Title/Priority/Tags as headers; Apprise's /notify/{key} rejects anything
+without a `body` field with HTTP 400 "Payload lacks minimum requirements".
+Neither speaks Alertmanager. A small standard-library bridge translates between them.
+
+WHY IT EXPORTS METRICS. The failure this whole layer exists to prevent is
+alerting that cannot page anyone ... and you cannot page someone to tell them
+paging is broken. So the bridge publishes its own delivery health as metrics:
+Prometheus scrapes it, `TockmoxNotificationSinkDown` fires, and the breakage is
+visible on a dashboard even when nothing can leave the cluster. Absence renders
+not-green, the same contract the selfcheck layer states.
+
+Stdlib only: no pip install on container start, so an airgapped cluster with a
+mirrored python image runs this unchanged.
+*/ -}}
+{{- $ns := .Values.namespaces.monitoring -}}
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-alert-bridge
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-alert-bridge
+data:
+  bridge.py: |
+    """Alertmanager webhook -> ntfy or Apprise. Standard library only."""
+    import http.server
+    import json
+    import os
+    import sys
+    import threading
+    import time
+    import urllib.error
+    import urllib.request
+
+    SINK = os.environ.get("SINK", "ntfy")
+    NTFY_URL = os.environ.get("NTFY_URL", "")
+    NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "alerts")
+    NTFY_TOKEN = os.environ.get("NTFY_TOKEN", "")
+    NTFY_TOKEN_FILE = os.environ.get(
+        "NTFY_TOKEN_FILE", "/etc/tockmox/ntfy/NTFY_BRIDGE_TOKEN")
+    APPRISE_URL = os.environ.get("APPRISE_URL", "")
+    APPRISE_KEY = os.environ.get("APPRISE_KEY", "tockmox")
+    PORT = int(os.environ.get("PORT", "8080"))
+    PROBE_INTERVAL = int(os.environ.get("PROBE_INTERVAL", "60"))
+
+    SEVERITY_PRIORITY = {"critical": "5", "warning": "3", "info": "2", "none": "1"}
+    STATUS_TAG = {"firing": "rotating_light", "resolved": "white_check_mark"}
+
+    # Counters are process-local and monotonic; with replicas > 1 Prometheus
+    # sees one series per pod, which is what you want -- a single wedged
+    # replica is a real fault and must not be averaged away.
+    STATE = {"forwarded": 0, "failed": 0, "sink_up": 0, "last_ok": 0.0}
+    LOCK = threading.Lock()
+
+
+    def log(msg):
+        print(msg, flush=True)
+
+
+    def ntfy_token():
+        """Read the bearer token at CALL time, never once at start.
+
+        TM-0488. Environment variables are resolved exactly once, when the
+        container starts, and install.md applies the ntfy Secret at step 3c --
+        which is AFTER the layers sync, correctly, because the namespaces do
+        not exist until the policy wave creates them. So the bridge always
+        started BEFORE its token existed, took the `optional: true` path to an
+        empty string, and published unauthenticated to a deny-all ntfy for the
+        life of the pod. Nothing re-read the Secret; nothing restarted the
+        Deployment. Every by-the-book install ended with alerting dead.
+
+        A MOUNTED Secret does not have that problem. kubelet repopulates the
+        volume when the Secret appears, and again whenever it changes, with no
+        restart and no help from us.
+
+        Measured 2026-09-10 on a single-node k3s cluster, on a pod matching
+        this container's securityContext (runAsUser 65534,
+        readOnlyRootFilesystem):
+
+            Secret created  02:13:23  ->  file present  02:14:16   (53s)
+            Secret rotated  02:14:23  ->  file updated  02:15:40   (77s)
+
+        The env var read EMPTY through both, which is the defect reproduced
+        alongside its fix.
+
+        NTFY_TOKEN still wins when set, so an operator injecting the token by
+        some other route is unaffected, and so is anyone running ntfy without
+        auth: absent stays absent and the request simply goes unauthenticated,
+        exactly as before.
+        """
+        if NTFY_TOKEN:
+            return NTFY_TOKEN
+        try:
+            with open(NTFY_TOKEN_FILE, "r", encoding="utf-8") as fh:
+                return fh.read().strip()
+        except OSError:
+            # Absent is the normal state between the layer syncing and 3c
+            # running. It is reported through tockmox_notify_token_present and
+            # tockmox_notify_failed_total, not by failing here.
+            return ""
+
+
+    def sink_health_url():
+        """A cheap endpoint that proves the sink is reachable AND authorised."""
+        if SINK == "apprise":
+            return f"{APPRISE_URL}/status"
+        return f"{NTFY_URL}/v1/health"
+
+
+    def probe_sink():
+        """Background liveness probe of the SINK, not of ourselves.
+
+        A bridge that is up while its sink is unreachable is the exact shape of
+        'alerting that looks fine and pages nobody', so it gets its own gauge.
+        """
+        while True:
+            ok = False
+            try:
+                req = urllib.request.Request(sink_health_url(), method="GET")
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    ok = 200 <= resp.status < 300
+            except Exception as e:  # noqa: BLE001 - any failure is "down"
+                log(f"sink probe failed: {e}")
+            with LOCK:
+                STATE["sink_up"] = 1 if ok else 0
+            time.sleep(PROBE_INTERVAL)
+
+
+    def render(alert, group_status):
+        labels = alert.get("labels") or {}
+        annotations = alert.get("annotations") or {}
+        status = alert.get("status", group_status)
+        alertname = labels.get("alertname", "Unknown")
+        severity = str(labels.get("severity", "unknown")).lower()
+        namespace = labels.get("namespace", "")
+        summary = annotations.get("summary", "")
+        description = annotations.get("description", "")
+
+        parts = []
+        if summary:
+            parts.append(summary)
+        if description and description != summary:
+            parts.append(description)
+        meta = []
+        if severity:
+            meta.append(f"severity={severity}")
+        if namespace:
+            meta.append(f"ns={namespace}")
+        if meta:
+            parts.append(" | ".join(meta))
+
+        return {
+            "title": f"[{status.upper()}] {alertname}",
+            "message": "\n\n".join(parts) if parts else f"{alertname} ({status})",
+            "priority": SEVERITY_PRIORITY.get(severity, "3"),
+            "tag": STATUS_TAG.get(status, "warning"),
+            "severity": severity,
+        }
+
+
+    def forward(alert, group_status):
+        """Deliver one alert. Returns (ok, error text or None, HTTP code or 0).
+
+        The code is 0 when the sink never answered (timeout, refused, DNS). It
+        is returned so do_POST can write the per-delivery line (TM-0780).
+        """
+        m = render(alert, group_status)
+        if SINK == "apprise":
+            payload = json.dumps({
+                "title": m["title"],
+                "body": m["message"],
+                # Apprise types: info | success | warning | failure
+                "type": "failure" if m["severity"] == "critical" else "warning",
+                # The config is locked (apprise.yaml), and a locked key notifies only a named
+                # tag: every line of the Secret is `<key>=<url>` (TM-1020).
+                "tag": APPRISE_KEY,
+            }).encode()
+            req = urllib.request.Request(
+                f"{APPRISE_URL}/notify/{APPRISE_KEY}",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+        else:
+            headers = {"Title": m["title"], "Priority": m["priority"], "Tags": m["tag"]}
+            token = ntfy_token()
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            req = urllib.request.Request(
+                f"{NTFY_URL}/{NTFY_TOPIC}",
+                data=m["message"].encode("utf-8"),
+                headers=headers,
+                method="POST",
+            )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return (200 <= resp.status < 300), None, resp.status
+        except urllib.error.HTTPError as e:
+            # 403 here almost always means the ntfy auth Secret is missing or
+            # the token lacks write access on the topic. Say so by name.
+            return False, f"HTTP {e.code} from sink ({e.reason})", e.code
+        except Exception as e:  # noqa: BLE001
+            return False, str(e), 0
+
+
+    def delivery_line(alert, group_status, ok, code):
+        """One logfmt line per alert handed to the sink (TM-0780).
+
+        `grep '^delivery '` answers "what did we deliver". Only labels that are
+        already in the alert are written: no message body, no sink URL, no
+        token. alertname is JSON-quoted so a label with a space or a quote
+        cannot break the key=value parse. http=0 means the sink did not answer.
+        """
+        labels = alert.get("labels") or {}
+        return (
+            f"delivery alertname={json.dumps(str(labels.get('alertname', 'Unknown')))}"
+            f" severity={str(labels.get('severity', 'unknown')).lower()}"
+            f" status={alert.get('status', group_status)}"
+            f" fingerprint={json.dumps(str(alert.get('fingerprint', '')))}"
+            f" sink={SINK}"
+            f" http={code}"
+            f" result={'ok' if ok else 'failed'}"
+        )
+
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, fmt, *args):
+            log(f"{self.address_string()} {fmt % args}")
+
+        def do_GET(self):
+            if self.path == "/healthz":
+                self._text(200, "ok\n")
+            elif self.path == "/metrics":
+                self._text(200, self._metrics(), "text/plain; version=0.0.4")
+            else:
+                self.send_error(404)
+
+        def _text(self, code, body, ctype="text/plain"):
+            raw = body.encode()
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def _metrics(self):
+            with LOCK:
+                s = dict(STATE)
+            # Read live rather than from STATE: the token can arrive (or
+            # rotate) at any time without a restart, which is the whole point
+            # of TM-0488's fix, so a cached answer would be the stale half of
+            # the thing this gauge exists to report.
+            token_present = 1 if ntfy_token() else 0
+            return (
+                "# HELP tockmox_notify_forwarded_total Alerts delivered to the sink.\n"
+                "# TYPE tockmox_notify_forwarded_total counter\n"
+                f"tockmox_notify_forwarded_total {s['forwarded']}\n"
+                "# HELP tockmox_notify_failed_total Alerts the sink refused or did not answer.\n"
+                "# TYPE tockmox_notify_failed_total counter\n"
+                f"tockmox_notify_failed_total {s['failed']}\n"
+                # REACHABLE IS NOT AUTHORISED. ntfy answers /v1/health without
+                # credentials, so this gauge reads 1 on a bridge that cannot
+                # publish a single message -- which is exactly what it did for
+                # the whole of the 2026-09-10 gate run. It is a useful signal
+                # and it is NOT sufficient on its own; pair it with
+                # tockmox_notify_token_present below.
+                "# HELP tockmox_notify_sink_up Sink reachable and answering (1) or not (0). Reachability only: says nothing about whether we may publish.\n"
+                "# TYPE tockmox_notify_sink_up gauge\n"
+                f"tockmox_notify_sink_up {s['sink_up']}\n"
+                "# HELP tockmox_notify_token_present A bearer token is available to authenticate with (1) or not (0). Zero on a deny-all ntfy means nothing can be delivered, whatever tockmox_notify_sink_up says.\n"
+                "# TYPE tockmox_notify_token_present gauge\n"
+                f"tockmox_notify_token_present {token_present}\n"
+                "# HELP tockmox_notify_last_success_timestamp_seconds Unix time of the last successful delivery.\n"
+                "# TYPE tockmox_notify_last_success_timestamp_seconds gauge\n"
+                f"tockmox_notify_last_success_timestamp_seconds {s['last_ok']}\n"
+            )
+
+        def do_POST(self):
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                data = json.loads(self.rfile.read(length))
+            except Exception as e:  # noqa: BLE001
+                log(f"bad request body: {e}")
+                self.send_error(400, "malformed webhook payload")
+                return
+
+            group_status = data.get("status", "firing")
+            ok_count = fail_count = 0
+            for alert in data.get("alerts", []):
+                ok, err, code = forward(alert, group_status)
+                log(delivery_line(alert, group_status, ok, code))
+                if ok:
+                    ok_count += 1
+                else:
+                    fail_count += 1
+                    log(f"forward error: {err}")
+
+            with LOCK:
+                STATE["forwarded"] += ok_count
+                STATE["failed"] += fail_count
+                if ok_count:
+                    STATE["last_ok"] = time.time()
+
+            # 200 even on partial failure: Alertmanager retries the WHOLE group,
+            # which would re-deliver the ones that succeeded. The failure is
+            # reported through metrics instead, where it can be alerted on.
+            self._text(200, json.dumps({"forwarded": ok_count, "failed": fail_count}) + "\n",
+                       "application/json")
+
+
+    if __name__ == "__main__":
+        if SINK == "apprise" and not APPRISE_URL:
+            log("FATAL: SINK=apprise but APPRISE_URL is empty")
+            sys.exit(1)
+        if SINK == "ntfy" and not NTFY_URL:
+            log("FATAL: SINK=ntfy but NTFY_URL is empty")
+            sys.exit(1)
+        threading.Thread(target=probe_sink, daemon=True).start()
+        log(f"tockmox alert bridge listening on :{PORT}, sink={SINK}")
+        http.server.HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tockmox-alert-bridge
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-alert-bridge
+spec:
+  # More than one replica because this is the alert DELIVERY path. A single
+  # pod means one node drain silences every alert you have, quietly.
+  replicas: {{ .Values.notifications.bridge.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-alert-bridge
+  template:
+    metadata:
+      labels:
+        {{- include "tockmox.labels" . | nindent 8 }}
+        app.kubernetes.io/name: tockmox-alert-bridge
+      annotations:
+        tockmox.com/config-hash: {{ toYaml .Values.notifications | sha256sum | trunc 16 | quote }}
+    spec:
+      # No Kubernetes API calls: a ServiceAccount of its own and no token (TM-0759,
+      # CIS 5.1.5 and 5.1.6).
+      serviceAccountName: tockmox-alert-bridge
+      automountServiceAccountToken: false
+      priorityClassName: {{ .Values.notifications.priorityClassName }}
+      # Soft, not required: on a single-schedulable-node cluster a hard rule
+      # leaves the second replica Pending forever and the PDB then blocks drains.
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: tockmox-alert-bridge
+                topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: bridge
+          image: {{ include "tockmox.image" (dict "ctx" $ "repo" .Values.notifications.bridge.image) }}
+          command: ["python3", "/app/bridge.py"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          env:
+            - name: SINK
+              value: {{ .Values.notifications.bridge.sink | quote }}
+            - name: NTFY_URL
+              value: "http://tockmox-ntfy.{{ $ns }}.svc"
+            - name: NTFY_TOPIC
+              value: {{ .Values.notifications.ntfy.topic | quote }}
+            - name: APPRISE_URL
+              value: "http://tockmox-apprise.{{ $ns }}.svc:8000"
+            - name: APPRISE_KEY
+              value: {{ .Values.notifications.apprise.configKey | quote }}
+            - name: PORT
+              value: "8080"
+            # DELIBERATELY NOT a secretKeyRef for the token (TM-0488). An env
+            # var is resolved once, at container start, and install.md applies
+            # this Secret at step 3c -- after the layers sync. The bridge
+            # therefore always started before its token existed, resolved it to
+            # empty, and published unauthenticated for the life of the pod.
+            # `optional: true` was the right instinct (start and be visibly
+            # broken, rather than wedge in CreateContainerConfigError where no
+            # alert sees it) and the sequencing defeated it: the optional path
+            # fails open and STAYS failed, while a non-optional reference would
+            # have self-healed on kubelet's retry.
+            #
+            # The token now arrives through the `ntfy-auth` volume below, which
+            # kubelet repopulates when the Secret appears and when it rotates,
+            # and bridge.py re-reads on every forward. NTFY_TOKEN is kept as an
+            # override for operators who inject it some other way.
+            - name: NTFY_TOKEN_FILE
+              value: /etc/tockmox/ntfy/NTFY_BRIDGE_TOKEN
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.notifications.bridge.resources | nindent 12 }}
+          volumeMounts:
+            - name: script
+              mountPath: /app
+              readOnly: true
+            - name: ntfy-auth
+              mountPath: /etc/tockmox/ntfy
+              readOnly: true
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+      volumes:
+        - name: script
+          configMap:
+            name: tockmox-alert-bridge
+        # `optional` so the pod still starts before 3c has run, and so an
+        # operator running ntfy without auth is not forced to create a Secret
+        # they have no use for. Unlike the env var this replaced, an optional
+        # volume is not a one-shot: kubelet keeps resyncing it, so the token
+        # lands on its own once the Secret exists. Measured 2026-09-10 on a
+        # single-node k3s cluster at 53s for first arrival and 77s for a
+        # rotation, both with no restart. Do NOT add subPath here -- a subPath
+        # mount is exactly the case kubelet does NOT update, which would
+        # reintroduce TM-0488 wearing different clothes.
+        - name: ntfy-auth
+          secret:
+            secretName: {{ .Values.notifications.ntfy.auth.existingSecret }}
+            optional: true
+---
+# TM-0759: this workload's own identity, with no token. The namespace's `default`
+# account is not used (CIS 5.1.5 and 5.1.6).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-alert-bridge
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tockmox-alert-bridge
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-alert-bridge
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: tockmox-alert-bridge
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+{{- if gt (int .Values.notifications.bridge.replicas) 1 }}
+---
+# Only meaningful with more than one replica: a PDB over a single-replica
+# Deployment blocks node drains outright instead of protecting anything.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: tockmox-alert-bridge
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-alert-bridge
+{{- end }}
+{{- /*
+The ServiceMonitor is the only object here that needs a Prometheus operator, so
+it follows serviceMonitors while the workload follows notifications. Someone
+who declines the observability stack still gets a working notification path;
+they just do not get a monitor for an operator that is not there.
+*/ -}}
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tockmox-alert-bridge
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-alert-bridge
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-alert-bridge
+  namespaceSelector:
+    matchNames: [{{ $ns }}]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+{{- end }}
+{{- end }}

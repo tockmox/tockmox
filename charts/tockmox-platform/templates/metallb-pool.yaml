@@ -1,0 +1,69 @@
+{{- if and .Values.apps.metallb.enabled .Values.apps.addressPool.enabled }}
+# SPDX-License-Identifier: Apache-2.0
+{{- if not .Values.addressPool.range }}
+{{- fail "\n\naddressPool.range is required when metallb and addressPool are enabled.\nMetalLB without an address pool leaves every LoadBalancer Service Pending\nforever, with no error explaining why.\n\nSet a range inside your lanCIDR that DHCP does not hand out, e.g.\n\n  addressPool:\n    range: 192.168.1.200-192.168.1.220\n\nOr set apps.addressPool.enabled=false if you manage pools yourself.\n" }}
+{{- end }}
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: tockmox-default
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    # NOT a Helm hook, deliberately ... and it used to be one, so the reasoning
+    # is recorded.
+    #
+    # The problem: this is a metallb.io custom resource shipped by the same
+    # chart that installs MetalLB, so on a virgin cluster the CRD does not
+    # exist when the manifest is first validated.
+    #
+    # The old answer (post-install hook) deadlocks under ArgoCD: Helm's
+    # post-install becomes a PostSync hook, PostSync runs only after the sync
+    # reports healthy, and the sync cannot report healthy while Traefik's
+    # LoadBalancer waits for an address only this pool can grant. A clean
+    # GitOps install therefore hangs forever; a cluster that ever had MetalLB
+    # before never shows it.
+    #
+    # The Argo-native answer: skip the dry-run check until the CRD exists,
+    # and apply late in the wave. ArgoCD applies CRDs before other resources
+    # natively. A direct `helm install` on a virgin cluster may need one
+    # retry if CRD establishment races the CR ... ArgoCD's retry does this
+    # for you.
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  addresses:
+    # A STRING OR A LIST, because one range is not always enough. A site that
+    # already has a LoadBalancer VIP in use keeps it by naming it as a /32 and
+    # putting the free block beside it ... MetalLB's own field is a list and
+    # this used to flatten it to one entry, so that site could not express what
+    # it runs. Found 2026-08-30 against a production cluster whose pool is one
+    # in-service VIP as a `/32` plus a twenty-address block elsewhere in the
+    # subnet ... two entries, and no way to say so.
+    #
+    # Both forms stay valid; a plain string is still the common case and the
+    # docs still show it.
+    {{- if kindIs "slice" .Values.addressPool.range }}
+    {{- range .Values.addressPool.range }}
+    - {{ . | quote }}
+    {{- end }}
+    {{- else }}
+    - {{ .Values.addressPool.range | quote }}
+    {{- end }}
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: tockmox-default
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    # Same reasoning as the IPAddressPool above.
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+    argocd.argoproj.io/sync-wave: "6"
+spec:
+  ipAddressPools:
+    - tockmox-default
+{{- end }}

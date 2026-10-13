@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# BASE CONFIGURATION for the documentation site tools/publish-docs.sh uploads to the docs bucket.
+# Do not run `mkdocs` against this file directly. tools/build-docs.sh stages the
+# audience-filtered pages, then writes a second config that INHERITs this one and
+# adds docs_dir, the navigation and the theme override path. Those cannot live
+# here because they depend on what the audience filter kept.
+#
+# THE ONE RULE THIS FILE EXISTS TO HOLD: the built site makes no network request
+# at view time. A Dark Site install has no internet, and documentation that
+# quietly reaches for a font or a script host has broken the claim the whole
+# feature is for (TM-0215). Each setting below is here because leaving it at the
+# theme's default breaks that, and tools/check-docs-offline.sh asserts on the
+# BUILT ARTIFACT rather than trusting this file.
+#
+#   theme.font: false        Material otherwise links fonts.googleapis.com on
+#                            every page. The system stack is set in
+#                            docs/assets/tockmox-docs.css.
+#   markdown_extensions      pymdownx.superfences is loaded WITHOUT the mermaid
+#                            custom fence on purpose. Material's mermaid
+#                            support loads mermaid from unpkg.com the first
+#                            time a page has a diagram. Without the fence, a
+#                            ```mermaid block renders as a plain code block: the
+#                            source is readable, the drawing is not. Trade-off
+#                            recorded in the TM-0215 report; vendoring mermaid
+#                            is the follow-up if the drawings are wanted.
+#                            pymdownx.emoji is NOT loaded, for the same reason
+#                            (its twemoji index is a runtime CDN fetch).
+#   plugins                  search only. It builds a lunr index at build time
+#                            and the browser loads it from the same origin.
+#                            `privacy` and `offline` are not needed: nothing
+#                            external is referenced, and `privacy` would need
+#                            the network at BUILD time to find out.
+#   use_directory_urls       false, so a page is dir/name.html and works from
+#                            any static file server without an index-document
+#                            redirect, including Garage's web endpoint.
+#   no site_url              so no canonical link and no absolute URL is
+#                            emitted; the site is served at whatever Host the
+#                            operator's internalDomain gives it.
+#   extra.generator: false   drops the "Made with Material" footer link.
+#   no analytics, no social  the `extra.analytics` and `extra.social` keys are
+#                            absent and must stay so.
+site_name: Tockmox documentation
+site_description: Operator documentation for a Tockmox install, served from the install itself so it is present when the network is not.
+use_directory_urls: false
+strict: true
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+theme:
+  name: material
+  language: en
+  font: false
+  favicon: assets/tockmox-favicon.svg
+  logo: assets/tockmox-favicon.svg
+  palette:
+    scheme: slate
+    primary: custom
+    accent: custom
+  features:
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+extra_css:
+  - assets/tockmox-docs.css
+extra:
+  generator: false
+plugins:
+  - search
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - sane_lists
+  - toc:
+      permalink: false
+      slugify: !!python/object/apply:pymdownx.slugs.slugify {kwds: {case: lower}}
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.tasklist:
+      custom_checkbox: true

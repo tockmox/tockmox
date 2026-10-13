@@ -1,0 +1,107 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+GRAFANA'S DATABASE ON CLOUDNATIVEPG (TM-0786). Off by default; values.yaml,
+`grafanaDatabase`, says what it changes and how to move an existing Grafana.
+
+WHY CNPG GENERATES THE CREDENTIAL HERE, unlike the model gateway. LiteLLM's
+database holds keys and spend nobody can regenerate, so its credential is a
+Secret the operator mints and seals, and one object holds it. Grafana's database
+holds state that comes back by itself (dashboards are ConfigMaps, people return
+on their next SSO login), so the simpler route is the right one: initdb names no
+secret, CNPG writes the owner's credential to <name>-app, and Grafana reads the
+password from there. Nothing to mint, nothing to rotate in git.
+
+WHY NO NAMESPACE FIELD, same as every object in this chart: the release
+namespace is where Grafana runs, and the env Secret below hard-codes the
+service name in it.
+*/ -}}
+{{- $gd := .Values.grafanaDatabase | default dict -}}
+{{- if and $gd.enabled (include "tockmox.appEnabled" (dict "ctx" $ "app" "kubePrometheusStack")) }}
+{{- $bk := $gd.backup | default dict }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ $gd.name }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $gd.name }}
+spec:
+  instances: {{ $gd.instances }}
+  {{- with $gd.imageName }}
+  imageName: {{ . | quote }}
+  {{- end }}
+  {{- with $gd.priorityClassName }}
+  priorityClassName: {{ . | quote }}
+  {{- end }}
+  {{- with $gd.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  monitoring:
+    enablePodMonitor: {{ include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") | not | not }}
+  storage:
+    {{- $class := $gd.storageClass | default "" -}}
+    {{- if not $class }}
+      {{- if ge (int $gd.instances) 3 }}
+        {{- $class = .Values.global.localStorageClass | default "" }}
+      {{- else }}
+        {{- $class = .Values.global.storageClass | default "" }}
+      {{- end }}
+    {{- end }}
+    {{- with $class }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+    size: {{ $gd.storage }}
+  bootstrap:
+    initdb:
+      database: {{ $gd.database | quote }}
+      owner: {{ $gd.owner | quote }}
+  {{- with $bk.objectStoreName }}
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      enabled: true
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: {{ . | quote }}
+        {{- with $bk.serverName }}
+        serverName: {{ . | quote }}
+        {{- end }}
+  {{- end }}
+{{- if $bk.objectStoreName }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ $gd.name }}-scheduled
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  schedule: {{ $bk.schedule | quote }}
+  backupOwnerReference: self
+  cluster:
+    name: {{ $gd.name }}
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+{{- end }}
+---
+# What Grafana needs besides the password, which it reads from <name>-app. A
+# Secret rather than a ConfigMap only because the Grafana chart takes extra env
+# through envFromSecrets; nothing here is secret.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tockmox-observability-grafana-db-env
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  GF_DATABASE_TYPE: postgres
+  GF_DATABASE_HOST: "{{ $gd.name }}-rw.{{ .Release.Namespace }}.svc:5432"
+  GF_DATABASE_NAME: {{ $gd.database | quote }}
+  GF_DATABASE_USER: {{ $gd.owner | quote }}
+  # In-cluster hop to the primary, inside a namespace with default-deny ingress.
+  # CNPG client TLS is later hardening, as on the reference site.
+  GF_DATABASE_SSL_MODE: disable
+{{- end }}

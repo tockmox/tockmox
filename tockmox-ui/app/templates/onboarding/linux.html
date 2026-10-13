@@ -1,0 +1,82 @@
+{% include "onboarding/_sources.html" %}
+{%- set port = eng.port -%}
+<p>Every command runs on the node, as a user with sudo. Tested on Ubuntu 22.04 and 24.04.</p>
+<ol>
+  <li><h3>GPU driver</h3>
+    <p class="where">NVIDIA hosts only, and not on DGX OS, which ships with it</p>
+<pre tabindex="0" data-step="driver" data-when="nvidia"><code>sudo ubuntu-drivers install
+sudo reboot</code></pre>
+    {% if engine in ("vllm", "nim", "sglang", "tgi") %}<p>Containers also need Docker and the NVIDIA Container Toolkit; follow NVIDIA's install guide for your distribution, then check <code>docker run --rm --gpus all ubuntu nvidia-smi</code> lists your GPUs.</p>{% endif %}</li>
+{% if engine == "ollama" %}
+  <li><h3>Install Ollama</h3>
+<pre tabindex="0" data-run="linux" data-step="install"><code>curl -fsSL https://ollama.com/install.sh | sh</code></pre></li>
+  <li><h3>Listen on the network, keep models loaded</h3>
+    <p>Ollama listens on 127.0.0.1 by default, so the gateway cannot reach it.</p>
+<pre tabindex="0" data-run="linux" data-step="listen"><code>sudo mkdir -p /etc/systemd/system/ollama.service.d
+printf '[Service]\nEnvironment="OLLAMA_HOST=0.0.0.0:{{ port }}"\nEnvironment="OLLAMA_KEEP_ALIVE=24h"\n' \
+  | sudo tee /etc/systemd/system/ollama.service.d/tockmox.conf
+sudo systemctl daemon-reload
+sudo systemctl restart ollama</code></pre></li>
+  <li><h3>Let only the gateway in</h3>
+    <p>Ollama has no login of its own, so the firewall is what keeps everyone else out. If the node already runs a firewall, add the same rule there instead.</p>
+<pre tabindex="0" data-run="linux" data-step="firewall"><code>sudo ufw allow OpenSSH
+{% for c in src %}sudo ufw allow from {{ c }} to any port {{ port }} proto tcp
+{% endfor %}sudo ufw deny {{ port }}/tcp
+sudo ufw --force enable</code></pre></li>
+  <li><h3>Pull a first model</h3>
+<pre tabindex="0" data-run="linux" data-step="pull"><code>ollama pull {{ model or "MODEL" }}</code></pre>
+    <p>For example <code>ollama pull qwen3:8b</code>. Check the model fits: this page estimates it when you place it.</p></li>
+  <li><h3>Check it locally</h3>
+<pre tabindex="0" data-run="linux" data-step="check"><code>curl -s http://127.0.0.1:{{ port }}/api/version
+curl -s http://127.0.0.1:{{ port }}/api/tags</code></pre></li>
+{% elif engine == "llama-server" %}
+  <li><h3>Make a key the gateway will use</h3>
+<pre tabindex="0" data-step="key"><code>openssl rand -hex 24 | sudo tee /etc/llama-server.key
+sudo chmod 600 /etc/llama-server.key</code></pre>
+    <p>Store the same value as a Secret for the gateway (sealed, like your other secrets) and name it on the probe page; the change this page generates refers to the Secret by name and never contains the key.</p></li>
+  <li><h3>Run llama-server</h3>
+<pre tabindex="0" data-step="run"><code>docker run -d --name llama-server --restart unless-stopped {% if ntype != "amd-strix-halo" %}--gpus all {% endif %}\
+  -p {{ port }}:{{ port }} -v /etc/llama-server.key:/key:ro -v llama-models:/models \
+  ghcr.io/ggml-org/llama.cpp:server-cuda \
+  --host 0.0.0.0 --port {{ port }} --api-key-file /key -hf {{ model or "MODEL" }}</code></pre></li>
+  <li><h3>Let only the gateway in</h3>
+<pre tabindex="0" data-step="firewall"><code>{% for c in src %}sudo ufw allow from {{ c }} to any port {{ port }} proto tcp
+{% endfor %}sudo ufw deny {{ port }}/tcp</code></pre></li>
+{% else %}
+  <li><h3>Make a key the gateway will use</h3>
+<pre tabindex="0" data-step="key"><code>openssl rand -hex 24 | sudo tee /etc/{{ engine }}.key
+sudo chmod 600 /etc/{{ engine }}.key</code></pre>
+    <p>Store the same value as a Secret for the gateway and name it on the probe page.</p></li>
+  <li><h3>Run {{ eng.name }}</h3>
+{% if engine == "vllm" %}
+<pre tabindex="0" data-step="run"><code>docker run -d --name vllm --restart unless-stopped --gpus all --ipc=host \
+  -p {{ port }}:8000 -v hf-cache:/root/.cache/huggingface \
+  vllm/vllm-openai:latest --model {{ model or "MODEL" }} --api-key "$(sudo cat /etc/vllm.key)"</code></pre>
+    <p>Pin the image to a release tag rather than <code>latest</code> once it works. On arm64 hosts (DGX Spark, Jetson) use an arm64 build.</p>
+{% elif engine == "nim" %}
+<pre tabindex="0" data-step="run"><code>export NGC_API_KEY=YOUR_NGC_KEY
+docker run -d --name nim --restart unless-stopped --gpus all --shm-size=16g \
+  -e NGC_API_KEY -p {{ port }}:8000 -v nim-cache:/opt/nim/.cache \
+  nvcr.io/nim/{{ model or "MODEL" }}:latest</code></pre>
+    <p>The NGC key pulls the container. NIM's own endpoint has no key in this shape, so the firewall step is the control; put a proxy in front if you need a token.</p>
+{% elif engine == "sglang" %}
+<pre tabindex="0" data-step="run"><code>docker run -d --name sglang --restart unless-stopped --gpus all --ipc=host \
+  -p {{ port }}:30000 -v hf-cache:/root/.cache/huggingface lmsysorg/sglang:latest \
+  python3 -m sglang.launch_server --model-path {{ model or "MODEL" }} --host 0.0.0.0 --port 30000 --api-key "$(sudo cat /etc/sglang.key)"</code></pre>
+{% elif engine == "tgi" %}
+<pre tabindex="0" data-step="run"><code>docker run -d --name tgi --restart unless-stopped --gpus all --shm-size 1g \
+  -p {{ port }}:80 -v tgi-data:/data ghcr.io/huggingface/text-generation-inference:latest --model-id {{ model or "MODEL" }}</code></pre>
+{% else %}
+<p>Follow the engine's own install guide. It must listen on the node's network address, on port {{ port }} unless you choose another.</p>
+{% endif %}</li>
+  <li><h3>Let only the gateway in</h3>
+<pre tabindex="0" data-step="firewall"><code>{% for c in src %}sudo ufw allow from {{ c }} to any port {{ port }} proto tcp
+{% endfor %}sudo ufw deny {{ port }}/tcp</code></pre></li>
+{% endif %}
+  <li><h3>Export metrics (recommended)</h3>
+    <p>This page reads a node's health and memory from Prometheus, never from the node. Without an exporter the node shows as Unknown.</p>
+<pre tabindex="0" data-step="metrics"><code>sudo apt-get install -y prometheus-node-exporter
+{% for c in src %}sudo ufw allow from {{ c }} to any port 9100 proto tcp
+{% endfor %}</code></pre>
+    <p>NVIDIA hosts: also run NVIDIA's DCGM exporter (port 9400) for GPU memory and temperature.</p></li>
+</ol>

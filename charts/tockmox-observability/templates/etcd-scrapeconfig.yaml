@@ -1,0 +1,51 @@
+{{/*
+SPDX-License-Identifier: Apache-2.0
+
+SCRAPE EMBEDDED etcd (k3s) WITHOUT AN Endpoints OBJECT.
+
+kube-prometheus-stack scrapes etcd through a Service plus an Endpoints object
+it writes from `kubeEtcd.endpoints`. Argo CD 3.x excludes Endpoints and
+EndpointSlice from sync by default, so on a GitOps install that Endpoints never
+arrives, Prometheus has no etcd target, and nothing alerts on the missing
+series. The 2026-10-02 production window hand-applied the object, which a
+namespace rebuild or a restore loses silently.
+
+A ScrapeConfig with static targets is an ordinary custom resource that Argo
+syncs. The job is named `kube-etcd`, which is the name the stack's etcd
+dashboard and rules select on, so they work unchanged.
+
+OPT-IN, because the targets are yours: the control-plane node addresses with
+etcd's metrics port. k3s serves them only when started with
+`etcd-expose-metrics: true`, on port 2381 (plain HTTP). Turn the stack's own
+etcd monitor off when you turn this on, or Prometheus scrapes twice:
+`kube-prometheus-stack.kubeEtcd.enabled: false`.
+*/ -}}
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") }}
+{{- $e := $.Values.apps.etcdScrapeConfig | default dict }}
+{{- if $e.enabled }}
+{{- if not $e.targets }}
+{{- fail "apps.etcdScrapeConfig.enabled is true but apps.etcdScrapeConfig.targets is empty: list the control-plane node addresses with etcd's metrics port, for example 10.0.0.11:2381" }}
+{{- end }}
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: ScrapeConfig
+metadata:
+  name: tockmox-kube-etcd
+  namespace: {{ $.Values.namespaces.monitoring }}
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+    prometheus: kube-prometheus-stack
+spec:
+  jobName: kube-etcd
+  scheme: {{ $e.scheme | default "HTTP" }}
+  metricsPath: /metrics
+  scrapeInterval: {{ $e.interval | default "30s" }}
+  staticConfigs:
+    - targets:
+        {{- range $e.targets }}
+        - {{ . | quote }}
+        {{- end }}
+      labels:
+        tockmox_tier: platform
+{{- end }}
+{{- end }}

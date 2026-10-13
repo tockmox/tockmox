@@ -1,0 +1,70 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+Render-time guards for the devops layer. Emits no objects.
+
+WHY THIS LAYER NEEDS ONE THAT THE OTHERS DO NOT.
+
+Grafana and Open WebUI get their OIDC endpoints from a Secret this repo renders,
+so the scheme is DERIVED from `global.certIssuer` and moves with it. The
+argo-workflows chart takes its issuer and redirect URL as plain values it never
+templates, so the installer writes them into the site's values once, at install
+time, and nothing revisits them.
+
+That difference is not cosmetic. Turning TLS on afterwards moves every console
+from http to https and moves Authentik's advertised issuer with it, and this
+one file keeps pointing at the old scheme. The result is a login that fails
+inside the OIDC exchange rather than at a certificate warning, which is the
+harder half of the failure to read.
+
+Observed on the devtest site 2026-08-15: `global.certIssuer: tockmox-ca` with
+`site/values/devops.yaml` still carrying `http://auth.../application/o/...`.
+*/ -}}
+{{- $argo := index .Values "argo-workflows" | default dict -}}
+{{- $server := $argo.server | default dict -}}
+{{- $sso := $server.sso | default dict -}}
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "argoWorkflows")) $sso.enabled -}}
+{{- $wantScheme := ternary "https" "http" (ne .Values.global.certIssuer "") -}}
+{{- range $field := (list "issuer" "redirectUrl") -}}
+{{- $url := index $sso $field | default "" -}}
+{{- if $url -}}
+{{- $have := (splitList "://" $url) | first -}}
+{{- if ne $have $wantScheme -}}
+{{- fail (printf "argo-workflows.server.sso.%s is %q but global.certIssuer is %q, so every console is served over %s. The argo-workflows chart does not derive this value the way the Grafana and Open WebUI SSO Secrets do, so it does not move when TLS is turned on or off; the installer wrote it once. A scheme mismatch here fails login inside the OIDC exchange, not at a certificate warning. Set it to %s://... in your site values." $field $url $.Values.global.certIssuer $wantScheme $wantScheme) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- /*
+IN-CLUSTER TRUST, the Go shape. Every key below is list-valued, so a site that
+sets one REPLACES the shipped value rather than adding to it.
+
+There is no initContainer to check for here, and that is deliberate rather than
+an omission: Go reads SSL_CERT_FILE and the default certificate directories and
+unions them, so the CA alone is enough. The concatenating initContainer the AI
+layer uses could not run in this image anyway ... argocli is distroless and has
+no shell.
+*/ -}}
+{{- if (include "tockmox.appEnabled" (dict "ctx" $ "app" "argoWorkflows")) -}}
+{{- $vols := $server.volumes | default list -}}
+{{- $mounts := $server.volumeMounts | default list -}}
+{{- $env := $server.extraEnv | default list -}}
+{{- $hasCaVol := false -}}
+{{- range $vols }}{{- if eq .name "tockmox-ca" }}{{- $hasCaVol = true }}{{- end }}{{- end -}}
+{{- $hasMount := false -}}
+{{- range $mounts }}{{- if and (eq .name "tockmox-ca") (eq .mountPath "/etc/tockmox/ca") }}{{- $hasMount = true }}{{- end }}{{- end -}}
+{{- $sslEnv := "" -}}
+{{- range $env }}{{- if eq .name "SSL_CERT_FILE" }}{{- $sslEnv = .value }}{{- end }}{{- end -}}
+{{- include "tockmox.trustBundle.assertWiring" (dict "component" "the Argo Workflows server" "checks" (list
+    (dict "present" $hasCaVol "detail" "argo-workflows.server.volumes has no `tockmox-ca` entry, so the CA is never presented to the container")
+    (dict "present" $hasMount "detail" "argo-workflows.server.volumeMounts does not mount `tockmox-ca` at /etc/tockmox/ca")
+    (dict "present" (eq $sslEnv "/etc/tockmox/ca/ca.crt") "detail" "argo-workflows.server.extraEnv does not set SSL_CERT_FILE to /etc/tockmox/ca/ca.crt, which is what Go reads")
+    (dict "present" (or (not .Values.global.certIssuer) (contains "wait-for-ca" (toYaml ((index .Values "argo-workflows").server.extraInitContainers | default list)))) "detail" "argo-workflows.server.extraInitContainers has no `wait-for-ca` container, so the server can start before cert-manager has written the CA, build its Go root pool from the public roots alone and never rebuild it ... SSO then fails permanently while the server reports healthy (TM-0632)")
+  )) -}}
+{{- end -}}
+{{- /*
+CAPABILITY COHERENCE. A component switched on individually while the capability
+that owns it is off leaves a part with no whole. Failing beats delivering half,
+and beats silently promoting the capability back on because of one key.
+*/ -}}
+{{- include "tockmox.capabilityCoherent" (dict "ctx" $ "capability" "workflowAutomation" "apps" (list "argoWorkflows")) -}}

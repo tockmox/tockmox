@@ -1,0 +1,52 @@
+{# State is never colour alone: a distinct SHAPE, a WORD, and a colour token. #}
+{% macro state_icon(state) -%}
+{%- if state == "ok" -%}
+<svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 10.3l2.6 2.6L14.2 7.3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+{%- elif state == "warning" -%}
+<svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M10 2.2L18.6 17H1.4z" fill="currentColor"/><path d="M10 7.5v4.5M10 14.2v.3" stroke="var(--on-state)" stroke-width="2" stroke-linecap="round"/></svg>
+{%- elif state == "critical" -%}
+<svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M10 1.5L18.5 10 10 18.5 1.5 10z" fill="currentColor"/><path d="M10 6v5M10 13.6v.3" stroke="var(--on-state)" stroke-width="2" stroke-linecap="round"/></svg>
+{%- else -%}
+<svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8.5" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2.2"/><path d="M7.6 7.6a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .8-1 1.5v.4M10 14.2v.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro state_word(state) -%}
+{{ {"ok": "Healthy", "warning": "Needs a look", "critical": "Problem", "unknown": "Unknown"}.get(state, "Unknown") }}
+{%- endmacro %}
+
+{% macro badge(state, word=None) -%}
+<span class="badge st-{{ state }}">{{ state_icon(state) }}<span>{{ word or state_word(state) }}</span></span>
+{%- endmacro %}
+
+{% macro argo_badge(value, kind) -%}
+{%- set good = (kind == "sync" and value == "Synced") or (kind == "health" and value == "Healthy") -%}
+{%- set bad = value in ("Degraded", "Missing") -%}
+{%- set warn = value in ("OutOfSync", "Progressing", "Suspended") -%}
+{%- set st = "ok" if good else ("critical" if bad else ("warning" if warn else "unknown")) -%}
+<span class="badge st-{{ st }}">{{ state_icon(st) }}<span>{{ value }}</span></span>
+{%- endmacro %}
+
+{% macro app_icon(name) -%}
+<svg class="app-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+{%- if name == "chat" -%}<path d="M4 5h16v10H9l-5 4z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+{%- elif name == "chart" -%}<path d="M4 20V4M4 20h16M8 16v-5M12 16V8M16 16v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+{%- elif name == "git" -%}<circle cx="6" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="6" cy="18" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="18" cy="9" r="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M6 8.2v7.6M18 11.2c0 3-4 3.4-10 5.4" fill="none" stroke="currentColor" stroke-width="1.8"/>
+{%- elif name == "flow" -%}<rect x="3" y="4" width="6" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="15" y="15" width="6" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 6.5h4a2 2 0 0 1 2 2v6.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+{%- elif name == "key" -%}<circle cx="8" cy="12" r="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M11.5 12H21M17 12v3M20 12v2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+{%- elif name == "bell" -%}<path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+{%- elif name == "disk" -%}<ellipse cx="12" cy="6" rx="7" ry="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 6v12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V6M5 12c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5" fill="none" stroke="currentColor" stroke-width="1.8"/>
+{%- elif name == "gateway" -%}<path d="M4 12h5M15 12h5M12 4v5M12 15v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><rect x="9" y="9" width="6" height="6" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/>
+{%- elif name == "news" -%}<path d="M5 5h11v14H6a1 1 0 0 1-1-1zM16 9h3v9a1 1 0 0 1-1 1h-2M8 9h5M8 12h5M8 15h3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+{%- elif name == "book" -%}<path d="M4 5.5A1.5 1.5 0 0 1 5.5 4H11v15H5.5A1.5 1.5 0 0 0 4 20.5zM20 5.5A1.5 1.5 0 0 0 18.5 4H13v15h5.5a1.5 1.5 0 0 1 1.5 1.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>
+{%- elif name == "sync" -%}<path d="M19 8a7 7 0 0 0-12.5-2M5 4v3h3M5 16a7 7 0 0 0 12.5 2M19 20v-3h-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+{%- else -%}<rect x="4" y="4" width="16" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 12h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+{%- endif -%}
+</svg>
+{%- endmacro %}
+
+{% macro source_line(r) -%}
+<span class="src">{{ badge(r.state) }} <span class="src-name">{{ r.source }}</span>
+{%- if r.reason %}<span class="muted">: {{ r.reason }}</span>{% endif -%}
+<span class="muted age"> (last answered {{ r.age_text() }})</span></span>
+{%- endmacro %}

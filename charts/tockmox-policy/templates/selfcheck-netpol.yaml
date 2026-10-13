@@ -1,0 +1,84 @@
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "networkPolicy" "app" "selfcheck_netpol") }}
+# SPDX-License-Identifier: Apache-2.0
+---
+# INGRESS-ONLY default-deny for the self-check namespace.
+#
+# The second of the two namespaces the v0.5.0 CHANGELOG published as carrying
+# no NetworkPolicies. This one is small enough to reason about completely,
+# which is why it gets a real bundle rather than the conservative treatment the
+# platform namespace gets.
+#
+# WHAT LIVES HERE, exhaustively on a stock install:
+#  - `tockmox-heartbeat`, a CronJob. It makes ONE outbound call, to
+#    Alertmanager's /api/v2/alerts, and accepts no inbound connections at all.
+#    Egress is untouched by this bundle, so it keeps working.
+#  - `prometheus-blackbox-exporter`. Prometheus scrapes it on 9115 (ingress,
+#    allowed below) and it probes the site's own ingress hostnames (egress,
+#    untouched).
+#
+# So the whole inbound surface is one scrape, and everything else can be
+# denied. The blackbox exporter reaching a `*.<internalDomain>` URL is EGRESS
+# from this namespace to the Traefik LoadBalancer address; this bundle does not
+# touch it, and the platform bundle's allow-ingress-to-traefik is what lets it
+# land.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: default-deny-ingress
+  namespace: {{ .Values.namespaces.selfcheck }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Same-namespace traffic. Nothing on a stock install needs it ... the heartbeat
+# CronJob and the blackbox exporter never talk to each other ... but a site that
+# adds a second checker here should not have to rediscover this rule, and an
+# intra-namespace allow cannot widen the blast radius beyond a namespace that
+# is already one trust domain.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-intra-namespace
+  namespace: {{ .Values.namespaces.selfcheck }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.selfcheck }}
+---
+# The one rule that has to be right.
+#
+# Prometheus scrapes the blackbox exporter on 9115; the probe RESULTS are the
+# only evidence that the self-check layer is doing anything. Drop this and the
+# probes still run, the exporter still measures, and nothing anywhere records
+# it ... a checker that checks into the void. Scoped to the Prometheus pod,
+# matching every other scrape allow in this chart.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-prometheus-scrape
+  namespace: {{ .Values.namespaces.selfcheck }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.monitoring }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+{{- end }}

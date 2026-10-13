@@ -1,0 +1,52 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+The add-on's own namespace. Nothing reaches in. The differential may reach DNS
+and the Kubernetes API, and nothing else: it has no egress of its own beyond the
+reads, and the report never leaves the volume over the network.
+
+Collectors and stand-ins live in the MEASURED namespaces and are deliberately not
+selected by any policy here (see collectors.yaml).
+*/ -}}
+{{- if .Values.enabled -}}
+{{- $m := include "pp.model" . | fromJson -}}
+{{- if not $m.api -}}
+{{- fail "posture-probe: networkPolicy.apiServer is empty and global.lanCIDR is not set: name the address the differential may reach the Kubernetes API on, for example [{cidr: 192.0.2.10/32, port: 6443}]" -}}
+{{- end -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: posture-probe-default-deny
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pp.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: posture-probe-differential
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pp.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: posture-probe-differential
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    {{- range $m.api }}
+    - to:
+        - ipBlock: { cidr: {{ .cidr | quote }} }
+      ports:
+        - { port: {{ .port | default 6443 }}, protocol: TCP }
+    {{- end }}
+{{- end }}

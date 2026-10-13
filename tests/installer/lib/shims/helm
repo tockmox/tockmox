@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Fake helm: `upgrade --install` creates a controller (and a sealing key unless
+# one is already in the namespace, as after a restore); `list` reports our
+# release. Records arguments in $FAKE_STATE/calls.log.
+S="${FAKE_STATE:?FAKE_STATE not set}"; C="$S/cluster"; mkdir -p "$C/ns" "$C/keys"
+printf 'helm %s\n' "$*" >> "$S/calls.log"
+args=("$@"); ns=""; full=""; filter=""; pos=(); i=0
+while [ "$i" -lt "${#args[@]}" ]; do
+  case "${args[$i]}" in
+    --kube-context|--version|--repo|--timeout) i=$((i + 2)) ;;
+    -n|--namespace) ns="${args[$((i + 1))]}"; i=$((i + 2)) ;;
+    -f) filter="${args[$((i + 1))]}"; i=$((i + 2)) ;;
+    --set-string) case "${args[$((i + 1))]}" in fullnameOverride=*) full="${args[$((i + 1))]#fullnameOverride=}" ;; esac; i=$((i + 2)) ;;
+    -*) i=$((i + 1)) ;;
+    *)  pos+=("${args[$i]}"); i=$((i + 1)) ;;
+  esac
+done
+case "${pos[0]:-}" in
+  list)
+    [ -e "$C/helm-release" ] || exit 0
+    read -r rns rname < "$C/helm-release"
+    want="${filter#^}"; want="${want%\$}"
+    [ "$rns" = "$ns" ] && [ "$rname" = "$want" ] && echo "$rname"
+    exit 0 ;;
+  upgrade)
+    [ -z "${FAKE_HELM_FAIL:-}" ] || { echo "fake helm: forced failure" >&2; exit 1; }
+    rel="${pos[1]:-}"
+    : > "$C/ns/$ns"
+    printf '%s %s\n' "$ns" "${full:-$rel}" > "$C/controller"
+    printf '%s %s\n' "$ns" "$rel" > "$C/helm-release"
+    mkdir -p "$C/keys/$ns"
+    if [ -z "$(ls -A "$C/keys/$ns" 2>/dev/null)" ]; then
+      # A fresh controller generates its own key on first start.
+      printf 'crt=FAKECRT-%s\nkey=KEYMARKER-%s%s\n' "$RANDOM" "$RANDOM" "$RANDOM" > "$C/keys/$ns/sealed-secrets-key-fake1"
+    fi
+    exit 0 ;;
+esac
+echo "fake helm: unhandled: $*" >&2
+exit 1

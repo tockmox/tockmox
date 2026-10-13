@@ -1,0 +1,787 @@
+# SPDX-License-Identifier: Apache-2.0
+# ---------------------------------------------------------------------------
+# Global site values. Set once in your site repo's site-values.yaml.
+# A value earns its place here only if the OPERATOR must supply it.
+# ---------------------------------------------------------------------------
+global:
+  internalDomain: ""
+  certIssuer: "tockmox-ca"
+  imageRegistry: ""
+  timezone: "UTC"
+  # Pod network CIDR. k3s default shown.
+  clusterCIDR: "10.42.0.0/16"
+  # Service network CIDR. k3s default shown.
+  serviceCIDR: "10.43.0.0/16"
+  # The LAN/node network your cluster sits on. Used by NetworkPolicies that
+  # must admit traffic from devices outside the cluster (syslog senders,
+  # node-level containerd pulls). NO DEFAULT: a wrong value here either breaks
+  # ingest or opens a hole, so you must state it.
+  lanCIDR: ""
+  # THE STORAGE CONTRACT. Empty means "use whatever the cluster's default
+  # StorageClass happens to be", which is not the same as "use the storage this
+  # platform ships". On k3s the default is `local-path`: node-local, one copy,
+  # no snapshots, no backup target. Tockmox shipped Longhorn and, because
+  # nothing named a class, wrote every PVC to local-path anyway.
+  #
+  # Name it. `longhorn` on a stock install with apps.longhorn enabled;
+  # `local-path` if you have deliberately chosen node-local storage; the name of
+  # your own CSI class if you brought one. A preflight refuses the combination
+  # that used to fail silently.
+  storageClass: ""
+  # THE SECOND HALF OF THE STORAGE CONTRACT: the class for data whose
+  # application already protects it, or that can be re-derived.
+  #
+  # The policy is "replicate at exactly one layer". If an application keeps its
+  # own copies (Postgres streaming to replicas, an object store spreading
+  # across nodes) or the data can be rebuilt (a metrics TSDB), then replicating
+  # the volume underneath buys nothing and costs two to three times the disk
+  # plus write latency on the hot path. Those workloads get THIS class.
+  # Everything else gets `storageClass` above.
+  #
+  # `local-path` is k3s's own provisioner and is the shipped default here.
+  # prerequisites.md tells you to UN-DEFAULT it rather than delete it, and this
+  # is why. Node-local means a rescheduled pod finds an empty volume, which is
+  # the trade this class exists to make; do not point it at anything whose loss
+  # you would mind.
+  #
+  # Empty falls back to the cluster default, which un-does the policy without
+  # complaining. Set it to a class you have.
+  localStorageClass: "local-path"
+  # Extra labels for EVERY namespace a chart here creates (TM-0816): the policy
+  # layer's namespaces and the platform layer's createCredentialsNamespaces.
+  # For an admission mutator keyed on namespace labels, which would otherwise
+  # act on the first chart pod before you could label the namespace: Zarf's
+  # agent (`zarf.dev/agent: ignore`), Istio injection, a Kyverno selector. Empty
+  # adds nothing. A label the chart sets itself (name, app.kubernetes.io/part-of,
+  # tockmox.com/managed-by, tockmox.com/layer, and in policy pod-security.*) is
+  # refused at render time; Pod Security levels belong to `podSecurity`.
+  namespaceLabels: {}
+
+# ---------------------------------------------------------------------------
+# Namespace names.
+#
+# Defaults carry the the design decision reserved `tockmox-` prefix, so a greenfield
+# install is prefix-clean from day one. Existing deployments override these to
+# their legacy names rather than renaming ... a namespace rename destroys and
+# recreates everything inside it, which the design decision explicitly rules out.
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# CAPABILITIES: functional stories you can decline.
+#
+# `apps.*` is one switch per piece of software, which is the wrong unit for the
+# decision people actually make. Nobody chooses "a Garage", "a barman plugin"
+# and "a snapshot controller" separately; they choose whether this deployment
+# protects its data, or whether they already run Velero and want none of it.
+#
+# A capability is that decision, named, on one switch, spanning whatever
+# components it takes and whichever layers they live in.
+#
+# HOW IT RESOLVES, and the tri-state is the point:
+#   apps.<x>.enabled unset   follow the capability that owns the component
+#   apps.<x>.enabled: true   on, even if the capability is off
+#   apps.<x>.enabled: false  off, even if the capability is on
+#
+# So declining a capability turns off everything it owns, and a component you
+# named yourself still means what you said. Turning a single component on while
+# its capability is off fails the render rather than half-building the story.
+#
+# THIS BLOCK IS BYTE-IDENTICAL IN ALL NINE LAYERS, and that is deliberate. The
+# values namespace is shared across layers, so one profile sets a capability
+# once and every layer owning part of it reads the same answer. Editing one copy
+# and not the others is the failure the uniformity exists to prevent, and
+# tools/check-capabilities.sh fails CI on any drift between them.
+#
+# Full list, what each one contains, and why you would decline it:
+# docs/administration/capabilities.md
+# ---------------------------------------------------------------------------
+capabilities:
+  # Metrics, logs and the rules that read them ... everything answering "what is
+  # this platform doing right now". Off means Tockmox ships no Prometheus, no
+  # Loki, no Alloy, and none of its own ServiceMonitors or alert rules.
+  #
+  # Running your own Prometheus operator is the case worth naming. Decline the
+  # capability and set `apps.serviceMonitors.enabled: true`, and Tockmox renders
+  # its monitors and rules for YOUR operator to collect, without standing up a
+  # second stack beside the one you already run.
+  observability:
+    enabled: true
+
+  # Alerts that reach a person: the notification sink, the bridge that feeds it
+  # and the heartbeat that proves the path still works when nothing is wrong.
+  # Off means alerts fire into Alertmanager and stop there.
+  #
+  # The component switch for this one is `notifications.enabled` rather than an
+  # `apps` key, because it predates this framework and is a contract key. It has
+  # the same tri-state: unset follows the capability, set means what you said.
+  notifications:
+    enabled: true
+
+  # One sign-in across every console, and the identity provider behind it. Off
+  # means Tockmox ships no Authentik and each console falls back to its own
+  # local login, unless you point `sso` at an issuer you already run.
+  identity:
+    enabled: true
+
+  # The private AI plane: a chat console and the model gateway in front of it.
+  # Off leaves Tockmox as a platform and nothing else, which is a legitimate way
+  # to run it and the right answer if you are here for the infrastructure.
+  aiPlane:
+    enabled: true
+
+  # Backups that go somewhere, restores that are exercised, and the CSI
+  # plumbing underneath both. Off means Tockmox ships no object store, no
+  # backup plugin and no snapshot control plane, and expects you to have your
+  # own or to not want one.
+  dataProtection:
+    enabled: true
+
+  # Telemetry from PHYSICAL hardware: disk SMART attributes, and SNMP from
+  # switches, UPSes and appliances.
+  #
+  # OFF BY DEFAULT, unlike every other capability here, because the reference
+  # deployment is a virtual machine: there is no physical disk to ask and no
+  # switch to poll, and an exporter scraping nothing still alerts on its own
+  # absence. Turn it on when the hardware is real, and both exporters follow.
+  hardwareTelemetry:
+    enabled: false
+
+  # Jobs running inside the cluster on a schedule or an event, with a console to
+  # watch them. Off means no Argo Workflows.
+  workflowAutomation:
+    enabled: true
+
+  # Default-deny between namespaces, so a compromised workload cannot reach a
+  # neighbour it was never meant to.
+  #
+  # Off is the honest setting on a cluster whose CNI does not enforce
+  # NetworkPolicy at all. Flannel without a policy plugin accepts every object
+  # here and enforces none of them, and a control that is only decoration is
+  # worse than no control, because it gets counted.
+  networkPolicy:
+    enabled: true
+
+namespaces:
+  # Which of the namespaces below this chart CREATES. Everything else is
+  # referenced only. Blank a name to skip creating it.
+  #
+  # THE RULE: policy creates a namespace when some Tockmox layer actually
+  # deploys into it. Verified by rendering every layer into the destination
+  # namespace the installer assigns it ... see tools/check-no-ghost-policies.sh,
+  # which fails CI if a NetworkPolicy ever guards a namespace no shipped
+  # workload lands in.
+  #
+  # `forgejo`, `tailscale` and `harbor` are NOT on the list.
+  #   forgejo, tailscale  Tockmox ships neither workload.
+  #   harbor              No registry ships as of 0.1.0 (a registry is a
+  #                       prerequisite, not a component). The key stays because
+  #                       `apps.harbor_netpol` guards a Harbor YOU installed, in
+  #                       a namespace you chose. Nothing Tockmox ships has ever
+  #                       landed in tockmox-harbor.
+  # All three names remain defined below, because the optional policy bundles
+  # in `apps` reference them. Add a key back here if you install that workload
+  # yourself and want this chart to create its namespace.
+  create:
+    - ai
+    - monitoring
+    - platform
+    - authentik
+    - diagnostic_identity
+    - selfcheck
+    - devops
+
+  ai: tockmox-ai
+  monitoring: tockmox-monitoring
+  # ONE namespace for the whole platform layer. Helm subcharts install into
+  # their release's namespace, so Traefik, cert-manager, MetalLB, Longhorn,
+  # CNPG and kured all land together ... see the NAMESPACE MODEL note in
+  # tockmox-platform/values.yaml. The keys below exist because NetworkPolicies
+  # reference "where Traefik lives" and "where the CNPG operator lives"
+  # separately; on a stock install they are all the same place. Adopting into
+  # a cluster that already runs these components elsewhere? Point each key at
+  # the real namespace.
+  platform: tockmox-platform
+  traefik: tockmox-platform
+  cnpg_system: tockmox-platform
+  longhorn_system: tockmox-platform
+  kured: tockmox-platform
+  authentik: tockmox-authentik
+  forgejo: tockmox-forgejo
+  harbor: tockmox-harbor
+  tailscale: tockmox-tailscale
+  argocd: argocd
+  # Namespace holding an operator's own agent sandbox. Not shipped by Tockmox;
+  # referenced by the monitoring NetworkPolicy so a site-supplied agent can
+  # reach telemetry. Set to "" to drop that rule entirely.
+  agent_sandbox: ""
+  diagnostic_identity: tockmox-diagnostic
+  selfcheck: tockmox-selfcheck
+  devops: tockmox-devops
+  # The one namespace in this chart that is deliberately NOT restricted-capable.
+  # The kube-bench Job (tockmox-selfcheck, apps.kube_bench) needs hostPID and
+  # hostPath, which the baseline Pod Security profile refuses, so it gets a
+  # namespace of its own labelled `enforce: privileged` instead of loosening
+  # tockmox-selfcheck, where the heartbeat and the blackbox exporter can and
+  # should be held to restricted. Created ONLY when apps.kube_bench is enabled,
+  # which is why it is not in `create:` above. Read templates/kube-bench.yaml.
+  kube_bench: tockmox-kube-bench
+
+# ---------------------------------------------------------------------------
+# POD SECURITY ADMISSION (TM-0135, TM-0487, TM-0635). Written into the
+# `pod-security.kubernetes.io/*` labels of every namespace listed in
+# `namespaces.create` above. Labels only: nothing in this key changes a pod.
+#
+# HOW THE THREE MODES DIFFER. `enforce` REFUSES a pod that fails the level.
+# `warn` and `audit` observe without blocking, the same distinction the
+# admission policies below draw with ["Deny"] versus ["Audit","Warn"]. Before
+# 0.7.0 every namespace carried warn and audit at restricted and NO enforce,
+# so the label read stricter than it acted.
+#
+# WHAT EACH ENFORCE LEVEL BELOW IS BASED ON. tools/check-pod-security.sh renders
+# every layer (defaults, then the all-on overlay), evaluates every pod template
+# against the Pod Security Standards, and prints the highest level all pods in
+# each namespace pass. This file may not set a namespace's enforce level above
+# that measurement, and the gate fails if it does: a label stricter than its
+# pods is an install that cannot schedule, and the symptom is a Deployment stuck
+# at zero replicas with the reason in a ReplicaSet event.
+#
+#   ai                  baseline    the model gateway (LiteLLM) runs as root and
+#                                   its image ships no non-root user (TM-0596),
+#                                   so restricted cannot hold with it enabled.
+#                                   Raise to restricted once that is fixed.
+#   authentik           restricted  the server and worker set the four fields
+#                                   they left unset (TM-0635), from
+#                                   tockmox-identity values.
+#   diagnostic_identity baseline    no shipped pod lands here (measured: none).
+#                                   Baseline rather than restricted because
+#                                   this is where a site's diagnostic agents
+#                                   run, and their pods are not ours to measure.
+#   selfcheck           restricted  one shipped pod, measured restricted.
+#   devops              baseline    the shipped pods pass restricted, but Argo
+#                                   Workflows creates pods from Workflow objects
+#                                   at run time and those are the site's. Baseline
+#                                   still refuses privileged, host namespaces and
+#                                   hostPath.
+#   monitoring          (none)      node-exporter, Alloy and the smartctl
+#                                   exporter need hostNetwork, hostPID or
+#                                   hostPath by design, so the namespace measures
+#                                   privileged. Not fixable by a securityContext;
+#                                   the way out is a separate namespace for the
+#                                   node agents, which is a layout change, not a
+#                                   label.
+#   platform            (none)      Longhorn's manager and CSI plugins are
+#                                   privileged by necessity, kured needs hostPID
+#                                   and the MetalLB speaker needs hostNetwork and
+#                                   NET_RAW. One namespace holds the whole
+#                                   platform layer (NAMESPACE MODEL note in
+#                                   tockmox-platform/values.yaml), so the storage
+#                                   layer sets the level for all of it.
+#
+# NOT MEASURED HERE: pods an operator creates from a custom resource (the CNPG
+# database pods, the Prometheus and Alertmanager pods, Longhorn's instance
+# managers) and any workload a site adds. A level that holds for what the charts
+# render can still refuse those, which is why the levels above are conservative
+# where a site is expected to run its own pods.
+#
+# ESCAPE HATCH, per namespace: set that namespace's key to "" to render no
+# enforce label at all, or to a lower level. The keys are the ones in
+# `namespaces` above (ai, authentik, ...), not the namespace names.
+# ---------------------------------------------------------------------------
+podSecurity:
+  # Level the API server WARNS at (printed to the client, refuses nothing) and
+  # writes to the audit log at. Both stay restricted everywhere so an operator
+  # keeps seeing what a stricter enforce level would refuse.
+  warn: restricted
+  audit: restricted
+  # Version of the standard those two modes evaluate against. `latest` follows
+  # the API server; pin (for example v1.34) to stop a Kubernetes upgrade
+  # changing the answer.
+  version: latest
+  # Version of the standard `enforce` evaluates against. Kept separate because
+  # a version that moves under an ENFORCING label refuses pods, while under
+  # warn it only prints. `latest` matches the pre-0.7.0 labels; the rules used
+  # by the gate are those of Kubernetes 1.34 and are stable since 1.25 for
+  # restricted (INFERRED for later releases, not measured).
+  enforceVersion: latest
+  # Enforce level per namespace key. One of "privileged", "baseline",
+  # "restricted", or "" for no enforce label. A key absent here falls back to
+  # enforceDefault.
+  enforce:
+    ai: baseline
+    monitoring: ""
+    platform: ""
+    authentik: restricted
+    diagnostic_identity: baseline
+    selfcheck: restricted
+    devops: baseline
+  # Level for a namespace in `namespaces.create` that has no entry in `enforce`
+  # (a namespace a site added). Empty is deliberate: an unmeasured namespace
+  # does not get a label nobody has checked it against.
+  enforceDefault: ""
+
+# ---------------------------------------------------------------------------
+# Egress containment for the chat console (apps.ai_openwebui_egress above).
+#
+# Scoped to Open WebUI rather than the namespace on purpose. It is the pod that
+# holds chat history and uploaded documents, renders text that came from a model,
+# and can make outbound requests ... all three legs of ADR-0007's lethal trifecta
+# in one place. The gateway routes, and the database talks to the CNPG operator
+# and the API server; putting an egress default-deny in front of those buys no
+# containment and risks a database. Reasoning in templates/ai-egress.yaml.
+#
+# Selecting the pod makes this default-deny for it, so these lists are
+# exhaustive. Anything missing shows up as a timeout inside the console.
+# ---------------------------------------------------------------------------
+aiEgress:
+  openWebui:
+    # TRAEFIK'S CONTAINER PORTS, not the Service's 80 and 443, and this is the
+    # single easiest thing to get wrong here.
+    #
+    # The console's server does OIDC discovery and the token exchange itself,
+    # against `auth.<internalDomain>`. NetworkPolicy egress is evaluated AFTER
+    # service DNAT, so the packet being matched is already addressed to the
+    # Traefik POD and its container port. An ipBlock of the LoadBalancer address
+    # never matches, and neither does port 80. Verified both ways on a cluster,
+    # 2026-08-15.
+    #
+    # 8000 and 8443 are the Traefik chart's `web` and `websecure` entrypoints.
+    # Change these together with the selector in templates/ai-egress.yaml if you
+    # run a different ingress controller.
+    ingressContainerPorts:
+      - 8000
+      - 8443
+    # Raw NetworkPolicy egress entries, appended verbatim. For a console
+    # addressed straight at a model host instead of at the gateway, or an
+    # external identity provider. Every entry widens the containment argument,
+    # so record why beside it.
+    extraEgress: []
+
+  # -------------------------------------------------------------------------
+  # EGRESS DEFAULT-DENY FOR THE WHOLE AI NAMESPACE (TM-0273 fix 1).
+  #
+  # The block above contains the chat console only. This one closes the rest of
+  # the namespace: an ordinary pod in it, and the model gateway above all, which
+  # holds provider keys, used to have unrestricted egress. Rendered by
+  # templates/ai-egress-namespace.yaml behind the SAME toggle as the namespace's
+  # ingress default-deny (apps.ai_namespace, which follows
+  # capabilities.networkPolicy).
+  #
+  # WHAT IT ALLOWS, and each item was measured to be necessary, not guessed
+  # (card TM-0273, 2026-09-06 and 2026-09-07): cluster DNS; the namespace itself
+  # (a bare egress deny also blocks a pod from reaching its OWN neighbours, so
+  # Open WebUI -> LiteLLM and LiteLLM -> its database fail without it); the CNPG
+  # instance's paths (the Kubernetes API for the instance manager, the Garage S3
+  # port in the platform namespace for barman); the restore drill's API access;
+  # and the model gateway's provider egress below.
+  #
+  # ROLLBACK LEVER, and the honest reason it exists: a site whose model host is a
+  # machine on the LAN loses that path the moment this goes on, because the
+  # provider default below excludes the LAN on purpose. Add the host to
+  # `litellm.extraEgress` (the right fix) ... or set this false to go back to an
+  # unrestricted AI namespace while you do. It is not a tuning knob.
+  namespaceDefaultDeny: true
+
+  litellm:
+    # Where the model gateway may send traffic OUTSIDE the namespace. A list of
+    # {cidr, ports}. The default is TCP 443 to anywhere on the internet, which
+    # keeps hosted providers working; an entry whose cidr is exactly 0.0.0.0/0
+    # automatically excludes global.clusterCIDR, global.serviceCIDR,
+    # global.lanCIDR and the link-local range 169.254.0.0/16, so the gateway
+    # cannot use its provider path to reach another pod, a Service, the API
+    # server, the LAN or a cloud metadata address. The exclusion is what makes
+    # this a containment rule and not just a port filter.
+    #
+    # NARROW IT. The default is the widest thing that keeps a hosted provider
+    # working with no site knowledge. If you know your providers' address
+    # ranges, list those here instead (no automatic exclusion is added to a cidr
+    # other than 0.0.0.0/0, and the API server rejects an `except` outside its
+    # cidr). If you use no hosted provider at all, set this to [] and the gateway
+    # can reach nothing outside the namespace except what extraEgress adds.
+    providerAllow:
+      - cidr: 0.0.0.0/0
+        ports: [443]
+    # Raw NetworkPolicy egress entries appended verbatim, for the paths the
+    # default excludes on purpose: a model host on the LAN (the documented
+    # "point the gateway at a workstation" case), or a model server in another
+    # namespace. Every entry is a deliberate hole, so record why beside it.
+    #
+    # The SHAPE is a NetworkPolicy egress rule as the API server takes it
+    # (`to` plus `ports`), NOT providerAllow's {cidr, ports} above: that one
+    # rendered clean and failed at the Argo apply with ".cidr: field not
+    # declared in schema" on the 0.8.0 lab, so the schema now refuses it.
+    #   extraEgress:
+    #     - to: [{ipBlock: {cidr: 192.0.2.10/32}}]   # the model host
+    #       ports: [{protocol: TCP, port: 11434}]
+    extraEgress: []
+
+  cnpg:
+    # Where the CNPG instance manager (and the restore drill) reaches the
+    # Kubernetes API. Empty means global.lanCIDR on 6443 plus
+    # global.serviceCIDR on 443, which is the same breadth the diagnostic
+    # identity has today. Set it to the API server's real address(es) as /32
+    # entries (see diagnosticIdentity.apiServerCIDRs for how to find them).
+    apiServerCIDRs: []
+    # Raw egress entries appended verbatim for CNPG pods, e.g. an S3 endpoint
+    # that is NOT the shipped Garage (modelGateway.database.backup pointed at
+    # your own object store). Without it, that backup path is blocked.
+    extraEgress: []
+
+# ---------------------------------------------------------------------------
+# Diagnostic identity ... read-only, network-isolated, for automated agents.
+# ---------------------------------------------------------------------------
+diagnosticIdentity:
+  # Extra API groups the identity may READ. Add a group here when an operator
+  # you install brings a CRD the agent needs to see; it can never gain write.
+  extraApiGroups: []
+  # THE KUBERNETES API ENDPOINT, as /32 (or narrow) CIDRs (TM-0273 fix 2).
+  #
+  # Empty is today's behaviour and it is wider than the comment on the policy
+  # says: TCP 443 and 6443 to the WHOLE serviceCIDR and the WHOLE lanCIDR. "No
+  # path to the internet" is true for direct egress and false through any HTTPS
+  # forwarder on the LAN. The API server's address is site-specific, so it
+  # cannot be defaulted; that is why this is a key and not a template edit.
+  #
+  # Set it to the endpoints the API is actually served from:
+  #   kubectl get endpoints kubernetes -o jsonpath='{range .subsets[*].addresses[*]}{.ip}{"/32\n"}{end}'
+  # (node addresses, port 6443 on k3s) and, for CNIs that match a Service
+  # address before translating it, the ClusterIP:
+  #   kubectl get svc kubernetes -o jsonpath='{.spec.clusterIP}/32{"\n"}'
+  # When set, the serviceCIDR and lanCIDR blocks are NOT rendered for this rule.
+  # Adding a control-plane node means adding its address here.
+  apiServerCIDRs: []
+
+# ---------------------------------------------------------------------------
+# The platform namespace's ingress allows (TM-0273 fixes 3 and 4).
+# ---------------------------------------------------------------------------
+platformNetpol:
+  # SOURCES OF NODE-ORIGINATED TRAFFIC, as CIDRs (TM-0273 fix 4).
+  #
+  # `allow-from-node-network` has to admit traffic that comes from a NODE, not a
+  # pod: the kube-apiserver's webhook calls (cert-manager, CNPG, Longhorn,
+  # MetalLB), the kubelet reaching the Longhorn CSI plugin and probing pods, and
+  # MetalLB with externalTrafficPolicy: Cluster, which SNATs clients to the
+  # receiving node. global.lanCIDR covers the node addresses themselves. What
+  # lanCIDR does not cover is the address a node-originated packet carries when
+  # it is delivered to a pod on flannel, the k3s default: the node's cni0
+  # gateway (the first address of that node's podCIDR) for a pod on the same
+  # node, and its flannel.1 address (the podCIDR's network address) for a
+  # packet that crossed nodes. Both sit inside global.clusterCIDR.
+  #
+  # EMPTY (the default) keeps the pre-0.7.0 rule: the WHOLE clusterCIDR is
+  # admitted to every platform pod on every port. That is the insecure default,
+  # kept so an upgrade does not break a cluster nobody has measured. Measured
+  # 2026-09-29 on kube-router: a pod in `default` reached the object store's
+  # admin port (HTTP 200) and S3 port (403) through it. It is not safe.
+  #
+  # SET, the clusterCIDR block is not rendered and only these sources are
+  # admitted. List a /31 per node, which covers the flannel.1 and cni0
+  # addresses of a /24 podCIDR (10.42.1.0/24 -> 10.42.1.0/31). Print the block
+  # for your cluster with install/tockmox-install.sh --print-netpol-node-sources.
+  #
+  # THE TRAP: a node you add later has a gateway that is not in this list until
+  # you add it. Nothing fails at once; pods on the new node simply cannot be
+  # reached by webhooks, kubelet probes or CSI, and it presents as an admission
+  # webhook timeout or a volume that will not attach, on that node only. Update
+  # this list in the same change that adds the node.
+  #
+  # Other CNIs (Calico, Cilium) source node traffic differently; this list is
+  # written and reasoned for flannel with the embedded policy controller.
+  # A wrong entry cannot open more than the clusterCIDR it sits inside.
+  #
+  # THE RENDER REFUSES, naming both values, when this list is set and
+  # global.lanCIDR CONTAINS global.clusterCIDR (TM-0790). The lanCIDR block is
+  # rendered in both modes, so a lanCIDR that is a supernet of the pod network
+  # (10.0.0.0/8 against 10.42.0.0/16) admits every pod anyway and this key would
+  # do nothing while looking done. IPv4 only; an IPv6 or malformed value is not
+  # judged. See tools/check-lan-cidr-overlap.sh.
+  nodeOriginSources: []
+  # The ports Prometheus may reach on platform pods: the metrics ports the
+  # shipped ServiceMonitors scrape (cert-manager 9402, kured and
+  # snapshot-controller and the CNPG operator 8080, Longhorn manager 9500,
+  # MetalLB controller 9120, Traefik 9100). Derived from the rendered monitors
+  # 2026-09-29, not guessed. Add a port when you add a monitor for a platform
+  # workload. NOTE this only bites once nodeOriginSources is set: while the
+  # clusterCIDR block is rendered, Prometheus's own pod address is admitted by
+  # that block on every port regardless of this list.
+  scrapePorts: [9402, 8080, 9500, 9120, 9100]
+  # Namespaces, beyond the AI and identity ones, whose pods may write to the
+  # object store's S3 port (3900). The shipped users are the AI namespace's
+  # CNPG backups and the identity layer's database dump; add a namespace when
+  # you add a database that backs up to the shipped Garage.
+  extraS3ClientNamespaces: []
+  # Namespaces, beyond `namespaces.monitoring`, whose Prometheus may scrape the
+  # platform and devops namespaces (TM-0820, inventory-devops 4.10). The scrape
+  # rules follow `namespaces.monitoring` already; this is for a site whose
+  # Prometheus sits in a second namespace, for instance while an old stack and
+  # the shipped one run side by side. Each is admitted for pods labelled
+  # `app.kubernetes.io/name: prometheus` only. Empty adds nothing.
+  extraPrometheusNamespaces: []
+  # Namespaces outside the platform whose pods push logs, query metrics or
+  # publish alerts INTO the monitoring namespace: a site's own Alloy, capacity
+  # jobs, publishers (TM-0820, observability-cutover A1). Renders one
+  # NetworkPolicy, allow-from-site-clients, to Prometheus :9090, Loki :3100 and
+  # ntfy :80/:8080. Empty renders nothing.
+  extraMonitoringClientNamespaces: []
+
+# ---------------------------------------------------------------------------
+# RBAC admission guardrails
+#
+# deny-privileged-rbac denies any ClusterRoleBinding to cluster-admin whose
+# NAME is not listed here. That is intentional: every cluster-admin grant
+# should be a decision somebody made on purpose.
+#
+# IT WILL BLOCK THINGS YOU DID NOT EXPECT. k3s's HelmChart controller creates
+# a binding named helm-<chart>; installing any chart that way needs its name
+# added below. The resulting error mentions neither this policy nor the
+# binding, so read docs/operations/troubleshooting.md before you fight it.
+# ---------------------------------------------------------------------------
+rbacGuardrails:
+  clusterAdminAllowlist:
+    - cluster-admin
+    - longhorn-support-bundle
+    # - helm-argocd        # uncomment if you install charts via the k3s HelmChart CRD
+
+  wildcardClusterRoleAllowlist:
+    - cluster-admin
+
+  # ClusterRoles permitted to carry an aggregate-to-* label. The built-in
+  # Kubernetes ones must stay, or the control plane cannot reconcile itself.
+  #
+  # The tockmox-* entries are OURS. Two adopted subcharts ship aggregated
+  # ClusterRoles, and before 2026-09-11 a stock install produced six warnings
+  # telling the operator to allowlist objects Tockmox itself had just created.
+  # That is the product asking the operator to vouch for the product. Worse,
+  # moving denyAggregationInjection.validationActions to ["Deny"] ... an
+  # obvious thing to tighten once you read "Audit first" ... would then break a
+  # stock install with six denials from two shipped layers.
+  #
+  # These names are stable: the installer hardcodes each layer's Application
+  # name as `tockmox-<layer>`, which is also the Helm release name, so the
+  # prefix does not move with the site. Adopting a subchart that ships another
+  # aggregated ClusterRole means adding it here ...
+  # tools/check-rbac-aggregation-allowlist.sh fails CI when one is missing,
+  # so the next one cannot re-open this silently.
+  aggregationAllowlist:
+    - system:aggregate-to-admin
+    - system:aggregate-to-edit
+    - system:aggregate-to-view
+    - system:controller:generic-garbage-collector
+    # cert-manager, from the platform layer
+    - tockmox-platform-cert-manager-view
+    - tockmox-platform-cert-manager-edit
+    - tockmox-platform-cert-manager-cluster-view
+    # Argo Workflows, from the devops layer
+    - tockmox-devops-argo-workflows-view
+    - tockmox-devops-argo-workflows-edit
+    - tockmox-devops-argo-workflows-admin
+
+  denyPrivilegedRbac:
+    # Fail = a broken webhook blocks the request. Ignore = it is allowed through.
+    failurePolicy: Fail
+    # ["Deny"] enforces. ["Audit","Warn"] observes without blocking, which is
+    # the right first step on a cluster you did not build from scratch.
+    validationActions: ["Deny"]
+
+  # RoleBindings that reference the cluster-admin or admin ClusterRole grant
+  # full control of their namespace. Audit first: legitimate ones are common
+  # in clusters that predate Tockmox, and you want to see them before you
+  # start refusing them.
+  denyPrivilegedRolebinding:
+    validationActions: ["Audit", "Warn"]
+
+  # Aggregation-label injection is the quietest escalation path: no binding is
+  # created and no wildcard appears. Audit first for the same reason.
+  denyAggregationInjection:
+    enabled: true
+    validationActions: ["Audit", "Warn"]
+
+  # A ClusterRole granting */*/*. Audit-only by default, and the ONLY one of the
+  # four whose failurePolicy is Ignore ... so it is the only one that genuinely
+  # cannot refuse anything, evaluation errors included. The other three inherit
+  # denyPrivilegedRbac.failurePolicy (Fail), where a CEL error rejects the
+  # request whatever validationActions says.
+  #
+  # Both keys existed only as template literals until 2026-09-04, so the
+  # in-template instruction to "change to [Deny]" meant editing the chart. It is
+  # a values edit now. Raise BOTH together: actions alone leaves the error case
+  # open.
+  denyWildcardClusterrole:
+    failurePolicy: Ignore
+    validationActions: ["Audit", "Warn"]
+
+# ---------------------------------------------------------------------------
+# PriorityClass names. Referenced by `priorityClassName` on shipped workloads,
+# so renaming these is a coordinated change across every chart.
+# ---------------------------------------------------------------------------
+priorityClasses:
+  clusterCritical: tockmox-cluster-critical
+  infrastructure: tockmox-infrastructure
+  apps: tockmox-apps
+
+# ---------------------------------------------------------------------------
+# Per-app enable flags. Every shipped app is individually disableable.
+# ---------------------------------------------------------------------------
+apps:
+  # default-deny ingress in the AI namespace
+  ai_namespace:      {}   # unset: follows capabilities.networkPolicy
+  # The CNPG operator reaching the model gateway's database in the ai namespace.
+  # OFF by default and paired with `apps.litellm` in tockmox-ai, which is also
+  # off: with no LiteLLM there is no CNPG Cluster, and this rule would select no
+  # pod ... the exact defect tools/check-no-ghost-policies.sh exists to catch.
+  # The gate works at namespace granularity, so it would NOT catch this one.
+  # Turn both on together.
+  # UNSET, so it follows the `networkPolicy` capability like every sibling here.
+  # It was `{ enabled: false }` until 2026-09-12, and an explicit entry beats the
+  # capability ... so the one rule that lets the CNPG operator see its own
+  # database was the only netpol off by default. A site that enabled the model
+  # gateway got a database under default-deny with no allow for the operator, and
+  # the Cluster never left `Instance Status Extraction Error`. TM-0518.
+  #
+  # The comment on the rule itself used to say "turn both on together". That is
+  # now the chart's job rather than the reader's: a pairing documented only in a
+  # chart comment is a pairing that gets missed, and this one was, through a
+  # release gate.
+  #
+  # With LiteLLM off this renders an allow-rule that selects no pod. That is
+  # inert ... an ingress allow matching nothing permits nothing ... and it is the
+  # cheap side of the trade against an operator that cannot see its database.
+  ai_cnpg_netpol:    {}
+  # EGRESS containment for the chat console only, not the whole AI namespace.
+  # Needs no site-supplied values: everything it allows is expressible with
+  # selectors. It follows the capability as of 0.6.0, so on a stock install it
+  # is ON.
+  #
+  # What kept it off through v0.5.0 is still true and still worth knowing: its
+  # single-sign-on rule selects the Traefik pod BY LABEL and allows Traefik's
+  # CONTAINER ports. Both are properties of the ingress controller this repo
+  # happens to ship. On a cluster running a different controller, or a renamed
+  # release, the rule matches nothing and single sign-on fails in a way that
+  # looks like the identity provider being down. That is now handled in the
+  # template rather than by shipping off ... see the next paragraph. Test the
+  # login after any change here; see docs/usage/ai-plane.md.
+  # Changed in 0.6.0: was `{ enabled: false }`, which is what made "Open WebUI
+  # egress is unrestricted on a stock install" a published known issue in
+  # v0.5.0. It now follows the capability, and templates/ai-egress.yaml checks
+  # the one condition that OFF was really protecting ... whether the shipped
+  # Traefik is what serves this cluster. Where it is not, the bundle skips
+  # silently if you left this unset, and fails the render if you set it true.
+  ai_openwebui_egress: {}   # unset: follows capabilities.networkPolicy
+  # read-only, network-isolated identity for automated agents
+  diagnostic_identity: { enabled: true }
+  # PriorityClasses only. The Traefik security-headers Middleware moved to
+  # the platform layer: it is a traefik.io CRD, and policy runs at wave 1
+  # while Traefik installs its CRDs at wave 2. Creating it here fails the
+  # whole sync with "no matches for kind Middleware".
+  platform_policies: { enabled: true }
+  traefik_headers:   { enabled: false }
+  rbac_guardrails:   { enabled: true }
+  # The CIS benchmark scanner's namespace (labelled `enforce: privileged`) and its
+  # default-deny NetworkPolicy. OFF by default and NOT tied to a capability,
+  # because the thing it prepares a home for is an opt-in scan that needs host
+  # access. Turn it on together with `apps.kube_bench` in tockmox-selfcheck,
+  # which owns the CronJob: this key creates the namespace and the policy, that
+  # one creates the workload. With this on and that off you get a privileged
+  # namespace with nothing in it; with that on and this off the sync fails
+  # because the namespace does not exist. Both failures are loud or inert on
+  # purpose. docs/operations/kube-bench.md is the operator's page.
+  kube_bench: { enabled: false }
+  monitoring_netpol: {}   # unset: follows capabilities.networkPolicy
+  authentik_netpol:  {}   # unset: follows capabilities.networkPolicy
+
+  # The platform namespace: cert-manager, MetalLB, Traefik, Longhorn, the CNPG
+  # operator, the Barman plugin, kured, snapshot-controller. Through v0.5.0 this
+  # namespace carried NO NetworkPolicies and the CHANGELOG said so; new in
+  # 0.6.0.
+  #
+  # INGRESS-ONLY, on purpose. Longhorn replicates on runtime-assigned ports and
+  # the Barman plugin writes to whatever object store you named, so an egress
+  # default-deny written from a template would be an outage rather than a
+  # control. What this buys is that nothing outside this namespace, the
+  # Prometheus that scrapes it, and the node network can open a connection to
+  # the Longhorn manager, the CNPG operator or the cert-manager webhook. Traefik
+  # stays open because Traefik is the front door.
+  #
+  # REQUIRES global.lanCIDR. The admission webhooks here are called by the
+  # kube-apiserver from a NODE address, which no selector can match; the render
+  # fails with an explanation rather than shipping a bundle that silently breaks
+  # certificate issuance. hostNetwork pods (MetalLB speaker, kured,
+  # node-exporter) are outside NetworkPolicy entirely and this bundle does not
+  # reach them.
+  platform_netpol:   {}   # unset: follows capabilities.networkPolicy
+
+  # The self-check namespace: the heartbeat CronJob and the blackbox exporter.
+  # The other namespace v0.5.0 published as unpoliced; new in 0.6.0. Small
+  # enough to enumerate completely ... the entire inbound surface is one
+  # Prometheus scrape on 9115, so everything else is denied. Egress untouched,
+  # so the heartbeat still reaches Alertmanager and the probes still reach your
+  # ingress hostnames.
+  selfcheck_netpol:  {}   # unset: follows capabilities.networkPolicy
+  # The devops namespace, where tockmox-devops installs. Default-deny ingress
+  # plus three allows: the intra-namespace mesh, Traefik, and Prometheus.
+  #
+  # This bundle guards Argo Workflows, which lands in `namespaces.devops`. It is
+  # on by default because that workload ships on by default.
+  #
+  # It used to guard Harbor too, which is the whole reason it exists: Harbor was
+  # a subchart landing here while `apps.harbor_netpol` pointed at a `harbor`
+  # namespace nothing occupied. Harbor no longer ships (see
+  # docs/deployment/registry.md), and `harbor_netpol` below is now purely for a
+  # registry you installed yourself.
+  #
+  # tockmox-platform and tockmox-selfcheck still carry no NetworkPolicies.
+  devops_netpol:     {}   # unset: follows capabilities.networkPolicy
+  # SITE-SUPPLIED, and off, for the same reason as the three bundles below:
+  # it guards a Harbor you installed YOURSELF, as its own release in
+  # `namespaces.harbor`. It does not guard the Harbor tockmox-devops ships,
+  # and never did ... Helm installs subchart resources into their release's
+  # namespace, so the shipped Harbor is in `namespaces.devops` and is covered
+  # by `apps.devops_netpol` above. The rules here are kept because a
+  # standalone Harbor is a real deployment and its component mesh is the same
+  # mesh; only the namespace differs.
+  #
+  # The template refuses to render if `namespaces.harbor` is pointed at
+  # `namespaces.devops`, which would put two default-deny bundles on one
+  # namespace and hand the devops namespace a rule set that never heard of
+  # Argo Workflows.
+  harbor_netpol:     { enabled: false }
+
+  # -------------------------------------------------------------------------
+  # SITE-SUPPLIED POLICY BUNDLES ... off by default.
+  #
+  # These guard workloads Tockmox does NOT ship. They are kept because they
+  # encode reachability reasoning that is tedious to rederive, and because the
+  # reference site runs all three. Turning one on without the matching workload
+  # creates NetworkPolicies that select nothing, which is the defect this
+  # default closes.
+  #
+  # Before enabling any of these, confirm the target namespace exists ... set
+  # `namespaces.<key>` to where your workload actually lives, and add the key
+  # to `namespaces.create` if you want this chart to create it. Enabling a
+  # bundle with a blank namespace name fails the render on purpose.
+  # -------------------------------------------------------------------------
+
+  # Default-deny plus a Traefik/git-SSH/Prometheus allow set for a Forgejo you
+  # installed yourself. Tockmox ships no Forgejo chart; see
+  # charts/tockmox-devops/values.yaml for why.
+  forgejo_netpol:    { enabled: false }
+
+  # Default-deny plus intra-namespace and Prometheus allows for a Tailscale
+  # operator or subnet router you installed yourself. Ingress-only, so the
+  # tunnel data path is untouched.
+  tailscale_netpol:  { enabled: false }
+
+  # Admits remote syslog from `global.lanCIDR` to a second Alloy release named
+  # `syslog-ingest` listening on 1514. Tockmox ships one Alloy (the log
+  # DaemonSet from tockmox-observability), not that receiver, so this rule
+  # selected no pod on a stock install. Previously it rendered whenever
+  # monitoring_netpol was on; it now has its own flag.
+  syslog_ingest_netpol: { enabled: false }
+
+  # The ServiceMonitor, PodMonitor and PrometheusRule objects THIS REPO writes,
+  # as distinct from the stack that consumes them.
+  #
+  # It is a separate component so that "I run my own Prometheus operator" is one
+  # key rather than a fork. Decline capabilities.observability to drop the stack,
+  # set this true, and Tockmox still renders its monitors and rules for your
+  # operator to collect. Unset, it follows the capability, so the common case
+  # needs no decision at all.
+  serviceMonitors: {}   # unset: follows capabilities.observability

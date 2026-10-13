@@ -1,0 +1,3 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+tockmox-selfcheck (sync wave 5) installed.
+Enabled apps: {{ include "tockmox.enabledApps" . }}

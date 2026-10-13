@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Fake kubeseal. --fetch-cert answers only for the controller the fake cluster
+# actually runs (a wrong namespace or name fails, as the real one does).
+# Sealing reads a Secret manifest on stdin and writes a SealedSecret whose
+# "ciphertext" is a random nonce plus a SHA-256 of the value: unlike real
+# ciphertext it lets the tests see that two halves of a pair carry ONE value,
+# and it never contains the value. Arguments are logged; stdin never is.
+S="${FAKE_STATE:?FAKE_STATE not set}"; C="$S/cluster"
+printf 'kubeseal %s\n' "$*" >> "$S/calls.log"
+OSSL="${REAL_OPENSSL:-openssl}"
+cname=""; cns=""; cert=""; fetch=false; ver=false; args=("$@"); i=0
+while [ "$i" -lt "${#args[@]}" ]; do
+  case "${args[$i]}" in
+    --version) ver=true; i=$((i + 1)) ;;
+    --fetch-cert) fetch=true; i=$((i + 1)) ;;
+    --controller-name) cname="${args[$((i + 1))]}"; i=$((i + 2)) ;;
+    --controller-namespace) cns="${args[$((i + 1))]}"; i=$((i + 2)) ;;
+    --cert) cert="${args[$((i + 1))]}"; i=$((i + 2)) ;;
+    --context|--format) i=$((i + 2)) ;;
+    *) i=$((i + 1)) ;;
+  esac
+done
+$ver && { echo "kubeseal version: 0.40.1"; exit 0; }
+if $fetch; then
+  [ -e "$C/controller" ] || { echo "fake kubeseal: no controller in this cluster" >&2; exit 1; }
+  read -r rns rname _ < "$C/controller"
+  { [ "$rns" = "$cns" ] && [ "$rname" = "$cname" ]; } \
+    || { echo "fake kubeseal: cannot fetch certificate: services \"$cname\" not found in namespace \"$cns\"" >&2; exit 1; }
+  f="$(ls "$C/keys/$rns"/* 2>/dev/null | head -1)"
+  [ -n "$f" ] || { echo "fake kubeseal: controller has no key" >&2; exit 1; }
+  printf -- '-----BEGIN CERTIFICATE-----\nFAKECERT-%s\n-----END CERTIFICATE-----\n' "$(sed -n 's/^crt=//p' "$f")"
+  exit 0
+fi
+# seal
+[ -r "$cert" ] && grep -q FAKECERT "$cert" || { echo "fake kubeseal: --cert missing or not a fake certificate" >&2; exit 1; }
+n=$(( $(cat "$S/seal.count" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$S/seal.count"
+if [ -n "${FAKE_KUBESEAL_FAIL_AT:-}" ] && [ "$n" -eq "$FAKE_KUBESEAL_FAIL_AT" ]; then
+  echo "fake kubeseal: forced failure on seal number $n" >&2; exit 1
+fi
+in="$(cat)"
+name="$(printf '%s\n' "$in" | sed -n 's/^  name: //p' | head -1)"
+ns="$(printf '%s\n' "$in" | sed -n 's/^  namespace: //p' | head -1)"
+type="$(printf '%s\n' "$in" | sed -n 's/^type: //p' | head -1)"
+printf 'kubeseal sealed %s/%s\n' "$ns" "$name" >> "$S/calls.log"
+printf 'apiVersion: bitnami.com/v1alpha1\nkind: SealedSecret\nmetadata:\n  name: %s\n  namespace: %s\nspec:\n  encryptedData:\n' "$name" "$ns"
+printf '%s\n' "$in" | awk '/^data:/{f=1;next} f && /^  [^ ]/{print}' | while IFS= read -r line; do
+  k="${line%%:*}"; k="${k# }"; k="${k# }"; v="${line#*: }"
+  h="$(printf '%s' "$v" | "$OSSL" dgst -sha256 -r | cut -d' ' -f1)"
+  printf '    %s: FAKESEALED.%s%s.%s\n' "$k" "$RANDOM" "$RANDOM" "$h"
+done
+printf '  template:\n    type: %s\n' "${type:-Opaque}"

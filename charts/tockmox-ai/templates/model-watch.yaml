@@ -1,0 +1,234 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+The model watcher and its PR opener (REQ-0048, TM-0930, TM-0920). OFF by default: modelLifecycle.watch.enabled.
+
+The watcher is the one part of Tockmox that reaches the internet on its own: it reads Hugging Face, the Ollama
+registry, OpenRouter, and the Anthropic and OpenAI model lists, writes a report, and changes nothing. The opener
+(modelLifecycle.watch.pullRequests.enabled) turns that report into ONE pull request at a time on the site repo.
+Both live in the Tockmox UI image, which ships as source (TM-0902): the site builds it and names it here.
+
+One CronJob, no Kubernetes authority (no service-account token), and a NetworkPolicy of its own:
+  ingress   none
+  egress    DNS to kube-system; HTTPS (443) to the internet, EXCEPT every private, link-local, shared and loopback
+            range, so the pod can reach the five upstream hosts and the forge API but not the cluster, the LAN or a
+            cloud metadata address; plus modelLifecycle.watch.egress.extra (for example an in-cluster Forgejo).
+            NetworkPolicy cannot name hosts; the code's own host allowlist (WATCH_HOSTS) narrows it further.
+The pod carries tockmox.com/isolated, so the policy layer's namespace-wide ingress allows skip it.
+
+The report lands on a small PVC the Tockmox UI mounts read-only when it runs in this chart (tockmox-ui.yaml).
+*/ -}}
+{{- $lc := .Values.modelLifecycle | default dict -}}
+{{- $w := $lc.watch | default dict -}}
+{{- if $w.enabled -}}
+{{- if not $w.image -}}
+{{- fail "modelLifecycle.watch.enabled is true but modelLifecycle.watch.image is empty: the watcher runs in the Tockmox UI image, which ships as source (TM-0902). Build it from the Tockmox UI's Dockerfile, push it to your registry, and name it here." -}}
+{{- end -}}
+{{- $pr := $w.pullRequests | default dict -}}
+{{- $sec := $w.secrets | default dict -}}
+{{- $appKey := ($pr.githubApp | default dict) -}}
+{{- if and $pr.enabled (ne ($pr.forge | default "github") "github") (not $sec.forgeToken) -}}
+{{- fail "modelLifecycle.watch.pullRequests is on for a Forgejo forge but modelLifecycle.watch.secrets.forgeToken names no Secret: the opener needs the bot's token in it (key: token)" -}}
+{{- end -}}
+{{- if and $pr.enabled (eq ($pr.forge | default "github") "github") (not $appKey) (not $sec.forgeToken) -}}
+{{- fail "modelLifecycle.watch.pullRequests is on for GitHub but neither pullRequests.githubApp (appId) nor secrets.forgeToken is set: the opener has no way to authenticate" -}}
+{{- end -}}
+{{- /* The config the watcher and opener read: the site's own blocks, with the key path pinned to where it is mounted. */ -}}
+{{- $wcfg := deepCopy $w -}}
+{{- if and $pr.enabled $appKey -}}
+{{- $p2 := deepCopy $pr -}}
+{{- $_ := set $p2 "githubApp" (merge (dict "privateKeyFile" "/bot/private-key.pem") (omit $appKey "privateKeyFile")) -}}
+{{- $_ := set $wcfg "pullRequests" $p2 -}}
+{{- end -}}
+{{- if $sec.forgeToken -}}
+{{- $p3 := deepCopy ($wcfg.pullRequests | default dict) -}}
+{{- $_ := set $p3 "tokenEnv" "TOCKMOX_BOT_TOKEN" -}}
+{{- $_ := set $wcfg "pullRequests" $p3 -}}
+{{- end -}}
+{{- $_ := set $wcfg "enabled" true -}}
+{{- $cfg := dict "modelLifecycle" (merge (dict "watch" (omit $wcfg "image" "schedule" "secrets" "egress" "resources" "report")) (omit $lc "watch")) "inferenceNodes" (.Values.inferenceNodes | default dict) -}}
+{{- $cfgText := $cfg | toYaml -}}
+{{- $rep := $w.report | default dict -}}
+{{- /*
+The report volume has two consumers: this CronJob writes it, the Tockmox UI mounts it read-only. A
+ReadWriteOnce volume attaches to ONE node, so on a multi-node cluster the two pods must share a node or one
+of them waits on Multi-Attach forever (D2, TM-0902). With the UI on and the volume RWO, the watcher is
+required onto the UI pod's node (the UI holds the attachment; the watcher is the short-lived one), and the
+UI Deployment rolls with maxSurge 0 (not Recreate, which ServerSideApply refuses over a live Deployment) so
+its own rollout never needs the volume on two nodes. ReadWriteMany needs
+neither. ReadWriteOncePod cannot serve two pods at all and is refused.
+*/ -}}
+{{- $modes := $rep.accessModes | default (list "ReadWriteOnce") -}}
+{{- if has "ReadWriteOncePod" $modes -}}
+{{- fail "modelLifecycle.watch.report.accessModes has ReadWriteOncePod: the watcher writes the report and the Tockmox UI reads it, two pods. Use ReadWriteOnce (the chart co-schedules them) or ReadWriteMany." -}}
+{{- end -}}
+{{- $colocate := and (($.Values.tockmoxUi | default dict).enabled) (has "ReadWriteOnce" $modes) (not (has "ReadWriteMany" $modes)) -}}
+{{- $res := $w.resources | default (dict "requests" (dict "cpu" "50m" "memory" "128Mi") "limits" (dict "memory" "256Mi")) -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-model-watch
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-model-watch
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+{{ $cfgText | indent 4 }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tockmox-model-watch-report
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  accessModes: {{ toJson ($rep.accessModes | default (list "ReadWriteOnce")) }}
+  {{- with ($rep.storageClass | default ((.Values.global | default dict).storageClass)) }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $rep.size | default "64Mi" }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tockmox-model-watch
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  schedule: {{ $w.schedule | default "17 6 * * *" | quote }}
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 900
+      template:
+        metadata:
+          labels:
+            {{- include "tockmox.labels" . | nindent 12 }}
+            app.kubernetes.io/name: tockmox-model-watch
+            tockmox.com/isolated: "true"
+          annotations:
+            checksum/config: {{ $cfgText | sha256sum | trunc 16 | quote }}
+        spec:
+          serviceAccountName: tockmox-model-watch
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          {{- if $colocate }}
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector: { matchLabels: { app.kubernetes.io/name: tockmox-ui } }
+                  topologyKey: kubernetes.io/hostname
+          {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile: { type: RuntimeDefault }
+          {{- if $pr.enabled }}
+          initContainers:
+          {{- else }}
+          containers:
+          {{- end }}
+            - name: watcher
+              image: {{ $w.image | quote }}
+              imagePullPolicy: IfNotPresent
+              command: [python, -m, app.watcher, /config/config.yaml, /work/report.json]
+              {{- with $sec.providerKeys }}
+              envFrom:
+                - secretRef: { name: {{ . | quote }} }
+              {{- end }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              resources:
+                {{- toYaml $res | nindent 16 }}
+              volumeMounts:
+                - { name: config, mountPath: /config, readOnly: true }
+                - { name: work, mountPath: /work }
+          {{- if $pr.enabled }}
+          containers:
+            - name: opener
+              image: {{ $w.image | quote }}
+              imagePullPolicy: IfNotPresent
+              command: [python, -m, app.pr_opener, /config/config.yaml, /work/report.json, --apply]
+              {{- with $sec.forgeToken }}
+              env:
+                - name: TOCKMOX_BOT_TOKEN
+                  valueFrom: { secretKeyRef: { name: {{ . | quote }}, key: token } }
+              {{- end }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              resources:
+                {{- toYaml $res | nindent 16 }}
+              volumeMounts:
+                - { name: config, mountPath: /config, readOnly: true }
+                - { name: work, mountPath: /work, readOnly: true }
+                {{- if $appKey }}
+                - { name: bot-key, mountPath: /bot, readOnly: true }
+                {{- end }}
+          {{- end }}
+          volumes:
+            - name: config
+              configMap: { name: tockmox-model-watch }
+            - name: work
+              persistentVolumeClaim: { claimName: tockmox-model-watch-report }
+            {{- if and $pr.enabled $appKey }}
+            - name: bot-key
+              secret:
+                secretName: {{ $sec.githubAppKey | default "tockmox-model-watch-bot-app" | quote }}
+                defaultMode: 0440
+                items: [{ key: private-key.pem, path: private-key.pem }]
+            {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tockmox-model-watch
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-model-watch
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
+              - 127.0.0.0/8
+      ports:
+        - { port: 443, protocol: TCP }
+    {{- with (($w.egress | default dict).extra) }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

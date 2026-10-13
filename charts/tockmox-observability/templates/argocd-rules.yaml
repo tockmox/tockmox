@@ -1,0 +1,132 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+TM-0739 ... ALERT WHEN ARGOCD CANNOT READ WHAT IT IS MEANT TO RECONCILE.
+
+THE INCIDENT. 2026-09-17, on a lab install: an expired read-only token left nine
+Applications in `ComparisonError` for two and a half days. Every one of them
+reported Health=Healthy throughout, because the workloads applied before the
+token died keep running; the heartbeat kept firing; TockmoxSelfCheckStale
+correctly stayed quiet. Nothing in the product alerted on ArgoCD's state, so the
+only tell was a Sync Status column reading `Unknown` beside the word `Healthy`.
+
+TWO STATES, AND ONLY ONE IS LOUD.
+  OutOfSync   ArgoCD read the desired state and it differs. Visible, and
+              selfHeal acts on it.
+  Unknown     ArgoCD could not read the desired state at all (repository
+              unreachable, credential expired, revision gone). selfHeal has
+              nothing to heal toward and prune does not run; the Application sits
+              as it was last left, looking fine. SILENT BY CONSTRUCTION.
+This file alerts on the second. It keys on `sync_status`, never on
+`health_status` (which reads Healthy throughout) and never on chart labels.
+
+WHAT THE METRIC CAN AND CANNOT SAY. `argocd_app_info` carries `sync_status`; on a
+failed comparison it reads `Unknown`. The reason (ComparisonError and its
+message) lives in `status.conditions`, which ArgoCD exports as
+`argocd_app_condition` ONLY for condition names the operator lists in
+`controller.metrics.application.conditions`; none are listed on a stock install,
+so this rule cannot depend on it. Unknown is also what an Application reads for a
+few seconds while a refresh is in flight and for a short while after a
+repo-server restart, which is the whole reason for the `for:` window below.
+
+SAME GATE AS THE SCRAPE, deliberately. The rules render with
+`apps.argocdMonitoring`, together with the monitors and the board, and since
+TM-0739 that key follows capabilities.observability, so they render on every
+install with observability on. ArgoCD's metrics services are off in a stock
+argo-cd chart (see argocd-monitoring.yaml); fresh-install.md §6 turns them on in
+the install command, an ArgoCD you installed yourself may not have them.
+
+THE DEFAULT-ON CONSEQUENCE, and how the second rule avoids a false alert. On an
+install whose ArgoCD has no metrics Services there is no `argocd_app_info` and
+never will be, which is "metrics are off", a choice, and not "the scrape broke",
+a fault. Prometheus cannot tell the two apart from `argocd_app_info` alone, so
+TockmoxArgoCDMetricsAbsent also requires that ArgoCD's metrics Services EXIST in
+the cluster (kube_service_info, from kube-state-metrics, which
+kube-prometheus-stack runs by default). Services present and no series is a
+fault; no Services is silence. If kube-state-metrics is disabled the rule is
+silent, which is the safe direction.
+
+LIMIT, stated plainly: an install whose ArgoCD has NOT got metrics turned on gets
+none of these alerts, and is not told so by an alert (it would be a false one). Tockmox never touches the operator's ArgoCD (prerequisites.md
+§2), so it cannot turn them on. Proven here by `promtool test rules` over the
+rendered expression (tests/rules/argocd-sync.yaml); NOT proven here: that a
+broken credential on a live cluster produces an ntfy notification inside the
+stated window.
+*/ -}}
+{{- $monitors := include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") }}
+{{- if and $monitors (include "tockmox.appEnabled" (dict "ctx" $ "app" "argocdMonitoring")) }}
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tockmox-argocd
+  namespace: {{ $.Values.namespaces.monitoring }}
+  annotations:
+    # Sync wave 1: after the operator Deployment (wave 0) that serves the
+    # admission webhook. check-upgrade-safety.sh F4 asserts it.
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+spec:
+  groups:
+    - name: tockmox-argocd
+      rules:
+        - alert: TockmoxArgoCDCannotCompare
+          # `count by (name, project)` rather than the raw series: argocd_app_info
+          # also carries health_status, revision-ish and destination labels that
+          # change while an Application is unhealthy, and a `for:` clock on a
+          # series whose label set keeps changing never completes. `namespace`
+          # is left out on purpose: the scrape renames the Application's own
+          # namespace label to exported_namespace, and `name` is unique here.
+          expr: count by (name, project) (argocd_app_info{sync_status="Unknown"}) > 0
+          # 30m: a refresh in flight or a repo-server restart clears in seconds
+          # to a few minutes; the default reconciliation timeout is 3m. Thirty
+          # minutes is ten missed refreshes, long enough that nothing healthy
+          # sits in it and short enough that a dead credential is reported the
+          # same morning rather than 2.5 days later.
+          for: 30m
+          labels:
+            # critical, like TockmoxNotificationSinkDown and TockmoxSelfCheckStale:
+            # this is the mechanism every other layer is delivered by, and while it
+            # is blind a re-pin, a rotation or a fix silently never lands.
+            severity: critical
+          annotations:
+            summary: "ArgoCD cannot compare {{ "{{ $labels.name }}" }} against its repository ... sync status Unknown, not OutOfSync"
+            description: >-
+              ArgoCD has not been able to read the desired state of Application
+              {{ "{{ $labels.name }}" }} (project {{ "{{ $labels.project }}" }}) for 30 minutes. This
+              is not OutOfSync: nothing is being compared, selfHeal has nothing to
+              heal toward, prune is not running, and the Application will keep
+              reporting Health Healthy because what it last applied is still
+              running. Usual causes are an expired or revoked repository
+              credential, a repoURL that no longer matches the credential's url,
+              or a revision that no longer exists. Read the reason with
+              `kubectl -n argocd get application {{ "{{ $labels.name }}" }} -o
+              jsonpath='{.status.conditions}'`. If many Applications are listed
+              at once the cause is shared: the repository credential.
+            runbook: docs/administration/argocd.md#when-argocd-cannot-read-the-repository-and-what-alerts
+        - alert: TockmoxArgoCDMetricsAbsent
+          # ABSENT, not zero: with the scrape broken, "no Application is Unknown"
+          # and "nothing is reporting" are the same empty result, and the first
+          # is the failure TockmoxArgoCDCannotCompare exists to catch.
+          # `and on() count(kube_service_info ...)`: only while ArgoCD's metrics
+          # Services exist. Without them metrics are simply off, and the rule
+          # now renders by default (TM-0739), so firing would be a false alert on
+          # every install whose ArgoCD has no metrics. The regex matches the
+          # three Service NAMES (argocd-server-metrics, argocd-repo-server-metrics,
+          # argocd-application-controller-metrics).
+          expr: absent(argocd_app_info) and on() (count(kube_service_info{namespace="{{ $.Values.argocd.namespace }}", service=~".*(controller|server)-metrics"}) > 0)
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "No ArgoCD application metrics ... the sync-state alert cannot fire"
+            description: >-
+              ArgoCD's metrics Services exist, but Prometheus holds no
+              argocd_app_info series. TockmoxArgoCDCannotCompare is blind until
+              they return. Check that metrics are enabled on your ArgoCD
+              (controller.metrics.enabled) and that its metrics Service carries
+              the `argocd-metrics` label and an `http-metrics` port, which is what
+              the ServiceMonitor selects.
+            runbook: docs/administration/argocd.md#its-metrics-are-off-until-you-turn-them-on
+{{- end }}

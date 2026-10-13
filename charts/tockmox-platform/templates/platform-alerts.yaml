@@ -1,0 +1,336 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+Alerts on the platform's own components. Every expression below was checked
+against the exporter it reads, on a running cluster, on 2026-08-15 ... metric
+names AND label sets, not just "cert-manager exposes metrics". A rule naming a
+metric the shipped stack does not produce is worse than no rule, because it
+looks like coverage.
+
+WHY THESE ARRIVE AFTER THE SERVICEMONITORS AND NOT BEFORE. On the day this was
+written, Prometheus on the reference deployment had 24 targets and not one was
+cert-manager, Longhorn, Traefik or MetalLB. All four shipped. All four exposed
+metrics. Every upstream chart defaults its ServiceMonitor off, because a
+standalone chart cannot assume the CRD exists, and nobody had turned them on.
+
+So these rules could not have worked before values.yaml enabled the scrape, and
+writing them first would have produced a page of alerts that never fire. That
+ordering is the whole lesson: turn on the collection, confirm the series, then
+alert.
+
+The AND with serviceMonitors is deliberate and is not the capability tri-state:
+`apps.serviceMonitors` asks "is anything evaluating rules", and without it these
+are objects that apply cleanly and are never read.
+*/ -}}
+{{- $monitors := include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") }}
+{{- if $monitors }}
+{{- $lhOn := include "tockmox.appEnabled" (dict "ctx" $ "app" "longhorn") }}
+{{- $cmOn := .Values.apps.certManager.enabled }}
+{{- $cnpgOn := include "tockmox.appEnabled" (dict "ctx" $ "app" "cnpg") }}
+{{- /*
+The Longhorn threshold is DERIVED from the setting that actually decides,
+rather than picked as a round number. Longhorn refuses to schedule a replica
+when free space falls below `storageMinimalAvailablePercentage`, so the moment
+that matters is exactly the moment usage crosses (100 - that value).
+
+Observed on the reference lab on 2026-08-15, with the default of 25: the disk
+reached 90 percent, every replica became unschedulable, both volumes went
+faulted, and Longhorn reported it as "disks are unavailable: no disks found on
+node <name>". Nothing said the disk was full. This alert is that sentence.
+*/ -}}
+{{- $lh := index .Values "longhorn" | default dict -}}
+{{- $lhDefaults := $lh.defaultSettings | default dict -}}
+{{- $minAvail := $lhDefaults.storageMinimalAvailablePercentage | default 25 | int -}}
+{{- /* divf, not div. Helm's `div` is INTEGER division, so `div 75 100.0`
+     is 0 and the rendered expression became `> 0`, which is true for every
+     node at all times. Caught by reading the rendered rule rather than the
+     template. */ -}}
+{{- $lhThreshold := divf (sub 100 $minAvail) 100 -}}
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tockmox-platform
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    prometheus: kube-prometheus-stack
+    role: alert-rules
+spec:
+  groups:
+    - name: tockmox.platform.storage
+      interval: 1m
+      rules:
+        # ---- the failure this repo actually had ----
+        - alert: TockmoxPersistentVolumeClaimPending
+          # The first-hour hazard, and it is silent by construction: a PVC with
+          # no storageClassName falls through to the cluster default, and if
+          # that default cannot provision, the claim sits Pending forever with
+          # the cause two log levels down in the provisioner. The pod says
+          # ContainerCreating and nothing says why.
+          expr: |
+            max by (namespace, persistentvolumeclaim) (
+              kube_persistentvolumeclaim_status_phase{phase="Pending"}
+            ) == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "PVC {{ `{{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }}` }} has been Pending for 15 minutes"
+            description: >-
+              Nothing has provisioned this claim. The usual causes are a default
+              StorageClass that cannot schedule (check TockmoxLonghornStorageFull
+              below), a storageClassName naming a class this cluster does not
+              have, or a provisioner that is not running. Any pod mounting it is
+              stuck in ContainerCreating.
+{{- if $lhOn }}
+        - alert: TockmoxLonghornStorageFull
+          # Confirmed on the live exporter 2026-08-15: both series exist, one
+          # per node, labelled `node`.
+          expr: |
+            (
+              longhorn_node_storage_usage_bytes
+              /
+              longhorn_node_storage_capacity_bytes
+            ) > {{ $lhThreshold }}
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Longhorn storage on {{ `{{ $labels.node }}` }} is past the point where replicas stop scheduling"
+            description: >-
+              Usage has crossed {{ printf "%.0f" (mulf $lhThreshold 100) }} percent, which is where Longhorn's
+              storageMinimalAvailablePercentage of {{ $minAvail }} stops it scheduling any new
+              or rebuilding replica. Volumes will go faulted and Longhorn will
+              report it as "no disks found on node", which names neither the
+              disk nor the capacity. Free space or add a disk.
+        - alert: TockmoxLonghornVolumeFaulted
+          # `state` is a LABEL on this metric, not a value, and the series
+          # exists for every state at all times with a 0/1 value. Matching on
+          # the label and testing == 1 is the only correct reading; testing the
+          # metric alone matches eight series per volume.
+          #
+          # TWO SHAPES OF A REAL FAULT, AND ONE SHAPE THAT IS NOT ONE.
+          #
+          #   SUSTAINED: faulted 5 minutes ago and on every sample since.
+          #   Fires about 7 minutes in (the 5m window plus `for: 2m`). The
+          #   `offset 5m` half is not decoration: after a reboot the series is
+          #   NEW, min_over_time sees only the samples since boot, and a
+          #   three-sample startup blip would read as "faulted throughout".
+          #
+          #   FLAPPING (the 2026-08-18 single-node fault): a wedged volume puts
+          #   its workload into a ~30s recreate loop, and robustness oscillates.
+          #   Measured while it was live: faulted only ~10% of the time and 26
+          #   changes an hour, so `== 1` with `for: 5m` stayed INACTIVE for over
+          #   an hour (the clock reset on every flip). Caught here by counting
+          #   EPISODES: at least 6 changes in an hour (three separate faulted
+          #   episodes), the latest within 15 minutes so it resolves once the
+          #   flapping stops.
+          #
+          #   A REBOOT (TM-0836, measured on the lab 2026-10-03): while
+          #   longhorn-manager starts, every volume reads faulted briefly, then
+          #   healthy. On the lab that was 2 samples and 1 change per volume.
+          #   One episode, however many samples it spans, never fires.
+          #
+          # WHY NOT THE DUTY CYCLE THIS RULE USED TO BE. It was
+          # `avg_over_time(...[30m]) > 0.05`, argued as "a transient blip scores
+          # ~0.017 (30s in 30m)". That is seconds; avg_over_time averages
+          # SAMPLES, and this chart scrapes Longhorn every 60s (metrics.interval
+          # in values.yaml), so one faulted sample scored 0.034 and the reboot's
+          # two scored 0.069: a critical page after every reboot, from 0.5.0
+          # until 0.7.1. Counting episodes and requiring a sustained run do not
+          # depend on the scrape interval; a fraction of samples does. The
+          # general lesson: avg_over_time counts samples, not seconds.
+          #
+          # tests/rules/longhorn-volume-faulted.yaml pins all three shapes at the
+          # shipped 60s interval and at 30s, in both directions.
+          expr: >-
+            (
+              max by (volume, pvc, pvc_namespace) (
+                min_over_time(longhorn_volume_robustness{state="faulted"}[5m])
+              ) == 1
+              and
+              max by (volume, pvc, pvc_namespace) (
+                longhorn_volume_robustness{state="faulted"} offset 5m
+              ) == 1
+            )
+            or
+            (
+              max by (volume, pvc, pvc_namespace) (
+                changes(longhorn_volume_robustness{state="faulted"}[1h])
+              ) >= 6
+              and
+              max by (volume, pvc, pvc_namespace) (
+                max_over_time(longhorn_volume_robustness{state="faulted"}[15m])
+              ) == 1
+            )
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Longhorn volume {{ `{{ $labels.pvc_namespace }}/{{ $labels.pvc }}` }} is faulted"
+            description: >-
+              The volume has no healthy replica and cannot serve I/O. Anything
+              mounting it will fail to attach.
+        - alert: TockmoxLonghornVolumeStuckAttaching
+          # The OTHER shape of the 2026-08-18 fault, and the one the faulted
+          # rule cannot see on its own: a volume that wedges MID-ATTACH sits
+          # with state=attaching and robustness=unknown, only passing through
+          # faulted for seconds per cycle. The faulted rule catches
+          # it when those excursions are frequent enough; this rule catches it
+          # directly. A healthy attach takes seconds, so its attaching duty
+          # cycle over 15 minutes is ~0.01; the observed wedge (a ~30s
+          # workload recreate loop re-attempting attach) holds the state most
+          # of the window. 0.5 catches both the sustained and the looping
+          # shape with an order of magnitude of headroom on either side.
+          # Same label semantics as robustness: `state` is a label, the
+          # series carries 0/1, and every state's series always exists.
+          expr: >-
+            max by (volume, pvc, pvc_namespace) (
+              avg_over_time(longhorn_volume_state{state="attaching"}[15m])
+            ) > 0.5
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Longhorn volume {{ `{{ $labels.pvc_namespace }}/{{ $labels.pvc }}` }} has been stuck attaching for 15 minutes"
+            description: >-
+              The volume cannot finish attaching, so its workload cannot
+              start; expect the pod in a recreate or init loop. Check for a
+              stale VolumeAttachment and the longhorn-manager log for the
+              volume before restarting anything.
+        - alert: TockmoxLonghornVolumeDegraded
+          expr: max by (volume, pvc, pvc_namespace) (longhorn_volume_robustness{state="degraded"}) == 1
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Longhorn volume {{ `{{ $labels.pvc_namespace }}/{{ $labels.pvc }}` }} has been degraded for 30 minutes"
+            description: >-
+              Fewer healthy replicas than requested and not rebuilding. On a
+              single-node deployment with replica count 1 this should never
+              appear; if it does, the disk is unschedulable.
+{{- end }}
+{{- if $cmOn }}
+    - name: tockmox.platform.certificates
+      interval: 5m
+      rules:
+        - alert: TockmoxCertificateNotReady
+          # Confirmed on the live exporter 2026-08-15. `condition` is a label.
+          expr: max by (name, namespace) (certmanager_certificate_ready_status{condition="True"}) == 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Certificate {{ `{{ $labels.namespace }}/{{ $labels.name }}` }} is not ready"
+            description: >-
+              cert-manager has not issued or renewed this certificate for an
+              hour. Every console fronted by it will present an untrusted or
+              expired certificate, and server-side OIDC will fail before the
+              browser ever shows a warning.
+        - alert: TockmoxCertificateExpiringSoon
+          expr: |
+            (
+              max by (name, namespace) (certmanager_certificate_expiration_timestamp_seconds)
+              - time()
+            ) < (14 * 24 * 3600)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Certificate {{ `{{ $labels.namespace }}/{{ $labels.name }}` }} expires in under 14 days"
+            description: >-
+              Renewal has not happened and there are fewer than 14 days left.
+              cert-manager normally renews at two thirds of lifetime, so this
+              firing means renewal is failing rather than merely pending.
+{{- end }}
+
+{{- /*
+CNPG CLUSTER HEALTH ... the alert that did not exist on 2026-09-12 (TM-0518).
+
+A CNPG Cluster sat in `Instance Status Extraction Error: HTTP communication
+issue` for an entire install and NOTHING went red. The database itself was fine
+and every `cnpg_collector_*` series stayed green, because the fault was the
+operator being unable to SEE the instance. An instance-level signal can never
+catch an operator-level fault, which is why this reads the CR's own phase via
+kube-state-metrics (configured in tockmox-observability values).
+
+THE EXPRESSION IS AN `unless`, NOT AN EQUALITY, and that is deliberate. Writing
+it as `...{phase="Cluster in healthy state"} == 0` produces no series at all
+when the phase is anything else, because a label matcher that matches nothing
+returns nothing ... the alert would be silent in exactly the state it exists to
+report. `unless` asks the question the other way: here is every Cluster that
+exists, minus the ones currently reporting the healthy phase. A Cluster whose
+phase upstream has reworded therefore still fires, loudly and wrongly, which is
+the right direction to fail. Tested both ways in tests/rules/.
+*/}}
+{{- if $cnpgOn }}
+    - name: tockmox.platform.cnpg
+      interval: 1m
+      rules:
+        - alert: TockmoxCNPGClusterNotHealthy
+          expr: |
+            max by (name, namespace) (tockmox_cnpg_cluster_status_info)
+            unless on (name, namespace)
+            max by (name, namespace) (tockmox_cnpg_cluster_status_info{phase="Cluster in healthy state"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CNPG Cluster {{ `{{ $labels.namespace }}/{{ $labels.name }}` }} is not in a healthy phase"
+            description: >-
+              The cluster has been out of `Cluster in healthy state` for fifteen
+              minutes. The database may still be serving: the phase reports what
+              the OPERATOR can see, and the operator losing sight of an instance
+              looks identical from the application side right up until a
+              failover or a backup is needed. Check the operator log for
+              `Cannot extract Pod status`, and check that
+              `allow-cnpg-operator` exists in the database's namespace.
+{{/*
+CNPG BACKUP HEALTH ... the alert that did not exist on 2026-09-16 (TM-0659).
+
+`news/miniflux-db` had `ContinuousArchiving=False` and a failed nightly Backup
+for the whole life of the rc4 install ... 2,215 failed ArchiveWAL calls ... and
+the only alert firing in thirteen hours was `Watchdog`. The Cluster reported
+`Cluster in healthy state` throughout, so the phase alert above could not see it
+either: a cluster can be perfectly healthy AS A DATABASE and be protecting
+nothing.
+
+WHY THIS IS NOT THE AI CHART'S RULE WITH THE NAMESPACE MATCHER REMOVED, which
+is the obvious fix and is wrong. `TockmoxWalArchiveBacklog` reads
+`cnpg_collector_pg_wal_archive_status`, an INSTANCE metric scraped from the
+database pod. Measured on rc4: every `cnpg_*` instance series in the cluster
+existed for `tockmox-ai` alone, because no other namespace's database pods are
+scrape targets. Deleting the matcher widens a rule over data that is not there.
+This one reads the CR itself through kube-state-metrics, which lists from the
+API and therefore covers every namespace whether or not anything scrapes it.
+
+IT IS SILENT WHEN THE CONDITION IS ABSENT, AND THAT IS THE INTENDED TRADE. A
+Cluster with no backup configured has no `ContinuousArchiving` condition, so it
+produces no series and does not fire ... correct, because a database nobody
+asked to back up is not failing to back up. The cost is the other direction: if
+someone REMOVES a working backup configuration, the condition disappears rather
+than going false, and this alert goes quiet instead of firing. Detecting
+"backups used to be configured here" needs state this rule does not have. Stated
+rather than left for the next person to discover.
+*/}}
+        - alert: TockmoxCNPGBackupUnhealthy
+          expr: |
+            min by (name, namespace, type) (
+              tockmox_cnpg_cluster_condition{type=~"ContinuousArchiving|LastBackupSucceeded"}
+            ) == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CNPG Cluster {{ `{{ $labels.namespace }}/{{ $labels.name }}` }} reports {{ `{{ $labels.type }}` }} false"
+            description: >-
+              This database has been failing to protect itself for fifteen
+              minutes, and it will keep reporting itself healthy while it does:
+              the Cluster phase describes whether POSTGRES is well, not whether
+              anything is being archived. Every point-in-time recovery after the
+              last shipped segment is already unavailable. The condition's
+              `reason` says why, and it is usually the ObjectStore's credential,
+              endpoint, bucket or region rather than the database:
+              `kubectl -n {{ `{{ $labels.namespace }}` }} get cluster {{ `{{ $labels.name }}` }} -o jsonpath='{.status.conditions}'`.
+{{- end }}
+{{- end }}

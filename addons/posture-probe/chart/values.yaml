@@ -1,0 +1,124 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Security Posture Probe, a Tockmox add-on. EXPERIMENTAL in 0.8.0: every key
+# below may change before it is marked stable. Off until `enabled: true`.
+#
+# Install it as its own Argo CD Application (or `helm install`) with its own
+# values file. It is not a layer, nothing in the platform depends on it, and a
+# red gate or a failed run never touches a running service.
+#
+# Docs: docs/administration/posture-probe.md. Safety contract: the role in
+# templates/rbac.yaml holds no write verb, and tools/check-posture-probe.sh
+# refuses a render in which it does.
+
+enabled: false
+
+# The site builds the image from addons/posture-probe/Dockerfile and names it
+# here. Tockmox publishes no image (ADR-0036). Required when enabled.
+image: ""
+imagePullPolicy: IfNotPresent
+
+# Every run is one minute: each collector CronJob and the differential CronJob
+# share this schedule, and the differential matches its collectors by the run id
+# Kubernetes derives from the scheduled time.
+schedule: "41 3 * * *"
+suspend: false
+
+# A label for the report, never used to reach anything.
+clusterIdentifier: ""
+
+# Source namespaces. Each gets a collector that runs as the namespace's default
+# ServiceAccount under the namespace's own NetworkPolicies, and (with standins)
+# a listener the others try to reach. The add-on's own namespace may not be one.
+namespaces:
+  - tockmox-ai
+  - tockmox-authentik
+  - tockmox-devops
+  - tockmox-diagnostic
+  - tockmox-monitoring
+  - tockmox-platform
+  - tockmox-selfcheck
+
+# Identities whose RBAC is measured from the inside: a collector runs as each
+# ServiceAccount and asks the authorization oracle what it may do. It never
+# performs any of it. mountToken forces a token on the collector pod for an
+# account whose own pods mount one explicitly.
+identityVantages:
+  - namespace: tockmox-diagnostic
+    serviceAccount: tockmox-diagnostic
+    mountToken: true
+
+# What you declared. `tockmox-reference` is the 63-row intent derived from the
+# policy layer's own stated design (files/intent-tockmox-reference.json); `none`
+# uses only `rows`. Rows are {subject, dimension, intent, tier?, basis?}; see the
+# docs for the subject grammar. A row naming a namespace or target this release
+# does not measure fails the render instead of reading as could-not-run forever.
+intent:
+  preset: tockmox-reference
+  rows: []
+
+targets:
+  # Port the stand-in listeners serve on, and the port every ns-to-ns row tests.
+  standinPort: 8080
+  # Connect-only egress test. Empty host drops the target (and any row naming it
+  # fails the render).
+  internet:
+    host: "1.1.1.1"
+    port: 443
+  kubeApi:
+    host: kubernetes.default.svc.cluster.local
+    port: 443
+    # The address a NetworkPolicy sees for the API server after the Service is
+    # translated (on k3s, the server node's address and 6443). Empty: derived
+    # from networkPolicy.apiServer when that is one /32, otherwise the config
+    # column for these rows is n/a rather than a guess.
+    policyIp: ""
+    policyPort: 6443
+
+# Off-the-shelf listeners, one per source namespace, so every ns-to-ns row has a
+# known listener to be refused by. Without them a refused connect proves nothing
+# and those rows read unknown (could not run).
+standins:
+  enabled: true
+
+# A new pod is not policed at once (k3s kube-router measured ~1 s, lab 2026-10-08):
+# collectors measure in rounds and report only when every control reads what it
+# must and every reading has held for stableRounds rounds over minSpanSeconds.
+# Not settled by maxSeconds: that namespace is could-not-run (exit 1), never a
+# reading from the window. autoControls makes each namespace's own declared
+# egress/api-egress DENY rows its controls; controls adds or replaces per
+# namespace ({ns: [{target, expect: denied|allowed}]}). Controls apply to the
+# namespace's network collector only: an identity vantage opens no connection,
+# so it has nothing to settle and ignores them (lab N2, 2026-10-08).
+settle:
+  stableRounds: 3
+  intervalSeconds: 1
+  minSpanSeconds: 3
+  maxSeconds: 60
+  autoControls: true
+  controls: {}
+
+timeouts:
+  connectSeconds: 2
+  # How long the differential waits for this run's collectors.
+  collectSeconds: 240
+
+# The report store: a volume only the differential Job mounts. Reports are
+# sensitive (a map of what can reach what); see the docs for who may read them.
+store:
+  size: 1Gi
+  storageClass: ""
+  # Reports kept, newest first. 1 is tier 0 (latest only).
+  keep: 1
+
+networkPolicy:
+  # Where the differential may reach the Kubernetes API, e.g.
+  # [{cidr: 192.0.2.10/32, port: 6443}]. Falls back to global.lanCIDR on 6443.
+  apiServer: []
+
+resources:
+  requests: {cpu: 20m, memory: 32Mi}
+  limits: {memory: 128Mi}
+
+# Accepted so a site can pass a shared file; only global.lanCIDR is read.
+global: {}

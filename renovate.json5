@@ -1,0 +1,137 @@
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+
+  // Dependency automation for the Tockmox OSS repo.
+  //
+  // What lives here and therefore what Renovate manages:
+  //   .github/workflows/**   GitHub Actions refs + the tool-version env pins
+  //   charts/*/Chart.yaml    Helm chart dependencies
+  //   charts/*/templates/**  container image references
+  //
+  // There is no apps/ or infrastructure/ tree here ... that layout belongs to
+  // the site/overlay repos, not the product.
+
+  extends: [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommitsDisabled",
+    // Pin workflow actions to commit SHAs. Supply-chain hygiene, and it also
+    // resolves the Node 20 deprecation warnings by keeping refs current.
+    "helpers:pinGitHubActionDigests",
+  ],
+
+  // Name the development branch rather than lean on the repository default
+  // (TM-0686). RELEASING.md "Orientation": `main` is the development trunk and
+  // `release-X.Y` branches are cut from it, so dependency bumps land on `main`
+  // and reach a release line by cherry-pick, like any other fix. A release
+  // branch is deliberately NOT listed: bumping a frozen line is a patch-bar
+  // decision made by a human, not a weekly batch.
+  baseBranchPatterns: ["main"],
+
+  timezone: "America/Chicago",
+
+  // One weekly batch rather than a trickle. Security PRs bypass this via
+  // vulnerabilityAlerts below.
+  // NOTE: `schedule` gates BRANCH CREATION, not scanning. Outside the window a
+  // scan recomputes everything and writes nothing, parking items under
+  // "Awaiting Schedule". Keep the window wide: a narrow one can be missed
+  // entirely by the hosted scan cadence, silently rolling the whole batch over.
+  schedule: ["before 9am on monday"],
+
+  // Let upstreams eat their own day-0 regressions (non-security only).
+  minimumReleaseAge: "3 days",
+
+  prConcurrentLimit: 10,
+  prHourlyLimit: 0,
+  labels: ["renovate"],
+
+  // Image refs inside chart templates. Anchored at ^charts/ deliberately:
+  // a loose (^|/) form matches mid-path and can "update" a frozen test fixture.
+  kubernetes: {
+    managerFilePatterns: ["/^charts/.+\\.ya?ml$/"],
+  },
+
+  // bootstrap/ is documentation about generated artefacts, and any
+  // targetRevision in it is a self-reference to a Tockmox release. Renovate
+  // must not bump those: release tagging is a human act tied to the
+  // deploy-proof gate.
+  ignorePaths: ["bootstrap/**"],
+
+  customManagers: [
+    // CI tool pins live as env vars in ci.yaml so they are visible and
+    // updatable. Without these managers those versions rot silently.
+    {
+      customType: "regex",
+      description: "CI tool pin: helm",
+      managerFilePatterns: ["/^\\.github/workflows/ci\\.ya?ml$/"],
+      matchStrings: ["HELM_VERSION:\\s*\"(?<currentValue>[^\"]+)\""],
+      depNameTemplate: "helm/helm",
+      datasourceTemplate: "github-releases",
+    },
+    {
+      customType: "regex",
+      description: "CI tool pin: kubeconform",
+      managerFilePatterns: ["/^\\.github/workflows/ci\\.ya?ml$/"],
+      matchStrings: ["KUBECONFORM_VERSION:\\s*\"(?<currentValue>[^\"]+)\""],
+      depNameTemplate: "yannh/kubeconform",
+      datasourceTemplate: "github-releases",
+      extractVersionTemplate: "^v(?<version>.+)$",
+    },
+    {
+      customType: "regex",
+      description: "CI tool pin: gitleaks",
+      managerFilePatterns: ["/^\\.github/workflows/ci\\.ya?ml$/"],
+      matchStrings: ["GITLEAKS_VERSION:\\s*\"(?<currentValue>[^\"]+)\""],
+      depNameTemplate: "gitleaks/gitleaks",
+      datasourceTemplate: "github-releases",
+      extractVersionTemplate: "^v(?<version>.+)$",
+    },
+  ],
+
+  packageRules: [
+    {
+      // Majors on platform charts carry breaking-change risk and want a
+      // deliberate window, not an auto-opened PR. Surface on the dashboard.
+      matchUpdateTypes: ["major"],
+      dependencyDashboardApproval: true,
+    },
+    {
+      // Postgres major is a deliberate, runbook-driven CNPG migration. Hold
+      // majors entirely; patch and minor within a major are fine.
+      // docker.io/library/postgres is the SAME image spelled in full, which is
+      // how tockmox-identity's databaseBackup.postgresImage names it; Renovate
+      // matches the name as written, so "postgres" alone let a 17 -> 18 bump of
+      // that pg_dump client through while the server it dumps stays on 17
+      // (TM-1010, 2026-10-11: dropped from the sweep).
+      matchDatasources: ["docker"],
+      matchPackageNames: ["postgres", "docker.io/library/postgres", "ghcr.io/cloudnative-pg/postgresql"],
+      matchUpdateTypes: ["major"],
+      enabled: false,
+    },
+    {
+      // Low-risk, high-frequency. One grouped PR instead of a dozen.
+      matchManagers: ["github-actions"],
+      groupName: "github-actions",
+    },
+    {
+      // These move in lockstep upstream, usually the same config-reloader bump.
+      // Activates once tockmox-exporters declares them as chart dependencies.
+      matchDatasources: ["helm"],
+      matchPackageNames: [
+        "prometheus-blackbox-exporter",
+        "prometheus-snmp-exporter",
+        "prometheus-smartctl-exporter",
+      ],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "prometheus exporter charts",
+    },
+  ],
+
+  // Security fixes jump the queue: no schedule, no release-age wait.
+  vulnerabilityAlerts: {
+    labels: ["renovate", "security"],
+    schedule: ["at any time"],
+    minimumReleaseAge: null,
+  },
+  osvVulnerabilityAlerts: true,
+}

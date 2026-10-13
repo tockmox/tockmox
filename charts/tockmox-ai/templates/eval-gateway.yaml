@@ -1,0 +1,139 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+The EVAL gateway (REQ-0048, TM-0920). A second, small LiteLLM that serves candidate models beside the
+models they are compared against, reachable only by the evaluators. OFF by default.
+
+WHY A SEPARATE GATEWAY. A candidate is not usable until a person approves it, local or hosted (Jeff's
+ruling, 2026-10-07). Inside one LiteLLM that cannot be enforced: a virtual key with no model list, or an
+empty one, can call every model the gateway has, access groups and tags included, and resetting a key to
+an empty list reopens it (measured on 1.100.3, TM-0936). What held for every key, the master key
+included, was the candidate not being in the production gateway at all. So it is here instead.
+
+What it serves (templates/_inference-nodes.tpl): every `-next` node route and the live route each is
+compared against, plus hosted catalog entries at stage `candidate`, untagged.
+
+Who reaches it: modelLifecycle.evalGateway.allowedClients, a list of NetworkPolicy peers ... the eval
+runner, and the evaluation front end of anyone who grades by hand. EMPTY MEANS NOBODY. The policy below
+selects only this pod, so it isolates it on its own, whether or not the networkPolicy capability is on;
+the policy layer's namespace-wide allows skip pods labelled tockmox.com/isolated (tockmox-policy,
+ai-default-deny.yaml), so nothing in the namespace widens it.
+
+No database: it serves the master key only, and the network policy is the fence. No admin UI.
+*/ -}}
+{{- $eg := ((.Values.modelLifecycle | default dict).evalGateway) | default dict -}}
+{{- if and $eg.enabled (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm")) -}}
+{{- $routes := include "tockmox-ai.nodeRoutes" (dict "root" $ "gateway" "eval") | fromYamlArray -}}
+{{- $hosted := include "tockmox-ai.hostedCandidates" . | fromYamlArray -}}
+{{- $config := dict "model_list" (concat $routes $hosted) "general_settings" (dict "master_key" "os.environ/PROXY_MASTER_KEY") -}}
+{{- $cfgText := $config | toYaml -}}
+{{- $img := .Values.litellm.image | default dict -}}
+{{- $tag := $img.tag | default .Subcharts.litellm.Chart.AppVersion -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-litellm-eval-config
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-litellm-eval
+data:
+  config.yaml: |
+{{ $cfgText | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tockmox-litellm-eval
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-litellm-eval
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-litellm-eval
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tockmox-litellm-eval
+        app.kubernetes.io/part-of: tockmox
+        tockmox.com/isolated: "true"
+      annotations:
+        checksum/config: {{ $cfgText | sha256sum | trunc 16 | quote }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: litellm
+          image: {{ include "tockmox.image" (dict "ctx" $ "repo" (printf "%s:%s" $img.repository $tag)) }}
+          imagePullPolicy: {{ $img.pullPolicy | default "IfNotPresent" }}
+          args: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
+          env:
+            - name: PROXY_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $eg.masterkeySecretName | default "tockmox-litellm-eval" }}
+                  key: {{ $eg.masterkeySecretKey | default "masterkey" }}
+            - name: DISABLE_ADMIN_UI
+              value: "True"
+          {{- with $eg.environmentSecrets }}
+          envFrom:
+            {{- range . }}
+            - secretRef: { name: {{ . }} }
+            {{- end }}
+          {{- end }}
+          ports:
+            - { name: http, containerPort: 4000 }
+          readinessProbe:
+            httpGet: { path: /health/readiness, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health/liveliness, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+            readOnlyRootFilesystem: false
+          resources:
+            {{- toYaml ($eg.resources | default (dict "requests" (dict "cpu" "50m" "memory" "384Mi") "limits" (dict "memory" "1Gi"))) | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/litellm, readOnly: true }
+      volumes:
+        - name: config
+          configMap: { name: tockmox-litellm-eval-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tockmox-litellm-eval
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: tockmox-litellm-eval
+  ports:
+    - { name: http, port: 4000, targetPort: http }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tockmox-litellm-eval
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-litellm-eval
+  policyTypes: [Ingress]
+  {{- with $eg.allowedClients }}
+  ingress:
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - { port: 4000, protocol: TCP }
+  {{- else }}
+  ingress: []
+  {{- end }}
+{{- end }}

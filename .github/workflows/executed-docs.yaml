@@ -1,0 +1,504 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The executed-documentation gate.
+#
+# ci.yaml runs 39 gates and all but one of them is static analysis of this
+# repository. They answer "is the tree internally consistent?" and nothing in
+# them answers "do the instructions work?" This workflow is the second question.
+# (The exception, tests/installer, runs the installer itself against no cluster.
+# It answers "does the program behave?" ... a third question, and a narrower one.)
+#
+# TWO JOBS, TWO CADENCES, and the split is deliberate rather than incidental.
+# testing-standard rule 6: what decides cadence is hermeticity and runtime.
+#
+#   selftest  ... hermetic, no network, no cluster, about a second. Per-commit.
+#   paths     ... needs a real cluster and roughly twenty minutes. Nightly and
+#                 before every release tag, on the devtest runner.
+#
+# The second job is the expensive one, so testing-standard rule 6 applies with
+# full force: "A check that is expensive and therefore quietly never runs is
+# worse than one that does not exist, because it appears in the inventory."
+# Concretely, that means TWO failure modes have to stay visible:
+#
+#   - no runner registered with the `tockmox-devtest` label. The job queues and
+#     never starts, and a queued job is not a red job.
+#   - a scheduled workflow on a repository with no recent activity is disabled
+#     by GitHub after 60 days. Same shape: it stops running and nothing goes red.
+#
+# CORRECTED 2026-09-03. This comment used to say the `paths` job's own preflight
+# step converted the first of those into a loud failure. It cannot. The preflight
+# runs INSIDE a job whose `runs-on` is `[self-hosted, tockmox-devtest]`, so if no
+# runner carries that label the job never starts and the preflight never
+# executes. The mitigation was inside the thing whose absence it was supposed to
+# detect. An external review found this on a run that was, at that moment,
+# sitting queued and blocking the next scheduled run behind it.
+#
+# The `freshness` job below is the actual detector, and it is hosted so it cannot
+# be taken out by the same absence. Both failure modes above have one observable
+# in common ... the last successful `paths` run gets old ... so one check covers
+# them. Reading a runner's labels directly would need `administration: read`,
+# which the default token does not carry; reading workflow runs needs only
+# `actions: read`, which it does.
+#
+# WHAT THIS WORKFLOW DOES NOT PROVE: everything not in
+# tests/executed-docs/paths/. The exit code of the `paths` job is not a coverage
+# number. tests/executed-docs/INVENTORY.md is the coverage statement, and it is
+# maintained by hand because the interesting half of it is the exceptions.
+
+name: executed-docs
+
+on:
+  pull_request:
+    paths:
+      - 'tests/executed-docs/**'
+      - 'docs/**'
+      - '.github/workflows/executed-docs.yaml'
+  push:
+    # release-* for the same reason as ci.yaml: the tag goes on a release
+    # branch commit, and that commit's own run is the evidence (TM-0775).
+    branches: [main, 'release-*']
+    paths:
+      - 'tests/executed-docs/**'
+      - 'docs/**'
+      - '.github/workflows/executed-docs.yaml'
+  schedule:
+    # 07:00 UTC daily. Nightly, stated, not "when someone remembers".
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'git ref whose documentation is under test'
+        required: true
+        default: 'main'
+      keep_cluster:
+        description: 'leave the throwaway cluster standing for inspection'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read      # the freshness job reads this workflow's own run history
+
+jobs:
+
+  # The detector for "this gate has quietly stopped running". Hosted on purpose:
+  # a check for an absent self-hosted runner must not itself need one.
+  #
+  # It asserts on the AGE OF THE LAST SUCCESS, not on runner labels, because the
+  # two failure modes named at the top of this file both surface that way and
+  # neither is visible any other way to a token with these permissions. A job
+  # that queues forever never succeeds; a schedule GitHub disabled never runs.
+  # Either way this goes red on the stated day, with a message naming which.
+  freshness:
+    name: the paths job has run recently enough to mean anything
+    runs-on: ubuntu-latest
+    steps:
+      - name: last successful paths run is inside the stale window
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Nightly cadence, so three days is two consecutive misses plus slack.
+          # Deliberately not one day: a single miss is a blip, and a gate that
+          # cries on a blip gets muted, which is this file's whole subject.
+          STALE_DAYS: '3'
+          # THE DECLARED GAP. `paths` cannot run until a self-hosted runner
+          # carries the `tockmox-devtest` label, which is open and carded. With
+          # no declaration this job goes red on EVERY pull request for a reason
+          # already known and already tracked ... and a check that is red every
+          # time is one people learn to skim past, which is the exact failure
+          # this whole job exists to prevent. A detector nobody reads has
+          # stopped being a detector.
+          #
+          # The waiver is deliberately NARROW and it expires:
+          #   - it excuses a `paths` job that has NEVER RUN, never one that ran
+          #     and failed (see paths_failed below)
+          #   - it does not touch staleness: once `paths` has succeeded once,
+          #     the normal stale window applies and this waiver is ignored
+          #   - past GAP_EXPIRES it goes red regardless, so the gap cannot
+          #     become permanent by being forgotten
+          # Clear both values to remove the waiver.
+          #
+          # CLEARED 2026-09-28: TM-0345 is closed. `paths` ran green on main
+          # (run 36423037925, 6faf994) and was shown to go red on a deliberate
+          # one-line docs break (run 36424726218). The normal stale window now
+          # applies; keep the mechanism for the next declared gap.
+          GAP_CARD: ''
+          GAP_EXPIRES: ''
+        shell: bash -euo pipefail {0}
+        run: |
+          # ASK ABOUT THE `paths` JOB, NOT THE WORKFLOW. Until 2026-09-13 this
+          # read the newest SUCCESSFUL run of the whole workflow, reasoning that
+          # "a run succeeds only when every job in it succeeded".
+          #
+          # That reasoning is wrong about SKIPPED jobs, and `paths` is skipped on
+          # every pull request by its own `if:` (a self-hosted runner must not
+          # execute fork code). So a PR ran `freshness` and `selftest`, both
+          # hosted, both green, and the workflow run concluded SUCCESS with
+          # `paths` never having executed. This job then read that run, measured
+          # its age as zero days, and passed.
+          #
+          # The detector for "this gate has quietly stopped running" was
+          # therefore reset to fresh by every pull request ... including the pull
+          # request that would have carried its own fix. It could not go red
+          # while anyone was working on the repository, which is precisely when
+          # a stopped gate matters. Nothing about the runner had to be true.
+          #
+          # So: walk recent runs newest-first and find the first one in which the
+          # `paths` JOB itself concluded success. Only that is evidence.
+          runs=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/executed-docs.yaml/runs?per_page=60" \
+            --jq '.workflow_runs[].id' 2>/dev/null || true)
+
+          # Collect the first SUCCESS and, separately, whether `paths` has ever
+          # actually RUN AND FAILED. The second is what keeps the declared gap
+          # below narrow: a waiver may excuse a job that has never run, and must
+          # never excuse one that ran and broke.
+          last=""
+          paths_failed=0
+          for id in $runs; do
+            concl=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${id}/jobs" \
+              --jq '.jobs[] | select(.name == "documented paths against a live cluster") | .conclusion' \
+              2>/dev/null || true)
+            case "$concl" in
+              success)
+                last=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${id}" \
+                  --jq '.updated_at // empty' 2>/dev/null || true)
+                [ -n "$last" ] && break ;;
+              failure|timed_out) paths_failed=1 ;;
+            esac
+          done
+
+          if [ -z "$last" ]; then
+            echo "NO SUCCESSFUL RUN of the 'paths' JOB in the last 60 runs."
+            echo "That is the silent-absence case this job exists to catch:"
+            echo "  - no runner carries the 'tockmox-devtest' label, so 'paths'"
+            echo "    queues forever and never goes red on its own, or"
+            echo "  - the schedule was disabled after 60 days of inactivity."
+            echo "Check the runner first: Settings -> Actions -> Runners."
+            echo
+
+            # A declared gap excuses this, on three conditions, all checked.
+            if [ -n "${GAP_CARD:-}" ] && [ -n "${GAP_EXPIRES:-}" ]; then
+              if ! date -u -d "$GAP_EXPIRES" +%s >/dev/null 2>&1; then
+                echo "RED: GAP_EXPIRES='${GAP_EXPIRES}' is not a date this runner can parse."
+                echo "     A waiver whose expiry cannot be read is not a waiver."
+                exit 1
+              fi
+              if [ "$(date -u +%s)" -gt "$(date -u -d "$GAP_EXPIRES" +%s)" ]; then
+                echo "RED: the declared gap ${GAP_CARD} EXPIRED on ${GAP_EXPIRES}."
+                echo "     Land the runner, or re-declare the gap deliberately with a"
+                echo "     new date. An expiry that renews itself is not an expiry."
+                exit 1
+              fi
+              if [ "$paths_failed" -eq 1 ]; then
+                echo "RED: 'paths' has RUN AND FAILED inside the last 60 runs, so this"
+                echo "     is not the never-ran gap that ${GAP_CARD} declares."
+                echo "     A waiver for an absent job must not cover a broken one."
+                exit 1
+              fi
+              echo "DECLARED GAP ${GAP_CARD}, expires ${GAP_EXPIRES}: 'paths' has never"
+              echo "run, and that is known and tracked rather than newly broken. This"
+              echo "job passes on that declaration ALONE ... it is not evidence that any"
+              echo "documented path was executed, and the run summary must not be read"
+              echo "as coverage. It goes red on the expiry date, or sooner if 'paths'"
+              echo "starts running and failing."
+              exit 0
+            fi
+            exit 1
+          fi
+
+          last_s=$(date -u -d "$last" +%s)
+          now_s=$(date -u +%s)
+          age_d=$(( (now_s - last_s) / 86400 ))
+          echo "last successful run: $last (${age_d}d ago), stale window ${STALE_DAYS}d"
+
+          if [ "$age_d" -gt "$STALE_DAYS" ]; then
+            echo
+            echo "STALE: the executed-documentation gate has not passed in ${age_d} days."
+            echo "It is nightly, so this is at least two consecutive misses."
+            echo "Most likely, in order:"
+            echo "  1. no runner carries the 'tockmox-devtest' label ('paths' is queued, not failed)"
+            echo "  2. the scheduled workflow was disabled after 60 days of repository inactivity"
+            echo "  3. the runner is up and the paths are genuinely failing -- in which case"
+            echo "     you would also have a red 'paths' job, and this message is redundant"
+            exit 1
+          fi
+  # ---------------------------------------------------------------- per-commit
+  selftest:
+    name: harness selftest (hermetic)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: the extractor returns the page's bytes, and refuses when it cannot
+        shell: bash -euo pipefail {0}
+        run: |
+          # The extractor is what makes "verbatim" mean something. If it can
+          # ever return an empty string instead of refusing, every path in this
+          # harness becomes a step that exits zero having examined nothing,
+          # which is the failure mode ci.yaml's own bash-3.2 gate was rewritten
+          # to prevent. So it is tested, hermetically, on every commit.
+          bash tests/executed-docs/selftest.sh
+
+      - name: no kubectl or helm call in the harness omits its cluster (TM-0797)
+        shell: bash -euo pipefail {0}
+        run: |
+          # A bare call targets whatever context the caller's shell has current,
+          # and this harness creates and deletes VMs, Secrets and namespaces.
+          # Hermetic and about a second, so it belongs on every commit rather
+          # than in the nightly job. The second run proves the first CAN go red.
+          bash tools/check-harness-context.sh
+          bash tools/check-harness-context.sh --selftest
+
+      - name: every documented block the paths reference still resolves
+        shell: bash -euo pipefail {0}
+        run: |
+          # A cheap, hermetic canary for the drift this harness is most exposed
+          # to: someone renames a heading, the extractor stops finding the
+          # section, and the nightly job starts reporting the path as "absent at
+          # this ref" ... which reads like an exception rather than a break.
+          # Catching it here, per-commit, keeps that from looking deliberate.
+          E=tests/executed-docs/lib/extract-block.sh
+          fail=0
+          check() {
+            # $4 is the fence language; defaults to bash so every pre-existing
+            # call below is unchanged.
+            local lang="${4:-bash}"
+            if bash "$E" --ref HEAD --page "$1" --section "$2" --lang "$lang" --block "$3" >/dev/null 2>&1; then
+              echo "ok   $1 :: $2 [$lang block $3]"
+            else
+              echo "MISS $1 :: $2 [$lang block $3]"; fail=1
+            fi
+          }
+          check_containing() {
+            # Added 0.6.1 (TM-0628). A canary that asserts an ORDINAL while the
+            # path script selects by CONTENT is testing something the path does
+            # not use: on 2026-09-13 a block was inserted at the top of
+            # fresh-install section 6, every ordinal shifted, the ordinal checks
+            # below stayed green, and P04 ran the wrong command. This asserts
+            # the same question the path asks. extract-block.sh exits 6 on more
+            # than one match, so ambiguity goes red here too.
+            local lang="${3:-bash}"
+            if bash "$E" --ref HEAD --page "$1" --section "$2" --lang "$lang" --containing "${4:?}" >/dev/null 2>&1; then
+              echo "ok   $1 :: $2 [$lang containing: $4]"
+            else
+              echo "MISS $1 :: $2 [$lang containing: $4]"; fail=1
+            fi
+          }
+          check docs/administration/argocd.md  '## If you install from the raw manifest anyway' 1
+          check docs/administration/argocd.md  '## If you install from the raw manifest anyway' 2
+          check docs/administration/storage.md '### Making it durable: skip the addon, then patch' 1
+          check docs/deployment/fresh-install.md '## 6. Install ArgoCD' 1
+          check docs/deployment/fresh-install.md '## 6. Install ArgoCD' 2
+          check docs/deployment/fresh-install.md '## 6. Install ArgoCD' 3
+          # The three commands P04 and P06 actually extract, named rather than
+          # numbered. The ordinal checks above are kept as a weak smoke test
+          # that the section still carries at least three bash blocks.
+          check_containing docs/deployment/fresh-install.md '## 6. Install ArgoCD' bash 'helm repo add argo'
+          check_containing docs/deployment/fresh-install.md '## 6. Install ArgoCD' bash 'helm install argocd'
+          check_containing docs/deployment/fresh-install.md '## 6. Install ArgoCD' bash 'grep metrics'
+          check docs/deployment/fresh-install.md '## 7. Install sealed-secrets, with your own key' 1
+          check docs/deployment/fresh-install.md '## 7. Install sealed-secrets, with your own key' 2
+          check docs/deployment/fresh-install.md '## 7. Install sealed-secrets, with your own key' 3
+          check docs/deployment/fresh-install.md '## 7. Install sealed-secrets, with your own key' 4
+          check docs/administration/argocd.md '## Its metrics are off until you turn them on' 1 yaml
+          check docs/administration/secrets.md '## Sealing one' 1
+          check docs/deployment/existing-cluster.md '## Check 1: version and node readiness' 1
+          check docs/deployment/existing-cluster.md '## Check 3: the default StorageClass' 1
+          if [ "$fail" -ne 0 ]; then
+            echo ""
+            echo "A section a path script depends on no longer resolves."
+            echo "Either the heading moved (update the path script) or the"
+            echo "procedure was removed (update INVENTORY.md and say why)."
+            exit 1
+          fi
+
+      # The inline-anchor canary that stood here was DELETED at 0.6.1
+      # (TM-0628). It existed only because fresh-install.md's ArgoCD-metrics
+      # success condition was prose with an inline code span, which
+      # extract-block.sh cannot walk, so P06 pulled the bytes out with sed
+      # against a literal prose anchor and this step asserted that anchor still
+      # matched character for character. The condition is a labelled ```bash
+      # fence now, so P06 extracts it like every other block and the
+      # check_containing calls above cover it. A canary guarding a mechanism
+      # that no longer exists is a gate that can only ever go red for the wrong
+      # reason ... which is what it did when the page was fixed.
+
+  # -------------------------------------------------- nightly and pre-release
+  paths:
+    name: documented paths against a live cluster
+    # Never on pull_request: a self-hosted runner must not execute fork code.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    runs-on: [self-hosted, tockmox-devtest]
+    timeout-minutes: 60
+    concurrency:
+      # One at a time. Since TM-0587 the teardown only removes this run's own
+      # VM (named below), but two runs would still compete for the substrate's
+      # capacity, and a capacity failure reads like a flake.
+      group: executed-docs-tockmox-test
+      cancel-in-progress: false
+    env:
+      TOCKMOX_DOCS_REF: ${{ github.event.inputs.ref || github.sha }}
+      TOCKMOX_TEST_NAMESPACE: tockmox-test
+      # TM-0587. This run's VM, by a name nothing else uses, so its teardown can
+      # delete exactly what it created. The `ed-` prefix belongs to this
+      # workflow; the teardown's sweep relies on that.
+      TOCKMOX_TEST_VM: ed-${{ github.run_id }}-${{ github.run_attempt }}
+      # TM-0797. The hypervisor cluster's kubectl context, from a repository
+      # variable (Settings -> Secrets and variables -> Actions -> Variables). It
+      # is REQUIRED: every kubectl call below names it, and a step that finds it
+      # empty refuses rather than letting `--context=` fall back to whichever
+      # context the runner's kubeconfig has current. Not a secret, so a variable.
+      TOCKMOX_SUBSTRATE_CONTEXT: ${{ vars.TOCKMOX_SUBSTRATE_CONTEXT }}
+      TOCKMOX_KEEP_CLUSTER: ${{ github.event.inputs.keep_cluster == 'true' && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # the harness reads docs at a ref, so it needs history
+
+      - name: preflight ... refuse rather than skip
+        shell: bash -euo pipefail {0}
+        run: |
+          # Every precondition, named individually. A missing one must fail
+          # here with its own name, not three steps later as something that
+          # reads like a network fault.
+          miss=0
+          # First, and it stops here: with no context named, every check below
+          # would read whichever cluster the runner's kubeconfig has current.
+          : "${TOCKMOX_SUBSTRATE_CONTEXT:?TOCKMOX_SUBSTRATE_CONTEXT is empty: set the repository variable of that name to the kubectl context of the Harvester rig}"
+          for t in kubectl curl ssh ssh-keygen; do
+            command -v "$t" >/dev/null 2>&1 || { echo "MISSING TOOL: $t"; miss=1; }
+          done
+          # The credential's remaining life, named before it bites. TM-0345.
+          #
+          # ORDER MATTERS AND THIS GOES FIRST, ahead of the namespace probe
+          # below. An expired token makes the namespace probe fail, so without
+          # this check an expiry is reported as "namespace not reachable" ...
+          # a misdiagnosis that sends the reader to the rig, which is fine.
+          #
+          # WHY AT ALL. Today the runner authenticates to Harvester with a
+          # token minted by hand at --duration=168h. It dies every seventh day,
+          # mid-run, inside a job nobody watches, and surfaces as an auth error
+          # rather than as an expiry: the quiet-failure shape this whole
+          # workflow exists to refuse.
+          #
+          # CORRECT UNDER EVERY CREDENTIAL OPTION, which is why it is written
+          # before the option is chosen:
+          #   - projected SA token (A): kubelet rotates it hourly, so it can
+          #     never fire, and costs one decode per run.
+          #   - static SA token (C): legacy tokens carry no `exp` claim, so it
+          #     passes and says why.
+          #   - the 168h status quo: a mid-run auth failure becomes a named
+          #     refusal three days early.
+          #
+          # Reads the `exp` claim and prints a date. The token itself is piped,
+          # never echoed, and never reaches the log or the step summary.
+          cred_tok="$(kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" config view --raw --minify \
+                        -o jsonpath='{.users[0].user.token}' 2>/dev/null || true)"
+          if [ -z "$cred_tok" ]; then
+            cred_file="$(kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" config view --raw --minify \
+                           -o jsonpath='{.users[0].user.tokenFile}' 2>/dev/null || true)"
+            # The projected-token case: option A puts the credential here.
+            [ -n "$cred_file" ] && [ -r "$cred_file" ] && cred_tok="$(cat "$cred_file")"
+          fi
+          # The decoder is a module, not six lines inlined here, so selftest.sh
+          # can exercise the expired and malformed cases hermetically on every
+          # commit. A check that can only be run by the sixty-minute job that
+          # contains it ships unexercised.
+          cred_days="$(printf '%s' "$cred_tok" \
+                       | python3 tests/executed-docs/lib/credential-life.py)"
+          case "$cred_days" in
+            nojwt)
+              echo "credential: not a bearer JWT (client cert or exec plugin) ... no exp to read" ;;
+            noexp)
+              echo "credential: JWT carrying no exp claim (legacy service-account token) ... does not expire" ;;
+            rotating)
+              # Short total life, so something renews it and a days-remaining
+              # floor is the wrong question ... it would refuse EVERY run under
+              # the projected-token design, which is the option TM-0345 prefers.
+              # This says the credential is of the self-renewing KIND. It does
+              # not say the renewal is happening; a wedged kubelet reads the
+              # same right up until the namespace probe below fails.
+              echo "credential: short-lived and externally renewed ... no expiry floor applies" ;;
+            undecodable)
+              echo "MISSING: the credential is a JWT whose payload will not decode."
+              echo "         A credential whose remaining life cannot be READ is not one"
+              echo "         to start a sixty-minute run on. This refuses rather than"
+              echo "         assuming it is fine, which is the same rule as every check above."
+              miss=1 ;;
+            *)
+              if [ "$cred_days" -lt 0 ]; then
+                echo "MISSING: the Harvester credential EXPIRED ${cred_days#-} day(s) ago."
+                miss=1
+              elif [ "$cred_days" -lt 3 ]; then
+                echo "MISSING: the Harvester credential expires in ${cred_days} day(s)."
+                echo "         Refusing three days early, deliberately. A credential that"
+                echo "         dies mid-run presents as an auth error against the rig, and"
+                echo "         the first hour goes to the rig rather than to the token."
+                miss=1
+              else
+                echo "credential ok: ${cred_days} day(s) remaining"
+              fi ;;
+          esac
+
+          # Probe the capability the paths NEED, inside the namespace, not the
+          # cluster-scoped Namespace object. CORRECTED 2026-09-27 (TM-0345): this
+          # used to be `kubectl get ns`, which a correctly confined credential
+          # CANNOT do, so the first real run on the unparked runner refused a
+          # healthy rig. throwaway-cluster.sh fixed the same mistake earlier;
+          # the workflow kept the old probe. Same rule as there: a precondition
+          # check that rewards excess privilege is worse than none.
+          if ! kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$TOCKMOX_TEST_NAMESPACE" get virtualmachines.kubevirt.io -o name >/dev/null 2>&1; then
+            echo "MISSING: cannot list VirtualMachines in ${TOCKMOX_TEST_NAMESPACE}."
+            echo "         The runner's KUBECONFIG must point at the Harvester rig"
+            echo "         with a credential scoped to that namespace."
+            miss=1
+          fi
+          if ! kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" api-resources --api-group=kubevirt.io 2>/dev/null | grep -q virtualmachines; then
+            echo "MISSING: the target cluster serves no kubevirt.io/virtualmachines."
+            miss=1
+          fi
+          [ "$miss" -eq 0 ] || exit 1
+          echo "preflight ok on $(uname -s)/$(uname -m)"
+
+      - name: run the documented paths
+        shell: bash -euo pipefail {0}
+        run: bash tests/executed-docs/run.sh
+
+      - name: upload the run report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: executed-docs-report
+          path: /tmp/executed-docs/report-*.txt
+          if-no-files-found: error   # a run with no report did not run
+
+      - name: teardown is not optional
+        if: always() && github.event.inputs.keep_cluster != 'true'
+        shell: bash -euo pipefail {0}
+        run: |
+          # run.sh tears down on its own EXIT trap. This is the second net, for
+          # the case where the runner killed the job before the trap fired ...
+          # a leaked VM makes the next run's results unrepeatable, which is
+          # worse than a failed run. It is also the only cleanup a FAILED create
+          # gets (TM-0766): run.sh calls destroy only after a create succeeded,
+          # and the cloud-init Secret carries a namespace-scoped token.
+          #
+          # IT TEARS DOWN ONLY WHAT THIS RUN CREATED (TM-0587). It used to be
+          # `delete vm --all` plus every harness-labelled Secret and Service in
+          # the namespace, and on 2026-10-06 this step deleted two agent lab VMs
+          # mid-install. Every VM this job makes is named TOCKMOX_TEST_VM
+          # (ed-<run id>-<attempt>, set above), and `destroy` deletes only that
+          # name and the objects named after it. Then `sweep ed- 120` destroys,
+          # one by one and by name, any `ed-` VM older than two hours: earlier
+          # runs of THIS workflow that were killed before any teardown ran. No
+          # other VM in the namespace is touched; the prefix is this workflow's.
+          #
+          # The context guard is repeated HERE on purpose: this step runs
+          # `if: always()`, including after a preflight that refused because the
+          # variable was empty.
+          : "${TOCKMOX_SUBSTRATE_CONTEXT:?TOCKMOX_SUBSTRATE_CONTEXT is empty: nothing was provisioned, and nothing will be deleted}"
+          : "${TOCKMOX_TEST_VM:?TOCKMOX_TEST_VM is empty: refusing to guess which VM this run created}"
+          fail=0
+          bash tests/executed-docs/provision/throwaway-cluster.sh destroy || fail=1
+          bash tests/executed-docs/provision/throwaway-cluster.sh sweep ed- 120 || fail=1
+          [ "$fail" = "0" ]

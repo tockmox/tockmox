@@ -1,0 +1,85 @@
+# TockmoxCNPGClusterNotHealthy ... TM-0518.
+#
+# DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
+#
+# THE CASE THIS ALERT EXISTS FOR is the one measured on 2026-09-12: a Cluster
+# stuck in `Instance Status Extraction Error: HTTP communication issue` while
+# the database itself was fine and every cnpg_collector_* series stayed green.
+# Nothing went red for an entire install. So the third test below ... a stuck
+# cluster WITH a healthy ready-instance count ... is the regression case, and it
+# is the one that would have caught the original defect.
+#
+# The expression is `unless`, not `== 0` against a phase matcher. A matcher for
+# the healthy phase produces NO SERIES when the phase is anything else, so the
+# equality form is silent in exactly the state being reported. These cases fail
+# if anyone "simplifies" it back.
+evaluation_interval: 1m
+
+tests:
+  # 1. A healthy cluster must never fire.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_cnpg_cluster_status_info{name="tockmox-litellm-db",namespace="tockmox-ai",phase="Cluster in healthy state"}'
+        values: '1+0x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxCNPGClusterNotHealthy
+        exp_alerts: []
+
+  # 2. THE TM-0518 REGRESSION CASE. Phase is the operator-side failure string,
+  #    and readyInstances is 1 ... the database is serving. Must fire anyway.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_cnpg_cluster_status_info{name="tockmox-litellm-db",namespace="tockmox-ai",phase="Instance Status Extraction Error: HTTP communication issue"}'
+        values: '1+0x60'
+      - series: 'tockmox_cnpg_cluster_ready_instances{name="tockmox-litellm-db",namespace="tockmox-ai"}'
+        values: '1+0x60'
+    alert_rule_test:
+      # `for: 15m`, so nothing before it and firing after.
+      - eval_time: 10m
+        alertname: TockmoxCNPGClusterNotHealthy
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: TockmoxCNPGClusterNotHealthy
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              name: tockmox-litellm-db
+              namespace: tockmox-ai
+            exp_annotations:
+              summary: "CNPG Cluster tockmox-ai/tockmox-litellm-db is not in a healthy phase"
+              description: "The cluster has been out of `Cluster in healthy state` for fifteen minutes. The database may still be serving: the phase reports what the OPERATOR can see, and the operator losing sight of an instance looks identical from the application side right up until a failover or a backup is needed. Check the operator log for `Cannot extract Pod status`, and check that `allow-cnpg-operator` exists in the database's namespace."
+
+  # 3. A phase string upstream has REWORDED. We cannot know future phase names,
+  #    so the alert must fail loudly rather than silently: an unrecognised phase
+  #    fires. That is the deliberate trade recorded in the values comment.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_cnpg_cluster_status_info{name="db",namespace="tockmox-ai",phase="Cluster is healthy"}'
+        values: '1+0x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxCNPGClusterNotHealthy
+        exp_alerts:
+          - exp_labels: {severity: warning, name: db, namespace: tockmox-ai}
+            exp_annotations:
+              summary: "CNPG Cluster tockmox-ai/db is not in a healthy phase"
+              description: "The cluster has been out of `Cluster in healthy state` for fifteen minutes. The database may still be serving: the phase reports what the OPERATOR can see, and the operator losing sight of an instance looks identical from the application side right up until a failover or a backup is needed. Check the operator log for `Cannot extract Pod status`, and check that `allow-cnpg-operator` exists in the database's namespace."
+
+  # 4. Two clusters, one sick: only the sick one fires, and it carries its own
+  #    identity. Guards against a `by (name, namespace)` regression collapsing
+  #    them into one series.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_cnpg_cluster_status_info{name="good",namespace="tockmox-ai",phase="Cluster in healthy state"}'
+        values: '1+0x60'
+      - series: 'tockmox_cnpg_cluster_status_info{name="sick",namespace="tockmox-authentik",phase="Setting up primary"}'
+        values: '1+0x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxCNPGClusterNotHealthy
+        exp_alerts:
+          - exp_labels: {severity: warning, name: sick, namespace: tockmox-authentik}
+            exp_annotations:
+              summary: "CNPG Cluster tockmox-authentik/sick is not in a healthy phase"
+              description: "The cluster has been out of `Cluster in healthy state` for fifteen minutes. The database may still be serving: the phase reports what the OPERATOR can see, and the operator losing sight of an instance looks identical from the application side right up until a failover or a backup is needed. Check the operator log for `Cannot extract Pod status`, and check that `allow-cnpg-operator` exists in the database's namespace."

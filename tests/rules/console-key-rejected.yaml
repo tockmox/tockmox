@@ -1,0 +1,268 @@
+# TockmoxConsoleKeyRejected ... TM-0982.
+#
+# DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
+#
+# THE CONTROL. The console-key check (charts/tockmox-ai/templates/
+# console-key-check.yaml) is a CronJob that sends the console's key to the
+# gateway every 15 minutes and exits 1 on a 401 or 403. The Job's
+# podFailurePolicy turns exit 1 into a failure for reason PodFailurePolicy,
+# which kube-state-metrics 2.20.0 reports (measured, lab L5 b6, 2026-10-09) as
+# a kube_job_status_failed series with NO reason label at all, at 1, beside the
+# three reasons it names (BackoffLimitExceeded, DeadlineExceeded, Evicted) at
+# 0. Every other failure (gateway down, exit 3; pod never started) is one of
+# those three at 1, and the rule excludes them by name; an absent label
+# matches the negative regex, and so does an empty one (case 9), which is the
+# same series to PromQL. Case 2 carries the measured four-series shape; the
+# other rejection cases carry the unlabelled series alone, which is equivalent.
+#
+# THE SHAPE is TockmoxRestoreDrillFailed's: the newest rejection's start time
+# against the newest success's completion time, so one passing run clears it
+# and the failed Jobs failedJobsHistoryLimit keeps cannot hold it up. The
+# other direction (lab L5 F-L5-6): the rejection's own Job must stay on record
+# while outage failures follow it, which is failedJobsHistoryLimit's job
+# (24, asserted by check-gateway-default.sh G7) and cannot be expressed here;
+# case 10 asserts the rule's half, that the rejection keeps firing under four
+# outage failures as long as its Job exists.
+#
+# EVERY CASE ASSERTS ONE DIRECTION, AND THE FILE ASSERTS BOTH. Cases 1, 3, 5,
+# 6 and 7 are the silences; 2, 4, 8, 9 and 10 are the firings.
+#
+# Timing frame: promtool's clock starts at 0, so every timestamp below is
+# seconds since the start of the test. The interval is 1m (the group's), so a
+# series is present at every evaluation.
+#
+# The selectors are those of the RENDER: check-alert-rules.sh renders tockmox-ai
+# with ci/values.yaml, where namespaces.ai is `tockmox-ai`.
+
+evaluation_interval: 1m
+
+tests:
+  # CASE 1: the only run passed. Silent.
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_status_completion_time{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330000"}'
+        values: '600x120'
+      - series: 'kube_job_status_succeeded{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330000"}'
+        values: '1x120'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330000"}'
+        values: '0x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxConsoleKeyRejected
+        exp_alerts: []
+
+  # CASE 2: the only run was a rejection (PodFailurePolicy: the series with
+  # no reason label at 1, the three named reasons at 0, as kube-state-metrics
+  # 2.20.0 reported it in lab L5), no success on record. Silent before `for`
+  # (5m), firing after it.
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015"}'
+        values: '900x120'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015"}'
+        values: '1x120'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015", reason="BackoffLimitExceeded"}'
+        values: '0x120'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015", reason="DeadlineExceeded"}'
+        values: '0x120'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015", reason="Evicted"}'
+        values: '0x120'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: TockmoxConsoleKeyRejected
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: TockmoxConsoleKeyRejected
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "The model gateway rejects the console's key"
+              description: "The console-key check's most recent run was answered 401 or 403 by the gateway: the key in Secret tockmox-ai/tockmox-openwebui-gateway is no longer one the gateway holds (a gateway turned off and on again loses every key with its database; a key revoked by hand looks the same). The console cannot chat until the key is replaced. The console-key Job replaces it and restarts the console when it next runs; make it run now by deleting the finished Job and syncing the AI layer (`kubectl -n tockmox-ai delete job -l app.kubernetes.io/name=tockmox-gateway-key`, then `argocd app sync tockmox-ai`), or follow the manual steps in docs/usage/ai-plane.md, \"When the gateway rejects the console's key\". The next passing check clears this alert."
+
+  # CASE 3: a rejection at 900s, then the key was replaced and the run at
+  # 1800s passed (completed 1830s). Firing while only the rejection exists,
+  # silent from the success on, with the failed Job still in history.
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015"}'
+        values: '900x120'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015"}'
+        values: '1x120'
+      - series: 'kube_job_status_completion_time{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330030"}'
+        values: '_x30 1830x90'
+      - series: 'kube_job_status_succeeded{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330030"}'
+        values: '_x30 1x90'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: TockmoxConsoleKeyRejected
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "The model gateway rejects the console's key"
+              description: "The console-key check's most recent run was answered 401 or 403 by the gateway: the key in Secret tockmox-ai/tockmox-openwebui-gateway is no longer one the gateway holds (a gateway turned off and on again loses every key with its database; a key revoked by hand looks the same). The console cannot chat until the key is replaced. The console-key Job replaces it and restarts the console when it next runs; make it run now by deleting the finished Job and syncing the AI layer (`kubectl -n tockmox-ai delete job -l app.kubernetes.io/name=tockmox-gateway-key`, then `argocd app sync tockmox-ai`), or follow the manual steps in docs/usage/ai-plane.md, \"When the gateway rejects the console's key\". The next passing check clears this alert."
+      - eval_time: 45m
+        alertname: TockmoxConsoleKeyRejected
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: TockmoxConsoleKeyRejected
+        exp_alerts: []
+
+  # CASE 4: a pass at 600s, then a rejection at 900s. Fires: the newest run
+  # is the rejection, and the earlier success does not excuse it.
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_status_completion_time{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330000"}'
+        values: '630x120'
+      - series: 'kube_job_status_succeeded{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330000"}'
+        values: '1x120'
+      - series: 'kube_job_status_start_time{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015"}'
+        values: '_x15 900x105'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015"}'
+        values: '_x15 1x105'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: TockmoxConsoleKeyRejected
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: TockmoxConsoleKeyRejected
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "The model gateway rejects the console's key"
+              description: "The console-key check's most recent run was answered 401 or 403 by the gateway: the key in Secret tockmox-ai/tockmox-openwebui-gateway is no longer one the gateway holds (a gateway turned off and on again loses every key with its database; a key revoked by hand looks the same). The console cannot chat until the key is replaced. The console-key Job replaces it and restarts the console when it next runs; make it run now by deleting the finished Job and syncing the AI layer (`kubectl -n tockmox-ai delete job -l app.kubernetes.io/name=tockmox-gateway-key`, then `argocd app sync tockmox-ai`), or follow the manual steps in docs/usage/ai-plane.md, \"When the gateway rejects the console's key\". The next passing check clears this alert."
+
+  # CASE 5: the gateway was down. The check exited 3, the Job failed for
+  # BackoffLimitExceeded, and kube-state-metrics reports that reason (with the
+  # other two it knows at 0). Not a rejection: silent, however long.
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015"}'
+        values: '900x120'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015", reason="BackoffLimitExceeded"}'
+        values: '1x120'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015", reason="DeadlineExceeded"}'
+        values: '0x120'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015", reason="Evicted"}'
+        values: '0x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxConsoleKeyRejected
+        exp_alerts: []
+      - eval_time: 2h
+        alertname: TockmoxConsoleKeyRejected
+        exp_alerts: []
+
+  # CASE 6: a pod that never started (the Secret not yet minted on a fresh
+  # install): DeadlineExceeded. Silent.
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015"}'
+        values: '900x120'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015", reason="DeadlineExceeded"}'
+        values: '1x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxConsoleKeyRejected
+        exp_alerts: []
+
+  # CASE 7: a foreign Job's rejection-shaped failure (the restore drill) in the
+  # same namespace. Silent: the selector is by Job name.
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="tockmox-ai", job_name="tockmox-litellm-db-drill-29330015"}'
+        values: '900x120'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-litellm-db-drill-29330015"}'
+        values: '1x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxConsoleKeyRejected
+        exp_alerts: []
+
+  # CASE 8: a rejection at 900s, then the gateway went down and the run at
+  # 1800s failed for BackoffLimitExceeded. Still firing: nothing has shown
+  # the key works, and the outage is somebody else's alert.
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015"}'
+        values: '900x120'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015"}'
+        values: '1x120'
+      - series: 'kube_job_status_start_time{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330030"}'
+        values: '_x30 1800x90'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330030", reason="BackoffLimitExceeded"}'
+        values: '_x30 1x90'
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: TockmoxConsoleKeyRejected
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "The model gateway rejects the console's key"
+              description: "The console-key check's most recent run was answered 401 or 403 by the gateway: the key in Secret tockmox-ai/tockmox-openwebui-gateway is no longer one the gateway holds (a gateway turned off and on again loses every key with its database; a key revoked by hand looks the same). The console cannot chat until the key is replaced. The console-key Job replaces it and restarts the console when it next runs; make it run now by deleting the finished Job and syncing the AI layer (`kubectl -n tockmox-ai delete job -l app.kubernetes.io/name=tockmox-gateway-key`, then `argocd app sync tockmox-ai`), or follow the manual steps in docs/usage/ai-plane.md, \"When the gateway rejects the console's key\". The next passing check clears this alert."
+
+  # CASE 9: the rejection spelled with an empty reason label (what jq prints
+  # for the absent one; the same series to PromQL). Fires.
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015"}'
+        values: '900x120'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015", reason=""}'
+        values: '1x120'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TockmoxConsoleKeyRejected
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "The model gateway rejects the console's key"
+              description: "The console-key check's most recent run was answered 401 or 403 by the gateway: the key in Secret tockmox-ai/tockmox-openwebui-gateway is no longer one the gateway holds (a gateway turned off and on again loses every key with its database; a key revoked by hand looks the same). The console cannot chat until the key is replaced. The console-key Job replaces it and restarts the console when it next runs; make it run now by deleting the finished Job and syncing the AI layer (`kubectl -n tockmox-ai delete job -l app.kubernetes.io/name=tockmox-gateway-key`, then `argocd app sync tockmox-ai`), or follow the manual steps in docs/usage/ai-plane.md, \"When the gateway rejects the console's key\". The next passing check clears this alert."
+
+  # CASE 10: a rejection at 900s, then the gateway stopped answering for four
+  # slots (1800s, 2700s, 3600s, 4500s: BackoffLimitExceeded each). Lab L5
+  # F-L5-6: with failedJobsHistoryLimit 3 the fourth would have pruned the
+  # rejection's Job and the alert cleared by garbage collection. With the Job
+  # on record the rule keeps firing: nothing has shown the key works.
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_status_start_time{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015"}'
+        values: '900x120'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330015"}'
+        values: '1x120'
+      - series: 'kube_job_status_start_time{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330030"}'
+        values: '_x30 1800x90'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330030", reason="BackoffLimitExceeded"}'
+        values: '_x30 1x90'
+      - series: 'kube_job_status_start_time{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330045"}'
+        values: '_x45 2700x75'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330045", reason="BackoffLimitExceeded"}'
+        values: '_x45 1x75'
+      - series: 'kube_job_status_start_time{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330060"}'
+        values: '_x60 3600x60'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330060", reason="BackoffLimitExceeded"}'
+        values: '_x60 1x60'
+      - series: 'kube_job_status_start_time{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330075"}'
+        values: '_x75 4500x45'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-console-key-check-29330075", reason="BackoffLimitExceeded"}'
+        values: '_x75 1x45'
+    alert_rule_test:
+      - eval_time: 80m
+        alertname: TockmoxConsoleKeyRejected
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "The model gateway rejects the console's key"
+              description: "The console-key check's most recent run was answered 401 or 403 by the gateway: the key in Secret tockmox-ai/tockmox-openwebui-gateway is no longer one the gateway holds (a gateway turned off and on again loses every key with its database; a key revoked by hand looks the same). The console cannot chat until the key is replaced. The console-key Job replaces it and restarts the console when it next runs; make it run now by deleting the finished Job and syncing the AI layer (`kubectl -n tockmox-ai delete job -l app.kubernetes.io/name=tockmox-gateway-key`, then `argocd app sync tockmox-ai`), or follow the manual steps in docs/usage/ai-plane.md, \"When the gateway rejects the console's key\". The next passing check clears this alert."
+      - eval_time: 118m
+        alertname: TockmoxConsoleKeyRejected
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "The model gateway rejects the console's key"
+              description: "The console-key check's most recent run was answered 401 or 403 by the gateway: the key in Secret tockmox-ai/tockmox-openwebui-gateway is no longer one the gateway holds (a gateway turned off and on again loses every key with its database; a key revoked by hand looks the same). The console cannot chat until the key is replaced. The console-key Job replaces it and restarts the console when it next runs; make it run now by deleting the finished Job and syncing the AI layer (`kubectl -n tockmox-ai delete job -l app.kubernetes.io/name=tockmox-gateway-key`, then `argocd app sync tockmox-ai`), or follow the manual steps in docs/usage/ai-plane.md, \"When the gateway rejects the console's key\". The next passing check clears this alert."

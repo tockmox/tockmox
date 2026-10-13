@@ -1,0 +1,102 @@
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "networkPolicy" "app" "harbor_netpol") }}
+{{- if not .Values.namespaces.harbor }}
+{{- fail "\n\napps.harbor_netpol.enabled is true but namespaces.harbor is blank.\n" }}
+{{- end }}
+{{- if eq .Values.namespaces.harbor .Values.namespaces.devops }}
+{{- fail "\n\napps.harbor_netpol.enabled is true and namespaces.harbor equals namespaces.devops.\nThis bundle assumes Harbor is its OWN release in its OWN namespace. Pointed at\nthe devops namespace it would stack a second default-deny on a namespace that\nalready has one, with an allow set that never heard of Argo Workflows.\nThe devops namespace is guarded by apps.devops_netpol, which is on by default.\nLeave this bundle for a standalone Harbor, or turn it off.\n" }}
+{{- end }}
+# SPDX-License-Identifier: Apache-2.0
+---
+# SITE-SUPPLIED, and off by default. This bundle is for a Harbor YOU installed,
+# as its own release in its own namespace.
+#
+# It is not the bundle that guards the Harbor this repository ships. That one
+# is `apps.devops_netpol` in devops-netpol.yaml, on by default, because Harbor
+# ships as a SUBCHART of tockmox-devops and Helm installs it into that
+# release's namespace (`namespaces.devops`) alongside Argo Workflows. These
+# rules are kept because a standalone Harbor is a real deployment and its
+# component mesh is the same mesh; only the namespace differs.
+#
+# Default-deny INGRESS for the harbor namespace (phase-1 of the cluster-wide
+# rollout; egress intentionally untouched, same as the ai canary). Harbor is a
+# clean target: reached only via Traefik (incl. node image pulls through the
+# harbor.int.example.com ingress), an all-internal component mesh, and an optional
+# Prometheus scrape. No LoadBalancer, no SSH.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: default-deny-ingress
+  namespace: {{ .Values.namespaces.harbor }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Allow Harbor's internal component mesh (core <-> database <-> redis <->
+# registry <-> jobservice <-> trivy <-> portal, plus the harbor-postgres-backup
+# CronJob -> harbor-database:5432). All of it is same-namespace, so one rule.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-intra-namespace
+  namespace: {{ .Values.namespaces.harbor }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.harbor }}
+---
+# Allow Traefik (its own namespace) to reach Harbor. This is the ingress path
+# for the UI/API AND for k3s node image pulls (containerd -> harbor.int.example.com
+# -> Traefik -> harbor-core/registry). Ports left open ... Traefik only targets
+# core/portal/registry, but scoping to the Traefik pod is the real restriction.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-from-traefik
+  namespace: {{ .Values.namespaces.harbor }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.traefik }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+---
+# Allow Prometheus to scrape (harbor metrics are off today but this future-proofs
+# the exporter/serviceMonitor without reopening the namespace later).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-prometheus-scrape
+  namespace: {{ .Values.namespaces.harbor }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.monitoring }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+{{- end }}

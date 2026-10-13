@@ -1,0 +1,47 @@
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "networkPolicy" "app" "syslog_ingest_netpol") }}
+{{- if not .Values.namespaces.monitoring }}
+{{- fail "\n\napps.syslog_ingest_netpol.enabled is true but namespaces.monitoring is blank.\nThis rule has to land in the namespace your syslog receiver runs in.\n" }}
+{{- end }}
+# SPDX-License-Identifier: Apache-2.0
+---
+# SITE-SUPPLIED. Tockmox does not ship a syslog receiver; this rule is off by
+# default and admits one you deploy yourself. It selects a SECOND Alloy release
+# named `syslog-ingest`, not the log DaemonSet that tockmox-observability
+# installs. With no such release in the namespace, the rule selects no pod.
+#
+# Allow remote syslog from LAN devices (a firewall, a NAS, a switch) into the
+# syslog-ingest receiver on :1514. Without this, the monitoring
+# default-deny-ingress drops the traffic at the pod. The LoadBalancer Service
+# uses externalTrafficPolicy: Cluster, so external packets are SNAT'd to the
+# receiving node's IP before they reach the pod ... hence the allow is by the
+# LAN/node CIDR (global.lanCIDR) plus the pod CIDR, not the device IPs. Device
+# identity is still
+# captured: rfc3164 carries the sending hostname, which Alloy maps to the `host`
+# label. To restrict to specific device IPs later, switch the Service to
+# externalTrafficPolicy: Local (preserves source IP; single-replica safe).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-syslog-ingest
+  namespace: {{ .Values.namespaces.monitoring }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: syslog-ingest
+      app.kubernetes.io/name: alloy
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: {{ .Values.global.lanCIDR }}
+        - ipBlock:
+            cidr: {{ .Values.global.clusterCIDR }}
+      ports:
+        - protocol: TCP
+          port: 1514
+        - protocol: UDP
+          port: 1514
+{{- end }}

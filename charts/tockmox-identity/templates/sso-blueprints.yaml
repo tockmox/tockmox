@@ -1,0 +1,254 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Authentik blueprints wiring the shipped UIs into single sign-on.
+#
+# GREENFIELD RULE (the hard-won one): every blueprint must apply on an EMPTY
+# Authentik. One invalid blueprint poisons discovery for all of them, so
+# nothing here may reference an object a stock install does not have. The
+# only lookups below are authentik's own defaults: the implicit-consent
+# authorization flow, the default invalidation flow, the self-signed signing
+# key, and the standard OAuth scope mappings.
+#
+# Client secrets enter via !Env from the operator-created `tockmox-sso`
+# Secret (mounted envFrom on server and worker). They are never rendered.
+#
+# The ConfigMap itself renders even with sso.enabled=false ... the authentik
+# chart mounts it by name, and a missing mount breaks the pod. Disabled just
+# means only the (harmless) groups blueprint ships.
+{{- if (include "tockmox.appEnabled" (dict "ctx" $ "app" "authentik")) }}
+{{- $scheme := ternary "https" "http" (ne .Values.global.certIssuer "") }}
+{{- $domain := .Values.global.internalDomain }}
+{{- $authHost := .Values.ingress.apps.authentik.host | default (include "tockmox.internalHost" (dict "svc" "auth" "ctx" $)) }}
+{{- $assets := printf "%s://%s/tockmox/logos" $scheme $authHost }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-sso-blueprints
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+data:
+  tockmox-groups.yaml: |
+    version: 1
+    metadata:
+      name: tockmox-groups
+      labels:
+        blueprints.goauthentik.io/description: "Tockmox role groups; app role mappings key on these names"
+    entries:
+      - model: authentik_core.group
+        state: present
+        identifiers:
+          name: {{ .Values.sso.adminGroup }}
+        attrs:
+          is_superuser: false
+      - model: authentik_core.group
+        state: present
+        identifiers:
+          name: {{ .Values.sso.userGroup }}
+        attrs:
+          is_superuser: false
+{{- if .Values.brand.enabled }}
+  tockmox-branding.yaml: |
+    version: 1
+    metadata:
+      name: tockmox-branding
+      labels:
+        blueprints.goauthentik.io/description: "Tockmox marks on the default brand"
+    entries:
+      # The DEFAULT brand, matched on its domain rather than created: a stock
+      # Authentik always has exactly one, and creating a second silently wins
+      # or silently loses depending on domain specificity.
+      #
+      # `default: true` IS REQUIRED, and its absence cost a whole install.
+      # "A stock Authentik always has exactly one" is false during FIRST BOOT:
+      # discovery can reach this blueprint before authentik's own
+      # `default/default-brand.yaml`, in which case `state: present` finds
+      # nothing and CREATES the brand ... with default=False, because we did
+      # not say otherwise. Authentik's own blueprint identifies on BOTH
+      # `domain` AND `default: True`, so from then on it can never match, its
+      # create attempt hits the unique constraint on `domain`, and it reports
+      #
+      #   Serializer errors {'domain': [ErrorDetail(string='This field must
+      #   be unique.', code='unique')]}
+      #
+      # forever. The instance is then left with ZERO default brands, which
+      # silently removes the recovery flow (the admin UI says "To create a
+      # recovery link, set a recovery flow for the current brand") and any
+      # brand fallback for hosts that match no domain.
+      #
+      # Observed on the clean install of 2026-08-18: default=False, 0 brands
+      # with default=True, `Default - Brand` status=error. Setting default=True
+      # by hand made authentik's blueprint validate again on the next pass and
+      # left our marks intact, which is how the mechanism was confirmed rather
+      # than guessed. Carrying the field makes this idempotent whichever
+      # blueprint lands first.
+      - model: authentik_brands.brand
+        state: present
+        identifiers:
+          domain: "authentik-default"
+        attrs:
+          default: true
+          # FULL URLs. The serializer rejects absolute paths ... and these
+          # resolve to the in-cluster asset server on the same host, so the
+          # login page fetches nothing from the internet.
+          branding_logo: "{{ $assets }}/tockmox-lockup-horizontal-steel.svg"
+          branding_favicon: "{{ $assets }}/tockmox-favicon.svg"
+          branding_default_flow_background: "{{ $assets }}/flow-background.svg"
+          branding_title: {{ .Values.brand.title | quote }}
+{{- end }}
+{{- if .Values.sso.enabled }}
+{{- /*
+`group` is what makes the user dashboard render sections rather than one
+undifferentiated wall of tiles. Leave it unset and every application lands in
+the same unlabelled block, which is what a stock install looked like until this
+was added.
+
+`icon` names a file served by the in-cluster brand server (see brand.yaml), NOT
+a CDN. The reference deployment hotlinks these from jsDelivr; a shipped product
+cannot, because an icon fetched from the internet is a login page that renders
+half-broken on an air-gapped install. Provenance and licensing for the vendored
+files: NOTICE.
+
+`access` is WHO MAY REACH the application, and it is the part that was missing
+until 2026-09-08. `group` above is Authentik's display category ... it decides
+which heading a tile sits under, not who may click it. With no policy binding on
+an Application, Authentik shows it to, and authorizes, EVERY authenticated user,
+so the two role groups were a naming convention: the consoles' own role mappings
+sorted admins from users, but a user in NEITHER group still reached every login
+page and, on Grafana, got in as Viewer. Each application therefore gets a
+binding to the group(s) named by `sso.apps.<app>.access`:
+
+  admin   the admin group only
+  users   the user group AND the admin group (an admin is a user too)
+
+Anyone in neither group is refused by Authentik before any console sees them.
+`sso.access.enabled: false` renders no bindings at all and restores the open
+shape; it exists so an operator locked out mid-install has a one-line way back,
+not as a supported configuration.
+
+THE BINDINGS RESTATE THE GROUPS. Each app blueprint re-declares the two groups
+with `state: present` (idempotent on `name`) and binds by `!KeyOf` inside the
+same file, instead of `!Find`-ing the group the groups blueprint creates. That
+is the greenfield rule from the top of this file: discovery applies blueprints
+in no promised order, and on first boot an app blueprint can run before the
+groups one. A `!Find` that resolves to nothing puts a binding with no group,
+user or policy in front of the serializer, the blueprint goes to `error`, and
+one blueprint in `error` poisons discovery for all of them. Restating costs
+four lines per app and removes the ordering dependency entirely.
+*/ -}}
+{{- $apps := list
+      (dict "key" "grafana"   "title" "Grafana"        "host" (.Values.sso.apps.grafana.host | default "") "subMode" (.Values.sso.apps.grafana.subMode | default $.Values.sso.subMode | default "") "cid" .Values.sso.apps.grafana.clientId       "access" (.Values.sso.apps.grafana.access | default "users")       "env" "GRAFANA_CLIENT_SECRET"   "hostPrefix" "grafana"   "path" "/login/generic_oauth" "desc" "Metrics, logs and dashboards." "group" "Observability" "icon" "app-grafana.svg")
+      (dict "key" "openwebui" "title" "Open WebUI"     "host" (.Values.sso.apps.openWebui.host | default "") "subMode" (.Values.sso.apps.openWebui.subMode | default $.Values.sso.subMode | default "") "cid" .Values.sso.apps.openWebui.clientId     "access" (.Values.sso.apps.openWebui.access | default "users")     "env" "OPENWEBUI_CLIENT_SECRET" "hostPrefix" "chat"      "path" "/oauth/oidc/callback" "desc" "Chat with models running on your own hardware." "group" "AI Apps" "icon" "app-openwebui.svg")
+      (dict "key" "argo"      "title" "Argo Workflows" "host" (.Values.sso.apps.argoWorkflows.host | default "") "subMode" (.Values.sso.apps.argoWorkflows.subMode | default $.Values.sso.subMode | default "") "cid" .Values.sso.apps.argoWorkflows.clientId "access" (.Values.sso.apps.argoWorkflows.access | default "users") "env" "ARGO_CLIENT_SECRET"      "hostPrefix" "workflows" "path" "/oauth2/callback"    "desc" "Run and inspect workflows." "group" "Infrastructure" "icon" "app-argo-workflows.svg") }}
+{{- $accessOn := dig "access" "enabled" true .Values.sso }}
+{{- $subModes := list "hashed_user_id" "user_id" "user_uuid" "user_username" "user_email" }}
+{{- range $app := $apps }}
+{{- /* Redirect host: an explicit sso.apps.<app>.host wins, else <prefix>.<domain>. Mirrors the per-app ingress host override in the layer that serves the app (TM-0820). */ -}}
+{{- $appHost := $app.host | default (printf "%s.%s" $app.hostPrefix $domain) }}
+{{- if and $app.subMode (not (has $app.subMode $subModes)) }}
+{{- fail (printf "sso.apps.%s.subMode (or sso.subMode) must be one of %s, got %q" $app.key (join ", " $subModes) $app.subMode) }}
+{{- end }}
+{{- if not (has $app.access (list "admin" "users")) }}
+{{- fail (printf "sso.apps.%s.access must be \"admin\" or \"users\", got %q" $app.key $app.access) }}
+{{- end }}
+  tockmox-app-{{ $app.key }}.yaml: |
+    version: 1
+    metadata:
+      name: tockmox-app-{{ $app.key }}
+    entries:
+      - model: authentik_providers_oauth2.oauth2provider
+        state: present
+        id: provider-{{ $app.key }}
+        identifiers:
+          name: {{ $app.cid }}
+        attrs:
+          client_type: confidential
+          client_id: {{ $app.cid }}
+{{- if $app.subMode }}
+          sub_mode: {{ $app.subMode }}
+{{- end }}
+          client_secret: !Env {{ $app.env }}
+          # Explicit, because a blueprint-created provider gets an EMPTY
+          # grant-type list where the admin UI would default sensibly, and an
+          # empty list rejects every authorize request with invalid_request.
+          # Found live on the first end-to-end login.
+          grant_types:
+            - authorization_code
+            - refresh_token
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+          signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
+          property_mappings:
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-email]]
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-profile]]
+          redirect_uris:
+            - matching_mode: strict
+              url: "{{ $scheme }}://{{ $appHost }}{{ $app.path }}"
+      - model: authentik_core.application
+        state: present
+        id: app-{{ $app.key }}
+        identifiers:
+          slug: {{ $app.cid }}
+        attrs:
+          name: {{ $app.title }}
+          provider: !KeyOf provider-{{ $app.key }}
+          # Tile metadata. Without meta_launch_url the card on the user
+          # dashboard is decorative ... it renders and does nothing when
+          # clicked, which reads as a broken deployment rather than a missing
+          # field.
+          meta_launch_url: "{{ $scheme }}://{{ $appHost }}"
+          meta_description: {{ $app.desc | quote }}
+          meta_publisher: {{ $.Values.brand.title | quote }}
+          group: {{ $app.group | quote }}
+          # Launch each console in its own tab, so the portal survives being
+          # used. Without this authentik navigates the portal tab itself, and
+          # the operator's way back to the other consoles is the browser Back
+          # button ... which on a console that has just completed an SSO
+          # redirect does not reliably return to the portal.
+          # The key is DECLARED in values.yaml, deliberately, so this is a bare
+          # reference. `| default true` here would be a bug: Helm's `default`
+          # fires on any empty value and `false` is empty, so an explicit
+          # `false` would be flipped back to `true`.
+          open_in_new_tab: {{ $.Values.sso.openInNewTab }}
+{{- if $.Values.brand.enabled }}
+          meta_icon: "{{ $assets }}/{{ $app.icon }}"
+{{- end }}
+{{- if $accessOn }}
+      # Access: who may reach {{ $app.title }} ({{ $app.access }}). See the
+      # note above the app list. Groups restated so this file applies alone.
+      - model: authentik_core.group
+        state: present
+        id: group-admin-{{ $app.key }}
+        identifiers:
+          name: {{ $.Values.sso.adminGroup }}
+        attrs:
+          is_superuser: false
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          target: !KeyOf app-{{ $app.key }}
+          order: 0
+        attrs:
+          group: !KeyOf group-admin-{{ $app.key }}
+          enabled: true
+{{- if eq $app.access "users" }}
+      - model: authentik_core.group
+        state: present
+        id: group-user-{{ $app.key }}
+        identifiers:
+          name: {{ $.Values.sso.userGroup }}
+        attrs:
+          is_superuser: false
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          target: !KeyOf app-{{ $app.key }}
+          order: 1
+        attrs:
+          group: !KeyOf group-user-{{ $app.key }}
+          enabled: true
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,66 @@
+{{- /*
+# SPDX-License-Identifier: Apache-2.0
+
+Formerly render-time fail() guards for the secret key and database password.
+Those credentials now live in operator-created Secrets referenced by name
+(authentik.authentik.existingSecret / postgresql.auth.existingSecret), so a
+render can no longer prove their presence ... the loud failure moved to the
+pods, which wait with a config error naming the missing Secret, exactly like
+Grafana's admin secret. The expected-secrets table in
+docs/administration/secrets.md is the contract.
+*/ -}}
+{{- /*
+CAPABILITY COHERENCE. A component switched on individually while the capability
+that owns it is off leaves a part with no whole. Failing beats delivering half,
+and beats silently promoting the capability back on because of one key.
+*/ -}}
+{{- include "tockmox.capabilityCoherent" (dict "ctx" $ "capability" "identity" "apps" (list "authentik")) -}}
+{{- /*
+SUBCHART MONITORS DO NOT FOLLOW THE CAPABILITY, SO REFUSE THE HALF-OFF STATE (TM-0825).
+`capabilities.observability.enabled: false` stops every ServiceMonitor,
+PodMonitor and PrometheusRule this chart's OWN templates write. The monitors a
+vendored subchart writes come from the subchart's own switch, and a subchart's
+values are static YAML: they cannot read `.Values.capabilities`, and a parent
+template cannot reach into a subchart's render. So declining the capability and
+leaving one of those switches on renders a monitoring.coreos.com object on a
+cluster that, by your own choice, has no Prometheus operator CRDs, and Argo
+rejects the layer on an unknown kind.
+
+Failing at render is the honest answer: it names the switches and the fix
+instead of letting the sync fail later. Not refused: `apps.serviceMonitors.enabled:
+true` (the "run your own Prometheus operator" route, where the CRDs are yours and
+the monitors are wanted), and a subchart that is itself switched off, since its
+monitor cannot render. A subchart's condition is read the way Helm reads it: the
+first listed path that holds a boolean decides.
+*/ -}}
+{{- $obsOn := include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability") -}}
+{{- $byo := eq (((.Values.apps | default dict).serviceMonitors | default dict).enabled) true -}}
+{{- if and (not $obsOn) (not $byo) -}}
+{{- $subs := list -}}
+{{- $subs = append $subs (dict "name" "authentik" "when" (list "apps.authentik.enabled" "capabilities.identity.enabled") "switch" "authentik.server.metrics.serviceMonitor.enabled") -}}
+{{- $subs = append $subs (dict "name" "authentik" "when" (list "apps.authentik.enabled" "capabilities.identity.enabled") "switch" "authentik.worker.metrics.serviceMonitor.enabled") -}}
+{{- $offenders := list -}}
+{{- range $s := $subs -}}
+{{- $active := true -}}
+{{- $found := false -}}
+{{- range $cond := $s.when -}}
+{{- if not $found -}}
+{{- $cur := $.Values -}}
+{{- range $k := splitList "." $cond -}}
+{{- if kindIs "map" $cur -}}{{- $cur = index $cur $k -}}{{- else -}}{{- $cur = nil -}}{{- end -}}
+{{- end -}}
+{{- if kindIs "bool" $cur -}}{{- $active = $cur -}}{{- $found = true -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $active -}}
+{{- $cur := $.Values -}}
+{{- range $k := splitList "." $s.switch -}}
+{{- if kindIs "map" $cur -}}{{- $cur = index $cur $k -}}{{- else -}}{{- $cur = nil -}}{{- end -}}
+{{- end -}}
+{{- if $cur -}}{{- $offenders = append $offenders $s.switch -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $offenders -}}
+{{- fail (printf "capabilities.observability is off, but %d vendored subchart monitor switch(es) in this layer are still on: %s. A subchart's values cannot read the capability, so each of these would still render a ServiceMonitor or PodMonitor, and a cluster without the Prometheus operator CRDs rejects the layer on an unknown kind. Choose one: pass profiles/observability-off.yaml to this layer (after your global values, the way profiles are passed: docs/deployment/profiles.md), or set those switches to false yourself. If you run your own Prometheus operator and WANT the monitors, set apps.serviceMonitors.enabled: true instead." (len $offenders) (join ", " $offenders)) -}}
+{{- end -}}
+{{- end -}}

@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Ingress for the Longhorn console ... OFF by default; see values.yaml for the
+# reasoning. The upstream Service is literally named `longhorn-frontend`
+# (not release-prefixed). Sync wave 8: after the Traefik Service (wave 7) that
+# gives an Ingress its address; see garage-web.yaml and the helper's `wave`.
+{{- if and .Values.apps.longhorn.enabled .Values.ingress.apps.longhorn.enabled }}
+---
+{{ include "tockmox.ingress" (dict "ctx" . "name" "longhorn" "prefix" "longhorn" "host" .Values.ingress.apps.longhorn.host "service" "longhorn-frontend" "port" 80 "wave" "8") }}
+{{- end }}

@@ -1,0 +1,302 @@
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "networkPolicy" "app" "platform_netpol") }}
+# SPDX-License-Identifier: Apache-2.0
+{{- /*
+BACKSTOP, not the primary guard. values.schema.json already requires
+global.lanCIDR to be a non-empty string, and that is what an operator will
+normally hit first, with a clearer message. This exists for the paths where
+schema validation does not run ... `helm template --skip-schema-validation`,
+and any tooling that renders templates without the schema ... because the
+consequence of a blank value here is not a cosmetic one. Delete the schema rule
+and this still fails; delete this and a skipped-schema render emits an
+ipBlock with an empty cidr, which the API server rejects at apply time with an
+error naming neither this file nor the missing value.
+*/ -}}
+{{- if not .Values.global.lanCIDR }}
+{{- fail "platform_netpol needs global.lanCIDR: the admission webhooks in this namespace are called by the kube-apiserver from a NODE address, so without the node/LAN range the allow list cannot be written and cert-manager, CNPG and Longhorn all stop admitting. Set global.lanCIDR, or set apps.platform_netpol.enabled=false and say plainly that this namespace is unpoliced." }}
+{{- end }}
+{{- $pn := .Values.platformNetpol | default dict -}}
+{{- $sources := $pn.nodeOriginSources | default list -}}
+{{- /*
+TM-0798, ruled 2026-09-29: 0.7.x kept the wide clusterCIDR rule when this list
+was empty, documented as the insecure default, while the reference site ran
+with the list set for a release. 0.8.0 refuses instead. The wide rule admits
+every pod in the cluster to every platform pod on every port (measured
+2026-09-29: a pod in `default` reached the object store's admin port), and a
+default that has to be documented as insecure is not a default worth shipping.
+*/ -}}
+{{- if not $sources }}
+{{- fail "platform_netpol is on and platformNetpol.nodeOriginSources is empty. Since 0.8.0 the policy layer no longer falls back to admitting the whole pod network (global.clusterCIDR) to the platform namespace, because that admits every pod in the cluster to every platform pod on every port. On flannel (the k3s default), run `install/tockmox-install.sh --print-netpol-node-sources --context <your context>` and add the block it prints to this layer's values (site/values/policy.yaml); re-run it when you add a node. On a CNI that does not allocate a podCIDR per node, the helper cannot answer: set apps.platform_netpol.enabled=false and say plainly that the platform namespace is unpoliced. See docs/deployment/install.md, step 1f." }}
+{{- end }}
+{{- range $sources }}
+{{- if or (eq . $.Values.global.clusterCIDR) (eq . "0.0.0.0/0") }}
+{{- fail (printf "platformNetpol.nodeOriginSources contains %s, which is the whole pod network (or wider). That is exactly the rule this key exists to replace: it would admit every pod in the cluster to every platform pod. List the per-node flannel gateway addresses instead (install/tockmox-install.sh --print-netpol-node-sources), or set apps.platform_netpol.enabled=false and say plainly that the platform namespace is unpoliced." .) }}
+{{- end }}
+{{- end }}
+{{- /*
+TM-0790. The clusterCIDR ipBlock is not rendered (since 0.8.0 there is no
+mode that renders it), and that is the whole fix. It does nothing if global.lanCIDR is a
+supernet of the pod network: the lanCIDR ipBlock is rendered either way, so a
+lanCIDR of 10.0.0.0/8 still admits every address in 10.42.0.0/16 and the
+narrowing renders as done while changing nothing. Refuse it, naming both values.
+Only a proven containment refuses: an unparseable or IPv6 value is not judged
+here (see tockmox.cidrContains).
+*/ -}}
+{{- if and $sources (eq (include "tockmox.cidrContains" (dict "outer" $.Values.global.lanCIDR "inner" $.Values.global.clusterCIDR)) "true") }}
+{{- fail (printf "platformNetpol.nodeOriginSources is set, but global.lanCIDR (%s) contains global.clusterCIDR (%s). The lanCIDR ipBlock in allow-from-node-network is always rendered, so it re-admits every pod in the cluster and the narrowing you asked for does nothing. Set global.lanCIDR to the node/LAN range that does NOT include the pod network. (Leaving nodeOriginSources empty no longer renders the wide rule; since 0.8.0 it refuses, TM-0798.)" $.Values.global.lanCIDR $.Values.global.clusterCIDR) }}
+{{- end }}
+---
+# INGRESS-ONLY default-deny for the platform namespace.
+#
+# Until 0.6.0 this namespace carried no NetworkPolicies at all, and the v0.5.0
+# CHANGELOG published that fact. This bundle closes it, deliberately and
+# conservatively.
+#
+# WHY INGRESS-ONLY, and why that is not a cop-out. The same choice the
+# monitoring bundle makes, for stronger reasons. What lives here: cert-manager,
+# MetalLB, Traefik, Longhorn, the CNPG operator, the Barman plugin, kured and
+# snapshot-controller. Their EGRESS is wide, legitimate and hard to enumerate
+# from a template: Longhorn replicates node to node on ports assigned at
+# runtime, the Barman plugin writes to whatever object store the site named,
+# cert-manager reaches an ACME endpoint or a DNS provider, kured queries
+# Prometheus. An egress default-deny here, written without a live validation
+# pass, would not be a security control ... it would be an outage with a
+# YAML file attached. Ingress-only is the honest half, and it is the half that
+# carries the value below.
+#
+# WHAT THIS ACTUALLY BUYS. Before: any pod anywhere in the cluster could open a
+# connection to the Longhorn manager API, the CNPG operator, or the cert-manager
+# webhook. After: only pods in this namespace, the Prometheus that scrapes them,
+# and the node network can. Traefik stays reachable from everywhere because
+# Traefik is the front door; everything BEHIND the front door stops being.
+#
+# WHAT THIS DOES NOT COVER, stated so nobody reads the bundle as wider than it
+# is. NetworkPolicy does not apply to hostNetwork pods, and three things here
+# run that way on a stock install: the MetalLB speaker, kured, and
+# node-exporter. They are unaffected by every rule below. That is a property of
+# the API, not an oversight, but a reader who assumes "the namespace is policed"
+# would be wrong about those three.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: default-deny-ingress
+  namespace: {{ .Values.namespaces.platform }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# The platform mesh is overwhelmingly same-namespace: Longhorn manager <->
+# engine <-> replica <-> instance-manager, the CNPG operator reaching the
+# clusters it manages here, cert-manager's controller reaching its own webhook,
+# the snapshot-controller and the Barman plugin. One intra-namespace allow
+# covers all of it, and it is the rule that keeps Longhorn alive.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-intra-namespace
+  namespace: {{ .Values.namespaces.platform }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.platform }}
+---
+# THE RULE THAT BREAKS THE CLUSTER IF IT IS MISSING.
+#
+# Three components here register admission webhooks: cert-manager, the CNPG
+# operator, and Longhorn. The caller is the kube-apiserver, and the
+# kube-apiserver is not a pod ... on k3s it is a process on the node, so the
+# source address is a NODE address and no namespaceSelector or podSelector can
+# ever match it. Drop this rule and every webhook call times out: Certificates
+# stop being issued, CNPG clusters stop being admitted, Longhorn volumes stop
+# being created. The failure looks like a storage bug and is a policy bug.
+#
+# The same range covers two more real paths: the kubelet reaching the Longhorn
+# CSI plugin's registration and probe endpoints, and traffic delivered by
+# MetalLB with externalTrafficPolicy: Cluster, which SNATs the client to the
+# receiving node's IP before the packet reaches a pod.
+#
+# WHAT THE SOURCES ARE, and why clusterCIDR is the problem. global.lanCIDR
+# covers the node addresses. The other legitimate source is a node reaching a
+# POD: on flannel (k3s default) that packet leaves from the node's cni0 gateway
+# or flannel.1 address, both inside the pod network and neither a pod. Admitting
+# the whole clusterCIDR to cover them also admits every real pod. Measured
+# 2026-09-29 (kube-router, chart 0.6.2-staged): a pod in namespace `default`
+# reached the object store's admin port 3903 (HTTP 200) and S3 port 3900 (403)
+# through this rule. TM-0273 fix 4.
+#
+# So the rule is lanCIDR + exactly the node gateway addresses listed in
+# platformNetpol.nodeOriginSources. The clusterCIDR is NOT admitted. Pods in
+# other namespaces reach nothing here except what another rule in this file
+# opens (Traefik, and the S3 port for backup clients).
+#
+# Until 0.8.0 there was a second mode: an EMPTY list admitted lanCIDR plus the
+# whole clusterCIDR, kept so a 0.7.0 upgrade did not break a cluster nobody had
+# measured, and documented as the insecure default. It is gone (TM-0798); an
+# empty list now refuses to render, above.
+#
+# The clusterCIDR block used to carry two more legitimate paths, and both have
+# their own rule now so that SET mode does not break them: Prometheus scraping
+# (allow-prometheus-scrape) and database backups writing to the object store
+# (allow-s3-from-backup-clients). The CNPG operator reaching instances in other
+# namespaces is EGRESS from this namespace and is answered on the same
+# connection, so it needed no ingress here at all.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-from-node-network
+  namespace: {{ .Values.namespaces.platform }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: {{ .Values.global.lanCIDR }}
+        {{- range $sources }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+---
+# Prometheus scrapes cert-manager, Traefik, MetalLB, Longhorn, CNPG and kured,
+# and the nine authored dashboards are built on those metric families. Scoped
+# to the Prometheus pod rather than its whole namespace, matching every other
+# scrape allow in this chart.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-prometheus-scrape
+  namespace: {{ .Values.namespaces.platform }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.monitoring }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+        {{- range (($.Values.platformNetpol | default dict).extraPrometheusNamespaces | default list) }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+        {{- end }}
+      # THE METRICS PORTS THE SHIPPED MONITORS SCRAPE, and only those (TM-0273
+      # fix 3). Before, this rule selected every platform pod with no `ports:`
+      # key, so a compromised Prometheus reached every platform pod on every
+      # port. The list is platformNetpol.scrapePorts, derived from the rendered
+      # ServiceMonitors (cert-manager 9402; kured, snapshot-controller and the
+      # CNPG operator 8080; Longhorn manager 9500; MetalLB controller 9120;
+      # Traefik 9100). NetworkPolicy matches the CONTAINER port, after DNAT.
+      # Until 0.8.0 this narrowed nothing on a site that left
+      # nodeOriginSources empty, because the clusterCIDR block above admitted
+      # Prometheus's pod address on every port. That block is gone (TM-0798).
+      ports:
+        {{- range ($pn.scrapePorts | default (list 9402 8080 9500 9120 9100)) }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "dataProtection") }}
+---
+# BACKUP CLIENTS -> THE OBJECT STORE, S3 PORT ONLY (TM-0273 fix 4).
+#
+# The AI layer's CNPG barman plugin and the identity layer's nightly database
+# dump both write to the shipped Garage, and both were admitted to it, on every
+# port, by the clusterCIDR block in allow-from-node-network. Narrowing that
+# block would have made the backups fail with a timeout, so this rule names the
+# path: the two client namespaces (plus platformNetpol.extraS3ClientNamespaces),
+# the Garage pods, TCP 3900. The admin port 3903 and the RPC port 3901 are NOT
+# opened, which is the measured hole this whole change exists to close.
+#
+# Gated on the dataProtection capability because that is what owns Garage. It
+# selects nothing where Garage is off, which is inert.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-s3-from-backup-clients
+  namespace: {{ .Values.namespaces.platform }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-garage
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.ai }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.authentik }}
+        {{- range ($pn.extraS3ClientNamespaces | default list) }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 3900
+{{- end }}
+{{- if eq .Values.namespaces.traefik .Values.namespaces.platform }}
+---
+# Traefik is the front door and is deliberately reachable from everywhere.
+#
+# This rule looks like it gives away the protection the bundle just built. It
+# does not: it is scoped to the TRAEFIK POD, so Longhorn, the CNPG operator,
+# cert-manager and the rest stay behind the default-deny. Narrowing this one
+# would mean deciding, in a chart, which clients are allowed to reach a
+# published website ... which is a decision the site makes at the edge, not
+# something a Helm template can know.
+#
+# If your edge already restricts who reaches the LoadBalancer, this rule costs
+# you nothing. If it does not, this is not the control that would have saved
+# you.
+#
+# GUARDED on traefik and platform being the same namespace, which they are on a
+# stock install. Point `namespaces.traefik` somewhere else and this rule does
+# not render ... correctly, because the default-deny above only covers
+# `namespaces.platform`, so an allow in the other namespace would select a pod
+# that nothing is denying. That is a ghost policy, and
+# tools/check-no-ghost-policies.sh exists because this repo has shipped them
+# before.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-ingress-to-traefik
+  namespace: {{ .Values.namespaces.platform }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: traefik
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+{{- end }}
+{{- end }}

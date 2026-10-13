@@ -1,0 +1,89 @@
+# SPDX-License-Identifier: Apache-2.0
+{{- /*
+Tockmox-owned namespaces.
+
+The policy layer creates every namespace the product deploys into, which is why
+it runs at sync wave 1, ahead of platform. Argo's CreateNamespace=true only
+creates an Application's DESTINATION namespace, not namespaces its resources
+happen to target ... so without this, a greenfield install fails with
+"namespaces X not found" while an existing cluster silently succeeds.
+
+Found 2026-08-12 on a clean devtest cluster. An existing deployment cannot
+surface this class of bug, which is the argument for greenfield in the release
+gate.
+
+NOT created here, deliberately:
+  argocd          a user prerequisite, installed before the GitOps loop exists
+  kube-system     the distro's
+The platform layer's components (Traefik, cert-manager, MetalLB, Longhorn,
+CNPG, kured) share the single `platform` namespace created here ... see the
+NAMESPACE MODEL note in tockmox-platform/values.yaml.
+Anything set to "" is skipped, so an operator can drop a namespace they do not
+want by blanking its value.
+*/ -}}
+{{- /*
+POD SECURITY LABELS come from `podSecurity` in values (TM-0135). warn and audit
+observe without blocking; enforce REFUSES, and is rendered only where the values
+name a level for the namespace's key. tools/check-pod-security.sh fails if an
+enforce level is stricter than what the pods rendered into that namespace pass.
+Reasons per namespace are in values.yaml beside the key.
+*/ -}}
+{{- $ps := .Values.podSecurity }}
+{{- /*
+global.namespaceLabels (TM-0816): a site's extra labels on EVERY namespace this
+chart creates, for admission mutators keyed on namespace labels (Zarf's
+`zarf.dev/agent: ignore`, Istio injection, Kyverno). Appended after the chart's
+own labels; a key the chart already sets is refused rather than silently
+dropped (Pod Security levels belong to `podSecurity`, which the gate measures).
+*/ -}}
+{{- $extra := (.Values.global.namespaceLabels | default dict) }}
+{{- $owned := list "name" "app.kubernetes.io/part-of" "tockmox.com/managed-by" "tockmox.com/layer" }}
+{{- range $k, $_ := $extra }}
+{{- if or (has $k $owned) (hasPrefix "pod-security.kubernetes.io/" $k) }}
+{{- fail (printf "global.namespaceLabels sets %q, which this chart owns (Pod Security labels come from podSecurity in tockmox-policy values)" $k) }}
+{{- end }}
+{{- end }}
+{{- range $key := .Values.namespaces.create }}
+{{- $name := index $.Values.namespaces $key }}
+{{- if $name }}
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $name }}
+  labels:
+    name: {{ $name }}
+    app.kubernetes.io/part-of: tockmox
+    tockmox.com/managed-by: tockmox
+    tockmox.com/layer: policy
+    pod-security.kubernetes.io/warn: {{ $ps.warn | quote }}
+    pod-security.kubernetes.io/warn-version: {{ $ps.version | quote }}
+    pod-security.kubernetes.io/audit: {{ $ps.audit | quote }}
+    pod-security.kubernetes.io/audit-version: {{ $ps.version | quote }}
+{{- $enforce := (index $ps.enforce $key) | default $ps.enforceDefault }}
+{{- if $enforce }}
+    pod-security.kubernetes.io/enforce: {{ $enforce | quote }}
+    pod-security.kubernetes.io/enforce-version: {{ $ps.enforceVersion | quote }}
+{{- end }}
+{{- range $k, $v := $extra }}
+    {{ $k | quote }}: {{ $v | quote }}
+{{- end }}
+---
+# TM-0759 (CIS 5.1.5): the namespace controller creates `default`; rendering it here lets it carry
+# automountServiceAccountToken: false. Prune=false,Delete=false: removing this object must never
+# delete the account, which Kubernetes recreates anyway; no Tockmox pod runs as it, and no
+# Role or ClusterRole binds it (tools/check-sa-tokens.sh asserts the first).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: {{ $name }}
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+  labels:
+    app.kubernetes.io/part-of: tockmox
+    tockmox.com/managed-by: tockmox
+    tockmox.com/layer: policy
+automountServiceAccountToken: false
+{{- end }}
+{{- end }}

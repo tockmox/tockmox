@@ -1,0 +1,96 @@
+{{- if (.Values.apps.kube_bench | default dict).enabled }}
+{{- if not .Values.namespaces.kube_bench }}
+{{- fail "\n\napps.kube_bench.enabled is true but namespaces.kube_bench is blank.\nName the namespace the kube-bench Job will run in (default tockmox-kube-bench).\n" }}
+{{- end }}
+# SPDX-License-Identifier: Apache-2.0
+---
+# THE ONE NAMESPACE IN THIS CHART THAT ENFORCES `privileged`, and why.
+#
+# kube-bench has to read the node it runs on: the host's process table (hostPID)
+# and the files k3s keeps its credentials and TLS in (hostPath). The Pod Security
+# Standards refuse both at the BASELINE level, let alone restricted, so a
+# namespace that admits this Job admits `privileged` and nothing tighter.
+#
+# It gets a namespace of its own instead of a place in tockmox-selfcheck so that
+# the loosening is as small as it can be: nothing else lives here, and the
+# heartbeat and blackbox exporter in tockmox-selfcheck stay eligible for
+# `restricted` when Pod Security enforcement lands (TM-0135).
+#
+# A namespace label overrides a cluster-wide default in the API server's
+# AdmissionConfiguration, so this works on a k3s that enforces `restricted`
+# by default. It does NOT survive an exemption list that removes the namespace,
+# and it does not stop a cluster-wide policy engine (Kyverno, Gatekeeper) from
+# refusing the pod. Neither of those is something this chart can see.
+#
+# `warn` and `audit` stay at `restricted` (set below): the API server records,
+# on every run, that the scanner's pod exceeds restricted. That is the honest
+# statement of this namespace's posture and it costs one warning and one audit
+# annotation per run.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.namespaces.kube_bench }}
+  labels:
+    name: {{ .Values.namespaces.kube_bench }}
+    app.kubernetes.io/part-of: tockmox
+    tockmox.com/managed-by: tockmox
+    tockmox.com/layer: policy
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest
+    # warn and audit stay `restricted`, as on every other namespace this layer
+    # creates (tools/check-pod-security.sh asserts it): the scanner's pod
+    # violates restricted, and saying so on every run is the true statement.
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    {{- /* global.namespaceLabels (TM-0816): validated in namespaces.yaml. */}}
+    {{- range $k, $v := (.Values.global.namespaceLabels | default dict) }}
+    {{ $k | quote }}: {{ $v | quote }}
+    {{- end }}
+---
+# TM-0759 (CIS 5.1.5): the namespace controller creates `default`; rendering it here lets it carry
+# automountServiceAccountToken: false. Prune=false,Delete=false: removing this object must never
+# delete the account, which Kubernetes recreates anyway; no Tockmox pod runs as it, and no
+# Role or ClusterRole binds it (tools/check-sa-tokens.sh asserts the first).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: default
+  namespace: {{ .Values.namespaces.kube_bench }}
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+  labels:
+    app.kubernetes.io/part-of: tockmox
+    tockmox.com/managed-by: tockmox
+    tockmox.com/layer: policy
+automountServiceAccountToken: false
+---
+# NO NETWORK IN EITHER DIRECTION. kube-bench reads local files and processes,
+# and the CronJob mounts no ServiceAccount token, so the correct policy for the
+# only pod here is to allow nothing at all, DNS included.
+#
+# ONE THING IS NOT SETTLED. Run with --benchmark named, v0.16.0 still looks for
+# `kubectl` or `kubelet` to detect the Kubernetes version (observed on a Linux
+# host without them: a warning, and the scan continues). The image ships
+# `kubectl`, which would try the API server and, with no token and no route,
+# should fail at once. INFERRED, not observed in this image. If it instead waits
+# for a timeout the scan just takes longer, and activeDeadlineSeconds bounds it.
+#
+# If the scanner turns out to need the network, the symptom is a scan that hangs
+# until activeDeadlineSeconds, and the fix is a rule added here with the reason
+# beside it. `podSelector: {}` covers any pod an operator adds to
+# this namespace by hand, which is the safer direction to be wrong in.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: default-deny-all
+  namespace: {{ .Values.namespaces.kube_bench }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+{{- end }}

@@ -1,0 +1,3 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+tockmox-crds (sync wave 0) installed.
+Enabled apps: {{ include "tockmox.enabledApps" . }}

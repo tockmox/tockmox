@@ -1,0 +1,131 @@
+{{- /*
+A PrometheusRule needs an operator to evaluate it AND the CRD to exist, so it
+follows serviceMonitors as well as the notifications capability. Rendering it
+without either produces an object that applies cleanly and is never read, which
+is the exact shape of failure this repo has now found in itself twice.
+*/ -}}
+{{- $notify := include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "notifications" "override" .Values.notifications.enabled) }}
+{{- $monitors := include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") }}
+{{- if and $notify $monitors }}
+{{- /*
+The alerting path watches itself.
+
+You cannot page somebody to tell them paging is broken. So every failure mode of
+the delivery path is expressed as a metric the local Prometheus scrapes and a
+rule that renders NOT-GREEN on a dashboard, which is a surface that survives the
+notification path being dead. This is the same contract the selfcheck layer
+states: absence and staleness are failures, never the absence of a failure.
+
+These rules deliberately do NOT route through the bridge. They fire into
+Alertmanager and show up in Grafana; if the bridge is the broken thing, that is
+still where you will see it.
+*/ -}}
+{{- $ns := .Values.namespaces.monitoring -}}
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tockmox-notifications
+  namespace: {{ $ns }}
+  annotations:
+    # Sync wave 1 of the sync phase, so ArgoCD applies this rule only after the
+    # operator Deployment (wave 0) that serves the admission webhook is healthy.
+    # See kube-prometheus-stack in values.yaml. check-upgrade-safety.sh F4 asserts it.
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: tockmox-notifications
+      rules:
+        - alert: TockmoxNotificationSinkDown
+          # The bridge probes its sink every minute and publishes the result.
+          # 0 means the sink refused, timed out, or does not resolve.
+          expr: tockmox_notify_sink_up == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Alert delivery sink unreachable ... alerts are not leaving the cluster"
+            description: >-
+              The Alertmanager bridge cannot reach its notification sink at
+              all. Alerts still fire and still appear in Grafana, but nothing
+              is being delivered. Look for ntfy not running, not resolving, or
+              refused by a NetworkPolicy. This alert does NOT cover a missing
+              publish token: ntfy answers /v1/health without credentials
+              (measured 2026-09-10, HTTP 200 on a deny-all instance), so a
+              bridge that cannot publish a single message still reports its
+              sink up. That case is TockmoxNotificationDeliveryFailing, and
+              tockmox_notify_token_present is the metric that separates them.
+        - alert: TockmoxNotificationDeliveryFailing
+          # A counter that is still moving means deliveries are being REFUSED,
+          # which is different from the sink being down and usually means auth.
+          expr: increase(tockmox_notify_failed_total[15m]) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Alert deliveries are being rejected by the sink"
+            description: >-
+              The bridge reached the sink and the sink refused the message.
+              Check the bridge pod logs for the HTTP status; 403 means the
+              publish token is missing or lacks write access on topic
+              "{{ .Values.notifications.ntfy.topic }}".
+        - alert: TockmoxNotificationBridgeAbsent
+          # ABSENT, not down. A deleted Deployment, a failed scrape or a
+          # ServiceMonitor that stopped matching all look identical to "quiet",
+          # and quiet is exactly how this failure hides.
+          expr: absent(tockmox_notify_sink_up)
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "The alert bridge is not being scraped ... delivery health is unknown"
+            description: >-
+              No tockmox_notify_* series exist. Either the bridge is not
+              running or Prometheus is not scraping it. Delivery cannot be
+              assumed to work while this is firing.
+{{- if .Values.notifications.ntfy.enabled }}
+        - alert: TockmoxNtfyDown
+          expr: up{job="tockmox-ntfy"} == 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "ntfy is down"
+            description: >-
+              The notification server itself is not answering. Paired with
+              TockmoxNotificationSinkDown this is the whole story; alone it
+              usually means the scrape port, not the service, is unhappy.
+{{- end }}
+{{- if .Values.notifications.bridge.enabled }}
+{{- /*
+DRIFT GUARD.
+
+Alertmanager's configuration is a static values block ... Helm cannot template a
+values file, so the bridge's webhook URL is written out literally below the
+`kube-prometheus-stack.alertmanager.config` key. A literal is a thing that goes
+stale the moment somebody renames `namespaces.monitoring`, and the failure is
+silent: Alertmanager POSTs into a name that does not resolve and every alert is
+dropped with a log line nobody reads.
+
+So the chart checks its own literal against the Service it actually creates and
+refuses to render when they disagree. A deliberately invalid render beats a
+deliberately silent one -- the same reasoning that made the default receiver
+invalid in the first place.
+*/ -}}
+{{- $want := printf "http://tockmox-alert-bridge.%s.svc:80/" $ns -}}
+{{- $kps := index .Values "kube-prometheus-stack" -}}
+{{- $found := "" -}}
+{{- range $r := $kps.alertmanager.config.receivers -}}
+  {{- if eq $r.name "tockmox-default" -}}
+    {{- range $w := ($r.webhook_configs | default list) -}}
+      {{- $found = $w.url -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- if ne $found $want -}}
+{{- fail (printf "\n\nnotifications are enabled but Alertmanager does not point at the bridge.\n  expected receiver 'tockmox-default' webhook url: %s\n  found:                                        %s\n\nThis happens when namespaces.monitoring is changed without changing the\nAlertmanager receiver, which would silently drop every alert. Fix either:\n\n  kube-prometheus-stack:\n    alertmanager:\n      config:\n        receivers:\n          - name: tockmox-default\n            webhook_configs:\n              - url: %s\n                send_resolved: true\n\nor set notifications.enabled: false if you deliver alerts some other way.\n" $want (default "(no webhook_configs)" $found) $want) -}}
+{{- end -}}
+{{- end }}
+{{- end }}

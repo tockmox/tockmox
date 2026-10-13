@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Ingress for the devops UIs.
+#
+# Argo Workflows: Service `<release>-argo-workflows-server`, port 2746.
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "argoWorkflows")) .Values.ingress.apps.argoWorkflows.enabled }}
+---
+{{ include "tockmox.ingress" (dict "ctx" . "name" "argo-workflows" "prefix" "workflows" "host" .Values.ingress.apps.argoWorkflows.host "service" (printf "%s-argo-workflows-server" .Release.Name) "port" 2746) }}
+{{- end }}

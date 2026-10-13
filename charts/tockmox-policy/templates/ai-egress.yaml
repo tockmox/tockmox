@@ -1,0 +1,150 @@
+{{- /*
+SELF-GUARD, new in 0.6.0. Through v0.5.0 this bundle shipped OFF, and the
+CHANGELOG published the consequence: "Open WebUI egress is unrestricted on a
+stock install." The reason for OFF was never that containment is wrong; it was
+that the rules below name the SHIPPED Traefik by pod label and container port,
+so on a cluster running a different ingress controller they match nothing and
+single sign-on breaks in a way that looks like the identity provider being down.
+
+That is a statement about one condition, not about the default. So the default
+now follows the networkPolicy capability like every other shipped bundle, and
+the condition is checked here instead:
+
+  shipped Traefik present  ... render, and the console is contained
+  not present, unset       ... skip silently; the default must not break a
+                               cluster whose ingress controller we do not know
+  not present, set true    ... fail the render and say why, because an operator
+                               who asked for this by name is owed an error
+                               rather than a policy that quietly selects nothing
+
+`$explicit` below is the explicit-true test: kindOf on the raw key, not the
+resolved value, because the resolved value cannot tell "the operator said true"
+from "the capability said true".
+
+WHAT THE CONDITION IS ALLOWED TO READ, and this cost a false start during
+development. The obvious test is `apps.traefik.enabled` ... and it is a
+cross-layer read. `apps.traefik` belongs to the PLATFORM chart; the values
+namespace is shared, so ci/values.yaml supplies it and a real site's per-layer
+policy values file does not. Reading it here is a nil pointer that fails the
+whole render, and ci/values.yaml being more complete than any real site is
+exactly why that would have passed CI and failed on first deployment. Same
+trap, same shape, as the note at the top of tockmox-selfcheck's heartbeat.yaml.
+
+So the condition uses only what THIS chart owns: whether `namespaces.traefik`
+still points at `namespaces.platform`, which is where the shipped Traefik lives
+and where an adopter running their own controller is told to stop pointing it.
+That is a proxy, not a proof ... an adopter who ran a different controller in
+the platform namespace under the same pod label would defeat it. The live test
+in docs/usage/ai-plane.md is still the thing that settles it, and the
+explicit-true path above fails loudly rather than guessing.
+*/ -}}
+{{- $entry := index (.Values.apps | default dict) "ai_openwebui_egress" | default dict -}}
+{{- $explicit := and (ne (kindOf $entry.enabled) "invalid") $entry.enabled -}}
+{{- $shippedTraefik := eq .Values.namespaces.traefik .Values.namespaces.platform -}}
+{{- if and $explicit (not $shippedTraefik) }}
+{{- fail "apps.ai_openwebui_egress is set true, but namespaces.traefik no longer points at namespaces.platform, which is this chart's only local signal that the SHIPPED Traefik is what serves the cluster. This bundle selects the ingress controller by the pod label `app.kubernetes.io/name: traefik` and by its CONTAINER ports (8000/8443, not the Service's 80/443 ... NetworkPolicy egress is matched after DNAT). Against another controller it matches nothing and Open WebUI's OIDC discovery fails as a timeout that reads as the identity provider being down. Fix the selector and aiEgress.openWebui.ingressContainerPorts together for your controller, then re-enable, and run the login test in docs/usage/ai-plane.md." }}
+{{- end }}
+{{- if and (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "networkPolicy" "app" "ai_openwebui_egress")) $shippedTraefik }}
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+EGRESS CONTAINMENT FOR THE CHAT CONSOLE.
+
+ai-default-deny.yaml closes ingress for the whole AI namespace and says, in its
+own comment, that egress is a later phase. This is that phase, and it is
+deliberately narrower than the namespace.
+
+WHY ONLY OPEN WEBUI. ADR-0007's lethal trifecta needs private data, untrusted
+content, and an exfiltration channel together. Open WebUI is the one pod here
+that holds all three: it stores chat history and uploaded documents, it renders
+text that came from a model, and it can make outbound requests. The gateway is a
+routing hop; the database talks to the CNPG operator and the API server. An
+egress default-deny in front of those buys no containment and risks a database.
+
+So the console is contained and the rest of the namespace is not yet. That is a
+smaller claim than "the AI namespace has egress control" and it is the true one.
+
+SELECTING A POD MAKES IT DEFAULT-DENY. A pod matched by any policy carrying
+`policyTypes: Egress` may reach only what that policy allows, so the rules below
+are exhaustive. Anything missing fails as a connection timeout inside the
+console rather than as an error anyone sees.
+
+THE TRAP, AND IT COST A FALSE START. Open WebUI's SERVER performs OIDC discovery
+and the token exchange itself, against `auth.<internalDomain>`. That hostname
+resolves to the ingress LoadBalancer address, so the obvious rule is an
+`ipBlock` for it. THAT DOES NOT WORK. NetworkPolicy egress is evaluated AFTER
+service DNAT, so by the time the packet is matched its destination is the
+Traefik POD address and port, not the LoadBalancer VIP and not the Service port.
+An `ipBlock` of the VIP never matches anything.
+
+Measured on the lab, 2026-08-15, both ways round:
+
+  ipBlock <traefik-vip>/32 on 80,443    OIDC discovery BLOCKED
+  traefik pod selector on 8000,8443     OIDC discovery, jwks and token all OK
+
+The ports below are Traefik's CONTAINER ports, which is the same trap one level
+down: the Service publishes 80 and 443 and targets 8000 and 8443, and DNAT has
+already rewritten the port too. Allowing 80 and 443 here does nothing.
+
+If you run a different ingress controller, or renamed the Traefik release, fix
+the selector and the ports together. Getting either wrong breaks single sign-on
+in a way that looks like the identity provider being down.
+*/ -}}
+{{- $e := .Values.aiEgress.openWebui -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-egress-openwebui
+  namespace: {{ .Values.namespaces.ai }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: open-webui
+  policyTypes:
+    - Egress
+  egress:
+    # DNS first, because without it every rule below is unreachable by name and
+    # the symptom is a resolution error that reads like a broken cluster.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # The rest of this namespace: the model gateway and the console's Redis.
+    # Pointing the console at the gateway rather than at a model host is what
+    # keeps model hosts off this list entirely. A console addressed straight at
+    # a model host needs that host added to extraEgress, and has already given
+    # up the per-console key and the request log.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.ai }}
+    # Single sign-on, via the ingress controller's POD. See the trap note above
+    # before changing this to an ipBlock.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.traefik }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        {{- range $e.ingressContainerPorts }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+    {{- with $e.extraEgress }}
+    # Site-supplied, appended verbatim. Every entry is a deliberate hole in the
+    # containment argument, so record why beside it in your values.
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

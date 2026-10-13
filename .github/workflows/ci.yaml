@@ -1,0 +1,860 @@
+# SPDX-License-Identifier: Apache-2.0
+name: ci
+on:
+  pull_request:
+  push:
+    # release-* too: a point release is cut from its release branch, and the
+    # tagging invariant in RELEASING.md needs a run on the exact commit that
+    # gets tagged. A pull_request run tests a synthetic merge commit, not that
+    # commit, so without this a release branch could never satisfy it (TM-0775).
+    branches: [main, 'release-*']
+
+permissions:
+  contents: read
+
+# Tool pins. Declared as env vars, not buried in shell, so Renovate's custom
+# managers can bump them. A version you cannot see is a version nobody updates.
+env:
+  HELM_VERSION: "v4.3.0"
+  KUBECONFORM_VERSION: "0.8.0"
+  GITLEAKS_VERSION: "8.30.1"
+  PROMTOOL_VERSION: "3.14.0"
+  # SHA-256 of the exact release asset each download step fetches (TM-0592),
+  # copied from the project's own published checksum file for that version and
+  # confirmed against the downloaded bytes. A Renovate bump of a version above
+  # fails its step on a checksum mismatch until the matching hash here is
+  # updated in the same PR: that failure is the prompt, not a defect.
+  # tools/check-action-pins.sh refuses a download with no check after it.
+  PROMTOOL_SHA256: "f665c6da19eb7ba399c915d30c7d9793c9b417bf8a749b504bc470678631478d"  # prometheus-${PROMTOOL_VERSION}.linux-amd64.tar.gz
+  KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883"  # kubeconform-linux-amd64.tar.gz
+  GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"  # gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz
+
+jobs:
+  charts:
+    # GitHub-hosted: free and unlimited on public repos, and safe against fork PRs.
+    # Self-hosted runners must never serve pull_request from forks.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: every tool is executable
+        shell: bash -euo pipefail {0}
+        run: |
+          # CI invokes these as ./tools/x.sh, so a file committed 100644 fails
+          # with "Permission denied" BEFORE it runs a single check. That is how
+          # tools/check-values-duplicate-keys.sh failed on every run from the
+          # day it was added: never once did it evaluate anything, and because
+          # a failed step skips the rest of the job, it also hid the nine
+          # checks behind it.
+          #
+          # The sandbox this repo is often edited from cannot set the exec bit
+          # on its mount, so the bit has to be set in the index deliberately:
+          #   git update-index --chmod=+x tools/whatever.sh
+          fail=0
+          for f in tools/*.sh; do
+            if [ ! -x "$f" ]; then
+              echo "::error::$f is not executable; CI runs it as ./$f"
+              echo "  fix: git update-index --chmod=+x $f"
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - name: helm lint (all layer charts)
+        # `helm lint` exits 0 on a template fail(), and a pipeline without
+        # pipefail reports the LAST command's status. Both bit us: CI was green
+        # while tockmox-platform rendered nothing at all.
+        shell: bash -euo pipefail {0}
+        run: |
+          ./tools/helm-deps.sh
+          fail=0
+          for c in charts/tockmox-*; do
+            [ "$c" = "charts/tockmox-common" ] && continue
+            helm lint "$c"  \
+              -f ci/values.yaml || fail=1
+            # Second pass with the all-on overlay: paths the defaults never
+            # render (backups, hardware telemetry, the consoles' ingresses)
+            # get linted too. A lint-breaking defect in the backup path
+            # shipped invisibly on 2026-08-19 because nothing rendered it.
+            helm lint "$c"  \
+              -f ci/values.yaml -f ci/values-all-on.yaml || fail=1
+          done
+          exit $fail
+
+      - name: every layer renders a non-zero number of resources
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # Assert on the ARTIFACT, not the exit code. helm lint passing tells
+          # you nothing about whether anything rendered. Since TM-0533 the
+          # counts are also written to build/render-counts.tsv, which
+          # "documented counts still match the tree" below reads instead of
+          # rendering all nine layers a second time.
+          ./tools/render-counts.sh
+
+      - name: no NetworkPolicy guards an empty namespace
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # Four bundles shipped enabled for months guarding workloads that were
+          # never ported, plus a Harbor bundle aimed at the wrong namespace.
+          # Every other check in this file passed the whole time: the manifests
+          # were valid, the schema was satisfied, and the cluster synced green
+          # over empty namespaces.
+          ./tools/check-no-ghost-policies.sh
+
+      - name: every NetworkPolicy selector can actually match
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # A matchLabels value that renders to "" matches NOTHING while
+          # applying cleanly and reporting Synced. Found live 2026-08-18: an
+          # allow-rule whose namespaceSelector matched no namespace because a
+          # site value rendered empty. One level below the ghost gate: that
+          # one asks whether anything lives where a policy points, this one
+          # asks whether the selector can ever match at all.
+          ./tools/check-netpol-selectors.sh --selftest
+          ./tools/check-netpol-selectors.sh
+
+      - name: every aggregated ClusterRole we ship is allowlisted by our own guardrail
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # TM-0505. A stock install on 2026-09-11 logged six admission warnings
+          # from deny-rbac-aggregation-injection, every one of them against a
+          # ClusterRole Tockmox had just created itself ... telling the operator
+          # to allowlist objects the product ships. Nothing was blocked, because
+          # the policy defaults to Audit/Warn, and that is the trap: the values
+          # file invites tightening it to ["Deny"], which on that day would have
+          # turned six warnings into six denials on a stock install.
+          #
+          # The six are allowlisted now. This gate is here so the seventh cannot
+          # arrive quietly: the warning only appears at install time, in a log
+          # nobody re-reads, so adopting a subchart that ships an aggregated
+          # ClusterRole would re-open it with no signal at all.
+          #
+          # --selftest first, same reasoning as the gates around it.
+          ./tools/check-rbac-aggregation-allowlist.sh --selftest
+          ./tools/check-rbac-aggregation-allowlist.sh
+
+      - name: the alert rules we author are tested
+        # Independent of the steps before it, same reasoning as the SBOM step.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # Tockmox ships alert rules as its safety net and, until 2026-09-12,
+          # not one of them had a test. The alert-series-churn family is nine
+          # separate mechanisms by which an alert reads green and cannot fire,
+          # and every one was found by a human noticing rather than by a gate.
+          #
+          # Two bars, deliberately different: our own rules get promtool's full
+          # lint, everything we SHIP gets a parse check. kube-prometheus-stack
+          # emits one recording rule four times, which is upstream's design and
+          # not ours to fix; failing on it would make this gate permanently red,
+          # which is how a suite teaches people to ignore it.
+          #
+          # The cases live in tests/rules/ and must assert BOTH directions.
+          # TM-0519 is the seed case: the rule must fire on the static tokens we
+          # mint and must NOT fire on the one kube-prometheus-stack 90.1.1
+          # started shipping. Proven to go red against the pre-fix expression.
+          #
+          # promtool ships inside the prometheus tarball; there is no standalone
+          # release asset. The gate SKIPS (exit 2) when promtool is absent, so
+          # this install step is what makes CI actually run it rather than
+          # quietly skip ... a skipped gate in CI is the same as no gate.
+          curl -fsSL -o prometheus.tar.gz "https://github.com/prometheus/prometheus/releases/download/v${PROMTOOL_VERSION}/prometheus-${PROMTOOL_VERSION}.linux-amd64.tar.gz"
+          echo "${PROMTOOL_SHA256}  prometheus.tar.gz" | sha256sum -c -
+          tar -xzf prometheus.tar.gz --strip-components=1 "prometheus-${PROMTOOL_VERSION}.linux-amd64/promtool"
+          sudo install -m755 promtool /usr/local/bin/
+          promtool --version
+          ./tools/check-alert-rules.sh
+
+      - name: the committed SBOM matches the tree
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # sbom.cdx.json is generated, committed, and timestamp-free, so
+          # regenerating it on an unchanged tree must be a no-op. A diff here
+          # means charts changed and the SBOM did not ride along ... the
+          # staleness class images.txt already gates against, applied to the
+          # machine-readable inventory verify.md points deployers at.
+          ./tools/gen-sbom.sh
+          git diff --exit-code -- sbom.cdx.json
+
+      - name: no duplicate top-level keys in values files
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # YAML keeps the LAST occurrence of a repeated key and silently drops
+          # the earlier one. On 2026-08-15 an appended `open-webui:` block
+          # discarded the original, re-enabling Pipelines and removing the
+          # settings that keep the console off a third-party API.
+          #
+          # helm lint reported 9 of 9 clean. helm template rendered without
+          # error. The diff read as a pure addition. The fault was found only
+          # by counting rendered PVCs, which had dropped from ten to three.
+          ./tools/check-values-duplicate-keys.sh
+
+      - name: every OIDC console gets a trust bundle from its own image
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # Turning TLS on for the first time broke SSO on every console at
+          # once: each one verifies the provider's certificate from inside its
+          # own container and none trusted the private CA. Every chart
+          # rendered, every schema passed, and local break-glass login kept
+          # working, so nothing looked wrong.
+          ./tools/check-trust-wiring.sh
+
+      - name: storage policy holds on the rendered claims
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # Every claim in this repo sat on local-path for weeks while Longhorn
+          # ran healthy and unused, because nothing named a class and nothing
+          # checked. The classes are now named in five places, two of them
+          # literals because the upstream charts do not template the key, so
+          # the way this regresses is one of them moving without the others.
+          ./tools/check-storage-policy.sh
+
+      - name: every layer renders against a real site's values, not just CI's
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # ci/values.yaml is MORE COMPLETE than any real deployment: it carries
+          # every layer's keys in one file, so a template reading a key owned by
+          # another layer finds it and renders fine. A real site keeps one values
+          # file per layer, where that read is nil ... and a nil in a chain is a
+          # render-ending error, not a falsy value.
+          #
+          # tockmox-selfcheck grew a read of .Values.notifications.enabled, a key
+          # declared only in the observability layer. Nine charts linted, nine
+          # templated, every gate passed, CI was green, and the first real
+          # deployment could not render the selfcheck layer at all.
+          fail=0
+          for c in charts/tockmox-*; do
+            [ "$c" = "charts/tockmox-common" ] && continue
+            if ! out=$(helm template t "$c" -f ci/values-site-minimal.yaml 2>&1); then
+              echo "::error::$c fails to render against ci/values-site-minimal.yaml"
+              printf '%s\n' "$out" | head -5
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - name: every capability is a switch that does something
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # A capability that removes no object is decoration, and it fails
+          # silently: the render succeeds, the count barely moves, and the
+          # documentation still says you can decline it. Four of the eight were
+          # in that state the day they were written, because a component
+          # defaulting to an explicit `true` beats the tri-state.
+          #
+          # This also asserts the ownership map in the script matches the one in
+          # tockmox.capabilityOwners, so the gate cannot drift away from the
+          # charts it is checking.
+          ./tools/check-capabilities.sh
+
+      - name: global.imageRegistry redirects every image it claims to
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # Measured 2026-08-15: setting global.imageRegistry redirected 24 of
+          # 45 images and left 21 pointing at docker.io, ghcr.io, quay.io and
+          # registry.k8s.io, because the key only reaches Tockmox-authored
+          # templates and each vendored subchart resolves its own image through
+          # its own key. The air-gap story was true of the images this repo
+          # writes and false of the images it ships.
+          #
+          # The exemption list in the script is a ratchet: it fails on a NEW
+          # image that ignores the key, and on a listed image that no longer
+          # needs listing.
+          ./tools/check-airgap.sh
+
+      - name: no cloud egress in default values
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # This project claims your data does not leave your hardware. The step
+          # used to grep three vendor hostnames in `value:` position, which could
+          # not see a hostname that lives in a binary (Grafana's update check) or
+          # any host nobody had named. The script asserts on what the rendered
+          # tree can reach (TM-0671); the same step name keeps the check count.
+          ./tools/check-cloud-egress.sh
+          ./tools/check-cloud-egress.sh --selftest
+
+      - name: values schema rejects bad input
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        run: |
+          # The schema is a contract. Prove it fails closed, or it is decoration.
+          # Sets only an optional global, so the two required ones
+          # (internalDomain, lanCIDR) are missing and the schema must object.
+          if helm lint charts/tockmox-policy --set global.timezone=UTC >/dev/null 2>&1; then
+            echo "::error::values.schema.json did not reject a missing required global"
+            exit 1
+          fi
+          echo "schema fails closed as expected"
+
+      - name: values schema rejects an unknown top-level key or component name
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # The root of every layer schema is closed, and since TM-0404 so is the
+          # set of component names under `apps`: a misspelt top-level key or a
+          # misspelt switch is an error rather than a chart installed with
+          # defaults and no complaint. Proven per layer with a control, because
+          # the enumeration is per layer and one of them drifting is the way this
+          # stops working. The script also proves the generated name list is in
+          # sync with every layer's values.yaml, and its --selftest proves both
+          # assertions can go red.
+          tools/check-values-typos.sh
+          tools/check-values-typos.sh --selftest
+
+      - name: every values key carries a stability tier
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # values-contract.md tells an operator that a `stable` key does not
+          # move without a minor bump and a migration note. This is the half of
+          # that promise a pull request can check: every Tockmox key carries one
+          # of the three tiers, so a new key cannot arrive untiered and inherit
+          # whatever a reader assumes.
+          #
+          # The OTHER half ... that no stable key moved since the last release
+          # without the CHANGELOG saying so ... needs the tags, which this job
+          # deliberately does not fetch. It runs in render-diff, which already
+          # checks out with fetch-depth 0 for the same baseline.
+          #
+          # --selftest first, because the drift half of this gate reports
+          # "nothing to compare" until the first tag carrying tiers, and a gate
+          # in that state has to be observed refusing on fixtures or it is a
+          # green tick nobody has tested.
+          ./tools/check-values-tiers.sh --selftest
+          ./tools/check-values-tiers.sh --coverage-only
+
+      - name: the Tockmox UI's tests pass
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # tockmox-ui/ ships as source (TM-0902) and its tests ran only on a
+          # laptop until this step. They are unit tests through FastAPI's
+          # TestClient with every upstream mocked: no cluster, no network. The
+          # venv is built here because the runner's python3 has none of the
+          # UI's packages; the gate exits 2 (skipped) without them, and a
+          # skipped gate is not what this step is for.
+          python3 -m venv build/ui-venv
+          build/ui-venv/bin/pip install -q -r tockmox-ui/requirements.txt pytest
+          TOCKMOX_UI_PYTHON=build/ui-venv/bin/python ./tools/check-tockmox-ui-tests.sh
+
+      - name: SSO blueprints are parseable YAML
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # One invalid blueprint poisons Authentik's discovery of ALL of
+          # them, and a human found that the hard way once. Assert every
+          # rendered blueprint parses (authentik's !Env/!Find/!KeyOf tags
+          # accepted) and declares version + entries.
+          helm template t charts/tockmox-identity -f ci/values.yaml \
+            -s templates/sso-blueprints.yaml > /tmp/bp.yaml
+          python3 - <<'PY'
+          import yaml, sys
+          class L(yaml.SafeLoader): pass
+          for tag in ('!Env', '!Find', '!KeyOf', '!Format', '!Context'):
+              L.add_constructor(tag, lambda l, n: None)
+          docs = [d for d in yaml.safe_load_all(open('/tmp/bp.yaml')) if d]
+          assert docs, 'blueprint ConfigMap did not render'
+          data = docs[0]['data']
+          assert data, 'no blueprints in ConfigMap'
+          for name, body in data.items():
+              bp = yaml.load(body, Loader=L)
+              assert bp.get('version') == 1, f'{name}: missing version'
+              assert bp.get('entries'), f'{name}: no entries'
+              print(f'{name}: ok ({len(bp["entries"])} entries)')
+          PY
+
+      - name: every SSO application is bound to a role group
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # An Authentik Application with no policy binding is authorized for
+          # EVERY authenticated user. The tree shipped that way until
+          # 2026-09-08 with every render gate green, because nothing rendered
+          # was wrong ... something was missing. The parse gate above proves
+          # the blueprints are well-formed; this one proves each application
+          # they declare is bound to a group declared in the same blueprint.
+          ./tools/check-sso-bindings.sh --selftest
+          ./tools/check-sso-bindings.sh
+
+      - name: documentation stamps are current
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # Version, copyright and licence labelling is GENERATED from
+          # Chart.yaml. Assert it was regenerated, or the docs quietly claim a
+          # version that shipped months ago -- a failure nothing else catches
+          # because nothing breaks.
+          ./tools/stamp-docs.sh --check
+
+      - name: the generated docs index surfaces match a fresh render
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # The layer table in docs/architecture.md and the page tables in the
+          # four section READMEs are GENERATED (TM-0228), from each chart's
+          # sync-wave (asserted against the installer's wave()) and from page
+          # frontmatter. The selftest flips a wave, the installer, a committed
+          # table and the page list in a scratch copy and requires red on each.
+          ./tools/gen-docs-index.sh --selftest
+          ./tools/gen-docs-index.sh --check
+
+      - name: the installer's version matches the charts
+        # Independent step. stamp-docs.sh --check above covers the DOCS. It does
+        # not cover install/tockmox-install.sh, which carries its own VERSION
+        # and was never in the bump list -- so it read 0.1.0 through 0.5.0 and
+        # through the whole 0.6.0 cycle (TM-0269).
+        #
+        # That is not a cosmetic string. Every file the installer generates is
+        # stamped with it, AND it is the default offered for tockmox.revision,
+        # so the installer's out-of-the-box suggestion was a tag no remote could
+        # resolve. The preflight catches that and dies helpfully, which is why
+        # it never became an incident and also why it never got noticed.
+        #
+        # The bump is FIVE edits, not four. A checklist is not a mechanism;
+        # this is the mechanism.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          chart=$(awk '/^version:/ {print $2; exit}' charts/tockmox-common/Chart.yaml)
+          inst=$(awk -F'"' '/^VERSION=/ {print $2; exit}' install/tockmox-install.sh)
+          echo "tockmox-common: ${chart}"
+          echo "installer:      ${inst}"
+          if [ "$chart" != "$inst" ]; then
+            echo "::error file=install/tockmox-install.sh::VERSION is ${inst}, charts are ${chart}. The version bump is five edits; this is the fifth."
+            exit 1
+          fi
+
+      - name: the installer behaves, interactively and from a config file
+        # THE ONLY STEP IN THIS FILE THAT RUNS A TOCKMOX PROGRAM RATHER THAN
+        # READING THE TREE. Hermetic: stubs git and kubectl, touches no network
+        # and no cluster, about two seconds. See tests/installer/run.sh for the
+        # two defects it was written after, both of which every other gate here
+        # was structurally incapable of seeing:
+        #
+        #   - the interactive path died on an unbound variable at the twelfth
+        #     question, after eleven answers, and README.md's quickstart lists
+        #     interactive FIRST. Nothing had ever run it, because every proof run
+        #     used --config.
+        #   - --no-cluster did not skip the cluster preflight when a cluster
+        #     happened to answer, so preparing a site repo ahead of a cluster
+        #     failed on any workstation with a populated kubeconfig.
+        #
+        # Invoked as `bash ...`, not `./...`, for the same reason the
+        # executed-docs scripts are: the exec bit cannot be set from the sandbox
+        # this repo is often edited from, and `tools/*.sh` is the only tree the
+        # executable gate above scans.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: bash tests/installer/run.sh
+
+      - name: no git plumbing is tracked at the repo root
+        # Independent step. FETCH_HEAD sat tracked at the root, zero bytes, from
+        # some point before 2026-08-31 until an external reviewer found it on
+        # 2026-09-01 (TM-0268). Nothing broke -- which is precisely why nothing
+        # caught it, and precisely why it mattered on a repository whose opening
+        # argument is "source, not binaries, read it".
+        #
+        # .gitignore now lists these names, but gitignore does not affect files
+        # already in the index, so the ignore rule alone would not have caught
+        # the file it was written for. This does.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # `git ls-files` and not a filesystem check: an UNTRACKED FETCH_HEAD
+          # is normal git operation and none of our business. Being in the
+          # index is the defect.
+          found=$(git ls-files -- FETCH_HEAD ORIG_HEAD MERGE_HEAD COMMIT_EDITMSG HEAD)
+          if [ -n "$found" ]; then
+            echo "::error::git plumbing is tracked at the repo root:"
+            echo "$found"
+            echo "Fix: git rm --cached <file>. It is already in .gitignore."
+            exit 1
+          fi
+          echo "no tracked git plumbing at the root"
+
+      - name: no site specifics in the published tree
+        # Independent step. CONTRIBUTING.md tells contributors "no hostnames,
+        # no IPs, no node names" and until 2026-08-19 nothing enforced it. An
+        # audit that day found five references to a maintainer node name across
+        # four charts and one real LoadBalancer address quoted in a prerequisites
+        # error message. Every one of them arrived inside a comment explaining
+        # where a defect had been observed ... which is the honest technical
+        # writing this project wants, and is exactly how the leak happens.
+        #
+        # This matters more since the publish model settled on keeping real
+        # history rather than squashing at release: what ships is what is in the
+        # tree, so the check belongs on every commit and not in a release-day
+        # runbook nobody opens.
+        #
+        # --selftest first, and it asserts BOTH directions: that the patterns
+        # fire, and that they do NOT fire on example.com, the RFC 5737 ranges,
+        # 192.168.x as a generic LAN example, or the k3s cluster/service CIDR
+        # defaults. The first draft of this gate flagged nine legitimate
+        # documentation examples; a gate that cries wolf earns an exemption list
+        # and then earns being ignored.
+        #
+        # The maintainer's own identifiers come from the SITE_PATTERNS secret,
+        # never from the tree (a scanner that publishes its match list publishes
+        # the topology it guards). A fork's pull request has no secrets and runs
+        # the generic rules only; the script says which it ran.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        env:
+          SITE_PATTERNS: ${{ secrets.SITE_PATTERNS }}
+        run: |
+          ./tools/check-no-site-specifics.sh --selftest
+          if [ -n "${SITE_PATTERNS:-}" ]; then
+            f="$RUNNER_TEMP/site-patterns"; printf '%s\n' "$SITE_PATTERNS" > "$f"
+            export TOCKMOX_SITE_PATTERNS_FILE="$f"
+          fi
+          ./tools/check-no-site-specifics.sh
+
+      - name: no workflow publishes a container image (ADR-0036)
+        # Independent step. The docs image workflow pushed ghcr.io/tockmox/tockmox-docs
+        # on every v* tag and broke ADR-0036 (Tockmox publishes no container images)
+        # without any check noticing; TM-0098's close condition is a check that no
+        # workflow pushes an image. --selftest first: it proves each push pattern
+        # goes red on a fixture, and on one shaped like the deleted docs-image workflow.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          ./tools/check-no-published-images.sh --selftest
+          ./tools/check-no-published-images.sh
+
+      - name: the docs publish path refuses what it must (TM-0807)
+        # Independent step. tools/publish-docs.sh copies a built site into the
+        # cluster's docs bucket through a short-lived pod. --selftest runs the
+        # real script against a stub kubectl and asserts on what it asks the
+        # cluster to do (every call names its context, the Secret is never read,
+        # the pod is always removed, refusals happen before the cluster is
+        # touched), and each assertion is proven able to fail. The site-contents
+        # gate refuses anything that is not static web content; its selftest
+        # injects each kind of file it must refuse.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          ./tools/check-docs-site-contents.sh --selftest
+          ./tools/publish-docs.sh --selftest
+
+      - name: documentation style (no meaning-carrying emoji)
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # The style rules were stated in four places and enforced in none.
+          # A scan on 2026-08-17 found fourteen emoji in two published docs
+          # pages that helm lint, kubeconform and the schema validator had all
+          # passed over for months, because none of them has an opinion about
+          # prose. Same failure shape as the NetworkPolicies that guarded
+          # nothing: everything green, nothing checking.
+          #
+          # --selftest runs FIRST and on its own line. It asserts the rules
+          # still refuse the seven cases they exist to refuse. A gate that has
+          # silently stopped refusing anything passes every clean tree
+          # forever, which is the one failure a green check cannot show you.
+          ./tools/check-docs-style.sh --selftest
+          ./tools/check-docs-style.sh
+
+      - name: documented commands paste as-is
+        # Independent step, so a style failure does not hide a paste failure.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # TM-0484. macOS ships zsh as the default login shell and
+          # INTERACTIVE_COMMENTS is off in an interactive zsh, so a `#` line
+          # inside a copyable block is an error the reader gets instead of a
+          # command. Reproduced on a stock macOS zsh 2026-09-11. A TRAILING
+          # comment is worse: the words become arguments, and `$EDITOR f.yaml
+          # # or another` opens four files without erroring at all.
+          #
+          # Also asserts that the WORKSTATION/NODE routing marker lives in the
+          # prose ABOVE each fence rather than inside it, where every copy
+          # button strips it, and that no hand-substitution token appears in a
+          # block that does not itself assign it.
+          #
+          # --selftest first, same reasoning as the style gate above: a gate
+          # that has stopped refusing anything passes every clean tree forever.
+          ./tools/check-pasteable-blocks.sh --selftest
+          ./tools/check-pasteable-blocks.sh
+
+      - name: docs links resolve
+        # Independent step, so a style failure does not hide a link failure.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # A deployment page landed on 2026-08-18 linked from the docs index
+          # and from prerequisites, and from nowhere a reader following the
+          # installation walkthrough would pass. It took a human noticing.
+          # Nothing was broken, so nothing could fail: no existing gate has an
+          # opinion about whether a page can be reached.
+          #
+          # Broken links are fatal here. Orphan pages are printed and are not,
+          # because some are correct ... any README is reached by browsing its
+          # directory, and docs/values.md is a redirect stub kept so old links
+          # survive. Failing on those teaches people to add decorative links.
+          #
+          # --selftest first, same reason as above: prove the gate still
+          # refuses before trusting that it found nothing.
+          ./tools/check-docs-links.sh --selftest
+          ./tools/check-docs-links.sh
+
+      - name: frontmatter contract holds over the docs bundle
+        # Independent step, same reason as the two above.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # Validates every page under docs/ that HAS a frontmatter block, and
+          # reports the ones that do not. Coverage is a ratchet with a FLOOR in
+          # the script that only goes up, so this does not go red on the day it
+          # lands ... which is how gates get disabled rather than fixed.
+          #
+          # No PyYAML on purpose. The contract restricts the permitted shape so
+          # that validating it needs no CI dependency. Wanting a real YAML
+          # engine here means the block has outgrown the contract.
+          #
+          # --selftest first: prove the gate still refuses before trusting that
+          # it found nothing.
+          ./tools/check-frontmatter.sh --selftest
+          ./tools/check-frontmatter.sh
+
+      - name: documented counts still match the tree
+        # Independent step, same reason as the three above.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          # Everything GENERATED here is checked and prose is not. This checks
+          # the prose that states a countable fact about the tree, which is the
+          # highest-value prose on the site ... the sentences a reader quotes
+          # back. configuration.md asserted four such facts and all four had
+          # stopped being true; its footer said 0.6.0 while its body said 0.1.0.
+          #
+          # Deliberately NOT a general docs linter. It reads one hand-written
+          # registry, tools/doc-claims.txt, because deciding what counts as a
+          # claim is a judgement no parser should make.
+          #
+          # --selftest first, and it earns its keep here more than most: the
+          # first version of this gate PASSED a real poison test, because it
+          # only checked that the claim text still existed somewhere on the
+          # page. The selftest now proves the states path refuses a page that
+          # contradicts the tree.
+          ./tools/check-doc-claims.sh --selftest
+          ./tools/check-doc-claims.sh
+
+      - name: kubeconform rendered output
+        # Independent of the steps before it. Without this, ONE early
+        # failure skips every check after it and a single red X hides nine.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: |
+          curl -fsSL -o kubeconform.tar.gz "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf kubeconform.tar.gz kubeconform && sudo install -m755 kubeconform /usr/local/bin/
+          for c in charts/tockmox-*; do
+            [ "$c" = "charts/tockmox-common" ] && continue
+            helm template t "$c"  \
+              -f ci/values.yaml \
+            | kubeconform -strict -summary -ignore-missing-schemas
+          done
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }
+
+      # NOT gitleaks/gitleaks-action@v2: that action requires a paid
+      # GITLEAKS_LICENSE for ORGANIZATION accounts. It is free for personal
+      # accounts, which is why this pattern worked under jmaaks/ and would
+      # fail here. The binary itself is MIT and has no such restriction.
+      - name: gitleaks (full history)
+        run: |
+          curl -fsSL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo install -m755 gitleaks /usr/local/bin/
+          gitleaks --version
+          gitleaks detect --source . --redact --verbose --exit-code 1
+
+      # Lives in THIS job, not the charts job, for one mechanical reason: it
+      # needs history and this is the only job that checks out with
+      # fetch-depth: 0. The charts job takes the shallow default, so
+      # `git rev-list base..head` there fails with "bad revision" rather than
+      # doing anything useful. Found before it shipped, by asking what the
+      # step actually needs rather than where it reads best.
+      - name: every commit carries a DCO sign-off
+        # CONTRIBUTING.md calls a missing Signed-off-by "the one review comment
+        # that is not a judgment call", and the DCO was chosen INSTEAD of a CLA
+        # so that no rights grant is needed. Nothing checked it until
+        # 2026-08-19. That is the shipped-but-not-wired class applied to the
+        # project's own provenance mechanism ... the one chain of title rests on.
+        #
+        # Scoped to the commits a PR actually adds. Older history is not
+        # rewritten: doing so would break the signed v0.5.0 tag, and the publish
+        # model now keeps real history rather than squashing it.
+        #
+        # ONE EXEMPTION: Renovate's own commits in a PR Renovate opened (Jeff,
+        # 2026-10-07, after Renovate PR #192 failed here). A sign-off is a
+        # person certifying the four DCO clauses, and a bot cannot; a
+        # Signed-off-by: renovate[bot] trailer would be a claim with nobody
+        # behind it. Both conditions are required, and they are not
+        # interchangeable: the PR opener comes from GitHub's event payload and
+        # cannot be set by a contributor, while a commit's author name and
+        # email can be set to anything. So a hand-made commit claiming to be
+        # Renovate in a human's PR is still checked, and a human commit pushed
+        # onto a Renovate branch still needs its own sign-off. The opener is
+        # passed through env, never interpolated into the script.
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        shell: bash -euo pipefail {0}
+        env:
+          PR_OPENER: ${{ github.event.pull_request.user.login }}
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          missing=0
+          for sha in $(git rev-list --no-merges "$base..$head"); do
+            if [ "$PR_OPENER" = "renovate[bot]" ] \
+               && [ "$(git log -1 --format='%an' "$sha")" = "renovate[bot]" ] \
+               && git log -1 --format='%ae' "$sha" | grep -qE '^[0-9]+\+renovate\[bot\]@users\.noreply\.github\.com$'; then
+              echo "exempt: $(git log -1 --format='%h %s' "$sha") (Renovate's commit in a PR Renovate opened)"
+              continue
+            fi
+            if ! git log -1 --format='%B' "$sha" | grep -qiE '^Signed-off-by: .+ <.+@.+>'; then
+              echo "::error::commit $sha has no Signed-off-by trailer"
+              git log -1 --format='  %h %s (author %an <%ae>)' "$sha"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo
+            echo "Every commit needs a DCO sign-off:"
+            echo "  git commit --amend --signoff     (the last commit)"
+            echo "  git rebase --signoff $base       (a range)"
+            echo "See CONTRIBUTING.md and DCO."
+            exit 1
+          fi
+          echo "every commit in this range carries a sign-off"
+
+  render-diff:
+    # The previous release tag and this PR's candidate, rendered against the
+    # same real site's values and diffed (TM-0283). A values key that moved
+    # between releases shows up here as a field a resource lost, a default it
+    # gained, or an object that disappeared ... the most likely pre-1.0 upgrade
+    # break, visible before anything is applied.
+    #
+    # REPORTS, DOES NOT FAIL ON A DIFF. Changes are expected on most PRs; the
+    # point is that the change is READ, on the PR, by a person, rather than
+    # discovered on a site. It fails only when a layer does not render at the
+    # candidate, which is a real defect.
+    #
+    # Values: the same file the charts job's "real site's values" step uses,
+    # for the same reason. ci/values.yaml is more complete than any real site
+    # and a render-diff against it would prove the wrong thing with a green
+    # tick; the script refuses it outright.
+    #
+    # The script prints its own caveat: a clean diff does not prove the
+    # upgrade applies. TM-0281 is the check that proves an upgrade.
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { fetch-depth: 0 }   # tags, so the previous release resolves
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: render every layer at the previous release tag and at this candidate, and diff
+        shell: bash -euo pipefail {0}
+        run: |
+          # Newest v* tag by version order. Release candidates count: after
+          # v0.6.0-rc1 and before v0.6.0, the rc IS the previous release.
+          prev="$(git tag -l 'v*' --sort=-v:refname | head -1)"
+          if [ -z "$prev" ]; then
+            echo "::error::no v* tag is reachable; fetch-depth 0 should have brought them"
+            exit 1
+          fi
+          echo "previous release: $prev"
+          echo "candidate:        ${{ github.event.pull_request.head.sha }} (HEAD)"
+          ./tools/render-diff.sh "$prev" HEAD -f ci/values-site-minimal.yaml --out render-diff | tee render-diff.log
+          {
+            echo "## render-diff: $prev -> candidate"
+            echo
+            echo '```'
+            sed -n '/^render-diff summary/,$p' render-diff.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: no stable values key moved since the previous release, unannounced
+        # Independent of the step before it, and here rather than in `charts`
+        # for one reason: this job already checks out with fetch-depth 0 so the
+        # previous release resolves, and that is exactly the baseline this
+        # needs. In a shallow checkout the gate would find no tag, report
+        # SKIPPED, and stay green forever while asserting nothing ... so
+        # --drift-only turns a missing baseline into an error rather than a
+        # skip, and this is the job where that is safe to demand.
+        if: ${{ !cancelled() }}
+        shell: bash -euo pipefail {0}
+        run: ./tools/check-values-tiers.sh --drift-only
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: render-diff
+          path: |
+            render-diff/diff
+            render-diff.log
+          retention-days: 14

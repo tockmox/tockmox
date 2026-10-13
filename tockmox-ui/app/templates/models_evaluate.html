@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}Start an evaluation{% endblock %}
+{% block main %}
+<h1>Start an evaluation{% if target %} for {{ target }}{% endif %}</h1>
+<p class="lede">Ask the REQ-0045 eval runner to compare <code>{{ cand.model }}</code>{% if inc %} against <code>{{ inc.model }}</code>{% else %} on its own (there is no current model to compare against){% endif %}. This page sends nothing: it gives you a request to commit, which the runner picks up and answers with one verdict record per run.</p>
+{% if error %}<p>{{ badge("critical", "Not generated") }} {{ error }}</p>{% endif %}
+{% if request_text %}
+<section class="panel steps" aria-labelledby="r-h">
+  <h2 id="r-h">The request</h2>
+  <p>Commit it at <code>{{ commit_path }}</code> in your site repository, or paste it as a comment on the candidate's admit pull request.</p>
+<pre tabindex="0"><code>{{ request_text }}</code></pre>
+  <form method="post" action="/models/evaluate">
+    <input type="hidden" name="csrf" value="{{ user.csrf }}">
+    {% for k, v in form_fields.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <input type="hidden" name="fmt" value="yaml">
+    <button class="btn" type="submit">Download it</button>
+  </form>
+</section>
+{% else %}
+<form method="post" action="/models/evaluate" class="panel">
+  <input type="hidden" name="csrf" value="{{ user.csrf }}">
+  <input type="hidden" name="alias" value="{{ alias_next }}">
+  <input type="hidden" name="entry" value="{{ entry }}">
+  {% if entry %}
+  <label for="target">The alias it would compete for</label>
+  <input id="target" name="target" type="text" value="{{ target }}" autocomplete="off" required>
+  {% endif %}
+  <label for="klass">Workload class <span class="muted">(the REQ-0045 class; it decides the eval set and how many passes are needed)</span></label>
+  <input id="klass" name="klass" type="text" list="classes" autocomplete="off" required>
+  <datalist id="classes">{% for c in classes %}<option value="{{ c }}">{% endfor %}</datalist>
+  <label for="runs">Runs <span class="muted">(empty: as many as the class needs; {{ lc.required_passes }} by default)</span></label>
+  <input id="runs" name="runs" type="text" inputmode="numeric" autocomplete="off">
+  <button class="btn" type="submit">Generate the request</button>
+</form>
+{% endif %}
+{% endblock %}

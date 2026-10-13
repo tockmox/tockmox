@@ -1,0 +1,289 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+THE CONSOLE-KEY CHECK (TM-0982): a detective control for the key the Job in
+gateway-key.yaml minted.
+
+WHY. The console-key Job repairs a rejected key at sync time only (TM-0977).
+Between syncs nothing notices: the llm uptime probe carries no key, so it
+stayed green through the whole of the 0.8.0 upgrade lab's off-then-on cycle
+while the console could not chat, and every layer read Healthy. This CronJob
+asks the one question the probe cannot: does the gateway still accept the
+console's key? It changes nothing. A failed run is the signal, and the rule
+below turns it into an alert.
+
+WHAT IT DOES. Every `check.schedule` it sends GET /v1/models to the gateway
+with the key the console reads (the same Secret, the same key inside it, as
+an environment reference). Then:
+  200         the key works; exit 0.
+  401 or 403  the gateway rejects it; one line naming the Secret and the fix,
+              exit 1. The Job's podFailurePolicy turns THAT exit code, and no
+              other, into a Job failed for reason PodFailurePolicy, which is
+              what the rule keys on.
+  no answer   exit 3, after ten attempts two seconds apart (lab L5: on k3s a
+              new pod's egress is refused for its first second or two, and a
+              single curl lost most slots to that window; only a request with
+              no HTTP answer is retried, so the first 401 decides). Any other
+              status, exit 2. Both leave the Job failed for
+              BackoffLimitExceeded (backoffLimit 0) and the rule ignores that
+              reason: a gateway that is down is a different fault, with alerts
+              of its own (the uptime probe, the Deployment), and this one must
+              not page twice for it or claim to know about a key it could not
+              test.
+
+WHAT IT HOLDS, AND DOES NOT. The console's key, for one request: never the
+master key, so a compromised check pod can do what the console can and
+nothing more. No ServiceAccount token and no Role: the key arrives through
+secretKeyRef, which Kubernetes resolves at pod creation, and a CronJob
+creates a fresh pod every run, so a key the Job replaced is the key the next
+run tests. Its pod carries tockmox.com/isolated, so the policy layer's
+namespace-wide egress allow skips it; the only path it has is the one the
+policy layer renders for it (allow-egress-console-key-check: the gateway,
+port 4000) plus DNS, which every pod gets.
+
+ARGO CD READS A FAILED CHECK AS A DEGRADED LAYER, ON PURPOSE. Argo CD's
+CronJob health (3.5: Degraded when lastSuccessfulTime < lastScheduleTime and
+nothing is active) makes tockmox-ai Degraded from the first failed slot to
+the first passing one, for a rejection and for a gateway that does not answer
+alike (lab L5, F-L5-7). Kept: a console that cannot chat IS a degraded AI
+layer, the reading clears itself on the next pass, and the Jobs kept in
+history do not hold it. It does blip Healthy for the seconds each failed
+slot's Job is active, since the same Lua reads an active Job as Healthy (lab
+L6, F-L6-1; docs/usage/ai-plane.md says so). There is deliberately no
+argocd.argoproj.io/ignore-healthcheck annotation here; G7 refuses one, so
+silencing Argo is a decision and not a drift. docs/usage/ai-plane.md, "When
+the gateway rejects the console's key".
+
+ON WHEN THE JOB IS. It follows tockmox-ai.consoleKeyOn exactly, so a site that
+keeps the manual key step (consoleKey.enabled false), runs no gateway or points
+the console elsewhere gets no check either; `check.enabled: false` turns the
+check off on its own.
+
+THE RULE. TockmoxConsoleKeyRejected is the restore drill's "most recent run
+failed" shape (restore-drill.yaml, TockmoxRestoreDrillFailed): the newest
+rejection's start time against the newest success's completion time, so one
+passing run clears it the moment the key is replaced, and the failed Jobs
+that failedJobsHistoryLimit keeps around cannot keep it firing. The `reason`
+selector is what keeps a gateway outage out of it; the same history limit is
+what keeps the rejection on record while outage failures follow it (lab L5:
+kube-state-metrics 2.20.0 reports a PodFailurePolicy failure with NO reason
+label, next to the three named reasons at 0). Unit-tested with promtool in
+tests/rules/console-key-rejected.yaml through tools/check-alert-rules.sh.
+*/ -}}
+{{- $ck := .Values.modelGateway.consoleKey | default dict -}}
+{{- $check := $ck.check | default dict -}}
+{{- $on := and (eq (include "tockmox-ai.consoleKeyOn" .) "true") (ne (toString $check.enabled) "false") -}}
+{{- if $on }}
+{{- $ns := .Values.namespaces.ai -}}
+{{- $gateway := printf "http://%s-litellm:4000" .Release.Name -}}
+{{- $secretName := $ck.secretName | default "tockmox-openwebui-gateway" -}}
+{{- $secretKey := $ck.secretKey | default "api-key" -}}
+{{- $name := "tockmox-console-key-check" -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+# No token: the check never calls the Kubernetes API. The key it tests is an
+# environment reference the kubelet resolves; there is nothing for kubectl to do.
+automountServiceAccountToken: false
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  schedule: {{ $check.schedule | default "*/15 * * * *" | quote }}
+  timeZone: "UTC"
+  suspend: {{ $check.suspend | default false }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  # The rule reads the rejection off the failed Job that records it, so the
+  # Job must outlive the non-rejection failures that can follow it (a gateway
+  # that stops answering: exit 3, one failed Job per slot). Lab L5 measured a
+  # limit of 3 pruning a rejection behind three such failures, and the alert
+  # cleared by garbage collection with the key still dead. 24 keeps a
+  # rejection through every failed slot of a six-hour outage at the default
+  # schedule (4 slots an hour); finished pods cost nothing to keep. G7 holds
+  # the floor.
+  failedJobsHistoryLimit: 24
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      # Long enough for a pod to be scheduled and pulled on a quiet cluster;
+      # a pod that cannot start at all (the Secret not yet minted on a fresh
+      # install) ends here as DeadlineExceeded, which the rule ignores.
+      activeDeadlineSeconds: 300
+      # Exit 1 is the rejection and nothing else is. The Job's Failed
+      # condition then carries reason PodFailurePolicy; every other failure
+      # carries BackoffLimitExceeded or DeadlineExceeded, and the rule below
+      # reads the difference from kube_job_status_failed's reason label.
+      podFailurePolicy:
+        rules:
+          - action: FailJob
+            onExitCodes:
+              containerName: check
+              operator: In
+              values: [1]
+      template:
+        metadata:
+          labels:
+            {{- include "tockmox.labels" . | nindent 12 }}
+            app.kubernetes.io/name: {{ $name }}
+            tockmox.com/isolated: "true"
+        spec:
+          # Never, not OnFailure: podFailurePolicy needs it, and the verdict
+          # is the exit code of the first answered request; the script's own
+          # bounded loop is the only retry, and it retries no answer.
+          restartPolicy: Never
+          serviceAccountName: {{ $name }}
+          automountServiceAccountToken: false
+          {{- with $.Values.modelGateway.database.priorityClassName }}
+          priorityClassName: {{ . }}
+          {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: check
+              image: {{ include "tockmox.image" (dict "ctx" $ "repo" ($ck.image | default "alpine/k8s:1.37.1")) }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              resources:
+                requests: { cpu: 10m, memory: 32Mi }
+                limits:   { memory: 64Mi }
+              env:
+                - name: NS
+                  value: {{ $ns | quote }}
+                - name: GATEWAY
+                  value: {{ $gateway | quote }}
+                - name: SECRET_NAME
+                  value: {{ $secretName | quote }}
+                # The console's key, the same reference the console itself
+                # carries. Never the master key.
+                - name: CONSOLE_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ $secretName }}
+                      key: {{ $secretKey }}
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -u
+                  # The first HTTP answer decides; only a request that got no
+                  # answer at all is tried again. On k3s a new pod's egress is
+                  # refused for about its first second or two, until the policy
+                  # controller has programmed it (the lab measured curl rc 7 in
+                  # 1 ms as the container's first instruction), so a single
+                  # shot here lost most of its slots (TM-0982, lab L5). Ten
+                  # attempts two seconds apart: a refused connect costs
+                  # nothing, so the policy window is crossed in the first few;
+                  # a gateway that is truly down ends in about 20 s; the worst
+                  # case, ten 20 s timeouts, stays inside activeDeadlineSeconds.
+                  attempts=0; code=000; rc=0; t0=$(date +%s)
+                  while :; do
+                    attempts=$((attempts+1))
+                    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$GATEWAY/v1/models" -H "Authorization: Bearer $CONSOLE_KEY" 2>/dev/null); rc=$?
+                    [ "$rc" -eq 0 ] && [ "$code" != "000" ] && [ -n "$code" ] && break
+                    [ "$attempts" -ge 10 ] && break
+                    sleep 2
+                  done
+                  case "$code" in
+                    200)
+                      echo "the gateway at $GATEWAY accepts the console's key (Secret $NS/$SECRET_NAME; attempt $attempts)"
+                      exit 0 ;;
+                    401|403)
+                      echo "REJECTED: the gateway at $GATEWAY answered HTTP $code to the console's key (Secret $NS/$SECRET_NAME; attempt $attempts). The console cannot chat until the key is replaced; the console-key Job does that when it next runs (docs/usage/ai-plane.md, 'When the gateway rejects the console's key')" >&2
+                      exit 1 ;;
+                    000|"")
+                      case "$rc" in
+                        7)  why="the connection was refused (no endpoint behind the Service, or the pod's egress not yet allowed)" ;;
+                        28) why="each request timed out after 20s" ;;
+                        6)  why="the name did not resolve" ;;
+                        *)  why="curl exit $rc" ;;
+                      esac
+                      echo "the gateway at $GATEWAY gave no HTTP answer in $attempts attempts over $(( $(date +%s) - t0 ))s: $why. Not a rejection, nothing is known about the key. A gateway that is down has alerts of its own" >&2
+                      exit 3 ;;
+                    *)
+                      echo "the gateway at $GATEWAY answered HTTP $code to the console's key; not a rejection, nothing is known about the key" >&2
+                      exit 2 ;;
+                  esac
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: tockmox.ai.console-key
+      interval: 1m
+      rules:
+        - alert: TockmoxConsoleKeyRejected
+          # "The most recent check was a rejection", not "a rejected check
+          # exists": the same comparison as TockmoxRestoreDrillFailed, for the
+          # same reason (failedJobsHistoryLimit keeps failed Jobs around, and
+          # a plain `kube_job_status_failed > 0` would fire until they were
+          # garbage-collected, long after the key was replaced). The newest
+          # rejection's start time against the newest success's completion
+          # time; `or on () vector(0)` makes a rejection with no success on
+          # record ever count.
+          #
+          # ONLY A REJECTION COUNTS. The check exits 1 on 401/403 and the
+          # Job's podFailurePolicy makes that a failure for reason
+          # PodFailurePolicy. kube-state-metrics (2.20) labels a Job failure it
+          # knows by name (BackoffLimitExceeded, DeadlineExceeded, Evicted) and
+          # reports any other reason as a series with no reason label at all
+          # (measured on 2.20.0, lab L5 b6: the three named series at 0, one
+          # unlabelled series at 1), so the selector excludes the three it
+          # names rather than matching one spelling of ours; an absent label
+          # matches a negative regex. A gateway that did not answer (exit 3, backoffLimit 0, so
+          # BackoffLimitExceeded) or a pod that never started (DeadlineExceeded)
+          # is not a rejection, and has alerts of its own.
+          expr: >-
+            max(
+              kube_job_status_start_time{namespace={{ $ns | quote }}, job_name=~"{{ $name }}-.*"}
+              and on (namespace, job_name)
+              kube_job_status_failed{namespace={{ $ns | quote }}, job_name=~"{{ $name }}-.*", reason!~"BackoffLimitExceeded|DeadlineExceeded|Evicted"} > 0
+            )
+            >
+            (
+              max(
+                kube_job_status_completion_time{namespace={{ $ns | quote }}, job_name=~"{{ $name }}-.*"}
+                and on (namespace, job_name)
+                kube_job_status_succeeded{namespace={{ $ns | quote }}, job_name=~"{{ $name }}-.*"} > 0
+              )
+              or on () vector(0)
+            )
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The model gateway rejects the console's key"
+            description: >-
+              The console-key check's most recent run was answered 401 or 403
+              by the gateway: the key in Secret
+              {{ $ns }}/{{ $secretName }} is no longer one the gateway holds
+              (a gateway turned off and on again loses every key with its
+              database; a key revoked by hand looks the same). The console
+              cannot chat until the key is replaced. The console-key Job
+              replaces it and restarts the console when it next runs; make it
+              run now by deleting the finished Job and syncing the AI layer
+              (`kubectl -n {{ $ns }} delete job -l app.kubernetes.io/name=tockmox-gateway-key`,
+              then `argocd app sync tockmox-ai`), or follow the manual steps
+              in docs/usage/ai-plane.md, "When the gateway rejects the
+              console's key". The next passing check clears this alert.
+{{- end }}
+{{- end }}

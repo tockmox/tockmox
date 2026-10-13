@@ -1,0 +1,33 @@
+{{- if .Values.apps.traefik_headers.enabled }}
+# SPDX-License-Identifier: Apache-2.0
+---
+# Shared Traefik security-headers middleware. INERT until an IngressRoute/Ingress
+# references it ... attach per-route with the lines below. The namespace in them
+# is `namespaces.traefik` (tockmox-platform unless you changed it), rendered from
+# the same value this Middleware is created in, so the rendered manifest always
+# shows the string that actually resolves. Not the upstream `traefik` namespace:
+# Traefik runs in the platform layer's namespace here.
+#   IngressRoute:  spec.routes[].middlewares: [{name: secure-headers, namespace: {{ .Values.namespaces.traefik }}}]
+#   Ingress anno:  traefik.ingress.kubernetes.io/router.middlewares: {{ .Values.namespaces.traefik }}-secure-headers@kubernetescrd
+#
+# Context: these are internal-only services (*.int.example.com, LAN + Tailscale,
+# your internal CA TLS, most behind Authentik OIDC), so this is hardening polish, not an
+# internet-facing necessity. HSTS preload is intentionally OFF (don't preload an
+# internal domain into browsers' global HSTS lists).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: secure-headers
+  namespace: {{ .Values.namespaces.traefik }}
+spec:
+  headers:
+    stsSeconds: 31536000
+    stsIncludeSubdomains: true
+    stsPreload: false
+    contentTypeNosniff: true
+    browserXssFilter: true
+    frameDeny: true
+    referrerPolicy: "strict-origin-when-cross-origin"
+{{- end }}

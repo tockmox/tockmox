@@ -1,0 +1,106 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE OBSERVABILITY-OFF PROFILE ... decline metrics, logs and alert rules, all
+# the way down (TM-0825).
+#
+# Pass it to the platform and identity layers, after your global values and
+# before your per-layer overrides, the same way minimal.yaml is passed
+# (docs/deployment/profiles.md, "Pass it to every layer", has both shapes
+# written out). Passing it to every layer is fine and is the simplest rule:
+# each chart reads the keys it recognises and ignores the rest, so the other
+# seven layers see only `capabilities.observability.enabled: false`.
+#
+#   helm:
+#     valueFiles:
+#       - $site/site/values/global.yaml
+#       - $site/site/values/observability-off.yaml    # <-- a copy of this file
+#       - $site/site/values/platform.yaml
+#
+# It combines with the other profiles: list it after minimal.yaml or
+# household-sso.yaml (both keep observability on) to take that shape further.
+#
+# WHAT IT IS FOR. A cluster that already has its monitoring somewhere else, or
+# a lab that wants neither Prometheus nor Loki, and has no Prometheus operator
+# CRDs to put a ServiceMonitor on.
+#
+# WHY THE CAPABILITY ALONE IS NOT ENOUGH, AND WHAT THIS FILE ADDS.
+# `capabilities.observability.enabled: false` stops every ServiceMonitor,
+# PodMonitor and PrometheusRule that Tockmox's OWN templates write. Ten monitor
+# objects come from vendored subcharts instead (eight in tockmox-platform,
+# counting both metallb objects, and two in tockmox-identity), and a subchart's
+# values are static YAML: they cannot read `.Values.capabilities`, and a parent
+# template cannot reach into a subchart's render. The only seam is the
+# subchart's own switch, which is what this file sets. Without it, on a cluster
+# with no operator CRDs, Argo rejects the layer on an unknown kind.
+#
+# That is why tockmox-platform and tockmox-identity REFUSE TO RENDER when the
+# capability is off and one of those switches is still on. The message names the
+# switches and points here. The refusal does not fire when
+# `apps.serviceMonitors.enabled: true` (you run your own Prometheus operator and
+# want the monitors rendered for it).
+#
+# WHAT IT TAKES AWAY, stated plainly, because each of these is a real loss:
+#
+#   no Prometheus, Alertmanager or Grafana   kube-prometheus-stack is off, so
+#                           there are no dashboards and nothing evaluates alerts.
+#   no log aggregation      Loki and Alloy are off. `kubectl logs` still works.
+#   no alert rules          Tockmox's own PrometheusRules (platform, policy,
+#                           selfcheck, observability) are not rendered.
+#   no scrape of the platform   cert-manager, MetalLB, Traefik, Longhorn, CNPG,
+#                           kured, the snapshot controller and authentik export
+#                           metrics that nothing collects.
+#   no CRDs layer           tockmox-crds renders nothing.
+#
+# WHAT IT KEEPS: the notification sink (ntfy and the alert bridge) follows the
+# separate `notifications` capability and still renders; it has nothing to
+# deliver until you point your own Alertmanager at it. Everything else in the
+# platform, identity, policy and AI planes is unchanged.
+#
+# KEEP IT IN STEP WITH THE VENDORED SUBCHARTS. A subchart upgrade can add a
+# monitor switch this file does not know. tools/check-capability-monitors.sh
+# renders every layer with this file and fails on any monitor kind left over.
+capabilities:
+  observability:
+    enabled: false
+
+# -- tockmox-platform ------------------------------------------------------
+cert-manager:
+  prometheus:
+    servicemonitor:
+      enabled: false
+metallb:
+  prometheus:
+    serviceMonitor:
+      enabled: false
+traefik:
+  metrics:
+    prometheus:
+      serviceMonitor:
+        enabled: false
+longhorn:
+  metrics:
+    serviceMonitor:
+      enabled: false
+cloudnative-pg:
+  monitoring:
+    podMonitorEnabled: false
+kured:
+  # `service.create` stays as the platform values set it: the Service is not a
+  # monitoring.coreos.com object, and only `metrics.create` renders the monitor.
+  metrics:
+    create: false
+snapshot-controller:
+  controller:
+    serviceMonitor:
+      create: false
+
+# -- tockmox-identity ------------------------------------------------------
+authentik:
+  server:
+    metrics:
+      serviceMonitor:
+        enabled: false
+  worker:
+    metrics:
+      serviceMonitor:
+        enabled: false

@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE POLICY-GATE FIXTURE (TM-0383). Applied ON TOP of ci/values.yaml by
+# tools/check-policy-gate.sh (render invariants) and tests/policy-gate/run.sh
+# (a real LiteLLM proxy, with the local backend killed mid-test).
+#
+# Two models behind the gate, both on 127.0.0.1 because the live test runs fake
+# backends there:
+#   local-chat  a local-tier endpoint, tagged for every class, posture restricted
+#   frontier-x  an external-tier endpoint, tagged open only, posture open
+# so a restricted request has exactly one place it may go, and the test can
+# prove it never goes to the other one, including when that one place is down.
+#
+# Not part of ci/values-all-on.yaml: the gate needs a model list, and the
+# shipped model list is empty on purpose.
+
+apps:
+  litellm: { enabled: true }
+
+modelGateway:
+  policyGate:
+    enabled: true
+    policyId: ci-policy-gate
+    routePosture:
+      local-chat: restricted
+      frontier-x: open
+
+litellm:
+  proxy_config:
+    model_list:
+      - model_name: local-chat
+        litellm_params:
+          model: openai/fake
+          api_base: http://127.0.0.1:18001/v1
+          api_key: none
+          tags: [restricted, internal, open]
+        model_info:
+          endpoint_tier: local
+      - model_name: frontier-x
+        litellm_params:
+          model: openai/fake
+          api_base: http://127.0.0.1:18002/v1
+          api_key: os.environ/FRONTIER_KEY
+          tags: [open]
+        model_info:
+          endpoint_tier: external
+    router_settings:
+      enable_tag_filtering: true
+    litellm_settings:
+      callbacks:
+        - hooks.tockmox_gate.tockmox_gate

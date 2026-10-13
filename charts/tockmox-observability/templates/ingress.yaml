@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Ingress for the observability UIs. Backend Service names follow the
+# subcharts' fullname conventions: `<release>-grafana` (standard), and for
+# Prometheus/Alertmanager the kube-prometheus-stack fullname, which upstream
+# truncates to 26 characters ... replicated below rather than assumed, so a
+# differently-named release still resolves.
+{{- $kpsFullname := printf "%s-kube-prometheus-stack" .Release.Name | trunc 26 | trimSuffix "-" }}
+{{- if (include "tockmox.appEnabled" (dict "ctx" $ "app" "kubePrometheusStack")) }}
+{{- with .Values.ingress.apps.grafana }}
+{{- if .enabled }}
+---
+{{ include "tockmox.ingress" (dict "ctx" $ "name" "grafana" "prefix" "grafana" "host" .host "service" (printf "%s-grafana" $.Release.Name) "port" 80) }}
+{{- end }}
+{{- end }}
+{{- with .Values.ingress.apps.prometheus }}
+{{- if .enabled }}
+---
+{{ include "tockmox.ingress" (dict "ctx" $ "name" "prometheus" "prefix" "prometheus" "host" .host "service" (printf "%s-prometheus" $kpsFullname) "port" 9090) }}
+{{- end }}
+{{- end }}
+{{- with .Values.ingress.apps.alertmanager }}
+{{- if .enabled }}
+---
+{{ include "tockmox.ingress" (dict "ctx" $ "name" "alertmanager" "prefix" "alertmanager" "host" .host "service" (printf "%s-alertmanager" $kpsFullname) "port" 9093) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- /*
+ntfy is exposed like Grafana and unlike Prometheus/Alertmanager: it has its own
+authentication (deny-all by default) and the web app is how a human subscribes
+to the alert topic on a phone or a browser. Its /metrics lives on a separate
+port that this Ingress does not route, so exposing the UI does not expose the
+metrics.
+*/ -}}
+{{- /* Resolve the tri-state exactly as the workload does. Reading the raw
+key here is the bug this comment prevents from returning: notifications.enabled
+is deliberately UNSET so it can follow the capability, and a raw read of an
+unset key is falsy ... which shipped a ntfy whose configured public URL had no
+Ingress behind it. */ -}}
+{{- $notify := include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "notifications" "override" .Values.notifications.enabled) }}
+{{- if and $notify .Values.notifications.ntfy.enabled }}
+{{- with .Values.ingress.apps.ntfy }}
+{{- if .enabled }}
+---
+{{ include "tockmox.ingress" (dict "ctx" $ "name" "ntfy" "prefix" "ntfy" "host" .host "service" "tockmox-ntfy" "port" 80) }}
+{{- end }}
+{{- end }}
+{{- end }}

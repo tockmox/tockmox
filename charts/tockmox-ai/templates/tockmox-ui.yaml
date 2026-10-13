@@ -1,0 +1,510 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+The Tockmox UI (TM-0920, Jeff 2026-10-07: package it with 0.8.0). OFF by default: tockmoxUi.enabled. Experimental.
+
+The UI ships as source (TM-0902): the site builds its image and names it in tockmoxUi.image. It reads the cluster
+(nodes, Argo CD applications), Prometheus and Alertmanager, and this chart's inferenceNodes and modelLifecycle
+blocks; it never changes anything itself, so every action ends in YAML an admin commits.
+
+Its NetworkPolicy is the point of shipping it here. The pod carries tockmox.com/isolated, so the policy layer's
+namespace-wide allows skip it, and this policy is the whole of what it may do:
+  ingress   Traefik only, on 8080; Prometheus only, on 9464 (the metrics port, never routed by the Ingress).
+  egress    DNS; the Kubernetes API (tockmoxUi.networkPolicy.apiServer, else global.lanCIDR on 6443); Prometheus
+            and Alertmanager; Traefik (the OIDC issuer is served through it); inferenceNodes.probe.allowedCidrs
+            ONLY when that list is set (the probe, off by default); HTTPS to the internet ONLY when
+            tockmoxUi.config.updateCheck.enabled with an https feedUrl (a ConfigMap feed needs none,
+            tockmoxUi.updateFeed); and tockmoxUi.networkPolicy.extraEgress.
+Everything else is refused, including the inference nodes themselves when probing is off.
+
+Kubernetes authority: get/list on nodes, and on Argo CD applications in their namespace. Nothing else.
+
+IN-CLUSTER TRUST (lab F7, 2026-10-08). The UI performs the OIDC token exchange itself, from inside the pod, so
+with global.certIssuer (tockmox-ca by default) it must trust the Tockmox CA. Without it every /login answered 503
+("The identity provider did not answer": CERTIFICATE_VERIFY_FAILED against auth.<domain>) and nobody could sign in.
+Same construct as Open WebUI (values.yaml, open-webui.extraInitContainers): the UI is Python, and httpx and
+requests take SSL_CERT_FILE / REQUESTS_CA_BUNDLE as the WHOLE trust store, so the CA alone would drop every public
+root (the update feed and the watcher's sources are public HTTPS). The tockmox-trust-bundle initContainer, on the
+UI's own image, writes that image's store plus the CA from the UI's Ingress certificate Secret. Unlike Open WebUI
+this template can decide at render time whether a CA is coming, so TOCKMOX_EXPECT_CA is set here directly.
+
+ITS OWN FAILURES ARE VISIBLE (TM-1013, homelab 2026-10-11). Sign-in answered 503 with nothing in the pod log, and
+the cause (this policy refusing the issuer behind a LoadBalancer VIP) took an exec to find. The app now logs every
+caught sign-in and source failure and counts them on a separate metrics port (9464, TOCKMOX_UI_METRICS_PORT: the
+app port is routed whole to the Ingress host, so /metrics there would be public). With serviceMonitors on, a
+ServiceMonitor scrapes it and a PrometheusRule alerts on failed sign-in steps and on a UI Prometheus cannot reach.
+*/ -}}
+{{- $ui := .Values.tockmoxUi | default dict -}}
+{{- if $ui.enabled -}}
+{{- if not $ui.image -}}
+{{- fail "tockmoxUi.enabled is true but tockmoxUi.image is empty: the Tockmox UI ships as source (TM-0902). Build its image from the Dockerfile, push it to your registry, and name it here." -}}
+{{- end -}}
+{{- $ns := .Values.namespaces | default dict -}}
+{{- $monNs := $ns.monitoring | default "tockmox-monitoring" -}}
+{{- $trNs := $ns.traefik | default "tockmox-platform" -}}
+{{- $lc := .Values.modelLifecycle | default dict -}}
+{{- $in := .Values.inferenceNodes | default dict -}}
+{{- $np := $ui.networkPolicy | default dict -}}
+{{- $site := deepCopy ($ui.config | default dict) -}}
+{{- $argoNs := ((($site.sources | default dict).kubernetes | default dict).argocdNamespace) | default "argocd" -}}
+{{- $base := dict
+      "sources" (dict
+        "kubernetes" (dict "argocdNamespace" $argoNs)
+        "prometheus" (dict "url" (printf "http://tockmox-observability-kube-prometheus.%s.svc:9090" $monNs))
+        "alertmanager" (dict "url" (printf "http://tockmox-observability-kube-alertmanager.%s.svc:9093" $monNs))) -}}
+{{- $cfg := mergeOverwrite $base $site -}}
+{{- /* The chart owns these: one source of truth for the blocks, and the paths where it mounts the secrets. */ -}}
+{{- $lcCfg := deepCopy $lc -}}
+{{- if (($lc.watch | default dict).enabled) -}}{{- $_ := set $lcCfg "reportFile" "/var/lib/tockmox/model-watch/report.json" -}}{{- end -}}
+{{- $_ := set $cfg "modelLifecycle" $lcCfg -}}
+{{- $_ := set $cfg "inferenceNodes" $in -}}
+{{- $_ := set $cfg "session" (merge (dict "secretFile" "/etc/tockmox-ui/session/secret") (omit ($cfg.session | default dict) "secretFile")) -}}
+{{- $oidcOn := and $cfg.oidc ($cfg.oidc.issuer) -}}
+{{- if $oidcOn -}}
+{{- $_ := set $cfg "oidc" (merge (dict "clientSecretFile" "/etc/tockmox-ui/oidc/client-secret") (omit $cfg.oidc "clientSecretFile")) -}}
+{{- end -}}
+{{- /*
+DEFAULTS A SITE NO LONGER HAS TO WRITE (TM-1014, TM-1017; 0.8.0 testing, 2026-10-11: the reference
+site's UI said "No apps are assigned to your account" because it set no tockmoxUi.config.apps).
+  apps          with config.apps unset, one tile per console this release turns on, at its derived
+                host: chat and the gateway from this layer's own switches and ingress hosts; Grafana,
+                ntfy and Workflows from the capability switches every layer shares. What this layer
+                cannot see (another layer's per-app override or renamed host) is the site's to state:
+                set config.apps and the list is exactly yours.
+  site.docsUrl  the documentation site the platform layer publishes at docs.<internalDomain>.
+  capabilities  each capability's switch as this layer resolves it, for the capabilities page; the
+                page sets it beside what Argo CD reports each layer deployed.
+*/ -}}
+{{- $dom := ((.Values.global | default dict).internalDomain) | default "" -}}
+{{- $adm := (($cfg.roles | default dict).adminGroup) | default "tockmox-admins" -}}
+{{- if and (not (hasKey $cfg "apps")) $dom -}}
+{{- $ing := (.Values.ingress | default dict).apps | default dict -}}
+{{- $derived := list -}}
+{{- if include "tockmox.appEnabled" (dict "ctx" $ "app" "openWebui") -}}
+{{- $derived = append $derived (dict "id" "chat" "name" "Chat" "icon" "chat" "description" "Ask your models" "groups" (list "*") "url" (printf "https://%s" ((($ing.openWebui | default dict).host) | default (printf "chat.%s" $dom)))) -}}
+{{- end -}}
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability") -}}
+{{- $derived = append $derived (dict "id" "grafana" "name" "Grafana" "icon" "chart" "description" "Dashboards and history" "groups" (list "tockmox-users" $adm) "url" (printf "https://grafana.%s" $dom)) -}}
+{{- end -}}
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "workflowAutomation") -}}
+{{- $derived = append $derived (dict "id" "workflows" "name" "Workflows" "icon" "flow" "description" "Argo Workflows" "groups" (list $adm) "url" (printf "https://workflows.%s" $dom)) -}}
+{{- end -}}
+{{- if include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm") -}}
+{{- $derived = append $derived (dict "id" "llm" "name" "Model gateway" "icon" "gateway" "description" "LiteLLM admin" "groups" (list $adm) "url" (printf "https://%s" ((($ing.litellm | default dict).host) | default (printf "llm.%s" $dom)))) -}}
+{{- end -}}
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "notifications") -}}
+{{- $derived = append $derived (dict "id" "ntfy" "name" "Alerts on your phone" "icon" "bell" "description" "Subscribe to the alert topic" "groups" (list $adm) "url" (printf "https://ntfy.%s" $dom)) -}}
+{{- end -}}
+{{- $_ := set $cfg "apps" $derived -}}
+{{- end -}}
+{{- $siteCfg := $cfg.site | default dict -}}
+{{- if and (not (hasKey $siteCfg "docsUrl")) $dom (include "tockmox.appEnabled" (dict "ctx" $ "app" "docs")) -}}
+{{- $_ := set $siteCfg "docsUrl" (printf "https://docs.%s" $dom) -}}
+{{- $_ := set $cfg "site" $siteCfg -}}
+{{- end -}}
+{{- $caps := dict -}}
+{{- range $k, $_ := (.Values.capabilities | default dict) -}}
+{{- $_ := set $caps $k (ne (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" $k)) "") -}}
+{{- end -}}
+{{- $_ := set $cfg "capabilities" $caps -}}
+{{- $cfgText := $cfg | toYaml -}}
+{{- $sec := $ui.secrets | default dict -}}
+{{- $api := $np.apiServer | default list -}}
+{{- if and (not $api) ((.Values.global | default dict).lanCIDR) -}}
+{{- $api = list (dict "cidr" .Values.global.lanCIDR "port" 6443) -}}
+{{- end -}}
+{{- if not $api -}}
+{{- fail "tockmoxUi.networkPolicy.apiServer is empty and global.lanCIDR is not set: name the Kubernetes API server address the UI may reach, for example [{cidr: 10.0.0.10/32, port: 6443}]" -}}
+{{- end -}}
+{{- $probe := (($in.probe | default dict).allowedCidrs) | default list -}}
+{{- /* not `| default true`: Helm's default treats false as empty (see the Ingress below) */ -}}
+{{- $ingOn := or (not (hasKey ($ui.ingress | default dict) "enabled")) ($ui.ingress | default dict).enabled -}}
+{{- $expectCa := and (ne ((.Values.global | default dict).certIssuer | default "") "") $ingOn -}}
+{{- $update := (($cfg.updateCheck | default dict).enabled) -}}
+{{- /* A feed read from a mounted file needs no egress; HTTPS out opens only for an https feed (TM-1027). */ -}}
+{{- $updateHttps := and $update (hasPrefix "https://" ((($cfg.updateCheck | default dict).feedUrl) | default "")) -}}
+{{- $feedCm := (($ui.updateFeed | default dict).configMap) | default "" -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-ui
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tockmox-ui-read
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+rules:
+  - { apiGroups: [""], resources: [nodes], verbs: [get, list] }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tockmox-ui-read
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: tockmox-ui-read }
+subjects:
+  - { kind: ServiceAccount, name: tockmox-ui, namespace: {{ .Release.Namespace }} }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tockmox-ui-read-applications
+  namespace: {{ $argoNs }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+rules:
+  - { apiGroups: [argoproj.io], resources: [applications], verbs: [get, list] }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tockmox-ui-read-applications
+  namespace: {{ $argoNs }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: tockmox-ui-read-applications }
+subjects:
+  - { kind: ServiceAccount, name: tockmox-ui, namespace: {{ .Release.Namespace }} }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-ui
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+{{ $cfgText | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tockmox-ui
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-ui
+spec:
+  replicas: 1
+  {{- $wrep := (($lc.watch | default dict).report | default dict) -}}
+  {{- $wmodes := $wrep.accessModes | default (list "ReadWriteOnce") -}}
+  {{- if and (($lc.watch | default dict).enabled) (not (has "ReadWriteMany" $wmodes)) }}
+  # The watcher's report volume is ReadWriteOnce: a surging rollout would need it on two nodes at once
+  # when the new pod lands elsewhere, and wait forever. maxSurge 0 removes the old pod first, which releases
+  # the volume (see model-watch.yaml). NOT `type: Recreate`, which does the same: switching a live
+  # RollingUpdate Deployment to Recreate is refused under ServerSideApply ("spec.strategy.rollingUpdate:
+  # Forbidden: may not be specified when strategy `type` is 'Recreate'"; lab N1, 2026-10-08, and the Loki
+  # gateway on 2026-09-30), and the AI layer then sits OutOfSync.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 0, maxUnavailable: 1 }
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-ui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tockmox-ui
+        app.kubernetes.io/part-of: tockmox
+        tockmox.com/isolated: "true"
+      annotations:
+        checksum/config: {{ $cfgText | sha256sum | trunc 16 | quote }}
+    spec:
+      serviceAccountName: tockmox-ui
+      # Needs the API: get/list nodes and Argo CD applications (the RBAC above). Gate allowlist in tools/check-sa-tokens.sh.
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile: { type: RuntimeDefault }
+      initContainers:
+        # Builds "this image's own CA store, plus the Tockmox CA" into an emptyDir. MUST run the UI's image: the
+        # bundle is that image's store (tools/check-inference-nodes.sh asserts it, and runs this script).
+        - name: tockmox-trust-bundle
+          image: {{ $ui.image | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: TOCKMOX_EXPECT_CA, value: {{ ternary "true" "false" $expectCa | quote }} }
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              ca=/tockmox-ca/ca.crt
+              # WAIT rather than shrug (TM-0632): a bundle built before cert-manager writes the CA is wrong for the
+              # life of the pod. Exiting non-zero after 300 s makes kubelet retry, visibly.
+              if [ "${TOCKMOX_EXPECT_CA:-false}" = "true" ]; then
+                i=0
+                while [ ! -s "$ca" ]; do
+                  i=$((i + 1))
+                  if [ "$i" -gt 60 ]; then
+                    echo "FATAL: $ca is still absent after 300s. global.certIssuer is set, so this bundle must carry"
+                    echo "the Tockmox CA; without it sign-in fails for the life of this pod. Exiting so kubelet retries."
+                    exit 1
+                  fi
+                  if [ "$((i % 6))" -eq 1 ]; then echo "waiting for $ca (attempt $i, 5s apart) ..."; fi
+                  sleep 5
+                done
+              fi
+              cat /etc/ssl/certs/ca-certificates.crt > /trust/ca-bundle.crt
+              if [ -s "$ca" ]; then
+                cat "$ca" >> /trust/ca-bundle.crt
+                echo "trust bundle: image store + Tockmox CA"
+              else
+                echo "trust bundle: image store only (no CA expected)"
+              fi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 32Mi }
+          volumeMounts:
+            - { name: tockmox-trust, mountPath: /trust }
+            - { name: tockmox-ca, mountPath: /tockmox-ca, readOnly: true }
+      containers:
+        - name: ui
+          image: {{ $ui.image | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: TOCKMOX_UI_CONFIG, value: /etc/tockmox-ui/config.yaml }
+            # httpx and urllib read SSL_CERT_FILE; requests reads REQUESTS_CA_BUNDLE and ignores it. Both, always.
+            - { name: SSL_CERT_FILE, value: /etc/tockmox/trust/ca-bundle.crt }
+            - { name: REQUESTS_CA_BUNDLE, value: /etc/tockmox/trust/ca-bundle.crt }
+            # /metrics on its own port (TM-1013); the app port carries no /metrics.
+            - { name: TOCKMOX_UI_METRICS_PORT, value: "9464" }
+          ports:
+            - { name: http, containerPort: 8080 }
+            - { name: metrics, containerPort: 9464 }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            {{- toYaml ($ui.resources | default (dict "requests" (dict "cpu" "50m" "memory" "128Mi") "limits" (dict "memory" "384Mi"))) | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/tockmox-ui/config.yaml, subPath: config.yaml, readOnly: true }
+            - { name: session, mountPath: /etc/tockmox-ui/session, readOnly: true }
+            {{- if $oidcOn }}
+            - { name: oidc, mountPath: /etc/tockmox-ui/oidc, readOnly: true }
+            {{- end }}
+            {{- if (($lc.watch | default dict).enabled) }}
+            - { name: model-watch, mountPath: /var/lib/tockmox/model-watch, readOnly: true }
+            {{- end }}
+            - { name: tmp, mountPath: /tmp }
+            - { name: tockmox-trust, mountPath: /etc/tockmox/trust, readOnly: true }
+            {{- if $feedCm }}
+            # The update feed as files (design: file:///feed/releases.json for an air-gapped site, or a
+            # site's own signed test feed), set config.updateCheck.feedUrl to file:///feed/releases.json.
+            - { name: update-feed, mountPath: /feed, readOnly: true }
+            {{- end }}
+      volumes:
+        - name: tockmox-trust
+          emptyDir: { sizeLimit: 4Mi }
+        # The UI's OWN Ingress certificate Secret: cert-manager writes ca.crt beside the leaf and renews it with the
+        # certificate. Optional for the no-TLS case and the first seconds of an install (the initContainer waits).
+        - name: tockmox-ca
+          secret:
+            secretName: tockmox-ui-tls
+            optional: true
+            items: [{ key: ca.crt, path: ca.crt }]
+        - name: config
+          configMap: { name: tockmox-ui }
+        - name: session
+          secret:
+            secretName: {{ $sec.session | default "tockmox-ui-session" | quote }}
+            items: [{ key: secret, path: secret }]
+        {{- if $oidcOn }}
+        - name: oidc
+          secret:
+            secretName: {{ $sec.oidcClient | default "tockmox-sso-tockmox-ui" | quote }}
+            items: [{ key: client-secret, path: client-secret }]
+        {{- end }}
+        {{- if (($lc.watch | default dict).enabled) }}
+        - name: model-watch
+          persistentVolumeClaim: { claimName: tockmox-model-watch-report, readOnly: true }
+        {{- end }}
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
+        {{- if $feedCm }}
+        - name: update-feed
+          configMap: { name: {{ $feedCm | quote }} }
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tockmox-ui
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    # The ServiceMonitor below selects Services by this label. Without it the UI
+    # had no scrape target at all and TockmoxUIUnreachable fired on a healthy
+    # pod (the reference site, 0.8.0-rc1). tools/check-monitor-targets.sh holds it.
+    app.kubernetes.io/name: tockmox-ui
+spec:
+  selector:
+    app.kubernetes.io/name: tockmox-ui
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+    - { name: metrics, port: 9464, targetPort: metrics }
+{{- /* not `| default true`: Helm's default treats false as empty, so ingress.enabled: false would still render one */ -}}
+{{- $ing := $ui.ingress | default dict -}}
+{{- if or (not (hasKey $ing "enabled")) $ing.enabled }}
+---
+{{ include "tockmox.ingress" (dict "ctx" . "name" "tockmox-ui" "prefix" "tockmox" "host" (($ui.ingress | default dict).host | default "") "service" "tockmox-ui" "port" 8080) }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tockmox-ui
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-ui
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $trNs }} }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: traefik }
+      ports:
+        - { port: 8080, protocol: TCP }
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $monNs }} }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: prometheus }
+      ports:
+        - { port: 9464, protocol: TCP }
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    {{- range $api }}
+    - to:
+        - ipBlock: { cidr: {{ .cidr | quote }} }
+      ports:
+        - { port: {{ .port | default 6443 }}, protocol: TCP }
+    {{- end }}
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $monNs }} }
+          podSelector:
+            matchExpressions:
+              - { key: app.kubernetes.io/name, operator: In, values: [prometheus, alertmanager] }
+      ports:
+        - { port: 9090, protocol: TCP }
+        - { port: 9093, protocol: TCP }
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $trNs }} }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: traefik }
+    {{- if $probe }}
+    - to:
+        {{- range $probe }}
+        - ipBlock: { cidr: {{ . | quote }} }
+        {{- end }}
+    {{- end }}
+    {{- if $updateHttps }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16, 127.0.0.0/8]
+      ports:
+        - { port: 443, protocol: TCP }
+    {{- end }}
+    {{- with $np.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") }}
+{{- $aiNs := (.Values.namespaces | default dict).ai | default "tockmox-ai" }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tockmox-ui
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-ui
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-ui
+  endpoints:
+    - port: metrics
+      interval: 30s
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tockmox-ui
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: tockmox.ai.tockmox-ui
+      interval: 1m
+      rules:
+        - alert: TockmoxUISignInFailing
+          # Every series exists at 0 from the pod's start (tockmox-ui/app/telemetry.py), so increase() sees the
+          # FIRST failure; a series born at 1 would hide it. 15m window, 5m `for`: one failed attempt pages
+          # once, a person who retries after a fix clears it within 15m. Cases: tests/rules/tockmox-ui.yaml.
+          expr: >-
+            sum by (namespace, stage) (
+              increase(tockmox_ui_oidc_failures_total{namespace={{ $aiNs | quote }}}[15m])
+            ) > 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Tockmox UI sign-in is failing at the {{ "{{ $labels.stage }}" }} step"
+            description: >-
+              The Tockmox UI could not complete the {{ "{{ $labels.stage }}" }} step of sign-in
+              (discovery: the issuer did not answer; token: its answer could not be exchanged or
+              verified) in the last 15 minutes, so nobody without a live session can sign in. The
+              pod log names the cause on a "sign-in ... failed" line:
+              `kubectl -n {{ $aiNs }} logs deploy/tockmox-ui | grep "sign-in"`.
+              Connection refused to an issuer reached through a LoadBalancer address is usually
+              this NetworkPolicy: add that address to tockmoxUi.networkPolicy.extraEgress
+              (docs/administration/tockmox-ui.md, "When sign-in is unavailable").
+        - alert: TockmoxUIUnreachable
+          # absent(... == 1), not `up == 0`: a pod that is gone has no `up` series at all, and `up == 0`
+          # would read green exactly then. Rendered only when the UI is on, so absence is never expected.
+          expr: >-
+            absent(up{namespace={{ $aiNs | quote }}, job="tockmox-ui"} == 1)
+          for: 10m
+          labels:
+            severity: warning
+            # absent() of a comparison carries no labels; name the namespace for routing.
+            namespace: {{ $aiNs }}
+          annotations:
+            summary: "Prometheus cannot reach the Tockmox UI"
+            description: >-
+              No healthy scrape of {{ $aiNs }}/tockmox-ui's metrics port (9464) for 10 minutes:
+              the pod is not running, not Ready, or its NetworkPolicy no longer admits Prometheus.
+              `kubectl -n {{ $aiNs }} get pods -l app.kubernetes.io/name=tockmox-ui` first.
+{{- end }}
+{{- end }}

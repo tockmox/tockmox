@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, source_line %}
+{% block title %}{{ node.name }}{% endblock %}
+{% block main %}
+<h1>{{ node.name }}</h1>
+<p>{{ badge(health.state if health else "unknown") }} <span class="muted">{{ kind_.name }} at {{ node.address }}</span></p>
+{% if health and health.why %}<p class="muted">{{ health.why }}</p>{% elif not health %}<p class="muted">{{ reading.reason or "no reading" }}</p>{% endif %}
+{% if health and health.disagree %}<p class="warnbox">{{ badge("warning", "Check this") }} {{ health.disagree }}.</p>{% endif %}
+
+<section class="panel" aria-labelledby="hw-h">
+  <h2 id="hw-h">Hardware</h2>
+  <dl class="facts">
+    {% for k, f in node.hardware.items() %}<div><dt>{{ {"chip": "Chip", "memory_gib": "Memory (GiB)", "accelerator": "Accelerator"}[k] }}</dt><dd>{{ f.value }} <span class="muted">({{ f.source }})</span></dd></div>{% endfor %}
+    {% if health and health.chip %}<div><dt>Chip (exporter)</dt><dd>{{ health.chip }} <span class="muted">(metrics)</span></dd></div>{% endif %}
+    {% if health and health.memory %}<div><dt>Memory in use</dt><dd>{% if health.memory.used_gib is not none %}{{ health.memory.used_gib }} of {% endif %}{{ health.memory.total_gib }} GiB <span class="muted">(metrics)</span></dd></div>{% endif %}
+    <div><dt>Routes need (estimate)</dt><dd>{% if fit.usable_gib %}{{ fit.placed_gib }} of {{ fit.usable_gib }} GiB{% else %}unknown{% endif %}</dd></div>
+  </dl>
+  <p class="muted">"Routes need" is what every route on this node would hold at its worst moment, from the routes as recorded, not from what is loaded now: {{ fit.basis }}. A route whose server is not running still counts, so this can read higher than the memory in use.</p>
+  {% if fit.unknown_sizes %}<p class="muted">Not counted, size unknown: {{ fit.unknown_sizes|join(", ") }}.</p>{% endif %}
+</section>
+
+{% if health %}
+<section class="panel" aria-labelledby="checks-h">
+  <h2 id="checks-h">What measures it</h2>
+  <ul class="checks">{% for c in health.checks %}<li>{{ badge(c.state) }} <span>{{ c.what }}</span>{% if c.why %}<span class="muted">: {{ c.why }}</span>{% endif %}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+<section class="panel" aria-labelledby="eps-h">
+  <h2 id="eps-h">Engines and routes</h2>
+  <div class="table-wrap" role="region" aria-labelledby="eps-cap" tabindex="0">
+  <table>
+    <caption id="eps-cap">Gateway routes on {{ node.name }}</caption>
+    <thead><tr><th scope="col">Alias</th><th scope="col">Model</th><th scope="col">Engine</th><th scope="col">Kind</th><th scope="col">Size (GiB)</th></tr></thead>
+    <tbody>
+    {% for r in routes %}{% set e = node.endpoint(r.endpoint) %}
+      <tr><th scope="row"><code>{{ r.alias }}</code></th><td><code>{{ r.model }}</code></td><td>{{ engines[e.engine].name }} :{{ e.port }}</td><td>{{ r.kind }}</td><td>{{ r.size_gib if r.size_gib is not none else "?" }}</td></tr>
+    {% else %}<tr><td colspan="5">No routes yet.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="panel" aria-labelledby="place-h">
+  <h2 id="place-h">Place a model on this node</h2>
+  <p>Adds a gateway route. First check the fit; nothing changes until you commit the generated change. Getting the model onto the node is yours to do on the node itself.</p>
+  <form method="get" action="/nodes/{{ node.id }}" class="stack">
+    <label for="p-model">Model id, as the engine knows it</label><input id="p-model" name="model" type="text" value="{{ form.model }}" required spellcheck="false" autocomplete="off">
+    <label for="p-endpoint">Engine</label>
+    <select id="p-endpoint" name="endpoint">{% for e in node.endpoints %}<option value="{{ e.id }}" {% if e.id == form.endpoint %}selected{% endif %}>{{ engines[e.engine].name }} :{{ e.port }}</option>{% endfor %}</select>
+    <label for="p-alias">Gateway alias</label><input id="p-alias" name="alias" type="text" value="{{ form.alias }}" required autocomplete="off">
+    <label for="p-kind">Kind</label>
+    <select id="p-kind" name="kind">{% for k in ("chat", "embedding", "rerank") %}<option {% if k == form.kind %}selected{% endif %}>{{ k }}</option>{% endfor %}</select>
+    <label for="p-size">Size in GiB <span class="muted">(optional; estimated from the name if empty)</span></label><input id="p-size" name="size" type="text" inputmode="decimal" value="{{ form.size }}" autocomplete="off">
+    <button class="btn-ghost" type="submit">Check the fit</button>
+  </form>
+  {% if preview %}
+  <div class="result" role="status">
+  {% if preview.errors %}<p>{{ badge("critical", "Cannot place it") }}</p><ul>{% for e in preview.errors %}<li>{{ e }}</li>{% endfor %}</ul>
+  {% else %}
+    {% set f = preview.fit %}
+    <p>{{ badge({"fits": "ok", "tight": "warning", "over": "critical"}.get(f.state, "unknown"), {"fits": "Fits", "tight": "Tight", "over": "Does not fit", "unknown": "Fit unknown"}[f.state]) }}
+      {% if f.usable_gib and f.new_gib is not none %}Already planned {{ f.placed_gib }} GiB + this model {{ f.new_gib }} GiB ({{ preview.size_src }}) = {{ f.total|round(1) }} GiB, against {{ f.usable_gib }} GiB usable.{% else %}{{ f.basis }}.{% endif %}</p>
+    {% set pe = node.endpoint(form.endpoint) %}{% if pe and not engines[pe.engine].pull.startswith("(") %}<p>On the node, first: <code>{{ engines[pe.engine].pull|replace("{model}", form.model) }}</code></p>{% endif %}
+    <p class="muted">An estimate of the weights only, with 10% for overhead. Context (KV cache) comes on top and grows with the prompt. It never blocks a placement.</p>
+    <p>The gateway will get this route:</p>
+<pre tabindex="0"><code>{{ preview.entry }}</code></pre>
+    <form method="post" action="/nodes/change">
+      <input type="hidden" name="csrf" value="{{ user.csrf }}">
+      <input type="hidden" name="draft" value="{{ preview.draft }}">
+      <button class="btn" type="submit">Generate the change</button>
+    </form>
+  {% endif %}
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

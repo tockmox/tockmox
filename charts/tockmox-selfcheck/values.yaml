@@ -1,0 +1,251 @@
+# SPDX-License-Identifier: Apache-2.0
+global:
+  internalDomain: ""
+  certIssuer: "tockmox-ca"
+  imageRegistry: ""
+  timezone: "UTC"
+  clusterCIDR: "10.42.0.0/16"
+  serviceCIDR: "10.43.0.0/16"
+  lanCIDR: ""
+  # THE STORAGE CONTRACT. Empty means "use whatever the cluster's default
+  # StorageClass happens to be", which is not the same as "use the storage this
+  # platform ships". On k3s the default is `local-path`: node-local, one copy,
+  # no snapshots, no backup target. Tockmox shipped Longhorn and, because
+  # nothing named a class, wrote every PVC to local-path anyway.
+  #
+  # Name it. `longhorn` on a stock install with apps.longhorn enabled;
+  # `local-path` if you have deliberately chosen node-local storage; the name of
+  # your own CSI class if you brought one. A preflight refuses the combination
+  # that used to fail silently.
+  storageClass: ""
+
+  # THE SECOND HALF OF THE STORAGE CONTRACT: the class for data whose
+  # application already protects it, or that can be re-derived.
+  #
+  # The policy is "replicate at exactly one layer". If an application keeps its
+  # own copies (Postgres streaming to replicas, an object store spreading
+  # across nodes) or the data can be rebuilt (a metrics TSDB), then replicating
+  # the volume underneath buys nothing and costs two to three times the disk
+  # plus write latency on the hot path. Those workloads get THIS class.
+  # Everything else gets `storageClass` above.
+  #
+  # `local-path` is k3s's own provisioner and is the shipped default here.
+  # prerequisites.md tells you to UN-DEFAULT it rather than delete it, and this
+  # is why. Node-local means a rescheduled pod finds an empty volume, which is
+  # the trade this class exists to make; do not point it at anything whose loss
+  # you would mind.
+  #
+  # Empty falls back to the cluster default, which un-does the policy without
+  # complaining. Set it to a class you have.
+  localStorageClass: "local-path"
+# ---------------------------------------------------------------------------
+# CAPABILITIES: functional stories you can decline.
+#
+# `apps.*` is one switch per piece of software, which is the wrong unit for the
+# decision people actually make. Nobody chooses "a Garage", "a barman plugin"
+# and "a snapshot controller" separately; they choose whether this deployment
+# protects its data, or whether they already run Velero and want none of it.
+#
+# A capability is that decision, named, on one switch, spanning whatever
+# components it takes and whichever layers they live in.
+#
+# HOW IT RESOLVES, and the tri-state is the point:
+#   apps.<x>.enabled unset   follow the capability that owns the component
+#   apps.<x>.enabled: true   on, even if the capability is off
+#   apps.<x>.enabled: false  off, even if the capability is on
+#
+# So declining a capability turns off everything it owns, and a component you
+# named yourself still means what you said. Turning a single component on while
+# its capability is off fails the render rather than half-building the story.
+#
+# THIS BLOCK IS BYTE-IDENTICAL IN ALL NINE LAYERS, and that is deliberate. The
+# values namespace is shared across layers, so one profile sets a capability
+# once and every layer owning part of it reads the same answer. Editing one copy
+# and not the others is the failure the uniformity exists to prevent, and
+# tools/check-capabilities.sh fails CI on any drift between them.
+#
+# Full list, what each one contains, and why you would decline it:
+# docs/administration/capabilities.md
+# ---------------------------------------------------------------------------
+capabilities:
+  # Metrics, logs and the rules that read them ... everything answering "what is
+  # this platform doing right now". Off means Tockmox ships no Prometheus, no
+  # Loki, no Alloy, and none of its own ServiceMonitors or alert rules.
+  #
+  # Running your own Prometheus operator is the case worth naming. Decline the
+  # capability and set `apps.serviceMonitors.enabled: true`, and Tockmox renders
+  # its monitors and rules for YOUR operator to collect, without standing up a
+  # second stack beside the one you already run.
+  observability:
+    enabled: true
+
+  # Alerts that reach a person: the notification sink, the bridge that feeds it
+  # and the heartbeat that proves the path still works when nothing is wrong.
+  # Off means alerts fire into Alertmanager and stop there.
+  #
+  # The component switch for this one is `notifications.enabled` rather than an
+  # `apps` key, because it predates this framework and is a contract key. It has
+  # the same tri-state: unset follows the capability, set means what you said.
+  notifications:
+    enabled: true
+
+  # One sign-in across every console, and the identity provider behind it. Off
+  # means Tockmox ships no Authentik and each console falls back to its own
+  # local login, unless you point `sso` at an issuer you already run.
+  identity:
+    enabled: true
+
+  # The private AI plane: a chat console and the model gateway in front of it.
+  # Off leaves Tockmox as a platform and nothing else, which is a legitimate way
+  # to run it and the right answer if you are here for the infrastructure.
+  aiPlane:
+    enabled: true
+
+  # Backups that go somewhere, restores that are exercised, and the CSI
+  # plumbing underneath both. Off means Tockmox ships no object store, no
+  # backup plugin and no snapshot control plane, and expects you to have your
+  # own or to not want one.
+  dataProtection:
+    enabled: true
+
+  # Telemetry from PHYSICAL hardware: disk SMART attributes, and SNMP from
+  # switches, UPSes and appliances.
+  #
+  # OFF BY DEFAULT, unlike every other capability here, because the reference
+  # deployment is a virtual machine: there is no physical disk to ask and no
+  # switch to poll, and an exporter scraping nothing still alerts on its own
+  # absence. Turn it on when the hardware is real, and both exporters follow.
+  hardwareTelemetry:
+    enabled: false
+
+  # Jobs running inside the cluster on a schedule or an event, with a console to
+  # watch them. Off means no Argo Workflows.
+  workflowAutomation:
+    enabled: true
+
+  # Default-deny between namespaces, so a compromised workload cannot reach a
+  # neighbour it was never meant to.
+  #
+  # Off is the honest setting on a cluster whose CNI does not enforce
+  # NetworkPolicy at all. Flannel without a policy plugin accepts every object
+  # here and enforces none of them, and a control that is only decoration is
+  # worse than no control, because it gets counted.
+  networkPolicy:
+    enabled: true
+
+namespaces:
+  selfcheck: tockmox-selfcheck
+  # Where the kube-bench CronJob runs. Created by the POLICY layer (it labels the
+  # namespace `enforce: privileged`, which this chart cannot do for a namespace it
+  # does not own), and only when policy's apps.kube_bench is on. Keep the two
+  # names identical if you rename it.
+  kube_bench: tockmox-kube-bench
+
+# ---------------------------------------------------------------------------
+# Where to post the heartbeat.
+#
+# This is a VALUE rather than a derived name on purpose. The service name
+# depends on the observability release name and the namespace it was installed
+# into, neither of which this chart can know. Hardcoding a guess produced a
+# heartbeat that failed DNS every fifteen minutes while the alert that was
+# supposed to notice stayed green ... which is precisely the failure this layer
+# exists to prevent.
+#
+# Default matches a stock install: the `tockmox-observability` release in the
+# `tockmox-monitoring` namespace, which is where the generated bootstrap puts
+# it. Change it if you renamed either.
+# ---------------------------------------------------------------------------
+alertmanagerURL: "http://tockmox-observability-kube-alertmanager.tockmox-monitoring.svc:9093"
+
+apps:
+  # Alert rules that make a silent failure loud. No workloads, no model.
+  healthRules: { enabled: true }
+  # A heartbeat that proves the checker itself is alive.
+  heartbeat:   { enabled: true }
+  # The CIS Kubernetes benchmark scanner (kube-bench) as a weekly CronJob. OFF by
+  # default, and not tied to a capability: it needs hostPID and read-only
+  # hostPath mounts, so it runs in its own privileged namespace, which the POLICY
+  # layer creates when ITS apps.kube_bench is on. Turn on both.
+  # docs/operations/kube-bench.md says what it does, what it cannot see on k3s,
+  # and that no run of it has been measured yet.
+  kube_bench:  { enabled: false }
+  # The ServiceMonitor, PodMonitor and PrometheusRule objects THIS REPO writes,
+  # as distinct from the stack that consumes them.
+  #
+  # It is a separate component so that "I run my own Prometheus operator" is one
+  # key rather than a fork. Decline capabilities.observability to drop the stack,
+  # set this true, and Tockmox still renders its monitors and rules for your
+  # operator to collect. Unset, it follows the capability, so the common case
+  # needs no decision at all.
+  serviceMonitors: {}   # unset: follows capabilities.observability
+
+heartbeat:
+  schedule: "*/15 * * * *"
+  image: alpine/k8s:1.37.1
+
+# How long without a SUCCESSFUL heartbeat before the platform declares itself
+# unwatched. Seconds, because the value lands inside a PromQL comparison.
+# Three missed 15-minute beats = 2700.
+staleAfterSeconds: 2700
+
+# ---------------------------------------------------------------------------
+# kube-bench (apps.kube_bench). Read docs/operations/kube-bench.md first.
+#
+# The scan reports on ONE node: the pod lands wherever `nodeSelector` sends it
+# (a control-plane node by default), and the checks read that node's files and
+# processes. A three-server cluster is three runs, not one.
+#
+# A completed Job means the scanner RAN, not that the cluster passed. kube-bench
+# exits 0 with FAIL results in its output, and this chart does not change that.
+# ---------------------------------------------------------------------------
+kubeBench:
+  # Weekly, Sunday 03:23 in global.timezone. Not on the hour, so it does not
+  # stack with the other things scheduled at :00.
+  schedule: "23 3 * * 0"
+  # Pinned by tag. Upstream publishes the tag as a multi-arch index; the digest
+  # is not pinned here (docs/deployment/registry.md is the digest posture).
+  image: docker.io/aquasec/kube-bench:v0.16.0
+  # WHICH BENCHMARK. v0.16.0 ships k3s-cis-1.7, 1.8 and 1.9, and 1.9 is the newest
+  # (its own table says k3s v1.27 to v1.29). The reference platform runs a newer
+  # k3s than any benchmark v0.16.0 knows, so this is the nearest one, not a
+  # match, and the report should be read that way. Set it to a benchmark the
+  # image contains; a name it does not contain fails the Job with a message.
+  benchmark: k3s-cis-1.9
+  # Empty runs every target the benchmark defines (master, etcd, controlplane,
+  # node, policies). Name some to narrow it, e.g. [node].
+  targets: []
+  # Scanner runs on a control-plane node so the master checks see the
+  # apiserver's files. k3s labels its server nodes with this.
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: "true"
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+    - key: node-role.kubernetes.io/master
+      operator: Exists
+      effect: NoSchedule
+  # Host paths mounted READ-ONLY at the same path in the pod. These are the k3s
+  # locations the k3s benchmarks read (server/agent credentials and TLS under
+  # /var/lib/rancher/k3s, the operator's config under /etc/rancher/k3s, CNI
+  # state). Upstream's generic job mounts more (etc/systemd, lib/systemd,
+  # /usr/bin and others) for a kubeadm layout that k3s does not have; they are
+  # left out to keep the host exposure to what k3s needs. Add more with
+  # extraHostMounts rather than editing this list.
+  hostMounts:
+    - name: var-lib-rancher-k3s
+      path: /var/lib/rancher/k3s
+    - name: etc-rancher-k3s
+      path: /etc/rancher/k3s
+    - name: var-lib-cni
+      path: /var/lib/cni
+  # Same shape as hostMounts, appended. For a k3s that keeps data elsewhere
+  # (--data-dir) or a benchmark that reads a path not listed above.
+  extraHostMounts: []
+  # Seconds before the Job is killed. The scan reads files and greps output; a
+  # run that takes ten minutes is stuck, not thorough.
+  activeDeadlineSeconds: 600
+  # Finished Jobs kept, and with them their pod logs, which is where the result
+  # lives. Three weeks of history at the weekly schedule.
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3

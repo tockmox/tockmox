@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Grafana's OIDC configuration, rendered by the PARENT chart because every
+# URL derives from global.internalDomain and a subchart's static values
+# cannot see it ... the same reasoning as the Ingresses. Injected via the
+# grafana chart's `envFromSecrets` (referenced with optional: true, so
+# sso.enabled=false simply leaves Grafana on local login).
+#
+# The client secret is NOT here: it arrives separately via envValueFrom from
+# the operator-created `tockmox-sso-grafana` Secret. This object carries only
+# configuration; it is a Secret solely so one mechanism (envFromSecrets)
+# covers it.
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "kubePrometheusStack")) .Values.sso.enabled }}
+{{- $scheme := ternary "https" "http" (ne .Values.global.certIssuer "") }}
+{{- $domain := .Values.global.internalDomain }}
+{{- $grafanaHost := .Values.ingress.apps.grafana.host | default (printf "grafana.%s" $domain) }}
+{{- $authHost := printf "auth.%s" $domain }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tockmox-observability-sso-env
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  GF_SERVER_ROOT_URL: "{{ $scheme }}://{{ $grafanaHost }}"
+  GF_AUTH_GENERIC_OAUTH_ENABLED: "true"
+  GF_AUTH_GENERIC_OAUTH_NAME: "Tockmox SSO"
+  GF_AUTH_GENERIC_OAUTH_CLIENT_ID: {{ .Values.sso.clientId | quote }}
+  GF_AUTH_GENERIC_OAUTH_SCOPES: "openid email profile"
+  GF_AUTH_GENERIC_OAUTH_AUTH_URL: "{{ $scheme }}://{{ $authHost }}/application/o/authorize/"
+  GF_AUTH_GENERIC_OAUTH_TOKEN_URL: "{{ $scheme }}://{{ $authHost }}/application/o/token/"
+  GF_AUTH_GENERIC_OAUTH_API_URL: "{{ $scheme }}://{{ $authHost }}/application/o/userinfo/"
+  GF_AUTH_GENERIC_OAUTH_LOGIN_ATTRIBUTE_PATH: "preferred_username"
+  # A USER WITH NO EMAIL STILL SIGNS IN (TM-0667). Authentik does not require an
+  # email, and without the claim Grafana falls through to a GitHub-style
+  # `<api_url>/emails` request, which Authentik answers with a 404 page; Grafana
+  # then fails the whole login ("Login failed / InternalError", `userinfo//emails`
+  # in its log). A non-empty result here ends the lookup before that request.
+  # The expression is JMESPath, like the role path below: `email` when the claim
+  # is there, the username when it is not, so a user WITH an email is unchanged.
+  # The username lands in Grafana's email field for those users; it identifies
+  # nobody new, because login already comes from preferred_username above.
+  GF_AUTH_GENERIC_OAUTH_EMAIL_ATTRIBUTE_PATH: "email || preferred_username"
+  GF_AUTH_GENERIC_OAUTH_GROUPS_ATTRIBUTE_PATH: "groups"
+  # tockmox-admins -> GrafanaAdmin (server admin, which includes org Admin in
+  # the main org); everyone else the provider admits -> Viewer. GrafanaAdmin
+  # is only honoured from role_attribute_path when allow_assign_grafana_admin
+  # is true, set on the next line (TM-0820). Before 0.7.1 this returned
+  # 'Admin', which left a tockmox-admins member without server admin.
+  GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH: "contains(groups[*], '{{ .Values.sso.adminGroup }}') && 'GrafanaAdmin' || 'Viewer'"
+  GF_AUTH_GENERIC_OAUTH_ALLOW_ASSIGN_GRAFANA_ADMIN: "true"
+  # Local login stays = break-glass; the form gains an SSO button.
+  GF_AUTH_DISABLE_LOGIN_FORM: "false"
+{{- end }}

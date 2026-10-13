@@ -1,0 +1,10 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+tockmox-devops (sync wave 5) installed.
+Enabled apps: {{ include "tockmox.enabledApps" . }}
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "argoWorkflows")) .Values.ingress.apps.argoWorkflows.enabled }}
+Argo Workflows: http{{ if .Values.global.certIssuer }}s{{ end }}://{{ .Values.ingress.apps.argoWorkflows.host | default (printf "workflows.%s" .Values.global.internalDomain) }}
+{{- end }}
+
+  No registry ships in this layer as of 0.9.0. A registry is a prerequisite
+  rather than a component: see docs/deployment/registry.md, which also carries
+  the pull-through proxy cache procedure.

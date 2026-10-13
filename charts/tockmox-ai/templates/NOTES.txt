@@ -1,0 +1,34 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+tockmox-ai (sync wave 5) installed.
+Enabled apps: {{ include "tockmox.enabledApps" . }}
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "openWebui")) .Values.ingress.apps.openWebui.enabled }}
+Open WebUI: http{{ if .Values.global.certIssuer }}s{{ end }}://{{ .Values.ingress.apps.openWebui.host | default (printf "chat.%s" .Values.global.internalDomain) }}
+{{- end }}
+{{- if (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm")) }}
+{{- if .Values.ingress.apps.litellm.enabled }}
+LiteLLM:    http{{ if .Values.global.certIssuer }}s{{ end }}://{{ .Values.ingress.apps.litellm.host | default (printf "llm.%s" .Values.global.internalDomain) }}
+{{- end }}
+Before the gateway serves anything, two things are on you:
+  1. Secret {{ .Values.litellm.masterkeySecretName }} (key {{ .Values.litellm.masterkeySecretKey }}) and Secret
+     {{ .Values.litellm.db.secret.name }} (type kubernetes.io/basic-auth, username
+     {{ .Values.modelGateway.database.owner }}). See docs/administration/secrets.md.
+  2. At least one entry in litellm.proxy_config.model_list. It ships empty:
+     the proxy starts and routes to nothing until you name a model host.
+{{- $ck := .Values.modelGateway.consoleKey | default dict }}
+{{- if or (eq (kindOf $ck.enabled) "invalid") $ck.enabled }}
+The console's virtual key ({{ $ck.secretName | default "tockmox-openwebui-gateway" }}) is minted by a Job in this
+release once the gateway answers; no manual key step. If the console stays in
+CreateContainerConfigError, read that Job's log: kubectl -n {{ .Values.namespaces.ai }} logs job -l app.kubernetes.io/name=tockmox-gateway-key
+{{- else }}
+modelGateway.consoleKey is off: mint the console's virtual key yourself
+(docs/deployment/install.md, "Mint the console's model-gateway key").
+{{- end }}
+{{- if not (include "tockmox-ai.dbBackupEnabled" .) }}
+Database backups are OFF. {{ .Values.modelGateway.database.name }} holds your API keys and
+spend history; see docs/operations/backup-restore.md.
+{{- else }}
+Database backups are ON ({{ .Values.modelGateway.database.name }} to {{ .Values.modelGateway.database.backup.objectStoreName | default .Values.modelGateway.database.backup.objectStore.name }}). With the shipped object store
+that is the Garage in the platform layer, in this same cluster; see
+docs/operations/backup-restore.md before relying on it for data you care about.
+{{- end }}
+{{- end }}

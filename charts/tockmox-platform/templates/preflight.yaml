@@ -1,0 +1,126 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+Render-time guards for the platform layer. Emits no objects.
+
+THE STORAGE CONTRACT, and the failure it exists to stop.
+
+This chart shipped Longhorn with `persistence.defaultClass: false` and a comment
+saying "you name your default StorageClass explicitly". There was no key to name
+it with. So every PVC in every layer fell through to whatever the cluster's
+default happened to be, which on k3s is `local-path`: node-local, single copy,
+no snapshots, no backup target.
+
+Nothing failed. Longhorn ran, healthy and idle, while the databases it was
+installed to protect sat on the node's disk. Measured on the reference lab
+2026-08-15, before this guard existed: Longhorn present and every Tockmox PVC on
+`local-path`, including the model gateway's database.
+
+The guard is narrow on purpose. It does not require Longhorn, and it does not
+require any particular class ... it requires that SOMEBODY CHOSE. Naming
+`local-path` deliberately passes. Bringing your own CSI passes. The only thing
+that fails is shipping replicated storage and silently not using it, which is
+the exact state this platform was in.
+*/ -}}
+{{- $sc := .Values.global.storageClass | default "" -}}
+{{- if and .Values.apps.longhorn.enabled (not $sc) -}}
+{{- $lh := index .Values "longhorn" | default dict -}}
+{{- $persistence := $lh.persistence | default dict -}}
+{{- if not $persistence.defaultClass -}}
+{{- fail "apps.longhorn is enabled, Longhorn is not marked as the cluster default StorageClass, and global.storageClass is empty. Every PVC this platform creates would therefore land on whatever default the cluster already had ... on k3s that is `local-path`: node-local, one copy, no snapshots and nothing for a backup to attach to. Longhorn would run healthy and unused, which is precisely the state the reference deployment was found in on 2026-08-15. Choose one: set global.storageClass to `longhorn`, or set longhorn.persistence.defaultClass to true, or set global.storageClass to the class you actually intend (`local-path` is a legitimate answer if you mean it)." -}}
+{{- end -}}
+{{- end -}}
+{{- /*
+The inverse mistake: naming a class this install does not provide. Cheap to
+check for the one case we can be sure about, which is naming Longhorn's class
+with Longhorn switched off. Any other name may be a CSI the cluster already
+has, so it is not our business to second-guess.
+*/ -}}
+{{- if and $sc (eq $sc "longhorn") (not .Values.apps.longhorn.enabled) -}}
+{{- fail "global.storageClass is \"longhorn\" but apps.longhorn is disabled, so nothing creates that StorageClass. Every PVC would stay Pending with no events explaining why. Enable apps.longhorn, or name the class your cluster actually provides." -}}
+{{- end -}}
+{{- /*
+A component switched on while the capability that owns it is off leaves a
+half-built story: an object store with no plugin to write to it, or a snapshot
+controller nothing schedules against. Fail rather than deliver half.
+*/ -}}
+{{- include "tockmox.capabilityCoherent" (dict "ctx" $ "capability" "dataProtection" "apps" (list "garage" "docs" "barmanPlugin" "snapshotController")) -}}
+{{- /*
+DOCS SERVING NEEDS THE OBJECT STORE, and this is deliberately AFTER the
+coherence guard above so that guard's message wins when the capability is off.
+With the capability on and only the store declined, `apps.docs` would render an
+Ingress and a sync Job that point at a Service nothing creates: applies
+cleanly, serves nothing.
+*/ -}}
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "docs")) (not (include "tockmox.appEnabled" (dict "ctx" $ "app" "garage"))) -}}
+{{- fail "apps.docs is on but apps.garage is off. The docs are served from the shipped Garage's web endpoint and land in a bucket there, so with no Garage the Ingress and the sync Job would point at nothing. Turn apps.garage on, or set apps.docs.enabled: false." -}}
+{{- end -}}
+{{- /*
+A namespace this layer creates for a Secret copy must be one it copies to,
+otherwise the Namespace is created and nothing uses it (a typo that reads as
+success).
+*/ -}}
+{{- range $ns := (.Values.garage.createCredentialsNamespaces | default list) -}}
+{{- if not (has $ns ($.Values.garage.credentialsNamespaces | default list)) -}}
+{{- fail (printf "garage.createCredentialsNamespaces names %q, which is not in garage.credentialsNamespaces. Add it there too, or remove it here." $ns) -}}
+{{- end -}}
+{{- end -}}
+{{- /* Evaluate the site list once here so a malformed entry fails the render
+whether or not this pass would otherwise have touched it. */ -}}
+{{- if include "tockmox.appEnabled" (dict "ctx" $ "app" "garage") -}}
+{{- $_ := include "tockmox.garageWeb.sites" $ -}}
+{{- end -}}
+{{- /*
+SUBCHART MONITORS DO NOT FOLLOW THE CAPABILITY, SO REFUSE THE HALF-OFF STATE (TM-0825).
+`capabilities.observability.enabled: false` stops every ServiceMonitor,
+PodMonitor and PrometheusRule this chart's OWN templates write. The monitors a
+vendored subchart writes come from the subchart's own switch, and a subchart's
+values are static YAML: they cannot read `.Values.capabilities`, and a parent
+template cannot reach into a subchart's render. So declining the capability and
+leaving one of those switches on renders a monitoring.coreos.com object on a
+cluster that, by your own choice, has no Prometheus operator CRDs, and Argo
+rejects the layer on an unknown kind.
+
+Failing at render is the honest answer: it names the switches and the fix
+instead of letting the sync fail later. Not refused: `apps.serviceMonitors.enabled:
+true` (the "run your own Prometheus operator" route, where the CRDs are yours and
+the monitors are wanted), and a subchart that is itself switched off, since its
+monitor cannot render. A subchart's condition is read the way Helm reads it: the
+first listed path that holds a boolean decides.
+*/ -}}
+{{- $obsOn := include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability") -}}
+{{- $byo := eq (((.Values.apps | default dict).serviceMonitors | default dict).enabled) true -}}
+{{- if and (not $obsOn) (not $byo) -}}
+{{- $subs := list -}}
+{{- $subs = append $subs (dict "name" "cert-manager" "when" (list "apps.certManager.enabled") "switch" "cert-manager.prometheus.servicemonitor.enabled") -}}
+{{- $subs = append $subs (dict "name" "metallb" "when" (list "apps.metallb.enabled") "switch" "metallb.prometheus.serviceMonitor.enabled") -}}
+{{- $subs = append $subs (dict "name" "traefik" "when" (list "apps.traefik.enabled") "switch" "traefik.metrics.prometheus.serviceMonitor.enabled") -}}
+{{- $subs = append $subs (dict "name" "longhorn" "when" (list "apps.longhorn.enabled") "switch" "longhorn.metrics.serviceMonitor.enabled") -}}
+{{- $subs = append $subs (dict "name" "cloudnative-pg" "when" (list "apps.cnpg.enabled") "switch" "cloudnative-pg.monitoring.podMonitorEnabled") -}}
+{{- $subs = append $subs (dict "name" "kured" "when" (list "apps.kured.enabled") "switch" "kured.metrics.create") -}}
+{{- $subs = append $subs (dict "name" "snapshot-controller" "when" (list "apps.snapshotController.enabled" "capabilities.dataProtection.enabled") "switch" "snapshot-controller.controller.serviceMonitor.create") -}}
+{{- $offenders := list -}}
+{{- range $s := $subs -}}
+{{- $active := true -}}
+{{- $found := false -}}
+{{- range $cond := $s.when -}}
+{{- if not $found -}}
+{{- $cur := $.Values -}}
+{{- range $k := splitList "." $cond -}}
+{{- if kindIs "map" $cur -}}{{- $cur = index $cur $k -}}{{- else -}}{{- $cur = nil -}}{{- end -}}
+{{- end -}}
+{{- if kindIs "bool" $cur -}}{{- $active = $cur -}}{{- $found = true -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $active -}}
+{{- $cur := $.Values -}}
+{{- range $k := splitList "." $s.switch -}}
+{{- if kindIs "map" $cur -}}{{- $cur = index $cur $k -}}{{- else -}}{{- $cur = nil -}}{{- end -}}
+{{- end -}}
+{{- if $cur -}}{{- $offenders = append $offenders $s.switch -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if $offenders -}}
+{{- fail (printf "capabilities.observability is off, but %d vendored subchart monitor switch(es) in this layer are still on: %s. A subchart's values cannot read the capability, so each of these would still render a ServiceMonitor or PodMonitor, and a cluster without the Prometheus operator CRDs rejects the layer on an unknown kind. Choose one: pass profiles/observability-off.yaml to this layer (after your global values, the way profiles are passed: docs/deployment/profiles.md), or set those switches to false yourself. If you run your own Prometheus operator and WANT the monitors, set apps.serviceMonitors.enabled: true instead." (len $offenders) (join ", " $offenders)) -}}
+{{- end -}}
+{{- end -}}

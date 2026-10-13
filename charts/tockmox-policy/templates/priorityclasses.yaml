@@ -1,0 +1,72 @@
+{{- if .Values.apps.platform_policies.enabled }}
+# SPDX-License-Identifier: Apache-2.0
+---
+# Cluster-scoped PriorityClasses for the the platform (three-tier).
+#
+# These are INERT until a workload sets spec.priorityClassName ... they change
+# nothing on their own. Per-app assignment is the canaried follow-up rollout
+# (see README.md in this dir for the workload->tier map and the exact Helm
+# values key per app), NOT done in this file.
+#
+# Why: on a temporarily-smaller cluster during node reworks, and under real
+# memory pressure, the scheduler preempts and the kubelet evicts lower-priority
+# pods first. Without priorities every pod is equal (priority 0), so core
+# platform pods can be evicted alongside disposable ones. Tiers let the cluster
+# shed load from the bottom up.
+#
+# All values sit well below the built-in system-cluster-critical (2000000000)
+# and system-node-critical (2000001000) so the platform workloads never outrank the
+# kube-system control plane. They are ALSO intentionally below Longhorn's own
+# longhorn-critical (1000000000): Longhorn (incl. instance-managers) and CoreDNS
+# (system-cluster-critical) self-manage a higher critical class and are NOT
+# assigned these the platform tiers ... overriding would downgrade them and, for
+# Longhorn, force a disruptive instance-manager restart. See README.md.
+# preemptionPolicy: PreemptLowerPriority is the default and is explicit here for
+# clarity. globalDefault stays false on every tier ... unassigned pods keep
+# priority 0, below all three.
+#
+# Supersedes the earlier two-tier stub (the platform-platform-critical /
+# the platform-app-important). Nothing referenced those names yet.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: {{ .Values.priorityClasses.clusterCritical }}
+value: 1000000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: >-
+  Cascade-critical plane: losing one of these takes down many other services.
+  CoreDNS, Longhorn data path (instance managers / CSI), cert-manager, MetalLB,
+  Traefik (all ingress), Authentik (SSO for everything). Evicted last.
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: {{ .Values.priorityClasses.infrastructure }}
+value: 100000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: >-
+  Platform control plane: important but a brief loss does not cascade. ArgoCD,
+  Harbor, Forgejo, Garage, and the kube-prometheus-stack observability stack
+  (Prometheus, Grafana, Loki, Alertmanager). Sits below cluster-critical,
+  above user apps.
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: {{ .Values.priorityClasses.apps }}
+value: 10000
+globalDefault: false
+preemptionPolicy: PreemptLowerPriority
+description: >-
+  User-facing / leaf workloads that should outrank unassigned best-effort pods
+  but yield to the platform under pressure: Open WebUI and its peers.
+  Evicted before infrastructure and cluster-critical.
+{{- end }}

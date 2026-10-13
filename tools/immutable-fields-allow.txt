@@ -1,0 +1,10 @@
+# Immutable-field hits that tools/check-immutable-fields.sh must not fail on
+# because they are handled elsewhere (TM-0754). One per line:
+#
+#   <layer> <Kind> <name> <field>     # why, and where the operator step lives
+#
+# <field> is the name the check prints (spec.template, spec.selector, ...) or *.
+# The hit is still printed as "allowed". An entry that matches nothing is
+# printed as a note, so it gets removed once the case is gone. Empty on purpose:
+# the LiteLLM migrations Job is held by check-upgrade-safety.sh F1 and its shape
+# file, and only needs an entry here if the subchart's own chart version moves.

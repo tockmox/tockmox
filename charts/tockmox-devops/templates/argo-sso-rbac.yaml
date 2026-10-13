@@ -1,0 +1,109 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Group -> permission mapping for Argo Workflows SSO. Argo's SSO-RBAC model
+# is "the login's groups pick a ServiceAccount": these annotations are the
+# rules, precedence breaks ties (admins match both groups' rules).
+# Harmless without SSO configured ... nothing selects them.
+#
+# The explicit service-account-token Secrets exist because Kubernetes stopped
+# auto-minting SA token Secrets in 1.24, and Argo's SSO-RBAC needs a durable
+# token per mapped ServiceAccount.
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "argoWorkflows")) .Values.sso.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-argo-admin
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    workflows.argoproj.io/rbac-rule: "'{{ .Values.sso.adminGroup }}' in groups"
+    workflows.argoproj.io/rbac-rule-precedence: "2"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-argo-viewer
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    workflows.argoproj.io/rbac-rule: "'{{ .Values.sso.userGroup }}' in groups"
+    workflows.argoproj.io/rbac-rule-precedence: "1"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tockmox-argo-admin.service-account-token
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/service-account.name: tockmox-argo-admin
+type: kubernetes.io/service-account-token
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tockmox-argo-viewer.service-account-token
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    kubernetes.io/service-account.name: tockmox-argo-viewer
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tockmox-argo-admin
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows", "workflowtemplates", "cronworkflows", "workfloweventbindings", "workflowtaskresults"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tockmox-argo-viewer
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["argoproj.io"]
+    resources: ["workflows", "workflowtemplates", "cronworkflows", "workfloweventbindings"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tockmox-argo-admin
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tockmox-argo-admin
+subjects:
+  - kind: ServiceAccount
+    name: tockmox-argo-admin
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tockmox-argo-viewer
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tockmox-argo-viewer
+subjects:
+  - kind: ServiceAccount
+    name: tockmox-argo-viewer
+    namespace: {{ .Release.Namespace }}
+{{- end }}

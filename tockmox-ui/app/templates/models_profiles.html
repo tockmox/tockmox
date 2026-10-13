@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, source_line %}
+{% block title %}Workload profiles{% endblock %}
+{% block main %}
+<h1>Workload profiles</h1>
+<p class="lede">A profile says which work matters most and which models should stay loaded for it. Each node gets a plan: models held in memory all the time, and models loaded when asked for and unloaded when idle. The plan becomes engine configuration you commit.</p>
+{% if profiles %}
+<form method="get" action="/models/profiles" class="panel inline">
+  <label for="profile">Profile</label>
+  <select id="profile" name="profile">{% for p in profiles %}<option value="{{ p.id }}" {% if prof and p.id == prof.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}</select>
+  <button class="btn-ghost" type="submit">Show the plan</button>
+</form>
+{% else %}<p class="empty">No profiles yet. Without one every route is on-demand. Add profiles under <code>modelLifecycle.profiles</code>.</p>{% endif %}
+
+<section class="panel" aria-labelledby="d-h">
+  <h2 id="d-h">What the gateway actually served</h2>
+  <p>{{ source_line(demand) }}</p>
+  {% if demand.data %}<ul class="plain">{% for a, n in demand.data|dictsort(by="value", reverse=true) %}<li><code>{{ a }}</code>: {{ n|round|int }} requests</li>{% endfor %}</ul>
+  <p class="muted">Shown beside the plan, not fed into it: profile weights from demand come once there are weeks of data (TM-0931).</p>{% endif %}
+</section>
+
+{% for x in plans %}{% set p = x.plan %}
+<section class="panel" aria-labelledby="p-{{ x.node.id }}-h">
+  <h2 id="p-{{ x.node.id }}-h">{{ x.node.name }}</h2>
+  <p>{% if p.usable_gib %}Held in memory: {{ p.pinned_gib }} GiB, plus room for the largest on-demand model ({{ p.largest_on_demand_gib }} GiB), of {{ p.usable_gib }} GiB usable.{% else %}No memory figure for this node, so nothing was checked.{% endif %}</p>
+  {% for w in p.warnings %}<p>{{ badge("warning", "Check this") }} {{ w }}</p>{% endfor %}
+  <div class="table-wrap" role="region" aria-labelledby="p-{{ x.node.id }}-cap" tabindex="0">
+  <table>
+    <caption id="p-{{ x.node.id }}-cap">Residency plan for {{ x.node.name }}</caption>
+    <thead><tr><th scope="col">Alias</th><th scope="col">Engine</th><th scope="col">Priority</th><th scope="col">Asked</th><th scope="col">Planned</th></tr></thead>
+    <tbody>{% for r in p.placements %}<tr><th scope="row"><code>{{ r.alias }}</code></th><td>{{ r.engine }}</td><td>{{ r.priority if r.priority < 9 else "-" }}</td><td>{{ r.want if r.got != "unprofiled" else "-" }}</td><td>{{ r.got if r.got != "unprofiled" else "not in this profile: as configured today" }}{% if r.why %}<br><span class="muted">{{ r.why }}</span>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table>
+  </div>
+  {% if x.swap %}<details><summary>llama-swap configuration for the mlx-lm and llama-server models</summary>
+<pre tabindex="0"><code>{{ x.swap }}</code></pre></details>{% endif %}
+  {% if x.ollama %}<details><summary>Ollama settings (route keep_alive and the daemon's model ceiling)</summary>
+<pre tabindex="0"><code>{{ x.ollama }}</code></pre></details>{% endif %}
+</section>
+{% endfor %}
+{% endblock %}

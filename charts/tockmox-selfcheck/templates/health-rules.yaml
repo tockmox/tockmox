@@ -1,0 +1,110 @@
+{{- /*
+AND, not the capability tri-state, and the difference is the point: healthRules
+asks "do you want these rules" and serviceMonitors asks "is there anything to
+evaluate them". Both have to be yes. Someone running their own Prometheus
+operator sets apps.serviceMonitors.enabled and still gets these.
+*/ -}}
+{{- $monitors := include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") }}
+{{- if and .Values.apps.healthRules.enabled $monitors }}
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  # No explicit namespace: lands in the release namespace. Prometheus discovers
+  # it anywhere because the observability layer sets
+  # ruleSelectorNilUsesHelmValues: false.
+  name: tockmox-selfcheck
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    prometheus: kube-prometheus-stack
+    role: alert-rules
+spec:
+  groups:
+    - name: tockmox.selfcheck
+      interval: 1m
+      rules:
+        # ---- the checker-liveness axis ----
+        - alert: TockmoxSelfCheckStale
+          # Watches the HEARTBEAT, not an unrelated scrape target ... and this
+          # is the third expression to claim that, so the reasoning is spelled
+          # out. Two prior attempts each measured something adjacent:
+          #   up{job=~".*alertmanager.*"}    ... whether AM is scraped, not
+          #                                     whether the heartbeat runs.
+          #   absent(ALERTS{alertname=...})  ... ALERTS holds only alerts
+          #                                     PROMETHEUS evaluates. An alert
+          #                                     POSTed to Alertmanager's API
+          #                                     never appears there, so this
+          #                                     fired forever while the
+          #                                     heartbeat worked.
+          # What provably tracks the heartbeat: the CronJob runs `set -eu` and
+          # exits nonzero when the POST fails, so its last SUCCESS timestamp
+          # (kube-state-metrics) moves only when Alertmanager accepted a beat.
+          # The absent() arm fires when the metric itself is gone ... a dead
+          # kube-state-metrics also means nothing is watching.
+          expr: >-
+            (time() - max(kube_cronjob_status_last_successful_time{namespace="{{ .Release.Namespace }}", cronjob="tockmox-heartbeat"}))
+              > {{ .Values.staleAfterSeconds }}
+            or
+            absent(kube_cronjob_status_last_successful_time{namespace="{{ .Release.Namespace }}", cronjob="tockmox-heartbeat"}) == 1
+          # `for` MUST outlast the heartbeat's own schedule, and 5m did not.
+          # The absent() arm above is true from the moment this rule loads until
+          # the FIRST successful tick, and the CronJob runs every 15 minutes ...
+          # so on a cold install this fired at 5 minutes, at severity critical,
+          # and stayed firing until the first tick up to ten minutes later.
+          # Measured end to end on a greenfield 2026-09-12: cluster up 00:46,
+          # alert firing from ~00:52, first heartbeat Job completed 01:01:25,
+          # metric appeared, alert cleared by 01:01:29. Nothing was wrong at any
+          # point.
+          #
+          # That is the same failure mode as the KubeJobFailed noise fixed on
+          # 2026-09-12 and a DIFFERENT cause: that one was the first tick
+          # FAILING because Alertmanager was not up yet; this is there being no
+          # first tick yet at all. An alert that fires on every correct install,
+          # at the exact moment an operator first looks at their alerts, trains
+          # them to discount it ... which is the one thing a self-check must
+          # never do.
+          #
+          # 20m covers the 15-minute schedule plus a margin for a slow first
+          # sync. It does NOT weaken real staleness detection: that is the
+          # `> staleAfterSeconds` arm above (45 minutes by default), which is
+          # unchanged and is what catches a heartbeat that stops arriving.
+          for: 20m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Tockmox self-check has gone silent"
+            description: >-
+              No successful heartbeat for {{ div .Values.staleAfterSeconds 60 }}
+              minutes. The platform is not necessarily broken ... but nothing is
+              watching it, which means a green dashboard is currently
+              meaningless. Treat this as an outage of the monitoring plane.
+
+        # ---- the subject-health axis ----
+        - alert: TockmoxTargetsDown
+          expr: |
+            (count by (job) (up == 0)) > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Scrape target {{ "{{ $labels.job }}" }} is down"
+            description: >-
+              One or more targets in job {{ "{{ $labels.job }}" }} have failed
+              scraping for 10 minutes.
+
+        - alert: TockmoxPersistentVolumeFillingUp
+          expr: |
+            (
+              kubelet_volume_stats_available_bytes
+              / kubelet_volume_stats_capacity_bytes
+            ) < 0.10
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "PVC {{ "{{ $labels.persistentvolumeclaim }}" }} is over 90% full"
+            description: >-
+              Volume {{ "{{ $labels.namespace }}" }}/{{ "{{ $labels.persistentvolumeclaim }}" }}
+              has under 10% free. Storage that fills silently takes the
+              workload with it.
+{{- end }}

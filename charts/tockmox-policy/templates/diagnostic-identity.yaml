@@ -1,0 +1,164 @@
+{{- if .Values.apps.diagnostic_identity.enabled }}
+{{- $ns := .Values.namespaces.diagnostic_identity }}
+{{- /*
+A read-only identity for automated agents.
+
+Read-only BY CONSTRUCTION, not by policy: the ClusterRole grants get, list and
+watch and nothing else, so an attempted write fails at the API server rather
+than depending on the caller behaving. Secrets are excluded from the core group
+deliberately ... read-only should not mean read-everything.
+
+Network isolation is the other half. Egress is limited to DNS, the API server
+and in-cluster telemetry. With diagnosticIdentity.apiServerCIDRs set, that is
+literally true; with it empty (the default) the "API server" rule is the whole
+serviceCIDR and lanCIDR on 443/6443, and an HTTPS forwarder on the LAN is a path
+out. See the rule below and TM-0273 fix 2.
+
+Tockmox ships the cage. What runs in it is your choice.
+*/ -}}
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-diagnostic
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tockmox-diagnostic-readonly
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+rules:
+  # Core group enumerated explicitly. NOT "" + resources: ["*"], because that
+  # would include secrets.
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log
+      - services
+      - endpoints
+      - namespaces
+      - nodes
+      - events
+      - configmaps
+      - persistentvolumes
+      - persistentvolumeclaims
+      - serviceaccounts
+      - replicationcontrollers
+      - resourcequotas
+      - limitranges
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps", "batch", "networking.k8s.io", "policy", "storage.k8s.io",
+                "apiextensions.k8s.io", "rbac.authorization.k8s.io",
+                "admissionregistration.k8s.io", "autoscaling",
+                "coordination.k8s.io", "discovery.k8s.io", "metrics.k8s.io"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  {{- range .Values.diagnosticIdentity.extraApiGroups }}
+  - apiGroups: [{{ . | quote }}]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tockmox-diagnostic-readonly
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tockmox-diagnostic-readonly
+subjects:
+  - kind: ServiceAccount
+    name: tockmox-diagnostic
+    namespace: {{ $ns }}
+{{- /*
+The ServiceAccount and its ClusterRole are the diagnostic identity; these two
+NetworkPolicies are what keep it from reaching anything it was not granted.
+They follow the networkPolicy capability rather than the identity itself,
+because on a CNI that does not enforce NetworkPolicy they were never doing
+the containing anyway ... and the read-only RBAC still holds either way,
+which is what makes dropping them survivable rather than a hole.
+*/ -}}
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "networkPolicy") }}
+---
+# Default deny, both directions.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# Then allow exactly three things.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-api-telemetry
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    # 1. cluster DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # 2. the Kubernetes API.
+    #
+    # diagnosticIdentity.apiServerCIDRs SET: exactly those addresses, on 443 and
+    # 6443. This is the rule the comment above always claimed.
+    #
+    # EMPTY (the default, and the pre-0.7.0 behaviour): the WHOLE serviceCIDR and
+    # the WHOLE lanCIDR on the same ports. That is wider than "the API server":
+    # any HTTPS forwarder or service on the LAN answers on 443, so "no path to
+    # the internet" holds for direct egress and not through such a host. The
+    # API server's address is site-specific, so it cannot be defaulted here;
+    # the key's comment in values.yaml says how to read it from the cluster.
+    - to:
+        {{- if .Values.diagnosticIdentity.apiServerCIDRs }}
+        {{- range .Values.diagnosticIdentity.apiServerCIDRs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+        {{- else }}
+        - ipBlock:
+            cidr: {{ .Values.global.serviceCIDR }}
+        - ipBlock:
+            cidr: {{ .Values.global.lanCIDR }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+    # 3. in-cluster telemetry
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.monitoring }}
+      ports:
+        - protocol: TCP
+          port: 9090
+        - protocol: TCP
+          port: 3100
+{{- end }}
+
+{{- end }}

@@ -1,0 +1,85 @@
+# SPDX-License-Identifier: Apache-2.0
+# How each serving engine is reached through the gateway (REQ-0047). Generated from the Tockmox UI's engine table
+# (app/nodes.py ENGINES) so the chart and the UI derive the same model_list; tests/golden/inference-nodes.yaml
+# is the check that they still do. provider: the LiteLLM provider prefix per route kind (absent = the engine cannot
+# serve that kind). base_path: appended to the endpoint URL; empty means "/v1" except for the ollama, ollama_chat and
+# infinity providers, which take the bare URL.
+exo:
+  base_path:
+    chat: /v1
+    embedding: /v1
+    rerank: ''
+  provider:
+    chat: openai
+llama-server:
+  base_path:
+    chat: /v1
+    embedding: /v1
+    rerank: ''
+  provider:
+    chat: openai
+    embedding: openai
+    rerank: infinity
+lm-studio:
+  base_path:
+    chat: /v1
+    embedding: /v1
+    rerank: ''
+  provider:
+    chat: openai
+    embedding: openai
+mlx-lm:
+  base_path:
+    chat: /v1
+    embedding: /v1
+    rerank: ''
+  provider:
+    chat: openai
+nim:
+  base_path:
+    chat: /v1
+    embedding: /v1
+    rerank: ''
+  provider:
+    chat: openai
+    embedding: openai
+ollama:
+  base_path:
+    chat: ''
+    embedding: ''
+    rerank: ''
+  provider:
+    chat: ollama_chat
+    embedding: ollama
+openai-compatible:
+  base_path:
+    chat: /v1
+    embedding: /v1
+    rerank: ''
+  provider:
+    chat: openai
+    embedding: openai
+    rerank: infinity
+sglang:
+  base_path:
+    chat: /v1
+    embedding: /v1
+    rerank: ''
+  provider:
+    chat: openai
+    embedding: openai
+tgi:
+  base_path:
+    chat: /v1
+    embedding: /v1
+    rerank: ''
+  provider:
+    chat: openai
+vllm:
+  base_path:
+    chat: /v1
+    embedding: /v1
+    rerank: ''
+  provider:
+    chat: openai
+    embedding: openai

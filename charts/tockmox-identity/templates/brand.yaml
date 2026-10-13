@@ -1,0 +1,190 @@
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "authentik")) .Values.brand.enabled }}
+{{- /*
+Brand asset server.
+
+WHY A SERVER AND NOT A FILE PATH. Authentik's brand serializer takes FULL URLs
+for branding_logo, branding_favicon and branding_default_flow_background, and
+rejects absolute paths. So the assets have to be fetchable over HTTP from
+somewhere. "Somewhere" must not be a CDN: a login page that fetches its logo
+from the internet is a login page that looks broken during an outage, on an
+air-gapped install, and on the exact day you are demonstrating that this thing
+runs without the internet.
+
+So: about seventy kilobytes of SVG in a ConfigMap behind a stock nginx, mounted
+read-only, no PVC, no image build, nothing fetched at runtime.
+
+SAME ORIGIN, ON PURPOSE. It is served at /tockmox on the Authentik host rather
+than on a hostname of its own. One DNS name, one certificate, and the login
+page's asset loads are same-origin so no CORS header has to be right for the
+page to look correct.
+
+The assets are the canonical Tockmox brand kit. They are trademarks: see
+TRADEMARKS.md. A modified distribution must replace them.
+*/ -}}
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-brand-assets
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-brand
+data:
+  {{- /* Sourced from files rather than pasted inline: a 4KB SVG inside a
+         values-adjacent template is unreviewable, and .Files.Glob keeps the
+         asset and the object that serves it from drifting apart. */}}
+  {{- (.Files.Glob "brand/*.svg").AsConfig | nindent 2 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-brand-nginx
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-brand
+data:
+  default.conf: |
+    server {
+      # 8080, not 80: the container runs unprivileged and cannot bind low ports.
+      listen 8080;
+      server_name _;
+
+      # Probe target. Cheap, and not under /tockmox so a path-prefix mistake
+      # cannot make the pod look unhealthy.
+      location = /healthz {
+        access_log off;
+        return 200 "ok\n";
+        add_header Content-Type text/plain;
+      }
+
+      location /tockmox/logos/ {
+        alias /srv/logos/;
+        types { }
+        default_type image/svg+xml;
+        # Immutable content addressed by name; a brand change ships a new
+        # ConfigMap and a new pod, so a long cache is safe.
+        add_header Cache-Control "public, max-age=86400";
+        # Assets only, never credentials. Present so another app can use the
+        # marks cross-origin; the login page itself is same-origin and does
+        # not depend on this.
+        add_header Access-Control-Allow-Origin "*";
+      }
+
+      # Everything else is not ours to serve.
+      location / { return 404; }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tockmox-brand
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-brand
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-brand
+  template:
+    metadata:
+      labels:
+        {{- include "tockmox.labels" . | nindent 8 }}
+        app.kubernetes.io/name: tockmox-brand
+      annotations:
+        tockmox.com/assets-hash: {{ (.Files.Glob "brand/*.svg").AsConfig | sha256sum | trunc 16 | quote }}
+    spec:
+      # No Kubernetes API calls: a ServiceAccount of its own and no token (TM-0759,
+      # CIS 5.1.5 and 5.1.6).
+      serviceAccountName: tockmox-brand
+      automountServiceAccountToken: false
+      priorityClassName: {{ .Values.brand.priorityClassName }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101      # the nginx user baked into nginx-unprivileged
+        runAsGroup: 101
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: nginx
+          image: {{ include "tockmox.image" (dict "ctx" $ "repo" .Values.brand.image) }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d
+              readOnly: true
+            - name: logos
+              mountPath: /srv/logos
+              readOnly: true
+            # nginx writes its pid and its temp directories at startup even
+            # when it serves nothing but static files, so a read-only root
+            # needs one writable path. THAT PATH IS /tmp, and only /tmp.
+            #
+            # This is worth stating because the obvious answer is wrong. The
+            # image is COMPILED with --http-proxy-temp-path=/var/cache/nginx/
+            # and friends, so `nginx -V` and every generic "nginx read-only
+            # root" guide point you at /var/cache/nginx. But
+            # nginx-unprivileged's own /etc/nginx/nginx.conf OVERRIDES all six
+            # of them plus the pid to /tmp, precisely because uid 101 cannot be
+            # assumed to own /var/cache. Verified by exec into the image:
+            #   pid /tmp/nginx.pid; proxy_temp_path /tmp/proxy_temp;
+            #   client_body_temp_path /tmp/client_temp; ...
+            # Mounting /var/cache/nginx and /var/run instead produced
+            #   [emerg] mkdir() "/tmp/proxy_temp" failed (30: Read-only file system)
+            # and a pod that never served a byte while the login page and every
+            # application tile rendered a broken-image icon.
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            {{- toYaml .Values.brand.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: tockmox-brand-nginx
+        - name: logos
+          configMap:
+            name: tockmox-brand-assets
+        - name: tmp
+          emptyDir: {}
+---
+# TM-0759: this workload's own identity, with no token. The namespace's `default`
+# account is not used (CIS 5.1.5 and 5.1.6).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-brand
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tockmox-brand
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-brand
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: tockmox-brand
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+{{- end }}

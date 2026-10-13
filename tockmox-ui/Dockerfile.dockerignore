@@ -1,0 +1,8 @@
+# The build context is the repository root; send only what the Dockerfile copies.
+# (BuildKit reads <Dockerfile>.dockerignore; the legacy builder ignores this file
+# and sends the whole tree, which is slower and changes nothing in the image.)
+**
+!CHANGELOG.md
+!tockmox-ui/requirements.txt
+!tockmox-ui/app/**
+**/__pycache__

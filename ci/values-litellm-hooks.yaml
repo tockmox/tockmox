@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE SITE-HOOKS FIXTURE (TM-0787). Applied ON TOP of ci/values.yaml by
+# tools/check-litellm-hooks.sh, which asserts on the RENDER that a site can load
+# a pre-call policy gate and a logging hook through documented values alone.
+#
+# It is deliberately NOT part of ci/values-all-on.yaml: hooks are site code, so
+# there is no shipped default for "all on" to switch on, and the default render
+# must stay hook-free (the gate asserts that too).
+#
+# The two example files are generic. They exist to be rendered, not to be run
+# against a live proxy. The 0.7.0 lab pass loaded them on a live install: the
+# gate refused a request (HTTP 400) and the logging line appeared at WARNING.
+
+modelGateway:
+  hooks:
+    files:
+      example_gate.py: |
+        # Example pre-call gate: refuses any request whose text contains a marker.
+        from litellm.caching.dual_cache import DualCache
+        from litellm.integrations.custom_logger import CustomLogger
+        from fastapi import HTTPException
+
+        MARKER = "EXAMPLE-BLOCK-ME"
+
+
+        class ExampleGate(CustomLogger):
+            async def async_pre_call_hook(self, user_api_key_dict, cache: DualCache, data: dict, call_type):
+                if MARKER in str(data.get("messages", "")):
+                    raise HTTPException(status_code=400, detail="refused by the example gate")
+                return data
+
+
+        gate = ExampleGate()
+      example_log.py: |
+        # Example logging hook: writes one line per completed call.
+        #
+        # It logs at WARNING on purpose. The proxy runs with LITELLM_LOG=INFO
+        # and this logger has no handler of its own, so an INFO record from it
+        # is dropped and the hook looks as if it never fired (0.7.0 lab pass,
+        # finding F5: the callback ran, the line was never shown). WARNING
+        # reaches the pod log at default settings. Use a level you can see.
+        import logging
+
+        from litellm.integrations.custom_logger import CustomLogger
+
+        log = logging.getLogger("example-hook")
+
+
+        class ExampleLog(CustomLogger):
+            async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+                log.warning("completion model=%s", kwargs.get("model"))
+
+
+        logger = ExampleLog()
+
+litellm:
+  proxy_config:
+    litellm_settings:
+      callbacks:
+        - hooks.example_gate.gate
+        - hooks.example_log.logger

@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Open WebUI's OIDC configuration, rendered by the PARENT chart because the
+# provider URL derives from global.internalDomain ... same reasoning as the
+# Ingresses and Grafana's sso-env. Injected via the upstream chart's
+# `extraEnvFrom` (optional ref), so sso off = local login only, nothing
+# breaks. Client secret arrives separately from the operator-created
+# `tockmox-sso-openwebui` Secret.
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "openWebui")) .Values.sso.enabled }}
+{{- $scheme := ternary "https" "http" (ne .Values.global.certIssuer "") }}
+{{- $domain := .Values.global.internalDomain }}
+{{- $authHost := printf "auth.%s" $domain }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tockmox-ai-sso-env
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  # Read by the `tockmox-trust-bundle` initContainer, NOT by Open WebUI.
+  # That container cannot be made conditional at render time ... this subchart
+  # passes extraInitContainers through `toYaml` with no `tpl` ... so the
+  # decision "is a CA coming, or is there genuinely none?" has to reach it at
+  # RUNTIME. Without it the container cannot tell a CA that is three seconds
+  # away from a plain-HTTP install where none will ever arrive, so it either
+  # shrugs and loses the race (what it did before 2026-09-15) or waits out a
+  # timeout on every evaluation install. This key is the difference. TM-0632.
+  TOCKMOX_EXPECT_CA: {{ ternary "true" "false" (ne .Values.global.certIssuer "") | quote }}
+  ENABLE_OAUTH_SIGNUP: "true"
+  OAUTH_PROVIDER_NAME: "Tockmox SSO"
+  OAUTH_CLIENT_ID: {{ .Values.sso.clientId | quote }}
+  OPENID_PROVIDER_URL: "{{ $scheme }}://{{ $authHost }}/application/o/{{ .Values.sso.clientId }}/.well-known/openid-configuration"
+  OAUTH_SCOPES: "openid email profile"
+  # Group -> role mapping: tockmox-admins arrive as admin, tockmox-users as
+  # user; anyone else the provider admits gets the pending role.
+  ENABLE_OAUTH_ROLE_MANAGEMENT: "true"
+  OAUTH_ROLES_CLAIM: "groups"
+  OAUTH_ADMIN_ROLES: {{ .Values.sso.adminGroup | quote }}
+  OAUTH_ALLOWED_ROLES: "{{ .Values.sso.adminGroup }},{{ .Values.sso.userGroup }}"
+  # OAuth users merge with an existing local account of the same email
+  # rather than colliding with it.
+  {{- /* A value, default true (TM-0669); the risk is named at sso.mergeAccountsByEmail in values.yaml. */}}
+  OAUTH_MERGE_ACCOUNTS_BY_EMAIL: {{ .Values.sso.mergeAccountsByEmail | quote }}
+{{- end }}

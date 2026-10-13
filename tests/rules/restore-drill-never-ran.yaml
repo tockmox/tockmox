@@ -1,0 +1,107 @@
+# TockmoxRestoreDrillNeverRan ... TM-0851.
+#
+# DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
+#
+# THE DEFECT. The rule was `absent(<a drill Job completed>)` with `for: 26h`,
+# written as if the drill ran daily. It runs weekly (`30 4 * * 1`), so an
+# install made on a Tuesday fired for six days before the first drill could
+# have run. Seen on the reference site 2026-10-03, 32 hours after the AI window.
+#
+# THE FIX keys the rule on the CronJob's own schedule, read from
+# kube-state-metrics, so it needs no knowledge of the cadence:
+#   arm A: scheduled more than 26h ago, and still no completed drill Job
+#   arm B: the next scheduled time is more than an hour in the past (a
+#          suspended CronJob, or one the controller never picks up)
+#
+# EVERY CASE ASSERTS ONE DIRECTION, AND THE FILE ASSERTS BOTH. Cases 1 and 4
+# are the silences (a fresh install, a drill that has run); cases 2 and 3 are
+# the firings, one per arm. Case 1 at 30h is the exact moment the OLD rule
+# fired, so a revert to the old expression turns this file red.
+#
+# Timing frame: promtool's clock starts at 0, so every timestamp below is
+# seconds since the start of the test, and `time()` at eval_time 30h is 108000.
+# The interval is 5m, inside Prometheus's 5m lookback, so a series is present
+# at every evaluation rather than only on the hour.
+#
+# The selectors are those of the RENDER: check-alert-rules.sh renders tockmox-ai
+# with ci/values.yaml, where namespaces.ai is `tockmox-ai` and the drill's
+# database is `tockmox-litellm-db`.
+
+evaluation_interval: 5m
+
+tests:
+  # CASE 1: a fresh install, first slot five days away. Silent throughout,
+  # including at 30h, where the old `for: 26h` rule was firing.
+  - interval: 5m
+    input_series:
+      - series: 'kube_cronjob_next_schedule_time{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '432000x1500'
+    alert_rule_test:
+      - eval_time: 30h
+        alertname: TockmoxRestoreDrillNeverRan
+        exp_alerts: []
+      - eval_time: 4d
+        alertname: TockmoxRestoreDrillNeverRan
+        exp_alerts: []
+
+  # CASE 2 (arm B): the slot at 24h passed and the CronJob was never scheduled,
+  # which is what a suspended CronJob looks like. Silent at 24h30m (the slot is
+  # only 30 minutes gone), firing by 26h (more than an hour past, plus `for`).
+  - interval: 5m
+    input_series:
+      - series: 'kube_cronjob_next_schedule_time{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '86400x1500'
+    alert_rule_test:
+      - eval_time: 24h30m
+        alertname: TockmoxRestoreDrillNeverRan
+        exp_alerts: []
+      - eval_time: 26h
+        alertname: TockmoxRestoreDrillNeverRan
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              namespace: tockmox-ai
+            exp_annotations:
+              summary: "The restore drill has never run on this cluster"
+              description: "The drill CronJob has passed a scheduled time and no drill Job has ever completed: either it was scheduled more than a day ago and the Job never finished, or the slot passed without the CronJob being scheduled at all. Check that the CronJob is not suspended, that its schedule is sane, and the drill Job's events and log."
+
+  # CASE 3 (arm A): scheduled at 1h, so the next slot is a week out and arm B
+  # cannot fire; the Job never completes. Silent at 20h, firing at 28h (26h
+  # after the schedule, plus `for`).
+  - interval: 5m
+    input_series:
+      - series: 'kube_cronjob_status_last_schedule_time{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '3600x1500'
+      - series: 'kube_cronjob_next_schedule_time{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '608400x1500'
+    alert_rule_test:
+      - eval_time: 20h
+        alertname: TockmoxRestoreDrillNeverRan
+        exp_alerts: []
+      - eval_time: 28h
+        alertname: TockmoxRestoreDrillNeverRan
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              namespace: tockmox-ai
+            exp_annotations:
+              summary: "The restore drill has never run on this cluster"
+              description: "The drill CronJob has passed a scheduled time and no drill Job has ever completed: either it was scheduled more than a day ago and the Job never finished, or the slot passed without the CronJob being scheduled at all. Check that the CronJob is not suspended, that its schedule is sane, and the drill Job's events and log."
+
+  # CASE 4: the same schedule as case 3, and a drill Job completed at 2h. The
+  # absent() arm is false, so nothing fires however long after.
+  - interval: 5m
+    input_series:
+      - series: 'kube_cronjob_status_last_schedule_time{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '3600x1500'
+      - series: 'kube_cronjob_next_schedule_time{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '608400x1500'
+      - series: 'kube_job_status_completion_time{namespace="tockmox-ai", job_name="tockmox-litellm-db-drill-29330000"}'
+        values: '_x24 7200x1476'
+    alert_rule_test:
+      - eval_time: 28h
+        alertname: TockmoxRestoreDrillNeverRan
+        exp_alerts: []
+      - eval_time: 4d
+        alertname: TockmoxRestoreDrillNeverRan
+        exp_alerts: []

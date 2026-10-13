@@ -1,0 +1,184 @@
+{{- $db := .Values.databaseBackup | default dict -}}
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "authentik")) .Values.capabilities.dataProtection.enabled ($db.enabled | default false) }}
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE IDENTITY DATABASE'S BACKUP, closing the one row of the backup table
+# that had none: Authentik runs on the chart's bundled (Bitnami) Postgres,
+# which has no CNPG operator underneath and therefore no Barman path. Until
+# the planned CNPG migration, this is the honest bridge: a nightly pg_dump
+# shipped to the same object store everything else backs up to.
+#
+# SEVEN-OBJECT ROTATION, NOT A RETENTION POLICY. The dump lands at
+# authentik-db/authentik-<weekday>.sql.gz, so day eight overwrites day one.
+# Self-pruning with no ListObjects/DeleteObjects machinery, a fixed storage
+# ceiling, and a seven-day restore window ... stated plainly rather than
+# implied. Need more than seven days? That is the CNPG migration talking.
+#
+# THE UPLOADER IS curl, NOT an AWS SDK. curl >= 7.75 signs SigV4 natively
+# (--aws-sigv4), Garage accepts it, and it means no new image and no
+# network fetch of a client library ... the Dark Site posture applied to a
+# backup job. Verified against the shipped Garage: PUT then HEAD, and the
+# byte counts must match or the job fails ... an upload nobody measured is
+# the green-backup-job class this platform keeps writing checks against.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tockmox-authentik-db-backup
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  schedule: {{ $db.schedule | default "10 3 * * *" | quote }}
+  timeZone: {{ .Values.global.timezone | quote }}
+  suspend: {{ $db.suspend | default false }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 900
+      template:
+        metadata:
+          labels:
+            {{- include "tockmox.labels" . | nindent 12 }}
+            app.kubernetes.io/name: tockmox-authentik-db-backup
+        spec:
+          restartPolicy: Never
+          # No Kubernetes API calls: a ServiceAccount of its own and no token (TM-0759,
+          # CIS 5.1.5 and 5.1.6).
+          serviceAccountName: tockmox-authentik-db-backup
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            seccompProfile: { type: RuntimeDefault }
+          initContainers:
+            - name: dump
+              image: {{ include "tockmox.image" (dict "ctx" $ "repo" ($db.postgresImage | default "docker.io/library/postgres:17.11-bookworm")) }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              resources:
+                requests: { cpu: 50m, memory: 128Mi }
+                limits:   { memory: 256Mi }
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: tockmox-authentik-postgres
+                      key: password
+              volumeMounts:
+                - { name: dump, mountPath: /dump }
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  pg_dump -h tockmox-identity-postgresql -U authentik -d authentik \
+                    | gzip > /dump/authentik.sql.gz
+                  SIZE=$(stat -c%s /dump/authentik.sql.gz)
+                  echo "dump: ${SIZE} bytes"
+                  # An empty-but-valid gzip is ~20 bytes; a real Authentik
+                  # schema dumps orders of magnitude more. The floor catches
+                  # "connected to the wrong/empty database and succeeded".
+                  [ "$SIZE" -ge 10000 ] || { echo "dump implausibly small"; exit 1; }
+          containers:
+            - name: upload
+              image: {{ include "tockmox.image" (dict "ctx" $ "repo" ($db.uploaderImage | default "alpine/k8s:1.37.1")) }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              resources:
+                requests: { cpu: 20m, memory: 64Mi }
+                limits:   { memory: 128Mi }
+              env:
+                - name: AK
+                  valueFrom:
+                    secretKeyRef:
+                      name: tockmox-garage-credentials
+                      key: ACCESS_KEY_ID
+                - name: SK
+                  valueFrom:
+                    secretKeyRef:
+                      name: tockmox-garage-credentials
+                      key: ACCESS_SECRET_KEY
+              volumeMounts:
+                - { name: dump, mountPath: /dump, readOnly: true }
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  EP={{ $db.endpoint | default "http://tockmox-garage.tockmox-platform.svc:3900" | quote }}
+                  BUCKET={{ $db.bucket | default "tockmox-backups" | quote }}
+                  DOW=$(date -u +%a | tr 'A-Z' 'a-z')
+                  KEY="authentik-db/authentik-${DOW}.sql.gz"
+                  SIZE=$(stat -c%s /dump/authentik.sql.gz)
+                  curl -sf --aws-sigv4 "aws:amz:garage:s3" --user "${AK}:${SK}" \
+                    -T /dump/authentik.sql.gz "${EP}/${BUCKET}/${KEY}"
+                  REMOTE=$(curl -sfI --aws-sigv4 "aws:amz:garage:s3" --user "${AK}:${SK}" \
+                    "${EP}/${BUCKET}/${KEY}" | tr -d '\r' | awk 'tolower($1)=="content-length:"{print $2}')
+                  echo "uploaded ${KEY}: local=${SIZE} remote=${REMOTE}"
+                  [ "$SIZE" = "$REMOTE" ] || { echo "byte counts differ; the upload did not happen the way it claimed"; exit 1; }
+          volumes:
+            - name: dump
+              emptyDir: {}
+---
+# TM-0759: this workload's own identity, with no token. The namespace's `default`
+# account is not used (CIS 5.1.5 and 5.1.6).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-authentik-db-backup
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+{{- if .Values.capabilities.observability.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tockmox-authentik-db-backup-freshness
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: tockmox.identity.db-backup
+      interval: 5m
+      rules:
+        - alert: TockmoxAuthentikBackupStale
+          # Daily cadence, alert past two cycles plus slack (the platform's
+          # freshness convention): one missed slot to a maintenance window
+          # stays silent, two never does.
+          expr: >-
+            time() - max(
+              kube_job_status_completion_time{namespace={{ .Values.namespaces.identity | quote }}, job_name=~"tockmox-authentik-db-backup-.*"}
+              and on (namespace, job_name)
+              kube_job_status_succeeded{namespace={{ .Values.namespaces.identity | quote }}, job_name=~"tockmox-authentik-db-backup-.*"} > 0
+            ) > (50 * 3600)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "No successful Authentik database backup in 50 hours"
+            description: >-
+              The identity database's nightly dump has not succeeded in over
+              two cycles. The seven-day rotation window is shrinking from the
+              far end. Check the last Job's logs in
+              {{ .Values.namespaces.identity }}.
+        - alert: TockmoxAuthentikBackupNeverRan
+          expr: >-
+            absent(kube_job_status_completion_time{namespace={{ .Values.namespaces.identity | quote }}, job_name=~"tockmox-authentik-db-backup-.*"})
+          for: 26h
+          labels:
+            severity: info
+          annotations:
+            summary: "The Authentik database backup has never run"
+            description: >-
+              The CronJob exists but no Job has ever completed. Expected on
+              the first day; after that, check suspend and the schedule.
+{{- end }}
+{{- end }}

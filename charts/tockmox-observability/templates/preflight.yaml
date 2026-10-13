@@ -1,0 +1,157 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+Render-time guards for the observability layer. Emits no objects.
+
+IN-CLUSTER TRUST. Grafana performs the OIDC token and userinfo calls itself,
+server side, so the CA has to be trusted inside its container and not only in
+the operator's browser.
+
+The list-valued keys are replaced wholesale by a site that sets them, so a
+partial override drops the shipped entries without saying so. `env` is a map and
+merges, so that one can only be lost by an explicit null; it is checked anyway.
+
+There is no initContainer here. Grafana is Go, and Go reads SSL_CERT_FILE and
+the default certificate directories and unions them, so the CA alone gives the
+CA plus every public root. Python is the exception, not the rule, and the AI
+layer is where that exception lives.
+
+The failure this catches is quiet: SSO breaks at the token exchange with
+CERTIFICATE_VERIFY_FAILED while the local admin login keeps working, so Grafana
+reports healthy and only federated users are locked out.
+*/ -}}
+{{- $kps := index .Values "kube-prometheus-stack" | default dict -}}
+{{- $graf := $kps.grafana | default dict -}}
+{{- if (include "tockmox.appEnabled" (dict "ctx" $ "app" "kubePrometheusStack")) -}}
+{{- $vols := $graf.extraContainerVolumes | default list -}}
+{{- $mounts := $graf.extraVolumeMounts | default list -}}
+{{- $env := $graf.env | default dict -}}
+{{- $hasCaVol := false -}}
+{{- range $vols }}{{- if eq .name "tockmox-ca" }}{{- $hasCaVol = true }}{{- end }}{{- end -}}
+{{- $hasMount := false -}}
+{{- range $mounts }}{{- if and (eq .name "tockmox-ca") (eq .mountPath "/etc/tockmox/ca") }}{{- $hasMount = true }}{{- end }}{{- end -}}
+{{- include "tockmox.trustBundle.assertWiring" (dict "component" "Grafana" "checks" (list
+    (dict "present" $hasCaVol "detail" "kube-prometheus-stack.grafana.extraContainerVolumes has no `tockmox-ca` entry, so the CA is never presented to the container")
+    (dict "present" $hasMount "detail" "kube-prometheus-stack.grafana.extraVolumeMounts does not mount `tockmox-ca` at /etc/tockmox/ca")
+    (dict "present" (eq (get $env "SSL_CERT_FILE") "/etc/tockmox/ca/ca.crt") "detail" "kube-prometheus-stack.grafana.env does not set SSL_CERT_FILE to /etc/tockmox/ca/ca.crt, which is what Go reads")
+    (dict "present" (or (not .Values.global.certIssuer) (contains "wait-for-ca" (toYaml ($graf.extraInitContainers | default list)))) "detail" "kube-prometheus-stack.grafana.extraInitContainers has no `wait-for-ca` container, so Grafana can start before cert-manager has written the CA, build its Go root pool from the public roots alone and never rebuild it ... SSO then fails permanently while the console reports healthy (TM-0632)")
+  )) -}}
+{{- end -}}
+{{- /*
+THE EMPTY STRING IS NOT THE DEFAULT, and Alertmanager is the one claim in this
+layer that cannot say so for itself.
+
+`ntfy.yaml` and the Prometheus claim both OMIT `storageClassName` when the
+global is unset, which is what selects the cluster default. Alertmanager's claim
+is not written here ... it is a values map handed to kube-prometheus-stack,
+which runs `tpl` over the VALUE and not over the surrounding YAML. So an unset
+global renders `storageClassName: ''`, and Kubernetes reads an empty string as
+"use NO class": dynamic provisioning is off, the claim binds only to a
+pre-existing classless PV, and Alertmanager sits Pending with no event naming a
+cause. A `{{ if }}` in the values file cannot fix it, because a values file is
+data.
+
+The platform layer's preflight does not cover this. That guard lives in
+tockmox-platform, and this layer installs as its own Application, so on a site
+that installs observability without the platform it never renders at all.
+
+Found 2026-09-04 by rendering with the global unset. Under the storage contract
+`global.storageClass` is required anyway, so refusing here costs a correct site
+nothing.
+*/ -}}
+{{- if (include "tockmox.appEnabled" (dict "ctx" $ "app" "kubePrometheusStack")) -}}
+{{- if not (.Values.global.storageClass | default "") -}}
+{{- fail "global.storageClass is empty and kube-prometheus-stack is enabled. Alertmanager's claim would render `storageClassName: \"\"`, which is not `use the cluster default` ... an empty string opts the claim OUT of dynamic provisioning and binds it only to a pre-existing PV that also has no class, so Alertmanager stays Pending forever with nothing in its events explaining why. Name the class you intend in global.storageClass (`local-path` is a legitimate answer if you mean it)." -}}
+{{- end -}}
+{{- end -}}
+{{- /*
+CAPABILITY COHERENCE. A component switched on individually while the capability
+that owns it is off leaves a part with no whole. Failing beats delivering half,
+and beats silently promoting the capability back on because of one key.
+*/ -}}
+{{- include "tockmox.capabilityCoherent" (dict "ctx" $ "capability" "observability" "apps" (list "kubePrometheusStack" "loki" "alloy" "dashboards" "argocdMonitoring")) -}}
+{{- /*
+`serviceMonitors` is deliberately NOT guarded here (TM-0825). Declining the
+observability capability while pinning `apps.serviceMonitors.enabled: true` is
+the documented "run your own Prometheus operator" route: the capability says
+"do not deploy a monitoring stack", the component says "but render the monitors
+and rules for the operator I already have". Refusing it made the route
+unreachable in every layer.
+*/ -}}
+{{- /*
+A GLOBAL THAT MOVED WHILE THE LITERAL BEHIND IT DID NOT (TM-0146).
+
+Three claims in this layer cannot follow the storage globals by themselves:
+Grafana and Loki because their charts do not run `tpl` over the class key, and
+Prometheus because its value is written out to match them (values.yaml says why
+at each key). So each carries the class the reference install uses as a
+literal: Grafana `longhorn`, Prometheus and Loki `local-path`.
+
+That is right for the reference install and wrong for any site whose globals
+name something else, and it fails quietly: the claim asks for a class the site
+never named, and on a cluster without it sits Pending. profiles/minimal.yaml
+and household-sso.yaml shipped exactly this way until 0.8.0, setting
+global.storageClass to `local-path` with Longhorn off while Grafana still asked
+for `longhorn`.
+
+The test below is narrow on purpose. It fires only when a literal is still the
+shipped value AND the global it stands in for says something different. A site
+that has set the literal itself ... the homelab keeps Prometheus and Loki on
+`longhorn` by choice ... has made a decision this guard does not second-guess.
+*/ -}}
+{{- if (include "tockmox.appEnabled" (dict "ctx" $ "app" "kubePrometheusStack")) -}}
+{{- $sc := .Values.global.storageClass | default "" -}}
+{{- $lsc := .Values.global.localStorageClass | default "" -}}
+{{- $gp := $graf.persistence | default dict -}}
+{{- if and $gp.enabled (eq ($gp.storageClassName | default "") "longhorn") $sc (ne $sc "longhorn") -}}
+{{- fail (printf "kube-prometheus-stack.grafana.persistence.storageClassName is still the shipped `longhorn`, but global.storageClass is `%s`. The Grafana chart does not run tpl over this key, so it cannot follow the global by itself: set it to `%s` (or the class you actually mean) in this layer's values. As it stands the claim asks for a class this site does not name and, without Longhorn, Grafana stays Pending (TM-0146)." $sc $sc) -}}
+{{- end -}}
+{{- $ps := ((((($kps.prometheus | default dict).prometheusSpec | default dict).storageSpec | default dict).volumeClaimTemplate | default dict).spec | default dict) -}}
+{{- if and (eq ($ps.storageClassName | default "") "local-path") $lsc (ne $lsc "local-path") -}}
+{{- fail (printf "kube-prometheus-stack.prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName is still the shipped `local-path`, but global.localStorageClass is `%s`. This key is a literal (values.yaml says why), so it does not follow the global: set it to `%s` in this layer's values, or set the global back. As it stands the TSDB asks for a class this site does not name (TM-0146)." $lsc $lsc) -}}
+{{- end -}}
+{{- end -}}
+{{- if (include "tockmox.appEnabled" (dict "ctx" $ "app" "loki")) -}}
+{{- $lsc := .Values.global.localStorageClass | default "" -}}
+{{- $lp := (((.Values.loki | default dict).singleBinary | default dict).persistence | default dict) -}}
+{{- if and (eq ($lp.storageClass | default "") "local-path") $lsc (ne $lsc "local-path") -}}
+{{- fail (printf "loki.singleBinary.persistence.storageClass is still the shipped `local-path`, but global.localStorageClass is `%s`. The Loki chart does not run tpl over this key, so it cannot follow the global by itself: set it to `%s` in this layer's values, or set the global back. As it stands Loki's chunks ask for a class this site does not name (TM-0146)." $lsc $lsc) -}}
+{{- end -}}
+{{- end -}}
+{{- /*
+GRAFANA ON CNPG (TM-0786). Three things live in three places: the database
+(grafanaDatabase, this chart), the env that points Grafana at it and the
+password reference (kube-prometheus-stack.grafana, static subchart values a site
+can replace), and the replica count. Each wrong combination renders cleanly and
+then either keeps Grafana on SQLite while the values say otherwise, or runs two
+Grafanas on one SQLite file, so each is a sentence here.
+*/ -}}
+{{- if (include "tockmox.appEnabled" (dict "ctx" $ "app" "kubePrometheusStack")) -}}
+{{- $gd := .Values.grafanaDatabase | default dict -}}
+{{- $g := (index .Values "kube-prometheus-stack" | default dict).grafana | default dict -}}
+{{- $replicas := int ($g.replicas | default 1) -}}
+{{- if $gd.enabled -}}
+{{- $hasEnv := false -}}
+{{- range ($g.envFromSecrets | default list) }}{{- if eq .name "tockmox-observability-grafana-db-env" }}{{- $hasEnv = true }}{{- end }}{{- end -}}
+{{- if not $hasEnv -}}
+{{- fail "grafanaDatabase.enabled is true, but kube-prometheus-stack.grafana.envFromSecrets has no `tockmox-observability-grafana-db-env` entry, so Grafana never learns where its database is and stays on SQLite while the values say otherwise. envFromSecrets is a list, and a site that sets it replaces the shipped one: restate {name: tockmox-observability-grafana-db-env, optional: true}." -}}
+{{- end -}}
+{{- $pw := dig "GF_DATABASE_PASSWORD" "secretKeyRef" "name" "" ($g.envValueFrom | default dict) -}}
+{{- if ne $pw (printf "%s-app" $gd.name) -}}
+{{- fail (printf "grafanaDatabase.name is %q, so CNPG writes the password to the Secret %q, but kube-prometheus-stack.grafana.envValueFrom.GF_DATABASE_PASSWORD reads %q. Grafana would start with no password and fail to reach its database. Set the secretKeyRef name to %q." $gd.name (printf "%s-app" $gd.name) ($pw | default "nothing") (printf "%s-app" $gd.name)) -}}
+{{- end -}}
+{{- end -}}
+{{- if gt $replicas 1 -}}
+{{- /* A site may run Grafana on a database it manages itself, named in
+grafana.ini's [database] section (the reference homelab does: a site CNPG
+cluster). That is not SQLite, so it satisfies the same need as grafanaDatabase
+(TM-1005, found reading the reference site's values against 0.8.0). */ -}}
+{{- $iniDb := lower (toString (dig "grafana.ini" "database" "type" "" $g)) -}}
+{{- if and (not $gd.enabled) (not (has $iniDb (list "postgres" "mysql"))) -}}
+{{- fail (printf "kube-prometheus-stack.grafana.replicas is %d, but grafanaDatabase is off and grafana.ini names no shared database, so every replica would open its own SQLite file: users, preferences and annotations would differ by which pod answered. Turn grafanaDatabase on first, or point grafana.ini's database section at a postgres or mysql you run (TM-0786, TM-1005)." $replicas) -}}
+{{- end -}}
+{{- if ($g.persistence | default dict).enabled -}}
+{{- fail (printf "kube-prometheus-stack.grafana.replicas is %d with persistence still on. The Grafana volume is ReadWriteOnce, so the second replica cannot mount it and sits in ContainerCreating with a Multi-Attach error. With grafanaDatabase on the volume holds nothing that matters: set persistence.enabled to false." $replicas) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

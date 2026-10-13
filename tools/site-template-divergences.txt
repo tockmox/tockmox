@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# DELIBERATE DIFFERENCES between tockmox-site-template and what
+# install/tockmox-install.sh generates, read by tools/site-template-diff.sh
+# (TM-0621). Anything the diff finds that is NOT listed here fails it.
+#
+# The template is a hand-kept copy of installer output, published so a stranger
+# can click "Use this template". It drifts every time the installer moves, and
+# until TM-0621 nothing compared the two. This file is the written record the
+# card asked for: which differences are intended, and why, so the next release
+# reads only what changed since.
+#
+# FORMAT, one per line:
+#   only-template <path>    a file the template has and a generated site does not
+#   only-generated <path>   a file a generated site has and the template does not
+#   prose <path>            a file whose content is prose for a human, compared by
+#                           neither YAML nor patterns (the README)
+#   pin <path>              a YAML file whose only allowed difference is
+#                           repoURL: PLACEHOLDER_SITE_REPO_URL (the template has no
+#                           real repository to name)
+
+# The template's own CI and licence. A generated site is the operator's repo,
+# with the operator's CI and licence.
+only-template .github/workflows/check-pin-consistency.sh
+only-template .github/workflows/pin-consistency.yaml
+only-template .github/workflows/validate.yaml
+only-template LICENSE
+
+# The template explains the secrets/ directory in a README; the installer keeps
+# it with an empty .gitkeep. Both make the directory exist in git.
+only-template secrets/README.md
+only-generated secrets/.gitkeep
+
+# Hand-written for a reader who arrived from GitHub, not from the installer.
+prose README.md
+prose apps/README.md

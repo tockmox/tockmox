@@ -1,0 +1,587 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "global"
+  ],
+  "properties": {
+    "global": {
+      "type": "object",
+      "required": [
+        "internalDomain"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "internalDomain": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Base domain for internal service hostnames."
+        },
+        "certIssuer": {
+          "type": "string"
+        },
+        "imageRegistry": {
+          "type": "string"
+        },
+        "timezone": {
+          "type": "string"
+        },
+        "clusterCIDR": {
+          "type": "string"
+        },
+        "serviceCIDR": {
+          "type": "string"
+        },
+        "lanCIDR": {
+          "type": "string"
+        },
+        "storageClass": {
+          "type": "string",
+          "description": "StorageClass for data the volume must protect. Empty uses the cluster default."
+        },
+        "localStorageClass": {
+          "type": "string",
+          "description": "StorageClass for data the application replicates itself or can re-derive. Empty uses the cluster default."
+        }
+      },
+      "x-tockmox-stability": "stable"
+    },
+    "ingress": {
+      "type": "object",
+      "description": "Ingress for this layer's UIs. Hostnames derive from global.internalDomain.",
+      "required": [
+        "apps"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "className": {
+          "type": "string",
+          "description": "Empty uses the cluster default IngressClass."
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "apps": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "enabled"
+            ],
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "host": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "x-tockmox-stability": "stable"
+    },
+    "alloy": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Upstream alloy chart values, passed through unchanged."
+    },
+    "apps": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "true or false to decide explicitly; unset or null to follow the owning capability."
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Tockmox-owned block: apps.",
+      "properties": {
+        "argocdMonitoring": {
+          "type": "object",
+          "description": "ArgoCD monitoring (K8, TM-0739). Unset or null follows capabilities.observability. ArgoCD is a prerequisite Tockmox does not install and its chart ships metrics services disabled; fresh-install.md turns them on in the install command. Gates the three ServiceMonitors, the dashboard and the sync-state alert rules together.",
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "etcdScrapeConfig": {
+          "type": "object",
+          "description": "Scrape embedded etcd (k3s) through a ScrapeConfig with static targets instead of the stack's Endpoints object, which Argo CD 3.x never syncs. Opt-in; also set kube-prometheus-stack.kubeEtcd.enabled false.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "targets": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "host:port of each control-plane node's etcd metrics endpoint, e.g. 10.0.0.11:2381."
+            },
+            "interval": {
+              "type": "string"
+            },
+            "scheme": {
+              "type": "string",
+              "enum": [
+                "HTTP",
+                "HTTPS"
+              ]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "x-tockmox-stability": "stable",
+      "propertyNames": {
+        "enum": [
+          "addressPool",
+          "ai_cnpg_netpol",
+          "ai_namespace",
+          "ai_openwebui_egress",
+          "alloy",
+          "argoWorkflows",
+          "argocdMonitoring",
+          "authentik",
+          "authentik_netpol",
+          "barmanPlugin",
+          "blackbox",
+          "certManager",
+          "cnpg",
+          "dashboards",
+          "devops_netpol",
+          "diagnostic_identity",
+          "docs",
+          "etcdScrapeConfig",
+          "forgejo_netpol",
+          "garage",
+          "harbor_netpol",
+          "healthRules",
+          "heartbeat",
+          "kubePrometheusStack",
+          "kube_bench",
+          "kured",
+          "litellm",
+          "loki",
+          "longhorn",
+          "metallb",
+          "monitoring_netpol",
+          "openWebui",
+          "platform_netpol",
+          "platform_policies",
+          "prometheusOperatorCrds",
+          "rbac_guardrails",
+          "selfcheck_netpol",
+          "serviceMonitors",
+          "smartctl",
+          "snapshotController",
+          "snmp",
+          "syslog_ingest_netpol",
+          "tailscale_netpol",
+          "traefik",
+          "traefik_headers"
+        ],
+        "description": "Generated by tools/check-values-typos.sh --write: every component name any layer declares (TM-0404)."
+      }
+    },
+    "kube-prometheus-stack": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Upstream kube-prometheus-stack chart values, passed through unchanged."
+    },
+    "loki": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Upstream loki chart values, passed through unchanged."
+    },
+    "namespaces": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Tockmox-owned block: namespaces.",
+      "properties": {
+        "create": {
+          "type": "array",
+          "description": "Keys from this map that the chart CREATES. Others are referenced only.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "x-tockmox-stability": "stable"
+    },
+    "notifications": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Tockmox-owned block: notifications.",
+      "x-tockmox-stability": "stable"
+    },
+    "sso": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Tockmox-owned block: sso.",
+      "x-tockmox-stability": "stable"
+    },
+    "tockmox-common": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "The Tockmox library chart. It has no values interface; the block exists so a site cannot be surprised by a schema rejection if it sets one."
+    },
+    "addressPool": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "aiEgress": {
+      "description": "Not this layer's key. Owned by the policy layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "alertmanagerURL": {
+      "description": "Not this layer's key. Owned by the selfcheck layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "argo-workflows": {
+      "description": "Not this layer's key. Owned by the devops layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "authentik": {
+      "description": "Not this layer's key. Owned by the identity layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "brand": {
+      "description": "Not this layer's key. Owned by the identity layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "cert-manager": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "certIssuer": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "cloudnative-pg": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "diagnosticIdentity": {
+      "description": "Not this layer's key. Owned by the policy layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "heartbeat": {
+      "description": "Not this layer's key. Owned by the selfcheck layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "kubeBench": {
+      "description": "Not this layer's key. Owned by the selfcheck layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "kured": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "litellm": {
+      "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "longhorn": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "metallb": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "modelGateway": {
+      "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "open-webui": {
+      "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "priorityClasses": {
+      "description": "Not this layer's key. Owned by the policy layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "prometheus-blackbox-exporter": {
+      "description": "Not this layer's key. Owned by the exporters layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "prometheus-operator-crds": {
+      "description": "Not this layer's key. Owned by the crds layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "prometheus-smartctl-exporter": {
+      "description": "Not this layer's key. Owned by the exporters layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "prometheus-snmp-exporter": {
+      "description": "Not this layer's key. Owned by the exporters layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "rbacGuardrails": {
+      "description": "Not this layer's key. Owned by the policy layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "staleAfterSeconds": {
+      "description": "Not this layer's key. Owned by the selfcheck layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "traefik": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "garage": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "plugin-barman-cloud": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "observability": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Unset means components follow this capability; true or false overrides."
+            }
+          },
+          "description": "Metrics, logs, and the ServiceMonitor/PrometheusRule objects this repo writes. Decline it and set apps.serviceMonitors.enabled to keep the monitors for your own Prometheus operator."
+        },
+        "notifications": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Unset means components follow this capability; true or false overrides."
+            }
+          },
+          "description": "Alerts that reach a person: the sink, the bridge and the heartbeat that proves the path. Its component switch is notifications.enabled, which predates this framework."
+        },
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Unset means components follow this capability; true or false overrides."
+            }
+          },
+          "description": "Single sign-on across every console, and the identity provider behind it."
+        },
+        "aiPlane": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Unset means components follow this capability; true or false overrides."
+            }
+          },
+          "description": "The private AI plane: the chat console and the model gateway in front of it."
+        },
+        "dataProtection": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Unset means components follow this capability; true or false overrides."
+            }
+          },
+          "description": "Backups that go somewhere, and the object store, backup plugin and snapshot control plane underneath them."
+        },
+        "hardwareTelemetry": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Unset means components follow this capability; true or false overrides."
+            }
+          },
+          "description": "SMART and SNMP telemetry from physical hardware. Off by default, because the reference deployment is a virtual machine."
+        },
+        "workflowAutomation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Unset means components follow this capability; true or false overrides."
+            }
+          },
+          "description": "Scheduled and event-driven jobs inside the cluster, with a console to watch them."
+        },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Unset means components follow this capability; true or false overrides."
+            }
+          },
+          "description": "Default-deny between namespaces. Decline it on a CNI that does not enforce NetworkPolicy, where these objects are decoration."
+        }
+      },
+      "description": "Named functional capabilities: one switch per functional story, spanning whatever components it takes across whichever layers they live in. CLOSED, unlike `global`: nothing upstream reads this block, so an unrecognised name here is always a typo, and an ignored typo means a capability you thought you declined is still on. See docs/administration/capabilities.md.",
+      "x-tockmox-stability": "stable"
+    },
+    "snapshot-controller": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "probes": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Blackbox Probe objects. The exporter shipped with none, so it ran and measured nothing.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "interval": {
+          "type": "string"
+        },
+        "scrapeTimeout": {
+          "type": "string"
+        },
+        "module": {
+          "type": "string",
+          "description": "A module name from the blackbox exporter's own config."
+        },
+        "consoles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "description": "Subdomain under global.internalDomain -> probe it or not."
+        },
+        "alerts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "x-tockmox-stability": "stable"
+    },
+    "argocd": {
+      "type": "object",
+      "description": "Where your ArgoCD lives. Read only when apps.argocdMonitoring.enabled is true.",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "description": "Namespace of your out-of-band ArgoCD install."
+        }
+      },
+      "additionalProperties": false,
+      "x-tockmox-stability": "stable"
+    },
+    "platformNetpol": {
+      "description": "Not this layer's key. Owned by the policy layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "podSecurity": {
+      "description": "Not this layer's key. Owned by the policy layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "grafanaDatabase": {
+      "type": "object",
+      "description": "Tockmox-owned block: grafanaDatabase. Run Grafana on a chart-managed CloudNativePG database instead of SQLite on a volume, which is what lets Grafana run more than one replica (TM-0786). Off by default.",
+      "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-08",
+      "x-tockmox-stability-rerule": "0.9.0",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Render the CNPG Cluster and point Grafana at it. Roll Grafana once after the first sync that turns it on."
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40,
+          "description": "Cluster name. CNPG serves reads and writes at <name>-rw and writes the generated credential to the Secret <name>-app."
+        },
+        "database": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "instances": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9
+        },
+        "storage": {
+          "type": "string",
+          "pattern": "^[0-9]+(Mi|Gi|Ti)$"
+        },
+        "storageClass": {
+          "type": "string",
+          "description": "Empty: localStorageClass at three or more instances (Postgres replicates itself), storageClass below that."
+        },
+        "imageName": {
+          "type": "string"
+        },
+        "resources": {
+          "type": "object"
+        },
+        "priorityClassName": {
+          "type": "string"
+        },
+        "backup": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Optional. Grafana's database holds state that is regenerable (dashboards are ConfigMaps, people return on their next SSO login), so it ships without a backup. Name an existing barman-cloud ObjectStore to archive WAL and take a scheduled base backup.",
+          "properties": {
+            "objectStoreName": {
+              "type": "string"
+            },
+            "serverName": {
+              "type": "string"
+            },
+            "schedule": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "inferenceNodes": {
+      "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "modelLifecycle": {
+      "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "tockmoxUi": {
+      "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    }
+  },
+  "additionalProperties": false,
+  "$comment": "The ROOT is closed: a key that is neither a Tockmox block, a chart dependency, nor another layer's block is a typo, and a typo in a top-level key used to be accepted in silence. Keys owned by other layers are listed because ci/values.yaml and profiles/*.yaml are passed to all nine. See docs/administration/values-contract.md."
+}

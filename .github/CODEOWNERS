@@ -1,0 +1,7 @@
+# Every path, one owner. This project has one maintainer and says so in
+# GOVERNANCE.md and SUPPORT.md; this file makes that mechanical rather than
+# something a contributor has to infer from the commit log.
+#
+# It is deliberately not per-directory. Splitting ownership implies reviewers
+# who do not exist, which is the same overclaim GOVERNANCE.md exists to avoid.
+* @jmaaks

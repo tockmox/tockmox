@@ -1,0 +1,154 @@
+{{- $notify := include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "notifications" "override" .Values.notifications.enabled) }}
+{{- if and $notify .Values.notifications.apprise.enabled }}
+{{- /*
+Apprise ... the fan-out end of the alerting path.
+
+WHAT IT IS FOR. ntfy is one destination. Apprise is a hundred: email, Slack,
+Discord, Matrix, Gotify, Telegram, SMS gateways, a webhook of your own. Point
+the bridge at Apprise instead of ntfy (notifications.bridge.sink: apprise) and
+one alert fans out to every URL in your config ... including ntfy, so you do not
+lose the phone path by adding email.
+
+OFF BY DEFAULT, ON PURPOSE. Apprise with no URLs configured delivers nothing,
+which is the ghost-scaffolding defect this project keeps finding in its own
+work: a component that ships, renders, reports Healthy and does nothing. It
+turns on when you have somewhere to send to.
+
+WHERE THE URLs LIVE. In a Secret you create, not in values ... an Apprise URL
+is a credential (slack://TOKEN@..., mailto://user:pass@host). See
+docs/administration/secrets.md. The Secret is mounted read-only as the config
+file Apprise serves under /notify/<key>.
+*/ -}}
+{{- $ns := .Values.namespaces.monitoring -}}
+{{- $key := .Values.notifications.apprise.configKey -}}
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tockmox-apprise
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-apprise
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-apprise
+  template:
+    metadata:
+      labels:
+        {{- include "tockmox.labels" . | nindent 8 }}
+        app.kubernetes.io/name: tockmox-apprise
+      annotations:
+        tockmox.com/config-hash: {{ toYaml .Values.notifications.apprise | sha256sum | trunc 16 | quote }}
+    spec:
+      # No Kubernetes API calls: a ServiceAccount of its own and no token (TM-0759,
+      # CIS 5.1.5 and 5.1.6).
+      serviceAccountName: tockmox-apprise
+      automountServiceAccountToken: false
+      priorityClassName: {{ .Values.notifications.priorityClassName }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: apprise
+          image: {{ include "tockmox.image" (dict "ctx" $ "repo" .Values.notifications.apprise.image) }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          # THIS PATH HAD NEVER DELIVERED (TM-1020, measured 2026-10-11 on 1.5.4 and 2.0.1).
+          # The Secret was mounted as <key>.txt; simple mode reads only <key>.cfg or <key>.yml,
+          # so 1.5.4 answered every alert 204 and sent nothing (the bridge counted it delivered),
+          # and /status answered 417 on the read-only mount. Each line below is one of the fixes;
+          # the run that proved delivery is docs/operations/monitoring.md, "Apprise".
+          env:
+            # "simple" persistent mode: configs are plain files under the config
+            # directory, one per key, and /notify/<key> reads the matching file.
+            # No database, nothing to migrate, and the file can be a read-only
+            # Secret mount -- which is the point.
+            - name: APPRISE_STATEFUL_MODE
+              value: "simple"
+            - name: APPRISE_CONFIG_DIR
+              value: /config
+            # Read-only config: /get, /add and /del answer 403, so a caller in the cluster cannot
+            # read the credential URLs back or add its own, and /status skips the write check.
+            # A locked key needs a tag on /notify, which is why each line is `<key>=<url>` and
+            # the bridge sends `"tag": <key>`.
+            - { name: APPRISE_CONFIG_LOCK, value: "yes" }
+            - { name: APPRISE_ADMIN, value: "no" }
+            - { name: APPRISE_STATELESS_MODE, value: "disabled" }   # no relay for arbitrary URLs
+            - { name: APPRISE_API_ONLY, value: "yes" }              # no web UI
+            - { name: APPRISE_STORAGE_MODE, value: "memory" }
+            - { name: APPRISE_ATTACH_SIZE, value: "0" }
+            - { name: APPRISE_PRUNE_ENABLED, value: "no" }          # pruning writes to /config
+            # nginx listens on [::] as well by default and exits on a node without IPv6. The
+            # startup script tests only that the variable is SET: "no" turns it on too.
+            - { name: IPV4_ONLY, value: "yes" }
+            # Default is 2 x host CPUs + 1; two measured 166MiB against the 256Mi limit.
+            - { name: APPRISE_WORKER_COUNT, value: "2" }
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp      # nginx and gunicorn runtime files; the only writable path
+          resources:
+            {{- toYaml .Values.notifications.apprise.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: { path: /status, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /status, port: http }
+            initialDelaySeconds: 15
+            periodSeconds: 30
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ .Values.notifications.apprise.configSecret }}
+            # NOT optional: with apprise enabled and no URLs, every alert is
+            # accepted and discarded. Fail to start instead, visibly.
+            items:
+              - key: {{ $key }}
+                path: {{ printf "%s.cfg" $key }}
+        - name: tmp
+          emptyDir: { sizeLimit: 16Mi }
+---
+# TM-0759: this workload's own identity, with no token. The namespace's `default`
+# account is not used (CIS 5.1.5 and 5.1.6).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-apprise
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tockmox-apprise
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-apprise
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: tockmox-apprise
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+      protocol: TCP
+{{- end }}

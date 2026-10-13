@@ -1,0 +1,311 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "posture-probe add-on values",
+  "description": "Security Posture Probe, a Tockmox add-on. Every key is experimental in 0.8.0. See docs/administration/posture-probe.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "enabled": {
+      "x-tockmox-stability": "experimental",
+      "type": "boolean",
+      "description": "Render anything at all. Off by default."
+    },
+    "image": {
+      "x-tockmox-stability": "experimental",
+      "type": "string",
+      "description": "The site-built image (addons/posture-probe/Dockerfile). Required when enabled."
+    },
+    "imagePullPolicy": {
+      "x-tockmox-stability": "experimental",
+      "enum": [
+        "Always",
+        "IfNotPresent",
+        "Never"
+      ]
+    },
+    "schedule": {
+      "x-tockmox-stability": "experimental",
+      "type": "string",
+      "minLength": 9
+    },
+    "suspend": {
+      "x-tockmox-stability": "experimental",
+      "type": "boolean"
+    },
+    "clusterIdentifier": {
+      "x-tockmox-stability": "experimental",
+      "type": "string"
+    },
+    "namespaces": {
+      "x-tockmox-stability": "experimental",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+        "maxLength": 63
+      }
+    },
+    "identityVantages": {
+      "x-tockmox-stability": "experimental",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "namespace",
+          "serviceAccount"
+        ],
+        "properties": {
+          "namespace": {
+            "type": "string",
+            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+            "maxLength": 63
+          },
+          "serviceAccount": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mountToken": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "intent": {
+      "x-tockmox-stability": "experimental",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preset": {
+          "enum": [
+            "tockmox-reference",
+            "none"
+          ]
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "subject",
+              "dimension",
+              "intent"
+            ],
+            "additionalProperties": true,
+            "properties": {
+              "subject": {
+                "type": "string",
+                "minLength": 3
+              },
+              "dimension": {
+                "type": "string",
+                "minLength": 1
+              },
+              "intent": {
+                "enum": [
+                  "allow",
+                  "deny"
+                ]
+              },
+              "tier": {
+                "type": "string"
+              },
+              "basis": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "targets": {
+      "x-tockmox-stability": "experimental",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "standinPort": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65535
+        },
+        "internet": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "host": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          }
+        },
+        "kubeApi": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "host": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "policyIp": {
+              "type": "string",
+              "pattern": "^([0-9.]+)?$"
+            },
+            "policyPort": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          }
+        }
+      }
+    },
+    "standins": {
+      "x-tockmox-stability": "experimental",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "settle": {
+      "x-tockmox-stability": "experimental",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Wait out the window in which a new pod is not yet policed (the settling window).",
+      "properties": {
+        "stableRounds": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 20
+        },
+        "intervalSeconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 10
+        },
+        "minSpanSeconds": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 120
+        },
+        "maxSeconds": {
+          "type": "number",
+          "minimum": 5,
+          "maximum": 900
+        },
+        "autoControls": {
+          "type": "boolean"
+        },
+        "controls": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target"
+              ],
+              "properties": {
+                "target": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "expect": {
+                  "enum": [
+                    "denied",
+                    "allowed"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "timeouts": {
+      "x-tockmox-stability": "experimental",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "connectSeconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 30
+        },
+        "collectSeconds": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 1800
+        }
+      }
+    },
+    "store": {
+      "x-tockmox-stability": "experimental",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "size": {
+          "type": "string"
+        },
+        "storageClass": {
+          "type": "string"
+        },
+        "keep": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        }
+      }
+    },
+    "networkPolicy": {
+      "x-tockmox-stability": "experimental",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "apiServer": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "cidr"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "cidr": {
+                "type": "string",
+                "pattern": "^[0-9.]+/[0-9]{1,2}$"
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              }
+            }
+          }
+        }
+      }
+    },
+    "resources": {
+      "x-tockmox-stability": "experimental",
+      "type": "object"
+    },
+    "global": {
+      "x-tockmox-stability": "experimental",
+      "type": "object",
+      "description": "Open, so a shared site values file is accepted; only global.lanCIDR is read."
+    }
+  }
+}

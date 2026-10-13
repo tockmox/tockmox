@@ -1,0 +1,9 @@
+dependencies:
+- name: tockmox-common
+  repository: file://../tockmox-common
+  version: 0.8.0
+- name: authentik
+  repository: https://charts.goauthentik.io
+  version: 2026.8.3
+digest: sha256:e8080c1afced706abae1927ea49b0b4a9fb0650c2c884a89c4856c309c888560
+generated: "2026-10-09T23:31:51.490196773Z"

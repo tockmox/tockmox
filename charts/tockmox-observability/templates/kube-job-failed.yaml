@@ -1,0 +1,89 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+KubeJobFailed, UPSTREAM'S RULE WITH ONE JOB LEFT OUT (TM-0982, lab L6 F-L6-2).
+
+THE NOISE. kube-prometheus-stack's KubeJobFailed (warning, for 15m) fires one
+alert per failed Job that exists, and keeps it firing until the Job is pruned.
+The console-key check (charts/tockmox-ai/templates/console-key-check.yaml)
+keeps 24 failed Jobs on purpose: the rejection that TockmoxConsoleKeyRejected
+reads must outlive the outage failures that can follow it (lab L5 F-L5-6; a
+limit of 3 let the alert clear by garbage collection). Measured on lab L6
+(2026-10-09, a five-minute schedule): seven failed check Jobs in history and FIVE copies
+of KubeJobFailed firing beside the one TockmoxConsoleKeyRejected, two more
+pending, one per failed slot, for a rejection and for a gateway outage alike,
+and each stays for 24 slots (six hours at the shipped schedule). The owning
+alert already says what happened and clears on the next pass; the copies say
+nothing it does not, and "a gateway outage stays silent" held for the owning
+alert only.
+
+THE FIX IS HERE, NOT A SHORTER HISTORY. Lowering failedJobsHistoryLimit is the
+one thing R2 of that lab proved wrong (check-gateway-default.sh G7 holds the
+floor at 24). The selfcheck heartbeat took the other road (heartbeat.yaml:
+wait for Alertmanager rather than suppress the alert), and that was right there
+because its condition was transient; here the failed Job IS the record the
+owning alert reads, and it must stay.
+
+HOW. Upstream renders KubeJobFailed behind `defaultRules.disabled.KubeJobFailed`
+and offers no per-rule selector, so values.yaml turns the upstream copy off and
+this file ships the same rule with `job_name!~"tockmox-console-key-check-.*"`
+added: the same expression otherwise (the job label, the namespace selector
+and its operator read from the same values upstream reads), the same `for`,
+severity, summary, description and runbook. Every other Job's failure fires
+exactly as before. Proven by promtool over the RENDERED rule
+(tests/rules/kube-job-failed.yaml): a failed console-key-check Job does not
+fire it, any other failed Job still does.
+
+WHEN IT RENDERS: exactly when the upstream copy would have and this chart has
+turned it off. A site that sets `defaultRules.disabled.KubeJobFailed: false`
+gets the upstream rule back and not this one, never both. The same `disabled`
+map is the only place to turn it off (`defaultRules.create: false` or
+`defaultRules.rules.kubernetesApps: false` turn both off together).
+
+An Alertmanager inhibition was the other route; it is not unit-testable with
+promtool and would still leave the copies firing in Prometheus and on the
+boards, so the rule is what changed.
+*/ -}}
+{{- $kps := index .Values "kube-prometheus-stack" | default dict -}}
+{{- $dr := $kps.defaultRules | default dict -}}
+{{- $rules := $dr.rules | default dict -}}
+{{- $disabled := $dr.disabled | default dict -}}
+{{- $stack := include "tockmox.appEnabled" (dict "ctx" $ "app" "kubePrometheusStack") -}}
+{{- $monitors := include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") -}}
+{{- $upstreamWould := and (ne (toString $dr.create) "false") (ne (toString $rules.kubernetesApps) "false") -}}
+{{- if and $stack $monitors $upstreamWould (eq (toString $disabled.KubeJobFailed) "true") }}
+{{- $ksm := index $kps "kube-state-metrics" | default dict -}}
+{{- $ksmJob := $ksm.nameOverride | default "kube-state-metrics" -}}
+{{- $nsOp := $dr.appNamespacesOperator | default "=~" -}}
+{{- $nsTarget := $dr.appNamespacesTarget | default ".*" -}}
+{{- $runbook := $dr.runbookUrl | default "https://runbooks.prometheus-operator.dev/runbooks" -}}
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tockmox-kube-job-failed
+  namespace: {{ .Values.namespaces.monitoring }}
+  annotations:
+    # Sync wave 1: after the operator Deployment (wave 0) that serves the
+    # admission webhook. check-upgrade-safety.sh F4 asserts it.
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: tockmox-kube-job-failed
+      rules:
+        - alert: KubeJobFailed
+          annotations:
+            description: Job {{ "{{ $labels.namespace }}" }}/{{ "{{ $labels.job_name }}" }} failed to complete. Removing failed job after investigation should clear this alert on cluster {{ "{{ $labels.cluster }}" }}.
+            runbook_url: {{ $runbook }}/kubernetes/kubejobfailed
+            summary: Job failed to complete.
+          # Upstream's expression plus the one exclusion. The console-key
+          # check's failed Jobs are read by TockmoxConsoleKeyRejected
+          # (charts/tockmox-ai), which says what happened and clears on the
+          # next pass; a copy of this alert per failed Job said nothing more.
+          expr: kube_job_failed{job={{ $ksmJob | quote }}, namespace{{ $nsOp }}{{ $nsTarget | quote }}, job_name!~"tockmox-console-key-check-.*"} > 0
+          for: 15m
+          labels:
+            severity: warning
+{{- end }}

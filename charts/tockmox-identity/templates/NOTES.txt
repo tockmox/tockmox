@@ -1,0 +1,6 @@
+{{- /* SPDX-License-Identifier: Apache-2.0 */ -}}
+tockmox-identity (sync wave 4) installed.
+Enabled apps: {{ include "tockmox.enabledApps" . }}
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "authentik")) .Values.ingress.apps.authentik.enabled }}
+Authentik: http{{ if .Values.global.certIssuer }}s{{ end }}://{{ .Values.ingress.apps.authentik.host | default (printf "auth.%s" .Values.global.internalDomain) }}
+{{- end }}

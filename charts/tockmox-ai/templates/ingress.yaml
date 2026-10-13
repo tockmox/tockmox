@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Ingress for the AI plane console. Backend Service name follows the upstream
+# chart's fullname convention: `<release>-open-webui`.
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "openWebui")) .Values.ingress.apps.openWebui.enabled }}
+---
+{{ include "tockmox.ingress" (dict "ctx" . "name" "open-webui" "prefix" "chat" "host" .Values.ingress.apps.openWebui.host "service" (printf "%s-open-webui" .Release.Name) "port" 80) }}
+{{- end }}
+{{- /*
+The model gateway at `llm.<internalDomain>`. Backend Service name follows the
+upstream chart's fullname convention (`<release>-litellm`) on port 4000.
+
+An Ingress in front of an OpenAI-compatible API is not a UI decision: it is
+what lets tools outside the cluster ... an editor, a script, another host on
+the LAN ... reach one gateway instead of each finding its own model host. The
+gateway is authenticated by its master key and the keys minted from it, and it
+is on the internal domain, so it is reachable from your network and not from
+the internet unless you publish it yourself.
+*/}}
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm")) .Values.ingress.apps.litellm.enabled }}
+---
+{{ include "tockmox.ingress" (dict "ctx" . "name" "litellm" "prefix" "llm" "host" .Values.ingress.apps.litellm.host "service" (printf "%s-litellm" .Release.Name) "port" 4000) }}
+{{- end }}

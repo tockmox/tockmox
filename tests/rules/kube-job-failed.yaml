@@ -1,0 +1,104 @@
+# KubeJobFailed, re-shipped with the console-key check's Jobs left out ... TM-0982
+# (lab L6 F-L6-2).
+#
+# DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
+#
+# THE CONTROL. charts/tockmox-observability/values.yaml turns off upstream
+# kube-prometheus-stack's KubeJobFailed (defaultRules.disabled.KubeJobFailed)
+# and templates/kube-job-failed.yaml ships the same rule with
+# `job_name!~"tockmox-console-key-check-.*"` added. The console-key check keeps
+# 24 failed Jobs on purpose (the rejection TockmoxConsoleKeyRejected reads must
+# outlive the outage failures behind it), and lab L6 measured the upstream rule
+# firing one warning per kept Job, five at once beside the owning alert.
+#
+# THE FILE ASSERTS BOTH DIRECTIONS, and both are needed to prove the mechanism:
+#   1  A failed console-key-check Job does NOT fire KubeJobFailed, at any time.
+#      This case also fails if the UPSTREAM copy is rendered again (its
+#      expression has no exclusion), because promtool evaluates every
+#      KubeJobFailed in the rendered file: the never-both gating is covered
+#      with the exclusion.
+#   2  Any other failed Job STILL fires it, exactly as upstream did: silent at
+#      14m, firing at 16m (`for: 15m`), severity warning, the upstream summary,
+#      description and runbook, and on the failed Job only, not on a Job that
+#      merely exists. The restore drill is the example: its CronJob keeps
+#      three failed Jobs and gets no exclusion.
+#   3  Both at once: a failed check Job and a failed drill Job side by side
+#      fire exactly one alert, the drill's.
+#
+# kube_job_failed is kube-state-metrics' own series (one per Job, with
+# condition="true" when the Job has failed), scraped under job="kube-state-metrics",
+# which is the job label the rendered rule selects on.
+#
+# Timing frame: promtool's clock starts at 0, so every timestamp below is
+# seconds since the start of the test.
+
+evaluation_interval: 1m
+
+tests:
+  # CASE 1: a failed console-key-check Job alone. Silent, before and long after
+  # the 15m window.
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_failed{job="kube-state-metrics", namespace="tockmox-ai", job_name="tockmox-console-key-check-29859460", condition="true"}'
+        values: '1x120'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: KubeJobFailed
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: KubeJobFailed
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: KubeJobFailed
+        exp_alerts: []
+
+  # CASE 2: a failed restore-drill Job fires as upstream did; a Job whose
+  # kube_job_failed reads 0 (it exists and has not failed) does not.
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_failed{job="kube-state-metrics", namespace="tockmox-ai", job_name="tockmox-restore-drill-29859000", condition="true"}'
+        values: '1x120'
+      - series: 'kube_job_failed{job="kube-state-metrics", namespace="tockmox-ai", job_name="tockmox-identity-dump-29859000", condition="true"}'
+        values: '0x120'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: KubeJobFailed
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: KubeJobFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: kube-state-metrics
+              namespace: tockmox-ai
+              job_name: tockmox-restore-drill-29859000
+              condition: "true"
+            exp_annotations:
+              summary: Job failed to complete.
+              description: Job tockmox-ai/tockmox-restore-drill-29859000 failed to complete. Removing failed job after investigation should clear this alert on cluster .
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubejobfailed
+
+  # CASE 3: a failed check Job and a failed drill Job side by side, in the
+  # same namespace, fire exactly one alert: the drill's.
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_failed{job="kube-state-metrics", namespace="tockmox-ai", job_name="tockmox-console-key-check-29859460", condition="true"}'
+        values: '1x120'
+      - series: 'kube_job_failed{job="kube-state-metrics", namespace="tockmox-ai", job_name="tockmox-console-key-check-29859465", condition="true"}'
+        values: '1x120'
+      - series: 'kube_job_failed{job="kube-state-metrics", namespace="tockmox-ai", job_name="tockmox-restore-drill-29859000", condition="true"}'
+        values: '1x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: KubeJobFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              job: kube-state-metrics
+              namespace: tockmox-ai
+              job_name: tockmox-restore-drill-29859000
+              condition: "true"
+            exp_annotations:
+              summary: Job failed to complete.
+              description: Job tockmox-ai/tockmox-restore-drill-29859000 failed to complete. Removing failed job after investigation should clear this alert on cluster .
+              runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubejobfailed

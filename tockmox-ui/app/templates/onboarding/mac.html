@@ -1,0 +1,77 @@
+{% include "onboarding/_sources.html" %}
+{%- set port = eng.port -%}
+<p>Every command runs on the Mac, in Terminal, as an administrator. The engine runs as a LaunchDaemon so it starts at boot without anyone signed in.</p>
+<ol>
+  <li><h3>Keep the Mac awake and recover from power loss</h3>
+<pre tabindex="0" data-run="mac" data-step="power"><code>sudo pmset -a sleep 0 disksleep 0 autorestart 1 womp 1 standby 0 autopoweroff 0</code></pre></li>
+  <li><h3>Install Homebrew, if it is not there</h3>
+<pre tabindex="0" data-run="mac" data-step="brew"><code>command -v brew || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</code></pre></li>
+{% if engine == "ollama" %}
+  <li><h3>Install Ollama and run it as a LaunchDaemon on the network</h3>
+    <p>Use the Homebrew daemon, not the Ollama app: two copies fighting over port {{ port }} is a known trap.</p>
+<pre tabindex="0" data-run="mac" data-step="install"><code>brew install ollama
+sudo tee /Library/LaunchDaemons/com.tockmox.ollama.plist &gt;/dev/null &lt;&lt;PLIST
+&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"&gt;
+&lt;plist version="1.0"&gt;&lt;dict&gt;
+  &lt;key&gt;Label&lt;/key&gt;&lt;string&gt;com.tockmox.ollama&lt;/string&gt;
+  &lt;key&gt;UserName&lt;/key&gt;&lt;string&gt;$(whoami)&lt;/string&gt;
+  &lt;key&gt;ProgramArguments&lt;/key&gt;&lt;array&gt;&lt;string&gt;$(brew --prefix)/bin/ollama&lt;/string&gt;&lt;string&gt;serve&lt;/string&gt;&lt;/array&gt;
+  &lt;key&gt;EnvironmentVariables&lt;/key&gt;&lt;dict&gt;
+    &lt;key&gt;OLLAMA_HOST&lt;/key&gt;&lt;string&gt;0.0.0.0:{{ port }}&lt;/string&gt;
+    &lt;key&gt;OLLAMA_KEEP_ALIVE&lt;/key&gt;&lt;string&gt;-1&lt;/string&gt;
+    &lt;key&gt;HOME&lt;/key&gt;&lt;string&gt;$HOME&lt;/string&gt;
+  &lt;/dict&gt;
+  &lt;key&gt;RunAtLoad&lt;/key&gt;&lt;true/&gt;&lt;key&gt;KeepAlive&lt;/key&gt;&lt;true/&gt;
+&lt;/dict&gt;&lt;/plist&gt;
+PLIST
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.tockmox.ollama.plist</code></pre></li>
+{% elif engine == "mlx-lm" %}
+  <li><h3>Install mlx-lm in its own environment</h3>
+<pre tabindex="0" data-run="mac" data-step="install"><code>brew install python@3.12
+$(brew --prefix)/bin/python3.12 -m venv "$HOME/.venvs/mlx-lm"
+"$HOME/.venvs/mlx-lm/bin/pip" install mlx-lm</code></pre>
+    <p>Pin the version once it works (<code>pip install mlx-lm==X.Y.Z</code>); upgrades change behaviour.</p></li>
+  <li><h3>Serve one model as a LaunchDaemon</h3>
+    <p>One server per model and port. To serve a second model, repeat with another label and port (8082, 8083, ...).</p>
+<pre tabindex="0" data-run="mac" data-step="serve"><code>MODEL={{ model or "mlx-community/MODEL" }}
+sudo tee /Library/LaunchDaemons/com.tockmox.mlx-lm-{{ port }}.plist &gt;/dev/null &lt;&lt;PLIST
+&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"&gt;
+&lt;plist version="1.0"&gt;&lt;dict&gt;
+  &lt;key&gt;Label&lt;/key&gt;&lt;string&gt;com.tockmox.mlx-lm-{{ port }}&lt;/string&gt;
+  &lt;key&gt;UserName&lt;/key&gt;&lt;string&gt;$(whoami)&lt;/string&gt;
+  &lt;key&gt;ProgramArguments&lt;/key&gt;&lt;array&gt;
+    &lt;string&gt;$HOME/.venvs/mlx-lm/bin/mlx_lm.server&lt;/string&gt;
+    &lt;string&gt;--host&lt;/string&gt;&lt;string&gt;0.0.0.0&lt;/string&gt;&lt;string&gt;--port&lt;/string&gt;&lt;string&gt;{{ port }}&lt;/string&gt;
+    &lt;string&gt;--model&lt;/string&gt;&lt;string&gt;$MODEL&lt;/string&gt;
+  &lt;/array&gt;
+  &lt;key&gt;EnvironmentVariables&lt;/key&gt;&lt;dict&gt;&lt;key&gt;HOME&lt;/key&gt;&lt;string&gt;$HOME&lt;/string&gt;&lt;/dict&gt;
+  &lt;key&gt;RunAtLoad&lt;/key&gt;&lt;true/&gt;&lt;key&gt;KeepAlive&lt;/key&gt;&lt;true/&gt;
+&lt;/dict&gt;&lt;/plist&gt;
+PLIST
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.tockmox.mlx-lm-{{ port }}.plist</code></pre></li>
+{% else %}
+  <li><h3>Install {{ eng.name }}</h3>
+    <p>{% if engine == "lm-studio" %}<code>curl -fsSL https://lmstudio.ai/install.sh | bash</code>, then <code>lms daemon up</code> and <code>lms server start --port {{ port }}</code>. Turn on API authentication in its server settings.{% else %}<code>brew install llama.cpp</code>, then run <code>llama-server --host 0.0.0.0 --port {{ port }} --api-key-file KEYFILE -hf {{ model or "MODEL" }}</code> as a LaunchDaemon in the same shape as the Ollama one.{% endif %}</p></li>
+{% endif %}
+  <li><h3>Let only the gateway in (pf)</h3>
+    <p>macOS's packet filter, in its own anchor so a macOS update does not erase it. {{ eng.note }}</p>
+<pre tabindex="0" data-run="mac" data-step="firewall"><code>sudo tee /etc/pf.anchors/com.tockmox.models &gt;/dev/null &lt;&lt;PF
+table &lt;gateway&gt; const { {{ src|join(", ") }} }
+pass in quick on lo0 proto tcp to any port {{ port }}
+pass in quick proto tcp from &lt;gateway&gt; to any port {{ port }}
+block return in quick proto tcp from any to any port {{ port }}
+PF
+grep -q com.tockmox.models /etc/pf.conf || printf 'anchor "com.tockmox.models"\nload anchor "com.tockmox.models" from "/etc/pf.anchors/com.tockmox.models"\n' | sudo tee -a /etc/pf.conf
+sudo pfctl -E -f /etc/pf.conf</code></pre>
+    <p>A macOS update can rewrite <code>/etc/pf.conf</code>; re-run the last two lines after one, or manage them with your configuration tool.</p></li>
+  <li><h3>Check it locally</h3>
+<pre tabindex="0" data-run="mac" data-step="check"><code>{% if engine == "ollama" %}curl -s http://127.0.0.1:{{ port }}/api/version{% else %}curl -s http://127.0.0.1:{{ port }}/v1/models{% endif %}</code></pre></li>
+  <li><h3>Export metrics (recommended)</h3>
+    <p>node_exporter for the host and macmon for unified-memory use, GPU power and temperature. This page reads both through Prometheus; macmon is what lets it show memory pressure.</p>
+<pre tabindex="0" data-run="mac" data-step="metrics"><code>brew install node_exporter macmon
+brew services start node_exporter
+macmon serve --port 9101 &amp;</code></pre>
+    <p>Run macmon as a LaunchDaemon for real use, in the same shape as above. Add ports 9100 and 9101 to the pf anchor's gateway rule if Prometheus scrapes from the cluster.</p></li>
+</ol>

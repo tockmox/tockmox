@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{#
+  Tockmox banner header. Ported from the homelab docs site
+  (container-images/docs/overrides/main.html) so the public documentation and
+  the internal one are recognisably the same product: full-width dark band,
+  white lockup on the left, emerald 2px bottom rule, tagline in spaced capitals.
+
+  Rendered in Material's `announce` slot, which sits above the header on every
+  page. Styling lives in assets/tockmox-docs.css under `.tx-banner`.
+
+  The logo path is absolute because both published sites are served at the root
+  of their own bucket. If Tockmox docs are ever published under a subpath, this
+  is the line that breaks.
+#}
+{% block announce %}
+<div class="tx-banner">
+  <a class="tx-banner-home" href="{{ nav.homepage.url | url }}" aria-label="Tockmox documentation home" style="display:inline-flex;align-items:center;line-height:0;">
+    <img class="tx-banner-logo" src="/assets/tockmox-lockup-horizontal-white.svg" alt="Tockmox ... home">
+  </a>
+  <span class="tx-banner-tagline">Magic is just well-documented engineering</span>
+</div>
+{% endblock %}

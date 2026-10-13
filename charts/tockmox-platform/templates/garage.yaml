@@ -1,0 +1,374 @@
+{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "dataProtection" "app" "garage") }}
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+OBJECT STORAGE: the destination the backup path writes to.
+
+WHY THIS SHIPS. Until now the charts rendered barman `ObjectStore` and
+`ScheduledBackup` objects against an S3 endpoint the operator had to provide and
+a plugin the operator had to install. Two unshipped prerequisites underneath the
+claim the README leads with. This closes both: with `apps.garage` and
+`apps.barmanPlugin` on, a fresh install has a working backup target.
+
+WHAT IT IS NOT. One node holding one copy, in the same cluster it protects. That
+covers a dropped table, a bad migration, a corrupted database. It does NOT cover
+losing the cluster or the machine under it, and no amount of replication_factor
+changes that while the target lives here. `docs/operations/backup-restore.md`
+says so in those words, and a second site remains the operator's job.
+
+CREDENTIALS ARE MINTED IN-CLUSTER, not by you and not by a render. The same
+pattern the ntfy auth Secret uses: a Job creates them once, only if absent, and
+they live in a Secret and nowhere else. A render cannot generate a credential
+without changing it on every sync, which under GitOps is a credential that
+rotates forever and an Application that never reports Synced.
+*/ -}}
+{{- $g := .Values.garage -}}
+{{- $name := "tockmox-garage" -}}
+{{- $webOn := include "tockmox.garageWeb.enabled" . -}}
+{{- /*
+The config checksum below hashes the whole garage block so a change to any value
+rolls the pod. An EMPTY blockSize is left out of that hash: it renders nothing, so
+including it would change the checksum on every existing install and restart the
+one Garage pod on upgrade for a key nobody set (TM-0782, default unchanged).
+*/ -}}
+{{- $gsum := $g -}}
+{{- if not $g.blockSize }}{{- $gsum = omit $g "blockSize" -}}{{- end -}}
+{{- /* dbEngine at its historical value is left out of the hash too (TM-0817), for the
+     same reason: adding the key must not change the checksum on existing installs. */ -}}
+{{- if eq ($g.dbEngine | default "sqlite") "sqlite" }}{{- $gsum = omit $gsum "dbEngine" -}}{{- end -}}
+{{- /* Namespace labels do not change the Garage config; keep them out of the pod-template checksum (TM-0815) so adding the key does not roll Garage. */ -}}
+{{- $gsum = omit $gsum "credentialsNamespaceLabels" -}}
+{{- if not (has ($g.dbEngine | default "sqlite") (list "sqlite" "lmdb")) -}}
+{{- fail (printf "garage.dbEngine must be \"sqlite\" or \"lmdb\", got %q" $g.dbEngine) -}}
+{{- end -}}
+{{- if and (not .Values.apps.longhorn.enabled) (not .Values.global.localStorageClass) (not .Values.global.storageClass) -}}
+{{- fail "apps.garage is on but neither global.storageClass nor global.localStorageClass is set and Longhorn is off. Garage's volumes would fall through to whatever the cluster default happens to be, which for an object store holding your backups is not a decision to leave to chance. Name a class." -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+data:
+  # No secrets here on purpose. Garage reads GARAGE_RPC_SECRET and
+  # GARAGE_ADMIN_TOKEN from the environment, so the file stays a ConfigMap you
+  # can read and the credentials stay in a Secret.
+  garage.toml: |
+    metadata_dir = "/var/lib/garage/meta"
+    data_dir = "/var/lib/garage/data"
+    db_engine = {{ $g.dbEngine | default "sqlite" | quote }}
+
+    # ONE COPY, and the number is honest rather than aspirational. A single
+    # StatefulSet replica cannot satisfy a higher factor, and setting one would
+    # leave every write degraded while looking careful. Raise this only when you
+    # have raised `replicas` to match, and read the note about a second site
+    # above before believing either number protects you from losing the cluster.
+    replication_factor = {{ $g.replicationFactor }}
+    consistency_mode = "consistent"
+    {{- if $g.blockSize }}
+
+    # garage.blockSize (TM-0782). Absent when the value is empty, so Garage uses
+    # its own default. Only NEW uploads use it; see the note in values.yaml.
+    block_size = {{ $g.blockSize | toString | quote }}
+    {{- end }}
+
+    rpc_bind_addr = "[::]:3901"
+    rpc_public_addr = "127.0.0.1:3901"
+
+    [s3_api]
+    s3_region = "{{ $g.region }}"
+    api_bind_addr = "[::]:3900"
+    root_domain = ".s3.garage"
+
+    {{- if $webOn }}
+
+    # The static-site endpoint (TM-0215). Anonymous and read-only: it serves
+    # any bucket that has website access enabled and an alias equal to the
+    # request Host. `root_domain` only matters for `<bucket><root_domain>`
+    # hosts; the sites this chart configures are matched by alias. Not
+    # reachable from outside the cluster except through an Ingress.
+    [s3_web]
+    bind_addr = "[::]:3902"
+    root_domain = "{{ include "tockmox.garageWeb.rootDomain" . }}"
+    {{- end }}
+
+    [admin]
+    api_bind_addr = "[::]:3903"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+  ports:
+    - name: s3-api
+      port: 3900
+      targetPort: s3-api
+    - name: admin
+      port: 3903
+      targetPort: admin
+    {{- if $webOn }}
+    - name: web
+      port: 3902
+      targetPort: web
+    {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-headless
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  # PUBLISHES NOT-READY ADDRESSES, and without this the bootstrap deadlocks.
+  #
+  # Garage is not Ready until a layout is applied. Applying a layout means
+  # calling its admin API. A Service will not route to a pod that is not Ready.
+  # So the readiness gate and the thing that satisfies it wait on each other
+  # forever, and the symptom is a bootstrap Job sitting in its retry loop while
+  # the pod sits at 0/1 with nothing in either log to say why.
+  #
+  # Observed on the lab 2026-08-15 before this line existed.
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+  ports:
+    - name: rpc
+      port: 3901
+      targetPort: rpc
+    # The admin API, reachable per-pod through this headless Service so the
+    # bootstrap can talk to a node that is not yet Ready.
+    - name: admin
+      port: 3903
+      targetPort: admin
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ $name }}-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        {{- include "tockmox.labels" . | nindent 8 }}
+        app.kubernetes.io/name: {{ $name }}
+      annotations:
+        # Derived from the VALUES the config is built from, not from the
+        # rendered file: this annotation lives in the same template as the
+        # ConfigMap it describes, so including that file includes itself.
+        # The web endpoint can be switched by apps.docs, which is not in $g, so
+        # its resolved state and root domain are hashed in as well.
+        checksum/config: {{ printf "%s|%s|%s" (toYaml $gsum) $webOn (include "tockmox.garageWeb.rootDomain" .) | sha256sum | trunc 16 }}
+    spec:
+      # No Kubernetes API calls: a ServiceAccount of its own and no token (TM-0759,
+      # CIS 5.1.5 and 5.1.6).
+      serviceAccountName: {{ $name }}
+      automountServiceAccountToken: false
+      {{- with $g.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        # Garage writes as uid 1000. fsGroup is what makes a freshly provisioned
+        # volume writable by it without a root initContainer doing a chown,
+        # which is the version of this that needs CAP_DAC_OVERRIDE.
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: { type: RuntimeDefault }
+      # ENGINE GUARD (TM-0817). Garage does not record which engine wrote its
+      # metadata, so a sqlite Garage on an LMDB directory starts empty and looks
+      # healthy. This refuses that start, loudly, before Garage can create a
+      # second, empty database. It reuses the bootstrap image (it already ships
+      # with the chart) and only reads the volume.
+      initContainers:
+        - name: engine-guard
+          image: {{ include "tockmox.image" (dict "ctx" $ "repo" $g.bootstrap.image) }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: ENGINE, value: {{ $g.dbEngine | default "sqlite" | quote }} }
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              m=/var/lib/garage/meta
+              if [ "$ENGINE" = sqlite ] && [ -e "$m/db.lmdb" ] && [ ! -e "$m/db.sqlite" ]; then
+                echo "REFUSING TO START: garage.dbEngine is sqlite but $m holds an LMDB database (db.lmdb) and no db.sqlite."
+                echo "Garage would open an EMPTY sqlite database beside it and every bucket and key would appear to be gone."
+                echo "Either set garage.dbEngine: lmdb, or convert once: garage convert-db -a lmdb -i $m/db.lmdb -b sqlite -o $m/db.sqlite"
+                exit 1
+              fi
+              if [ "$ENGINE" = lmdb ] && [ -e "$m/db.sqlite" ] && [ ! -e "$m/db.lmdb" ]; then
+                echo "REFUSING TO START: garage.dbEngine is lmdb but $m holds a sqlite database (db.sqlite) and no db.lmdb."
+                echo "Set garage.dbEngine: sqlite, or convert with garage convert-db -a sqlite -i $m/db.sqlite -b lmdb -o $m/db.lmdb"
+                exit 1
+              fi
+              echo "engine guard: $ENGINE, meta directory consistent"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: meta, mountPath: /var/lib/garage/meta, readOnly: true }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { cpu: 100m, memory: 64Mi }
+      containers:
+        - name: garage
+          image: {{ include "tockmox.image" (dict "ctx" $ "repo" $g.image) }}
+          imagePullPolicy: IfNotPresent
+          # The v2 image changed its entrypoint, so `args: ["server"]` alone
+          # resolves to exec("server") and fails with "executable file not found
+          # in $PATH". Naming the binary removes the guess.
+          command: ["/garage"]
+          args: ["server"]
+          env:
+            - name: GARAGE_RPC_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $g.secretName }}
+                  key: rpc-secret
+            - name: GARAGE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $g.secretName }}
+                  key: admin-token
+          ports:
+            - { name: s3-api, containerPort: 3900 }
+            - { name: rpc,    containerPort: 3901 }
+            - { name: admin,  containerPort: 3903 }
+            {{- if $webOn }}
+            - { name: web,    containerPort: 3902 }
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: config, mountPath: /etc/garage.toml, subPath: garage.toml, readOnly: true }
+            - { name: meta,   mountPath: /var/lib/garage/meta }
+            - { name: data,   mountPath: /var/lib/garage/data }
+          resources:
+            {{- toYaml $g.resources | nindent 12 }}
+          # READINESS IS A TCP CHECK, NOT /health, AND THIS IS THE SECOND
+          # DEADLOCK THIS COMPONENT SHIPPED WITH.
+          #
+          # /health answers 503 until a cluster layout is applied. The previous
+          # comment here said that "should hold traffic back, not restart the
+          # pod", which is correct about traffic and misses what else readiness
+          # gates:
+          #
+          #   ArgoCD runs PostSync hooks only after the resources are HEALTHY
+          #   a StatefulSet is healthy only when its pod is READY
+          #   the pod is ready only when /health returns 200
+          #   /health returns 200 only after a layout is applied
+          #   the layout is applied by the PostSync hook
+          #
+          # So the bootstrap Job could never run, on any install, ever. Splitting
+          # the credentials out of it did not help, because this loop does not
+          # involve the Secret at all. Observed on the reference lab 2026-08-15:
+          # the pod ran, logged "Admin API server listening on http://[::]:3903",
+          # and sat at 0/1 while Argo reported "waiting for healthy state of
+          # apps/StatefulSet/tockmox-garage" and never advanced ... which also
+          # pinned the whole layer to one revision, because Argo will not start a
+          # new sync while an operation is still Running.
+          #
+          # Measured on that pod, same moment, same port:
+          #   GET /health                503 Service Unavailable
+          #   GET /v2/GetClusterStatus   200, node reports its identity
+          #
+          # The process is serving. Only the cluster-level question is failing.
+          # A TCP check answers the question readiness should ask here ... can
+          # this pod take a connection ... and lets the hook that fixes the
+          # cluster-level state actually run. Nothing consumes the S3 endpoint
+          # before the bootstrap creates the bucket, so there is no window where
+          # premature readiness routes real traffic anywhere.
+          #
+          # /v2/GetClusterStatus would also work and says more, but it needs a
+          # bearer token, and a probe cannot read one from a Secret.
+          readinessProbe:
+            tcpSocket: { port: admin }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: { port: admin }
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}-config
+  volumeClaimTemplates:
+    # apiVersion and kind stated explicitly: the API server defaults them on an
+    # embedded PVC spec, and ArgoCD's diff fires on server-defaulted fields it
+    # did not send.
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: meta
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with $g.metaStorageClass | default .Values.global.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $g.metaSize }}
+    - apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # THE DATA VOLUME IS THE ONE EXCEPTION TO THE STORAGE POLICY, and it is
+        # worth saying why rather than letting the gate look wrong. Garage
+        # replicates across nodes itself, so docs/administration/storage.md puts
+        # it on the LOCAL class. That reasoning holds at replication_factor 3.
+        # At factor 1, which is what a single replica can honestly run, nothing
+        # else holds a copy and the volume is it. So this follows the same rule
+        # the model gateway's database follows: the class tracks whether
+        # anything else is keeping a copy.
+        {{- $dataClass := $g.dataStorageClass -}}
+        {{- if not $dataClass }}
+          {{- if ge (int $g.replicationFactor) 3 }}
+            {{- $dataClass = .Values.global.localStorageClass }}
+          {{- else }}
+            {{- $dataClass = .Values.global.storageClass }}
+          {{- end }}
+        {{- end }}
+        {{- with $dataClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $g.dataSize }}
+---
+# TM-0759: this workload's own identity, with no token. The namespace's `default`
+# account is not used (CIS 5.1.5 and 5.1.6).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+{{- end }}

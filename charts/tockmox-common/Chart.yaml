@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: v2
+name: tockmox-common
+description: "Shared helpers for Tockmox layer charts. Library chart, not installable."
+type: library
+version: 0.8.0
