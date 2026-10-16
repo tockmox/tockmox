@@ -79,6 +79,11 @@ CLAIMS="${CLAIMS:-tools/doc-claims.txt}"
 # Where tools/render-counts.sh leaves the counts that the render-count claims
 # read. Overridable so --selftest can point the script at a fixture.
 COUNTS_FILE="${COUNTS_FILE:-build/render-counts.tsv}"
+# Exported so the registry's `tools/render-counts.sh --read` tests read the
+# same file the preflight verified.
+export COUNTS_FILE
+# shellcheck source=tools/lib/tool-runs.sh
+. tools/lib/tool-runs.sh
 
 # Space-separated tools the preflight found missing. Empty means everything is
 # installed and no entry is skipped. --selftest sets it by hand.
@@ -849,10 +854,16 @@ expect: 3"
 claim:  three widgets
 test:   echo 4 # tools/render-counts.sh --read total
 expect: 3"
-  : > "$tmp/counts.tsv"
+  # A counts file that describes THIS tree (its fingerprint is the tree's), and
+  # one that describes another. The preflight verifies the file, so an empty
+  # stand-in would read as stale.
+  printf 'total\t4\nfingerprint\t%s\n' "$("$BASH" tools/render-counts.sh --fingerprint)" > "$tmp/counts.tsv"
+  printf 'total\t3\nfingerprint\tdeadbeefdeadbeef\n' > "$tmp/stale-counts.tsv"
 
   selfprobe "an absent render-counts file is a missing precondition, not a false claim" skip \
     "$tmp/no-such-counts.tsv" "FALSE CLAIM" "$tmp/no-such-counts.tsv" "" "$COUNT_CLAIM"
+  selfprobe "a render-counts file from another tree is a missing precondition, not a false claim" skip \
+    "describes another tree" "FALSE CLAIM" "$tmp/stale-counts.tsv" "" "$COUNT_CLAIM"
   selfprobe "with the render-counts file present, a changed count is still a false claim" fail \
     "FALSE CLAIM" "" "$tmp/counts.tsv" "" "$COUNT_CLAIM"
   selfprobe "an absent render-counts file does not hide a false claim that needs no file" fail \
@@ -917,26 +928,9 @@ fi
 # NAME instead, everything else runs, and both counts print. Exit is 1 if a
 # checked entry is false, else 2 while anything was skipped: a partial run is
 # never a pass.
-# tool_runs TOOL: does the tool EXECUTE, not merely exist on PATH.
-# `command -v` answers "is a file there". A binary built for another
-# architecture, or one that lost its interpreter, passes it, and every test
-# command that sends the tool's stderr to /dev/null then dies silently and
-# reads 0. Each probe is the cheapest call that needs no network and no
-# cluster, and only its exit status is read.
-tool_runs() {
-  case "$1" in
-    helm)    helm version >/dev/null 2>&1 ;;
-    kubectl) kubectl version --client >/dev/null 2>&1 ;;
-    jq)      jq --version >/dev/null 2>&1 ;;
-    yq)      yq --version >/dev/null 2>&1 ;;
-    python3) python3 -c 'pass' >/dev/null 2>&1 ;;
-    awk)     awk 'BEGIN { exit 0 }' >/dev/null 2>&1 ;;
-    find)    find . -maxdepth 0 >/dev/null 2>&1 ;;
-    xargs)   printf x | xargs echo >/dev/null 2>&1 ;;
-    *)       return 0 ;;
-  esac
-}
-
+# Whether a tool EXECUTES, not merely exists on PATH, is answered by
+# tool_state/tool_runs in tools/lib/tool-runs.sh, shared with the other gates
+# that partition on a missing tool.
 preflight() {
   local t absent="" broken="" nocounts=0
   for t in $(grep '^test:' "$CLAIMS" \
@@ -952,7 +946,12 @@ preflight() {
   # The render-count claims read a file another script writes. Run standalone
   # in a clean clone it is not there, and every one of them would read
   # "MISSING (...)" and be reported as a false claim against a correct page.
-  if grep '^test:' "$CLAIMS" | grep -q 'render-counts\.sh' && [ ! -f "$COUNTS_FILE" ]; then
+  # A file left over from an earlier tree is the same precondition, not met:
+  # each read prints "STALE (...)", which was reported as a false claim too.
+  # render-counts.sh --verify is the one judge of both.
+  local why=""
+  if grep '^test:' "$CLAIMS" | grep -q 'render-counts\.sh' \
+     && ! why="$("$BASH" tools/render-counts.sh --verify 2>&1)"; then
     nocounts=1
   fi
   MISSING="$absent${absent:+${broken:+ }}$broken"
@@ -961,7 +960,7 @@ preflight() {
   echo "check-doc-claims: PARTIAL RUN"
   [ -n "$absent" ] && echo "  missing tool(s), not on PATH: $absent"
   [ -n "$broken" ] && echo "  on PATH but cannot run (wrong architecture, missing interpreter, broken install): $broken"
-  [ "$nocounts" -eq 1 ] && echo "  missing precondition: $COUNTS_FILE does not exist (run tools/render-counts.sh first)"
+  [ "$nocounts" -eq 1 ] && echo "  missing precondition: render counts not usable for this tree: ${why:-$COUNTS_FILE unreadable}"
   echo
   echo "  These are used by test commands in $CLAIMS, several of which redirect"
   echo "  stderr and pipe into a counting grep, or read a file another script"

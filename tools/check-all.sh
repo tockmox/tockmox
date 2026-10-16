@@ -210,6 +210,22 @@ run_gate "the image extractor handles every quoting form (TM-0646)" \
 run_gate "mint-secrets refuses a value with a control character (TM-0662)" \
   bash tools/mint-secrets.sh --selftest
 
+# A TOOL THAT CANNOT RUN IS NOT A FINDING, added 2026-10-16. Four gates
+# partition on a missing helm or promtool; each now also treats one that is on
+# PATH and cannot execute as missing, and render-counts no longer leaves a
+# counts file behind a failed render. Fixture tools on a hermetic PATH, so none
+# of these needs a working helm either.
+run_gate "the tool probe tells a tool that cannot run from one that runs" \
+  bash tools/lib/tool-runs.sh --selftest
+run_gate "render-counts leaves no counts file after a failed render" \
+  bash tools/render-counts.sh --selftest
+run_gate "check-capabilities skips rather than accuses with a helm that cannot run" \
+  bash tools/check-capabilities.sh --selftest
+run_gate "check-alert-rules skips rather than accuses with a helm or promtool that cannot run" \
+  bash tools/check-alert-rules.sh --selftest
+run_gate "check-doc-claims skips rather than accuses on a missing tool or a stale counts file" \
+  bash tools/check-doc-claims.sh --selftest
+
 # Both passes, exactly as ci.yaml runs them. A bare `helm lint` with no values
 # fails EVERY chart on `global.internalDomain` being empty, which is the schema
 # working correctly and says nothing whatever about the tree. This script did

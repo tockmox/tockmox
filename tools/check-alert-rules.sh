@@ -31,7 +31,39 @@
 # thing it must ignore", which is the same pass-on-the-edit-and-fail-on-HEAD
 # discipline the handoff sentinels use.
 set -euo pipefail
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")/.."
+# shellcheck source=tools/lib/tool-runs.sh
+. tools/lib/tool-runs.sh
+
+# --selftest: the partition below must hold for a helm or promtool that is on
+# PATH and cannot run, not only for one that is absent. Runs this script end to
+# end on a HERMETIC PATH (a fixture dir with python3 linked in, then
+# /usr/bin:/bin) so the machine's own tools can neither shadow nor be shadowed
+# by the fixtures.
+if [ "${1:-}" = "--selftest" ]; then
+  set +e
+  py="$(command -v python3)" || { echo "selftest: python3 not on PATH; refusing"; exit 2; }
+  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+  for d in broken empty; do mkdir -p "$tmp/$d"; ln -s "$py" "$tmp/$d/python3"; done
+  printf '\177ELF not a program for this machine\n' > "$tmp/broken/helm"
+  cp "$tmp/broken/helm" "$tmp/broken/promtool"; chmod +x "$tmp/broken/helm" "$tmp/broken/promtool"
+  fails=0
+  probe() {
+    local label="$1" dir="$2" why="$3" out rc
+    out=$(PATH="$tmp/$dir:/usr/bin:/bin" "$BASH" "$SELF" 2>&1); rc=$?
+    if [ "$rc" -ne 2 ] || ! grep -qF -- "$why" <<<"$out" || grep -qE 'did not render|FAIL' <<<"$out"; then
+      echo "  SELFTEST FAIL: '$label' wanted exit 2 naming '$why' and no finding, got exit $rc:"
+      sed 's/^/            /' <<<"$out" | tail -n 25; fails=1
+    else
+      echo "  selftest ok: $label"
+    fi
+  }
+  probe "a helm and promtool that are on PATH and cannot run are skipped by name, accusing nothing" broken "cannot run"
+  probe "no helm and no promtool are skipped by name, accusing nothing"                            empty  "not on PATH"
+  [ "$fails" -eq 0 ] && { echo "selftest PASSED"; exit 0; }
+  echo "selftest FAILED"; exit 1
+fi
 
 command -v python3  >/dev/null 2>&1 || { echo "check-alert-rules: REFUSING ... python3 is not on PATH" >&2; exit 2; }
 
@@ -47,13 +79,28 @@ command -v python3  >/dev/null 2>&1 || { echo "check-alert-rules: REFUSING ... p
 # no render is faked, no rule is linted without promtool), every step that
 # does not need it runs, and both counts print. Exit 1 on a finding, else 2
 # while anything was skipped. A partial run is never a pass.
-HAVE_HELM=1; HAVE_PROMTOOL=1; miss=""
-command -v helm     >/dev/null 2>&1 || { HAVE_HELM=0;     miss="$miss helm"; }
-command -v promtool >/dev/null 2>&1 || { HAVE_PROMTOOL=0; miss="$miss promtool"; }
+#
+# A TOOL THAT CANNOT RUN IS A MISSING TOOL (2026-10-16). `command -v` passed a
+# helm built for another architecture, and the run stopped at "charts/... did
+# not render", a finding about the chart that was really about the machine.
+# Whether each tool EXECUTES is now the test (tools/lib/tool-runs.sh), and
+# either failure takes the same partition.
+HAVE_HELM=1; HAVE_PROMTOOL=1; miss=""; absent=""; broken=""
+for t in helm promtool; do
+  case "$(tool_state "$t")" in
+    ok) continue ;;
+    absent) absent="$absent $t" ;;
+    broken) broken="$broken $t" ;;
+  esac
+  miss="$miss $t"
+  [ "$t" = helm ] && HAVE_HELM=0 || HAVE_PROMTOOL=0
+done
 nrun=0; nskip=0
 skip() { printf '  SKIPPED  %s\n' "$*"; nskip=$((nskip + 1)); }
 if [ -n "$miss" ]; then
-  echo "check-alert-rules: PARTIAL RUN ... not on PATH:$miss (CI pins HELM_VERSION and PROMTOOL_VERSION)"
+  echo "check-alert-rules: PARTIAL RUN (CI pins HELM_VERSION and PROMTOOL_VERSION)"
+  [ -n "$absent" ] && echo "  not on PATH:$absent"
+  [ -n "$broken" ] && echo "  on PATH but cannot run (wrong architecture, missing interpreter, broken install):$broken"
   echo "  every step that needs it is SKIPPED by name below; the rest run. This run cannot pass."
   echo
 fi
