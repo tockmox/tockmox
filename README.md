@@ -23,6 +23,7 @@ best-in-class open source, and run every day by the guy who wrote it.
 [![Docs: CC BY 4.0](https://img.shields.io/badge/docs-CC%20BY%204.0-blue.svg)](LICENSE-docs)
 
 [![Release](https://img.shields.io/github/v/release/tockmox/tockmox?include_prereleases&sort=semver)](https://github.com/tockmox/tockmox/releases)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/tockmox/tockmox/badge)](https://scorecard.dev/viewer/?uri=github.com/tockmox/tockmox)
 
 </div>
 
