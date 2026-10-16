@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# OpenSSF Scorecard. A third-party, auto-computed supply-chain score,
+# published to scorecard.dev so the README badge reads a number this project did
+# not grade itself. It could not run before 2026-10-12: publish_results is a
+# public-repository path.
+#
+# publish_results puts constraints on this file that Scorecard enforces when it
+# verifies the run: no top-level write permissions, no env or defaults blocks,
+# only the steps the action documents, and the job on a GitHub-hosted runner.
+# Keep it that shape; extra steps make the published result fail verification.
+#
+# The score is a reading, not a target. What a low check means for this repo is
+# recorded on the card that tracks it, not chased here.
+
+name: scorecard
+
+on:
+  branch_protection_rule:
+  schedule:
+    # Weekly, Monday 05:23 UTC: the score moves slowly and runs are not free.
+    - cron: '23 5 * * 1'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write   # upload the SARIF to code scanning
+      id-token: write          # sign the published result (OIDC)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scorecard-sarif
+          path: results.sarif
+          retention-days: 5
+
+      - uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: results.sarif
