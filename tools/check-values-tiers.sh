@@ -88,10 +88,16 @@
 # decorative gate in this directory's history.
 #
 # Environment:
-#   BASELINE_REF  override the baseline (default: git describe --tags --abbrev=0)
+#   BASELINE_REF  override the baseline. The default is the newest FINAL v* tag
+#                 by version order, else the newest v* tag of any kind. NOT
+#                 `git describe`: releases are tagged on release-X.Y branches
+#                 that never merge back, so on main describe stays at the last
+#                 tag that happened to land on a main commit.
+#   tools/check-values-tiers.sh --print-baseline [REPO]   print that default
 
 set -uo pipefail
 
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")/.."
 
 VALID_TIERS="stable provisional experimental"
@@ -524,6 +530,42 @@ JSON
   probe "a baseline with no tiers is reported, not failed" pass \
         check_drift "$emptybase" "$head" "$tmp/CHANGELOG.clean.md"
 
+  # ---- the baseline is the newest final release, not what git describe says --
+  # Releases are tagged on release-X.Y, which never merges back, so on main
+  # `git describe` stays at the last tag that happened to be on a main commit
+  # while newer releases exist. The fixture is that history: v0.8.0 on main,
+  # then a release branch carrying v0.9.0-rc1 and v0.9.0, then main moves on.
+  # The script is copied into the fixture so that its own `cd` lands there.
+  echo "selftest: baseline"
+  bl="$tmp/baseline-repo"; mkdir -p "$bl/tools" "$bl/charts/tockmox-demo"
+  cp "$SELF" "$bl/tools/check-values-tiers.sh"
+  cp "$base/charts/tockmox-demo/values.schema.json" "$bl/charts/tockmox-demo/"
+  cp "$tmp/CHANGELOG.clean.md" "$bl/CHANGELOG.md"
+  g() { git -C "$bl" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false -c tag.gpgsign=false "$@"; }
+  g init -q -b main
+  g add -A; g commit -q -m root; g tag v0.8.0
+  g checkout -q -b release-0.9
+  g commit -q --allow-empty -m rc; g tag v0.9.0-rc1
+  g commit -q --allow-empty -m final; g tag v0.9.0
+  g checkout -q main
+  g commit -q --allow-empty -m "development goes on"
+  drift_baseline() { # ENV... : the "baseline:" line the drift half prints in the fixture
+    ( cd "$bl" && env "$@" bash tools/check-values-tiers.sh --drift-only 2>&1 | grep '^  baseline:' )
+  }
+  [ "$(g describe --tags --abbrev=0)" = "v0.8.0" ] || { echo "  SELFTEST FAIL: the fixture does not reproduce git describe lagging"; fails=1; }
+  probe "main baselines on the newest final release, not on git describe" pass \
+        sh -c "[ \"\$(cd '$bl' && bash tools/check-values-tiers.sh --drift-only 2>&1 | grep '^  baseline:')\" = '  baseline: v0.9.0' ]"
+  probe "BASELINE_REF still overrides the default" pass \
+        sh -c "[ \"\$(cd '$bl' && BASELINE_REF=v0.8.0 bash tools/check-values-tiers.sh --drift-only 2>&1 | grep '^  baseline:')\" = '  baseline: v0.8.0' ]"
+  probe "--print-baseline prints the same tag for other tools to use" pass \
+        sh -c "[ \"\$(bash '$SELF' --print-baseline '$bl')\" = v0.9.0 ]"
+  g tag -d v0.9.0 >/dev/null
+  probe "a release candidate is not a baseline while a final release exists" pass \
+        sh -c "[ \"\$(bash '$SELF' --print-baseline '$bl')\" = v0.8.0 ]"
+  g tag -d v0.8.0 >/dev/null
+  probe "with only a candidate tag to go on, it is used rather than nothing" pass \
+        sh -c "[ \"\$(bash '$SELF' --print-baseline '$bl')\" = v0.9.0-rc1 ]"
+
   if [ "$fails" -eq 0 ]; then
     echo "check-values-tiers --selftest: PASSED"; exit 0
   fi
@@ -533,6 +575,22 @@ fi
 # ---------------------------------------------------------------------------
 # the real run
 # ---------------------------------------------------------------------------
+# default_baseline [REPO]: the tag a drift run compares against when
+# BASELINE_REF is unset. Newest final release by version order, which is what
+# the render-diff job beside the drift step computes. A candidate tag counts
+# only when no final release exists yet.
+default_baseline() {
+  local d="${1:-.}" all t
+  all=$(git --no-optional-locks -C "$d" tag -l 'v*' --sort=-v:refname 2>/dev/null) || all=""
+  t=$(printf '%s\n' "$all" | grep -v -- '-' | head -n 1)
+  [ -n "$t" ] || t=$(printf '%s\n' "$all" | head -n 1)
+  printf '%s' "$t"
+}
+
+if [ "${1:-}" = "--print-baseline" ]; then
+  default_baseline "${2:-.}"; echo; exit 0
+fi
+
 command -v jq >/dev/null 2>&1 || {
   echo "check-values-tiers: jq is required and is not on PATH."
   echo "A gate that cannot read the schemas must refuse rather than report clean."
@@ -593,7 +651,7 @@ no_baseline() {
 if ! command -v git >/dev/null 2>&1; then
   no_baseline "git is not on PATH, so there is no baseline to compare." || drift_rc=1
 else
-  BASE_REF="${BASELINE_REF:-$(git --no-optional-locks describe --tags --abbrev=0 2>/dev/null)}"
+  BASE_REF="${BASELINE_REF:-$(default_baseline .)}"
   if [ -z "$BASE_REF" ]; then
     no_baseline "no tag is reachable from HEAD (shallow clone or fresh history)." || drift_rc=1
   else

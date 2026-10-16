@@ -14,8 +14,10 @@
 #           --layers "tockmox-platform tockmox-ai"   only these layers
 #           --values FILE ...   render both sides with these value files instead
 #                               of each side's own ci/values.yaml (+ all-on overlay)
-# Environment: BASELINE_REF (as check-values-tiers.sh: `git describe --tags`
-#           lies once an rc exists), IMMUTABLE_DEPS_DIR (extra *.tgz subcharts).
+# Environment: BASELINE_REF (default: the newest final v* tag by version order,
+#           computed by `check-values-tiers.sh --print-baseline`; `git describe`
+#           lies once an rc exists and on main once releases are tagged on
+#           release branches), IMMUTABLE_DEPS_DIR (extra *.tgz subcharts).
 #
 # WHY RENDERED OUTPUT. "No template file changed" does not mean "no rendered
 # manifest changed": `helm.sh/chart` is rendered from Chart.yaml's version, so a
@@ -373,7 +375,7 @@ if [ -n "$BASEDIR" ] || [ -n "$HEADDIR" ]; then
   [ -n "$BASEDIR" ] && [ -n "$HEADDIR" ] || { echo "check-immutable-fields: --base-dir and --head-dir go together" >&2; exit 2; }
   bsrc="dir:$BASEDIR"; hsrc="dir:$HEADDIR"; label="$BASEDIR vs $HEADDIR"
 else
-  if [ -z "$BASE" ]; then BASE=${BASELINE_REF:-$(git --no-optional-locks -C "$REPO" describe --tags --abbrev=0 2>/dev/null || true)}; fi
+  if [ -z "$BASE" ]; then BASE=${BASELINE_REF:-$(bash "$ROOT/tools/check-values-tiers.sh" --print-baseline "$REPO" 2>/dev/null || true)}; fi
   if [ -z "$BASE" ] || ! git --no-optional-locks -C "$REPO" rev-parse -q --verify "$BASE^{commit}" >/dev/null 2>&1; then
     echo "check-immutable-fields: SKIPPED, no baseline ref (${BASE:-none}); fetch tags or set BASELINE_REF. Not a pass: nothing was compared."
     exit 0

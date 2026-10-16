@@ -72,9 +72,13 @@
 # a pass: check-all.sh counts it as skipped and a CI step goes red on it.
 set -uo pipefail
 
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")/.."
 
 CLAIMS="${CLAIMS:-tools/doc-claims.txt}"
+# Where tools/render-counts.sh leaves the counts that the render-count claims
+# read. Overridable so --selftest can point the script at a fixture.
+COUNTS_FILE="${COUNTS_FILE:-build/render-counts.tsv}"
 
 # Space-separated tools the preflight found missing. Empty means everything is
 # installed and no entry is skipped. --selftest sets it by hand.
@@ -803,6 +807,82 @@ claim:  three widgets
 test:   echo helm >/dev/null; echo 3
 expect: 3"
 
+  # ---- the whole script, run as a user would (end to end) -------------------
+  # Everything above drives run_claims with MISSING set by hand. The two cases
+  # below are about what the script itself finds out about its machine before
+  # run_claims starts, so they run the script, with a fixture registry and a
+  # fixture PATH, and read its exit status and report.
+  printf 'The tree ships three widgets today.\n' > "$tmp/docs/page.md"
+  mkdir -p "$tmp/bin-empty" "$tmp/bin-broken" "$tmp/bin-noexec" "$tmp/bin-good"
+
+  # selfprobe LABEL WANT WHY FORBIDDEN COUNTS_FILE PATH_PREFIX BODY
+  #   COUNTS_FILE is where the script is told to look for the render counts.
+  #   FORBIDDEN, when given, is a string the report must NOT contain.
+  selfprobe() {
+    local label="$1" want="$2" why="$3" forbid="$4" counts="$5" pfx="$6" body="$7" out rc wrc
+    printf '%s\n' "$body" > "$tmp/self-claims.txt"
+    # A fixture PATH is HERMETIC: the fixture dir, then only /usr/bin:/bin. Prepending
+    # to the caller's PATH is not enough, because `command -v` skips a file that is
+    # not executable and then finds the machine's own helm further along, which
+    # runs and reads 0 (a Mac with Homebrew helm failed the noexec probe that way).
+    local p="$PATH"; [ -n "$pfx" ] && p="$pfx:/usr/bin:/bin"
+    out=$(CLAIMS="$tmp/self-claims.txt" COUNTS_FILE="$counts" PATH="$p" "$BASH" "$SELF" 2>&1); rc=$?
+    case "$want" in pass) wrc=0 ;; fail) wrc=1 ;; skip) wrc=2 ;; esac
+    if [ "$rc" -ne "$wrc" ]; then
+      echo "  SELFTEST FAIL: '$label' wanted $want (exit $wrc), got exit $rc:"
+      printf '%s\n' "$out" | sed 's/^/            /'; fails=1
+    elif [ -n "$why" ] && ! printf '%s\n' "$out" | grep -F -- "$why" >/dev/null; then
+      echo "  SELFTEST FAIL: '$label' exited $rc but not for the reason '$why':"
+      printf '%s\n' "$out" | sed 's/^/            /'; fails=1
+    elif [ -n "$forbid" ] && printf '%s\n' "$out" | grep -F -- "$forbid" >/dev/null; then
+      echo "  SELFTEST FAIL: '$label' reported '$forbid', which accuses a page that is right:"
+      printf '%s\n' "$out" | sed 's/^/            /'; fails=1
+    else
+      echo "  selftest ok: $label"
+    fi
+  }
+
+  # A render-count claim, whose test reads the file tools/render-counts.sh
+  # writes. The trailing comment makes the test command name that script the
+  # way the real registry's entries do, and the echo stands in for the count.
+  COUNT_CLAIM="page:   $tmp/docs/page.md
+claim:  three widgets
+test:   echo 4 # tools/render-counts.sh --read total
+expect: 3"
+  : > "$tmp/counts.tsv"
+
+  selfprobe "an absent render-counts file is a missing precondition, not a false claim" skip \
+    "$tmp/no-such-counts.tsv" "FALSE CLAIM" "$tmp/no-such-counts.tsv" "" "$COUNT_CLAIM"
+  selfprobe "with the render-counts file present, a changed count is still a false claim" fail \
+    "FALSE CLAIM" "" "$tmp/counts.tsv" "" "$COUNT_CLAIM"
+  selfprobe "an absent render-counts file does not hide a false claim that needs no file" fail \
+    "FALSE CLAIM" "" "$tmp/no-such-counts.tsv" "" "$COUNT_CLAIM
+
+page:   $tmp/docs/page.md
+claim:  three widgets
+test:   echo 4
+expect: 3"
+
+  # ---- a tool that is on PATH but cannot run ------------------------------
+  # `command -v` says a file is there, not that it executes. A helm built for
+  # another architecture passes it, every `helm template ... 2>/dev/null |
+  # grep -c` then reads 0, and the report accused correct pages.
+  HELM_CLAIM="page:   $tmp/docs/page.md
+claim:  three widgets
+test:   helm template x 2>/dev/null | grep -c widget
+expect: 3"
+  printf '\177ELF not a program for this machine\n' > "$tmp/bin-broken/helm"; chmod +x "$tmp/bin-broken/helm"
+  printf '#!/bin/sh\nexit 0\n' > "$tmp/bin-noexec/helm"; chmod -x "$tmp/bin-noexec/helm"
+  printf '#!/bin/sh\n[ "$1" = version ] && { echo v3.0.0; exit 0; }\necho widget; echo widget; echo widget\n' > "$tmp/bin-good/helm"; chmod +x "$tmp/bin-good/helm"
+  # Each fixture runs with a hermetic PATH (see selfprobe), so a real helm on the
+  # machine can neither shadow nor be shadowed by the fixture.
+  selfprobe "a helm that is on PATH and cannot execute is refused as unrunnable, not measured as 0" skip \
+    "cannot run" "FALSE CLAIM" "$tmp/counts.tsv" "$tmp/bin-broken" "$HELM_CLAIM"
+  selfprobe "a helm that is not executable is refused, not measured as 0" skip \
+    "" "FALSE CLAIM" "$tmp/counts.tsv" "$tmp/bin-noexec" "$HELM_CLAIM"
+  selfprobe "a helm that runs is measured" pass \
+    "" "" "$tmp/counts.tsv" "$tmp/bin-good" "$HELM_CLAIM"
+
   [ "$fails" -eq 0 ] && { echo "selftest PASSED"; exit 0; }
   echo "selftest FAILED"; exit 1
 fi
@@ -837,23 +917,58 @@ fi
 # NAME instead, everything else runs, and both counts print. Exit is 1 if a
 # checked entry is false, else 2 while anything was skipped: a partial run is
 # never a pass.
+# tool_runs TOOL: does the tool EXECUTE, not merely exist on PATH.
+# `command -v` answers "is a file there". A binary built for another
+# architecture, or one that lost its interpreter, passes it, and every test
+# command that sends the tool's stderr to /dev/null then dies silently and
+# reads 0. Each probe is the cheapest call that needs no network and no
+# cluster, and only its exit status is read.
+tool_runs() {
+  case "$1" in
+    helm)    helm version >/dev/null 2>&1 ;;
+    kubectl) kubectl version --client >/dev/null 2>&1 ;;
+    jq)      jq --version >/dev/null 2>&1 ;;
+    yq)      yq --version >/dev/null 2>&1 ;;
+    python3) python3 -c 'pass' >/dev/null 2>&1 ;;
+    awk)     awk 'BEGIN { exit 0 }' >/dev/null 2>&1 ;;
+    find)    find . -maxdepth 0 >/dev/null 2>&1 ;;
+    xargs)   printf x | xargs echo >/dev/null 2>&1 ;;
+    *)       return 0 ;;
+  esac
+}
+
 preflight() {
-  local t
+  local t absent="" broken="" nocounts=0
   for t in $(grep '^test:' "$CLAIMS" \
              | grep -oE '\b(helm|jq|yq|python3|kubectl|awk|find|xargs)\b' \
              | sort -u); do
-    command -v "$t" >/dev/null 2>&1 || MISSING="$MISSING $t"
+    if ! command -v "$t" >/dev/null 2>&1; then
+      absent="$absent $t"
+    elif ! tool_runs "$t"; then
+      broken="$broken $t"
+    fi
   done
-  MISSING="${MISSING# }"
+  absent="${absent# }"; broken="${broken# }"
+  # The render-count claims read a file another script writes. Run standalone
+  # in a clean clone it is not there, and every one of them would read
+  # "MISSING (...)" and be reported as a false claim against a correct page.
+  if grep '^test:' "$CLAIMS" | grep -q 'render-counts\.sh' && [ ! -f "$COUNTS_FILE" ]; then
+    nocounts=1
+  fi
+  MISSING="$absent${absent:+${broken:+ }}$broken"
+  [ "$nocounts" -eq 1 ] && MISSING="${MISSING:+$MISSING }render-counts.sh"
   [ -z "$MISSING" ] && return 0
-  echo "check-doc-claims: PARTIAL RUN ... missing tool(s): $MISSING"
+  echo "check-doc-claims: PARTIAL RUN"
+  [ -n "$absent" ] && echo "  missing tool(s), not on PATH: $absent"
+  [ -n "$broken" ] && echo "  on PATH but cannot run (wrong architecture, missing interpreter, broken install): $broken"
+  [ "$nocounts" -eq 1 ] && echo "  missing precondition: $COUNTS_FILE does not exist (run tools/render-counts.sh first)"
   echo
   echo "  These are used by test commands in $CLAIMS, several of which redirect"
-  echo "  stderr and pipe into a counting grep. Without the tool such a test"
-  echo "  measures as 0 and would accuse a correct page, so every entry whose"
-  echo "  test names a missing tool is SKIPPED below, by name. Every other entry"
-  echo "  is checked as usual. This run cannot pass: it exits 1 on a finding"
-  echo "  and 2 otherwise."
+  echo "  stderr and pipe into a counting grep, or read a file another script"
+  echo "  writes. Without the tool, or the file, such a test measures as 0 or as"
+  echo "  MISSING and would accuse a correct page, so every entry whose test needs"
+  echo "  one of them is SKIPPED below, by name. Every other entry is checked as"
+  echo "  usual. This run cannot pass: it exits 1 on a finding and 2 otherwise."
   echo
 }
 preflight
@@ -866,16 +981,16 @@ if [ "$rc" -eq 0 ]; then
 fi
 if [ "$rc" -eq 2 ]; then
   echo
-  echo "check-doc-claims: INCOMPLETE ... $SKIP_TOTAL skipped (named above), missing tool(s): $MISSING"
+  echo "check-doc-claims: INCOMPLETE ... $SKIP_TOTAL skipped (named above), missing: $MISSING"
   echo
   echo "  Everything that could be checked without them is true. The SKIPPED"
   echo "  lines above name what was not checked. Exit 2: not a pass. Install"
-  echo "  the tool(s) and re-run for a full result."
+  echo "  the tool(s), or run tools/render-counts.sh, and re-run for a full result."
   exit 2
 fi
 if [ "$SKIP_TOTAL" -gt 0 ]; then
   echo
-  echo "  ($SKIP_TOTAL more skipped, named above, for missing tool(s): $MISSING)"
+  echo "  ($SKIP_TOTAL more skipped, named above, for: $MISSING)"
 fi
 
 cat <<'FAIL'
