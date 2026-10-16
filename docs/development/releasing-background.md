@@ -221,6 +221,10 @@ drift re-run between the rc tag and the final tag compares the candidate
 against itself. Every stable key matches, because it is the same tree. The gate
 reports PASSED and has measured nothing.
 
+The default has since changed to the newest final `v*` tag by version order, so
+an rc no longer does this by itself. It still happens once the final tag of the
+release being cut exists, and the explicit baseline below remains the rule.
+
 This is the failure the gate was written to refuse, arriving through the door
 the gate reads its own baseline from, and it is invisible: the only tell is the
 `baseline:` line in the output, which reads `vX.Y.Z-rc1` where it should read

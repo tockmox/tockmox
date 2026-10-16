@@ -274,10 +274,16 @@ UNVERIFIED with the reason, never as PASS.
 
 #### An rc tag silently disarms the values-tier drift gate
 
-`tools/check-values-tiers.sh` takes its baseline from
-`git describe --tags --abbrev=0`. Once `vX.Y.Z-rc1` is tagged, that is the
-baseline, so a drift re-run compares the candidate against itself and reports
-PASSED having measured nothing. The only tell is the `baseline:` line.
+`tools/check-values-tiers.sh` and `tools/check-immutable-fields.sh` default
+their baseline to the newest final `v*` tag by version order, as the
+`render-diff` job in CI does, and use a release candidate tag only when no
+final release exists. They no longer ask `git describe --tags --abbrev=0`,
+which returned the candidate itself as soon as `vX.Y.Z-rc1` was tagged (a drift
+re-run then compared the candidate against itself and reported PASSED having
+measured nothing) and, on `main`, an older release than the newest one, because
+releases are tagged on `release-X.Y` branches that never merge back. The same
+thing still happens once the final tag of the release being cut exists. The
+only tell is the `baseline:` line.
 
 **From the first rc of a cycle onward, pass the previous release explicitly:**
 
