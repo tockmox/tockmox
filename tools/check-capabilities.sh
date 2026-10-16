@@ -58,8 +58,37 @@ if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
   exit 2
 fi
 
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")/.."
 VALUES="${VALUES:-ci/values.yaml}"
+# shellcheck source=tools/lib/tool-runs.sh
+. tools/lib/tool-runs.sh
+
+# --selftest: the helm partition below must hold for a helm that is on PATH
+# and cannot run, not only for one that is absent. Runs this script end to end
+# on a HERMETIC PATH (a fixture dir, then /usr/bin:/bin) so the machine's own
+# helm can neither shadow nor be shadowed by the fixture.
+if [ "${1:-}" = "--selftest" ]; then
+  set +e
+  tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+  mkdir -p "$tmp/broken" "$tmp/empty"
+  printf '\177ELF not a program for this machine\n' > "$tmp/broken/helm"; chmod +x "$tmp/broken/helm"
+  fails=0
+  probe() {
+    local label="$1" dir="$2" why="$3" out rc
+    out=$(PATH="$tmp/$dir:/usr/bin:/bin" "$BASH" "$SELF" 2>&1); rc=$?
+    if [ "$rc" -ne 2 ] || ! grep -qF -- "$why" <<<"$out" || grep -qE '^  FAIL  |capability framework FAILED' <<<"$out"; then
+      echo "  SELFTEST FAIL: '$label' wanted exit 2 naming '$why' and no finding, got exit $rc:"
+      sed 's/^/            /' <<<"$out" | tail -n 25; fails=1
+    else
+      echo "  selftest ok: $label"
+    fi
+  }
+  probe "a helm that is on PATH and cannot run skips the render checks, accusing nothing" broken "cannot run"
+  probe "no helm skips the render checks, accusing nothing"                               empty  "not on PATH"
+  [ "$fails" -eq 0 ] && { echo "selftest PASSED"; exit 0; }
+  echo "selftest FAILED"; exit 1
+fi
 LAYERS=(crds platform policy identity observability exporters ai devops selfcheck)
 fail=0
 note() { printf '  %s\n' "$*"; }
@@ -145,14 +174,21 @@ BYO=(serviceMonitors)
 # both counts print, and the exit is 1 on a finding and 2 otherwise. Exit 2 is
 # the repository's "skipped" and is never a pass; it was exit 1 here before,
 # which check-all.sh never saw because it refuses to start without helm.
+#
+# A HELM THAT CANNOT RUN IS NO HELM (2026-10-16). `command -v` passed a helm
+# built for another architecture; render() then returned the same exec error
+# for both sides of every comparison, and every capability was reported as a
+# switch that does nothing. Whether helm EXECUTES is now the test
+# (tools/lib/tool-runs.sh), and either failure takes the same partition.
 HAVE_HELM=1; nrun=0; nskip=0
+HELM_WHY="$(tool_why helm)"
 skip() { printf '  SKIPPED  %s\n' "$*"; nskip=$((nskip + 1)); }
-if ! command -v helm >/dev/null 2>&1; then
+if [ "$(tool_state helm)" != ok ]; then
   HAVE_HELM=0
-  echo "PARTIAL RUN: helm is not on PATH."
+  echo "PARTIAL RUN: $HELM_WHY."
   echo
   echo "Check 2 and the coherence half of check 3 compare helm renders; without"
-  echo "helm they would compare empty to empty and report every capability as a"
+  echo "a working helm they would compare like to like and report every capability as a"
   echo "switch that does nothing, a page of findings about a defect that is not"
   echo "there. They are SKIPPED, by name, below. Checks 1, 4 and 5 and the"
   echo "manifest half of 3 need no helm and run as usual. This run cannot pass."
@@ -330,7 +366,7 @@ nrun=$((nrun + 1))
 echo
 if [ "$nskip" -gt 0 ]; then
   echo "$nrun check(s) run, $nskip skipped (named above; check 3 is in both, its"
-  echo "manifest half ran): helm is not on PATH"
+  echo "manifest half ran): $HELM_WHY"
   if [ "$fail" -eq 0 ]; then
     echo "capability framework INCOMPLETE ... nothing run failed; exit 2, not a pass"
     exit 2

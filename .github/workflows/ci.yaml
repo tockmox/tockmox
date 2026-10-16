@@ -94,7 +94,9 @@ jobs:
           # you nothing about whether anything rendered. Since TM-0533 the
           # counts are also written to build/render-counts.tsv, which
           # "documented counts still match the tree" below reads instead of
-          # rendering all nine layers a second time.
+          # rendering all nine layers a second time. The selftest first: a
+          # failed render must leave no counts file for that step to trust.
+          ./tools/render-counts.sh --selftest
           ./tools/render-counts.sh
 
       - name: no NetworkPolicy guards an empty namespace
@@ -178,6 +180,7 @@ jobs:
           tar -xzf prometheus.tar.gz --strip-components=1 "prometheus-${PROMTOOL_VERSION}.linux-amd64/promtool"
           sudo install -m755 promtool /usr/local/bin/
           promtool --version
+          ./tools/check-alert-rules.sh --selftest
           ./tools/check-alert-rules.sh
 
       - name: the committed SBOM matches the tree
@@ -278,6 +281,7 @@ jobs:
           # This also asserts the ownership map in the script matches the one in
           # tockmox.capabilityOwners, so the gate cannot drift away from the
           # charts it is checking.
+          ./tools/check-capabilities.sh --selftest
           ./tools/check-capabilities.sh
 
       - name: global.imageRegistry redirects every image it claims to
@@ -692,6 +696,7 @@ jobs:
           # only checked that the claim text still existed somewhere on the
           # page. The selftest now proves the states path refuses a page that
           # contradicts the tree.
+          bash tools/lib/tool-runs.sh --selftest
           ./tools/check-doc-claims.sh --selftest
           ./tools/check-doc-claims.sh
 
