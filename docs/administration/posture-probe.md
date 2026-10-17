@@ -143,6 +143,20 @@ is the add-on's alone. The chart creates objects in every measured
 namespace (a CronJob, a ConfigMap, a Role and RoleBinding, and the stand-in
 listener), so the Application's project must be allowed to deploy there.
 
+With plain Helm the same chart installs with `--wait`:
+
+```text
+helm upgrade --install posture-probe addons/posture-probe/chart -n tockmox-posture --create-namespace -f posture-probe.yaml --wait --timeout 5m
+```
+
+The report volume is claimed at install, not at the first scheduled run. On a
+`WaitForFirstConsumer` StorageClass (the k3s default, `local-path`) a claim stays
+`Pending` until a pod mounts it, and the differential Job that normally mounts
+it may be a night away. A small one-shot Job, `posture-probe-bind-<hash>`, mounts
+the claim and exits, so the release reaches `deployed` (and the Application
+`Healthy`) on the first sync. It is the same image, with the same restricted
+security context, and it reads and writes nothing.
+
 The values that matter:
 
 ```yaml
