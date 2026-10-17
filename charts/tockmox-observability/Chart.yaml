@@ -12,11 +12,11 @@ dependencies:
     version: 0.8.0
     repository: "file://../tockmox-common"
   - name: kube-prometheus-stack
-    version: 92.2.0
+    version: 92.3.1
     repository: "https://prometheus-community.github.io/helm-charts"
     condition: apps.kubePrometheusStack.enabled,capabilities.observability.enabled
   - name: loki
-    version: "18.15.0"
+    version: "18.15.1"
     repository: "https://grafana-community.github.io/helm-charts"
     condition: apps.loki.enabled,capabilities.observability.enabled
   - name: alloy
