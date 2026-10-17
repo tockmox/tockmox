@@ -120,6 +120,11 @@ binding to the group(s) named by `sso.apps.<app>.access`:
   admin   the admin group only
   users   the user group AND the admin group (an admin is a user too)
 
+Changing `access` later is safe in both directions: the user-group binding is
+always rendered, as state: absent under `admin`, so moving an app from users to
+admin deletes the binding an earlier sync created (a blueprint never removes an
+object just because its entry is gone).
+
 Anyone in neither group is refused by Authentik before any console sees them.
 `sso.access.enabled: false` renders no bindings at all and restores the open
 shape; it exists so an operator locked out mid-install has a one-line way back,
@@ -273,15 +278,17 @@ declining the capability sets `enabled: false` here as well.
           name: {{ $.Values.sso.adminGroup }}
         attrs:
           is_superuser: false
+      # Bindings are identified by target AND group, never by order. An order
+      # identifier matches whatever else sits at that order on the application
+      # (a site's own policy binding, say) and would rewrite it.
       - model: authentik_policies.policybinding
         state: present
         identifiers:
           target: !KeyOf app-{{ $app.key }}
-          order: 0
-        attrs:
           group: !KeyOf group-admin-{{ $app.key }}
+        attrs:
+          order: 0
           enabled: true
-{{- if eq $app.access "users" }}
       - model: authentik_core.group
         state: present
         id: group-user-{{ $app.key }}
@@ -289,15 +296,20 @@ declining the capability sets `enabled: false` here as well.
           name: {{ $.Values.sso.userGroup }}
         attrs:
           is_superuser: false
+      # Rendered for `admin` too, as state: absent. A blueprint only creates and
+      # updates what it lists, so leaving this entry out when a site moves an
+      # app from users to admin would leave the user-group binding in place,
+      # and with Authentik's default ANY engine mode that binding alone still
+      # lets every user in. absent deletes it; on an install that never had it,
+      # absent is a no-op.
       - model: authentik_policies.policybinding
-        state: present
+        state: {{ ternary "present" "absent" (eq $app.access "users") }}
         identifiers:
           target: !KeyOf app-{{ $app.key }}
-          order: 1
-        attrs:
           group: !KeyOf group-user-{{ $app.key }}
+        attrs:
+          order: 1
           enabled: true
-{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

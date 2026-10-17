@@ -36,6 +36,19 @@
 # of them. A `!Find`-resolved group is therefore reported as a defect here, not
 # as a weaker pass.
 #
+# ACCESS CAN CHANGE (2026-10-17). A blueprint only creates and updates what it
+# lists; an entry that stops rendering leaves its object behind. When a site
+# moved an app from `access: users` to `admin`, the user-group binding entry
+# simply stopped rendering, so the binding the earlier sync made stayed, and
+# under Authentik's default ANY engine mode it alone still let every user in
+# (found on a live install, 2026-10-17). So every application must carry a
+# binding entry for BOTH role groups, `state: absent` for the one it does not
+# grant; only `present` bindings count as coverage; and a binding is
+# identified by target and group, never by `order`, because an order
+# identifier matches whatever else sits at that order (a site's own policy
+# binding) and rewrites it. Role group names come from the chart's values
+# (sso.adminGroup, sso.userGroup), or ROLE_GROUPS for fixtures.
+#
 # TWO RENDER PASSES, like the sibling gates: CI defaults, then the all-on
 # overlay, so an application that only renders on a non-default path is
 # checked too. `sso.access.enabled: false` renders no bindings by design and is
@@ -73,7 +86,9 @@ def _tagged(tag):
 for t in ('!Env', '!Find', '!KeyOf', '!Format', '!Context'):
     L.add_constructor(t, _tagged(t))
 
+import os
 path, label = sys.argv[1], sys.argv[2]
+role_groups = os.environ.get('ROLE_GROUPS', 'tockmox-admins tockmox-users').split()
 docs = [d for d in yaml.load_all(open(path), Loader=L) if d]
 if not docs:
     print(f"FAIL: {label or path}: nothing rendered, so this gate is checking nothing")
@@ -91,6 +106,8 @@ for name, bp in blueprints.items():
     entries = (bp or {}).get('entries') or []
     groups = {e.get('id') for e in entries
               if e.get('model') == 'authentik_core.group' and e.get('id')}
+    group_name = {e.get('id'): (e.get('identifiers') or {}).get('name') for e in entries
+                  if e.get('model') == 'authentik_core.group' and e.get('id')}
     apps = [e for e in entries if e.get('model') == 'authentik_core.application']
     bindings = [e for e in entries if e.get('model') == 'authentik_policies.policybinding']
     for app in apps:
@@ -101,12 +118,15 @@ for name, bp in blueprints.items():
             problems.append(f"{name}: application {slug} has no `id:`, so nothing can bind to it by !KeyOf")
             continue
         covered = 0
+        bound_names = set()
         for b in bindings:
             ident = b.get('identifiers') or {}
             attrs = b.get('attrs') or {}
             target = ident.get('target')
             if target != ('!KeyOf', app_id):
                 continue
+            if 'order' in ident:
+                problems.append(f"{name}: a binding on {slug} is identified by `order` ... that matches whatever else sits at that order on the application and rewrites it; identify by target and group")
             group = attrs.get('group', ident.get('group'))
             if group is None:
                 problems.append(f"{name}: a binding targets {slug} but names no group")
@@ -117,7 +137,12 @@ for name, bp in blueprints.items():
             if group[1] not in groups:
                 problems.append(f"{name}: the binding on {slug} names group id {group[1]!r}, which no authentik_core.group entry in this blueprint declares")
                 continue
-            covered += 1
+            bound_names.add(group_name.get(group[1]))
+            if b.get('state', 'present') == 'present':
+                covered += 1
+        for rg in role_groups:
+            if rg not in bound_names:
+                problems.append(f"{name}: application {slug} has no binding entry for role group {rg} ... if access changes later, the binding an earlier sync made stays behind; render it with state: absent when this app does not grant {rg}")
         if covered == 0:
             problems.append(f"{name}: application {slug} ({app_id}) has NO group binding ... every authenticated user may reach it")
 
@@ -133,6 +158,11 @@ print(f"  {label or path}: ok ({apps_seen} application(s), every one bound to a 
 PY
 }
 
+# The role group names, from the chart's own values (not hard-coded here).
+role_groups() {
+  python3 -c 'import yaml; s=yaml.safe_load(open("charts/tockmox-identity/values.yaml"))["sso"]; print(s["adminGroup"], s["userGroup"])'
+}
+
 render_and_scan() {
   local label="$1"; shift
   local tmp
@@ -144,7 +174,7 @@ render_and_scan() {
     return 1
   fi
   local rc=0
-  scan "$tmp" "$label" || rc=1
+  ROLE_GROUPS="$(role_groups)" scan "$tmp" "$label" || rc=1
   rm -f "$tmp"
   return "$rc"
 }
@@ -172,7 +202,9 @@ EOF
   fi
 
   # Direction 2: the same application bound by !KeyOf to a group declared in
-  # the same blueprint MUST pass.
+  # the same blueprint, identified by target and group, with the role group it
+  # does not grant rendered as state: absent, MUST pass. This is the shipped
+  # shape for `access: admin`.
   cat > "$fx/bound.yaml" <<'EOF'
 version: 1
 entries:
@@ -192,10 +224,22 @@ entries:
     state: present
     identifiers:
       target: !KeyOf app-x
-      order: 0
-    attrs:
       group: !KeyOf group-admin
+    attrs:
+      order: 0
       enabled: true
+  - model: authentik_core.group
+    state: present
+    id: group-user
+    identifiers:
+      name: tockmox-users
+  - model: authentik_policies.policybinding
+    state: absent
+    identifiers:
+      target: !KeyOf app-x
+      group: !KeyOf group-user
+    attrs:
+      order: 1
 EOF
   if ! scan "$fx/bound.yaml" bound >/dev/null 2>&1; then
     echo "check-sso-bindings: SELFTEST FAILED ... a correctly bound application was reported unbound"
@@ -249,9 +293,112 @@ EOF
     fail=1
   fi
 
+  # Direction 5: the 0.8.0 shape for `access: admin` ... no entry at all for
+  # the user group ... MUST trip: moving an app from users to admin would leave
+  # the binding an earlier sync made behind.
+  cat > "$fx/no-user-entry.yaml" <<'EOF'
+version: 1
+entries:
+  - model: authentik_core.application
+    state: present
+    id: app-x
+    identifiers:
+      slug: x
+  - model: authentik_core.group
+    state: present
+    id: group-admin
+    identifiers:
+      name: tockmox-admins
+  - model: authentik_policies.policybinding
+    state: present
+    identifiers:
+      target: !KeyOf app-x
+      group: !KeyOf group-admin
+    attrs:
+      order: 0
+EOF
+  if scan "$fx/no-user-entry.yaml" no-user-entry >/dev/null 2>&1; then
+    echo "check-sso-bindings: SELFTEST FAILED ... an app with no binding entry for the user group passed"
+    fail=1
+  fi
+
+  # Direction 6: a binding identified by `order` MUST trip, even when it is
+  # otherwise complete.
+  cat > "$fx/by-order.yaml" <<'EOF'
+version: 1
+entries:
+  - model: authentik_core.application
+    state: present
+    id: app-x
+    identifiers:
+      slug: x
+  - model: authentik_core.group
+    state: present
+    id: group-admin
+    identifiers:
+      name: tockmox-admins
+  - model: authentik_policies.policybinding
+    state: present
+    identifiers:
+      target: !KeyOf app-x
+      order: 0
+    attrs:
+      group: !KeyOf group-admin
+  - model: authentik_core.group
+    state: present
+    id: group-user
+    identifiers:
+      name: tockmox-users
+  - model: authentik_policies.policybinding
+    state: absent
+    identifiers:
+      target: !KeyOf app-x
+      group: !KeyOf group-user
+EOF
+  if scan "$fx/by-order.yaml" by-order >/dev/null 2>&1; then
+    echo "check-sso-bindings: SELFTEST FAILED ... a binding identified by order passed"
+    fail=1
+  fi
+
+  # Direction 7: an app whose only bindings are state: absent is unbound and
+  # MUST trip.
+  cat > "$fx/all-absent.yaml" <<'EOF'
+version: 1
+entries:
+  - model: authentik_core.application
+    state: present
+    id: app-x
+    identifiers:
+      slug: x
+  - model: authentik_core.group
+    state: present
+    id: group-admin
+    identifiers:
+      name: tockmox-admins
+  - model: authentik_policies.policybinding
+    state: absent
+    identifiers:
+      target: !KeyOf app-x
+      group: !KeyOf group-admin
+  - model: authentik_core.group
+    state: present
+    id: group-user
+    identifiers:
+      name: tockmox-users
+  - model: authentik_policies.policybinding
+    state: absent
+    identifiers:
+      target: !KeyOf app-x
+      group: !KeyOf group-user
+EOF
+  if scan "$fx/all-absent.yaml" all-absent >/dev/null 2>&1; then
+    echo "check-sso-bindings: SELFTEST FAILED ... an app whose bindings are all absent passed"
+    fail=1
+  fi
+
   rm -rf "$fx"
   if [ "$fail" -ne 0 ]; then exit 1; fi
-  echo "check-sso-bindings: selftest passes (unbound trips; bound passes; !Find trips; dangling !KeyOf trips)"
+  echo "check-sso-bindings: selftest passes (unbound trips; bound passes; !Find trips; dangling !KeyOf trips; no user-group entry trips; order identifier trips; all-absent trips)"
   exit 0
 fi
 
