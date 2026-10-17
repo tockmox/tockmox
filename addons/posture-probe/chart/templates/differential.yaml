@@ -31,6 +31,50 @@ spec:
     requests:
       storage: {{ $st.size | default "1Gi" | quote }}
 ---
+# Binds the report claim at install. On a WaitForFirstConsumer StorageClass (the
+# default on a fresh k3s: local-path) a claim stays Pending until a pod mounts
+# it, and its only consumer is the differential Job, which may be a night away.
+# Pending reads as not ready to `helm --wait` (the release ends failed) and as
+# Progressing to Argo CD. This Job mounts the claim once and exits, so both
+# reach ready on the first sync. The name carries a hash of everything the pod
+# template takes from values: a Job's template cannot be updated in place, so a
+# changed image makes a new Job and the old one is pruned with the release.
+{{- $bind := printf "posture-probe-bind-%s" (dict "i" .Values.image "p" (.Values.imagePullPolicy | default "IfNotPresent") "r" .Values.resources | toJson | sha256sum | trunc 8) }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $bind }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "pp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: binder
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: posture-probe-binder
+        app.kubernetes.io/part-of: posture-probe
+        app.kubernetes.io/component: binder
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      {{- include "pp.podSecurity" . | nindent 6 }}
+      containers:
+        - name: bind
+          image: {{ .Values.image | quote }}
+          imagePullPolicy: {{ .Values.imagePullPolicy | default "IfNotPresent" }}
+          # Prints usage and exits 0: the image needs no other entry point to be a consumer.
+          args: ["--help"]
+          {{- include "pp.containerSecurity" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - { name: reports, mountPath: /reports }
+      volumes:
+        - name: reports
+          persistentVolumeClaim: { claimName: posture-probe-reports }
+---
 apiVersion: batch/v1
 kind: CronJob
 metadata:

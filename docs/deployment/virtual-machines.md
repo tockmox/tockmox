@@ -253,6 +253,10 @@ yours to build, see [time synchronisation](time-sync.md).
 | Synology VMM | [below](#synology-virtual-machine-manager) | VM disk not on an SSD pool |
 | QNAP, Asustor and similar | [with Synology](#synology-virtual-machine-manager) | Same shape, none documented from a clean install |
 
+OpenShift Virtualization appears here as the hypervisor under your VMs. Tockmox
+installed onto an OpenShift cluster itself is not covered: no
+security-context-constraints profile ships and no such install is documented.
+
 ## SUSE Harvester
 
 Harvester is KubeVirt on top of k3s, so your Tockmox nodes are KubeVirt VMs.
@@ -282,6 +286,12 @@ Default emulated models cost real throughput on container image decompression.
 ## Red Hat OpenShift Virtualization
 
 Also KubeVirt, so the concepts match Harvester with different names.
+
+**This section is about OpenShift as the hypervisor.** Your Tockmox nodes are
+VMs that OpenShift Virtualization runs, and Kubernetes inside those VMs is the
+cluster Tockmox installs into. It does not cover installing Tockmox onto an
+OpenShift cluster itself: no security-context-constraints profile ships, and no
+install onto OpenShift is documented.
 
 **Network binding is the setting that matters.** The default `masquerade`
 binding NATs the VM behind the pod network, which breaks MetalLB L2 outright:

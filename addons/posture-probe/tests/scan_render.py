@@ -129,6 +129,19 @@ def scan(docs, rel_ns):
             for s in o.get("subjects") or []:
                 if (s.get("kind"), s.get("name"), s.get("namespace")) != ("ServiceAccount", "posture-probe", rel_ns):
                     errs.append("%s binds %s %s, not the probe's own account" % (where, s.get("kind"), s.get("name")))
+    # A claim only a CronJob mounts is Pending until the first scheduled run on a
+    # WaitForFirstConsumer StorageClass (k3s local-path), so `helm --wait` fails the
+    # release and Argo CD never reaches Healthy. Something that runs at install
+    # (a Job, never a CronJob) has to mount every claim.
+    for pvc in (o for o in docs if o["kind"] == "PersistentVolumeClaim"):
+        name, ns = pvc["metadata"]["name"], pvc["metadata"].get("namespace")
+        binders = [o for o in docs if o["kind"] in ("Job", "Deployment", "StatefulSet", "Pod")
+                   and o["metadata"].get("namespace") == ns
+                   and any((v.get("persistentVolumeClaim") or {}).get("claimName") == name
+                           for v in pod_spec(o).get("volumes") or [])]
+        if not binders:
+            errs.append("PersistentVolumeClaim %s/%s has no consumer that runs at install: on a WaitForFirstConsumer "
+                        "StorageClass it stays Pending until the first scheduled run, so helm --wait fails" % (ns, name))
     # Intent rows the collectors can actually answer.
     cms = [o for o in docs if o["kind"] == "ConfigMap" and o["metadata"]["name"] == "posture-probe-config"]
     if not cms:

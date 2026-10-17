@@ -1,6 +1,6 @@
 # The executed-documentation harness
 
-`ci.yaml` runs 39 gates. All but one are static analysis of this repository
+`ci.yaml` runs 40 gates. All but one are static analysis of this repository
 (the exception is [`tests/installer`](../installer/README.md), which runs the
 installer and no cluster). This directory is the other question: **do the
 instructions work?**

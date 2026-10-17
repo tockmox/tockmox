@@ -139,9 +139,55 @@ four lines per app and removes the ordering dependency entirely.
       (dict "key" "grafana"   "title" "Grafana"        "host" (.Values.sso.apps.grafana.host | default "") "subMode" (.Values.sso.apps.grafana.subMode | default $.Values.sso.subMode | default "") "cid" .Values.sso.apps.grafana.clientId       "access" (.Values.sso.apps.grafana.access | default "users")       "env" "GRAFANA_CLIENT_SECRET"   "hostPrefix" "grafana"   "path" "/login/generic_oauth" "desc" "Metrics, logs and dashboards." "group" "Observability" "icon" "app-grafana.svg")
       (dict "key" "openwebui" "title" "Open WebUI"     "host" (.Values.sso.apps.openWebui.host | default "") "subMode" (.Values.sso.apps.openWebui.subMode | default $.Values.sso.subMode | default "") "cid" .Values.sso.apps.openWebui.clientId     "access" (.Values.sso.apps.openWebui.access | default "users")     "env" "OPENWEBUI_CLIENT_SECRET" "hostPrefix" "chat"      "path" "/oauth/oidc/callback" "desc" "Chat with models running on your own hardware." "group" "AI Apps" "icon" "app-openwebui.svg")
       (dict "key" "argo"      "title" "Argo Workflows" "host" (.Values.sso.apps.argoWorkflows.host | default "") "subMode" (.Values.sso.apps.argoWorkflows.subMode | default $.Values.sso.subMode | default "") "cid" .Values.sso.apps.argoWorkflows.clientId "access" (.Values.sso.apps.argoWorkflows.access | default "users") "env" "ARGO_CLIENT_SECRET"      "hostPrefix" "workflows" "path" "/oauth2/callback"    "desc" "Run and inspect workflows." "group" "Infrastructure" "icon" "app-argo-workflows.svg") }}
+{{- /*
+LINK-ONLY APPLICATIONS (`sso.links.<key>`): a tile that opens a console which
+has no OIDC to attach a provider to. Authentik's Application.provider is
+optional (a nullable one-to-one on the model, and absent from the blueprint
+schema's `required` list), so the entry simply omits it: no OAuth2 provider, no
+client secret, no redirect URI, no `!Env`. Everything else is the same as an
+OAuth tile ... launch URL, icon, description, group heading, new-tab, and the
+same role-group binding, so `tools/check-sso-bindings.sh` holds for it too.
+
+THE TILE GRANTS NOTHING. The binding decides who SEES the tile; the console
+behind it still asks for its own sign-in, and its own users and ACL decide what
+that person may do. Say so in `description`, or an operator who has just
+watched three consoles open without a second login will expect the fourth to
+do the same.
+
+`enabled` is a tri-state like `apps.<x>.enabled`: unset follows the capability
+named in `capability` (a link with no `capability` and no explicit `true` stays
+off), `true` and `false` mean what they say. The identity layer cannot read
+another layer's values, so it follows the capability, not the other layer's
+per-component switches ... a site that turns the console itself off without
+declining the capability sets `enabled: false` here as well.
+*/ -}}
+{{- $oauthKeys := list "grafana" "openwebui" "argo" }}
+{{- $links := list }}
+{{- range $key, $l := (.Values.sso.links | default dict) }}
+{{- if has $key $oauthKeys }}
+{{- fail (printf "sso.links.%s collides with the OAuth application of the same key; choose another key" $key) }}
+{{- end }}
+{{- $on := false }}
+{{- if kindIs "invalid" $l.enabled }}
+{{- if $l.capability }}
+{{- $on = ne (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" $l.capability "app" "")) "" }}
+{{- end }}
+{{- else }}
+{{- $on = $l.enabled }}
+{{- end }}
+{{- if $on }}
+{{- if and (not $l.host) (not $l.hostPrefix) }}
+{{- fail (printf "sso.links.%s needs a host or a hostPrefix" $key) }}
+{{- end }}
+{{- if and $.Values.brand.enabled $l.icon (not ($.Files.Get (printf "brand/%s" $l.icon))) }}
+{{- fail (printf "sso.links.%s.icon %q is not a file in charts/tockmox-identity/brand/" $key $l.icon) }}
+{{- end }}
+{{- $links = append $links (dict "link" true "key" $key "title" ($l.title | default $key) "host" ($l.host | default "") "hostPrefix" ($l.hostPrefix | default "") "path" ($l.path | default "") "access" ($l.access | default "users") "desc" ($l.description | default "") "group" ($l.group | default "") "icon" ($l.icon | default "") "cid" (printf "tockmox-%s" $key)) }}
+{{- end }}
+{{- end }}
 {{- $accessOn := dig "access" "enabled" true .Values.sso }}
 {{- $subModes := list "hashed_user_id" "user_id" "user_uuid" "user_username" "user_email" }}
-{{- range $app := $apps }}
+{{- range $app := (concat $apps $links) }}
 {{- /* Redirect host: an explicit sso.apps.<app>.host wins, else <prefix>.<domain>. Mirrors the per-app ingress host override in the layer that serves the app (TM-0820). */ -}}
 {{- $appHost := $app.host | default (printf "%s.%s" $app.hostPrefix $domain) }}
 {{- if and $app.subMode (not (has $app.subMode $subModes)) }}
@@ -155,6 +201,7 @@ four lines per app and removes the ordering dependency entirely.
     metadata:
       name: tockmox-app-{{ $app.key }}
     entries:
+{{- if not $app.link }}
       - model: authentik_providers_oauth2.oauth2provider
         state: present
         id: provider-{{ $app.key }}
@@ -184,6 +231,7 @@ four lines per app and removes the ordering dependency entirely.
           redirect_uris:
             - matching_mode: strict
               url: "{{ $scheme }}://{{ $appHost }}{{ $app.path }}"
+{{- end }}
       - model: authentik_core.application
         state: present
         id: app-{{ $app.key }}
@@ -191,12 +239,14 @@ four lines per app and removes the ordering dependency entirely.
           slug: {{ $app.cid }}
         attrs:
           name: {{ $app.title }}
+{{- if not $app.link }}
           provider: !KeyOf provider-{{ $app.key }}
+{{- end }}
           # Tile metadata. Without meta_launch_url the card on the user
           # dashboard is decorative ... it renders and does nothing when
           # clicked, which reads as a broken deployment rather than a missing
           # field.
-          meta_launch_url: "{{ $scheme }}://{{ $appHost }}"
+          meta_launch_url: "{{ $scheme }}://{{ $appHost }}{{ if $app.link }}{{ $app.path }}{{ end }}"
           meta_description: {{ $app.desc | quote }}
           meta_publisher: {{ $.Values.brand.title | quote }}
           group: {{ $app.group | quote }}
@@ -210,7 +260,7 @@ four lines per app and removes the ordering dependency entirely.
           # fires on any empty value and `false` is empty, so an explicit
           # `false` would be flipped back to `true`.
           open_in_new_tab: {{ $.Values.sso.openInNewTab }}
-{{- if $.Values.brand.enabled }}
+{{- if and $.Values.brand.enabled $app.icon }}
           meta_icon: "{{ $assets }}/{{ $app.icon }}"
 {{- end }}
 {{- if $accessOn }}

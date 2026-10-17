@@ -53,7 +53,7 @@ Three honest reasons, and they are the reason this exists:
 |---|---|---|---|
 | `observability` | What is this platform doing right now: metrics, logs, and the rules that read them | kube-prometheus-stack, Loki, Alloy, the blackbox exporter, the Prometheus operator CRDs, and every ServiceMonitor / PodMonitor / PrometheusRule this repo writes | on |
 | `notifications` | Alerts that reach a person, and proof the path still works when nothing is wrong | ntfy, Apprise, the alert bridge, the heartbeat CronJob, the notification rules | on |
-| `identity` | One sign-in across every console | Authentik, the SSO env Secrets, the blueprints, the brand config | on |
+| `identity` | One sign-in across the three consoles wired to it | Authentik, the SSO env Secrets, the blueprints, the brand config | on |
 | `aiPlane` | A private AI console and the model gateway in front of it | Open WebUI, LiteLLM, their ingresses and database | on |
 | `dataProtection` | Backups that go somewhere, and the plumbing underneath them | Garage, the Barman Cloud plugin, the CSI snapshot controller, and the docs site Garage serves (`apps.docs`, [serving static sites](serving-static-sites.md)) | on |
 | `hardwareTelemetry` | Telemetry from physical hardware | the SMART exporter, the SNMP exporter | **off** |

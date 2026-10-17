@@ -324,6 +324,7 @@ run_gate "the docs offline gate goes red on every external reference (TM-0215)" 
 serial_gate "the built documentation site makes no network request (TM-0215)" \
   bash tools/check-docs-offline.sh
 run_gate "the committed SBOM matches the tree" bash tools/gen-sbom.sh --check
+run_gate "the committed images.txt matches the charts" bash tools/gen-images.sh --check
 run_gate "documentation stamps are current" bash tools/stamp-docs.sh --check
 # TM-0228. The layer table and the four section READMEs are generated. The
 # selftest proves the check goes red on a flipped wave, a flipped installer

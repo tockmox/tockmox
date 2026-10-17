@@ -65,8 +65,8 @@ one. Name a model host in the gateway's `litellm.proxy_config.model_list`, one
 value, in [the AI plane](ai-plane.md). Through 0.7.x the gateway itself shipped
 off and pointing the console at it was a documented extra step; that is gone.
 
-**One identity for all of it:** the identity layer wires the consoles into
-Authentik via shipped blueprints ... two groups (`tockmox-admins`,
+**One identity for the three consoles wired to it:** the identity layer wires
+Grafana, Open WebUI and Argo Workflows into Authentik via shipped blueprints ... two groups (`tockmox-admins`,
 `tockmox-users`) decide who may reach each app and which role they land in, a
 user in neither group is refused before any console sees the login, and local
 logins remain as break-glass. See [identity](../administration/identity.md).

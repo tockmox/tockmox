@@ -2,7 +2,7 @@
 #
 # The executed-documentation gate.
 #
-# ci.yaml runs 39 gates and all but one of them is static analysis of this
+# ci.yaml runs 40 gates and all but one of them is static analysis of this
 # repository. They answer "is the tree internally consistent?" and nothing in
 # them answers "do the instructions work?" This workflow is the second question.
 # (The exception, tests/installer, runs the installer itself against no cluster.

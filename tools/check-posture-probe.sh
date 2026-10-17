@@ -29,7 +29,9 @@
 #      collectors keep their output out of logs and settle before measuring
 #      (a new pod is not policed at once); reach collectors run as the
 #      namespace default account; every rbac intent row is a question the
-#      collector actually asks.
+#      collector actually asks; the report claim is mounted by something that runs
+#      at install (a claim only a CronJob mounts stays Pending on a
+#      WaitForFirstConsumer StorageClass, which fails `helm --wait` and Argo health).
 #   5. every top-level values key is `x-tockmox-stability: experimental`, and
 #      values.yaml declares no key the schema does not.
 #   6. the render refuses: no image, a measured release namespace, a row naming an
@@ -159,6 +161,7 @@ mutate "the reach collector given an account"       chart/templates/collectors.y
 mutate "collectors measure without settling"  chart/templates/collectors.yaml "s.replace('                - { name: PROBE_SETTLE, value: /etc/probe/settle.json }\n','')" "measures inside the window"
 mutate "the settle loop reports its first round" posture_probe/blackbox.py "s.replace('if streak >= cfg[\"stableRounds\"] and time.monotonic() - streak_t0 >= cfg[\"minSpanSeconds\"]:','if True:')" "test_default_reports_the_settled_state_not_the_first_second" unit
 mutate "an unsettled collector's readings are kept" posture_probe/blackbox.py "s.replace('        return report, []\n','        pass\n',1).replace('            return [], {\"settled\": False, \"rounds\": rounds,','            return res, {\"settled\": False, \"rounds\": rounds,')" "test_a_control_that_never_holds_is_could_not_settle" unit
+mutate "the report claim loses its install-time consumer" chart/templates/differential.yaml "re.sub(r'(?s)# Binds the report claim.*?(?=---\\napiVersion: batch/v1\\nkind: CronJob)','',s)" "has no consumer that runs at install"
 mutate "a container may escalate"                   chart/templates/_helpers.tpl "s.replace('allowPrivilegeEscalation: false','allowPrivilegeEscalation: true')" "is not restricted"
 mutate "the add-on on by default"                   chart/values.yaml "s.replace('enabled: false','enabled: true',1)" "FAIL default render failed"
 mutate "a values key promoted to stable"            chart/values.schema.json "s.replace('\"experimental\"','\"stable\"',1)" "not experimental"

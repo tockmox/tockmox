@@ -165,10 +165,19 @@ is a vulnerability. Note that this policy is *supposed* to block things ... see
 **Secrets never leave your cluster.** Tockmox has no telemetry and no
 phone-home. It ships secret *templates*; you seal your own against your own
 key. Tockmox transmitting anything anywhere is a vulnerability and will be
-treated as one.
+treated as one. The claim is about what Tockmox sends, not about where every
+byte sits: `tools/mint-secrets.sh` creates credentials on the machine you run
+it on and seals them before they reach git, and `install/tockmox-install.sh
+bootstrap-secrets` exports the sealed-secrets controller's private key,
+encrypted, to a file outside the cluster that you keep, because a rebuilt
+cluster cannot read your committed SealedSecrets without it. Credentials you
+give to a model provider or another integration go where you send them.
 
 **Upgrades cannot overwrite your configuration.** Your values live in a
 separate repository. An upgrade path that can write to it is a serious bug.
+This is a property of files; before 1.0 it does not promise that the names and
+endpoints an application of yours depends on stay put
+([values contract](docs/administration/values-contract.md#before-10-there-is-no-downstream-abi)).
 
 ## Known issues
 

@@ -274,6 +274,63 @@
               }
             }
           }
+        },
+        "links": {
+          "type": "object",
+          "description": "Link-only tiles: consoles with no OIDC. Renders an Authentik application with no provider, client secret or redirect URI.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": [
+                  "boolean",
+                  "null"
+                ],
+                "description": "true or false decides outright; unset or null follows `capability`. A link with no capability and no explicit true stays off."
+              },
+              "capability": {
+                "type": "string",
+                "description": "Capability that owns the console; the tile follows it when `enabled` is unset."
+              },
+              "title": {
+                "type": "string",
+                "description": "Tile name. Defaults to the key."
+              },
+              "hostPrefix": {
+                "type": "string",
+                "description": "Tile host is <hostPrefix>.<internalDomain> unless `host` is set."
+              },
+              "host": {
+                "type": "string",
+                "description": "Full hostname for the tile. Keep equal to the console's own ingress host."
+              },
+              "path": {
+                "type": "string",
+                "description": "Appended to the launch URL. Empty opens the host root."
+              },
+              "description": {
+                "type": "string",
+                "description": "One line on the tile. It should say what sign-in the console will ask for, because the tile grants nothing."
+              },
+              "group": {
+                "type": "string",
+                "description": "Heading the tile sits under on the portal."
+              },
+              "icon": {
+                "type": "string",
+                "description": "A file in charts/tockmox-identity/brand/."
+              },
+              "access": {
+                "type": "string",
+                "description": "Who sees the tile: admin (admin group only) or users (user group and admin group).",
+                "enum": [
+                  "admin",
+                  "users"
+                ]
+              }
+            }
+          }
         }
       }
     },

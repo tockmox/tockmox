@@ -56,17 +56,24 @@ decision you make per request, not a default someone made for you.
 It's a Kubernetes platform, delivered as Helm charts and reconciled by GitOps,
 that assembles proven open source components the way an enterprise platform
 team would: single sign-on in front of everything, default-deny networking,
-monitoring that pages a human, and backups that prove they restore. The
-opinions are stated, every component turns off individually, and your
-configuration lives in your repository, not ours.
+monitoring that pages a human, and backups that prove they restore. Read
+those four with their edges: single sign-on fronts the three consoles wired to
+it (Grafana, Open WebUI, Argo Workflows), with local break-glass logins beside
+it, and the UIs that ship no login of their own (Prometheus, Alertmanager,
+Longhorn) are off by default; default-deny is complete for ingress, while
+egress is contained only for the AI namespace and the diagnostic one; the
+scheduled restore drill covers the model-gateway database, not your chat
+history or a whole-cluster rebuild. [What you get](#what-you-get) states each
+in full. The opinions are stated, every component turns off individually, and
+your configuration lives in your repository, not ours.
 
 | Layer | What it gives you | Built on |
 |---|---|---|
 | **AI** | Private chat and a model gateway, pointed at *your* models | Open WebUI, LiteLLM, Ollama (optional) |
-| **Identity** | One login for every console | Authentik |
+| **Identity** | One login for the three consoles wired to it; local break-glass logins stay on | Authentik |
 | **Observability** | Metrics, logs, dashboards, and alerts that reach your phone | Prometheus, Alertmanager, Grafana, Loki, Alloy, ntfy |
 | **Platform** | Storage, databases, ingress, certificates, patching | Longhorn, CloudNativePG, Garage, Traefik, MetalLB, cert-manager, kured |
-| **Policy** | Default-deny networking and admission guardrails | Kubernetes NetworkPolicy, RBAC, ValidatingAdmissionPolicy |
+| **Policy** | Default-deny networking (ingress in every namespace it creates, egress in the AI namespace and the diagnostic one, nothing in namespaces you create) and admission guardrails | Kubernetes NetworkPolicy, RBAC, ValidatingAdmissionPolicy |
 | **DevOps** | Workflows, behind SSO | Argo Workflows (optional) |
 | **Self-check** | A heartbeat that proves the alerting is alive | Tockmox |
 | **Front door** | Is it OK, and where's everything? | Tockmox UI (experimental) |
@@ -76,10 +83,20 @@ source-available rather than open source are named on the
 [licences page](docs/third-party-licenses.md).
 
 - **It keeps working when the internet doesn't.** Every component runs locally.
-  Losing your uplink degrades capability, not availability.
+  Losing your uplink degrades capability, not availability: a cloud model
+  route you configured stops answering, and so does public certificate issuance
+  if you use it. That is about running. Installing disconnected takes
+  preparation, because the images, charts, git server, internal CA and time
+  source all have to be carried in ([air-gapped operation](#air-gapped-operation)),
+  and the one disconnected install was run on 2026-08-25 against an earlier
+  build, not re-run for 0.8.0.
 - **Upgrades can't overwrite your configuration.** Your settings live in a
   separate repository from the platform: the `/usr` versus `/etc` split, in
-  GitOps terms.
+  GitOps terms. That promise is about files. Before 1.0 it does not freeze
+  behaviour: only keys tiered `stable` are promised across releases, and the
+  Service names, Secret keys and endpoints an application of yours depends on
+  can change in a minor release
+  ([no downstream ABI before 1.0](docs/administration/values-contract.md#before-10-there-is-no-downstream-abi)).
 - **Every claim names its evidence and its kind.** Rendered artifacts are gated
   by CI on every commit; operational behaviour rests on named, dated runs on
   real clusters; documented procedures not yet executed verbatim say so on the
@@ -168,6 +185,9 @@ and comfort with Kubernetes, Helm and GitOps; hardware per tier is in
 [Prepare a fresh cluster](docs/deployment/fresh-install.md). On a hypervisor, read
 [virtual machines](docs/deployment/virtual-machines.md) first: four settings
 break Tockmox on Harvester, OpenShift Virtualization, vSphere and Synology VMM.
+OpenShift Virtualization is covered as the hypervisor under your cluster; no
+install onto OpenShift itself, and no security-context-constraints profile, is
+documented or shipped.
 
 ```bash
 git clone https://github.com/tockmox/tockmox.git
@@ -222,10 +242,12 @@ a heartbeat proves the alerting is alive. Default-deny **ingress** covers every
 namespace the platform creates; egress is contained for the whole AI namespace
 (the chat console included), and open elsewhere
 ([stated in full](docs/usage/what-you-get.md#network-containment)). The
-model-gateway database proves it restores on a schedule; Longhorn volumes have
-been restored from backup once, in production; Authentik's bundled database has
-been restored from its nightly dump once, on a lab, with a login after
-([row by row](docs/operations/backup-restore.md)).
+model-gateway database proves it restores on a schedule, into a scratch copy
+every week; the chat console's data volume has no scheduled drill. Longhorn
+volumes have been restored from backup once, in production; Authentik's bundled
+database has been restored from its nightly dump once, on a lab, with a login
+after ([row by row](docs/operations/backup-restore.md)). Rebuilding a cluster
+and restoring all of it has not been run as one exercise.
 Every application turns off individually, every UI hostname derives from one
 value, and TLS follows another.
 
@@ -299,7 +321,9 @@ upgrade physically can't write a file you own. Four ways to change what Tockmox
 ships, in the order to reach for them
 ([customising.md](docs/administration/customising.md)):
 
-1. **Values.** Anything the charts expose. Free upgrades forever.
+1. **Values.** Anything the charts expose. Free upgrades forever on keys tiered
+   `stable`; a `provisional` or `experimental` key, or an upstream key Tockmox
+   does not set, can move in a minor release.
 2. **Extension points.** Drop a Grafana dashboard or a PrometheusRule into your
    repository and Tockmox picks it up. Replace one of ours by matching its UID.
 3. **Kustomize patch** against the pinned base. Conflicts fail loudly at upgrade.

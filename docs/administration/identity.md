@@ -41,7 +41,9 @@ flowchart LR
 Authentik is the OIDC provider for three shipped consoles: Grafana, Open WebUI
 and Argo Workflows. Forgejo is drawn as planned rather than wired ... Tockmox
 does not ship Forgejo, and the policy layer's Forgejo bundle is for one you
-installed yourself.
+installed yourself. ntfy has a tile on the portal too, but only as a link: it
+has no OIDC, so Authentik signs nobody in to it
+([below](#tiles-for-consoles-that-have-no-sso)).
 
 ## Two groups drive every role mapping
 
@@ -213,6 +215,52 @@ you move local accounts onto SSO and control every address, then set `false`.
 With `false`, a login whose email matches an existing local account is refused
 rather than merged.
 
+## Tiles for consoles that have no SSO
+
+ntfy cannot sign in through Authentik: its server offers its own user database
+and access list and no OIDC, OAuth or trusted-header mode. It still gets a tile
+on the portal, so the console that reaches your phone is listed with the others.
+That tile is a **link-only application**: a launch URL, the ntfy icon, a
+description and a group heading, opened in a new tab, with **no OAuth2 provider,
+no client secret and no redirect URI**.
+
+**The tile grants nothing.** The same `access` binding as the other tiles
+decides who *sees* it, and ntfy still asks for its own username and password
+afterwards. Its users and access list, set in the `tockmox-ntfy-auth` Secret
+(see [secrets](secrets.md)), decide who may read or publish. The tile's
+description says this, because after three consoles that open without a second
+login, the fourth is expected to.
+
+The tile appears when the `notifications` capability is on, and its address is
+`ntfy.<internalDomain>/app`. The identity layer cannot read the observability
+layer's values, so it cannot see per-component switches. If you turn ntfy off
+or move it while leaving the capability on, state it here as well:
+
+```yaml
+# site/values/identity.yaml
+sso:
+  links:
+    ntfy:
+      enabled: false          # or host: alerts.example.com to follow a moved ingress
+      # path: /               # if you changed notifications.ntfy.webRoot
+```
+
+The same shape serves any other console without OIDC. Add a key under
+`sso.links` and the blueprint loop renders it, with no template change:
+
+| Key | Default for `ntfy` | What it does |
+|---|---|---|
+| `enabled` | unset | Unset follows `capability`; `true` or `false` decides outright. An entry with no `capability` and no `true` renders nothing. |
+| `capability` | `notifications` | The capability that owns the console. |
+| `title`, `description`, `group` | `ntfy`, a sentence naming ntfy's own sign-in, `Observability` | What the tile says and the heading it sits under. |
+| `hostPrefix`, `host` | `ntfy`, empty | The tile's host is `<hostPrefix>.<internalDomain>` unless `host` is set. Keep it equal to the console's own ingress host. |
+| `path` | `/app` | Appended to the launch URL. ntfy's web app lives at `/app` while `notifications.ntfy.webRoot` is `app`. |
+| `icon` | `app-ntfy.svg` | A file in `charts/tockmox-identity/brand/`, served in-cluster. A name that is not there fails the render. |
+| `access` | `users` | `admin` or `users`, as for the OAuth tiles. |
+
+A link needs `sso.enabled`, like every tile. Its slug is `tockmox-<key>`; a key
+that matches one of the OAuth applications fails the render.
+
 ## Day-to-day administration
 
 All user management happens in Authentik, at `auth.<internalDomain>`, behind
@@ -367,6 +415,10 @@ changing the registered URIs in the same commit, described in
 Both are a scheme mismatch; only the direction differs.
 
 ## Two axes, deliberately separate
+
+**Only privilege is implemented.** Nothing in this release enforces clearance,
+and Tockmox does not yet ship a document index of its own for clearance to
+govern. What follows is the design the later layers are held to.
 
 Tockmox distinguishes **privilege** (what you may do) from **clearance** (what
 you may see). They are not the same, and conflating them is how systems end up
