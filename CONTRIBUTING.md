@@ -59,7 +59,7 @@ and the customising ladder grow past one setup.
 
 ## Practical requirements
 
-Every pull request must pass CI, which runs 39 gates. Run them yourself first:
+Every pull request must pass CI, which runs 40 gates. Run them yourself first:
 
 ```bash
 ./tools/check-all.sh

@@ -211,10 +211,11 @@ states: [0-9]+ lines: every image reference
 # setup-helm) are plumbing rather than gates, and they carry no name precisely
 # because they assert nothing.
 # 2026-10-08: 38 -> 39, the Tockmox UI's test suite (TM-0975).
+# 2026-10-17: 39 -> 40, the images.txt freshness gate.
 page:   docs/testing-standard.md
-claim:  CI gates. Thirty-eight are static analysis
+claim:  CI gates. Thirty-nine are static analysis
 test:   grep -cE '^      - name: ' .github/workflows/ci.yaml
-expect: 39
+expect: 40
 states: [0-9]+ CI gates
 
 # THE DENOMINATOR THE INVENTORY MEASURES ITSELF AGAINST.
@@ -316,15 +317,15 @@ states: [0-9]+ console transcripts
 # reporting ok. Found by the STATES YIELDS NO NUMBER guard on the day it was
 # added. The first token of a `states` match must be the count.
 page:   .github/workflows/executed-docs.yaml
-claim:  ci.yaml runs 39 gates
+claim:  ci.yaml runs 40 gates
 test:   grep -c '^      - name:' .github/workflows/ci.yaml | tr -d ' '
-expect: 39
+expect: 40
 states: [0-9]+ gates
 
 page:   tests/executed-docs/README.md
-claim:  runs 39 gates
+claim:  runs 40 gates
 test:   grep -c '^      - name:' .github/workflows/ci.yaml | tr -d ' '
-expect: 39
+expect: 40
 states: [0-9]+ gates
 
 # The board count drifted the other way: what-you-get.md said five while nine
@@ -355,7 +356,7 @@ states: [A-Za-z]+ Tockmox-authored boards
 page:   CONTRIBUTING.md
 claim:  which runs
 test:   grep -c '^      - name:' .github/workflows/ci.yaml | tr -d ' '
-expect: 39
+expect: 40
 states: [0-9]+ gates
 
 # ---------------------------------------------------------------------------
@@ -556,7 +557,7 @@ expect: 19
 class:  CI gates (digits)
 match:  [0-9]+ (CI |static )?gates\b
 test:   grep -c '^      - name:' .github/workflows/ci.yaml | tr -d ' '
-expect: 39
+expect: 40
 
 # The node/workstation SPLIT on fresh-install.md, pinned 2026-09-12 (TM-0470).
 # The comment above records TM-0469 moving an unregistered number in this same
