@@ -9,9 +9,9 @@
     },
     {
       "name": "binwiederhier/ntfy",
-      "purl": "pkg:oci/ntfy?repository_url=binwiederhier/ntfy&tag=v2.29.0",
+      "purl": "pkg:oci/ntfy?repository_url=binwiederhier/ntfy&tag=v2.30.0",
       "type": "container",
-      "version": "v2.29.0"
+      "version": "v2.30.0"
     },
     {
       "name": "caronc/apprise",
@@ -33,9 +33,9 @@
     },
     {
       "name": "docker.io/grafana/grafana",
-      "purl": "pkg:oci/grafana?repository_url=docker.io/grafana/grafana&tag=13.2.3-distroless",
+      "purl": "pkg:oci/grafana?repository_url=docker.io/grafana/grafana&tag=13.2.4-distroless",
       "type": "container",
-      "version": "13.2.3-distroless"
+      "version": "13.2.4-distroless"
     },
     {
       "name": "docker.io/grafana/loki-canary",
@@ -123,9 +123,9 @@
     },
     {
       "name": "ghcr.io/jkroepke/access-log-exporter",
-      "purl": "pkg:oci/access-log-exporter?repository_url=ghcr.io/jkroepke/access-log-exporter&tag=0.4.21",
+      "purl": "pkg:oci/access-log-exporter?repository_url=ghcr.io/jkroepke/access-log-exporter&tag=0.4.22",
       "type": "container",
-      "version": "0.4.21"
+      "version": "0.4.22"
     },
     {
       "name": "ghcr.io/jkroepke/kube-webhook-certgen",
@@ -159,15 +159,15 @@
     },
     {
       "name": "quay.io/argoproj/argocli",
-      "purl": "pkg:oci/argocli?repository_url=quay.io/argoproj/argocli&tag=v4.1.4",
+      "purl": "pkg:oci/argocli?repository_url=quay.io/argoproj/argocli&tag=v4.1.5",
       "type": "container",
-      "version": "v4.1.4"
+      "version": "v4.1.5"
     },
     {
       "name": "quay.io/argoproj/workflow-controller",
-      "purl": "pkg:oci/workflow-controller?repository_url=quay.io/argoproj/workflow-controller&tag=v4.1.4",
+      "purl": "pkg:oci/workflow-controller?repository_url=quay.io/argoproj/workflow-controller&tag=v4.1.5",
       "type": "container",
-      "version": "v4.1.4"
+      "version": "v4.1.5"
     },
     {
       "name": "quay.io/jetstack/cert-manager-cainjector",
@@ -289,9 +289,9 @@
     {
       "description": "Helm chart dependency of tockmox-devops",
       "name": "argo-workflows",
-      "purl": "pkg:generic/helm/argo-workflows@2.0.11",
+      "purl": "pkg:generic/helm/argo-workflows@2.0.12",
       "type": "application",
-      "version": "2.0.11"
+      "version": "2.0.12"
     },
     {
       "description": "Helm chart dependency of tockmox-exporters",
@@ -324,16 +324,16 @@
     {
       "description": "Helm chart dependency of tockmox-observability",
       "name": "kube-prometheus-stack",
-      "purl": "pkg:generic/helm/kube-prometheus-stack@92.2.0",
+      "purl": "pkg:generic/helm/kube-prometheus-stack@92.3.1",
       "type": "application",
-      "version": "92.2.0"
+      "version": "92.3.1"
     },
     {
       "description": "Helm chart dependency of tockmox-observability",
       "name": "loki",
-      "purl": "pkg:generic/helm/loki@18.15.0",
+      "purl": "pkg:generic/helm/loki@18.15.1",
       "type": "application",
-      "version": "18.15.0"
+      "version": "18.15.1"
     },
     {
       "description": "Helm chart dependency of tockmox-observability",
@@ -359,9 +359,9 @@
     {
       "description": "Helm chart dependency of tockmox-platform",
       "name": "traefik",
-      "purl": "pkg:generic/helm/traefik@41.7.0",
+      "purl": "pkg:generic/helm/traefik@41.7.1",
       "type": "application",
-      "version": "41.7.0"
+      "version": "41.7.1"
     },
     {
       "description": "Helm chart dependency of tockmox-platform",

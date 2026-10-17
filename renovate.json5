@@ -157,6 +157,19 @@
       matchPackageNames: ["/\\{\\{/"],
       enabled: false,
     },
+    {
+      // One PR for every patch and minor update instead of one each: a
+      // dozen PRs a week each needing a merge was the cost, and several
+      // touch the same Chart.lock, so merging them one at a time conflicts.
+      // LAST on purpose: packageRules apply in order, so this group name
+      // overrides the github-actions and exporter groups above for patch and
+      // minor updates. Majors and security updates still arrive alone.
+      // A chart bump in the group still needs sbom.cdx.json and images.txt
+      // regenerated before ci passes (tools/gen-images.sh, tools/gen-sbom.sh).
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "non-major dependencies",
+      groupSlug: "non-major",
+    },
   ],
 
   // Security fixes jump the queue: no schedule, no release-age wait.
