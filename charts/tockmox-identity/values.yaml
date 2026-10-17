@@ -322,6 +322,47 @@ sso:
       access: users
       host: ""
       subMode: ""
+  # LINK-ONLY TILES: consoles that have no OIDC, so there is nothing to sign in
+  # WITH ... only a tile to open them from. Each entry renders an Authentik
+  # application with a launch URL, icon, description and group heading, opened
+  # in a new tab like the others, and bound to the role groups by `access`. It
+  # renders NO OAuth2 provider, client secret or redirect URI.
+  #
+  # THE TILE GRANTS NOTHING. `access` decides who sees the tile; the console
+  # behind it keeps its own sign-in and its own users, and asks for it. Say so
+  # in `description` (the shipped ntfy one does).
+  #
+  # One shape per entry, key = the application slug suffix (`tockmox-<key>`):
+  #   enabled      unset follows `capability`; true or false decides outright.
+  #                A link with no `capability` and no `true` stays off.
+  #   capability   the capability that owns the console (see `capabilities`)
+  #   title        tile name; defaults to the key
+  #   hostPrefix   tile host is <hostPrefix>.<global.internalDomain> ...
+  #   host         ... unless this is set. Keep it equal to the console's own
+  #                ingress host (the layers cannot read each other's values).
+  #   path         appended to the launch URL; empty opens the host root
+  #   description  one line shown on the tile
+  #   group        heading the tile sits under
+  #   icon         a file in charts/tockmox-identity/brand/, served in-cluster
+  #   access       admin | users, exactly as for the OAuth applications
+  # Add your own console by adding a key here; nothing in the template changes.
+  # The identity layer follows the CAPABILITY only. A site that turns the
+  # console itself off (notifications.ntfy.enabled, ingress.apps.ntfy.enabled)
+  # without declining the capability sets `links.ntfy.enabled: false` too, or
+  # keeps a tile that opens nothing. docs/administration/identity.md.
+  links:
+    ntfy:
+      enabled:
+      capability: notifications
+      title: ntfy
+      hostPrefix: ntfy
+      host: ""
+      # The shipped web app lives at /app (notifications.ntfy.webRoot).
+      path: /app
+      description: "Opens ntfy, where alerts arrive. ntfy has its own sign-in, separate from this portal: it will ask for an ntfy username and password."
+      group: Observability
+      icon: app-ntfy.svg
+      access: users
 
 authentik:
   # -------------------------------------------------------------------------
