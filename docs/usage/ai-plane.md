@@ -635,6 +635,19 @@ things remain yours to check: a callback hook you
 supply that writes to the container filesystem will fail with `Read-only file
 system`, and the image has not been measured past 1.100.1.
 
+**The migrations Job log ends with a Prisma traceback, and it is expected and
+harmless.** After `LiteLLM: Setup complete. Skipping server startup as
+requested.` the log of `tockmox-ai-litellm-migrations-<10 hex>` can carry a
+traceback ending `OSError: [Errno 30] Read-only file system` on a `schema.prisma`
+path under the image's `site-packages`. The Job runs with the read-only root
+filesystem described above, and after the migration LiteLLM runs `prisma
+generate`, which tries to copy that file into `site-packages` and cannot. The failure
+does not stop the migration: the Job still ends `Complete` and the gateway
+starts, using the Prisma client already built into the image. Check the Job's status, not the traceback:
+`kubectl -n tockmox-ai get job -l app.kubernetes.io/component=migrations` shows
+`Complete`. A `Read-only file system` error anywhere else, or in a pod that
+restarts, is a different matter: see the hooks caveat above.
+
 **No `ServiceMonitor` ships for the gateway.** `/metrics` on the LiteLLM proxy
 is an enterprise feature, and a scrape target that answers 404 reads as coverage
 on a dashboard without being any.

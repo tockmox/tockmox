@@ -1323,6 +1323,47 @@ an install where 3b passed first is therefore worth reporting rather than
 waving past. Do not `kubectl rollout restart` to "fix" either one: the
 backoff already retries, and restarting hides which of the two you were in.
 
+#### Restarts and ingress errors that are expected in the first hour
+
+**Your first `kubectl get pods -A` will probably show a non-zero `RESTARTS`
+column on a handful of pods, and that is normal.** Layers sync in waves, and a
+workload that starts before the thing it needs exits and is restarted by
+Kubernetes until the dependency is up. Measured on one by-the-book install,
+every restart happened during the first sync, the last one within about half an
+hour of it, and nothing restarted in the thirteen hours that followed. One
+install is one sample, so read the counts as ranges, not promises:
+
+| Workload | Restarts to expect | Why |
+|---|---|---|
+| `tockmox-devops-argo-workflows-server` | up to about six | It crashes, rather than waiting, when the CA bundle it mounts is not there yet or the identity provider does not answer yet, and recovers by restarting. The table above gives the two log lines to expect |
+| `tockmox-ai-litellm` (the gateway) | a few, about four | Its database and its migrations Job come up first; the gateway exits until both are ready |
+| `tockmox-ai-litellm-migrations` (the Job's pod) | a few, about four, then `Completed` | It retries until its database accepts connections, then finishes. A Job pod that ends `Completed` is the success state |
+| `tockmox-identity-authentik-server` | a few, about four | Most likely it is waiting for its database to come up |
+| `longhorn-manager` | about two | Longhorn's manager waits for its own admission webhook to be reachable |
+| An application you add under `apps/` with a database | a few | The same ordering applies to your own workloads: the application starts before its database is ready |
+
+**What is not install churn:** `coredns`, `local-path-provisioner` and
+`metrics-server` in `kube-system` each showing a restart with exit code 255 is
+the node having rebooted before Tockmox existed, not something Tockmox did.
+
+**What to read as broken instead:** a count that keeps rising after the first
+hour, or any `OOMKilled`. Capture the log line first
+([3c](#3c-watch-the-waves)), then look properly.
+
+**Traefik logs a burst of errors at startup, and clears them on its own.** In
+the first seconds the ingress controller tries to write status onto every
+Ingress before its own Service exists. Expect around forty lines, one per
+Ingress per retry, such as:
+
+```text
+ERR Error while updating ingress status error="missing service: tockmox-platform/tockmox-platform-traefik" ingress=grafana namespace=tockmox-monitoring
+```
+
+They stop within seconds, when the Service appears and Traefik logs
+`Updated ingress status` for each Ingress. Nothing is needed from you. An
+`Error while updating ingress status` line that appears again once the install
+has settled is worth reading properly.
+
 ### Point DNS at Traefik's address
 
 **Required.** Nothing resolves until you do, including the SSO token exchange

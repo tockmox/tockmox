@@ -274,15 +274,17 @@ the tag on its own. The procedure is
 **Required for a minor or major bump. Optional for a patch**, and cheap enough
 that skipping it buys you very little.
 
-Rollback is symmetrical for most changes, because Tockmox ships declarative
-manifests and no migrations: change the revision back and sync. **Three things
-break that symmetry**, and they are why this step exists:
+Rollback is symmetrical where it can be, not absolutely. Tockmox itself ships
+declarative manifests and no migrations of its own, so for most changes you
+change the revision back and sync. **Four things break that symmetry**, and they
+are why this step exists:
 
 | What | Why a rollback does not undo it | What to do first |
 |---|---|---|
 | **A deleted PersistentVolumeClaim** | ArgoCD's `prune: true` deletes a PVC the new release stops declaring. Putting the declaration back creates an empty volume | Prove a database backup, and record the PVC list below |
 | **A CRD schema change** | Removing a field from a CRD removes the data in it. Restoring the CRD does not restore the data | The release notes name these. Treat one as a major bump regardless of the version number |
 | **A namespace rename** | Deleting a namespace deletes everything inside it. Tockmox never does this automatically, for exactly that reason | Nothing automatic. Follow the migration notes by hand |
+| **A bundled application that migrates its own database schema** | Tockmox does not run these migrations, the applications do: LiteLLM in its migrations Job (see [below](#the-litellm-migrations-job-gets-a-new-name-on-upgrade-to-080)), and, on the upstream applications' own behaviour, Authentik, Open WebUI and Grafana (when it runs on its Postgres database) when a newer version starts. Pointing the revision back runs the older application against a schema the newer one already changed, and an older version cannot be relied on to read it | Restore the database backup you took before upgrading, then move the revision back. Read the release notes for any bump that moves one of these applications' versions, and do not expect the rollback alone to be enough |
 
 **WORKSTATION** ... record what exists now, so you can diff it afterwards
 
@@ -898,7 +900,8 @@ layer back on the old revision, `Synced` and `Healthy`, and the PVC list back to
 what [step 2](#2-back-up-what-a-rollback-will-not-bring-back) recorded.
 
 **A rollback does not restore deleted data.** If the upgrade pruned a PVC or
-narrowed a CRD, the revision going back does not bring the contents back. That
+narrowed a CRD, the revision going back does not bring the contents back. The
+same holds when a bundled application migrated its database schema. That
 is a restore, from [backup and restore](../operations/backup-restore.md), and it
 is a separate procedure.
 
