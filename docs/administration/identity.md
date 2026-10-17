@@ -99,8 +99,9 @@ matter for SSO. That was wrong. The 2026-08-18 check it rested on had a `tockmox
 member sign in **second**, after a local account already held the admin slot, so
 it never exercised an SSO login into an empty Open WebUI.
 
-What Open WebUI 0.12.0 does (`backend/open_webui/utils/oauth.py`, `get_user_role`
-and `handle_callback`; read 2026-10-11, the same outcome as 0.11.3): when its user
+What Open WebUI 0.12.3 does (`backend/open_webui/utils/oauth.py`, `get_user_role`
+and `handle_callback`; read 2026-10-11 at 0.12.0, the same outcome as 0.11.3; the
+0.12.3 changes to that file touch only token refresh, checked 2026-10-17): when its user
 table is empty, the arriving login skips the group mapping, is inserted with the
 default role and promoted to `admin` straight after, and while that account is
 the only one it is forced back to `admin` on every sign-in. Group mapping takes over once a
