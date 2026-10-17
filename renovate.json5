@@ -86,6 +86,14 @@
       datasourceTemplate: "github-releases",
       extractVersionTemplate: "^v(?<version>.+)$",
     },
+    {
+      customType: "regex",
+      description: "busybox wait-for-ca init container (registry threaded through tpl)",
+      managerFilePatterns: ["/^charts/tockmox-devops/values\\.yaml$/"],
+      matchStrings: ["/library/busybox:(?<currentValue>[0-9][^'\"\\s]*)"],
+      depNameTemplate: "busybox",
+      datasourceTemplate: "docker",
+    },
   ],
 
   packageRules: [
@@ -124,6 +132,30 @@
       ],
       matchUpdateTypes: ["minor", "patch"],
       groupName: "prometheus exporter charts",
+    },
+    {
+      // 0.8.x is a patch line. traefik 42 is a major and Python 3.15 is a new
+      // runtime under the tockmox-ui and posture-probe images; both wait for
+      // the 0.9.0 cycle. allowedVersions keeps them off the PR queue entirely
+      // instead of relying on nobody ticking a dashboard box (traefik 42 was
+      // listed under pending status checks despite the majors rule above).
+      // Lift both when 0.9.0 opens.
+      matchDatasources: ["helm"],
+      matchPackageNames: ["traefik"],
+      allowedVersions: "<42.0.0",
+    },
+    {
+      matchDatasources: ["docker"],
+      matchPackageNames: ["python"],
+      allowedVersions: "<3.15",
+    },
+    {
+      // tockmox-devops threads global.imageRegistry into the busybox init
+      // container through tpl, so the helm-values manager reads a depName
+      // with a template in it and the lookup fails on every run. Skip the
+      // templated name here; the customManager above tracks the tag.
+      matchPackageNames: ["/\\{\\{/"],
+      enabled: false,
     },
   ],
 
