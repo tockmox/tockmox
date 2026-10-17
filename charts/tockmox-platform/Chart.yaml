@@ -23,7 +23,7 @@ dependencies:
     condition: apps.metallb.enabled
 
   - name: traefik
-    version: 41.7.0
+    version: 41.7.1
     repository: "https://traefik.github.io/charts"
     condition: apps.traefik.enabled
 
