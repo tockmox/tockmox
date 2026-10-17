@@ -119,7 +119,9 @@ the CNCF run Kubernetes in production, and 97% of respondents to its Argo CD
 survey run Argo CD in production ... the parts
 are proven, and plenty of people reading this could wire them together. The
 question is whether you want to. Storage replication, single sign-on,
-certificate rotation, backups that prove they restore, alerts that fire when
+certificate rotation, backups that prove they restore (scheduled for the
+model-gateway database, by dated runs elsewhere; [the edges](operations/backup-restore.md#what-is-not-certified-here)),
+alerts that fire when
 something goes quiet ... none of that is the reason you got interested in this,
 and all of it is between you and the reason you did.
 

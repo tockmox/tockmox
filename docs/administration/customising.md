@@ -72,7 +72,11 @@ the two spellings is now silent.
 want, stop here.
 
 Anything a chart exposes, including anything an upstream chart exposes under its
-own key. Free upgrades forever, because you are using a supported interface.
+own key. Free upgrades forever on a key tiered `stable`, because you are using a
+supported interface. A `provisional` or `experimental` key can move in a minor
+release ([the tiers](values-contract.md#not-every-tockmox-key-carries-the-same-promise)),
+and so can a key inside an upstream chart's block that Tockmox does not set
+([what an upstream move costs](values-contract.md#what-an-upstream-move-costs)).
 
 ```yaml
 # site/values/observability.yaml ... keep logs 30 days instead of 7

@@ -368,6 +368,10 @@ Both are a scheme mismatch; only the direction differs.
 
 ## Two axes, deliberately separate
 
+**Only privilege is implemented.** Nothing in this release enforces clearance,
+and Tockmox does not yet ship a document index of its own for clearance to
+govern. What follows is the design the later layers are held to.
+
 Tockmox distinguishes **privilege** (what you may do) from **clearance** (what
 you may see). They are not the same, and conflating them is how systems end up
 granting administrators access to data they have no business reading. An

@@ -118,7 +118,10 @@ and fill in the values by hand.
 repository, an upgrade cannot overwrite them. Not "should not" ... cannot. It is
 the same guarantee a Linux distribution gives you by keeping packages in `/usr`
 and your configuration in `/etc`, and it is why Tockmox does not ask you to fork
-anything.
+anything. The guarantee is about your files. Before 1.0 it does not extend to
+the names and endpoints an application of yours depends on, which are promised
+only through keys tiered `stable`
+([no downstream ABI](administration/values-contract.md#before-10-there-is-no-downstream-abi)).
 
 Forking creates a permanent merge burden and drifts further from upstream every
 month. We would rather you never fork.

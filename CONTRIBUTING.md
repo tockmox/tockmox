@@ -8,8 +8,12 @@ One maintainer. Read [SUPPORT.md](SUPPORT.md) for what to expect in return and
 
 The project is early and the design is still moving. **A well-argued issue is
 worth more right now than a pull request, and is far more likely to change the
-software.** A patch has to fit a design only the maintainer can see; an issue
-says what you needed and why, which a diff cannot.
+software.** A patch has to fit the design, and the design is argued in public:
+the principles below, [GOVERNANCE.md](GOVERNANCE.md), and the issues and
+discussions where earlier decisions were made. If the constraint that stops your
+patch is not written down in one of those, that is a documentation gap worth
+raising, and the maintainer states the decision and the reason in the thread. An
+issue or a discussion says what you needed and why, which a diff cannot.
 
 **Send a pull request without asking for:**
 
@@ -18,7 +22,11 @@ says what you needed and why, which a diff cannot.
 
 **Open an issue first for anything else** ... new capabilities, structural
 changes, dependency swaps, anything touching the values interface. If we agree
-on the approach, a pull request is welcome.
+on the approach, a pull request is welcome. For a design question, or a change
+too large to review as a diff, open a
+[discussion](https://github.com/tockmox/tockmox/discussions) titled as a
+proposal, as [GOVERNANCE.md](GOVERNANCE.md#proposing-something-larger-than-a-pull-request)
+sets out. An issue works too if you prefer one.
 
 **The most valuable report:**
 
@@ -66,7 +74,7 @@ Every pull request must pass CI, which runs 40 gates. Run them yourself first:
 ```
 
 It runs every gate that does not need a live cluster, names each as it goes
-and says which it skipped and why. It needs `helm`, `python3` with the PyYAML
+and says which it skipped and why. It needs `helm` (v4.3.0, see below), `python3` with the PyYAML
 module (`python3 -m pip install pyyaml`, or your package manager's
 `python3-yaml`), and `jq`, and refuses to start if one is missing, because several gates cannot tell "the tree
 is wrong" from "the tool is absent".
@@ -85,6 +93,66 @@ isolation, never whether the documented instructions work when run on a
 cluster. The [testing standard](docs/testing-standard.md) sets out the boundary,
 the rule that every documented path is executed or excepted in writing, and the
 harness that executes them.
+
+### Toolchain, and the smallest check for a documentation-only change
+
+**Use Helm v4.3.0.** That is the version CI pins (`HELM_VERSION` in
+`.github/workflows/ci.yaml`, repeated in `portability-macos.yaml` and
+`policy-gate.yaml`), so it is the one a green run on your machine predicts.
+Helm 3 and Helm 4 have disagreed on a render before (a parent's `null` does not
+delete a subchart default under Helm 4), and this project has not verified its
+checks on Helm 3. Some pages under `docs/` quote measurements taken with Helm
+v3.16; those are dated records, not the toolchain to install.
+
+If your change touches only Markdown (a page under `docs/` or a root file), you
+do not need a cluster, Helm or chart dependencies for the checks that read
+prose. These need bash and `python3`:
+
+```bash
+./tools/check-docs-style.sh
+./tools/check-docs-links.sh
+./tools/check-frontmatter.sh
+./tools/check-pasteable-blocks.sh
+```
+
+Run them after your last edit. They are the same scripts CI runs in the steps
+named "docs links resolve", "frontmatter contract holds over the docs bundle",
+"documented commands paste as-is" and "documentation style (no meaning-carrying
+emoji)". A fifth,
+`./tools/check-doc-claims.sh`, checks the counts a page states against the tree
+and needs a Helm render first: run `./tools/helm-deps.sh` and
+`./tools/render-counts.sh`, which need Helm v4.3.0 and network access to the
+chart repositories. Without them it says it ran partially and exits non-zero.
+If you cannot run it, say so in the pull request and the maintainer will.
+Anything else you change, such as a chart, a value or a script, belongs under
+`./tools/check-all.sh`.
+
+### What a fork cannot do, and who supplies the live evidence
+
+CI runs on your pull request without secrets and never on the maintainer's
+self-hosted runner, because that runner must not execute fork code. Three
+consequences:
+
+- **The workflows the maintainer dispatches are not yours to dispatch.**
+  `workflow_dispatch` on the maintainer's workflows (`executed-docs.yaml`,
+  `portability-macos.yaml`, `release-tag.yaml`) needs write access to this
+  repository. `gh workflow run` run from a fork targets your fork's copy of a
+  workflow, with Actions enabled there; it does not run the maintainer's.
+- **Repository secrets do not reach a fork's pull request.** The one visible
+  effect is `tools/check-no-site-specifics.sh`, which runs its generic rules
+  for you and the maintainer's private rules on the maintainer's own runs.
+- **The self-hosted runner is not available.** The documented-procedure paths in
+  `tests/executed-docs/`, and the clean-cluster install the release gate
+  requires, run on a labelled self-hosted runner against a live cluster, on a
+  schedule and on pushes to `main` and `release-*` branches.
+
+What you owe is the evidence you can produce: the commands you ran and what
+they printed, in the pull request's Evidence section, or a plain statement that
+you did not run something. What the maintainer supplies after review is the
+rest: the `executed-docs` run against a live cluster for a change to a
+documented procedure, `portability-macos` when a gate's shell changed, and the
+release-time gates. If your change needs one of those, the pull request says
+which, and a pull request is not held for a run you had no way to start.
 
 ### `TM-` and `HL-` identifiers
 
@@ -110,8 +178,10 @@ brew install bash
 CI runs the gates on Linux with bash 5, and `portability-macos.yaml` runs
 `check-all.sh` on a macOS runner (Homebrew bash, BSD `sed`, `grep` and `wc`)
 weekly and on demand, not on pull requests. A gate that passes only with GNU
-tools fails there within a week; if you change a gate's shell, trigger it by
-hand (`gh workflow run portability-macos.yaml`) or run `check-all.sh` on a Mac.
+tools fails there within a week. If you change a gate's shell, run `check-all.sh`
+on a Mac, or say so in the pull request and the maintainer will run
+`portability-macos.yaml` for you: a fork cannot dispatch that workflow here
+([what a fork cannot do](#what-a-fork-cannot-do-and-who-supplies-the-live-evidence)).
 
 `./tools/check-all.sh` runs the gates in parallel, as many at once as you have CPUs; set
 `CHECK_ALL_JOBS=1` to run them one at a time with live output when you are chasing one.

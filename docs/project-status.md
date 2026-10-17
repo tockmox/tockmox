@@ -33,8 +33,9 @@ The assembly has stayed the province of teams and budgets.
 
 Tockmox is that assembly, built to the discipline a production environment
 earns rather than the discipline a demo needs: default-deny ingress, single
-sign-on, backups that prove they restore, guards that fail loudly rather than
-starting insecure. Every component ships under a licence you can read, and the
+sign-on across the three consoles wired to it, backups whose restore is proven
+for the model-gateway database on a schedule and elsewhere by dated runs,
+guards that fail loudly rather than starting insecure. Every component ships under a licence you can read, and the
 two that are source-available rather than open source are named on the
 [licences page](third-party-licenses.md). Nothing here is a piece you
 cannot read, replace, or keep.
@@ -42,12 +43,20 @@ cannot read, replace, or keep.
 It's built around three properties.
 
 **It keeps working when the internet doesn't.** Every component runs locally.
-Losing your uplink degrades capability, not availability.
+Losing your uplink degrades capability, not availability: a cloud model route
+you configured stops answering, and so does public certificate issuance if you
+use it. That is about running. Installing disconnected takes preparation (the
+images, charts, git server, internal CA and time source are carried in), and the
+one disconnected install was run on 2026-08-25 against an earlier build, not
+re-run for 0.8.0; [the difference](architecture.md#running-disconnected-and-installing-disconnected-are-different-claims).
 
 **Upgrades can't overwrite your configuration.** Your settings live in a
 separate repository from the platform, so an upgrade physically can't touch
 them. It's the `/usr` versus `/etc` split Linux distributions settled on
-decades ago, expressed in GitOps terms.
+decades ago, expressed in GitOps terms. That promise is about files: before 1.0
+only keys tiered `stable` are promised across releases, and the names and
+endpoints an application of yours depends on can change in a minor release
+([no downstream ABI](administration/values-contract.md#before-10-there-is-no-downstream-abi)).
 
 **Every claim here names its evidence, and says what kind it is.** Three kinds,
 and the difference matters: claims about *rendered artifacts* are gated on every
@@ -151,10 +160,12 @@ close permanently. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 A working stack, not a parts list. One sign-on reaches the three consoles wired
 to it ... Grafana, Open WebUI and Argo Workflows ... with local logins kept as
 break-glass. The model-gateway database proves it restores on a schedule
-instead of sitting there untested; Longhorn volumes have been restored from
-backup once, in production, and Authentik's bundled database is backed up but
-not yet drilled, which
-[backup and restore](operations/backup-restore.md) sets out row by row.
+instead of sitting there untested (a weekly restore into a scratch copy; the
+chat console's data volume has no scheduled drill); Longhorn volumes have been
+restored from backup once, in production, and Authentik's bundled database has
+been restored from its nightly dump once, on a lab, with a login after, which
+[backup and restore](operations/backup-restore.md) sets out row by row. No
+whole-cluster rebuild and restore has been run as one exercise.
 Silent failures page you, and a heartbeat proves the alerting itself is alive.
 Default-deny **ingress** covers every namespace the platform creates, with no
 exceptions left to discover in production ... and the word "ingress" is doing

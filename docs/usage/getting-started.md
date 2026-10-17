@@ -133,8 +133,11 @@ consulted, which is usually a different store from the one you installed into.
 ## 2. Bootstrap Authentik ... Required
 
 **This is the step people miss.** A fresh Authentik has no administrator, and
-every other console federates to it. Until you do this, Grafana's login
-redirects into a provider that cannot authenticate anyone.
+the consoles wired to it (Grafana, Open WebUI and Argo Workflows) federate to
+it. Until you do this, Grafana's login redirects into a provider that cannot
+authenticate anyone. Each of the three also keeps a local break-glass login
+that sits outside the group model, so nothing in Authentik shows who holds one
+([identity § break-glass](../administration/identity.md#break-glass-deliberately)).
 
 **BROWSER:** open `https://auth.YOUR_INTERNAL_DOMAIN/`. On a fresh install it
 redirects to `/setup`, which is Authentik's initial-configuration flow.
