@@ -33,7 +33,7 @@ jobs:
   charts:
     # GitHub-hosted: free and unlimited on public repos, and safe against fork PRs.
     # Self-hosted runners must never serve pull_request from forks.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
@@ -736,7 +736,7 @@ jobs:
           done
 
   secrets:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
@@ -833,7 +833,7 @@ jobs:
     # The script prints its own caveat: a clean diff does not prove the
     # upgrade applies. TM-0281 is the check that proves an upgrade.
     if: ${{ github.event_name == 'pull_request' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }   # tags, so the previous release resolves

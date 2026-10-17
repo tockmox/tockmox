@@ -91,7 +91,7 @@ jobs:
   # Either way this goes red on the stated day, with a message naming which.
   freshness:
     name: the paths job has run recently enough to mean anything
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: last successful paths run is inside the stale window
         env:
@@ -225,7 +225,7 @@ jobs:
   # ---------------------------------------------------------------- per-commit
   selftest:
     name: harness selftest (hermetic)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
