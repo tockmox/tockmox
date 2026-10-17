@@ -249,9 +249,9 @@
     },
     {
       "name": "redis",
-      "purl": "pkg:oci/redis?tag=7.4.2-alpine3.21",
+      "purl": "pkg:oci/redis?tag=7.4.11-alpine",
       "type": "container",
-      "version": "7.4.2-alpine3.21"
+      "version": "7.4.11-alpine"
     },
     {
       "name": "registry.k8s.io/kube-state-metrics/kube-state-metrics",
