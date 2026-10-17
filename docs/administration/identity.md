@@ -60,6 +60,11 @@ it.** Every shipped application carries a policy binding to the group(s) named
 by `sso.apps.<app>.access` in the identity layer's values (`users`, the shipped
 default for all three: the user group and the admin group; or `admin`: the
 admin group alone). Set a console to `admin` to hide it from users entirely.
+The same `access` key sets who sees the link-only tiles under `sso.links`.
+Changing it later works in both directions. Before 0.8.1, moving a console from
+`users` to `admin` left the user-group binding an earlier sync had created, so
+users kept access until someone deleted that binding by hand; 0.8.1 removes it
+on the next sync.
 Authentik then shows the application only to members and refuses the
 authorization for anyone else ... the console never receives the login. The
 role table above is what the consoles do *after* Authentik has let a member
