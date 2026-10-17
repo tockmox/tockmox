@@ -854,6 +854,16 @@ open-webui:
   # ------------------------------------------------------------------------
   websocket:
     redis:
+      # The upstream chart's default tag (7.4.2-alpine3.21, a 2025 build) carries
+      # four fixable Critical CVEs: three Go standard library ones in its gosu
+      # binary and one OpenSSL. Pinned here, not left to the subchart, because
+      # Renovate reads this file and never reads the subchart's own defaults, so
+      # the default would never move. 7.4.11-alpine scanned clean of fixable
+      # Criticals (Trivy, 2026-10-17). It holds no data: Open WebUI uses it only
+      # to fan websocket events out between replicas, so a restart loses nothing.
+      image:
+        repository: redis
+        tag: 7.4.11-alpine
       resources:
         # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
         # peak 12.7 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2); average 11.7 MiB.

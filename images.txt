@@ -42,6 +42,6 @@ quay.io/prometheus/alertmanager:v0.34.1
 quay.io/prometheus/blackbox-exporter:v0.29.0
 quay.io/prometheus/node-exporter:v1.12.1-distroless
 quay.io/prometheus/prometheus:v3.15.0-distroless
-redis:7.4.2-alpine3.21
+redis:7.4.11-alpine
 registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0
 registry.k8s.io/sig-storage/snapshot-controller:v8.6.0
