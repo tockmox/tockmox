@@ -143,6 +143,11 @@ images:
     host: llm.<internalDomain>/ui        # NOT the bare host ... see note
     state: fresh install with apps.litellm.enabled true; gateway up, no keys
     version_in_frame: LiteLLM v1.100.1
+    stale: >-
+      The product pins LiteLLM 1.105.1 from 0.8.1; this frame shows 1.100.1 and
+      was not re-shot (no greenfield this cycle). Whether the Virtual Keys page
+      still looks like this at 1.105.1 is not checked. Re-shoot on the next
+      greenfield.
     captured: 2026-09-12
     referenced_by: [charts/tockmox-ai/README.md]
     audited: 2026-09-12

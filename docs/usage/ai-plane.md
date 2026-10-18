@@ -633,7 +633,11 @@ so a site that sets either replaces the shipped entries and must restate
 not, because otherwise the Job fails at runtime with nowhere to write. Two
 things remain yours to check: a callback hook you
 supply that writes to the container filesystem will fail with `Read-only file
-system`, and the image has not been measured past 1.100.1.
+system`, and the measurements stop at the versions named here. Since 1.100.1
+the same two properties were observed on the reference site, not a lab, on
+1.105.0 and 1.105.1: an upgrade over a database migrated by 1.100.3 (2026-10-17,
+then 2026-10-18), the migrations Job `Complete` in 37 seconds, and the proxy as
+uid 1000 with a read-only root, ready with no restarts.
 
 **The migrations Job log ends with a Prisma traceback, and it is expected and
 harmless.** After `LiteLLM: Setup complete. Skipping server startup as
