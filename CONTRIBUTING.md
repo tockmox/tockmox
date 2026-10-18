@@ -74,7 +74,7 @@ Every pull request must pass CI, which runs 40 gates. Run them yourself first:
 ```
 
 It runs every gate that does not need a live cluster, names each as it goes
-and says which it skipped and why. It needs `helm` (v4.3.0, see below), `python3` with the PyYAML
+and says which it skipped and why. It needs `helm` (v4.3.1, see below), `python3` with the PyYAML
 module (`python3 -m pip install pyyaml`, or your package manager's
 `python3-yaml`), and `jq`, and refuses to start if one is missing, because several gates cannot tell "the tree
 is wrong" from "the tool is absent".
@@ -96,7 +96,7 @@ harness that executes them.
 
 ### Toolchain, and the smallest check for a documentation-only change
 
-**Use Helm v4.3.0.** That is the version CI pins (`HELM_VERSION` in
+**Use Helm v4.3.1.** That is the version CI pins (`HELM_VERSION` in
 `.github/workflows/ci.yaml`, repeated in `portability-macos.yaml` and
 `policy-gate.yaml`), so it is the one a green run on your machine predicts.
 Helm 3 and Helm 4 have disagreed on a render before (a parent's `null` does not
@@ -121,7 +121,7 @@ named "docs links resolve", "frontmatter contract holds over the docs bundle",
 emoji)". A fifth,
 `./tools/check-doc-claims.sh`, checks the counts a page states against the tree
 and needs a Helm render first: run `./tools/helm-deps.sh` and
-`./tools/render-counts.sh`, which need Helm v4.3.0 and network access to the
+`./tools/render-counts.sh`, which need Helm v4.3.1 and network access to the
 chart repositories. Without them it says it ran partially and exits non-zero.
 If you cannot run it, say so in the pull request and the maintainer will.
 Anything else you change, such as a chart, a value or a script, belongs under

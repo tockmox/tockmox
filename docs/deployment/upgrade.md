@@ -594,7 +594,7 @@ migrations Job's pod template, even when you have no hooks. A Job's
 stops: the layer sits `OutOfSync` with the operation `Failed`. Nothing is lost;
 the proxy keeps running. Measured on a lab upgrade from 0.6.2, 2026-09-30.
 
-**The chart cannot do this for you.** The vendored litellm-helm 1.100.1 subchart
+**The chart cannot do this for you.** The vendored litellm-helm subchart (re-read at 1.105.1)
 puts no parent-settable annotation on the Job's own metadata (its
 `migrationJob.annotations` land on the pod template), so `Replace=true` cannot
 be attached without forking a template. Its ArgoCD hook switch would make the

@@ -1365,7 +1365,8 @@ litellm:
   # `litellm/proxy/prisma_migration.py` says so in its docstring, and the
   # wheel contains no reference to the name). It stays because it costs
   # nothing and a site that pins an older image under `litellm.image.tag`
-  # (the reference site runs 1.100.3) still needs it for the property above.
+  # (the reference site ran 1.100.3 until 2026-10-17) still needs it for the
+  # property above.
   # ------------------------------------------------------------------------
   envVars:
     ENFORCE_PRISMA_MIGRATION_CHECK: "true"
@@ -1523,7 +1524,9 @@ litellm:
     limits:   { memory: 2Gi }
 
   # NON-ROOT AND READ-ONLY, MEASURED ON A LAB CLUSTER 2026-10-05 (TM-0596) against
-  # ghcr.io/berriai/litellm-database:1.100.1. The older note here said the image
+  # ghcr.io/berriai/litellm-database:1.100.1, and observed again on the reference
+  # site on 1.105.0 and 1.105.1 (2026-10-17/18, an upgrade over a 1.100.3 schema:
+  # migrations Job Complete, proxy ready as uid 1000 on a read-only root). The older note here said the image
   # writes to its own filesystem at startup and ships no non-root user. Neither
   # held: uid 1000 starts the proxy with the root filesystem read-only and only
   # an emptyDir at /tmp, answers a chat completion, an embedding and a key

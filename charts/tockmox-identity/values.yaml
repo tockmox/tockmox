@@ -464,6 +464,15 @@ authentik:
       enabled: true
   postgresql:
     enabled: true
+    # THE SERVER IMAGE IS PINNED HERE, not left to the subchart. authentik
+    # 2026.8.4 moved its bundled default from 17.11-bookworm to 17.11-trixie:
+    # same PostgreSQL, new Debian, new glibc, so an existing database reports a
+    # collation version mismatch and its text indexes want a REINDEX. That is a
+    # planned step, not a patch-release side effect. Held on bookworm for 0.8.x;
+    # the move to trixie (with the reindex) belongs to a minor release. Keep it
+    # equal to databaseBackup.postgresImage above (check-identity-seams S10).
+    image:
+      tag: "17.11-bookworm"
     auth:
       existingSecret: tockmox-authentik-postgres
     primary:
