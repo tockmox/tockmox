@@ -128,7 +128,7 @@ expect: 0
 # Only assignment positions count -- `revision:` and `targetRevision:` -- which
 # is exactly where a copied-and-pasted number does damage.
 page:   install/tockmox.yaml.example
-claim:  revision: v0.8.0
+claim:  revision: v0.8.1
 test:   grep -rhoE '^\s*(target)?[Rr]evision:\s*v0\.1\.0' install/ docs/ | wc -l
 expect: 0
 

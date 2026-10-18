@@ -52,7 +52,7 @@ tockmox:
   # phases later in an error that names neither this file nor this setting.
   #
   # Default: the current release
-  revision: v0.8.0
+  revision: v0.8.1
 
   # Where to fetch Tockmox from. Change this if you mirror the repo internally.
   # Default: https://github.com/tockmox/tockmox.git

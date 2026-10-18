@@ -1,7 +1,7 @@
 dependencies:
 - name: tockmox-common
   repository: file://../tockmox-common
-  version: 0.8.0
+  version: 0.8.1
 - name: prometheus-blackbox-exporter
   repository: https://prometheus-community.github.io/helm-charts
   version: 11.20.0
@@ -11,5 +11,5 @@ dependencies:
 - name: prometheus-smartctl-exporter
   repository: https://prometheus-community.github.io/helm-charts
   version: 0.17.1
-digest: sha256:ef4aff4dbfc15f1740676cce7bb10bfa671f14c77496d1a8ac7c916d203f305a
-generated: "2026-10-11T15:25:59.459210935-05:00"
+digest: sha256:cdf78e4c5cff77b31a67619a0f35ffaa13e552f742a2f06fbb7408ef436ca627
+generated: "2026-10-18T22:20:01.997711128Z"
