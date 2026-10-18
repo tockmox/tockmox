@@ -1310,6 +1310,75 @@ litellm:
     - name: tockmox-scratch
       mountPath: /scratch
 
+  # ------------------------------------------------------------------------
+  # WAIT FOR THE DATABASE BEFORE THE PROXY STARTS. The proxy fails hard without
+  # a reachable database (see envVars below), so a pod that starts while
+  # tockmox-litellm-db is restarting, as it does on an upgrade that rolls both,
+  # used to burn its container restarts on "P1001 Can't reach database server"
+  # until the database answered. An initContainer holds the pod in Init instead,
+  # and the main container starts once, against a database that is there.
+  #
+  # It checks TCP on the same host the proxy uses (litellm.db.endpoint) and the
+  # PostgreSQL default port the proxy dials, because the proxy's connection
+  # string names no other. It is the image the key-check and restore Jobs
+  # already use, so nothing new is pulled; global.imageRegistry redirects it
+  # (spelled inline below).
+  # The subchart renders this list through `tpl`, which is what lets the image
+  # and host resolve. Like every list here, setting litellm.extraInitContainers
+  # replaces it, and the proxy then starts without the wait.
+  #
+  # The host is the CNPG `-rw` Service, which has an endpoint only while a ready
+  # primary exists, so a TCP accept there means the database is up, not just
+  # that a socket opened.
+  #
+  # What it cannot do: an initContainer runs when a pod is created, not when a
+  # container inside a running pod restarts. That case does not need it:
+  # measured on a lab cluster 2026-10-18, a database-only restart (3.5 minutes
+  # down) left the running proxy unready but not restarted. The restarts come
+  # from a proxy pod CREATED while the database is down: without this wait, one
+  # restart; with it, none, the pod held in Init until the primary answered.
+  # ------------------------------------------------------------------------
+  extraInitContainers:
+    - name: wait-for-db
+      # Inline rather than the tockmox.image helper: the upgrade-safety gate
+      # renders the vendored subchart on its own, where that helper (and
+      # .Values.global) is absent.
+      # Same result: global.imageRegistry, when set, prefixes the repository.
+      image: '{{ with dig "imageRegistry" "" (.Values.global | default dict) }}{{ trimSuffix "/" . }}/{{ end }}alpine/k8s:1.37.1'
+      imagePullPolicy: IfNotPresent
+      env:
+        - name: DB_HOST
+          value: '{{ .Values.db.endpoint }}'
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -eu
+          i=0
+          until nc -z -w 2 "$DB_HOST" 5432; do
+            i=$((i + 1))
+            if [ "$i" -gt 60 ]; then
+              echo "FATAL: $DB_HOST:5432 is still unreachable after 300s."
+              echo "Exiting so kubelet retries; the proxy would only fail the same way."
+              exit 1
+            fi
+            if [ "$((i % 6))" -eq 1 ]; then
+              echo "waiting for $DB_HOST:5432 (attempt $i, 5s apart) ..."
+            fi
+            sleep 5
+          done
+          echo "$DB_HOST:5432 accepts connections; starting the proxy."
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities: { drop: ["ALL"] }
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: { type: RuntimeDefault }
+      # Floor for a shell-only init container (0.6 MiB measured on the others).
+      resources:
+        requests: {memory: 8Mi}
+        limits: {memory: 32Mi}
+
   db:
     # The bundled Bitnami postgresql subchart stays OFF. It carries a password
     # in values and `bitnamilegacy` images; the platform layer already runs
