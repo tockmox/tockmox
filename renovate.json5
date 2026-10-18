@@ -170,6 +170,30 @@
       groupName: "non-major dependencies",
       groupSlug: "non-major",
     },
+    {
+      // THE AI PLANE TAKES EVERY RELEASE AS IT LANDS (maintainer ruling,
+      // 2026-10-17). Open WebUI and LiteLLM ship several releases a week and
+      // their fixes matter (spend accounting, access checks), so no 3-day soak
+      // and no Monday window: a PR opens as soon as a stable release is out.
+      // AFTER the non-major group on purpose, so this group name wins for
+      // these packages. Both Open WebUI pins (the image tag and the
+      // trust-bundle initContainer) are the same package, so they land in one
+      // PR, which preflight requires. Majors still wait for dashboard approval
+      // (the rule near the top), and prereleases are never proposed while a
+      // stable version is current. A chart bump here still needs images.txt
+      // and the SBOM regenerated before ci passes.
+      matchPackageNames: [
+        "ghcr.io/open-webui/open-webui",
+        "open-webui",
+        "ghcr.io/berriai/litellm-database",
+        "litellm-helm",
+        "ghcr.io/berriai/litellm-helm",
+      ],
+      minimumReleaseAge: null,
+      schedule: ["at any time"],
+      groupName: "AI plane (Open WebUI, LiteLLM)",
+      groupSlug: "ai-plane",
+    },
   ],
 
   // Security fixes jump the queue: no schedule, no release-age wait.
