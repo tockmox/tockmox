@@ -484,8 +484,15 @@ authentik:
         # recorded. Re-measure under a real user load before changing.
         requests:
           memory: 128Mi
+        # RAISED 224Mi -> 512Mi after the 0.8.0 -> 0.8.1 upgrade leg on the lab
+        # (2026-10-18): Authentik 2026.8.4 ran its migrations and applied its
+        # blueprints in the same minute, the working set reached 219.5 MiB and
+        # the container was OOMKilled (exit 137) mid-upgrade. It recovered on
+        # its own with every migration applied, but an idle peak is the wrong
+        # basis for a limit an upgrade has to fit under. The request stays at
+        # the idle measurement; the limit covers the upgrade burst with room.
         limits:
-          memory: 224Mi
+          memory: 512Mi
   worker:
     resources:
       # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
