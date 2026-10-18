@@ -3,13 +3,13 @@ apiVersion: v2
 name: tockmox-devops
 description: "Workflow automation. A registry is a prerequisite, not a component ... see docs/deployment/registry.md."
 type: application
-version: 0.8.0
+version: 0.8.1
 appVersion: "0.1.0"
 annotations:
   tockmox.com/sync-wave: "5"
 dependencies:
   - name: tockmox-common
-    version: 0.8.0
+    version: 0.8.1
     repository: "file://../tockmox-common"
   - name: argo-workflows
     version: 2.0.13
