@@ -12,6 +12,6 @@ dependencies:
     version: 0.8.0
     repository: "file://../tockmox-common"
   - name: argo-workflows
-    version: 2.0.12
+    version: 2.0.13
     repository: "https://argoproj.github.io/argo-helm"
     condition: apps.argoWorkflows.enabled,capabilities.workflowAutomation.enabled

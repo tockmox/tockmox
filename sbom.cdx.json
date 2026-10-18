@@ -117,21 +117,21 @@
     },
     {
       "name": "ghcr.io/goauthentik/server",
-      "purl": "pkg:oci/server?repository_url=ghcr.io/goauthentik/server&tag=2026.8.3",
+      "purl": "pkg:oci/server?repository_url=ghcr.io/goauthentik/server&tag=2026.8.4",
       "type": "container",
-      "version": "2026.8.3"
+      "version": "2026.8.4"
     },
     {
       "name": "ghcr.io/jkroepke/access-log-exporter",
-      "purl": "pkg:oci/access-log-exporter?repository_url=ghcr.io/jkroepke/access-log-exporter&tag=0.4.22",
+      "purl": "pkg:oci/access-log-exporter?repository_url=ghcr.io/jkroepke/access-log-exporter&tag=0.5.0",
       "type": "container",
-      "version": "0.4.22"
+      "version": "0.5.0"
     },
     {
       "name": "ghcr.io/jkroepke/kube-webhook-certgen",
-      "purl": "pkg:oci/kube-webhook-certgen?repository_url=ghcr.io/jkroepke/kube-webhook-certgen&tag=1.8.9",
+      "purl": "pkg:oci/kube-webhook-certgen?repository_url=ghcr.io/jkroepke/kube-webhook-certgen&tag=1.11.0",
       "type": "container",
-      "version": "1.8.9"
+      "version": "1.11.0"
     },
     {
       "name": "ghcr.io/kubereboot/kured",
@@ -261,9 +261,9 @@
     },
     {
       "name": "registry.k8s.io/sig-storage/snapshot-controller",
-      "purl": "pkg:oci/snapshot-controller?repository_url=registry.k8s.io/sig-storage/snapshot-controller&tag=v8.6.0",
+      "purl": "pkg:oci/snapshot-controller?repository_url=registry.k8s.io/sig-storage/snapshot-controller&tag=v8.7.0",
       "type": "container",
-      "version": "v8.6.0"
+      "version": "v8.7.0"
     },
     {
       "description": "Helm chart dependency of tockmox-ai",
@@ -289,9 +289,9 @@
     {
       "description": "Helm chart dependency of tockmox-devops",
       "name": "argo-workflows",
-      "purl": "pkg:generic/helm/argo-workflows@2.0.12",
+      "purl": "pkg:generic/helm/argo-workflows@2.0.13",
       "type": "application",
-      "version": "2.0.12"
+      "version": "2.0.13"
     },
     {
       "description": "Helm chart dependency of tockmox-exporters",
@@ -317,23 +317,23 @@
     {
       "description": "Helm chart dependency of tockmox-identity",
       "name": "authentik",
-      "purl": "pkg:generic/helm/authentik@2026.8.3",
+      "purl": "pkg:generic/helm/authentik@2026.8.4",
       "type": "application",
-      "version": "2026.8.3"
+      "version": "2026.8.4"
     },
     {
       "description": "Helm chart dependency of tockmox-observability",
       "name": "kube-prometheus-stack",
-      "purl": "pkg:generic/helm/kube-prometheus-stack@92.3.1",
+      "purl": "pkg:generic/helm/kube-prometheus-stack@92.8.0",
       "type": "application",
-      "version": "92.3.1"
+      "version": "92.8.0"
     },
     {
       "description": "Helm chart dependency of tockmox-observability",
       "name": "loki",
-      "purl": "pkg:generic/helm/loki@18.15.1",
+      "purl": "pkg:generic/helm/loki@18.16.0",
       "type": "application",
-      "version": "18.15.1"
+      "version": "18.16.0"
     },
     {
       "description": "Helm chart dependency of tockmox-observability",
@@ -394,9 +394,9 @@
     {
       "description": "Helm chart dependency of tockmox-platform",
       "name": "snapshot-controller",
-      "purl": "pkg:generic/helm/snapshot-controller@5.3.0",
+      "purl": "pkg:generic/helm/snapshot-controller@5.4.0",
       "type": "application",
-      "version": "5.3.0"
+      "version": "5.4.0"
     }
   ],
   "metadata": {

@@ -15,7 +15,7 @@ permissions:
 # Tool pins. Declared as env vars, not buried in shell, so Renovate's custom
 # managers can bump them. A version you cannot see is a version nobody updates.
 env:
-  HELM_VERSION: "v4.3.0"
+  HELM_VERSION: "v4.3.1"
   KUBECONFORM_VERSION: "0.8.0"
   GITLEAKS_VERSION: "8.30.1"
   PROMTOOL_VERSION: "3.14.0"
