@@ -32,7 +32,7 @@ config scanner reading your intent could also find) or **enforcement** (the
 policies deny it and the cluster allowed it anyway, which no config scanner can
 see). The run's exit code is a gate you can wire into change control.
 
-> **Experimental in 0.8.0, and off by default.** It is an add-on: a separate
+> **Experimental since 0.8.0, and off by default.** It is an add-on: a separate
 > chart under `addons/posture-probe/` that you install on its own. It is not one
 > of the nine layers, nothing in the platform depends on it, and its values keys
 > may change before they are marked stable.
@@ -124,7 +124,7 @@ spec:
     namespace: tockmox-posture
   sources:
     - repoURL: https://github.com/tockmox/tockmox.git
-      targetRevision: v0.8.0
+      targetRevision: v0.8.1
       path: addons/posture-probe/chart
       helm:
         valueFiles:
