@@ -7,6 +7,82 @@ Breaking changes come first in their release, in their own section, each with
 the action required beneath it. Entries are bullets: what changed and what it
 costs you, with the reasoning in the documentation rather than here.
 
+## [0.8.1] ... 2026-10-19
+
+A patch release: fixes found since 0.8.0, the dependency updates that waited for
+it, and one memory limit an upgrade proved too small. To upgrade from 0.8.0,
+change the nine `targetRevision` pins to `v0.8.1` and push. Nothing else is
+required.
+
+### Fixed
+
+- **The LiteLLM proxy no longer crash-loops when it starts before its
+  database**, as it did on an upgrade or a reboot that restarted both: it now
+  waits in an init container until the database answers. A site that sets its
+  own `litellm.extraInitContainers` replaces that list and has to restate the
+  wait to keep it.
+- **Moving an application's access from `users` to `admin` now removes the
+  user-group binding.** Before, users kept access after the move.
+- **The identity layer's bundled PostgreSQL has a 512Mi memory limit** (was
+  224Mi). On the upgrade from 0.8.0 the old limit was reached and the database
+  was restarted once mid-upgrade; it recovered with every migration applied,
+  but the limit had been sized from an idle day.
+- **The Security Posture Probe add-on reaches `deployed` (and Healthy under Argo
+  CD) on its first sync**, on a StorageClass that waits for a first consumer
+  such as k3s's `local-path`. This was a 0.8.0 known issue.
+- **ntfy has a tile on the sign-in portal** (`links.ntfy`, `access: users` by
+  default). ntfy keeps its own sign-in.
+
+### Changed
+
+- Open WebUI 0.12.3 and LiteLLM 1.105.1 (the LiteLLM release fixes lost and
+  double-counted spend-log rows). Open WebUI's websocket redis is pinned to
+  7.4.11-alpine instead of its 2025 default.
+- Authentik 2026.8.4. Its bundled PostgreSQL moved its default image from
+  `17.11-bookworm` to `17.11-trixie`; Tockmox keeps `17.11-bookworm` for 0.8.x,
+  because the change of operating system changes the collation library under an
+  existing database.
+- argo-workflows 2.0.13, kube-prometheus-stack 92.8.0, Loki 18.16.0, Traefik
+  41.7.1, snapshot-controller 5.4.0 (external-snapshotter v8.7.0), ntfy v2.30.0.
+  `images.txt` and the SBOM list them, and CI now fails when `images.txt` is
+  stale.
+
+### How this release was tested
+
+- **Upgrade from 0.8.0**, on a single-node k3s lab: a fresh install of 0.8.0,
+  then the nine revision pins and nothing else. All layers Synced and Healthy 89
+  seconds after Argo CD read the new pins, with no retries and no hand action. A
+  5,001-row checksum table in each of two CloudNativePG databases read
+  byte-identical before and after, every volume claim stayed bound to the same
+  volume, a secret sealed under 0.8.0 still decrypted, the LiteLLM proxy did
+  not restart, and the identity PostgreSQL stayed up (it peaked at 288 MiB).
+  The first candidate ran the same upgrade and found the memory limit above.
+- **Fresh install** of the candidate, on the same lab holding only k3s, Argo CD
+  and Sealed Secrets: one `root.yaml` applied, every Application Synced and
+  Healthy with no hand action (Argo CD's own retries only). On that install: an
+  on-demand database backup, a restore drill that restored the database from the
+  object store into a scratch cluster and found 99 tables, every identity
+  blueprint applied, and a test alert delivered to the ntfy server.
+- The Security Posture Probe add-on, installed both with `helm --wait` and as
+  the documented Argo CD Application, on `local-path`.
+
+### Known issues
+
+- On an upgrade, a portal tile that is new in the release (in 0.8.1, the ntfy
+  tile) can take up to an hour to appear: during the rolling update its
+  blueprint can be picked up by an Authentik worker that does not have the file
+  yet, and Authentik applies it again at its next hourly discovery. A fresh
+  install is not affected.
+- LiteLLM's database migration Job still logs a `Read-only file system` error
+  from `prisma generate` after the migrations have applied; the Job completes.
+
+### Not tested for this release
+
+- An air-gapped install.
+- An alert reaching a phone: the test alert was read on the ntfy server, not on
+  a subscribed client.
+- A rollback from 0.8.1 to 0.8.0.
+
 ## [0.8.0] ... 2026-10-12
 
 The first public release of Tockmox. Earlier versions were built and run in a
@@ -79,5 +155,6 @@ on what hardware, and what has not: [project-status.md](docs/project-status.md).
   experimental features (the Tockmox UI aside) beyond confirming they stay off
   by default.
 
-[Unreleased]: https://github.com/tockmox/tockmox/compare/v0.8.0...main
+[Unreleased]: https://github.com/tockmox/tockmox/compare/v0.8.1...main
+[0.8.1]: https://github.com/tockmox/tockmox/releases/tag/v0.8.1
 [0.8.0]: https://github.com/tockmox/tockmox/releases/tag/v0.8.0

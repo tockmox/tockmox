@@ -17,7 +17,10 @@ Priorities change. When an item changes direction or is dropped, this page says
 so with a date rather than quietly losing the entry.
 
 Reviewed at every release, and whenever anything on it stops being true.
-**Last reviewed: 2026-10-12**, at 0.8.0, the first public release. Since 0.6.1:
+**Last reviewed: 2026-10-19**, at 0.8.1, a patch: no item changes direction,
+and the upgrade from 0.8.0 was measured end to end (data checksums, volumes and
+sealed secrets read before and after). At 0.8.0, the first public release, and
+since 0.6.1:
 documentation served from the cluster shipped in 0.7.0 and leaves Exploring; the
 model gateway runs non-root on a read-only root filesystem in 0.8.0; egress is
 contained for the whole AI namespace, not only the chat console; an upgrade
