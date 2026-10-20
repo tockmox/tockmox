@@ -17,7 +17,10 @@
 # Environment: BASELINE_REF (default: the newest final v* tag by version order,
 #           computed by `check-values-tiers.sh --print-baseline`; `git describe`
 #           lies once an rc exists and on main once releases are tagged on
-#           release branches), IMMUTABLE_DEPS_DIR (extra *.tgz subcharts).
+#           release branches), IMMUTABLE_DEPS_DIR (extra *.tgz subcharts, an
+#           explicit override that is searched before anything is fetched),
+#           IMMUTABLE_DEPS_CACHE (where fetched subcharts are kept; default
+#           $HOME/.cache/tockmox/subcharts).
 #
 # WHY RENDERED OUTPUT. "No template file changed" does not mean "no rendered
 # manifest changed": `helm.sh/chart` is rendered from Chart.yaml's version, so a
@@ -63,8 +66,14 @@
 # ci/values-all-on.yaml, which is a CI fixture and not a site; a site that sets
 # more (a StatefulSet from a subchart switched on) must run it with `--values`.
 # Subcharts come from this tree's vendored charts/*/charts (or IMMUTABLE_DEPS_DIR)
-# by name and version; when the exact version is missing the nearest vendored one
-# is used and the run says so, so after tools/helm-deps.sh that never happens. The
+# by EXACT name and version, else from IMMUTABLE_DEPS_CACHE, else `helm pull`
+# fetches that exact version into the cache (the base side's Chart.lock names
+# versions the candidate no longer vendors whenever a release bumps a subchart;
+# the 0.8.1 cut moved six). A nearest version is never substituted: Helm matches
+# a dependency by name AND version, so a substitute loads as an unlisted
+# subchart, its alias is not applied, and the layer's values schema refuses the
+# key ("Additional property litellm-helm is not allowed"). Offline with a cold
+# cache, the run fails saying which version it needs and where to put it. The
 # CRD layer is skipped (CRDs only; some schemas do not load with PyYAML).
 # NECESSARY, NOT SUFFICIENT: it proves the immutable fields are unchanged between
 # two renders, not that the live objects equal either render.
@@ -193,17 +202,40 @@ stage_ref() { # name ref -> $work/name holding charts/ and ci/
 }
 stage_dir() { mkdir -p "$work/$1"; (cd "$2" && tar -c --exclude='charts/*/charts' --exclude='charts/*/tmpcharts-*' charts ci) | tar -x -C "$work/$1"; }
 warns=0
-fill_deps() { # name: package tockmox-common from this side and vendor every dependency
-  local d="$work/$1"
+fill_deps() { # name: package tockmox-common from this side and vendor every dependency, by exact version
+  local d="$work/$1" cache="${IMMUTABLE_DEPS_CACHE:-$HOME/.cache/tockmox/subcharts}"
   mkdir -p "$work/pkg-$1"
   helm package "$d/charts/tockmox-common" -d "$work/pkg-$1" >/dev/null 2>&1 || { echo "check-immutable-fields: cannot package tockmox-common for $1" >&2; return 2; }
-  python3 - "$d" "$work/pkg-$1" "$ROOT" "${IMMUTABLE_DEPS_DIR:-}" <<'PY' || return 2
-import sys, os, glob, shutil, yaml
-d, pkg, root, extra = sys.argv[1:5]
+  python3 - "$d" "$work/pkg-$1" "$ROOT" "${IMMUTABLE_DEPS_DIR:-}" "$cache" "$1" <<'PY' || return 2
+import sys, os, re, glob, shutil, subprocess, tempfile, yaml
+d, pkg, root, extra, cache, side = sys.argv[1:7]
 pool = glob.glob(root + "/charts/*/charts/*.tgz") + (glob.glob(extra + "/*.tgz") if extra else [])
+EXACT = re.compile(r"^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$")
+def fetch(n, v, repo):
+    # `helm pull` by exact version, into a scratch dir inside the cache so a
+    # half-written archive is never read as cached. `--repo URL` needs no
+    # `helm repo add` (tools/helm-deps.sh registers repos because `helm
+    # dependency build` insists on them; `pull` does not), and an oci:// repo is
+    # pulled by reference. Only the version the lock names is ever accepted.
+    os.makedirs(cache, exist_ok=True)
+    tmp = tempfile.mkdtemp(prefix="pull-", dir=cache)
+    if repo.startswith("oci://"):
+        cmd = ["helm", "pull", repo.rstrip("/") + "/" + n, "--version", v, "--destination", tmp]
+    else:
+        cmd = ["helm", "pull", n, "--repo", repo, "--version", v, "--destination", tmp]
+    r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+    got = os.path.join(tmp, "%s-%s.tgz" % (n, v))
+    if r.returncode != 0 or not os.path.exists(got):
+        shutil.rmtree(tmp, ignore_errors=True)
+        last = [l for l in (r.stdout or "").splitlines() if l.strip()]
+        return None, (last[-1].strip() if last else "helm pull exited %d" % r.returncode)
+    final = os.path.join(cache, "%s-%s.tgz" % (n, v))
+    os.replace(got, final); shutil.rmtree(tmp, ignore_errors=True)
+    return final, ""
 bad = 0
 for ch in sorted(glob.glob(d + "/charts/tockmox-*")):
     if os.path.basename(ch) == "tockmox-common": continue
+    layer = os.path.basename(ch)
     src = ch + "/Chart.lock" if os.path.exists(ch + "/Chart.lock") else ch + "/Chart.yaml"
     deps = (yaml.safe_load(open(src)) or {}).get("dependencies") or []
     os.makedirs(ch + "/charts", exist_ok=True)
@@ -211,13 +243,26 @@ for ch in sorted(glob.glob(d + "/charts/tockmox-*")):
         n, v, repo = dep["name"], str(dep["version"]), dep.get("repository", "")
         if repo.startswith("file://"):
             shutil.copy(glob.glob(pkg + "/tockmox-common-*.tgz")[0], ch + "/charts/"); continue
-        exact = [p for p in pool if os.path.basename(p) == "%s-%s.tgz" % (n, v)]
-        near = [p for p in pool if os.path.basename(p).rsplit("-", 1)[0] == n]
-        pick = (exact or near or [None])[0]
+        want = "%s-%s.tgz" % (n, v)
+        exact = [p for p in pool if os.path.basename(p) == want]
+        pick = exact[0] if exact else (os.path.join(cache, want) if os.path.exists(os.path.join(cache, want)) else None)
+        why = ""
         if not pick:
-            print("check-immutable-fields: no vendored subchart %s %s for %s; run tools/helm-deps.sh or set IMMUTABLE_DEPS_DIR" % (n, v, os.path.basename(ch)), file=sys.stderr); bad = 1; continue
-        if not exact:
-            print("  warn: %s wants %s %s, using vendored %s" % (os.path.basename(ch), n, v, os.path.basename(pick)), file=sys.stderr)
+            if not EXACT.match(v):
+                why = "%s is a version range, not a pinned version; the layer has no Chart.lock to read" % v
+            elif not repo:
+                why = "the dependency names no repository to fetch from"
+            else:
+                pick, why = fetch(n, v, repo)
+                if pick:
+                    print("  note: fetched %s %s for %s (%s side) into %s" % (n, v, layer, side, cache), file=sys.stderr)
+        if not pick:
+            near = sorted(set(os.path.basename(p) for p in pool + glob.glob(cache + "/*.tgz") if os.path.basename(p).startswith(n + "-")))
+            print("check-immutable-fields: no subchart %s %s for %s (%s side): not vendored, not in %s, and the fetch did not happen (%s). "
+                  "A nearest version (%s) is NOT a substitute: Helm would load it as an unlisted subchart, drop the alias and refuse the values. "
+                  "Put %s in %s (tools/helm-deps.sh at that ref, then copy charts/*/charts/*.tgz), or set IMMUTABLE_DEPS_DIR to a directory holding it."
+                  % (n, v, layer, side, cache, why, ", ".join(near) or "none vendored", want, cache), file=sys.stderr)
+            bad = 1; continue
         shutil.copy(pick, ch + "/charts/")
 sys.exit(2 if bad else 0)
 PY
@@ -355,6 +400,83 @@ if [ "$SELFTEST" = 1 ]; then
   out=$(bash "$pt/tools/check-immutable-fields.sh" --perturb-images 2>&1) && die "--perturb-images passed a version-named Job: $out"
   printf '%s' "$out" | grep -Eq 'FAIL tockmox-platform Job .*/tockmox-garage-credentials-[0-9-]*: spec.template changes .*image' || die "wrong output: $out"
   ok "--perturb-images flags the credentials Job named for the version only, as on the homelab 2026-10-11"
+  # A subchart version that differs between the two sides (the 0.8.1 cut): the base
+  # side's lock names a version the candidate no longer vendors. Two throwaway sides,
+  # each tockmox-common from this tree plus a layer `tockmox-selftest` that depends on
+  # `selftest-dep` under the alias `sdep` behind a closed values schema. `helm pull`
+  # is stubbed by a `helm` wrapper first on PATH that serves a local directory and
+  # records its arguments (everything else goes to the real helm), so nothing reaches
+  # the network; the pool and the cache are fixture directories, not this tree or $HOME.
+  sd="$fx/sd"; mkdir -p "$sd/repo" "$sd/pool" "$sd/stub"
+  real_helm=$(command -v helm)
+  cat > "$sd/stub/helm" <<STUB
+#!/usr/bin/env bash
+if [ "\${1:-}" = pull ]; then
+  shift; printf 'pull %s\\n' "\$*" >> "$sd/pulls.log"
+  [ "\${SELFTEST_PULL_OFFLINE:-0}" = 1 ] && { echo "Error: selftest: the network is refused" >&2; exit 1; }
+  name=; ver=; dest=
+  while [ \$# -gt 0 ]; do case "\$1" in --version) ver=\$2; shift 2 ;; --destination) dest=\$2; shift 2 ;; --repo) shift 2 ;; *) name=\${1##*/}; shift ;; esac; done
+  cp "$sd/repo/\$name-\$ver.tgz" "\$dest/" 2>/dev/null || { echo "Error: selftest repo has no \$name-\$ver" >&2; exit 1; }
+  exit 0
+fi
+exec "$real_helm" "\$@"
+STUB
+  chmod +x "$sd/stub/helm"
+  mkdep() { # version -> $sd/repo/selftest-dep-<version>.tgz, a Service labelled with its version
+    local c="$sd/src/selftest-dep"; rm -rf "$c"; mkdir -p "$c/templates"
+    printf 'apiVersion: v2\nname: selftest-dep\nversion: %s\n' "$1" > "$c/Chart.yaml"
+    printf 'app: dep\n' > "$c/values.yaml"
+    printf 'apiVersion: v1\nkind: Service\nmetadata: {name: sdep, namespace: ns, labels: {dep: "%s"}}\nspec:\n  selector: {app: {{ .Values.app }}}\n  ports: [{port: 80}]\n' "$1" > "$c/templates/svc.yaml"
+    helm package "$c" -d "$sd/repo" >/dev/null 2>&1 || die "cannot package selftest-dep $1"
+  }
+  cver=$(awk '$1=="version:"{print $2; exit}' charts/tockmox-common/Chart.yaml)
+  mkside() { # name dep-version -> staged $work/name: charts/tockmox-common, charts/tockmox-selftest, ci/values.yaml
+    local t="$sd/tree-$1" c; c="$t/charts/tockmox-selftest"; mkdir -p "$c/templates" "$t/ci"
+    cp -R "$ROOT/charts/tockmox-common" "$t/charts/"
+    printf 'apiVersion: v2\nname: tockmox-selftest\nversion: 0.0.1\ndependencies:\n  - name: tockmox-common\n    version: %s\n    repository: "file://../tockmox-common"\n  - name: selftest-dep\n    alias: sdep\n    version: "%s"\n    repository: "https://selftest.invalid/charts"\n' "$cver" "$2" > "$c/Chart.yaml"
+    printf 'sdep:\n  app: web\n' > "$c/values.yaml"
+    printf '{"type": "object", "additionalProperties": false, "properties": {"sdep": {"type": "object"}, "global": {"type": "object"}, "tockmox-common": {"type": "object"}}}\n' > "$c/values.schema.json"
+    printf 'apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: web, namespace: ns}\nspec:\n  selector: {matchLabels: {app: {{ .Values.sdep.app }}}}\n  template:\n    metadata: {labels: {app: {{ .Values.sdep.app }}}}\n' > "$c/templates/deploy.yaml"
+    printf '{}\n' > "$t/ci/values.yaml"
+    stage_dir "$1" "$t"
+  }
+  mkdep 0.1.0; mkdep 0.2.0
+  mkside da 0.1.0; mkside db 0.2.0
+  sdc="$work/da/charts/tockmox-selftest/charts"
+  deps() { ( export PATH="$sd/stub:$PATH" IMMUTABLE_DEPS_DIR="$sd/pool" IMMUTABLE_DEPS_CACHE="$sd/cache" SELFTEST_PULL_OFFLINE="${1:-0}"; shift; fill_deps "$@" ) 2> "$sd/err"; }
+  render() { ( export PATH="$sd/stub:$PATH" IMMUTABLE_DEPS_DIR="$sd/pool" IMMUTABLE_DEPS_CACHE="$sd/cache" SELFTEST_PULL_OFFLINE="${1:-0}"; bash "$self" --base-dir "$work/da" --head-dir "$work/db" --layers tockmox-selftest 2>&1 ); }
+  # (a) both exact versions in the pool: taken from there, nothing fetched, both sides render
+  cp "$sd/repo/selftest-dep-0.1.0.tgz" "$sd/repo/selftest-dep-0.2.0.tgz" "$sd/pool/"; : > "$sd/pulls.log"
+  deps 0 da && deps 0 db || die "exact versions in the pool: fill_deps failed: $(cat "$sd/err")"
+  [ -f "$sdc/selftest-dep-0.1.0.tgz" ] && [ -f "$work/db/charts/tockmox-selftest/charts/selftest-dep-0.2.0.tgz" ] || die "exact versions in the pool were not vendored into the sides"
+  [ ! -s "$sd/pulls.log" ] || die "exact versions in the pool still pulled: $(cat "$sd/pulls.log")"
+  out=$(render 1) || die "two sides on different pooled subchart versions did not render: $out"
+  printf '%s' "$out" | grep -Eq 'the rendered diff is [1-9][0-9]* changed lines; 0 immutable' || die "wrong output: $out"
+  ok "a subchart at 0.1.0 on the base side and 0.2.0 on the head side: both exact versions come from the pool, nothing is fetched, both sides render"
+  # (b) the base side's exact version is not in the pool: fetched by exact version into the cache, then served from the cache offline
+  rm -f "$sd/pool/selftest-dep-0.1.0.tgz"; rm -rf "$sd/cache" "$sdc"; : > "$sd/pulls.log"
+  deps 0 da || die "a missing exact version was not fetched: $(cat "$sd/err")"
+  [ -f "$sd/cache/selftest-dep-0.1.0.tgz" ] || die "the fetched subchart is not in the cache"
+  [ -f "$sdc/selftest-dep-0.1.0.tgz" ] || die "the fetched subchart was not vendored into the side"
+  grep -q '^pull selftest-dep --repo https://selftest.invalid/charts --version 0.1.0 --destination ' "$sd/pulls.log" || die "helm pull was not called by exact version and repository: $(cat "$sd/pulls.log")"
+  [ "$(grep -c '^pull' "$sd/pulls.log")" = 1 ] || die "helm pull called $(grep -c '^pull' "$sd/pulls.log") times for one subchart"
+  grep -q 'note: fetched selftest-dep 0.1.0 for tockmox-selftest (da side)' "$sd/err" || die "the fetch was not reported: $(cat "$sd/err")"
+  ok "a subchart version the candidate no longer vendors is fetched by exact version and repository into the cache, once, and the run says so"
+  rm -rf "$sdc"; : > "$sd/pulls.log"
+  deps 1 da || die "a cached subchart was not used with the network refused: $(cat "$sd/err")"
+  [ -f "$sdc/selftest-dep-0.1.0.tgz" ] || die "the cached subchart was not vendored into the side"
+  [ ! -s "$sd/pulls.log" ] || die "a cached subchart was pulled again: $(cat "$sd/pulls.log")"
+  out=$(render 1) || die "the cached baseline subchart did not render both sides with the network refused: $out"
+  printf '%s' "$out" | grep -Eq 'the rendered diff is [1-9][0-9]* changed lines; 0 immutable' || die "wrong output: $out"
+  ok "the cached version is used offline, nothing is pulled again, and both sides render with no IMMUTABLE_DEPS_DIR for the baseline"
+  # (c) no exact version anywhere and no network: the nearest vendored version is refused, not substituted
+  rm -rf "$sd/cache" "$sdc"; : > "$sd/pulls.log"
+  deps 1 da && die "a nearest version (0.2.0 for a lock naming 0.1.0) was accepted"
+  grep -q 'no subchart selftest-dep 0.1.0 for tockmox-selftest (da side)' "$sd/err" && grep -q 'A nearest version (selftest-dep-0.2.0.tgz) is NOT a substitute' "$sd/err" || die "wrong refusal: $(cat "$sd/err")"
+  [ ! -e "$sdc/selftest-dep-0.2.0.tgz" ] || die "the nearest version was copied into the side anyway"
+  out=$(render 1); rc=$?; [ "$rc" = 2 ] || die "the whole run on a missing baseline subchart exited $rc, not 2: $out"
+  printf '%s' "$out" | grep -q 'NOT a substitute' || die "the whole run did not say why: $out"
+  ok "a nearest version is refused with the exact version named, nothing is copied in, and the run exits 2 instead of warning"
   echo "check-immutable-fields selftest: ok"
   exit 0
 fi
