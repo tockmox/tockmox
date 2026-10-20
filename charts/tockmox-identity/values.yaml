@@ -533,7 +533,7 @@ authentik:
     # this chart renders from `sso` and `brand`. tockmox.ssoEnvRevision in
     # tockmox-common documents the same wall. An annotation would also change
     # the pod, which swaps one worker for another and puts an old and a new
-    # worker on the broker together.
+    # worker on the broker together; the strategy below is about that.
     #
     # WHAT THIS DOES INSTEAD. The container hashes everything mounted under
     # /blueprints/mounted when it starts, and the liveness probe hashes it again
@@ -571,6 +571,32 @@ authentik:
               echo "the mounted blueprints changed since this worker started: restarting onto them"
               exit 1
             fi
+    # AN UPGRADE THAT ADDS A BLUEPRINT (TM-1060). The default RollingUpdate
+    # starts the new worker while the old one is still running, and for that
+    # window two workers share one task queue in the database. The new pod
+    # queues its startup discovery, the OLD worker takes it, looks in an image
+    # and a ConfigMap that do not yet hold the new blueprint, and finds
+    # nothing. The task is then done and nothing re-queues it: the blueprint
+    # is not applied, not errored, simply absent, until the hourly discovery on
+    # the hour. Measured on the lab with twelve new blueprints: none applied
+    # for up to the hour with the default, all twelve within about eight
+    # seconds with the setting below.
+    #
+    # maxSurge 0 stops the new worker from starting before the old one is gone,
+    # so there is never a second worker to take the task. maxUnavailable 100%
+    # lets the old one go first. The cost is a gap of one worker start (tens of
+    # seconds) with no worker at all: queued work waits in the database and
+    # runs when the new worker is up, and the server pods, which carry every
+    # login, are not touched. This is the strategy `type` RollingUpdate with
+    # different numbers, on purpose: Argo CD applies with ServerSideApply and
+    # a live Deployment cannot be switched to `type: Recreate` that way (the
+    # API server refuses it while `rollingUpdate` is set, and no apply clears
+    # it), so Recreate would fail the upgrade on exactly the installs it is for.
+    deploymentStrategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxSurge: 0
+        maxUnavailable: "100%"
     metrics:
       serviceMonitor:
         enabled: true
