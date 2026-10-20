@@ -1,0 +1,182 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Regenerate images.txt and sbom.cdx.json on a Renovate branch, so a chart bump
+# arrives with its generated files already right.
+#
+# WHY THIS EXISTS. ci.yaml refuses a tree whose images.txt or sbom.cdx.json is
+# stale, and a Renovate chart bump is stale by construction: Renovate edits
+# Chart.yaml and Chart.lock and cannot run tools/gen-images.sh. The Mend-hosted
+# app has no postUpgradeTasks (self-hosted only), so every AI-plane release,
+# several a week under the 2026-10-17 ruling, needed a person to regenerate two
+# files by hand (PR #53, 2026-10-19). The gate stays exactly as strict; this
+# makes the bot's PR satisfy it.
+#
+# TWO JOBS, AND ONLY ONE OF THEM HOLDS A CREDENTIAL. `regen` checks out the
+# branch and runs repository code (helm, the generators) with a read-only
+# GITHUB_TOKEN and no secret in reach. `commit` runs NO repository code: no
+# checkout, no tools/. It takes the two files as job outputs, refuses anything
+# else, mints a short-lived App token scoped to contents:write on this one
+# repository, and writes one commit through the GraphQL API. A generator that
+# misbehaved in `regen` can produce wrong file contents, which ci.yaml's own
+# staleness gates then catch; it cannot reach the App key.
+#
+# WHY AN APP AND NOT GITHUB_TOKEN. A push made with GITHUB_TOKEN does not start
+# workflows, so ci.yaml would never run on the regenerated commit and the PR
+# would sit red. An App installation token does start them.
+#
+# WHY createCommitOnBranch AND NOT git push. (1) expectedHeadOid makes the write
+# conditional on the branch still being the commit this run regenerated: if
+# Renovate pushed again meanwhile, the write fails rather than landing stale
+# files on a newer tree, and the newer push has its own run. (2) GitHub signs
+# the commit as the App, so it shows Verified. (3) No credential URL ever goes
+# through git, which is how an installation token once leaked into a terminal.
+#
+# NO LOOP. The App's commit is a push by the App, not by renovate[bot], so the
+# `if:` below skips it; ci.yaml runs on it, this does not.
+#
+# RENOVATE KEEPS OWNING THE BRANCH. renovate.json5 lists the App's commit email
+# under gitIgnoredAuthors. Without that, Renovate treats any foreign commit as a
+# human edit and stops rebasing or updating the branch. With it, a later
+# Renovate update rebuilds the branch, drops this commit, and the push that
+# rebuild makes runs this workflow again.
+#
+# DCO. The App's commit carries no Signed-off-by, for the same reason Renovate's
+# do not: a bot cannot certify the DCO. ci.yaml's sign-off step exempts it only
+# when the PR was opened by Renovate AND the commit touches nothing but these
+# two generated files. See that step.
+#
+# Setup (once): a GitHub App owned by the tockmox org, installed on this
+# repository only, with Contents: read and write and nothing else. Its Client ID
+# is the repository variable REGEN_APP_CLIENT_ID and its private key the
+# repository secret REGEN_APP_PRIVATE_KEY.
+
+name: renovate-regen
+
+on:
+  push:
+    branches: ['renovate/**']
+
+permissions:
+  contents: read
+
+# One run per branch. A newer Renovate push supersedes an older one, and the
+# older one's write would fail on expectedHeadOid anyway.
+concurrency:
+  group: renovate-regen-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Same pin as ci.yaml. Renovate's custom manager bumps both.
+  HELM_VERSION: "v4.3.1"
+
+jobs:
+  regen:
+    if: ${{ github.actor == 'renovate[bot]' }}
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+      images: ${{ steps.diff.outputs.images }}
+      sbom: ${{ steps.diff.outputs.sbom }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: regenerate images.txt, then the SBOM from it
+        # Order matters. gen-sbom.sh reads its image components from the
+        # committed images.txt, so running it against a stale list reports the
+        # chart entry and misses the image entry (seen on PR #53).
+        shell: bash -euo pipefail {0}
+        run: |
+          ./tools/helm-deps.sh
+          ./tools/gen-images.sh
+          ./tools/gen-sbom.sh
+
+      - name: decide what to commit
+        id: diff
+        shell: bash -euo pipefail {0}
+        run: |
+          # The generators must touch nothing but their own two outputs. If
+          # anything else in the tracked tree moved, stop: that is a generator
+          # defect, and committing around it would hide it.
+          other="$(git diff --name-only | grep -vxE 'images\.txt|sbom\.cdx\.json' || true)"
+          if [ -n "$other" ]; then
+            echo "::error::the generators changed files they do not own:"
+            echo "$other"
+            exit 1
+          fi
+          changed=false
+          # The "# Generated by ... on DATE" line is the one legitimate
+          # difference between two runs (same rule as ci.yaml), so a list that
+          # differs only there is not a change.
+          if git diff --quiet -I '^# Generated' -- images.txt; then
+            echo "images=" >> "$GITHUB_OUTPUT"
+          else
+            changed=true
+            echo "images=$(base64 -w0 images.txt)" >> "$GITHUB_OUTPUT"
+          fi
+          if git diff --quiet -- sbom.cdx.json; then
+            echo "sbom=" >> "$GITHUB_OUTPUT"
+          else
+            changed=true
+            echo "sbom=$(base64 -w0 sbom.cdx.json)" >> "$GITHUB_OUTPUT"
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          git diff --stat -I '^# Generated' -- images.txt sbom.cdx.json
+          echo "changed=$changed"
+
+  commit:
+    needs: regen
+    if: ${{ needs.regen.outputs.changed == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: mint a token for this repository only
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.REGEN_APP_CLIENT_ID }}
+          private-key: ${{ secrets.REGEN_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
+      - name: commit the regenerated files to the branch
+        shell: bash -euo pipefail {0}
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          HEAD_OID: ${{ github.sha }}
+          IMAGES_B64: ${{ needs.regen.outputs.images }}
+          SBOM_B64: ${{ needs.regen.outputs.sbom }}
+        run: |
+          # Every value arrives through env, never interpolated into the
+          # script: a branch name is input. The file list is fixed here, not
+          # taken from the other job, so nothing but these two paths can be
+          # written however the outputs were produced.
+          additions='[]'
+          if [ -n "$IMAGES_B64" ]; then
+            additions="$(jq -c --arg c "$IMAGES_B64" '. + [{path: "images.txt", contents: $c}]' <<<"$additions")"
+          fi
+          if [ -n "$SBOM_B64" ]; then
+            additions="$(jq -c --arg c "$SBOM_B64" '. + [{path: "sbom.cdx.json", contents: $c}]' <<<"$additions")"
+          fi
+          jq -n \
+            --arg repo "$REPO" --arg branch "$BRANCH" --arg head "$HEAD_OID" \
+            --argjson additions "$additions" \
+            '{
+              query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }",
+              variables: { input: {
+                branch: { repositoryNameWithOwner: $repo, branchName: $branch },
+                expectedHeadOid: $head,
+                message: {
+                  headline: "Regenerate images.txt and sbom.cdx.json",
+                  body: "Generated by tools/gen-images.sh and tools/gen-sbom.sh for the charts in \($head). Written by .github/workflows/renovate-regen.yaml; ci.yaml checks both files against the tree."
+                },
+                fileChanges: { additions: $additions }
+              } }
+            }' > "$RUNNER_TEMP/commit.json"
+          gh api graphql --input "$RUNNER_TEMP/commit.json" \
+            --jq '.data.createCommitOnBranch.commit | "committed \(.oid) \(.url)"'
