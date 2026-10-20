@@ -369,6 +369,84 @@ proves the restart worked ... rather than proving a pod restarted ... are in
 Which consoles carry which trust store, and why a private CA has to reach
 inside the container at all, is in [TLS and trust](tls-and-trust.md).
 
+## A changed blueprint reaches Authentik when the worker restarts
+
+The identity layer ships its single sign-on wiring as blueprints in a ConfigMap
+(`tockmox-sso-blueprints`) that the Authentik worker mounts. Authentik applies a
+mounted blueprint two ways: a discovery pass when the worker starts, which
+applies every file that changed, and a file watcher that notices Kubernetes
+swapping the ConfigMap volume. **The watcher is a single thread and it can die
+without a trace.** On one homelab both workers lost it to a stale database
+connection. After that a changed blueprint is synced by GitOps, mounted in the
+pod and never applied: every resource reports Synced and Healthy, the worker is
+Ready, and the console keeps its old behaviour. Only the hourly discovery, or a
+restart, would notice.
+
+**The chart restarts the worker's container for you.** When the worker starts it
+records a hash of everything mounted under `/blueprints/mounted`, and its
+liveness probe compares that hash on every period. A blueprint that changed, or
+a new one, makes the probe fail, Kubernetes restarts the container in the same
+pod, and the restart's discovery pass applies the new files. The whole thing
+takes a minute or two after the sync, most of it Kubernetes refreshing the
+mounted ConfigMap, and it leaves one restart on the pod and a `Liveness probe
+failed` event that says why:
+
+```bash
+kubectl -n tockmox-authentik describe pod -l app.kubernetes.io/component=worker \
+  | grep -A1 'Liveness probe failed'
+```
+
+This covers the blueprints this chart ships and any a site mounts through
+`authentik.blueprints.configMaps` or `authentik.blueprints.secrets`, because the
+hash covers the whole directory. **It does not cover** a blueprint mounted
+anywhere else (an `authentik.worker.volumes` entry outside
+`/blueprints/mounted`), and it is lost if a site replaces
+`authentik.worker.livenessProbe` without keeping the two `cat` lines. For
+either, restart the worker yourself after the change, or run a restart
+controller such as Stakater Reloader against it:
+
+```bash
+kubectl -n tockmox-authentik rollout restart deployment/<release>-authentik-worker
+```
+
+A restart controller replaces the pod instead of restarting its container. That
+is safe here, for the reason in the next section, and costs the same short gap
+with no worker.
+
+## An upgrade replaces the worker without overlap
+
+On an upgrade that adds a blueprint, Kubernetes by default starts the new worker
+while the old one is still running. For that overlap two workers share one task
+queue in the database. The new worker queues its discovery pass, the **old**
+worker takes it, looks in an image and a ConfigMap that do not hold the new
+blueprint yet, and finds nothing. The task is finished and nothing queues it
+again: the blueprint is not applied and not failed, it is **absent** from
+Authentik, until the hourly discovery on the hour. Nothing in Argo CD or the
+pod reports it. On the lab, twelve new blueprints added by an upgrade were all
+missing until the next hour with the default rollout.
+
+The chart therefore sets the worker's rollout to `RollingUpdate` with
+`maxSurge: 0` and `maxUnavailable: 100%`
+(`authentik.worker.deploymentStrategy`): the old worker is stopped before the
+new one starts, so no old worker can take the new worker's discovery. On the
+same twelve blueprints, all were applied within about eight seconds of the new
+worker starting.
+
+**What it costs.** For the time a worker takes to start, tens of seconds, there
+is no worker. Queued work (outpost and flow background tasks, blueprint
+application, email) waits in the database and runs when the new worker is up.
+Logins are served by the server pods, which this does not touch. A site that
+needs the old behaviour sets `authentik.worker.deploymentStrategy` itself; it
+then also takes back the missing-blueprint risk on an upgrade, and the way to
+close it is the same restart as above after the sync.
+
+**Why not `type: Recreate`.** It is the plainer way to say the same thing, and
+it cannot be applied here: Argo CD applies with ServerSideApply, the API server
+refuses a live Deployment's change to `Recreate` while its `rollingUpdate`
+block is set, and no apply clears that block. The upgrade would fail on
+exactly the installs that need it. New numbers on the same `RollingUpdate`
+type are accepted.
+
 ## Break-glass, deliberately
 
 Local logins stay enabled alongside SSO:

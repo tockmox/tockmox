@@ -516,6 +516,87 @@ authentik:
       allowPrivilegeEscalation: false
       capabilities:
         drop: ["ALL"]
+    # RESTART ONTO A CHANGED BLUEPRINT (TM-1058). Authentik applies a mounted
+    # blueprint two ways: its startup discovery, and a file watcher that fires
+    # when kubelet swaps the ConfigMap volume. The watcher is a single thread
+    # and it can die without a trace: on the homelab both workers lost it to a
+    # stale database connection, after which a changed blueprint was synced by
+    # Argo CD, mounted, and never applied, with every resource green and the
+    # worker Ready. The hourly discovery is the only thing left that notices.
+    #
+    # WHY NOT A checksum/blueprints POD ANNOTATION. It is the textbook fix and
+    # it cannot be written from here. The worker Deployment belongs to the
+    # vendored authentik chart, which renders `podAnnotations` as literal text
+    # (no `tpl`; checked against 2026.8.4, where `{{ 1 }}` arrives as `{{ 1 }}`),
+    # and a subchart sees `.Values.global` and nothing else of this chart's
+    # values, so even a field it does run `tpl` over could not hash a ConfigMap
+    # this chart renders from `sso` and `brand`. tockmox.ssoEnvRevision in
+    # tockmox-common documents the same wall. An annotation would also change
+    # the pod, which swaps one worker for another and puts an old and a new
+    # worker on the broker together; the strategy below is about that.
+    #
+    # WHAT THIS DOES INSTEAD. The container hashes everything mounted under
+    # /blueprints/mounted when it starts, and the liveness probe hashes it again
+    # on every period. When the two differ the probe fails and kubelet restarts
+    # the CONTAINER, in the same pod, and the restart runs the startup discovery
+    # over the new files. That covers every blueprint mounted through
+    # `authentik.blueprints.configMaps` and `.secrets`, this chart's and a
+    # site's alike, and it no longer matters whether the watcher is alive. The
+    # same idea as the ntfy auth Secret probe in tockmox-observability. Cost: a
+    # cat and a sha256sum of a few kilobytes every ten seconds, and one
+    # container restart per blueprint change, visible as a restart count of one
+    # and a `Liveness probe failed` event that says why.
+    #
+    # A blueprint mounted somewhere else (a `worker.volumes` entry that is not
+    # under /blueprints/mounted) is not covered. The glob is deliberately the
+    # directory Authentik itself scans. A probe the site replaces
+    # (`authentik.worker.livenessProbe`) also drops this; keep the `cat` lines.
+    lifecycle:
+      postStart:
+        exec:
+          command:
+            - /bin/sh
+            - -c
+            - cat /blueprints/mounted/*/* 2>/dev/null | sha256sum > /tmp/.blueprints-at-start || true
+    livenessProbe:
+      exec:
+        command:
+          - /bin/sh
+          - -c
+          - |
+            ak healthcheck || exit 1
+            now=$(cat /blueprints/mounted/*/* 2>/dev/null | sha256sum)
+            [ -s /tmp/.blueprints-at-start ] || { printf '%s\n' "$now" > /tmp/.blueprints-at-start; exit 0; }
+            if [ "$now" != "$(cat /tmp/.blueprints-at-start)" ]; then
+              echo "the mounted blueprints changed since this worker started: restarting onto them"
+              exit 1
+            fi
+    # AN UPGRADE THAT ADDS A BLUEPRINT (TM-1060). The default RollingUpdate
+    # starts the new worker while the old one is still running, and for that
+    # window two workers share one task queue in the database. The new pod
+    # queues its startup discovery, the OLD worker takes it, looks in an image
+    # and a ConfigMap that do not yet hold the new blueprint, and finds
+    # nothing. The task is then done and nothing re-queues it: the blueprint
+    # is not applied, not errored, simply absent, until the hourly discovery on
+    # the hour. Measured on the lab with twelve new blueprints: none applied
+    # for up to the hour with the default, all twelve within about eight
+    # seconds with the setting below.
+    #
+    # maxSurge 0 stops the new worker from starting before the old one is gone,
+    # so there is never a second worker to take the task. maxUnavailable 100%
+    # lets the old one go first. The cost is a gap of one worker start (tens of
+    # seconds) with no worker at all: queued work waits in the database and
+    # runs when the new worker is up, and the server pods, which carry every
+    # login, are not touched. This is the strategy `type` RollingUpdate with
+    # different numbers, on purpose: Argo CD applies with ServerSideApply and
+    # a live Deployment cannot be switched to `type: Recreate` that way (the
+    # API server refuses it while `rollingUpdate` is set, and no apply clears
+    # it), so Recreate would fail the upgrade on exactly the installs it is for.
+    deploymentStrategy:
+      type: RollingUpdate
+      rollingUpdate:
+        maxSurge: 0
+        maxUnavailable: "100%"
     metrics:
       serviceMonitor:
         enabled: true
