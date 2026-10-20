@@ -30,6 +30,11 @@
 
   timezone: "America/Chicago",
 
+  // PRs open without a dashboard tick unless a rule below says otherwise
+  // (majors do). Stated explicitly so an inherited default cannot hold every
+  // branch under "Pending Approval".
+  dependencyDashboardApproval: false,
+
   // One weekly batch rather than a trickle. Security PRs bypass this via
   // vulnerabilityAlerts below.
   // NOTE: `schedule` gates BRANCH CREATION, not scanning. Outside the window a
@@ -169,6 +174,9 @@
       matchUpdateTypes: ["minor", "patch"],
       groupName: "non-major dependencies",
       groupSlug: "non-major",
+      // Stated, not inherited: these open as PRs without a dashboard tick.
+      // Only majors wait for approval (the rule near the top).
+      dependencyDashboardApproval: false,
     },
     {
       // THE AI PLANE TAKES EVERY RELEASE AS IT LANDS (maintainer ruling,
@@ -193,6 +201,7 @@
       schedule: ["at any time"],
       groupName: "AI plane (Open WebUI, LiteLLM)",
       groupSlug: "ai-plane",
+      dependencyDashboardApproval: false,
     },
   ],
 
