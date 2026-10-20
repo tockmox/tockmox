@@ -50,6 +50,14 @@
   prHourlyLimit: 0,
   labels: ["renovate"],
 
+  // .github/workflows/renovate-regen.yaml adds one commit to a Renovate branch
+  // whose chart bump changed images.txt or sbom.cdx.json. Renovate treats any
+  // commit by another author as a human edit and stops rebasing and updating
+  // that branch; listing the regen App here keeps the branch Renovate's. A
+  // later update rebuilds the branch without the commit, and the workflow adds
+  // it again on that push.
+  gitIgnoredAuthors: ["345119929+tockmox-regen[bot]@users.noreply.github.com"],
+
   // Image refs inside chart templates. Anchored at ^charts/ deliberately:
   // a loose (^|/) form matches mid-path and can "update" a frozen test fixture.
   kubernetes: {
@@ -169,8 +177,8 @@
       // LAST on purpose: packageRules apply in order, so this group name
       // overrides the github-actions and exporter groups above for patch and
       // minor updates. Majors and security updates still arrive alone.
-      // A chart bump in the group still needs sbom.cdx.json and images.txt
-      // regenerated before ci passes (tools/gen-images.sh, tools/gen-sbom.sh).
+      // A chart bump in the group changes sbom.cdx.json and images.txt;
+      // renovate-regen.yaml regenerates and commits both on the branch.
       matchUpdateTypes: ["minor", "patch"],
       groupName: "non-major dependencies",
       groupSlug: "non-major",
@@ -188,8 +196,8 @@
       // trust-bundle initContainer) are the same package, so they land in one
       // PR, which preflight requires. Majors still wait for dashboard approval
       // (the rule near the top), and prereleases are never proposed while a
-      // stable version is current. A chart bump here still needs images.txt
-      // and the SBOM regenerated before ci passes.
+      // stable version is current. renovate-regen.yaml regenerates images.txt
+      // and the SBOM on the branch, so these PRs need no hand edit.
       matchPackageNames: [
         "ghcr.io/open-webui/open-webui",
         "open-webui",
