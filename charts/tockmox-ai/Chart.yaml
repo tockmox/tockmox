@@ -26,6 +26,6 @@ dependencies:
   # Chart.yaml lists them.
   - name: litellm-helm
     alias: litellm
-    version: "1.105.1"
+    version: "1.106.0"
     repository: "oci://ghcr.io/berriai"
     condition: apps.litellm.enabled,capabilities.aiPlane.enabled
