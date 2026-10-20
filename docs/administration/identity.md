@@ -369,6 +369,46 @@ proves the restart worked ... rather than proving a pod restarted ... are in
 Which consoles carry which trust store, and why a private CA has to reach
 inside the container at all, is in [TLS and trust](tls-and-trust.md).
 
+## A changed blueprint reaches Authentik when the worker restarts
+
+The identity layer ships its single sign-on wiring as blueprints in a ConfigMap
+(`tockmox-sso-blueprints`) that the Authentik worker mounts. Authentik applies a
+mounted blueprint two ways: a discovery pass when the worker starts, which
+applies every file that changed, and a file watcher that notices Kubernetes
+swapping the ConfigMap volume. **The watcher is a single thread and it can die
+without a trace.** On one homelab both workers lost it to a stale database
+connection. After that a changed blueprint is synced by GitOps, mounted in the
+pod and never applied: every resource reports Synced and Healthy, the worker is
+Ready, and the console keeps its old behaviour. Only the hourly discovery, or a
+restart, would notice.
+
+**The chart restarts the worker's container for you.** When the worker starts it
+records a hash of everything mounted under `/blueprints/mounted`, and its
+liveness probe compares that hash on every period. A blueprint that changed, or
+a new one, makes the probe fail, Kubernetes restarts the container in the same
+pod, and the restart's discovery pass applies the new files. The whole thing
+takes a minute or two after the sync, most of it Kubernetes refreshing the
+mounted ConfigMap, and it leaves one restart on the pod and a `Liveness probe
+failed` event that says why:
+
+```bash
+kubectl -n tockmox-authentik describe pod -l app.kubernetes.io/component=worker \
+  | grep -A1 'Liveness probe failed'
+```
+
+This covers the blueprints this chart ships and any a site mounts through
+`authentik.blueprints.configMaps` or `authentik.blueprints.secrets`, because the
+hash covers the whole directory. **It does not cover** a blueprint mounted
+anywhere else (an `authentik.worker.volumes` entry outside
+`/blueprints/mounted`), and it is lost if a site replaces
+`authentik.worker.livenessProbe` without keeping the two `cat` lines. For
+either, restart the worker yourself after the change, or run a restart
+controller such as Stakater Reloader against it:
+
+```bash
+kubectl -n tockmox-authentik rollout restart deployment/<release>-authentik-worker
+```
+
 ## Break-glass, deliberately
 
 Local logins stay enabled alongside SSO:
