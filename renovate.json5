@@ -20,13 +20,18 @@
     "helpers:pinGitHubActionDigests",
   ],
 
-  // Name the development branch rather than lean on the repository default
-  // (TM-0686). RELEASING.md "Orientation": `main` is the development trunk and
-  // `release-X.Y` branches are cut from it, so dependency bumps land on `main`
-  // and reach a release line by cherry-pick, like any other fix. A release
-  // branch is deliberately NOT listed: bumping a frozen line is a patch-bar
-  // decision made by a human, not a weekly batch.
-  baseBranchPatterns: ["main"],
+  // Name the branches rather than lean on the repository default.
+  // RELEASING.md "Orientation": `main` is the development trunk and
+  // `release-X.Y` branches are cut from it. The CURRENT release line is a
+  // target too, by exact name: once main moves to the next minor (caps lifted,
+  // charts changed) its dependency commits stop applying to the line, so the
+  // line gets its own PRs under the stricter rules at the END of packageRules
+  // (patch opens, minor waits for a dashboard tick, major never, 7-day wait).
+  // Exact name, not a pattern: a pattern would keep feeding an ended line,
+  // against SECURITY.md. The name flips to the new line at the next minor's
+  // final tag (RELEASING.md "The patch train", checklist). Merging to the line
+  // stays a human act; Renovate only opens the PRs.
+  baseBranchPatterns: ["main", "release-0.8"],
 
   timezone: "America/Chicago",
 
@@ -42,6 +47,10 @@
   // "Awaiting Schedule". Keep the window wide: a narrow one can be missed
   // entirely by the hosted scan cadence, silently rolling the whole batch over.
   schedule: ["before 9am on monday"],
+
+  // Outside the window, leave existing branches alone as well: a PR's head
+  // must not move after it has been approved for a patch train.
+  updateNotScheduled: false,
 
   // Let upstreams eat their own day-0 regressions (non-security only).
   minimumReleaseAge: "3 days",
@@ -147,22 +156,6 @@
       groupName: "prometheus exporter charts",
     },
     {
-      // 0.8.x is a patch line. traefik 42 is a major and Python 3.15 is a new
-      // runtime under the tockmox-ui and posture-probe images; both wait for
-      // the 0.9.0 cycle. allowedVersions keeps them off the PR queue entirely
-      // instead of relying on nobody ticking a dashboard box (traefik 42 was
-      // listed under pending status checks despite the majors rule above).
-      // Lift both when 0.9.0 opens.
-      matchDatasources: ["helm"],
-      matchPackageNames: ["traefik"],
-      allowedVersions: "<42.0.0",
-    },
-    {
-      matchDatasources: ["docker"],
-      matchPackageNames: ["python"],
-      allowedVersions: "<3.15",
-    },
-    {
       // tockmox-devops threads global.imageRegistry into the busybox init
       // container through tpl, so the helm-values manager reads a depName
       // with a template in it and the lookup fails on every run. Skip the
@@ -210,6 +203,72 @@
       groupName: "AI plane (Open WebUI, LiteLLM)",
       groupSlug: "ai-plane",
       dependencyDashboardApproval: false,
+    },
+
+    // THE RELEASE LINE. Everything from here down is scoped to the branch in
+    // baseBranchPatterns and applies only there. LAST on purpose: packageRules
+    // are last-wins, so these override the rules above for PRs against the
+    // line: the non-major group's no-tick, the AI plane's no-soak and "at any
+    // time", all of it. The comments above describe main. A patch release is
+    // cut from the line by the patch train (RELEASING.md), so what lands here
+    // is what ships to every existing operator.
+    {
+      // Seven days for everything, the AI plane included: main dogfoods the
+      // day-0 releases, the line does not. Security alerts keep the exemption
+      // in vulnerabilityAlerts below.
+      matchBaseBranches: ["release-0.8"],
+      minimumReleaseAge: "7 days",
+    },
+    {
+      // Patch updates open on their own, in one PR per batch.
+      matchBaseBranches: ["release-0.8"],
+      matchUpdateTypes: ["patch"],
+      groupName: "release line patch updates",
+      groupSlug: "release-patch",
+      dependencyDashboardApproval: false,
+    },
+    {
+      // Minor updates wait for a dashboard tick; the tick is the nomination
+      // for the next train. Their own group, so an unticked minor never holds
+      // a patch batch back.
+      matchBaseBranches: ["release-0.8"],
+      matchUpdateTypes: ["minor"],
+      groupName: "release line minor updates",
+      groupSlug: "release-minor",
+      dependencyDashboardApproval: true,
+    },
+    {
+      // No majors on a release line, ever. Main takes them under the rule near
+      // the top; they reach operators with the next minor.
+      matchBaseBranches: ["release-0.8"],
+      matchUpdateTypes: ["major"],
+      enabled: false,
+    },
+    {
+      // Workflow pins stay off the line: a change under .github/workflows
+      // needs the `workflows` permission the regen App does not have, and a
+      // CI change is not something a patch carries.
+      matchBaseBranches: ["release-0.8"],
+      matchManagers: ["github-actions"],
+      enabled: false,
+    },
+    {
+      // traefik 42 is a major and Python 3.15 is a new runtime under the
+      // tockmox-ui and posture-probe images; neither belongs in a patch.
+      // allowedVersions keeps them off the line's PR queue entirely instead of
+      // relying on nobody ticking a dashboard box (traefik 42 was listed under
+      // pending status checks despite the majors rule above). Scoped to the
+      // line only: main is the next minor's cycle and takes them now.
+      matchBaseBranches: ["release-0.8"],
+      matchDatasources: ["helm"],
+      matchPackageNames: ["traefik"],
+      allowedVersions: "<42.0.0",
+    },
+    {
+      matchBaseBranches: ["release-0.8"],
+      matchDatasources: ["docker"],
+      matchPackageNames: ["python"],
+      allowedVersions: "<3.15",
     },
   ],
 
