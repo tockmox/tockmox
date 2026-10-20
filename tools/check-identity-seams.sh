@@ -63,6 +63,13 @@
 #       any mounted directory, a new file, fails; a failing `ak healthcheck` still
 #       fails; a missing baseline is recorded rather than failing. Read as text it
 #       would pass a probe that never compares anything.
+#   S12 the Authentik worker never runs beside its replacement (TM-1060). Its
+#       Deployment renders a RollingUpdate with maxSurge 0 and maxUnavailable
+#       100%: the old worker is gone before the new one starts, so the startup
+#       discovery a new pod queues cannot be taken by an old worker that lacks
+#       the blueprint. Not `type: Recreate`: Argo CD's ServerSideApply cannot
+#       switch a live Deployment to it, and the upgrade would fail on the very
+#       installs it is for.
 #
 # WHY RENDER TEXT AND NOT A VALUES DIFF. The failure each seam prevents is in
 # what reaches Authentik, Open WebUI and CNPG, not in what values.yaml says. A
@@ -203,6 +210,17 @@ open(t + "/post.sh", "w").write(post[2]); open(t + "/live.sh", "w").write(live[2
   rm -rf "$t"; return $rc
 }
 
+# S12: the worker Deployment's strategy, read from its own YAML document.
+s12_strategy() {
+  local d; d=$(s11_doc "$1"); [ -n "$d" ] || return 1
+  printf '%s\n' "$d" | python3 -c '
+import sys, yaml
+s = yaml.safe_load(sys.stdin)["spec"].get("strategy") or {}
+ru = s.get("rollingUpdate") or {}
+sys.exit(0 if s.get("type") == "RollingUpdate" and str(ru.get("maxSurge")) == "0" and ru.get("maxUnavailable") == "100%" else 1)
+' 2>/dev/null
+}
+
 # --- the render ---------------------------------------------------------------
 render() { helm template t "$@" 2>&1; }
 
@@ -243,6 +261,7 @@ run_checks() {
   render $IDC -f $CI --set 'sso.adminUsers={alice,bob}' --set sso.adminGroup=site-admins > "$t/s8-group"
   render $IDC -f $CI --set 'sso.adminUsers={alice,bob}' --set sso.enabled=false > "$t/s8-off"
   s11_probe "$t/s8-default"   && ok "S11 the worker's postStart and liveness scripts restart it onto a changed or new blueprint in any mounted directory, and still fail on a failing healthcheck" || fail "S11 the worker does not restart onto a changed blueprint"
+  s12_strategy "$t/s8-default" && ok "S12 the worker rolls with maxSurge 0 and maxUnavailable 100%, so an old worker never takes the new pod's blueprint discovery" || fail "S12 the worker can run beside its replacement during a rollout"
   s8_default "$t/s8-default"  && ok "S8 sso.adminUsers empty renders no admin-membership Job" || fail "S8 Job rendered at the default"
   s10_majors "$t/s8-default"  && ok "S10 the bundled PostgreSQL server and the pg_dump client run one major ($(grep -Eo 'image: *"?[^ "]*/postgres(ql)?:[0-9.]+' "$t/s8-default" | sed -E 's/.*://' | sort -u | tr '\n' ' '))" || fail "S10 server and pg_dump client majors differ, or one of them is missing: $(grep -Eo 'image: *"?[^ "]*/postgres(ql)?:[^ "]+' "$t/s8-default" | sort -u | tr '\n' ' ')"
   s8_on "$t/s8-on"            && ok "S8 sso.adminUsers renders one PostSync Job: usernames, server image and Secret, restricted securityContext" || fail "S8 Job shape wrong"
@@ -301,7 +320,7 @@ selftest() {
   render $IDC -f $CI --set 'sso.adminUsers={alice,bob}' --set sso.adminGroup=site-admins > "$t/s8g"
   # The unmutated inputs must pass, or "red" below proves nothing.
   s1_default "$t/id" && s1_override "$t/idh" && s2_default "$t/id" && s2_values "$t/ids" && s3_default "$t/ai" \
-    && s8_default "$t/s8d" && s11_probe "$t/s8d" && s10_majors "$t/s8d" && s8_on "$t/s8" && s8_group "$t/s8g" && s9_default "$t/s8d" && s9_on "$t/s8" \
+    && s8_default "$t/s8d" && s11_probe "$t/s8d" && s12_strategy "$t/s8d" && s10_majors "$t/s8d" && s8_on "$t/s8" && s8_group "$t/s8g" && s9_default "$t/s8d" && s9_on "$t/s8" \
     && s4_default "$t/db" && s4_recovery "$t/dbr" && s6_default "$t/ob" && s6_group "$t/obg" && s7_backed "$t/ai7" && s7_unbacked "$t/ai7off" && s7_quiet "$t/ai7q" || { echo "selftest: the unmutated renders do not pass; fix the tree first"; rm -rf "$t"; return 1; }
   # S1: the old behaviour, host ignored.
   sed 's#https://llm.int.example.com#https://chat.int.example.com#g' "$t/idh" > "$t/m"; red "S1 host override ignored" s1_override "$t/m"
@@ -369,6 +388,11 @@ selftest() {
   sed 's#cat /blueprints/mounted#ls /blueprints/mounted#g' "$t/s8d" > "$t/m"; red "S11 file names hashed, not content" s11_probe "$t/m"
   sed 's/ak healthcheck || exit 1/true/' "$t/s8d" > "$t/m"; red "S11 the healthcheck dropped from the probe" s11_probe "$t/m"
   sed '/ak healthcheck || exit 1/,/^ *fi$/d' "$t/s8d" > "$t/m"; red "S11 liveness script gone" s11_probe "$t/m"
+  # S12 (TM-1060): the default surge back; the number loosened; the rolling
+  # numbers gone; the type switched to the one Argo CD cannot apply.
+  sed '/component: "*worker"*/,$ s/maxSurge: 0/maxSurge: 1/' "$t/s8d" > "$t/m"; red "S12 worker surges a new pod beside the old one" s12_strategy "$t/m"
+  sed '/component: "*worker"*/,$ s/maxUnavailable: 100%/maxUnavailable: 0/' "$t/s8d" > "$t/m"; red "S12 worker never lets the old pod go first" s12_strategy "$t/m"
+  sed '/component: "*worker"*/,$ s/type: RollingUpdate/type: Recreate/' "$t/s8d" > "$t/m"; red "S12 worker strategy switched to Recreate" s12_strategy "$t/m"
   # S5: the mint script with --only neutered must mint extra files. Run a mutated copy.
   mkdir -p "$t/tools"; sed 's/^want() {.*$/want() { return 0; }/' tools/mint-secrets.sh > "$t/tools/mint-secrets.sh"
   local bin; bin=$(mktemp -d); echo x > "$bin/cert.pem"

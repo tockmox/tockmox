@@ -22,6 +22,14 @@ costs you, with the reasoning in the documentation rather than here.
   `.secrets`. A site that replaces `authentik.worker.livenessProbe` has to keep
   the hash comparison, and a blueprint mounted outside `/blueprints/mounted`
   still needs a restart or a restart controller.
+- **A blueprint added by an upgrade is no longer missed.** During the rollout
+  the new worker queued its discovery pass and the old worker, which does not
+  have the file yet, took it and found nothing; the blueprint then stayed
+  absent until the hourly discovery. The Authentik worker now rolls with
+  `maxSurge: 0` and `maxUnavailable: 100%`, so the old worker is stopped first.
+  The cost is a gap of one worker start, tens of seconds, with no worker: queued
+  background work waits and logins are unaffected. It is not `type: Recreate`
+  because Argo CD's ServerSideApply cannot switch a live Deployment to it.
 
 ## [0.8.1] ... 2026-10-19
 
