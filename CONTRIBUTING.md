@@ -296,7 +296,9 @@ someone who could certify that handed it to you; and the contribution and the
 sign-off, including your name and email, become a permanent public record.
 
 Renovate's dependency PRs are the one exception: a bot cannot certify the DCO,
-so CI skips the check for commits Renovate authors in a PR Renovate opened. A
+so CI skips the check for commits Renovate authors in a PR Renovate opened, and
+for the one commit `renovate-regen.yaml` adds there holding the regenerated
+`images.txt` and `sbom.cdx.json` (that commit may touch nothing else). A
 commit you add to a Renovate branch still needs your sign-off.
 
 ```bash
