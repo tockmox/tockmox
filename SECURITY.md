@@ -117,8 +117,12 @@ the old key, treat it as a compromise and report it through the channel above.
 
 ## Supported versions
 
-Pre-1.0. Only the latest release is supported, and there are no backports.
-Fixes land on the current line; upgrading is the remediation path.
+Pre-1.0. The current release line (`release-X.Y`) receives patch releases:
+fixes cherry-picked from `main` (backports) plus dependency updates. Only the
+latest patch of the current line is supported; upgrading to it is the
+remediation path. A line ends when the next minor's final tag ships: once
+`vX.(Y+1).0` exists, `X.Y` receives no further patches. A security fix may ship
+out of band, ahead of the normal patch cadence.
 
 ## Scope
 
