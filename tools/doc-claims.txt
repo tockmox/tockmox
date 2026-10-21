@@ -771,3 +771,14 @@ page:   README.md
 claim:  a **scripted** run, not a person following these
 test:   test -f profiles/household-sso.yaml && echo present
 expect: present
+
+# The sign-in alert's timing is arithmetic over three numbers in the chart: the
+# ServiceMonitor scrape interval, the rule group's evaluation interval and the
+# alert's `for:`. tockmox-ui.md states "about six minutes" and "never later than
+# 6 minutes 30 seconds" from 30s + 1m + 5m. Changing any of the three goes red
+# ON PURPOSE: re-derive the sentence, then change `expect`. The measured figures
+# in that sentence come from a lab run on 2026-10-20 and are not tested here.
+page:   docs/administration/tockmox-ui.md
+claim:  never later than 6 minutes 30 seconds
+test:   echo "$(awk '/- port: metrics/{f=1} f&&/interval:/{print $2; exit}' charts/tockmox-ai/templates/tockmox-ui.yaml) $(awk '/name: tockmox.ai.tockmox-ui/{f=1} f&&/interval:/{print $2; exit}' charts/tockmox-ai/templates/tockmox-ui.yaml) $(awk '/alert: TockmoxUISignInFailing/{f=1} f&&/for:/{print $2; exit}' charts/tockmox-ai/templates/tockmox-ui.yaml)"
+expect: 30s 1m 5m
