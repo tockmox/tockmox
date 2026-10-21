@@ -211,7 +211,7 @@ It changes how much of this page applies.
 
 | Bump | Example | What this page requires |
 |---|---|---|
-| **Patch** | `v0.1.0` to `v0.1.1` | Steps 0, 1, 5, 6, 7. Fixes only |
+| **Patch** | `v0.1.0` to `v0.1.1` | Steps 0, 1, 5, 6, 7, and step 2 when the release notes move a bundled application that migrates its own database (Open WebUI, LiteLLM, Authentik, Grafana). Fixes and dependency updates, no new capability |
 | **Minor** | `v0.1.0` to `v0.2.0` | All of the above plus steps 2 and 3. New capability, values compatible |
 | **Major** | `v0.x` to `v1.0` | Every step, and the migration notes in the release section |
 
@@ -271,8 +271,11 @@ the tag on its own. The procedure is
 
 ## 2. Back up what a rollback will not bring back
 
-**Required for a minor or major bump. Optional for a patch**, and cheap enough
-that skipping it buys you very little.
+**Required for a minor or major bump, and for a patch whose release notes move
+one of the bundled applications in the last row below** (Open WebUI, LiteLLM,
+Authentik, Grafana): a patch may carry a dependency update that moves one of
+them, and their database migrations only go forward. **Optional for any other
+patch**, and cheap enough that skipping it buys you very little.
 
 Rollback is symmetrical where it can be, not absolutely. Tockmox itself ships
 declarative manifests and no migrations of its own, so for most changes you
