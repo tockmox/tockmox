@@ -245,7 +245,14 @@ WARNING:     tockmox_ui sign-in discovery failed: ConnectError: [Errno 111] Conn
 ```
 
 `kubectl -n <ai namespace> logs deploy/tockmox-ui | grep sign-in` finds it, and
-`TockmoxUISignInFailing` fires within five minutes of the first failure.
+`TockmoxUISignInFailing` fires about six minutes after the first failure. The
+alert goes pending at the first rule evaluation that sees the failed attempt,
+which is at most 90 seconds away (the chart scrapes every 30 seconds and
+evaluates the rule every minute), and it fires once it has been pending for its
+`for: 5m`, so never later than 6 minutes 30 seconds. Measured on a 0.8.1 lab
+install on 2026-10-20: pending 58 seconds after the first failed sign-in,
+firing 5 minutes 58 seconds after it. Your notification arrives after that, by
+whatever grouping delay your Alertmanager route sets.
 
 **Connection refused, with the issuer behind a LoadBalancer address.** The
 policy admits Traefik's *pods*. If the issuer's hostname resolves to the
