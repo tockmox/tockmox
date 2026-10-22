@@ -122,7 +122,13 @@ t = open(p).read()
 t = t.replace("\napps:\n", "\napps:\n  selftestOnlyComponent:\n    enabled: false\n", 1)
 open(p, "w").write(t)
 PY
-    if gen check "$tmp/charts" >/dev/null; then echo "selftest: SYNC stayed green on a stale enum"; ok=0; else echo "selftest: SYNC goes red on a stale enum"; fi
+    # Red for SYNC's own reason: a crash in gen also exits non-zero. Name the injected component.
+    out="$(gen check "$tmp/charts" 2>&1)"; rc=$?
+    if [ "$rc" = 1 ] && grep -qF "is stale (1 missing, e.g. ['selftestOnlyComponent']" <<<"$out"; then
+      echo "selftest: SYNC goes red on a stale enum"
+    else
+      echo "selftest: SYNC did not go red for the right reason on a stale enum (exit $rc):"; printf '%s\n' "$out" | sed 's/^/    /'; ok=0
+    fi
     rm -rf "$tmp/charts"; cp -R charts "$tmp/charts"
     # POISON must go red when one layer's enum is removed.
     python3 - "$tmp/charts/tockmox-ai/values.schema.json" <<'PY'
@@ -131,7 +137,46 @@ p = sys.argv[1]; s = json.load(open(p))
 s["properties"]["apps"].pop("propertyNames", None)
 open(p, "w").write(json.dumps(s, indent=2) + "\n")
 PY
-    ( cd "$tmp" && ln -s "$OLDPWD/ci" ci && poison charts >/dev/null ) && { echo "selftest: POISON stayed green with tockmox-ai's enum removed"; ok=0; } || echo "selftest: POISON goes red with tockmox-ai's enum removed"
+    ( cd "$tmp" && ln -s "$OLDPWD/ci" ci ) || { echo "selftest: could not link ci/ into the throwaway tree"; ok=0; }
+    # poison() exits non-zero for a CONTROL failure (helm rejecting a correct value, which reads as red
+    # on every layer), for a layer other than the one broken here, and for each of its own assertions.
+    # Any non-zero exit would pass for all of them, so each case below names the exact lines it must print.
+    out="$(cd "$tmp" && poison charts)"
+    want="  tockmox-ai: accepted the misspelt component apps.open_webui
+  tockmox-ai: accepted the mis-cased component apps.openwebui"
+    if [ "$out" = "$want" ]; then
+      echo "selftest: POISON goes red with tockmox-ai's enum removed"
+    else
+      echo "selftest: POISON did not go red for the right reason with tockmox-ai's enum removed:"; printf '%s\n' "$out" | sed 's/^/    /'; ok=0
+    fi
+    # The other two lines poison() can print, which the case above never reaches.
+    rm -rf "$tmp/charts"; cp -R charts "$tmp/charts"
+    python3 - "$tmp/charts/tockmox-ai/values.schema.json" <<'PY'
+import json, sys
+p = sys.argv[1]; s = json.load(open(p))
+s["additionalProperties"] = True
+open(p, "w").write(json.dumps(s, indent=2) + "\n")
+PY
+    out="$(cd "$tmp" && poison charts)"
+    if [ "$out" = "  tockmox-ai: accepted an unknown top-level key" ]; then
+      echo "selftest: POISON goes red with tockmox-ai's root opened"
+    else
+      echo "selftest: POISON did not go red for the right reason with tockmox-ai's root opened:"; printf '%s\n' "$out" | sed 's/^/    /'; ok=0
+    fi
+    rm -rf "$tmp/charts"; cp -R charts "$tmp/charts"
+    python3 - "$tmp/charts/tockmox-ai" <<'PY'
+import json, sys, yaml
+d = sys.argv[1]; s = json.load(open(d + "/values.schema.json"))
+good = sorted(yaml.safe_load(open(d + "/values.yaml"))["apps"])[0]
+s["properties"]["apps"]["propertyNames"]["enum"].remove(good)
+open(d + "/values.schema.json", "w").write(json.dumps(s, indent=2) + "\n")
+PY
+    out="$(cd "$tmp" && poison charts)"
+    if [ "$(printf '%s\n' "$out" | grep -c .)" = 1 ] && grep -q '^  tockmox-ai: CONTROL apps\.[A-Za-z0-9_]*\.enabled=true was rejected' <<<"$out"; then
+      echo "selftest: POISON reports a rejected CONTROL as its own failure"
+    else
+      echo "selftest: POISON did not report the rejected CONTROL, and only that:"; printf '%s\n' "$out" | sed 's/^/    /'; ok=0
+    fi
     [ "$ok" = 1 ] && { echo "check-values-typos --selftest: PASSED"; exit 0; }
     echo "check-values-typos --selftest: FAILED"; exit 1 ;;
   "") ;;

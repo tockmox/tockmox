@@ -205,8 +205,12 @@ metadata:
     rbac.authorization.k8s.io/aggregate-to-view: "true"
 rules: []
 EOF
-  if scan "$bad" >/dev/null 2>&1; then
-    echo "check-rbac-aggregation-allowlist: SELFTEST FAILED ... an un-allowlisted aggregated ClusterRole passed"
+  # Exit 1 is also what a Python traceback returns: require the rule's own report, naming the role.
+  # (`&& rc=0 || rc=$?` because the script runs under set -e and scan's wanted exit is non-zero.)
+  out=$(scan "$bad" 2>&1) && rc=0 || rc=$?
+  if [ "$rc" != 1 ] || ! grep -qF 'tockmox-platform-newthing-view   (from tockmox-platform)' <<<"$out"; then
+    echo "check-rbac-aggregation-allowlist: SELFTEST FAILED ... an un-allowlisted aggregated ClusterRole was not refused by the rule (exit $rc)"
+    printf '%s\n' "$out" | tail -3 | sed 's/^/    /'
     fail=1
   fi
   rm -rf "$bad"
@@ -268,8 +272,10 @@ metadata:
     rbac.authorization.k8s.io/aggregate-to-view: "true"
 rules: []
 EOF
-  if scan "$inert" >/dev/null 2>&1; then
-    echo "check-rbac-aggregation-allowlist: SELFTEST FAILED ... a policy with no allowlist variable read as clean"
+  out=$(scan "$inert" 2>&1) && rc=0 || rc=$?
+  if [ "$rc" != 1 ] || ! grep -qF 'did not render an `allowlist` variable' <<<"$out"; then
+    echo "check-rbac-aggregation-allowlist: SELFTEST FAILED ... a policy with no allowlist variable was not refused by the rule (exit $rc)"
+    printf '%s\n' "$out" | tail -3 | sed 's/^/    /'
     fail=1
   fi
   rm -rf "$inert"
