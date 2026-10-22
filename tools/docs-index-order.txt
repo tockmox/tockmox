@@ -37,6 +37,7 @@ adding-an-application
 removing-an-application
 serving-static-sites
 inference-nodes
+ai-nodes
 model-lifecycle
 tockmox-ui
 posture-probe

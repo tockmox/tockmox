@@ -160,6 +160,7 @@ details { margin-top: .75rem; } summary { cursor: pointer; font-weight: 600; min
 fieldset.plainset { border: 0; padding: 0; margin: .75rem 0; } fieldset.plainset legend { font-weight: 600; padding: 0; }
 label.check { font-weight: 400; display: flex; align-items: center; min-height: 32px; }
 .cands { list-style: none; padding: 0; margin: 0; } .cands li { border-top: 1px solid var(--tx-border); padding: .5rem 0; } .cands li p { margin: .2rem 0; }
+main p code, main li code, .cands li, .cands p { overflow-wrap: anywhere; }   /* long model ids and config keys wrap at 320px */
 
 /* TM-1014: the footer's "new version" pill, and the documentation links on home. */
 .pill { display: inline-block; margin-left: .35rem; padding: 0 .5rem; border: 1px solid var(--tx-accent); border-radius: 999px; color: var(--tx-accent-text); font-weight: 600; text-decoration: none; }

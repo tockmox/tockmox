@@ -1,0 +1,152 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# mlx-lm, one server process per instance (a process serves one model), in a virtual
+# environment at a pinned version, started from the snapshot of the pinned revision with the
+# Hugging Face hub in offline mode. The weights arrive only through model_sync.
+
+- name: Make sure the firewall verdict is known
+  ansible.builtin.include_role:
+    name: firewall
+    tasks_from: verify
+  when: firewall_anchor_verified is not defined
+
+- name: Pick the mlx-lm instances
+  ansible.builtin.set_fact:
+    engine_mlx_lm_wanted: "{{ tn_instances | selectattr('engine', 'equalto', 'mlx-lm') | list }}"
+
+- name: Resolve each instance to its label and model path
+  ansible.builtin.set_fact:
+    engine_mlx_lm_resolved: >-
+      {{ (engine_mlx_lm_resolved | default([])) + [ {
+           'id': item.id,
+           'port': item.port | int,
+           'label': item | tockmox_instance_label(tn_prefix),
+           'model': item.models[0].model,
+           'snapshot': item.models[0].artifact.ref | tockmox_hf_snapshot(item.models[0].artifact.revision, tn_root),
+           'log': tn_root ~ '/log/' ~ (item | tockmox_instance_slug) ~ '.log'
+         } ] }}
+  loop: "{{ engine_mlx_lm_wanted }}"
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Install and run the instances
+  when: engine_mlx_lm_wanted | length > 0
+  block:
+    - name: The engine version and the Python are pinned in ai-node.yaml
+      ansible.builtin.assert:
+        that:
+          - tn_mlx_version | length > 0
+          - tn_mlx_python is match('^[0-9]+\.[0-9]+$')
+        fail_msg: >-
+          An mlx-lm instance is asked for but engines.mlx-lm.version is empty. Pin a release, for example
+          "0.32.2": a node that installs whatever is newest is not one that can be rebuilt from git.
+        quiet: true
+
+    - name: Install the Python
+      ansible.builtin.include_role:
+        name: homebrew_baseline
+        tasks_from: ensure
+      vars:
+        homebrew_baseline_ensure: ["python@{{ tn_mlx_python }}"]
+
+    - name: Create the engine directory
+      become: true
+      ansible.builtin.file:
+        path: "{{ engine_mlx_lm_dir }}"
+        state: directory
+        owner: "{{ tn_service_user }}"
+        group: staff
+        mode: "0755"
+
+    - name: Create the virtual environment
+      become: true
+      become_user: "{{ tn_service_user }}"
+      ansible.builtin.command:
+        cmd: "{{ tn_brew_prefix }}/opt/python@{{ tn_mlx_python }}/bin/python{{ tn_mlx_python }} -m venv {{ engine_mlx_lm_venv }}"
+        creates: "{{ engine_mlx_lm_venv }}/bin/python"
+
+    - name: Read the installed mlx-lm version
+      become: true
+      become_user: "{{ tn_service_user }}"
+      ansible.builtin.command: "{{ engine_mlx_lm_venv }}/bin/pip show mlx-lm"
+      register: engine_mlx_lm_installed
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Install the pinned mlx-lm
+      become: true
+      become_user: "{{ tn_service_user }}"
+      ansible.builtin.command:
+        argv: ["{{ engine_mlx_lm_venv }}/bin/pip", "install", "--disable-pip-version-check", "mlx-lm=={{ tn_mlx_version }}"]
+      register: engine_mlx_lm_pip
+      when: >-
+        engine_mlx_lm_installed.stdout is not search('(?m)^Version: ' ~ (tn_mlx_version | regex_escape) ~ '$')
+      changed_when: true
+
+    - name: Look for each instance's model on disk
+      ansible.builtin.stat:
+        path: "{{ item.snapshot }}"
+      loop: "{{ engine_mlx_lm_resolved }}"
+      loop_control:
+        label: "{{ item.id }}"
+      register: engine_mlx_lm_model_stat
+
+    - name: A model that is not on disk is not started
+      when: not ansible_check_mode
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+        fail_msg: >-
+          {{ item.item.model }} is not on disk at {{ item.item.snapshot }}. model_sync fetches it at the
+          pinned revision; run the whole converge, not only this role.
+        quiet: true
+      loop: "{{ engine_mlx_lm_model_stat.results }}"
+      loop_control:
+        label: "{{ item.item.id }}"
+
+    - name: Run each instance
+      ansible.builtin.include_role:
+        name: launchd_service
+      vars:
+        launchd_service_label: "{{ item.label }}"
+        launchd_service_user: "{{ tn_service_user }}"
+        launchd_service_firewalled: true
+        launchd_service_args: >-
+          {{ [engine_mlx_lm_venv ~ '/bin/mlx_lm.server', '--model', item.snapshot, '--host',
+              ('0.0.0.0' if (firewall_anchor_verified | bool) else '127.0.0.1'), '--port', item.port | string]
+             + (tn_mlx_extra_args | map('string') | list) }}
+        launchd_service_log: "{{ item.log }}"
+        launchd_service_hold: "{{ tn_hold_engine_settings | bool }}"
+        launchd_service_force_reload: "{{ engine_mlx_lm_pip is defined and engine_mlx_lm_pip is changed }}"
+        launchd_service_process_type: Interactive
+        launchd_service_env:
+          HOME: "{{ tn_root }}/var/service-home"
+          HF_HOME: "{{ tn_root }}/models/hf"
+          HF_HUB_OFFLINE: "1"
+          TRANSFORMERS_OFFLINE: "1"
+          PATH: "{{ engine_mlx_lm_venv }}/bin:{{ tn_brew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      loop: "{{ engine_mlx_lm_resolved }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+- name: Find daemons of instances that are no longer wanted
+  when: tn_legacy is none
+  become: true
+  ansible.builtin.find:
+    paths: "{{ tn_launchd_dir }}"
+    patterns: "{{ tn_prefix }}.mlx-lm*.plist"
+  register: engine_mlx_lm_existing
+
+- name: Take them away
+  when:
+    - tn_legacy is none
+    - (item.path | basename | regex_replace('\.plist$', '')) not in (engine_mlx_lm_resolved | default([]) | map(attribute='label') | list)
+  ansible.builtin.include_role:
+    name: launchd_service
+  vars:
+    launchd_service_label: "{{ item.path | basename | regex_replace('\\.plist$', '') }}"
+    launchd_service_state: absent
+  loop: "{{ engine_mlx_lm_existing.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path | basename }}"

@@ -26,8 +26,9 @@
   <label for="target">The alias it would compete for</label>
   <input id="target" name="target" type="text" value="{{ target }}" autocomplete="off" required>
   {% endif %}
+  {% if move %}<p>{{ badge("warning", "Re-placement") }} The same model on both sides, moving from {{ move.from_node }} to {{ move.to_node }}. The class is <code>perf</code>, and the request names the move so the verdict can.</p>{% endif %}
   <label for="klass">Workload class <span class="muted">(the REQ-0045 class; it decides the eval set and how many passes are needed)</span></label>
-  <input id="klass" name="klass" type="text" list="classes" autocomplete="off" required>
+  <input id="klass" name="klass" type="text" list="classes" autocomplete="off" required{% if move %} value="perf"{% endif %}>
   <datalist id="classes">{% for c in classes %}<option value="{{ c }}">{% endfor %}</datalist>
   <label for="runs">Runs <span class="muted">(empty: as many as the class needs; {{ lc.required_passes }} by default)</span></label>
   <input id="runs" name="runs" type="text" inputmode="numeric" autocomplete="off">

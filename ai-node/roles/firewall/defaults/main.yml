@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# The sub-anchor under Apple's wildcard anchor. Apple's stock /etc/pf.conf has
+# anchor "com.apple/*", which evaluates every sub-anchor, so loading this one needs no edit to
+# /etc/pf.conf and an OS update that resets that file does not remove it.
+firewall_anchor_name: com.apple/250.tockmox
+# Root-owned on purpose: the converge account is an administrator, but a rule file that root loads
+# at boot should not sit in a directory a non-root account owns.
+firewall_anchor_file: "/etc/pf.anchors/{{ tn_prefix }}.allowlist"
+firewall_libexec: "{{ tn_libexec | default('/usr/local/libexec/tockmox-ai-node') }}"
+firewall_state_dir: /var/db/tockmox-ai-node
+# Every engine and exporter starts through this root-owned wrapper (launchd_service_firewalled),
+# which waits for the marker below before it execs the program. pf-load.sh writes the marker only
+# after it has seen the managed-port block rule in the live sub-anchor, and the marker holds this
+# boot's kern.boottime, so a marker left over from the last boot admits nothing.
+firewall_start_wrapper: "{{ firewall_libexec }}/start-when-firewalled"
+firewall_stop_listeners: "{{ firewall_libexec }}/stop-listeners.sh"
+firewall_boot_marker: "{{ firewall_state_dir }}/pf-boot-ok"
+firewall_sysctl: /usr/sbin/sysctl
+firewall_launchctl: /bin/launchctl
+firewall_launchd_dir: "{{ tn_launchd_dir | default('/Library/LaunchDaemons') }}"
+# What the timed rollback loads: the last ruleset an administrator confirmed (saved at apply time),
+# or, when none was ever confirmed, a minimal set rendered beside it. It never loads an empty anchor.
+firewall_last_confirmed: "{{ firewall_state_dir }}/pf-last-confirmed.rules"
+firewall_minimal_rules: "{{ firewall_state_dir }}/pf-minimal.rules"
+firewall_boot_label: "{{ tn_prefix }}.pf"
+firewall_rollback_label: "{{ tn_prefix }}.pf-rollback"
+# A change to the rules that decide who may administer the node is applied with a rollback armed.
+# Unless the change is confirmed within this many minutes, the sub-anchor is put back to the last
+# confirmed ruleset (or a minimal one: loopback, the administration ports from anywhere, and the
+# managed engine and exporter ports still blocked). The managed ports stay closed throughout.
+firewall_rollback_minutes: 5
+# How long the role itself waits for the confirmation before it fails the converge.
+firewall_confirm_wait_seconds: 90
+firewall_pfctl: /sbin/pfctl

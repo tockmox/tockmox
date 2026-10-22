@@ -276,6 +276,17 @@ run_gate "every shipped table panel that hides columns also orders them" bash to
 run_gate "every OIDC console gets a trust bundle" bash tools/check-trust-wiring.sh
 run_gate "site LiteLLM hooks load through values alone (TM-0787)" bash tools/check-litellm-hooks.sh
 run_gate "inference-node routes match the UI and the eval gateway is fenced (TM-0920)" bash tools/check-inference-nodes.sh
+# The AI-node toolkit (ai-node/): lint, unit tests and the converger wrapper's tests. Not in ci.yaml yet,
+# for the reason the posture-probe note below gives. The Linux simulation of the whole playbook changes the
+# host (empty directories, tmpfs and overlays in a private mount namespace) and takes about five minutes,
+# so it runs only when TOCKMOX_AI_NODE_E2E=1.
+run_gate "the AI-node toolkit lints, and its unit and converger tests pass" bash tools/check-ai-node.sh
+run_gate "the AI-node toolkit's own lints go red on a bash 4 feature, a GNU option and a printed key" bash tools/check-ai-node.sh --selftest
+if [ "${TOCKMOX_AI_NODE_E2E:-0}" = 1 ]; then
+  run_gate "the AI-node playbook converges twice against the macOS shims (Linux simulation)" bash tools/check-ai-node.sh --e2e
+else
+  skip_gate "AI-node playbook simulation" "set TOCKMOX_AI_NODE_E2E=1 (needs root and Linux; changes the host)"
+fi
 # The posture-probe add-on (TM-0874, TM-0882). Not in ci.yaml yet: wiring a CI
 # gate moves the counts doc-claims.txt pins, and that is its own change.
 run_gate "the posture-probe add-on stays observe-only: read-only role, confined policy, versioned report (TM-0874)" bash tools/check-posture-probe.sh
@@ -390,6 +401,10 @@ run_gate "check-values-typos selftest" bash tools/check-values-typos.sh --selfte
 # ci.yaml's "the Tockmox UI's tests pass". Exit 2 (skipped) without the UI's
 # packages: TOCKMOX_UI_PYTHON names a venv that has them (the script says how).
 run_gate "the Tockmox UI's tests pass" bash tools/check-tockmox-ui-tests.sh
+# The AI nodes' generated desired.yaml equals what its inputs render, and the renderer refuses what it should.
+# Exit 2 (skipped) without PyYAML and jsonschema: TOCKMOX_UI_PYTHON names a venv that has them.
+run_gate "every AI node's desired.yaml is what its inputs render" bash tools/check-ai-node-render.sh
+run_gate "the ai-node render gate goes red on a stale file, an unpinned revision, a port collision and a misspelt key" bash tools/check-ai-node-render.sh --selftest
 run_gate "the policy gate refuses every bad config by name" bash tools/check-policy-gate.sh
 run_gate "the policy gate holds with the local backend down" bash tests/policy-gate/run.sh
 

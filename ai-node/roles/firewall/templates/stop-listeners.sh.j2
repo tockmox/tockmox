@@ -1,0 +1,25 @@
+{# SPDX-License-Identifier: Apache-2.0 -#}
+#!/bin/sh
+# Managed by tockmox-ai-node (role firewall). Run as root by the firewall role when a converge
+# finds the allowlist not in force. Removes the boot marker, then boots out every LaunchDaemon that
+# starts through start-when-firewalled (every engine and every exporter, macmon included), so no
+# listener outlives the rules that protected it.
+PATH=/bin:/usr/bin:/sbin:/usr/sbin
+export PATH
+DIR='{{ firewall_launchd_dir }}'
+WRAPPER='{{ firewall_start_wrapper }}'
+LAUNCHCTL='{{ firewall_launchctl }}'
+MARKER='{{ firewall_boot_marker }}'
+
+/bin/rm -f "$MARKER"
+for plist in "$DIR"/*.plist; do
+  [ -e "$plist" ] || continue
+  /usr/bin/grep -qF "$WRAPPER" "$plist" 2>/dev/null || continue
+  label="${plist##*/}"
+  label="${label%.plist}"
+  if "$LAUNCHCTL" print "system/$label" >/dev/null 2>&1; then
+    "$LAUNCHCTL" bootout "system/$label" >/dev/null 2>&1
+    echo "stopped $label"
+  fi
+done
+exit 0

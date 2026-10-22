@@ -9,7 +9,42 @@ costs you, with the reasoning in the documentation rather than here.
 
 ## [Unreleased]
 
+### Added
+
+- **AI nodes can be managed from git (experimental).** `ai-node/` is
+  `tockmox-ai-node`: a bootstrap script and a converger that keep an
+  Apple-silicon Mac's engines, firewall, memory ceiling and model store at what
+  the site repo says. Desired state is generated from `inferenceNodes` and
+  `modelLifecycle` into `ai-nodes/<id>/desired.yaml`
+  (`python -m app.ai_nodes render`, with a stale check for CI). The node pulls,
+  verifies commit signatures against signers pinned at bootstrap (warn first,
+  then enforce) and has no listening control port. Linux nodes are not
+  supported yet. See `docs/administration/ai-nodes.md`.
+- **The Tockmox UI can enroll a Mac and show its convergence.** Adding an Apple
+  silicon node offers "Enroll for GitOps": the bootstrap one-liner, the
+  inventory change with `management: {enrolled: true}`, and the node's
+  `ai-node.yaml`. Enrolled nodes get Convergence and Readiness panels read from
+  Prometheus (a node that has not reported reads Unknown) and three alerts.
+  Import-only nodes are unchanged. New engine ids `omlx` and `vllm-mlx`; M5
+  hardware presets.
+- **Model lifecycle: the Models page now recommends candidates per alias class
+  for a node,** with the memory arithmetic shown (exact weights and cache from
+  the watcher's new `sizes` section, or an estimate it labels), and never
+  admits anything itself. Moving a model between nodes is a re-placement that
+  no longer retires it, a brand-new alias is promoted on absolute bars,
+  verdicts hash the result files they cite and CI recomputes the hashes, and
+  the PR opener can open evidence PRs under `evals/`. New: `watch.sizes`,
+  `recommend`, `resultsDir`. The watcher makes two more Hugging Face requests
+  per model.
+
 ### Fixed
+
+- **The model size estimate no longer over-sizes MXFP4 models 2.4x and MLX
+  4-bit and 8-bit models by up to a fifth.** The quant markers are matched in
+  the right order and the overhead factor is gone; it is still labelled an
+  estimate.
+- **The manual Mac setup steps bring up the firewall before the engine
+  listens.**
 
 - **A changed Authentik blueprint is now applied even when Authentik's file
   watcher has died.** The watcher can stop without a trace, after which a

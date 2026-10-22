@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# Read-only. Sets firewall_anchor_verified, which every role that opens a port consults:
+# until it is true they bind 127.0.0.1. Runs in check mode too, because it only reads.
+# Also called by the engine and exporter roles when they run alone (--tags), so a partial run
+# cannot take an engine off the network because a role it did not run did not set the fact.
+
+- name: Read whether pf is on
+  ansible.builtin.command: "{{ firewall_pfctl }} -s info"
+  become: true
+  register: firewall_info
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Read the main ruleset
+  ansible.builtin.command: "{{ firewall_pfctl }} -sr"
+  become: true
+  register: firewall_main_rules
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Read the allowlist sub-anchor
+  ansible.builtin.command: "{{ firewall_pfctl }} -a {{ firewall_anchor_name }} -sr"
+  become: true
+  register: firewall_anchor_rules
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Read the checksum of the rule file that was loaded
+  ansible.builtin.slurp:
+    src: "{{ firewall_state_dir }}/pf-loaded.sha256"
+  become: true
+  register: firewall_loaded_file
+  failed_when: false
+  check_mode: false
+
+- name: Read the checksum of the rule file on disk
+  ansible.builtin.stat:
+    path: "{{ firewall_anchor_file }}"
+    checksum_algorithm: sha256
+  become: true
+  register: firewall_file_stat
+  check_mode: false
+
+- name: Decide whether the allowlist is loaded and in force
+  ansible.builtin.set_fact:
+    firewall_pf_enabled: "{{ 'Status: Enabled' in (firewall_info.stdout | default('')) }}"
+    firewall_wildcard_present: "{{ 'anchor \"com.apple/*\"' in (firewall_main_rules.stdout | default('')) }}"
+    firewall_live_rule_count: "{{ (firewall_anchor_rules.stdout | default('')).splitlines() | select('search', '^(pass|block)') | list | length }}"
+    firewall_loaded_sha: "{{ (firewall_loaded_file.content | default('') | b64decode | trim) if (firewall_loaded_file.content is defined) else '' }}"
+    firewall_file_sha: "{{ firewall_file_stat.stat.checksum | default('') if firewall_file_stat.stat.exists else '' }}"
+    firewall_block_rule_count: "{{ (firewall_anchor_rules.stdout | default('')).splitlines() | select('search', '^block') | list | length }}"
+
+# Two verdicts. firewall_anchor_verified: the rules rendered from git are the ones in force. It
+# gates opening a port. firewall_block_in_force: pf is on and some ruleset with the managed-port block
+# is live, whether or not it is the newest (after a rollback it is the last confirmed one). It
+# gates keeping a listener alive, so a rollback does not turn a mistake in git into an outage, and
+# a lost or flushed anchor, or pf switched off, closes every listener.
+- name: Record the verdict
+  ansible.builtin.set_fact:
+    firewall_anchor_verified: >-
+      {{ firewall_pf_enabled | bool and firewall_wildcard_present | bool
+         and (firewall_live_rule_count | int) > 0 and firewall_file_sha | length > 0
+         and firewall_loaded_sha == firewall_file_sha }}
+    firewall_block_in_force: >-
+      {{ firewall_pf_enabled | bool and firewall_wildcard_present | bool and (firewall_block_rule_count | int) > 0 }}

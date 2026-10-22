@@ -5,4 +5,5 @@
 !CHANGELOG.md
 !tockmox-ui/requirements.txt
 !tockmox-ui/app/**
+!ai-node/schema/*.json
 **/__pycache__

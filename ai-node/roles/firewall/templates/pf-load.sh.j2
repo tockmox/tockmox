@@ -1,0 +1,75 @@
+{# SPDX-License-Identifier: Apache-2.0 -#}
+#!/bin/sh
+# Managed by tockmox-ai-node (role firewall). Loads the allowlist sub-anchor and turns pf on.
+# Run as root by the {{ firewall_boot_label }} LaunchDaemon at boot and by the firewall role.
+#
+#   pf-load.sh          remove the boot marker, load, enable pf, write the marker
+#   pf-load.sh --mark   only (re)write the boot marker, if the block rule is live
+#
+# The boot marker ({{ firewall_boot_marker }}) is what lets engines and exporters start: it holds
+# this boot's kern.boottime and is written only after the managed-port block rule has been seen in
+# the live sub-anchor. Its removal is this script's first action, so nothing that starts while the
+# rules are being loaded, or when loading fails, finds a marker.
+ANCHOR='{{ firewall_anchor_name }}'
+FILE='{{ firewall_anchor_file }}'
+STATE='{{ firewall_state_dir }}'
+PFCTL='{{ firewall_pfctl }}'
+SYSCTL='{{ firewall_sysctl }}'
+MARKER='{{ firewall_boot_marker }}'
+LAST='{{ firewall_last_confirmed }}'
+MINIMAL='{{ firewall_minimal_rules }}'
+PATH=/bin:/usr/bin:/sbin:/usr/sbin
+export PATH
+
+log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) pf-load: $*"; }
+
+boot_id() { "$SYSCTL" -n kern.boottime 2>/dev/null | /usr/bin/sed 's/}.*/}/'; }
+
+# mark: write the marker if, and only if, the live sub-anchor shows a block rule.
+mark() {
+  id="$(boot_id)"
+  if [ -n "$id" ] && "$PFCTL" -a "$ANCHOR" -sr 2>/dev/null | /usr/bin/grep -q '^block'; then
+    printf '%s\n' "$id" > "$MARKER.new" && /bin/mv -f "$MARKER.new" "$MARKER"
+    return $?
+  fi
+  /bin/rm -f "$MARKER"
+  return 1
+}
+
+if [ "${1:-}" = "--mark" ]; then
+  mark || { log "the block rule is not live; no boot marker"; exit 1; }
+  exit 0
+fi
+
+/bin/rm -f "$MARKER"
+
+# The sub-anchor is evaluated only if the main ruleset has Apple's wildcard anchor. Apple's stock
+# /etc/pf.conf has it; load that file if the running ruleset does not.
+if ! "$PFCTL" -sr 2>/dev/null | /usr/bin/grep -q 'anchor "com.apple/\*"'; then
+  "$PFCTL" -f /etc/pf.conf >/dev/null 2>&1
+fi
+
+# Rules that were applied and rolled back because nobody confirmed them are not applied again at
+# boot: the last confirmed ruleset (or the minimal one) goes in instead, and nothing is recorded
+# as loaded, so the next converge sees the difference.
+RULES="$FILE"
+if [ -r "$STATE/pf-rolled-back" ] && [ -r "$FILE" ]; then
+  have="$(/usr/bin/shasum -a 256 "$FILE" | /usr/bin/awk '{print $1}')"
+  rolled="$(/usr/bin/tr -d '[:space:]' < "$STATE/pf-rolled-back")"
+  if [ "$have" = "$rolled" ]; then
+    if [ -s "$LAST" ]; then RULES="$LAST"; else RULES="$MINIMAL"; fi
+    log "the rules in $FILE were rolled back earlier; loading $RULES instead"
+  fi
+fi
+
+"$PFCTL" -a "$ANCHOR" -f "$RULES" || { log "could not load $RULES into $ANCHOR"; exit 1; }
+if ! "$PFCTL" -s info 2>/dev/null | /usr/bin/grep -q 'Status: Enabled'; then
+  "$PFCTL" -E >/dev/null 2>&1
+fi
+if [ "$RULES" = "$FILE" ]; then
+  /usr/bin/shasum -a 256 "$FILE" | /usr/bin/awk '{print $1}' > "$STATE/pf-loaded.sha256"
+else
+  /bin/rm -f "$STATE/pf-loaded.sha256"
+fi
+mark || { log "loaded $RULES but the block rule is not live; no boot marker"; exit 1; }
+exit 0

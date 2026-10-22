@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+extends: default
+ignore: |
+  examples/site/ai-nodes/example-mac/secrets.sops.yaml
+rules:
+  line-length:
+    max: 160
+    level: warning
+    ignore: |
+      examples/
+  truthy:
+    allowed-values: ["true", "false"]
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1
+  # ansible-lint requires these four to be exactly so.
+  comments-indentation: false
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
+  document-start:
+    ignore: |
+      examples/
+  indentation:
+    spaces: 2
+    indent-sequences: consistent

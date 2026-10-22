@@ -609,7 +609,17 @@ inferenceNodes:
     enabled: false
     configMapName: tockmox-litellm-config
   nodes: []
+  #   A node the admin enrolled for GitOps convergence (tockmox-ai-node) says so on its record:
+  #     management: {enrolled: true}
+  #   The Tockmox UI then reports its convergence and readiness, and monitoring (below) renders the
+  #   TockmoxAiNode* alerts for it. A node without it is import-only: registered, probed and read, never judged
+  #   on convergence. docs/administration/ai-nodes.md.
   routes: []
+  # Facts about the enrolled fleet. All optional.
+  aiNodes: {}
+  #   siteRepo: https://git.example.com/org/site.git      # the bootstrap's --site-repo
+  #   toolkitRef: v0.9.0                                   # the bootstrap's --toolkit-ref
+  #   convergeIntervalSeconds: 900                         # equal to ai-nodes/fleet.yaml; 3 x this is the Stale alert
   probe:
     allowedCidrs: []
   gateway:

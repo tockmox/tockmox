@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+# ai-nodes/fleet.yaml: what every AI node in this site converges to.
+schema: tockmox.ai-node.fleet/v1
+toolkit:
+  # Confirmation only: the node pins its toolkit repository at bootstrap (TOOLKIT_REPO in
+  # ai-node.env) and refuses a different one named here, signed or not.
+  repo: https://github.com/tockmox/tockmox.git
+  # A 40-hex commit is immutable; a release tag can be moved by whoever can push tags; a branch name
+  # follows pushes, so use neither a branch nor a moving tag in production. The node takes this
+  # value only from a head whose signatures verified.
+  ref: v0.9.0
+defaults:
+  convergeIntervalSeconds: 900
+  siteRef: main
+signing:
+  # warn: log and report signature_ok 0 for an unverified commit, then apply it.
+  # enforce: refuse an unverified commit. A node's bootstrap mode can be tightened here, never loosened.
+  mode: warn

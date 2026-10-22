@@ -1,0 +1,104 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# One Hugging Face model. model_sync_item is {model, artifact: {kind, ref, revision}, stage}.
+
+- name: Check whether the verified snapshot is already in place
+  become: true
+  become_user: "{{ tn_service_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ model_sync_helper }}"
+      - check-hf
+      - "{{ tn_root }}"
+      - "{{ model_sync_item.artifact.ref }}"
+      - "{{ model_sync_item.artifact.revision }}"
+  register: model_sync_hf_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Fetch and verify it
+  when:
+    - model_sync_hf_check.rc != 0
+    - not ansible_check_mode
+  block:
+    - name: Download the pinned revision
+      become: true
+      become_user: "{{ tn_service_user }}"
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -u
+          if [ -r {{ model_sync_hf_token_file | quote }} ]; then
+            HF_TOKEN="$(tr -d '[:space:]' < {{ model_sync_hf_token_file | quote }})"
+            export HF_TOKEN
+          fi
+          exec {{ model_sync_hf_binary | quote }} download {{ model_sync_item.artifact.ref | quote }} --revision {{ model_sync_item.artifact.revision | quote }}
+      environment:
+        HOME: "{{ tn_root }}/var/service-home"
+        HF_HOME: "{{ tn_root }}/models/hf"
+        HF_HUB_OFFLINE: "0"
+        HF_HUB_DISABLE_TELEMETRY: "1"
+      register: model_sync_hf_download
+      changed_when: true
+      no_log: false
+
+    - name: Hash every file of the snapshot against its blob name
+      become: true
+      become_user: "{{ tn_service_user }}"
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - "{{ model_sync_helper }}"
+          - verify-hf
+          - "{{ tn_root }}"
+          - "{{ model_sync_item.artifact.ref }}"
+          - "{{ model_sync_item.artifact.revision }}"
+      register: model_sync_hf_verify
+      changed_when: false
+
+    - name: Record that it was fetched and verified
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - "{{ model_sync_helper }}"
+          - audit
+          - "{{ tn_root }}"
+          - --verdict
+          - verified
+          - --kind
+          - huggingface
+          - --ref
+          - "{{ model_sync_item.artifact.ref }}"
+          - --revision
+          - "{{ model_sync_item.artifact.revision }}"
+          - --detail
+          - "{{ model_sync_hf_verify.stdout | trim }}"
+      changed_when: false
+  rescue:
+    - name: Record the failure
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - "{{ model_sync_helper }}"
+          - audit
+          - "{{ tn_root }}"
+          - --verdict
+          - "{{ 'verify_failed' if model_sync_hf_download is defined and model_sync_hf_download is succeeded else 'pull_failed' }}"
+          - --kind
+          - huggingface
+          - --ref
+          - "{{ model_sync_item.artifact.ref }}"
+          - --revision
+          - "{{ model_sync_item.artifact.revision }}"
+          - --detail
+          - "{{ (model_sync_hf_verify.stdout | default('') | trim) or 'download failed' }}"
+      changed_when: false
+
+    - name: Stop the converge
+      ansible.builtin.fail:
+        msg: >-
+          {{ model_sync_item.model }} at revision {{ model_sync_item.artifact.revision }} could not be fetched
+          and verified: {{ (model_sync_hf_verify.stdout | default('')) or 'the download failed' }}. Nothing that depends on it is started.
+          See var/audit/model-updates.jsonl.

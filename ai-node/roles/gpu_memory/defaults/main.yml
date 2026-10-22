@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+gpu_memory_sysctl: /usr/sbin/sysctl
+# The least RAM left to the OS and everything else, in MiB. The floor is 10 GiB or 10% of RAM,
+# whichever is larger.
+gpu_memory_os_reserve_floor_mib: 10240

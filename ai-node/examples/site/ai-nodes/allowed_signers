@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+# ai-nodes/allowed_signers: who may sign commits to this site repository, in git's
+# allowed-signers format (man ssh-keygen, ALLOWED SIGNERS). One line per principal:
+#   <principal> namespaces="git" <key type> <public key>
+# The node pins THIS file at bootstrap, after you compare its fingerprints, and
+# afterwards trusts only the copy it pinned; a commit that changes this file takes
+# effect for later commits only when an already-pinned key signed it.
+# The key below is a throwaway generated for this example; replace it with yours.
+admin@example.com namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIM2qYxiHKIFZR3XVfScg0tL1YDQFAZfWyr5EpycCCqi/

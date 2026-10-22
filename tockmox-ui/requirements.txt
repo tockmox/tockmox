@@ -7,3 +7,4 @@ python-multipart>=0.0.9
 itsdangerous>=2.1
 PyJWT[crypto]>=2.8
 cryptography>=42
+jsonschema>=4.18

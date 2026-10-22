@@ -424,26 +424,169 @@ class PostureSource(Source):
 
 # ---------------------------------------------------------------- inference nodes (REQ-0047 AC-47.7)
 
+# The series tockmox-ai-node writes (CONTRACT, "Metrics contract"). One query reads all of them: every series carries
+# `ai_node`, the node's id in inferenceNodes, so a node is matched by that label and by nothing else. The model-store
+# series (model_present, model_bytes) are not read here.
+AI_NODE_SERIES = '{__name__=~"tockmox_ai_node_(converge_.+|info|readiness)"}'
+_P = "tockmox_ai_node_converge_"
+
+
+def _age_text(s: float) -> str:
+    s = int(max(0, s))
+    return f"{s}s" if s < 60 else (f"{s // 60}m" if s < 3600 else (f"{s // 3600}h {s % 3600 // 60}m" if s < 86400 else f"{s // 86400}d"))
+
+
+def _short(commit: str) -> str:
+    return commit[:8] if commit else ""
+
+
+def assess_convergence(rows: dict, interval_s: int, flap: dict | None) -> dict:
+    """One enrolled node's convergence, from its `tockmox_ai_node_converge_*` series. PURE.
+
+    rows: series name -> [prometheus instant-vector rows for this node]. flap: the window reading (see
+    InferenceNodesSource.fetch) or None. ABSENCE IS NOT GREEN: no converge series at all is Unknown, and so is a node
+    that reports a run but not the exit code that says how it went.
+
+      Healthy       exit 0 and the last success is within 2 x the interval, with nothing below to flag
+      Needs a look  the last success is older than 2 x the interval; or the signature check failed (warn mode lets the
+                    run proceed, and the signature_ok series says it would have refused); or the node is FLAPPING
+      Problem       the last run exited non-zero (naming the phase that failed); or no success for 3 x the interval
+
+    FLAPPING is `tasks{state="changed"} > 0` on consecutive runs with nothing new to apply. The UI reads one instant
+    of Prometheus, not the node's history, so it approximates the history with three windowed queries over 3 x the
+    interval: the smallest `changed` count in the window is above 0 (every sample in it changed something), the run
+    timestamp moved at least once (two runs were seen), and the `converge_info` series did not change identity
+    (same site commit, toolkit ref, desired sha and signing mode throughout). It is a fair test of "the same inputs
+    keep producing changes", it is blind to a node whose runs are further apart than the window, and it never
+    sees the node's own run counter. It can raise a false alarm when a node's first runs after enrolment all change
+    things inside one window with the same commit; those settle on their own.
+    """
+    def one(name):
+        r = rows.get(_P + name) or []
+        return r[0] if r else None
+
+    def num(name):
+        r = one(name)
+        try:
+            return float(r["value"][1]) if r else None
+        except (TypeError, ValueError, KeyError, IndexError):
+            return None
+
+    seen = any(rows.get(k) for k in rows if k.startswith(_P))
+    if not seen:
+        return {"state": UNKNOWN, "why": "this node has not reported a converge", "interval_s": interval_s}
+    info = (one("info") or {}).get("metric", {})
+    out = {"interval_s": interval_s, "site_commit": info.get("site_commit", ""), "site_commit_short": _short(info.get("site_commit", "")),
+           "toolkit_ref": info.get("toolkit_ref", ""), "signing_mode": info.get("signing_mode", ""),
+           "desired_sha256": info.get("desired_sha256", ""), "exit_code": None, "failing_phase": "", "last_run_age_s": None,
+           "last_success_age_s": None, "signature_ok": None, "tasks": {}, "duration_s": num("duration_seconds")}
+    rowts = next((float(r["value"][0]) for k in rows if k.startswith(_P) for r in rows[k] if r.get("value")), None)
+    lr, ls, ex = num("last_run_timestamp_seconds"), num("last_success_timestamp_seconds"), num("last_exit_code")
+    if rowts is not None and lr:
+        out["last_run_age_s"] = max(0.0, rowts - lr)
+    if rowts is not None and ls:
+        out["last_success_age_s"] = max(0.0, rowts - ls)
+    for k in ("last_run", "last_success"):
+        out[k + "_ago"] = _age_text(out[k + "_age_s"]) + " ago" if out[k + "_age_s"] is not None else ""
+    out["exit_code"] = int(ex) if ex is not None else None
+    sig = num("signature_ok")
+    out["signature_ok"] = None if sig is None else int(sig)
+    for r in rows.get(_P + "tasks") or []:
+        try:
+            out["tasks"][r["metric"].get("state", "?")] = int(float(r["value"][1]))
+        except (TypeError, ValueError, KeyError, IndexError):
+            pass
+    out["failing_phase"] = ",".join(sorted(r["metric"].get("phase", "?") for r in rows.get(_P + "phase") or []
+                                           if r.get("value") and r["value"][1] == "1"))
+    if ex is None:
+        return {**out, "state": UNKNOWN, "why": "this node reports a converge but not its exit code, so it cannot be called healthy"}
+    if ex != 0:
+        ph = out["failing_phase"]
+        return {**out, "state": CRIT,
+                "why": f"the last converge exited {int(ex)}, failing in the {ph} phase" if ph else
+                       f"the last converge exited {int(ex)}; the failing phase was not reported"}
+    if not ls:
+        return {**out, "state": UNKNOWN, "why": "the last converge exited 0 but no successful run time is recorded"}
+    age = out["last_success_age_s"]
+    if age is None:
+        return {**out, "state": UNKNOWN, "why": "no evaluation time on the series, so its age cannot be told"}
+    if age > 3 * interval_s:
+        return {**out, "state": CRIT, "why": f"no successful converge for {_age_text(age)} (more than 3 x the {_age_text(interval_s)} interval)"}
+    flags = []
+    if age > 2 * interval_s:
+        flags.append(f"the last success was {_age_text(age)} ago (more than 2 x the {_age_text(interval_s)} interval)")
+    if out["signature_ok"] == 0:
+        flags.append("the site commits did not verify against the pinned signers (signing mode "
+                     f"{out['signing_mode'] or 'unknown'}: the run went ahead, an enforcing node would have refused)")
+    if flap and flap.get("flapping"):
+        flags.append(f"every recent run changed something with nothing new to apply ({out['tasks'].get('changed', '?')} tasks changed "
+                     "in the latest): something on the node is undoing the configuration, or the configuration does not settle")
+    if flags:
+        return {**out, "state": WARN, "why": "; ".join(flags)}
+    return {**out, "state": OK, "why": ""}
+
+
+def assess_readiness(rows: list, node_type: str) -> dict:
+    """One enrolled node's readiness lines, from `tockmox_ai_node_readiness{check}` (1 ok, 0 problem, absent unknown).
+    A macOS node is expected to report every check in READINESS_CHECKS; one it does not report reads Unknown by name,
+    never ok. The node's single readiness state: any problem is Needs a look; else any unknown is Unknown; else ok."""
+    from .nodes import READINESS_CHECKS
+    got = {}
+    for r in rows:
+        try:
+            got[r["metric"].get("check", "?")] = "ok" if float(r["value"][1]) == 1 else "problem"
+        except (TypeError, ValueError, KeyError, IndexError):
+            got[r["metric"].get("check", "?")] = "unknown"
+    expected = list(READINESS_CHECKS) if node_type == "apple-silicon-mac" else []
+    names = expected + sorted(k for k in got if k not in expected)
+    items = [{"check": k, "label": READINESS_CHECKS.get(k, k), "state": got.get(k, "unknown")} for k in names]
+    if not got:
+        return {"state": UNKNOWN, "why": "this node has not reported its readiness facts", "items": items}
+    bad = [i["check"] for i in items if i["state"] == "problem"]
+    unk = [i["check"] for i in items if i["state"] == "unknown"]
+    if bad:
+        return {"state": WARN, "why": "not ready: " + ", ".join(bad), "items": items}
+    if unk:
+        return {"state": UNKNOWN, "why": "not reported: " + ", ".join(unk), "items": items}
+    return {"state": OK, "why": "", "items": items}
+
+
 class InferenceNodesSource(_HttpSource):
     """Health and memory of the inference nodes, READ FROM PROMETHEUS. The UI never polls a node.
 
     Per node, every measurement it has to offer is a state:
       * each exporter listed under the node's `metrics` (up == 1),
-      * each endpoint's blackbox probe (probe_success == 1), when one exists.
+      * each endpoint's blackbox probe (probe_success == 1), when one exists,
+      * for a node the admin ENROLLED (`management.enrolled`): its convergence and its readiness, from the
+        tockmox_ai_node_* series tockmox-ai-node writes (assess_convergence, assess_readiness).
     A measurement with no series is Unknown, not OK: a host whose exporter answers has
     not proven its engine serves (the reference homelab once lost the series while GitOps read
-    green). A node with nothing measuring it at all is Unknown with that reason.
+    green). A node with nothing measuring it at all is Unknown with that reason. An import-only node is not
+    enrolled, so it gets no convergence and no readiness at all (design 0 A14): nothing converges it, so there is
+    nothing for the absence of a series to mean.
     """
     name = "Inference Nodes"
     QUERIES = {"up": "up", "probe": "probe_success",
                "mac_used": "macmon_memory_ram_used_bytes", "mac_total": "macmon_memory_ram_total_bytes",
                "node_total": "node_memory_total_bytes",            # node_exporter on macOS (Darwin)
                "linux_total": "node_memory_MemTotal_bytes",        # node_exporter on Linux
-               "node_avail": "node_memory_MemAvailable_bytes"}
+               "node_avail": "node_memory_MemAvailable_bytes",
+               "ai": AI_NODE_SERIES}
 
     def __init__(self, url: str, inventory, timeout: float, transport=None, ttl=15.0):
         super().__init__(url, timeout, transport, ttl)
         self.inventory = inventory
+
+    def _interval(self) -> int:
+        from .nodes import DEFAULT_CONVERGE_INTERVAL_S
+        ai = getattr(self.inventory, "ai", None)
+        return int(ai.converge_interval_s) if ai else DEFAULT_CONVERGE_INTERVAL_S
+
+    def _flap_queries(self) -> dict:
+        w = f"{3 * self._interval()}s"
+        return {"flap_changed": f'min_over_time({_P}tasks{{state="changed"}}[{w}])',
+                "flap_runs": f"changes({_P}last_run_timestamp_seconds[{w}])",
+                "flap_inputs": f"count by (ai_node) (last_over_time({_P}info[{w}]))"}
 
     def configured(self):
         return bool(self.url) and bool(self.inventory.nodes)
@@ -456,7 +599,32 @@ class InferenceNodesSource(_HttpSource):
 
     def fetch(self):
         series = {k: self._q(v) for k, v in self.QUERIES.items()}
+        # The windowed queries only matter to an enrolled node, so a site with none asks Prometheus for nothing extra.
+        if any(n.enrolled for n in self.inventory.nodes):
+            series.update({k: self._q(v) for k, v in self._flap_queries().items()})
         return [self._node(n, series) for n in self.inventory.nodes]
+
+    @staticmethod
+    def _ai_rows(series, nid):
+        """This node's tockmox_ai_node_* rows, grouped by metric name. Matched on the `ai_node` label alone."""
+        out = {}
+        for r in series.get("ai", []):
+            m = r["metric"]
+            if m.get("ai_node") == nid:
+                out.setdefault(m.get("__name__", ""), []).append(r)
+        return out
+
+    def _flap(self, series, nid):
+        def val(key):
+            for r in series.get(key, []):
+                if r["metric"].get("ai_node") == nid:
+                    try:
+                        return float(r["value"][1])
+                    except (TypeError, ValueError, KeyError, IndexError):
+                        return None
+            return None
+        changed, runs, inputs = val("flap_changed"), val("flap_runs"), val("flap_inputs")
+        return {"flapping": bool(changed and changed > 0 and runs is not None and runs >= 1 and inputs == 1)}
 
     @staticmethod
     def _host_of(instance: str) -> str:
@@ -485,6 +653,17 @@ class InferenceNodesSource(_HttpSource):
                 ok = all(r["value"][1] == "1" for r in hit)
                 checks.append({"what": f"{e.engine} on :{e.port}", "state": OK if ok else CRIT,
                                "why": "" if ok else "probe failing"})
+        # tockmox-ai-node's own measurements. Only an enrolled node is judged on them; for any other node the
+        # series (if some exist) are reported as a hint and never as a state, so import-only stays unchanged.
+        ai = self._ai_rows(series, n.id)
+        conv = ready = None
+        if n.enrolled:
+            conv = assess_convergence(ai, self._interval(), self._flap(series, n.id))
+            ready = assess_readiness(ai.get("tockmox_ai_node_readiness", []), n.type)
+            checks.append({"what": "convergence", "state": conv["state"], "why": conv["why"]})
+            checks.append({"what": "readiness", "state": ready["state"], "why": ready["why"]})
+        reports_unenrolled = (not n.enrolled) and any(k.startswith(_P) or k.endswith("_readiness") for k in ai)
+        measured = self._measured(ai)
         mine = lambda key: [r for r in series[key] if self._host_of(r["metric"].get("instance", "")) == n.address]  # noqa: E731
         used = total = None
         chip = ""
@@ -505,8 +684,8 @@ class InferenceNodesSource(_HttpSource):
                    "used_gib": round(used / (1 << 30), 1) if used is not None else None}
             if used is not None and used / total > 0.92:
                 checks.append({"what": "memory", "state": WARN, "why": f"{used / total:.0%} of memory in use"})
-        measured = [c for c in checks if not (c["state"] == UNKNOWN and c["why"] == "no blackbox probe for this endpoint")]
-        if not n.metrics and not measured:
+        made = [c for c in checks if not (c["state"] == UNKNOWN and c["why"] == "no blackbox probe for this endpoint")]
+        if not n.metrics and not made:
             state, why = UNKNOWN, "nothing measures this node: add its exporter ports under metrics, or a blackbox probe"
         else:
             # A known failure outranks an unknown (the platform verdict's order). Ranking unknown first hid a
@@ -514,13 +693,36 @@ class InferenceNodesSource(_HttpSource):
             sts = [c["state"] for c in checks]
             state = next((x for x in (CRIT, UNKNOWN, WARN) if x in sts), OK)
             why = "; ".join(f"{c['what']}: {c['why']}" for c in checks if c["state"] != OK and c["why"])
+        # AC-47.6: what is recorded against what the node reports. The >1 GiB rule covers both reporters: the exporter
+        # (source `metrics`) and the facts exporter (source `measured`). A fact recorded from the same reporter cannot
+        # disagree with itself.
         disagree = ""
         conf = n.memory_gib()
-        if mem and conf and n.hardware["memory_gib"].source != "metrics" and abs(conf - mem["total_gib"]) > 1:
-            disagree = (f"the node's memory is recorded as {conf:g} GiB ({n.hardware['memory_gib'].source}) "
+        src = n.hardware["memory_gib"].source if "memory_gib" in n.hardware else ""
+        if mem and conf and src not in ("metrics", "measured") and abs(conf - mem["total_gib"]) > 1:
+            disagree = (f"the node's memory is recorded as {conf:g} GiB ({src}) "
                         f"but its exporter reports {mem['total_gib']:g} GiB")
+        elif measured.get("memory_gib") and conf and src not in ("metrics", "measured") and abs(conf - measured["memory_gib"]) > 1:
+            disagree = (f"the node's memory is recorded as {conf:g} GiB ({src}) "
+                        f"but tockmox-ai-node measured {measured['memory_gib']:g} GiB")
         return {"id": n.id, "state": state, "why": why, "checks": checks, "memory": mem, "chip": chip,
-                "disagree": disagree}
+                "disagree": disagree, "enrolled": n.enrolled, "convergence": conv, "readiness": ready,
+                "measured": measured or None, "reports_unenrolled": reports_unenrolled}
+
+    @staticmethod
+    def _measured(ai):
+        """Hardware facts the node itself reports, `tockmox_ai_node_info{chip,memory_gib,gpu_cores,os,os_version,os_build,arch}`.
+        The source of these facts is `measured`. Empty when the node has not reported."""
+        rows = ai.get("tockmox_ai_node_info") or []
+        if not rows:
+            return {}
+        m = rows[0]["metric"]
+        out = {k: m[k] for k in ("chip", "gpu_cores", "os", "os_version", "os_build", "arch") if m.get(k)}
+        try:
+            out["memory_gib"] = float(m["memory_gib"])
+        except (KeyError, TypeError, ValueError):
+            pass
+        return out
 
     def evaluate(self, nodes):
         if not nodes:

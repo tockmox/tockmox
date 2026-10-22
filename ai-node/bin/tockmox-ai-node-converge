@@ -1,0 +1,914 @@
+#!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# tockmox-ai-node-converge: bring this AI node to the state its site repository
+# declares, and say how it went.
+#
+#   tockmox-ai-node-converge                 one converge, as the launchd job runs it
+#   tockmox-ai-node-converge --check --diff  what would change; writes no metrics and no state
+#   tockmox-ai-node-converge --rebaseline SHA   trust the site history up to SHA (run at the node)
+#   tockmox-ai-node-converge --confirm-firewall confirm a pending firewall change reaches you
+#
+# THE PHASES, in the order they run, and the metric label each one gets when it
+# is the one that failed (tockmox_ai_node_converge_phase):
+#
+#   fetch    git fetch of the site repo (deploy key) and of the toolkit at the ref
+#            fleet.yaml pins
+#   verify   every commit on the site's first-parent line, from the last commit
+#            this node verified to the new head, against the signers pinned on
+#            THIS node (never the head's own file)
+#   decrypt  sops -d of ai-nodes/<id>/secrets.sops.yaml into <root>/secrets
+#   load     everything between "decrypted" and "ansible printed a recap": a
+#            missing file, a play that does not load, a refused firewall
+#   run      ansible-playbook ran and the recap shows a failed or unreachable task
+#
+# WHY ansible-playbook AGAINST THE LOCAL TOOLKIT CHECKOUT, NOT ansible-pull.
+# ansible-pull clones, checks out and runs in one command, so a fetch failure, a
+# bad ref and a play that will not load all arrive as one non-zero exit with no
+# recap. Here the toolkit is fetched by this script, so a failure to fetch is
+# `fetch` and a play that will not load is `load`, which is the distinction the
+# 2026-09 play-load incident could not draw (it read failed=0). The toolkit ref is
+# also pinned by a verified site commit, which ansible-pull's --verify-commit
+# (GPG only) cannot express. Cost: this script owns the checkout. It is small.
+#
+# SIGNING. SIGNING_MODE (<root>/etc/ai-node.env) is the node's own setting and
+# wins; fleet.yaml `signing.mode` can only make it stricter, never looser, or a
+# bad commit could switch verification off for itself. In `warn` a failed check is
+# logged, tockmox_ai_node_converge_signature_ok is 0 and the run proceeds; in
+# `enforce` the run stops at `verify` before anything is applied.
+#
+# Bash 3.2 and BSD userland only: this runs on macOS. No associative arrays, no
+# mapfile, no GNU flags. YAML is read with the Python that ships with the
+# Homebrew ansible, JSON with the standard library.
+#
+# Test seams (environment): TOCKMOX_ROOT, TOCKMOX_SUDO, TOCKMOX_ANSIBLE,
+# TOCKMOX_SOPS, TOCKMOX_PYTHON, TOCKMOX_LAUNCHCTL, TOCKMOX_LAUNCHD_DIR,
+# TOCKMOX_SOURCE_ONLY=1 (define the functions and return, for tests).
+
+set -uo pipefail
+
+# ------------------------------------------------------------------ settings
+
+SELF="${BASH_SOURCE[0]:-$0}"
+if [ -z "${TOCKMOX_ROOT:-}" ]; then
+  _bin_dir="$(cd "$(dirname "$SELF")" 2>/dev/null && pwd -P)"
+  case "$_bin_dir" in
+    */bin) TOCKMOX_ROOT="$(dirname "$_bin_dir")" ;;
+    *)     TOCKMOX_ROOT=/opt/tockmox ;;
+  esac
+fi
+ROOT="$TOCKMOX_ROOT"
+SUDO="${TOCKMOX_SUDO:-sudo -n}"
+ANSIBLE="${TOCKMOX_ANSIBLE:-ansible-playbook}"
+SOPS="${TOCKMOX_SOPS:-sops}"
+LAUNCHCTL="${TOCKMOX_LAUNCHCTL:-launchctl}"
+LAUNCHD_DIR="${TOCKMOX_LAUNCHD_DIR:-/Library/LaunchDaemons}"
+
+# Exit codes. ansible's own code is passed through for load/run.
+EX_LOCKED=75
+EX_FETCH=11
+EX_VERIFY=12
+EX_DECRYPT=13
+EX_LOAD=14
+EX_USAGE=64
+
+AI_NODE_ID=""
+SITE_REPO=""
+SITE_REF="main"
+TOOLKIT_REPO="https://github.com/tockmox/tockmox.git"
+TOOLKIT_REF=""
+SIGNING_MODE="warn"
+VERIFY_SCOPE="first-parent"
+ADMIN_USER=""
+LEGACY_CONVERGER_LABELS=""
+LABEL_PREFIX="com.tockmox.ai-node"
+
+CHECK_MODE=0
+DIFF_MODE=0
+ANSIBLE_TAGS=""
+ANSIBLE_SKIP_TAGS=""
+ANSIBLE_VERBOSE=""
+ACTION="converge"
+REBASELINE_SHA=""
+
+# Run state.
+PHASE="fetch"
+FAILED_PHASE=""
+EXIT_CODE=0
+SIG_OK=0
+SIG_MSG=""
+SITE_HEAD=""
+APPLIED_COMMIT=""
+TOOLKIT_REF_USED=""
+VERIFIED_TOOLKIT_REF=""       # the last toolkit ref a verified head chose (state.json)
+NEXT_VERIFIED_TOOLKIT_REF=""  # set this run when the head verified; stored on success
+DESIRED_SHA=""
+SIGNING_EFFECTIVE="warn"
+T_START=0
+HAVE_LOCK=0
+LOCK_DIR=""
+RUN_OUT=""
+SITE_VARS=""
+R_OK=0; R_CHANGED=0; R_FAILED=-1; R_SKIPPED=0; R_UNREACH=0
+
+SITE_DIR=""; TOOLKIT_DIR=""; ETC=""; VAR=""; TEXTFILE=""; LOG=""; SECRETS=""
+
+# --------------------------------------------------------------------- utils
+
+now() { date +%s; }
+log() { printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+warn() { log "WARN $*" >&2; }
+
+set_paths() {
+  SITE_DIR="$ROOT/site"
+  TOOLKIT_DIR="$ROOT/toolkit"
+  ETC="$ROOT/etc"
+  VAR="$ROOT/var"
+  TEXTFILE="$ROOT/textfile"
+  LOG="$ROOT/log/converge.log"
+  SECRETS="$ROOT/secrets"
+}
+
+# Find a Python that can import yaml (Homebrew's ansible bundles PyYAML).
+PY=""
+find_python() {
+  [ -n "$PY" ] && return 0
+  local c
+  for c in "${TOCKMOX_PYTHON:-}" /opt/homebrew/opt/ansible/libexec/bin/python3 \
+           /opt/homebrew/bin/python3 /usr/local/bin/python3 python3; do
+    [ -n "$c" ] || continue
+    if "$c" -c 'import yaml' >/dev/null 2>&1; then PY="$c"; return 0; fi
+  done
+  return 1
+}
+
+# yaml_get FILE DOTTED.PATH [DEFAULT] ; prints the value, or DEFAULT when absent.
+yaml_get() {
+  local file="$1" path="$2" def="${3:-}" out
+  if [ ! -r "$file" ] || ! find_python; then printf '%s\n' "$def"; return 0; fi
+  if out="$("$PY" -c '
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1])) or {}
+cur = d
+for k in sys.argv[2].split("."):
+    if isinstance(cur, dict) and k in cur:
+        cur = cur[k]
+    else:
+        sys.exit(3)
+if cur is None:
+    sys.exit(3)
+if isinstance(cur, bool):
+    cur = str(cur).lower()
+print(cur)
+' "$file" "$path" 2>/dev/null)"; then
+    printf '%s\n' "$out"
+  else
+    printf '%s\n' "$def"
+  fi
+}
+
+# norm_repo URL: compare toolkit repositories without a trailing slash or .git.
+norm_repo() { local u="$1"; u="${u%/}"; u="${u%.git}"; printf '%s\n' "$u"; }
+
+# safe_ref REF: a branch, tag or commit name, never an option or a path trick.
+safe_ref() {
+  case "$1" in ''|-*|*..*|*[!A-Za-z0-9._/+@-]*) return 1 ;; esac
+  return 0
+}
+
+# safe_repo URL: the pinned repository is admin-set, so only refuse what git would take as an
+# option or run as a helper (ext::, fd::), or a value with whitespace.
+safe_repo() {
+  case "$1" in ''|-*|ext::*|fd::*|*[[:space:]]*) return 1 ;; esac
+  return 0
+}
+
+sha256_file() { shasum -a 256 "$1" 2>/dev/null | awk '{print $1}'; }
+
+# Escape a Prometheus label value: backslash, double quote, newline.
+prom_escape() {
+  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr '\n' ' '
+}
+
+# json_escape: backslash and double quote only; our values are shas, refs and ids.
+json_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+
+# state_get KEY: read a string or number from var/state.json (single line, ours).
+state_get() {
+  local f="$VAR/state.json"
+  [ -r "$f" ] || return 0
+  sed -n -e 's/.*"'"$1"'": *"\([^"]*\)".*/\1/p' -e 's/.*"'"$1"'": *\([0-9-][0-9]*\).*/\1/p' "$f" | head -1
+}
+
+# load_env_file FILE: KEY=VALUE lines, whitelisted keys, never executed.
+load_env_file() {
+  local f="$1" k v
+  [ -r "$f" ] || return 1
+  while IFS='=' read -r k v || [ -n "$k" ]; do
+    case "$k" in ''|'#'*) continue ;; esac
+    v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+    case "$k" in
+      AI_NODE_ID)  AI_NODE_ID="$v" ;;
+      SITE_REPO)   SITE_REPO="$v" ;;
+      SITE_REF)    SITE_REF="$v" ;;
+      TOOLKIT_REPO) TOOLKIT_REPO="$v" ;;
+      TOOLKIT_REF) TOOLKIT_REF="$v" ;;
+      SIGNING_MODE) SIGNING_MODE="$v" ;;
+      VERIFY_SCOPE) VERIFY_SCOPE="$v" ;;
+      ADMIN_USER)  ADMIN_USER="$v" ;;
+      LEGACY_CONVERGER_LABELS) LEGACY_CONVERGER_LABELS="$v" ;;
+      LABEL_PREFIX) LABEL_PREFIX="$v" ;;
+      SKIP_TAGS)   ANSIBLE_SKIP_TAGS="$v" ;;
+    esac
+  done < "$f"
+  return 0
+}
+
+# version_ge A B: dotted numeric compare, bash 3.2 and no sort -V.
+version_ge() {
+  local a="$1" b="$2" i x y
+  for i in 1 2 3 4; do
+    x="$(printf '%s' "$a" | cut -d. -f"$i")"; y="$(printf '%s' "$b" | cut -d. -f"$i")"
+    x="${x:-0}"; y="${y:-0}"
+    x="${x//[!0-9]/}"; y="${y//[!0-9]/}"; x="${x:-0}"; y="${y:-0}"
+    [ "$x" -gt "$y" ] && return 0
+    [ "$x" -lt "$y" ] && return 1
+  done
+  return 0
+}
+
+# --------------------------------------------------------------------- lock
+
+acquire_lock() {
+  LOCK_DIR="$VAR/converge.lock"
+  mkdir -p "$VAR" 2>/dev/null || return 1
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo $$ > "$LOCK_DIR/pid"; HAVE_LOCK=1; return 0
+  fi
+  local old
+  old="$(cat "$LOCK_DIR/pid" 2>/dev/null)"
+  if [ -n "$old" ] && kill -0 "$old" 2>/dev/null \
+     && ps -p "$old" -o command= 2>/dev/null | grep -q 'tockmox-ai-node-converge'; then
+    return 1
+  fi
+  log "removing a stale lock (pid ${old:-unknown} is gone)"
+  rm -rf "$LOCK_DIR"
+  if mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo $$ > "$LOCK_DIR/pid"; HAVE_LOCK=1; return 0
+  fi
+  return 1
+}
+
+release_lock() {
+  if [ "$HAVE_LOCK" = 1 ] && [ -n "$LOCK_DIR" ]; then rm -rf "$LOCK_DIR"; HAVE_LOCK=0; fi
+}
+
+# ------------------------------------------------- mutual exclusion (design 4.4)
+
+# legacy_converger_found: prints the label or plist of an older converger that
+# would fight this one, and returns 0; returns 1 when there is none. Two
+# convergers must never run at once, so an applying run refuses while one is
+# loaded or its plist is still on disk. The default detection needs no name:
+# any LaunchDaemon other than ours that runs ansible-pull. A site can add names
+# with LEGACY_CONVERGER_LABELS in ai-node.env.
+legacy_converger_found() {
+  local own="$1" l p base
+  for l in $LEGACY_CONVERGER_LABELS; do
+    [ "$l" = "$own" ] && continue
+    if "$LAUNCHCTL" print "system/$l" >/dev/null 2>&1; then printf '%s\n' "$l (loaded)"; return 0; fi
+    if [ -e "$LAUNCHD_DIR/$l.plist" ]; then printf '%s\n' "$LAUNCHD_DIR/$l.plist"; return 0; fi
+  done
+  for p in "$LAUNCHD_DIR"/*.plist; do
+    [ -e "$p" ] || continue
+    base="$(basename "$p" .plist)"
+    [ "$base" = "$own" ] && continue
+    case "$base" in "$LABEL_PREFIX".*) continue ;; esac
+    if grep -q 'ansible-pull' "$p" 2>/dev/null; then
+      printf '%s\n' "$p"; return 0
+    fi
+  done
+  return 1
+}
+
+# ------------------------------------------------------------------- metrics
+
+# write_metrics: converge.prom, atomically, in the contract's exact series.
+write_metrics() {
+  local prom="$TEXTFILE/converge.prom" tmp n lbl ts_success prev_success
+  local id; id="$(prom_escape "$AI_NODE_ID")"
+  n="$(now)"
+  mkdir -p "$TEXTFILE" 2>/dev/null || return 0
+  prev_success="$(state_get last_success_epoch)"
+  if [ "$EXIT_CODE" = 0 ]; then ts_success="$n"; else ts_success="${prev_success:-0}"; fi
+  tmp="$(mktemp "$TEXTFILE/converge.prom.XXXXXX")" || return 0
+  lbl="ai_node=\"$id\""
+  {
+    printf '# HELP tockmox_ai_node_converge_last_run_timestamp_seconds Unix time the last converge run finished.\n'
+    printf '# TYPE tockmox_ai_node_converge_last_run_timestamp_seconds gauge\n'
+    printf 'tockmox_ai_node_converge_last_run_timestamp_seconds{%s} %s\n' "$lbl" "$n"
+    printf '# HELP tockmox_ai_node_converge_last_success_timestamp_seconds Unix time of the last converge run that exited 0.\n'
+    printf '# TYPE tockmox_ai_node_converge_last_success_timestamp_seconds gauge\n'
+    printf 'tockmox_ai_node_converge_last_success_timestamp_seconds{%s} %s\n' "$lbl" "$ts_success"
+    printf '# HELP tockmox_ai_node_converge_last_exit_code Exit code of the last converge run (0 = success).\n'
+    printf '# TYPE tockmox_ai_node_converge_last_exit_code gauge\n'
+    printf 'tockmox_ai_node_converge_last_exit_code{%s} %s\n' "$lbl" "$EXIT_CODE"
+    printf '# HELP tockmox_ai_node_converge_phase 1 for the phase that failed in the last run, 0 otherwise.\n'
+    printf '# TYPE tockmox_ai_node_converge_phase gauge\n'
+    for ph in fetch verify decrypt load run; do
+      if [ "$FAILED_PHASE" = "$ph" ]; then v=1; else v=0; fi
+      printf 'tockmox_ai_node_converge_phase{%s,phase="%s"} %s\n' "$lbl" "$ph" "$v"
+    done
+    printf '# HELP tockmox_ai_node_converge_duration_seconds Wall time of the last converge run.\n'
+    printf '# TYPE tockmox_ai_node_converge_duration_seconds gauge\n'
+    printf 'tockmox_ai_node_converge_duration_seconds{%s} %s\n' "$lbl" "$(( n - T_START ))"
+    printf '# HELP tockmox_ai_node_converge_tasks Task counts from the last recap; failed is -1 when there was no recap.\n'
+    printf '# TYPE tockmox_ai_node_converge_tasks gauge\n'
+    printf 'tockmox_ai_node_converge_tasks{%s,state="ok"} %s\n' "$lbl" "$R_OK"
+    printf 'tockmox_ai_node_converge_tasks{%s,state="changed"} %s\n' "$lbl" "$R_CHANGED"
+    printf 'tockmox_ai_node_converge_tasks{%s,state="failed"} %s\n' "$lbl" "$R_FAILED"
+    printf 'tockmox_ai_node_converge_tasks{%s,state="skipped"} %s\n' "$lbl" "$R_SKIPPED"
+    printf 'tockmox_ai_node_converge_tasks{%s,state="unreachable"} %s\n' "$lbl" "$R_UNREACH"
+    printf '# HELP tockmox_ai_node_converge_info What this node last applied.\n'
+    printf '# TYPE tockmox_ai_node_converge_info gauge\n'
+    printf 'tockmox_ai_node_converge_info{%s,site_commit="%s",toolkit_ref="%s",desired_sha256="%s",signing_mode="%s"} 1\n' \
+      "$lbl" "$(prom_escape "$APPLIED_COMMIT")" "$(prom_escape "$TOOLKIT_REF_USED")" \
+      "$(prom_escape "$DESIRED_SHA")" "$(prom_escape "$SIGNING_EFFECTIVE")"
+    printf '# HELP tockmox_ai_node_converge_signature_ok 1 when every commit since the last verified one checked out against the pinned signers; 0 otherwise (in warn mode the run still proceeded).\n'
+    printf '# TYPE tockmox_ai_node_converge_signature_ok gauge\n'
+    printf 'tockmox_ai_node_converge_signature_ok{%s} %s\n' "$lbl" "$SIG_OK"
+  } > "$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$prom"
+}
+
+# write_state: var/state.json, one line, atomically.
+write_state() {
+  local tmp n verified vtref
+  mkdir -p "$VAR" 2>/dev/null || return 0
+  n="$(now)"
+  verified="${VERIFIED_COMMIT:-$(state_get verified_commit)}"
+  # The verified toolkit ref moves only with a successful run on a verified head.
+  vtref="$VERIFIED_TOOLKIT_REF"
+  if [ "$EXIT_CODE" = 0 ] && [ -n "$NEXT_VERIFIED_TOOLKIT_REF" ]; then vtref="$NEXT_VERIFIED_TOOLKIT_REF"; fi
+  local last_success
+  if [ "$EXIT_CODE" = 0 ]; then last_success="$n"; else last_success="$(state_get last_success_epoch)"; last_success="${last_success:-0}"; fi
+  tmp="$(mktemp "$VAR/state.json.XXXXXX")" || return 0
+  printf '{"ai_node": "%s", "site_commit": "%s", "verified_commit": "%s", "toolkit_ref": "%s", "verified_toolkit_ref": "%s", "desired_sha256": "%s", "signing_mode": "%s", "signature_ok": %s, "last_run_epoch": %s, "last_success_epoch": %s, "last_exit": %s, "failed_phase": "%s"}\n' \
+    "$(json_escape "$AI_NODE_ID")" "$(json_escape "$APPLIED_COMMIT")" "$(json_escape "$verified")" \
+    "$(json_escape "$TOOLKIT_REF_USED")" "$(json_escape "$vtref")" "$(json_escape "$DESIRED_SHA")" "$(json_escape "$SIGNING_EFFECTIVE")" \
+    "$SIG_OK" "$n" "$last_success" "$EXIT_CODE" "$(json_escape "$FAILED_PHASE")" > "$tmp"
+  chmod 0644 "$tmp"
+  mv -f "$tmp" "$VAR/state.json"
+}
+
+# ------------------------------------------------------------- recap parser
+
+# parse_recap FILE: sets R_OK R_CHANGED R_FAILED R_SKIPPED R_UNREACH from the
+# last "<host> : ok=N changed=N ..." line. Returns 1, leaving failed=-1, when
+# the output has no recap at all (a play that did not load).
+parse_recap() {
+  local file="$1" line k v
+  R_OK=0; R_CHANGED=0; R_FAILED=-1; R_SKIPPED=0; R_UNREACH=0
+  line="$(grep -E '^[^[:space:]]+[[:space:]]*: +ok=[0-9]+' "$file" 2>/dev/null | tail -1)"
+  [ -n "$line" ] || return 1
+  for k in ok changed failed skipped unreachable; do
+    v="$(printf '%s\n' "$line" | sed -n 's/.*[[:space:]]'"$k"'=\([0-9][0-9]*\).*/\1/p')"
+    v="${v:-0}"
+    case "$k" in
+      ok) R_OK="$v" ;;
+      changed) R_CHANGED="$v" ;;
+      failed) R_FAILED="$v" ;;
+      skipped) R_SKIPPED="$v" ;;
+      unreachable) R_UNREACH="$v" ;;
+    esac
+  done
+  return 0
+}
+
+# classify_run RC FILE: decides EXIT_CODE and FAILED_PHASE from ansible's exit
+# status and recap. No recap is a failure whatever the status says.
+classify_run() {
+  local rc="$1" file="$2"
+  if parse_recap "$file"; then
+    if [ "$rc" = 0 ] && [ "$R_FAILED" = 0 ] && [ "$R_UNREACH" = 0 ]; then
+      EXIT_CODE=0; FAILED_PHASE=""
+    else
+      EXIT_CODE="$rc"; [ "$EXIT_CODE" = 0 ] && EXIT_CODE=2
+      FAILED_PHASE="run"
+    fi
+  else
+    EXIT_CODE="$rc"; [ "$EXIT_CODE" = 0 ] && EXIT_CODE="$EX_LOAD"
+    FAILED_PHASE="load"
+  fi
+}
+
+# --------------------------------------------------------------- notification
+
+# notify_failure: edge-triggered (OK to failing) push, only when the node has an
+# ntfy-url secret. The URL and any auth header go to curl on stdin, never argv,
+# never the log.
+notify_failure() {
+  local urlf="$SECRETS/ntfy-url" hdrf="$SECRETS/ntfy-auth-header" prev
+  [ "$CHECK_MODE" = 0 ] || return 0
+  [ -r "$urlf" ] || return 0
+  prev="$(state_get last_exit)"
+  [ "${prev:-0}" = 0 ] || return 0
+  [ "$EXIT_CODE" != 0 ] || return 0
+  command -v curl >/dev/null 2>&1 || return 0
+  {
+    printf 'url = "%s"\n' "$(tr -d '\n\r"' < "$urlf")"
+    if [ -r "$hdrf" ]; then printf 'header = "%s"\n' "$(tr -d '\n\r"' < "$hdrf")"; fi
+    printf 'header = "Title: tockmox-ai-node converge failed on %s"\n' "$AI_NODE_ID"
+    printf 'header = "Priority: high"\n'
+    printf 'data = "exit=%s phase=%s"\n' "$EXIT_CODE" "${FAILED_PHASE:-none}"
+  } | curl -fsS -m 10 -K - >/dev/null 2>&1 || true
+}
+
+# -------------------------------------------------------------------- finish
+
+finish() {
+  if [ "$CHECK_MODE" = 0 ] && [ "$ACTION" = converge ]; then
+    notify_failure
+    write_metrics
+    write_state
+  fi
+  if [ "$EXIT_CODE" = 0 ]; then
+    log "converge ok: site ${APPLIED_COMMIT:-none} signature_ok=$SIG_OK tasks ok=$R_OK changed=$R_CHANGED failed=$R_FAILED"
+  else
+    log "converge FAILED in phase ${FAILED_PHASE:-unknown} (exit $EXIT_CODE)"
+  fi
+  [ -n "$RUN_OUT" ] && rm -f "$RUN_OUT"
+  [ -n "$SITE_VARS" ] && rm -f "$SITE_VARS"
+  release_lock
+  exit "$EXIT_CODE"
+}
+
+# fail_phase PHASE CODE MESSAGE
+fail_phase() {
+  FAILED_PHASE="$1"; EXIT_CODE="$2"; shift 2
+  log "ERROR [$FAILED_PHASE] $*"
+  finish
+}
+
+on_signal() { fail_phase "${PHASE:-load}" 130 "interrupted"; }
+
+# --------------------------------------------------------------------- git
+
+git_site() { GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="$GIT_SSH" git -C "$SITE_DIR" "$@"; }
+
+setup_git_env() {
+  GIT_SSH="ssh -i $ETC/deploy_key -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$ETC/known_hosts -o ConnectTimeout=20"
+  export GIT_SSH
+}
+
+fetch_site() {
+  if [ ! -d "$SITE_DIR/.git" ]; then
+    log "cloning the site repository"
+    GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="$GIT_SSH" git clone --quiet "$SITE_REPO" "$SITE_DIR" 2>&1 || return 1
+  fi
+  git_site remote set-url origin "$SITE_REPO" 2>/dev/null || true
+  git_site fetch --quiet --tags --force origin "$SITE_REF" 2>&1 || return 1
+  SITE_HEAD="$(git_site rev-parse 'FETCH_HEAD^{commit}' 2>/dev/null)"
+  [ -n "$SITE_HEAD" ] || return 1
+  return 0
+}
+
+fetch_toolkit() {
+  local repo="$1" ref="$2" head
+  if [ ! -d "$TOOLKIT_DIR/.git" ]; then
+    rm -rf "$TOOLKIT_DIR"
+    log "cloning the toolkit"
+    GIT_TERMINAL_PROMPT=0 git clone --quiet "$repo" "$TOOLKIT_DIR" 2>&1 || return 1
+  fi
+  GIT_TERMINAL_PROMPT=0 git -C "$TOOLKIT_DIR" remote set-url origin "$repo" 2>/dev/null || true
+  GIT_TERMINAL_PROMPT=0 git -C "$TOOLKIT_DIR" fetch --quiet --tags --force origin "$ref" 2>&1 || return 1
+  head="$(git -C "$TOOLKIT_DIR" rev-parse 'FETCH_HEAD^{commit}' 2>/dev/null)"
+  [ -n "$head" ] || return 1
+  case "$ref" in
+    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f])
+      if [ "$head" != "$ref" ]; then log "toolkit ref $ref resolved to $head"; return 1; fi ;;
+  esac
+  git -C "$TOOLKIT_DIR" checkout --quiet --force --detach "$head" 2>&1 || return 1
+  return 0
+}
+
+# --------------------------------------------------------- signature checking
+
+# sig_type REPO COMMIT -> ssh | pgp | none
+sig_type() {
+  local repo="$1" c="$2" first
+  first="$(git -C "$repo" cat-file commit "$c" 2>/dev/null | awk '
+    /^gpgsig /{ sub(/^gpgsig /,""); print; exit }
+    /^$/{ exit }')"
+  case "$first" in
+    *"BEGIN SSH SIGNATURE"*) echo ssh ;;
+    *"BEGIN PGP SIGNATURE"*) echo pgp ;;
+    *) echo none ;;
+  esac
+}
+
+make_gnupg_home() {  # ASC_FILE -> prints a fresh GNUPGHOME with only those keys
+  local asc="$1" gh
+  gh="$(mktemp -d "${TMPDIR:-/tmp}/tmgpg.XXXXXX")" || return 1
+  chmod 700 "$gh"
+  command -v gpg >/dev/null 2>&1 || { rm -rf "$gh"; return 1; }
+  GNUPGHOME="$gh" gpg --batch --quiet --import "$asc" >/dev/null 2>&1 || true
+  printf '%s\n' "$gh"
+}
+
+# verify_one REPO COMMIT SIGNERS_FILE GPG_ASC_FILE ; returns 0 when good.
+VERIFY_DETAIL=""
+verify_one() {
+  local repo="$1" c="$2" signers="$3" asc="$4" t out gh rc
+  VERIFY_DETAIL=""
+  t="$(sig_type "$repo" "$c")"
+  case "$t" in
+    none) VERIFY_DETAIL="unsigned"; return 1 ;;
+    ssh)
+      if [ ! -s "$signers" ]; then VERIFY_DETAIL="ssh-signed but no pinned allowed_signers"; return 1; fi
+      if out="$(git -C "$repo" -c gpg.format=ssh -c "gpg.ssh.allowedSignersFile=$signers" verify-commit "$c" 2>&1)"; then
+        VERIFY_DETAIL="ssh ok"; return 0
+      fi
+      VERIFY_DETAIL="ssh signature not accepted by the pinned signers"; return 1 ;;
+    pgp)
+      if [ ! -s "$asc" ]; then VERIFY_DETAIL="gpg-signed but no pinned gpg-signers.asc"; return 1; fi
+      gh="$(make_gnupg_home "$asc")" || { VERIFY_DETAIL="gpg is not installed"; return 1; }
+      out="$(GNUPGHOME="$gh" git -C "$repo" -c gpg.format=openpgp verify-commit --raw "$c" 2>&1)"; rc=$?
+      rm -rf "$gh"
+      if [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -q '^\[GNUPG:\] GOODSIG' \
+         && printf '%s\n' "$out" | grep -q '^\[GNUPG:\] VALIDSIG' \
+         && ! printf '%s\n' "$out" | grep -qE '^\[GNUPG:\] (BADSIG|ERRSIG|EXPSIG|EXPKEYSIG|REVKEYSIG)'; then
+        VERIFY_DETAIL="gpg ok"; return 0
+      fi
+      VERIFY_DETAIL="gpg signature not accepted by the pinned keys"; return 1 ;;
+  esac
+  return 1
+}
+
+# verify_range: sets SIG_OK, SIG_MSG, NEW_SIGNERS / NEW_ASC (temp files holding
+# the signer set in force at the end of the range) and returns 0 when every
+# commit verified. The set is read from the PINNED files; a commit may change it
+# only if that commit itself verified under the set in force before it.
+NEW_SIGNERS=""; NEW_ASC=""
+verify_range() {
+  local repo="$SITE_DIR" head="$SITE_HEAD" base="$1" c commits n=0 spec new_s new_a
+  local pinned_s="$ETC/allowed_signers" pinned_a="$ETC/gpg-signers.asc"
+  SIG_OK=0; SIG_MSG=""
+  NEW_SIGNERS="$(mktemp "$VAR/signers.XXXXXX")" || return 1
+  NEW_ASC="$(mktemp "$VAR/gpgasc.XXXXXX")" || return 1
+  : > "$NEW_SIGNERS"; : > "$NEW_ASC"
+  [ -r "$pinned_s" ] && cat "$pinned_s" > "$NEW_SIGNERS"
+  [ -r "$pinned_a" ] && cat "$pinned_a" > "$NEW_ASC"
+  if [ ! -s "$NEW_SIGNERS" ] && [ ! -s "$NEW_ASC" ]; then
+    SIG_MSG="no signers are pinned on this node ($pinned_s)"; return 1
+  fi
+  if [ -n "$base" ]; then
+    if ! git -C "$repo" cat-file -e "$base^{commit}" 2>/dev/null; then
+      SIG_MSG="the last verified commit $base is not in the site repository"; return 1
+    fi
+    if ! git -C "$repo" merge-base --is-ancestor "$base" "$head" 2>/dev/null; then
+      SIG_MSG="history was rewritten: $base is not an ancestor of $head"; return 1
+    fi
+    spec="$base..$head"
+  else
+    spec=""
+  fi
+  if [ -n "$spec" ]; then
+    if [ "$VERIFY_SCOPE" = all ]; then
+      commits="$(git -C "$repo" rev-list --reverse --topo-order "$spec")"
+    else
+      commits="$(git -C "$repo" rev-list --reverse --first-parent "$spec")"
+    fi
+  else
+    commits="$head"
+  fi
+  [ -n "$commits" ] || { SIG_OK=1; SIG_MSG="nothing new since $base"; return 0; }
+  for c in $commits; do
+    n=$((n + 1))
+    if ! verify_one "$repo" "$c" "$NEW_SIGNERS" "$NEW_ASC"; then
+      SIG_MSG="commit $c: $VERIFY_DETAIL"; return 1
+    fi
+    # A verified commit may rotate the signer set; the next commits are checked
+    # against the new set. An unverified commit never gets here.
+    new_s="$(mktemp "$VAR/signers.XXXXXX")"; new_a="$(mktemp "$VAR/gpgasc.XXXXXX")"
+    git -C "$repo" show "$c:ai-nodes/allowed_signers" > "$new_s" 2>/dev/null || : > "$new_s"
+    git -C "$repo" show "$c:ai-nodes/gpg-signers.asc" > "$new_a" 2>/dev/null || : > "$new_a"
+    if [ -s "$new_s" ] && ! cmp -s "$new_s" "$NEW_SIGNERS"; then
+      log "signer set changes at $c (signed by a pinned key); in force for later commits"
+      cat "$new_s" > "$NEW_SIGNERS"
+    fi
+    if [ -s "$new_a" ] && ! cmp -s "$new_a" "$NEW_ASC"; then
+      log "gpg signer keys change at $c (signed by a pinned key); in force for later commits"
+      cat "$new_a" > "$NEW_ASC"
+    fi
+    rm -f "$new_s" "$new_a"
+  done
+  SIG_OK=1; SIG_MSG="$n commit(s) verified"
+  return 0
+}
+
+# adopt_signers: after a fully verified range, the end-of-range set becomes the pin.
+adopt_signers() {
+  if [ -s "$NEW_SIGNERS" ] && ! cmp -s "$NEW_SIGNERS" "$ETC/allowed_signers" 2>/dev/null; then
+    log "pinning the new allowed_signers (sha256 $(sha256_file "$NEW_SIGNERS"))"
+    cp "$NEW_SIGNERS" "$ETC/allowed_signers.new" && chmod 0644 "$ETC/allowed_signers.new" && mv -f "$ETC/allowed_signers.new" "$ETC/allowed_signers"
+  fi
+  if [ -s "$NEW_ASC" ] && ! cmp -s "$NEW_ASC" "$ETC/gpg-signers.asc" 2>/dev/null; then
+    log "pinning the new gpg-signers.asc (sha256 $(sha256_file "$NEW_ASC"))"
+    cp "$NEW_ASC" "$ETC/gpg-signers.asc.new" && chmod 0644 "$ETC/gpg-signers.asc.new" && mv -f "$ETC/gpg-signers.asc.new" "$ETC/gpg-signers.asc"
+  fi
+}
+
+# ------------------------------------------------------------------- secrets
+
+# decrypt_secrets FILE: each secret to <root>/secrets/<name>, 0600, owned by the
+# converge account or (owner: service) the service account. Names are printed,
+# values never.
+decrypt_secrets() {
+  local file="$1" svc names n owner
+  if ! command -v "$SOPS" >/dev/null 2>&1; then log "sops is not installed"; return 1; fi
+  find_python || { log "no python3 to place secrets"; return 1; }
+  svc="$(yaml_get "$SITE_DIR/ai-nodes/$AI_NODE_ID/ai-node.yaml" accounts.service inference)"
+  case "$svc" in
+    ''|[!a-z_]*|*[!a-z0-9_-]*) log "accounts.service in ai-node.yaml is not a plain account name"; return 1 ;;
+  esac
+  if [ "$CHECK_MODE" = 1 ]; then
+    SOPS_AGE_KEY_FILE="$ETC/age.key" "$SOPS" -d "$file" >/dev/null 2>&1 || return 1
+    log "secrets decrypt (check mode: nothing written)"
+    return 0
+  fi
+  mkdir -p "$SECRETS"; chmod 0711 "$SECRETS"
+  names="$(SOPS_AGE_KEY_FILE="$ETC/age.key" "$SOPS" -d --output-type json "$file" 2>/dev/null \
+    | "$PY" -c '
+import json, os, re, sys
+d = json.load(sys.stdin)
+dest = sys.argv[1]
+manifest = []
+for s in d.get("secrets", []):
+    name = s["name"]
+    if not re.match(r"^[A-Za-z0-9._-]+$", name) or name.startswith("."):
+        sys.stderr.write("bad secret name\n"); sys.exit(2)
+    owner = s.get("owner", "service")
+    if owner not in ("service", "converge"):
+        sys.stderr.write("bad owner for %s\n" % name); sys.exit(2)
+    path = os.path.join(dest, name)
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(str(s["value"]))
+    os.replace(tmp, path)
+    os.chmod(path, 0o600)
+    print("%s %s" % (name, owner))
+' "$SECRETS")" || return 1
+  : > "$VAR/secrets.manifest.new"
+  while read -r n owner; do
+    [ -n "$n" ] || continue
+    printf '%s\n' "$n" >> "$VAR/secrets.manifest.new"
+    if [ "$owner" = service ]; then $SUDO chown "$svc" "$SECRETS/$n" 2>/dev/null || warn "could not hand secret $n to $svc"; fi
+  done <<EOF
+$names
+EOF
+  if [ -r "$VAR/secrets.manifest" ]; then
+    while read -r n; do
+      [ -n "$n" ] || continue
+      grep -qx "$n" "$VAR/secrets.manifest.new" || { $SUDO rm -f "$SECRETS/$n"; log "removed secret $n (no longer in git)"; }
+    done < "$VAR/secrets.manifest"
+  fi
+  mv -f "$VAR/secrets.manifest.new" "$VAR/secrets.manifest"
+  log "secrets placed: $(wc -l < "$VAR/secrets.manifest" | tr -d ' ')"
+  return 0
+}
+
+# ------------------------------------------------------------- admin actions
+
+confirm_firewall() {
+  local d="${TOCKMOX_STATE_DB:-/var/db/tockmox-ai-node}"
+  $SUDO /usr/bin/touch "$d/pf-confirm" || { echo "could not write $d/pf-confirm"; return 1; }
+  # A rollback that already fired leaves a marker that stops the same rules being applied again;
+  # confirming means "I checked, try again", so the marker goes.
+  $SUDO /bin/rm -f "$d/pf-rolled-back"
+  echo "firewall change confirmed: the pending rollback will not flush the new rules."
+}
+
+rebaseline() {
+  local sha="$1" full
+  find_python >/dev/null 2>&1 || true
+  git_site rev-parse --verify --quiet "$sha^{commit}" >/dev/null || { echo "unknown commit: $sha"; return 1; }
+  full="$(git_site rev-parse "$sha^{commit}")"
+  printf 'Trust the site history up to %s without checking signatures on it? [type yes] ' "$full"
+  local a=""; read -r a < /dev/tty || true
+  [ "$a" = yes ] || { echo "not changed"; return 1; }
+  VERIFIED_COMMIT="$full"; EXIT_CODE=0; AI_NODE_ID="${AI_NODE_ID:-}"
+  APPLIED_COMMIT="$(state_get site_commit)"; TOOLKIT_REF_USED="$(state_get toolkit_ref)"
+  VERIFIED_TOOLKIT_REF="$(state_get verified_toolkit_ref)"
+  DESIRED_SHA="$(state_get desired_sha256)"; SIGNING_EFFECTIVE="$(state_get signing_mode)"
+  SIG_OK="$(state_get signature_ok)"; SIG_OK="${SIG_OK:-0}"
+  write_state
+  echo "verified_commit is now $full"
+}
+
+# ------------------------------------------------------------------- main
+
+usage() {
+  sed -n '4,10p' "$SELF" | sed 's/^# \{0,1\}//'
+}
+
+VERIFIED_COMMIT=""
+
+main() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --check) CHECK_MODE=1 ;;
+      --diff) DIFF_MODE=1 ;;
+      --tags) shift; ANSIBLE_TAGS="${1:-}" ;;
+      --skip-tags) shift; ANSIBLE_SKIP_TAGS="${1:-}" ;;
+      -v|-vv|-vvv) ANSIBLE_VERBOSE="$1" ;;
+      --site-ref) shift; SITE_REF="${1:-main}" ;;
+      --rebaseline) shift; ACTION=rebaseline; REBASELINE_SHA="${1:-}" ;;
+      --confirm-firewall) ACTION=confirm_firewall ;;
+      -h|--help) usage; exit 0 ;;
+      *) echo "unknown option: $1" >&2; usage >&2; exit "$EX_USAGE" ;;
+    esac
+    shift
+  done
+
+  set_paths
+  if ! load_env_file "$ETC/ai-node.env"; then
+    echo "cannot read $ETC/ai-node.env: run bootstrap-node.sh first" >&2; exit "$EX_USAGE"
+  fi
+  [ -n "$AI_NODE_ID" ] && [ -n "$SITE_REPO" ] || { echo "ai-node.env needs AI_NODE_ID and SITE_REPO" >&2; exit "$EX_USAGE"; }
+  case "$SIGNING_MODE" in warn|enforce) ;; *) echo "SIGNING_MODE must be warn or enforce" >&2; exit "$EX_USAGE" ;; esac
+  SIGNING_EFFECTIVE="$SIGNING_MODE"
+  # Homebrew's tools (sops, age, gpg, ansible) first, before anything below needs one: launchd and
+  # sudo both hand a job a minimal PATH.
+  export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"
+  setup_git_env
+
+  case "$ACTION" in
+    confirm_firewall) confirm_firewall; exit $? ;;
+    rebaseline) [ -n "$REBASELINE_SHA" ] || { echo "--rebaseline needs a commit" >&2; exit "$EX_USAGE"; }
+                rebaseline "$REBASELINE_SHA"; exit $? ;;
+  esac
+
+  mkdir -p "$ROOT/log" "$VAR" 2>/dev/null
+  # Interactive runs show the output and keep a copy; launchd already sends
+  # stdout to the log.
+  if [ -t 1 ]; then exec > >(tee -a "$LOG") 2>&1; fi
+  if [ -f "$LOG" ] && [ "$(wc -c < "$LOG" | tr -d ' ')" -gt 10485760 ]; then
+    mv -f "$LOG.2" "$LOG.3" 2>/dev/null; mv -f "$LOG.1" "$LOG.2" 2>/dev/null; mv -f "$LOG" "$LOG.1" 2>/dev/null
+  fi
+
+  T_START="$(now)"
+  trap on_signal INT TERM
+  if ! acquire_lock; then
+    log "another converge is running (lock $LOCK_DIR); this run does nothing"
+    exit "$EX_LOCKED"
+  fi
+  RUN_OUT="$(mktemp "$VAR/run.XXXXXX")"
+  VERIFIED_COMMIT="$(state_get verified_commit)"
+  APPLIED_COMMIT="$(state_get site_commit)"
+  TOOLKIT_REF_USED="$(state_get toolkit_ref)"
+  VERIFIED_TOOLKIT_REF="$(state_get verified_toolkit_ref)"
+  DESIRED_SHA="$(state_get desired_sha256)"
+  log "converge start: ai node $AI_NODE_ID, site ref $SITE_REF, signing $SIGNING_MODE$( [ "$CHECK_MODE" = 1 ] && printf ' (check mode)')"
+
+  # ---- fetch the site
+  PHASE=fetch
+  fetch_site || fail_phase fetch "$EX_FETCH" "could not fetch $SITE_REF from the site repository (deploy key registered? host key pinned?)"
+  log "site head $SITE_HEAD"
+
+  # ---- verify, BEFORE anything from the new head is read or run
+  PHASE=verify
+  local fleet_mode
+  if verify_range "$VERIFIED_COMMIT"; then
+    log "signatures: $SIG_MSG"
+  else
+    log "signatures: NOT VERIFIED: $SIG_MSG"
+  fi
+  # fleet.yaml may tighten the mode. It is read from the head only if the head verified,
+  # so an unverified commit can never choose its own policy.
+  if [ "$SIG_OK" = 1 ]; then
+    fleet_mode="$(git_site show "$SITE_HEAD:ai-nodes/fleet.yaml" 2>/dev/null | "${PY:-python3}" -c '
+import sys
+try:
+    import yaml
+    d = yaml.safe_load(sys.stdin) or {}
+    print(((d.get("signing") or {}).get("mode")) or "")
+except Exception:
+    print("")
+' 2>/dev/null)"
+    [ "$fleet_mode" = enforce ] && SIGNING_EFFECTIVE=enforce
+  fi
+  if [ "$SIG_OK" = 0 ]; then
+    if [ "$SIGNING_EFFECTIVE" = enforce ]; then
+      fail_phase verify "$EX_VERIFY" "refusing to apply: $SIG_MSG"
+    fi
+    warn "signing mode is warn: applying although $SIG_MSG"
+  else
+    adopt_signers
+  fi
+
+  git_site checkout --quiet --force --detach "$SITE_HEAD" 2>&1 || fail_phase fetch "$EX_FETCH" "could not check out $SITE_HEAD"
+
+  # ---- the toolkit. The playbook runs as root-capable code, so what selects it is trusted
+  # input: the repository is pinned on the node (TOOLKIT_REPO in ai-node.env, written at
+  # bootstrap) and fleet.yaml can only confirm it; the ref comes from fleet.yaml only when the
+  # head's signatures verified, otherwise the last ref a verified head chose.
+  PHASE=fetch
+  local fleet="$SITE_DIR/ai-nodes/fleet.yaml" t_repo t_ref interval f_repo
+  find_python || log "no python with PyYAML found; fleet.yaml and ai-node.yaml defaults apply"
+  t_repo="$TOOLKIT_REPO"
+  f_repo="$(yaml_get "$fleet" toolkit.repo "")"
+  if [ -n "$f_repo" ] && [ "$(norm_repo "$f_repo")" != "$(norm_repo "$t_repo")" ]; then
+    fail_phase fetch "$EX_FETCH" "refusing to use toolkit.repo $f_repo from ai-nodes/fleet.yaml: this node is pinned to $t_repo (TOOLKIT_REPO in $ETC/ai-node.env, set at bootstrap); change it on the node, not in git"
+  fi
+  if [ "$SIG_OK" = 1 ]; then
+    t_ref="$(yaml_get "$fleet" toolkit.ref "")"
+    [ -n "$t_ref" ] || t_ref="${VERIFIED_TOOLKIT_REF:-$TOOLKIT_REF}"
+  else
+    t_ref="${VERIFIED_TOOLKIT_REF:-$TOOLKIT_REF}"
+    if [ "$(yaml_get "$fleet" toolkit.ref "$t_ref")" != "$t_ref" ]; then
+      warn "ignoring toolkit.ref from the unverified head; keeping the last verified toolkit ref $t_ref"
+    fi
+  fi
+  [ -n "$t_ref" ] || fail_phase fetch "$EX_FETCH" "no toolkit ref: set toolkit.ref in ai-nodes/fleet.yaml (or TOOLKIT_REF in ai-node.env)"
+  safe_ref "$t_ref" || fail_phase fetch "$EX_FETCH" "toolkit ref is not a plain branch, tag or commit name"
+  safe_repo "$t_repo" || fail_phase fetch "$EX_FETCH" "TOOLKIT_REPO in ai-node.env is empty or not a plain repository URL or path"
+  # Not code-selecting, but it lands in a plist: take it only as a plain number.
+  interval="$(yaml_get "$fleet" defaults.convergeIntervalSeconds 900)"
+  case "$interval" in ''|*[!0-9]*) interval=900 ;; esac
+  [ "$interval" -ge 60 ] 2>/dev/null || interval=900
+  fetch_toolkit "$t_repo" "$t_ref" || fail_phase fetch "$EX_FETCH" "could not fetch toolkit ref $t_ref from $t_repo"
+  TOOLKIT_REF_USED="$t_ref"
+  [ "$SIG_OK" = 1 ] && NEXT_VERIFIED_TOOLKIT_REF="$t_ref"
+  log "toolkit $t_ref at $(git -C "$TOOLKIT_DIR" rev-parse --short HEAD)"
+
+  # ---- inputs for this node
+  PHASE=load
+  local ndir="$SITE_DIR/ai-nodes/$AI_NODE_ID" playbook="$TOOLKIT_DIR/ai-node/playbooks/ai-node.yml" own
+  [ -r "$ndir/ai-node.yaml" ] && [ -r "$ndir/desired.yaml" ] \
+    || fail_phase load "$EX_LOAD" "ai-nodes/$AI_NODE_ID/ai-node.yaml and desired.yaml must both exist at $SITE_HEAD"
+  [ -r "$playbook" ] || fail_phase load "$EX_LOAD" "the toolkit at $t_ref has no ai-node/playbooks/ai-node.yml"
+  DESIRED_SHA="$(sha256_file "$ndir/desired.yaml")"
+  LABEL_PREFIX="$(yaml_get "$ndir/ai-node.yaml" labels.prefix "$LABEL_PREFIX")"
+  case "$LABEL_PREFIX" in
+    ''|[!A-Za-z0-9]*|*[!A-Za-z0-9._-]*) fail_phase load "$EX_LOAD" "labels.prefix in ai-node.yaml is not a plain reverse-DNS prefix (letters, digits, dot, dash, underscore)" ;;
+  esac
+  own="$LABEL_PREFIX.converge"
+
+  # ---- mutual exclusion: one converger per node
+  if [ "$CHECK_MODE" = 0 ]; then
+    local lg
+    if lg="$(legacy_converger_found "$own")"; then
+      fail_phase load "$EX_LOAD" "another converger is installed ($lg); refusing to apply while it can run. Retire it first (--check is allowed)"
+    fi
+  fi
+
+  # ---- decrypt
+  PHASE=decrypt
+  if [ -r "$ndir/secrets.sops.yaml" ]; then
+    decrypt_secrets "$ndir/secrets.sops.yaml" || fail_phase decrypt "$EX_DECRYPT" "could not decrypt secrets.sops.yaml (is this node's age recipient in .sops.yaml and the file re-keyed?)"
+  else
+    log "no secrets.sops.yaml for this node"
+  fi
+
+  # ---- run
+  PHASE=load
+  export ANSIBLE_CONFIG="$TOOLKIT_DIR/ai-node/ansible.cfg"
+  export ANSIBLE_NOCOLOR=1 ANSIBLE_FORCE_COLOR=0
+  # The two site files go to the play as ONE namespaced, !unsafe extra-var (tn_site), never as
+  # top-level variables: extra-vars beat role defaults, and the files may come from a commit nobody
+  # verified (warn mode). ai_node_assert then checks them against ai-node/schema/*.json.
+  find_python || fail_phase load "$EX_LOAD" "no python3 with PyYAML to prepare the site files for the playbook"
+  SITE_VARS="$(mktemp "$VAR/sitevars.XXXXXX")" || fail_phase load "$EX_LOAD" "could not create a temporary file in $VAR"
+  "$PY" "$TOOLKIT_DIR/ai-node/playbooks/site_vars.py" "$ndir/ai-node.yaml" "$ndir/desired.yaml" "$SITE_VARS" \
+    || fail_phase load "$EX_LOAD" "ai-node.yaml and desired.yaml must both be YAML mappings"
+  set -- -i 'localhost,' -c local "$playbook" \
+    -e "@$SITE_VARS" \
+    -e "tockmox_ai_node_id=$AI_NODE_ID" -e "tockmox_node_dir=$ndir" \
+    -e "tockmox_toolkit_dir=$TOOLKIT_DIR" -e "tockmox_converge_interval=$interval" \
+    -e "tockmox_admin_user=$ADMIN_USER" -e "tockmox_signing_mode=$SIGNING_EFFECTIVE"
+  [ "$CHECK_MODE" = 1 ] && set -- "$@" --check
+  [ "$DIFF_MODE" = 1 ] && set -- "$@" --diff
+  [ -n "$ANSIBLE_TAGS" ] && set -- "$@" --tags "$ANSIBLE_TAGS"
+  [ -n "$ANSIBLE_SKIP_TAGS" ] && set -- "$@" --skip-tags "$ANSIBLE_SKIP_TAGS"
+  [ -n "$ANSIBLE_VERBOSE" ] && set -- "$@" "$ANSIBLE_VERBOSE"
+  log "running the playbook"
+  local rc
+  "$ANSIBLE" "$@" 2>&1 | tee "$RUN_OUT"
+  rc=${PIPESTATUS[0]}
+  classify_run "$rc" "$RUN_OUT"
+  if [ "$EXIT_CODE" = 0 ]; then
+    APPLIED_COMMIT="$SITE_HEAD"
+    [ "$SIG_OK" = 1 ] && VERIFIED_COMMIT="$SITE_HEAD"
+  fi
+  finish
+}
+
+# Tests source this file for its functions.
+if [ "${TOCKMOX_SOURCE_ONLY:-}" = 1 ]; then
+  # shellcheck disable=SC2317  # sourced by the tests (return), executed otherwise (exit)
+  return 0 2>/dev/null || exit 0
+fi
+
+main "$@"

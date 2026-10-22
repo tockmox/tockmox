@@ -807,6 +807,8 @@
                         "mlx-lm",
                         "llama-server",
                         "vllm",
+                        "omlx",
+                        "vllm-mlx",
                         "sglang",
                         "lm-studio",
                         "nim",
@@ -832,6 +834,16 @@
                   "openai-compatible"
                 ],
                 "description": "The hardware profile the Tockmox UI knows (tockmox-ui/app/nodes.py CATALOG; tools/check-inference-nodes.sh holds the two equal). Absent means openai-compatible. The UI refuses any other value at start (lab F4, 2026-10-08: 'workstation' rendered and the UI went into CrashLoopBackOff)."
+              },
+              "management": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "Set enrolled: true for a node the admin has enrolled for GitOps convergence (tockmox-ai-node). Only an enrolled node has a convergence and a readiness on the Tockmox UI's Nodes page, and only enrolled nodes get the TockmoxAiNode* alerts. Leave it out for a node you only register (import-only, the default).",
+                "properties": {
+                  "enrolled": {
+                    "type": "boolean"
+                  }
+                }
               }
             }
           }
@@ -913,6 +925,41 @@
             "blackboxProber": {
               "type": "string",
               "pattern": "^([A-Za-z0-9.-]+:[0-9]{1,5})?$"
+            }
+          }
+        },
+        "aiNodes": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Fleet-wide facts about enrolled nodes. The Tockmox UI reads them (it fills the bootstrap command with siteRepo and toolkitRef, judges convergence against convergeIntervalSeconds) and so does the alert template.",
+          "properties": {
+            "siteRepo": {
+              "type": "string",
+              "description": "The site repository the nodes pull ai-nodes/ from, as the bootstrap's --site-repo takes it: an https:// URL or user@host:path."
+            },
+            "toolkitRef": {
+              "type": "string",
+              "description": "The Tockmox release tag the nodes pin (the bootstrap's --toolkit-ref)."
+            },
+            "signingMode": {
+              "enum": [
+                "warn",
+                "enforce"
+              ],
+              "description": "As ai-nodes/fleet.yaml says. Informational here."
+            },
+            "convergeIntervalSeconds": {
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 86400,
+              "description": "How often a node converges; must equal ai-nodes/fleet.yaml's defaults.convergeIntervalSeconds (900 there by default). The UI calls a node Healthy within twice it, and TockmoxAiNodeConvergeStale fires after three."
+            },
+            "adminCidrs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The administrator networks offered to a new node's ai-node.yaml as access.adminCidrs."
             }
           }
         }

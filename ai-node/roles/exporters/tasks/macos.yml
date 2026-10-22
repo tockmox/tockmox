@@ -1,0 +1,62 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# node_exporter (host metrics plus the textfile collector that carries the converge and facts
+# series) and macmon (Apple-silicon GPU, ANE and power telemetry, no sudo). Both run as the service
+# account from a LaunchDaemon, so they start at boot with nobody logged in.
+#
+# Until the firewall allowlist is verified they listen on 127.0.0.1 only.
+
+- name: Make sure the firewall verdict is known
+  ansible.builtin.include_role:
+    name: firewall
+    tasks_from: verify
+  when: firewall_anchor_verified is not defined
+
+- name: Install the exporters
+  ansible.builtin.include_role:
+    name: homebrew_baseline
+    tasks_from: ensure
+  vars:
+    homebrew_baseline_ensure: [node_exporter, macmon]
+
+- name: Where the exporters listen
+  ansible.builtin.set_fact:
+    exporters_host: "{{ '0.0.0.0' if (firewall_anchor_verified | bool) else '127.0.0.1' }}"
+
+- name: Run node_exporter
+  ansible.builtin.include_role:
+    name: launchd_service
+  vars:
+    launchd_service_label: "{{ tn_prefix }}.node-exporter"
+    launchd_service_user: "{{ tn_service_user }}"
+    launchd_service_firewalled: true
+    launchd_service_args:
+      - "{{ exporters_node_exporter_binary }}"
+      - "--web.listen-address={{ exporters_host }}:{{ tn_node_exporter_port }}"
+      - "--collector.textfile.directory={{ tn_root }}/textfile"
+    launchd_service_log: "{{ tn_root }}/log/node-exporter.log"
+    launchd_service_hold: "{{ tn_hold_engine_settings | bool }}"
+    launchd_service_env:
+      PATH: "{{ tn_brew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+# macmon has no documented bind-address option, so it is not started at all until the firewall
+# is verified; it then listens as its version dictates and the allowlist covers its port.
+- name: Run macmon
+  ansible.builtin.include_role:
+    name: launchd_service
+  vars:
+    launchd_service_label: "{{ tn_prefix }}.macmon"
+    launchd_service_user: "{{ tn_service_user }}"
+    launchd_service_firewalled: true
+    launchd_service_args:
+      - "{{ exporters_macmon_binary }}"
+      - serve
+      - -p
+      - "{{ tn_macmon_port }}"
+      - -i
+      - "{{ exporters_macmon_interval_ms }}"
+    launchd_service_log: "{{ tn_root }}/log/macmon.log"
+    launchd_service_hold: "{{ tn_hold_engine_settings | bool }}"
+    launchd_service_state: "{{ 'present' if (firewall_anchor_verified | bool) else 'absent' }}"
+    launchd_service_env:
+      PATH: "{{ tn_brew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"

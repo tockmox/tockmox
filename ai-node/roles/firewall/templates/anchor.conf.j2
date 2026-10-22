@@ -1,0 +1,29 @@
+{# SPDX-License-Identifier: Apache-2.0 -#}
+# Managed by tockmox-ai-node (role firewall), rendered from desired.yaml for node {{ tn_node_id }}.
+# Do not edit: the next converge replaces this file. Loaded into the sub-anchor
+# {{ firewall_anchor_name }} so that /etc/pf.conf is untouched.
+#
+# Order matters and every rule is quick. Loopback, then the three allow rules, then one block that
+# covers every port this toolkit manages, so a port in the managed set is closed to everyone the
+# allow rules do not name. A port outside the set is left to the host as it was.
+table <tockmox_admin> const { {{ tn_firewall.adminCidrs | sort | join(', ') }} }
+{% if tn_firewall.enginePorts | default([]) | length > 0 %}
+table <tockmox_engine_clients> const { {{ tn_firewall.engineAllowFrom | sort | join(', ') }} }
+{% endif %}
+table <tockmox_scrapers> const { {{ tn_firewall.exporterAllowFrom | sort | join(', ') }} }
+admin_ports = "{ {{ tn_firewall.adminPorts | map('int') | sort | join(', ') }} }"
+{% if tn_firewall.enginePorts | default([]) | length > 0 %}
+engine_ports = "{ {{ tn_firewall.enginePorts | map('int') | sort | join(', ') }} }"
+{% endif %}
+exporter_ports = "{ {{ tn_firewall.exporterPorts | map('int') | sort | join(', ') }} }"
+managed_ports = "{ {{ ((tn_firewall.adminPorts | default([])) + (tn_firewall.enginePorts | default([])) + (tn_firewall.exporterPorts | default([]))) | map('int') | unique | sort | join(', ') }} }"
+
+pass in quick on lo0 all
+# flags any: a session that was open before pf was enabled (the administrator running the
+# bootstrap) carries on instead of being reset at its next packet.
+pass in quick proto tcp from <tockmox_admin> to any port $admin_ports flags any keep state
+{% if tn_firewall.enginePorts | default([]) | length > 0 %}
+pass in quick proto tcp from <tockmox_engine_clients> to any port $engine_ports keep state
+{% endif %}
+pass in quick proto tcp from <tockmox_scrapers> to any port $exporter_ports keep state
+block return in quick proto tcp from any to any port $managed_ports

@@ -26,6 +26,8 @@ RUN apk upgrade --no-cache \
  && pip uninstall -y pip \
  && rm -rf /usr/local/lib/python3.*/ensurepip
 COPY tockmox-ui/app ./app
+# The ai-node schemas sit beside app/ so app/ai_nodes.py finds them at ../ai-node/schema (the renderer's check and the enroll flow).
+COPY ai-node/schema ./ai-node/schema
 COPY CHANGELOG.md ./notes/CHANGELOG.md
 # COPY keeps the files' modes from the build context, and a checkout on a synced or umask-077 filesystem is 0600:
 # the image then starts and cannot read its own code as 65534 (TM-0920 lab, 2026-10-07). Readable by all, owned by root.

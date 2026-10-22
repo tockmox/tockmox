@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# Changes nothing. Everything here is a reason to stop before a single task has touched the node,
+# so a bad file in git is a red converge and not a half-configured machine.
+
+# FIRST, before anything reads a value from them: the two site files are untrusted data (in signing
+# mode warn they may come from a commit nobody verified), so each is checked against its JSON schema
+# from this toolkit checkout. A key the schema does not list, at any depth, is refused; so is a
+# wrong type, a value outside its enum or pattern, and a missing required key. They reach the play
+# only as tn_site (see playbooks/site_vars.py), so an unknown key could not override a role
+# variable in any case; this refuses it by name instead of ignoring it.
+- name: Refuse site files that do not match their schemas
+  ansible.builtin.assert:
+    that:
+      - tn_site is defined
+      - tn_site is mapping
+      - tn_site.keys() | list | sort == ['ai_node', 'desired']
+      - ai_node_assert_ai_node_errors | length == 0
+      - ai_node_assert_desired_errors | length == 0
+    fail_msg: >-
+      The node's site files do not match their schemas, so nothing was changed.
+      ai-node.yaml: {{ (ai_node_assert_ai_node_errors[:12] | join('; ')) or 'ok' }}.
+      desired.yaml: {{ (ai_node_assert_desired_errors[:12] | join('; ')) or 'ok' }}.
+      Fix the files in git (render desired.yaml again after changing ai-node.yaml).
+    quiet: true
+  vars:
+    ai_node_assert_ai_node_errors: >-
+      {{ tn_ai_node | tockmox_schema_errors(lookup('ansible.builtin.file', tn_toolkit_dir ~ '/ai-node/schema/ai-node.v1.schema.json')) }}
+    ai_node_assert_desired_errors: >-
+      {{ tn_desired | tockmox_schema_errors(lookup('ansible.builtin.file', tn_toolkit_dir ~ '/ai-node/schema/desired.v1.schema.json')) }}
+
+# From here on the site data has the shape its schema allows. rootfacts, which runs in `always`
+# even after a failure, writes with root only when this is set.
+- name: Note that the site files passed their schemas
+  ansible.builtin.set_fact:
+    ai_node_assert_site_valid: true
+
+- name: Linux is not supported yet
+  ansible.builtin.fail:
+    msg: "{{ tn_linux_message }}"
+  when: tn_family == 'linux'
+
+- name: Run the macOS checks
+  ansible.builtin.include_tasks: macos.yml
+  when: tn_family == 'macos'

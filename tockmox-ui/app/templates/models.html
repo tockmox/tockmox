@@ -48,6 +48,7 @@
   {% for x in nexts %}
     <li>
       <p><code>{{ x.route.alias }}</code> serves <code>{{ x.route.model }}</code> on {{ x.route.node }}, against <code>{{ x.live.model if x.live else "nothing yet" }}</code> on <code>{{ x.alias }}</code>.</p>
+      {% if x.replacement %}<p>{{ badge("warning", "Re-placement") }} the same model, moving from {{ x.move.from_node }} to {{ x.move.to_node }}: decided by class <code>perf</code>, nothing is retired.</p>{% endif %}
       <p>{% if x.ready %}{{ badge("ok", "Ready to promote") }}{% elif x.counted %}{{ badge("warning", x.counted|length ~ " of " ~ x.required) }}{% else %}{{ badge("unknown", "0 of " ~ x.required) }}{% endif %} passing comparison(s){% if x.klass %} for class {{ x.klass }}{% endif %}.{% if not x.entry %} <span class="muted">Not in the catalog yet: add it before promoting.</span>{% endif %}</p>
       {% if x.notes %}<p class="muted">{{ x.notes|join("; ") }}</p>{% endif %}
       <p><a href="/models/evaluate?alias={{ x.route.alias|urlencode }}">Start an evaluation<span class="visually-hidden"> of {{ x.route.alias }}</span></a> · <a href="/models/promote?alias={{ x.route.alias|urlencode }}">{{ "Promote" if x.ready else "See the count" }}<span class="visually-hidden"> for {{ x.route.alias }}</span></a></p>
@@ -120,4 +121,5 @@
   {% if uncatalogued %}<p class="muted">Routed but not in the catalog, so nothing watches them: {% for m, rs in uncatalogued %}<code>{{ m }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
 </section>
 <p><a href="/models/profiles">Workload profiles and what each node keeps loaded</a></p>
+{% if nodes %}<p>Recommend: a shortlist per alias class for one node, to review and admit by hand.{% for n in nodes %} <a href="/models/recommend?node={{ n.id|urlencode }}">{{ n.name }}<span class="visually-hidden"> (recommendations)</span></a>{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
 {% endblock %}

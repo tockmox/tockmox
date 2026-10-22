@@ -1,0 +1,4 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# A Homebrew binary the simulation only needs to exist.
+exit 0

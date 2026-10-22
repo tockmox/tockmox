@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# Directories under the install root: path, owner (converge | service), mode.
+# models and its children belong to the service account; everything else to the converge account.
+#
+# log is converge-owned and NOT group-writable: root creates each service's log file in it and hands
+# the file to that service, so the service account cannot plant a link there for root to follow.
+# textfile and var/audit stay group-writable on purpose (the facts writer and the model helper write
+# into them as the service account); nothing running as root writes into either, and the helper
+# opens its audit file with O_NOFOLLOW.
+macos_accounts_tree:
+  - {path: "", owner: converge, mode: "0755"}
+  - {path: bin, owner: converge, mode: "0755"}
+  - {path: etc, owner: converge, mode: "0755"}
+  - {path: site, owner: converge, mode: "0755"}
+  - {path: toolkit, owner: converge, mode: "0755"}
+  - {path: engines, owner: converge, mode: "0755"}
+  - {path: secrets, owner: converge, mode: "0711"}
+  - {path: textfile, owner: converge, mode: "0775"}
+  - {path: log, owner: converge, mode: "0755"}
+  - {path: var, owner: converge, mode: "0755"}
+  - {path: var/audit, owner: converge, mode: "0775"}
+  - {path: var/rootfacts.d, owner: converge, mode: "0755"}
+  - {path: var/service-home, owner: service, mode: "0700"}
+  - {path: models, owner: service, mode: "0755"}
+  - {path: models/hf, owner: service, mode: "0755"}
+  - {path: models/ollama, owner: service, mode: "0755"}
+  - {path: models/gguf, owner: service, mode: "0755"}

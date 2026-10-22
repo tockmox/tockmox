@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# The Ollama daemon, from Homebrew, as a LaunchDaemon under the service account. The models it
+# serves are fetched and verified by model_sync (pulled by name and tag, checked against the manifest
+# digest the site pinned). Nothing is pre-pulled here and nothing is pruned here.
+
+- name: Make sure the firewall verdict is known
+  ansible.builtin.include_role:
+    name: firewall
+    tasks_from: verify
+  when: firewall_anchor_verified is not defined
+
+- name: Find the Ollama instance, if the node has one
+  ansible.builtin.set_fact:
+    engine_ollama_instances: "{{ tn_instances | selectattr('engine', 'equalto', 'ollama') | list }}"
+
+- name: Take the daemon away when no Ollama instance is wanted
+  when:
+    - engine_ollama_instances | length == 0
+    - tn_legacy is none
+  ansible.builtin.include_role:
+    name: launchd_service
+  vars:
+    launchd_service_label: "{{ tn_prefix }}.ollama"
+    launchd_service_state: absent
+
+- name: Run the Ollama daemon
+  when: engine_ollama_instances | length > 0
+  block:
+    - name: Check the site's environment does not restate the role's own keys
+      ansible.builtin.assert:
+        that:
+          - tn_ollama_env is mapping
+          - tn_ollama_env.keys() | list | intersect(engine_ollama_reserved_env) | length == 0
+        fail_msg: >-
+          engines.ollama.env sets {{ tn_ollama_env.keys() | list | intersect(engine_ollama_reserved_env) }}. Those come
+          from the instance port, the model store and the role; remove them from ai-node.yaml.
+        quiet: true
+
+    - name: Refuse to converge beside Ollama.app
+      ansible.builtin.stat:
+        path: /Applications/Ollama.app
+      register: engine_ollama_app
+
+    - name: Ollama.app must not be installed
+      ansible.builtin.assert:
+        that:
+          - not engine_ollama_app.stat.exists
+        fail_msg: >-
+          /Applications/Ollama.app exists. The desktop app starts its own server on the same port at
+          login and a command to restart the daemon then restarts the wrong process. Uninstall the app;
+          this node runs the Homebrew daemon.
+        quiet: true
+
+    - name: Install ollama
+      ansible.builtin.include_role:
+        name: homebrew_baseline
+        tasks_from: ensure
+      vars:
+        homebrew_baseline_ensure: [ollama]
+        homebrew_baseline_pin: [ollama]
+
+    - name: Run it
+      ansible.builtin.include_role:
+        name: launchd_service
+      vars:
+        launchd_service_label: "{{ tn_prefix }}.ollama"
+        launchd_service_user: "{{ tn_service_user }}"
+        launchd_service_firewalled: true
+        launchd_service_args: ["{{ engine_ollama_binary }}", serve]
+        launchd_service_log: "{{ tn_root }}/log/ollama.log"
+        launchd_service_hold: "{{ tn_hold_engine_settings | bool }}"
+        launchd_service_env: >-
+          {{ tn_ollama_env | combine({
+               'OLLAMA_HOST': ('0.0.0.0' if (firewall_anchor_verified | bool) else '127.0.0.1') ~ ':' ~ (engine_ollama_instances[0].port | string),
+               'OLLAMA_MODELS': tn_root ~ '/models/ollama',
+               'HOME': tn_root ~ '/var/service-home',
+               'PATH': tn_brew_prefix ~ '/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+             }) }}
+
+    - name: Find every process listening on the Ollama port
+      when: not ansible_check_mode
+      become: true
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -o pipefail
+          for pid in $(/usr/sbin/lsof -nP -t -iTCP:{{ engine_ollama_instances[0].port }} -sTCP:LISTEN); do
+            ps -o comm= -p "$pid"
+          done | sort -u
+      register: engine_ollama_owner
+      changed_when: false
+      check_mode: false
+      retries: 6
+      delay: 5
+      until: engine_ollama_owner.stdout_lines | length > 0
+
+    - name: The Homebrew daemon is the only listener
+      when: not ansible_check_mode
+      ansible.builtin.assert:
+        that:
+          - engine_ollama_owner.stdout_lines | length == 1
+          - engine_ollama_owner.stdout_lines[0] is match('^/opt/homebrew/')
+        fail_msg: >-
+          The listener(s) on port {{ engine_ollama_instances[0].port }} are {{ engine_ollama_owner.stdout_lines }}; expected exactly one
+          under /opt/homebrew/. Another Ollama is holding the port. Remove it; do not edit this check.
+        quiet: true

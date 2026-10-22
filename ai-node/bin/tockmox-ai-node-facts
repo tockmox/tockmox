@@ -1,0 +1,287 @@
+#!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# tockmox-ai-node-facts: write what this AI node IS and whether it is READY, as
+# a Prometheus textfile (<root>/textfile/facts.prom), every 60 s from launchd.
+#
+# UNPRIVILEGED. It runs as the service account and calls nothing that needs
+# root. Anything it cannot read is left out of the file, and a series that is
+# absent means UNKNOWN to everything downstream (never "ok"). Two inputs come
+# from the converger, which is root and writes them each run:
+#
+#   <root>/etc/facts.env            expectations: min OS version, FileVault posture, required
+#                                   wired limit, label prefix, converge interval, ports
+#   <root>/var/rootfacts.d/<name>   one line, 0 or 1, for facts only root can read; an
+#                                   old file (older than ROOTFACTS_MAX_AGE) is ignored
+#
+# Where each readiness check comes from (this is the answer to "readable
+# without root?"; the ones marked UNPROVEN were not run on macOS 27):
+#
+#   os_min_version          sw_vers                                      unprivileged
+#   filevault_posture       fdesetup status, else rootfacts.d/filevault  fdesetup status unprivileged: UNPROVEN
+#   remote_login            netstat -an listening on :22, else rootfact  unprivileged: UNPROVEN
+#   wired_limit             sysctl iogpu.wired_limit_mb                  unprivileged
+#   pf_anchor               rootfacts.d/pf_anchor ONLY (pfctl needs root)
+#   converge_loaded         plist on disk and a recent converge run      unprivileged
+#   spotlight_off           mdutil -s /                                  unprivileged: UNPROVEN
+#   autoinstall_off         defaults read /Library/Preferences/...       unprivileged (file is 0644)
+#   macmon_up               curl http://127.0.0.1:<macmon port>/metrics  unprivileged
+#   apple_account_signed_out rootfacts.d/apple_account_signed_out ONLY (reads other users' homes)
+#   os_build                sw_vers, only when os.expectedBuild is set   (extension; see README)
+#
+# Bash 3.2 and BSD userland only.
+
+set -uo pipefail
+
+SELF="${BASH_SOURCE[0]:-$0}"
+if [ -z "${TOCKMOX_ROOT:-}" ]; then
+  _bin_dir="$(cd "$(dirname "$SELF")" 2>/dev/null && pwd -P)"
+  case "$_bin_dir" in */bin) TOCKMOX_ROOT="$(dirname "$_bin_dir")" ;; *) TOCKMOX_ROOT=/opt/tockmox ;; esac
+fi
+ROOT="$TOCKMOX_ROOT"
+OUT="$ROOT/textfile/facts.prom"
+ENVF="$ROOT/etc/facts.env"
+ROOTFACTS="$ROOT/var/rootfacts.d"
+MODELS_TSV="$ROOT/var/models-present.tsv"
+
+# Defaults, overridden by facts.env.
+AI_NODE_ID=""
+MIN_VERSION=""
+FILEVAULT_POSTURE=""
+WIRED_LIMIT_MIB=""
+CONVERGE_LABEL=""
+CONVERGE_INTERVAL=900
+MACMON_PORT=""
+EXPECTED_BUILD=""
+LAUNCHD_DIR="${TOCKMOX_LAUNCHD_DIR:-/Library/LaunchDaemons}"
+ROOTFACTS_MAX_AGE="${TOCKMOX_ROOTFACTS_MAX_AGE:-3600}"
+
+now() { date +%s; }
+
+prom_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr '\n' ' '; }
+
+load_env() {
+  local k v
+  [ -r "$ENVF" ] || return 0
+  while IFS='=' read -r k v || [ -n "$k" ]; do
+    case "$k" in ''|'#'*) continue ;; esac
+    v="${v%\"}"; v="${v#\"}"
+    case "$k" in
+      AI_NODE_ID) AI_NODE_ID="$v" ;;
+      MIN_VERSION) MIN_VERSION="$v" ;;
+      FILEVAULT_POSTURE) FILEVAULT_POSTURE="$v" ;;
+      WIRED_LIMIT_MIB) WIRED_LIMIT_MIB="$v" ;;
+      CONVERGE_LABEL) CONVERGE_LABEL="$v" ;;
+      CONVERGE_INTERVAL) CONVERGE_INTERVAL="$v" ;;
+      MACMON_PORT) MACMON_PORT="$v" ;;
+      EXPECTED_BUILD) EXPECTED_BUILD="$v" ;;
+      ROOTFACTS_MAX_AGE) case "$v" in ''|*[!0-9]*) ;; *) ROOTFACTS_MAX_AGE="$v" ;; esac ;;
+    esac
+  done < "$ENVF"
+}
+
+version_ge() {
+  local a="$1" b="$2" i x y
+  for i in 1 2 3 4; do
+    x="$(printf '%s' "$a" | cut -d. -f"$i")"; y="$(printf '%s' "$b" | cut -d. -f"$i")"
+    x="${x//[!0-9]/}"; y="${y//[!0-9]/}"; x="${x:-0}"; y="${y:-0}"
+    [ "$x" -gt "$y" ] && return 0
+    [ "$x" -lt "$y" ] && return 1
+  done
+  return 0
+}
+
+# file_mtime FILE: epoch seconds. GNU stat (-c) first: BSD stat has no -c and fails at once, whereas
+# GNU "stat -f" is a different option (filesystem status) that succeeds and prints something else.
+file_mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
+
+# rootfact NAME: prints 0 or 1 when root wrote a fresh value; prints nothing otherwise.
+rootfact() {
+  local f="$ROOTFACTS/$1" m age v
+  [ -r "$f" ] || return 0
+  m="$(file_mtime "$f")"
+  case "$m" in ''|*[!0-9]*) return 0 ;; esac
+  age=$(( $(now) - m ))
+  [ "$age" -le "$ROOTFACTS_MAX_AGE" ] || return 0
+  v="$(head -1 "$f" | tr -d '[:space:]')"
+  case "$v" in 0|1) printf '%s\n' "$v" ;; esac
+}
+
+emit() { printf '%s\n' "$*" >> "$TMP"; }
+
+# readiness NAME VALUE: VALUE must be 0 or 1; anything else is skipped (unknown).
+readiness() {
+  case "$2" in
+    0|1) emit "tockmox_ai_node_readiness{ai_node=\"$IDL\",check=\"$1\"} $2" ;;
+  esac
+}
+
+gpu_cores() {
+  local c cache="$ROOT/var/gpu-cores"
+  if [ -r "$cache" ]; then cat "$cache"; return; fi
+  c="$(ioreg -rd1 -c AGXAccelerator 2>/dev/null | sed -n 's/.*"gpu-core-count" = \([0-9]*\).*/\1/p' | head -1)"
+  [ -n "$c" ] || c="$(system_profiler SPDisplaysDataType 2>/dev/null | sed -n 's/.*Total Number of Cores: \([0-9]*\).*/\1/p' | head -1)"
+  [ -n "$c" ] || return 0
+  printf '%s\n' "$c" > "$cache" 2>/dev/null || true
+  printf '%s\n' "$c"
+}
+
+main() {
+  load_env
+  mkdir -p "$ROOT/textfile" 2>/dev/null || exit 0
+  TMP="$(mktemp "$ROOT/textfile/facts.prom.XXXXXX")" || exit 0
+  trap 'rm -f "$TMP"' EXIT
+  IDL="$(prom_escape "${AI_NODE_ID:-unknown}")"
+
+  local chip mem_b mem_gib cores os_ver os_build arch
+  chip="$(sysctl -n machdep.cpu.brand_string 2>/dev/null)"
+  mem_b="$(sysctl -n hw.memsize 2>/dev/null)"
+  mem_gib=""
+  [ -n "$mem_b" ] && mem_gib=$(( mem_b / 1073741824 ))
+  cores="$(gpu_cores)"
+  os_ver="$(sw_vers -productVersion 2>/dev/null)"
+  os_build="$(sw_vers -buildVersion 2>/dev/null)"
+  arch="$(uname -m 2>/dev/null)"
+
+  emit '# HELP tockmox_ai_node_info What this AI node is.'
+  emit '# TYPE tockmox_ai_node_info gauge'
+  emit "tockmox_ai_node_info{ai_node=\"$IDL\",chip=\"$(prom_escape "$chip")\",memory_gib=\"$mem_gib\",gpu_cores=\"$cores\",os=\"macos\",os_version=\"$(prom_escape "$os_ver")\",os_build=\"$(prom_escape "$os_build")\",arch=\"$(prom_escape "$arch")\"} 1"
+
+  emit '# HELP tockmox_ai_node_readiness 1 when the check holds, 0 when it does not. Absent means unknown.'
+  emit '# TYPE tockmox_ai_node_readiness gauge'
+
+  # os_min_version
+  if [ -n "$MIN_VERSION" ] && [ -n "$os_ver" ]; then
+    if version_ge "$os_ver" "$MIN_VERSION"; then readiness os_min_version 1; else readiness os_min_version 0; fi
+  fi
+
+  # filevault_posture
+  local fv v
+  fv="$(fdesetup status 2>/dev/null | head -1)"
+  v=""
+  case "$fv" in
+    *"is Off"*) v=off ;;
+    *"is On"*) v=on ;;
+  esac
+  if [ -z "$v" ]; then
+    case "$(rootfact filevault_on)" in 1) v=on ;; 0) v=off ;; esac
+  fi
+  if [ -n "$v" ] && [ -n "$FILEVAULT_POSTURE" ]; then
+    case "$FILEVAULT_POSTURE:$v" in
+      off:off|on_ssh_unlock:on) readiness filevault_posture 1 ;;
+      *) readiness filevault_posture 0 ;;
+    esac
+  fi
+
+  # remote_login
+  if netstat -an -p tcp 2>/dev/null | grep -E '[.:]22[[:space:]].*LISTEN' >/dev/null; then
+    readiness remote_login 1
+  elif netstat -an -p tcp >/dev/null 2>&1; then
+    # netstat worked and shows nothing on :22. A second source guards against a
+    # netstat that hides launchd-held sockets.
+    v="$(rootfact remote_login)"
+    if [ -n "$v" ]; then readiness remote_login "$v"; else readiness remote_login 0; fi
+  else
+    readiness remote_login "$(rootfact remote_login)"
+  fi
+
+  # wired_limit
+  local wl
+  wl="$(sysctl -n iogpu.wired_limit_mb 2>/dev/null)"
+  if [ -n "$wl" ]; then
+    emit '# HELP tockmox_ai_node_wired_limit_mib The live iogpu.wired_limit_mb (0 = the OS default).'
+    emit '# TYPE tockmox_ai_node_wired_limit_mib gauge'
+    emit "tockmox_ai_node_wired_limit_mib{ai_node=\"$IDL\"} $wl"
+    if [ -n "$WIRED_LIMIT_MIB" ]; then
+      if [ "$wl" = "$WIRED_LIMIT_MIB" ]; then readiness wired_limit 1; else readiness wired_limit 0; fi
+    fi
+  fi
+
+  # pf_anchor: root only
+  readiness pf_anchor "$(rootfact pf_anchor)"
+
+  # converge_loaded: the plist is installed AND a run happened within three intervals.
+  if [ -n "$CONVERGE_LABEL" ]; then
+    local lr last
+    if [ ! -e "$LAUNCHD_DIR/$CONVERGE_LABEL.plist" ]; then
+      readiness converge_loaded 0
+    else
+      last="$(sed -n 's/.*"last_run_epoch": *\([0-9]*\).*/\1/p' "$ROOT/var/state.json" 2>/dev/null | head -1)"
+      if [ -n "$last" ]; then
+        lr=$(( $(now) - last ))
+        if [ "$lr" -le $(( CONVERGE_INTERVAL * 3 )) ]; then readiness converge_loaded 1; else readiness converge_loaded 0; fi
+      fi
+    fi
+  fi
+
+  # spotlight_off
+  local md
+  md="$(mdutil -s / 2>/dev/null)"
+  case "$md" in
+    *"Indexing disabled"*|*"Indexing and searching disabled"*) readiness spotlight_off 1 ;;
+    *"Indexing enabled"*) readiness spotlight_off 0 ;;
+  esac
+
+  # autoinstall_off: both keys must read 0; a missing key is unknown, not ok.
+  local swu a b
+  swu=/Library/Preferences/com.apple.SoftwareUpdate
+  a="$(defaults read "$swu" AutomaticallyInstallMacOSUpdates 2>/dev/null)"
+  b="$(defaults read "$swu" AutomaticDownload 2>/dev/null)"
+  if [ "$a" = 1 ] || [ "$b" = 1 ]; then readiness autoinstall_off 0
+  elif [ "$a" = 0 ] && [ "$b" = 0 ]; then readiness autoinstall_off 1; fi
+
+  # macmon_up
+  if [ -n "$MACMON_PORT" ]; then
+    if curl -fsS -m 3 "http://127.0.0.1:$MACMON_PORT/metrics" 2>/dev/null | grep -q '^macmon_\|^# HELP macmon_'; then
+      readiness macmon_up 1
+    else
+      readiness macmon_up 0
+    fi
+  fi
+
+  # apple_account_signed_out: root only
+  readiness apple_account_signed_out "$(rootfact apple_account_signed_out)"
+
+  # os_build: only when the site names an expected build.
+  if [ -n "$EXPECTED_BUILD" ] && [ -n "$os_build" ]; then
+    if [ "$os_build" = "$EXPECTED_BUILD" ]; then readiness os_build 1; else readiness os_build 0; fi
+  fi
+
+  # Models: what the converger recorded, checked against the disk now.
+  if [ -r "$MODELS_TSV" ]; then
+    local model rev path kb bytes seen=""
+    emit '# HELP tockmox_ai_node_model_present 1 for a pinned model revision that is on disk.'
+    emit '# TYPE tockmox_ai_node_model_present gauge'
+    local bytelines=""
+    while IFS="$(printf '\t')" read -r model rev _kind path; do
+      [ -n "$model" ] || continue
+      [ -e "$path" ] || continue
+      emit "tockmox_ai_node_model_present{ai_node=\"$IDL\",model=\"$(prom_escape "$model")\",revision=\"$(prom_escape "$rev")\"} 1"
+      if [ -d "$path" ]; then kb="$(du -skL "$path" 2>/dev/null | awk '{print $1}')"; else kb="$(du -sk "$path" 2>/dev/null | awk '{print $1}')"; fi
+      if [ -n "$kb" ]; then
+        bytes=$(( kb * 1024 ))
+        case " $seen " in *" $model "*) ;; *)
+          bytelines="${bytelines}tockmox_ai_node_model_bytes{ai_node=\"$IDL\",model=\"$(prom_escape "$model")\"} $bytes
+"
+          seen="$seen $model" ;;
+        esac
+      fi
+    done < "$MODELS_TSV"
+    if [ -n "$bytelines" ]; then
+      emit '# HELP tockmox_ai_node_model_bytes Size on disk of a pinned model.'
+      emit '# TYPE tockmox_ai_node_model_bytes gauge'
+      printf '%s' "$bytelines" >> "$TMP"
+    fi
+  fi
+
+  chmod 0644 "$TMP"
+  mv -f "$TMP" "$OUT"
+  trap - EXIT
+}
+
+if [ "${TOCKMOX_SOURCE_ONLY:-}" = 1 ]; then
+  # shellcheck disable=SC2317  # sourced by the tests (return), executed otherwise (exit)
+  return 0 2>/dev/null || exit 0
+fi
+
+main "$@"

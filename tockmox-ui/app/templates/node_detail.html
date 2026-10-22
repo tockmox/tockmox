@@ -12,12 +12,60 @@
   <dl class="facts">
     {% for k, f in node.hardware.items() %}<div><dt>{{ {"chip": "Chip", "memory_gib": "Memory (GiB)", "accelerator": "Accelerator"}[k] }}</dt><dd>{{ f.value }} <span class="muted">({{ f.source }})</span></dd></div>{% endfor %}
     {% if health and health.chip %}<div><dt>Chip (exporter)</dt><dd>{{ health.chip }} <span class="muted">(metrics)</span></dd></div>{% endif %}
+    {% if health and health.measured %}{% set m = health.measured %}
+    {% if m.chip %}<div><dt>Chip (node)</dt><dd>{{ m.chip }} <span class="muted">(measured)</span></dd></div>{% endif %}
+    {% if m.memory_gib %}<div><dt>Memory (node, GiB)</dt><dd>{{ m.memory_gib|round(1) }} <span class="muted">(measured)</span></dd></div>{% endif %}
+    {% if m.gpu_cores %}<div><dt>GPU cores</dt><dd>{{ m.gpu_cores }} <span class="muted">(measured)</span></dd></div>{% endif %}
+    {% if m.os_version %}<div><dt>macOS</dt><dd>{{ m.os_version }}{% if m.os_build %} ({{ m.os_build }}){% endif %} <span class="muted">(measured)</span></dd></div>{% endif %}
+    {% endif %}
     {% if health and health.memory %}<div><dt>Memory in use</dt><dd>{% if health.memory.used_gib is not none %}{{ health.memory.used_gib }} of {% endif %}{{ health.memory.total_gib }} GiB <span class="muted">(metrics)</span></dd></div>{% endif %}
     <div><dt>Routes need (estimate)</dt><dd>{% if fit.usable_gib %}{{ fit.placed_gib }} of {{ fit.usable_gib }} GiB{% else %}unknown{% endif %}</dd></div>
   </dl>
   <p class="muted">"Routes need" is what every route on this node would hold at its worst moment, from the routes as recorded, not from what is loaded now: {{ fit.basis }}. A route whose server is not running still counts, so this can read higher than the memory in use.</p>
   {% if fit.unknown_sizes %}<p class="muted">Not counted, size unknown: {{ fit.unknown_sizes|join(", ") }}.</p>{% endif %}
 </section>
+
+{% if node.enrolled %}
+<section class="panel" aria-labelledby="conv-h">
+  <h2 id="conv-h">Convergence</h2>
+  {% set c = health.convergence if health and health.convergence else none %}
+  {% if c %}
+  <p>{{ badge(c.state) }} {% if c.why %}<span>{{ c.why }}</span>{% endif %}</p>
+  {% if c.state != "unknown" or c.site_commit or c.exit_code is not none %}
+  <dl class="facts">
+    {% if c.last_run_ago %}<div><dt>Last run</dt><dd>{{ c.last_run_ago }}</dd></div>{% endif %}
+    {% if c.last_success_ago %}<div><dt>Last success</dt><dd>{{ c.last_success_ago }}</dd></div>{% endif %}
+    {% if c.exit_code is not none %}<div><dt>Exit code</dt><dd>{{ c.exit_code }}</dd></div>{% endif %}
+    {% if c.failing_phase %}<div><dt>Failing phase</dt><dd><code>{{ c.failing_phase }}</code></dd></div>{% endif %}
+    {% if c.site_commit_short %}<div><dt>Site commit</dt><dd><code title="{{ c.site_commit }}">{{ c.site_commit_short }}</code></dd></div>{% endif %}
+    {% if c.toolkit_ref %}<div><dt>Toolkit ref</dt><dd><code>{{ c.toolkit_ref }}</code></dd></div>{% endif %}
+    {% if c.signing_mode %}<div><dt>Signing mode</dt><dd>{{ c.signing_mode }}{% if c.signature_ok == 1 %} <span class="muted">(verified)</span>{% elif c.signature_ok == 0 %} <span class="muted">(not verified)</span>{% endif %}</dd></div>{% endif %}
+    {% if c.tasks %}<div><dt>Tasks, last run</dt><dd>{% for k, v in c.tasks.items() %}{{ k }} {{ v }}{% if not loop.last %}, {% endif %}{% endfor %}</dd></div>{% endif %}
+  </dl>
+  {% endif %}
+  {% else %}
+  <p>{{ badge("unknown") }} <span class="muted">{{ reading.reason or "no reading" }}</span></p>
+  {% endif %}
+  <p class="muted">Read from the node's own metrics through Prometheus; this page never contacts the node. Healthy means the last run exited 0 and the last success is within twice the {{ ((c.interval_s if c else none) or 900) // 60 }}-minute interval. A node that reports nothing is Unknown, never Healthy.</p>
+</section>
+
+<section class="panel" aria-labelledby="ready-h">
+  <h2 id="ready-h">Readiness</h2>
+  {% set r = health.readiness if health and health.readiness else none %}
+  {% if r %}
+  <p>{{ badge(r.state) }} {% if r.why %}<span class="muted">{{ r.why }}</span>{% endif %}</p>
+  {% if r["items"] %}
+  <ul class="checks">{% for i in r["items"] %}<li>{{ badge({"ok": "ok", "problem": "critical"}.get(i.state, "unknown"), {"ok": "OK", "problem": "Problem", "unknown": "Unknown"}[i.state]) }} <span>{{ i.label }}</span> <code class="muted">{{ i.check }}</code></li>{% endfor %}</ul>
+  {% endif %}
+  {% else %}
+  <p>{{ badge("unknown") }} <span class="muted">{{ reading.reason or "no reading" }}</span></p>
+  {% endif %}
+  <p class="muted">One line per check the node's facts exporter writes. A check the node does not report reads Unknown by name.</p>
+</section>
+{% elif node.type == "apple-silicon-mac" %}
+<p class="muted">Import-only: Tockmox records this node, probes it and reads its metrics, and changes nothing on it. To have it managed from your site repository instead, <a href="/nodes/add/apple-silicon-mac">enroll it</a>.</p>
+{% endif %}
+{% if health and health.reports_unenrolled %}<p class="warnbox">{{ badge("warning", "Check this") }} This node reports tockmox-ai-node metrics, but its record does not say <code>management: {enrolled: true}</code>, so none of them are judged here. Add that to the node in your site values if you meant to enrol it.</p>{% endif %}
 
 {% if health %}
 <section class="panel" aria-labelledby="checks-h">
@@ -62,7 +110,7 @@
     <p>{{ badge({"fits": "ok", "tight": "warning", "over": "critical"}.get(f.state, "unknown"), {"fits": "Fits", "tight": "Tight", "over": "Does not fit", "unknown": "Fit unknown"}[f.state]) }}
       {% if f.usable_gib and f.new_gib is not none %}Already planned {{ f.placed_gib }} GiB + this model {{ f.new_gib }} GiB ({{ preview.size_src }}) = {{ f.total|round(1) }} GiB, against {{ f.usable_gib }} GiB usable.{% else %}{{ f.basis }}.{% endif %}</p>
     {% set pe = node.endpoint(form.endpoint) %}{% if pe and not engines[pe.engine].pull.startswith("(") %}<p>On the node, first: <code>{{ engines[pe.engine].pull|replace("{model}", form.model) }}</code></p>{% endif %}
-    <p class="muted">An estimate of the weights only, with 10% for overhead. Context (KV cache) comes on top and grows with the prompt. It never blocks a placement.</p>
+    <p class="muted">An estimate of the weights only, read from the model's name. Context (KV cache) comes on top and grows with the prompt. It never blocks a placement.</p>
     <p>The gateway will get this route:</p>
 <pre tabindex="0"><code>{{ preview.entry }}</code></pre>
     <form method="post" action="/nodes/change">

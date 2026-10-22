@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: Apache-2.0
+# ai-nodes/example-mac/ai-node.yaml: the AUTHORED half of this AI node's desired state.
+# desired.yaml beside it is GENERATED (python -m app.ai_nodes render --write); never edit that one.
+# Which engines run and which models they serve is NOT here: it comes from site/values/models.yaml.
+# Quote "off" and "on": unquoted they are booleans to some YAML loaders, and the renderer refuses them.
+schema: tockmox.ai-node/v1
+aiNodeId: example-mac             # must equal this directory and an inferenceNodes node id
+os:
+  family: macos
+  minVersion: "26.2"              # lowest allowed OS version; a quoted string
+  expectedBuild: null             # optional, e.g. "26A434"; drift is reported, never enforced
+  filevault: "off"                # "off" | "on_ssh_unlock". off suits a lights-out machine on a UPS;
+                                  # on_ssh_unlock needs a person to unlock the disk over SSH after a restart
+power:
+  preventSleep: true
+  autoRestart: true               # 'Start up when power is connected' is a console checklist item
+access:
+  adminCidrs: [203.0.113.0/24]    # REQUIRED: port 22 (and 5900) are open to these; an empty list is refused
+  sshAllowUsers: [admin, tockmox] # replace 'admin' with the break-glass account
+  screenSharing: false            # true also opens and admits port 5900
+accounts:
+  converge: tockmox               # admin group, passwordless sudo, runs the converge daemon
+  service: inference              # hidden standard user that runs every engine and exporter
+labels:
+  prefix: com.tockmox.ai-node     # services are <prefix>.<service>; an adopted node keeps its old prefix
+paths:
+  root: /opt/tockmox
+gpu:
+  wiredLimitMiB: 229376           # 87.5% of 256 GiB, kept inside 131072..235929 (RAM/2 .. RAM - max(10 GiB, 10%))
+engines:                          # versions and arguments only
+  mlx-lm:
+    version: "0.32.2"
+    python: "3.12"
+    extraArgs: []
+  llama-server:
+    brewFormula: llama.cpp
+    extraArgs: []
+  ollama:
+    env: {}                       # e.g. OLLAMA_NUM_PARALLEL: "2" (quote the values)
+models:
+  retain:
+    keepUnreferencedDays: 14      # a model that leaves modelsPresent stays this long, then goes
+strip:                            # "off" = the toolkit turns the feature off on this headless machine
+  spotlight: "off"
+  timeMachine: "off"
+  analytics: "off"
+  siri: "off"
+updates:
+  autoInstall: false              # detect and alert; no enforcement without device management
+telemetry:                        # must agree with inferenceNodes.nodes[].metrics when that is set
+  nodeExporterPort: 9100
+  macmonPort: 9101
+legacy: null                      # adopt-in-place only: {root: ..., serviceUser: ..., holdEngineSettings: true}

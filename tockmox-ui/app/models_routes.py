@@ -11,6 +11,8 @@ eval gateway, and promoting it to the production gateway after enough passing co
   POST /models/promote
   GET  /models/promote-hosted?entry=  the same for a hosted candidate, choosing its alias and data-class tags
   POST /models/promote-hosted
+  GET  /models/recommend?node=<id>  per alias class, a shortlist for one node (AC-48.14). A hypothesis list: it admits nothing
+  POST /models/recommend/admit      the same change as /models/propose, for one row of that list ("Admit for evaluation")
   GET  /models/profiles             workload profiles -> a residency plan per node, and the engine configs
   POST /models/builds               read which build each node holds for the pinned models it serves (TM-0934),
                                     through the probe's fences; the result lives in memory and goes stale
@@ -25,6 +27,8 @@ from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 
 from . import models as ml
 from . import nodes as nm
+from . import recommend as rc
+from . import results as rs
 from .probe import Refused
 
 # A build check is a reading like any other: an old one does not vouch for today (AC-48.4's rule).
@@ -36,7 +40,9 @@ def _now():
 
 
 def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report, src_demand, app_version, src_verdicts=None,
-             prober=None):
+             prober=None, node_facts=None):
+    """node_facts(node_id) -> {"wired_limit_mib": float} from the node's live metrics, or {}. Optional. Without it the wired
+    limit is read from the newest capability-result/1 that recorded one, and failing that the node's planning fraction is used."""
     L = s.lifecycle
     inv = s.nodes.inventory
     builds = {"at": None, "readings": {}}       # the last build check, in memory only (the UI writes nothing)
@@ -71,11 +77,14 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         uncatalogued = [(m, rs) for m, rs in by_model.items()]
         return out, uncatalogued
 
-    def progress(alias, model, revision="", incumbent=None, vs=()):
-        counted, notes = ml.count_passes(vs, alias, model, revision, incumbent)
+    def progress(alias, model, revision="", incumbent=None, vs=(), move=None):
+        """What the verdicts say about moving `alias` to `model`. `move` ({from_node, to_node}) is set for a re-placement
+        (the same model on another node): only class perf records that name that move count."""
+        counted, notes = ml.count_passes(vs, alias, model, revision, incumbent, move)
         klass = counted[-1].klass if counted else ""
-        req = L.lifecycle.required_for(klass) if klass else L.lifecycle.required_passes
-        return {"counted": counted, "notes": notes, "klass": klass, "required": req, "ready": bool(counted) and len(counted) >= req}
+        req = L.lifecycle.required_for(klass, move is not None) if klass else L.lifecycle.required_for(ml.PERF, True) if move else L.lifecycle.required_passes
+        return {"counted": counted, "notes": notes, "klass": klass, "required": req, "ready": bool(counted) and len(counted) >= req,
+                "move": move}
 
     def next_rows(vs):
         out = []
@@ -85,8 +94,9 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
             alias = r.alias[: -len(ml.NEXT)]
             live = next((x for x in inv.routes if x.alias == alias), None)
             e = L.lifecycle.by_model(r.model)
-            out.append({"route": r, "alias": alias, "live": live, "entry": e,
-                        **progress(alias, r.model, e.source.revision if e else "", live.model if live else "", vs)})
+            move = {"from_node": live.node, "to_node": r.node} if ml.is_replacement(live, r) else None
+            out.append({"route": r, "alias": alias, "live": live, "entry": e, "replacement": move is not None,
+                        **progress(alias, r.model, e.source.revision if e else "", live.model if live else "", vs, move)})
         return out
 
     def probe_on():
@@ -141,7 +151,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
                       watch_on=L.watch_enabled, gate=ml.check_promotions(L.lifecycle, inv),
                       gate_notes=ml.promotion_notes(L.lifecycle), nexts=next_rows(vs), hosted=hosted,
                       verdict_reading=vr, lc=L.lifecycle, drift=drift, drift_findings=ml.drift_findings(drift),
-                      probe_on=probe_on(), checked_at=builds["at"])
+                      probe_on=probe_on(), checked_at=builds["at"], nodes=inv.nodes)
 
     def _change(request, u, new_lc, new_inv, notes, title, fmt, form_fields, path):
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -165,7 +175,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
                       eval_hosted=dump(new_lc.eval_gateway_entries), prod_hosted=dump(new_lc.production_gateway_entries),
                       model_list=nm.model_list_yaml(derived) if [r for r in nm.gateway_routes(derived) if r.alias in changed] else "",
                       eval_list=nm.model_list_yaml(derived, "eval") if nm.gateway_routes(derived, "eval") else "",
-                      form_fields=form_fields, values_file=s.nodes.values_file)
+                      form_fields=form_fields, values_file=s.nodes.values_file, path=path)
 
     @app.post("/models/propose")
     def models_propose(request: Request, csrf: str = Form(""), cid: str = Form(""), fmt: str = Form("")):
@@ -187,10 +197,105 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         return _change(request, u, new_lc, new_inv, notes, f"Admit {cand.model} for evaluation", fmt, {"cid": cid},
                        "/models/propose")
 
+    # ------------------------------------------------------------ recommend for a node (AC-48.14)
+
+    def rec_config():
+        """(Config, "") or (None, why). Read per request: the values file is the one source."""
+        try:
+            return rc.parse_config((L.raw or {}).get("recommend")), ""
+        except ml.LifecycleError as e:
+            return None, str(e)
+
+    def load_results():
+        """capability-result/1 twins from modelLifecycle.resultsDir (a mount of the site's evals/results), or ([], [])."""
+        d = str((L.raw or {}).get("resultsDir", "") or "")
+        if not d:
+            return [], []
+        return rs.load_dir(d, "", prefix=str((L.raw or {}).get("resultsRepoPath", "evals/results") or "evals/results"))
+
+    def facts_for(node_id):
+        if node_facts is None:
+            return {}
+        try:
+            f = node_facts(node_id)
+        except Exception:  # noqa: BLE001  a metrics read must not take the page down
+            return {}
+        return f if isinstance(f, dict) else {}
+
+    def recommend_for(node_id):
+        cfg, why = rec_config()
+        if cfg is None:
+            return None, None, why
+        rep = src_report.read()
+        results, bad = load_results()
+        rec = rc.recommend(node_id, L.lifecycle, inv, rep.data, cfg, results, facts_for(node_id))
+        if bad:
+            rec.notes.append(f"{len(bad)} measured-result file(s) could not be read and were ignored: " + "; ".join(bad[:3]))
+        return rec, cfg, ""
+
+    @app.get("/models/recommend")
+    def models_recommend(request: Request, node: str = ""):
+        """A shortlist per alias class for one node. Read only: it admits nothing and writes nothing. The buttons POST to
+        /models/recommend/admit, which renders the same change /models/propose does, for a person to review and commit."""
+        u, deny = admin(request)
+        if deny:
+            return deny
+        if not node:
+            first = inv.nodes[0].id if inv.nodes else ""
+            if not first:
+                return render(request, "error.html", u, status_code=404, title="No nodes", message="There are no inference nodes in the inventory to recommend for.")
+            return RedirectResponse(f"/models/recommend?node={first}", status_code=303)
+        if inv.node(node) is None:
+            return render(request, "error.html", u, status_code=404, title="Not found", message="There is no such node.")
+        rec, cfg, why = recommend_for(node)
+        if rec is None:
+            return bad(request, u, "modelLifecycle.recommend is not valid: " + why)
+        rep = src_report.read()
+        return render(request, "models_recommend.html", u, rec=rec, cfg=cfg, nodes=inv.nodes, reading=rep, node=inv.node(node),
+                      facts_on=node_facts is not None)
+
+    @app.post("/models/recommend/admit")
+    def models_recommend_admit(request: Request, csrf: str = Form(""), node: str = Form(""), cls: str = Form(""),
+                               model: str = Form(""), endpoint: str = Form(""), fmt: str = Form("")):
+        u, deny = admin(request)
+        if deny:
+            return deny
+        if not csrf_ok(u, csrf):
+            return PlainTextResponse("bad request", status_code=400)
+        if inv.node(node) is None:
+            return bad(request, u, "There is no such node.", 404)
+        rec, cfg, why = recommend_for(node)
+        if rec is None:
+            return bad(request, u, "modelLifecycle.recommend is not valid: " + why)
+        # Never trust the form for what to do: find the row again and take the action from it. A row that is no longer
+        # on the list (the report changed, an alias was taken) is refused rather than guessed at.
+        cr = next((c for c in rec.classes if c.spec.name == cls), None)
+        row = next((r for r in cr.rows if r.option.model == model), None) if cr else None
+        if row is None:
+            return bad(request, u, "That model is no longer on this node's list for that class. Open the list again.", 404)
+        if not row.admissible:
+            return bad(request, u, f"{model} cannot be admitted for {row.alias}: {row.why_not}")
+        eps = {e: g for e, g in row.endpoints}
+        ep = endpoint or (row.endpoints[0][0] if row.endpoints else "")
+        if ep not in eps:
+            return bad(request, u, f"{node} has no endpoint {ep!r} that can serve {model}.")
+        try:
+            add_lc, add_inv, notes = rc.build_change(row.action, row.alias, row.option, node, ep, cr.spec, L.lifecycle, inv,
+                                                     gateway_names())
+            new_lc = ml.merge(L.lifecycle, add_lc)
+            new_inv = nm.merge(inv, add_inv) if add_inv.routes else inv
+        except (ml.LifecycleError, nm.NodeError, ValueError) as e:
+            return bad(request, u, str(e))
+        notes = notes + ["this came from the Recommend list, which is a set of hypotheses: the evaluation decides, and promotion is a "
+                         "second approval"]
+        return _change(request, u, new_lc, new_inv, notes, f"Admit {model} for evaluation as {row.alias}{ml.NEXT}", fmt,
+                       {"node": node, "cls": cls, "model": model, "endpoint": ep}, "/models/recommend/admit")
+
     # ------------------------------------------------------------ start an evaluation (AC-48.13)
 
     def _eval_target(alias_next="", entry="", alias=""):
-        """(alias, candidate {model, revision}, incumbent {model, revision}) or a reason it cannot be evaluated."""
+        """((alias, candidate {model, revision}, incumbent {model, revision}, move), "") or (None, reason). `move` is
+        {from_node, to_node} for a re-placement (the same model on another node), else None."""
         if alias_next:
             r = next((x for x in inv.routes if x.alias == alias_next and alias_next.endswith(ml.NEXT)), None)
             if r is None:
@@ -198,17 +303,18 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
             base = alias_next[: -len(ml.NEXT)]
             live = next((x for x in inv.routes if x.alias == base), None)
             e, le = L.lifecycle.by_model(r.model), L.lifecycle.by_model(live.model) if live else None
+            move = {"from_node": live.node, "to_node": r.node} if ml.is_replacement(live, r) else None
             return (base, {"model": r.model, "revision": e.source.revision if e else ""},
-                    {"model": live.model, "revision": le.source.revision if le else ""} if live else {}), ""
+                    {"model": live.model, "revision": le.source.revision if le else ""} if live else {}, move), ""
         e = L.lifecycle.entry(entry)
         if e is None or e.source.kind != "hosted" or e.stage != "candidate":
             return None, "That is not a hosted candidate in the catalog."
         if not alias:
-            return ("", {"model": e.model}, {}), ""
+            return ("", {"model": e.model}, {}, None), ""
         live = next((x for x in inv.routes if x.alias == alias), None)
         gw = next((m for m in s.nodes.gateway_model_list if isinstance(m, dict) and m.get("model_name") == alias), None)
         inc = {"model": live.model} if live else ({"model": str((gw.get("litellm_params") or {}).get("model", ""))} if gw else {})
-        return (alias, {"model": e.model}, inc), ""
+        return (alias, {"model": e.model}, inc, None), ""
 
     def _classes():
         names = {c.name for p in L.lifecycle.profiles for c in p.classes} | set(L.lifecycle.required_by_class)
@@ -222,7 +328,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         t, why = _eval_target(alias, entry, target)
         if t is None:
             return render(request, "error.html", u, status_code=404, title="Not found", message=why)
-        return render(request, "models_evaluate.html", u, alias_next=alias, entry=entry, target=t[0], cand=t[1], inc=t[2],
+        return render(request, "models_evaluate.html", u, alias_next=alias, entry=entry, target=t[0], cand=t[1], inc=t[2], move=t[3],
                       classes=_classes(), lc=L.lifecycle, error=None, request_text="", commit_path="")
 
     @app.post("/models/evaluate")
@@ -238,17 +344,17 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
             return bad(request, u, why, 404)
         now = datetime.datetime.now(datetime.timezone.utc)
         try:
-            n = int(runs) if runs.strip() else L.lifecycle.required_for(klass) if ml.CLASS_RE.match(klass or "") else 0
-            req = ml.eval_request(t[0], klass, n, t[1], t[2], u.name, now.strftime("%Y-%m-%dT%H:%M:%SZ"))
+            n = int(runs) if runs.strip() else L.lifecycle.required_for(klass, t[3] is not None) if ml.CLASS_RE.match(klass or "") else 0
+            req = ml.eval_request(t[0], klass, n, t[1], t[2], u.name, now.strftime("%Y-%m-%dT%H:%M:%SZ"), t[3])
         except (ValueError, ml.LifecycleError) as e:
-            return render(request, "models_evaluate.html", u, alias_next=alias, entry=entry, target=t[0], cand=t[1], inc=t[2],
+            return render(request, "models_evaluate.html", u, alias_next=alias, entry=entry, target=t[0], cand=t[1], inc=t[2], move=t[3],
                           classes=_classes(), lc=L.lifecycle, error=str(e), request_text="", commit_path="", status_code=400)
         text = yaml.dump(req, Dumper=nm._Dumper, sort_keys=False)
         path = f"{s.lifecycle.requests_repo_path}/{now.strftime('%Y-%m-%d')}-{ml._slug(t[0])}.yaml"
         if fmt == "yaml":
             return Response(text, media_type="application/yaml",
                             headers={"Content-Disposition": 'attachment; filename="eval-request.yaml"'})
-        return render(request, "models_evaluate.html", u, alias_next=alias, entry=entry, target=t[0], cand=t[1], inc=t[2],
+        return render(request, "models_evaluate.html", u, alias_next=alias, entry=entry, target=t[0], cand=t[1], inc=t[2], move=t[3],
                       classes=_classes(), lc=L.lifecycle, error=None, request_text=text, commit_path=path,
                       form_fields={"alias": alias, "entry": entry, "target": target, "klass": klass, "runs": str(n)})
 

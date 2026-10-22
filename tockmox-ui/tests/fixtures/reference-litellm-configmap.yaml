@@ -1,0 +1,233 @@
+# The reference gateway route list (captured 2026-10-06, model_list only). Addresses replaced with
+# documentation addresses. A fixture for importing a live LiteLLM config into the inventory.
+# model ids, ports, providers and params are as captured. No secret values: api_key
+# entries are either an os.environ reference or the literal "local-no-auth".
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: ai
+data:
+  config.yaml: |
+    model_list:
+    - model_name: claude-sonnet-4-6
+      litellm_params:
+        model: anthropic/claude-sonnet-4-6
+        api_key: os.environ/ANTHROPIC_API_KEY
+        tags:
+        - open
+      model_info:
+        endpoint_tier: external
+    - model_name: claude-opus-4-8
+      litellm_params:
+        model: anthropic/claude-opus-4-8
+        api_key: os.environ/ANTHROPIC_API_KEY
+        tags:
+        - open
+      model_info:
+        endpoint_tier: external
+    - model_name: claude-opus-5
+      litellm_params:
+        model: anthropic/claude-opus-5
+        api_key: os.environ/ANTHROPIC_API_KEY
+        tags:
+        - open
+      model_info:
+        endpoint_tier: external
+    - model_name: claude-fable-5
+      litellm_params:
+        model: anthropic/claude-fable-5
+        api_key: os.environ/ANTHROPIC_API_KEY
+        tags:
+        - open
+      model_info:
+        endpoint_tier: external
+    - model_name: claude-haiku-4-5
+      litellm_params:
+        model: anthropic/claude-haiku-4-5-20251001
+        api_key: os.environ/ANTHROPIC_API_KEY
+        tags:
+        - open
+      model_info:
+        endpoint_tier: external
+    - model_name: gpt-4o
+      litellm_params:
+        model: openai/gpt-4o
+        api_key: os.environ/OPENAI_API_KEY
+        tags:
+        - open
+      model_info:
+        endpoint_tier: external
+    - model_name: gpt-4o-mini
+      litellm_params:
+        model: openai/gpt-4o-mini
+        api_key: os.environ/OPENAI_API_KEY
+        tags:
+        - open
+      model_info:
+        endpoint_tier: external
+    - model_name: local-fast
+      litellm_params:
+        model: openai/mlx-community/Qwen2.5-7B-Instruct-4bit
+        api_base: http://192.0.2.14:8080/v1
+        api_key: local-no-auth
+        tags:
+        - restricted
+        - internal
+        - open
+      model_info:
+        endpoint_tier: local
+    - model_name: local-medium
+      litellm_params:
+        model: openai/mlx-community/Qwen2.5-32B-Instruct-4bit
+        api_base: http://192.0.2.9:8080/v1
+        api_key: local-no-auth
+        tags:
+        - restricted
+        - internal
+        - open
+      model_info:
+        endpoint_tier: local
+    - model_name: local-embed
+      litellm_params:
+        model: ollama/nomic-embed-text
+        api_base: http://192.0.2.14:11434
+        tags:
+        - restricted
+        - internal
+        - open
+      model_info:
+        endpoint_tier: local
+    - model_name: ops-32b
+      litellm_params:
+        model: openai/mlx-community/Qwen2.5-32B-Instruct-4bit
+        api_base: http://192.0.2.9:8080/v1
+        api_key: local-no-auth
+        tags:
+        - restricted
+        - internal
+        - open
+      model_info:
+        endpoint_tier: local
+    - model_name: local-coder
+      litellm_params:
+        model: ollama_chat/qwen2.5-coder:32b
+        api_base: http://192.0.2.14:11434
+        num_ctx: 16384
+        tags:
+        - restricted
+        - internal
+        - open
+      model_info:
+        endpoint_tier: local
+    - model_name: local-phi4
+      litellm_params:
+        model: ollama_chat/phi4
+        api_base: http://192.0.2.14:11434
+        num_ctx: 16384
+        tags:
+        - restricted
+        - internal
+        - open
+      model_info:
+        endpoint_tier: local
+    - model_name: local-llama70b
+      litellm_params:
+        model: ollama_chat/llama3.1:70b
+        api_base: http://192.0.2.14:11434
+        num_ctx: 8192
+        tags:
+        - restricted
+        - internal
+        - open
+      model_info:
+        endpoint_tier: local
+    - model_name: ops-agent-30b
+      litellm_params:
+        model: ollama_chat/qwen3-coder:30b
+        api_base: http://192.0.2.9:11434
+        num_ctx: 16384
+        tags:
+        - restricted
+        - internal
+        - open
+      model_info:
+        endpoint_tier: local
+    - model_name: local-medium-next
+      litellm_params:
+        model: openai/mlx-community/Qwen3.8-27B-4bit
+        api_base: http://192.0.2.9:8082/v1
+        api_key: local-no-auth
+        tags:
+        - restricted
+        - internal
+        - open
+      model_info:
+        endpoint_tier: local
+    - model_name: local-agent
+      litellm_params:
+        model: openai/mlx-community/Qwen3.6-35B-A3B-4bit
+        api_base: http://192.0.2.9:8083/v1
+        api_key: local-no-auth
+        tags:
+        - restricted
+        - internal
+        - open
+      model_info:
+        endpoint_tier: local
+    - model_name: local-classify
+      litellm_params:
+        model: openai/mlx-community/gemma-4-26b-a4b-it-4bit
+        api_base: http://192.0.2.14:8082/v1
+        api_key: local-no-auth
+        tags:
+        - restricted
+        - internal
+        - open
+      model_info:
+        endpoint_tier: local
+    - model_name: local-fast-next
+      litellm_params:
+        model: openai/mlx-community/Qwen3.5-9B-MLX-4bit
+        api_base: http://192.0.2.14:8083/v1
+        api_key: local-no-auth
+        tags:
+        - restricted
+        - internal
+        - open
+      model_info:
+        endpoint_tier: local
+    - model_name: local-router
+      litellm_params:
+        model: openai/mlx-community/Qwen3.5-4B-MLX-4bit
+        api_base: http://192.0.2.14:8084/v1
+        api_key: local-no-auth
+        tags:
+        - restricted
+        - internal
+        - open
+      model_info:
+        endpoint_tier: local
+    - model_name: local-embed-next
+      litellm_params:
+        model: openai/Qwen3-Embedding-4B
+        api_base: http://192.0.2.14:8090/v1
+        api_key: local-no-auth
+        mode: embedding
+        tags:
+        - restricted
+        - internal
+        - open
+      model_info:
+        endpoint_tier: local
+    - model_name: local-rerank
+      litellm_params:
+        model: infinity/bge-reranker-v2-m3
+        api_base: http://192.0.2.14:8091
+        api_key: local-no-auth
+        tags:
+        - restricted
+        - internal
+        - open
+      model_info:
+        endpoint_tier: local

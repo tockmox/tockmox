@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# Homebrew is installed by bootstrap-node.sh, as the human administrator, because its installer
+# wants a person and a sudo password. This role asserts it is there and owned by the converge
+# account (Homebrew refuses to run as root), then keeps the baseline packages.
+#
+# No community.general collection: brew is driven through its own CLI, so the toolkit has no
+# Galaxy dependency to fetch on a node.
+
+- name: Look for Homebrew
+  ansible.builtin.stat:
+    path: "{{ tn_brew }}"
+  register: homebrew_baseline_brew
+
+- name: Refuse to go on without Homebrew
+  ansible.builtin.assert:
+    that:
+      - homebrew_baseline_brew.stat.exists
+    fail_msg: >-
+      Homebrew is not at {{ tn_brew }}. Run ai-node/bootstrap-node.sh as the human administrator; it
+      installs Homebrew and hands it to {{ tn_converge_user }}.
+    quiet: true
+
+- name: Install the baseline packages
+  ansible.builtin.include_tasks: ensure.yml
+  vars:
+    homebrew_baseline_ensure: "{{ homebrew_baseline_baseline }}"
+    homebrew_baseline_pin: []

@@ -1,0 +1,27 @@
+#!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# `hf download REPO --revision REV` writes a snapshot in the Hugging Face cache layout whose blobs are
+# named by the hash of their content, so the helper's verification has something real to check.
+[ "$1" = download ] || exit 0
+repo="$2"; rev=""
+shift 2
+while [ $# -gt 0 ]; do case "$1" in --revision) rev="$2"; shift 2 ;; *) shift ;; esac; done
+: "${HF_HOME:?HF_HOME is not set}"
+[ "${HF_HUB_OFFLINE:-0}" = 0 ] || { echo "hf: offline mode" >&2; exit 1; }
+exec python3 - "$HF_HOME" "$repo" "$rev" <<'PY'
+import hashlib, os, sys
+home, repo, rev = sys.argv[1:4]
+root = os.path.join(home, "hub", "models--" + repo.replace("/", "--"))
+blobs = os.path.join(root, "blobs"); snap = os.path.join(root, "snapshots", rev)
+os.makedirs(blobs, exist_ok=True); os.makedirs(snap, exist_ok=True)
+def put(name, data, lfs):
+    h = hashlib.sha256(data).hexdigest() if lfs else hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+    with open(os.path.join(blobs, h), "wb") as f: f.write(data)
+    link = os.path.join(snap, name)
+    if os.path.lexists(link): os.remove(link)
+    os.symlink("../../blobs/" + h, link)
+put("config.json", b'{"model_type": "sim"}\n', False)
+put("model.safetensors", os.urandom(4096), True)
+if "GGUF" in repo:
+    put(repo.split("/")[-1].replace("-GGUF", "") + "-Q4_K_M.gguf", os.urandom(2048), True)
+PY

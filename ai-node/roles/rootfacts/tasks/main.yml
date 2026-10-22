@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+- name: Linux is not supported yet
+  ansible.builtin.fail:
+    msg: "{{ tn_linux_message }}"
+  when: tn_family == 'linux'
+
+- name: Converge on macOS
+  ansible.builtin.include_tasks: macos.yml
+  when: tn_family == 'macos'

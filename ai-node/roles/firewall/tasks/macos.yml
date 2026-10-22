@@ -1,0 +1,286 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# The allowlist, as a sub-anchor of Apple's wildcard anchor.
+#
+#   - /etc/pf.conf is not edited. An OS update that resets it cannot open the ports.
+#   - The rules are loaded at boot by a LaunchDaemon, from a root-owned file.
+#   - The role refuses to load a rule set with no administrator network (a lockout) or one that
+#     admits /0.
+#   - A change to the rules that decide who may ADMINISTER the node is applied with a timed
+#     rollback armed. It is confirmed by the administrator's own session still being in the state
+#     table, or by `tockmox-ai-node-converge --confirm-firewall`. If neither happens the
+#     sub-anchor is put back to the last confirmed ruleset (or a minimal one) and the converge
+#     fails. The anchor is never flushed to empty.
+#   - Engines and exporters start through start-when-firewalled, which waits for a marker that
+#     pf-load.sh writes, for this boot, after it has seen the block rule in the live anchor. When a
+#     converge cannot verify the allowlist it removes the marker and stops every one of them
+#     before it fails.
+
+- name: Refuse a rule set that could lock every administrator out
+  ansible.builtin.assert:
+    that:
+      - tn_firewall.adminCidrs | default([]) | length > 0
+      - tn_firewall.adminCidrs | select('match', '.*/0$') | list | length == 0
+      - tn_firewall.adminPorts | default([]) | length > 0
+    fail_msg: >-
+      The firewall needs at least one administrator network (none may be /0) and at least one
+      administration port. It will not load a rule set that blocks port 22 for everyone.
+    quiet: true
+
+- name: Install the firewall scripts and the rule file
+  become: true
+  block:
+    - name: Create the root-owned script and state directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: wheel
+        mode: "0755"
+      loop:
+        - /usr/local/libexec
+        - "{{ firewall_libexec }}"
+        - "{{ firewall_state_dir }}"
+
+    - name: Install the load script
+      ansible.builtin.template:
+        src: pf-load.sh.j2
+        dest: "{{ firewall_libexec }}/pf-load.sh"
+        owner: root
+        group: wheel
+        mode: "0755"
+
+    - name: Install the rollback script
+      ansible.builtin.template:
+        src: pf-rollback.sh.j2
+        dest: "{{ firewall_libexec }}/pf-rollback.sh"
+        owner: root
+        group: wheel
+        mode: "0755"
+
+    - name: Install the wrapper every engine and exporter starts through
+      ansible.builtin.template:
+        src: start-when-firewalled.sh.j2
+        dest: "{{ firewall_start_wrapper }}"
+        owner: root
+        group: wheel
+        mode: "0755"
+
+    - name: Install the script that closes the listeners
+      ansible.builtin.template:
+        src: stop-listeners.sh.j2
+        dest: "{{ firewall_stop_listeners }}"
+        owner: root
+        group: wheel
+        mode: "0755"
+
+    - name: Install the confirmation helper
+      ansible.builtin.copy:
+        src: pf_evidence.py
+        dest: "{{ firewall_libexec }}/pf_evidence.py"
+        owner: root
+        group: wheel
+        mode: "0755"
+
+    - name: Render the allowlist and check pfctl accepts it
+      ansible.builtin.template:
+        src: anchor.conf.j2
+        dest: "{{ firewall_anchor_file }}"
+        owner: root
+        group: wheel
+        mode: "0644"
+        validate: "{{ firewall_pfctl }} -n -a {{ firewall_anchor_name }} -f %s"
+
+    - name: Render the minimal ruleset the rollback falls back to when nothing was ever confirmed
+      ansible.builtin.template:
+        src: minimal.conf.j2
+        dest: "{{ firewall_minimal_rules }}"
+        owner: root
+        group: wheel
+        mode: "0644"
+        validate: "{{ firewall_pfctl }} -n -a {{ firewall_anchor_name }} -f %s"
+
+- name: Write the boot job that loads the allowlist (the role loads it now, with a rollback)
+  ansible.builtin.include_role:
+    name: launchd_service
+  vars:
+    launchd_service_label: "{{ firewall_boot_label }}"
+    launchd_service_args: ["{{ firewall_libexec }}/pf-load.sh"]
+    launchd_service_keep_alive: false
+    launchd_service_activate: false
+    launchd_service_log: "{{ firewall_state_dir }}/pf.log"
+
+- name: Apply the allowlist; if it cannot be verified, close the listeners and fail
+  block:
+    - name: Read the state this load starts from
+      ansible.builtin.include_tasks: verify.yml
+
+    - name: Read the rollback markers and the administrator rule signature
+      become: true
+      check_mode: false
+      changed_when: false
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -u -o pipefail
+          d={{ firewall_state_dir | quote }}
+          rb=""
+          sig=""
+          if [ -r "$d/pf-rolled-back" ]; then rb="$(tr -d '[:space:]' < "$d/pf-rolled-back")"; fi
+          if [ -r "$d/pf-admin-sig" ]; then sig="$(tr -d '[:space:]' < "$d/pf-admin-sig")"; fi
+          printf 'rolled_back=%s\n' "$rb"
+          printf 'admin_sig=%s\n' "$sig"
+      register: firewall_markers
+
+    - name: Work out what has to happen
+      ansible.builtin.set_fact:
+        firewall_rolled_back_sha: "{{ (firewall_markers.stdout_lines | select('match', '^rolled_back=') | first | regex_replace('^rolled_back=', '')) }}"
+        firewall_stored_admin_sig: "{{ (firewall_markers.stdout_lines | select('match', '^admin_sig=') | first | regex_replace('^admin_sig=', '')) }}"
+        firewall_admin_sig: >-
+          {{ ((tn_firewall.adminCidrs | sort | join(',')) ~ '|' ~ (tn_firewall.adminPorts | map('int') | sort | join(','))) | hash('sha256') }}
+        firewall_needs_load: "{{ not (firewall_anchor_verified | bool) }}"
+
+    - name: Note whether the administrator rules change
+      ansible.builtin.set_fact:
+        firewall_admin_changed: "{{ firewall_needs_load | bool and (firewall_stored_admin_sig != firewall_admin_sig) }}"
+
+    - name: Refuse to apply rules that were already rolled back
+      ansible.builtin.fail:
+        msg: >-
+          These exact rules (sha256 {{ firewall_file_sha }}) were applied before and rolled back
+          because nobody confirmed them. They are not applied again. Change adminCidrs or the rules in
+          git, or, if you checked that administrators can reach the node, run
+          sudo -u {{ tn_converge_user }} {{ tn_root }}/bin/tockmox-ai-node-converge --confirm-firewall
+          and converge again.
+      when:
+        - firewall_needs_load | bool
+        - firewall_rolled_back_sha == firewall_file_sha
+
+    - name: Report that the allowlist would be loaded
+      ansible.builtin.command: /usr/bin/true
+      changed_when: true
+      check_mode: false
+      when:
+        - ansible_check_mode
+        - firewall_needs_load | bool
+
+    - name: Load the allowlist
+      when:
+        - not ansible_check_mode
+        - firewall_needs_load | bool
+      become: true
+      block:
+        - name: Arm the timed rollback (only when the administrator rules change)
+          when: firewall_admin_changed | bool
+          ansible.builtin.shell:
+            executable: /bin/bash
+            cmd: |
+              set -eu
+              d={{ firewall_state_dir | quote }}
+              label={{ firewall_rollback_label | quote }}
+              printf '%s\n' {{ firewall_file_sha | quote }} > "$d/pf-pending.sha256"
+              date +%s > "$d/pf-armed"
+              launchctl remove "$label" >/dev/null 2>&1 || true
+              launchctl submit -l "$label" -- /bin/sh {{ (firewall_libexec ~ '/pf-rollback.sh') | quote }} {{ firewall_rollback_minutes | int }}
+              launchctl list "$label" >/dev/null 2>&1
+          changed_when: true
+
+        - name: Load the sub-anchor and turn pf on
+          ansible.builtin.command: "{{ firewall_libexec }}/pf-load.sh"
+          changed_when: true
+
+        - name: Wait for the change to be confirmed
+          when: firewall_admin_changed | bool
+          ansible.builtin.shell:
+            executable: /bin/bash
+            cmd: |
+              set -u -o pipefail
+              d={{ firewall_state_dir | quote }}
+              i=0
+              while [ "$i" -lt {{ firewall_confirm_wait_seconds | int }} ]; do
+                if [ -e "$d/pf-confirm" ] && [ "$d/pf-confirm" -nt "$d/pf-armed" ]; then
+                  echo confirmed-by-administrator
+                  exit 0
+                fi
+                n=$({{ firewall_pfctl }} -ss 2>/dev/null | {{ ansible_playbook_python }} {{ (firewall_libexec ~ '/pf_evidence.py') | quote }} \
+                      --ports {{ tn_firewall.adminPorts | map('int') | sort | join(',') | quote }} \
+                      --cidrs {{ tn_firewall.adminCidrs | sort | join(',') | quote }})
+                if [ "${n:-0}" -gt 0 ]; then
+                  echo confirmed-by-session
+                  exit 0
+                fi
+                sleep 5
+                i=$((i + 5))
+              done
+              echo unconfirmed
+          register: firewall_confirmation
+          changed_when: false
+
+        - name: Fail loudly when nobody confirmed (the rollback stays armed)
+          when:
+            - firewall_admin_changed | bool
+            - firewall_confirmation.stdout | trim == 'unconfirmed'
+          ansible.builtin.fail:
+            msg: >-
+              The administrator firewall rules changed and no administrator session or confirmation was
+              seen within {{ firewall_confirm_wait_seconds }} seconds. The rollback stays armed and will put back
+              the last confirmed rules (or a minimal set that keeps the managed ports closed and port 22 open)
+              {{ firewall_rollback_minutes }} minutes after it was armed. If you can reach the node, run
+              sudo -u {{ tn_converge_user }} {{ tn_root }}/bin/tockmox-ai-node-converge --confirm-firewall
+
+        - name: Record the confirmed administrator rules and stand the rollback down
+          when: firewall_admin_changed | bool
+          ansible.builtin.shell:
+            executable: /bin/bash
+            cmd: |
+              set -u
+              d={{ firewall_state_dir | quote }}
+              printf '%s\n' {{ firewall_admin_sig | quote }} > "$d/pf-admin-sig"
+              rm -f "$d/pf-rolled-back"
+              launchctl remove {{ firewall_rollback_label | quote }} >/dev/null 2>&1 || true
+          changed_when: true
+
+    - name: Read the state after the load
+      ansible.builtin.include_tasks: verify.yml
+
+    - name: Refuse to go on unless the allowlist is loaded and in force
+      when: not ansible_check_mode or (firewall_anchor_verified | bool)
+      ansible.builtin.assert:
+        that:
+          - firewall_anchor_verified | bool
+        fail_msg: >-
+          The allowlist is not in force: pf enabled={{ firewall_pf_enabled }}, Apple's wildcard anchor in
+          the main ruleset={{ firewall_wildcard_present }}, rules in {{ firewall_anchor_name }}={{ firewall_live_rule_count }},
+          loaded file matches the rendered file={{ firewall_loaded_sha == firewall_file_sha }}.
+          Nothing else in this converge opens a port until it is: engines and exporters stay on 127.0.0.1.
+          If the wildcard anchor is missing from your /etc/pf.conf, restore Apple's stock file (it has
+          anchor "com.apple/*"), or add that one line yourself and see docs/administration/ai-nodes.md
+          for the documented fallback.
+        quiet: true
+
+    - name: Keep the boot marker current, and save the ruleset that is now confirmed and in force
+      when: not ansible_check_mode
+      become: true
+      block:
+        - name: Write the boot marker for this boot (only if the block rule is live)
+          ansible.builtin.command: "{{ firewall_libexec }}/pf-load.sh --mark"
+          changed_when: false
+
+        - name: Save the confirmed ruleset the rollback falls back to
+          ansible.builtin.copy:
+            src: "{{ firewall_anchor_file }}"
+            dest: "{{ firewall_last_confirmed }}"
+            remote_src: true
+            owner: root
+            group: wheel
+            mode: "0644"
+  rescue:
+    - name: Read the allowlist state again after the failure
+      ansible.builtin.include_tasks: verify.yml
+
+    - name: Close the listeners if the allowlist is not in force
+      ansible.builtin.include_tasks: close_listeners.yml
+
+    - name: Stop the converge
+      ansible.builtin.fail:
+        msg: "{{ ansible_failed_result.msg | default('the firewall role failed') }}"

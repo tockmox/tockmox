@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+engine_mlx_lm_dir: "{{ tn_root }}/engines/mlx-lm"
+engine_mlx_lm_venv: "{{ engine_mlx_lm_dir }}/venv"

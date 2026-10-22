@@ -1,0 +1,46 @@
+{# SPDX-License-Identifier: Apache-2.0 -#}
+#!/bin/sh
+# Managed by tockmox-ai-node (role firewall). The timed rollback for a change to who may
+# administer the node. Started by the firewall role with `launchctl submit`, it sleeps, then puts
+# the sub-anchor back unless the change was confirmed after it was armed.
+#
+# "Back" is the last ruleset an administrator confirmed (saved by the firewall role when it
+# applied it), or, when none was ever confirmed, a minimal set: loopback, the administration ports
+# from anywhere, and the managed engine and exporter ports blocked. The anchor is never flushed to
+# empty: an empty anchor would open every managed port at once.
+MINUTES="${1:-{{ firewall_rollback_minutes }}}"
+ANCHOR='{{ firewall_anchor_name }}'
+STATE='{{ firewall_state_dir }}'
+PFCTL='{{ firewall_pfctl }}'
+LAST='{{ firewall_last_confirmed }}'
+MINIMAL='{{ firewall_minimal_rules }}'
+LOADER='{{ firewall_libexec }}/pf-load.sh'
+PATH=/bin:/usr/bin:/sbin:/usr/sbin
+export PATH
+
+log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) pf-rollback: $*" >> "$STATE/pf.log"; }
+
+/bin/sleep $((MINUTES * 60))
+if [ -e "$STATE/pf-confirm" ] && [ "$STATE/pf-confirm" -nt "$STATE/pf-armed" ]; then
+  exit 0
+fi
+
+loaded=""
+if [ -s "$LAST" ] && "$PFCTL" -a "$ANCHOR" -f "$LAST" >/dev/null 2>&1; then
+  loaded="the last confirmed ruleset"
+elif [ -s "$MINIMAL" ] && "$PFCTL" -a "$ANCHOR" -f "$MINIMAL" >/dev/null 2>&1; then
+  loaded="the minimal ruleset"
+fi
+if [ -z "$loaded" ]; then
+  # Nothing could be loaded. Leave what is there: flushing would open the managed ports.
+  log "could not load the last confirmed or the minimal ruleset; the unconfirmed rules stay in force"
+  exit 1
+fi
+log "change not confirmed: loaded $loaded"
+if [ -r "$STATE/pf-pending.sha256" ]; then
+  /bin/cat "$STATE/pf-pending.sha256" > "$STATE/pf-rolled-back"
+fi
+/bin/rm -f "$STATE/pf-loaded.sha256"
+# The boot marker follows what is live: kept (for this boot) while a block rule is, otherwise gone.
+"$LOADER" --mark >/dev/null 2>&1 || log "no block rule is live after the rollback; engines will not start"
+exit 0

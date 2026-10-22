@@ -24,6 +24,9 @@
 #   - the default render has none of it;
 #   - one scrape target per node exporter and one blackbox target per engine endpoint, with the
 #     instance labels the Tockmox UI matches on;
+#   - the TockmoxAiNode* PrometheusRule renders for the nodes that say management.enrolled and ONLY for them: not
+#     in the default render, not with monitoring off, not when no node is enrolled, and its selector names the
+#     enrolled ids and its Stale threshold is three of aiNodes.convergeIntervalSeconds;
 #   - default models for new production keys render into the config and change its hash;
 #   - the model watcher and the Tockmox UI have exactly the authority and egress documented;
 #   - eighteen wrong configurations are refused with a sentence naming the cause;
@@ -47,6 +50,10 @@ FIX=ci/values-inference-nodes.yaml
 helm template t "$AI" -f "$BASE" > "$tmp/default.yaml"
 helm template t "$AI" -f "$BASE" -f "$FIX" > "$tmp/nodes.yaml"
 helm template t charts/tockmox-policy -f "$BASE" > "$tmp/policy.yaml"
+# the enrolment cases: nobody enrolled, monitoring off, and a 5-minute interval
+helm template t "$AI" -f "$BASE" -f "$FIX" --set 'inferenceNodes.nodes[0].management.enrolled=false' > "$tmp/unenrolled.yaml"
+helm template t "$AI" -f "$BASE" -f "$FIX" --set 'inferenceNodes.monitoring.enabled=false' > "$tmp/monoff.yaml"
+helm template t "$AI" -f "$BASE" -f "$FIX" --set 'inferenceNodes.aiNodes.convergeIntervalSeconds=300' > "$tmp/interval.yaml"
 
 refuse() {  # name, expected substring, extra helm args...
   local name="$1" want="$2"; shift 2
@@ -98,8 +105,15 @@ refuse "monitoring on for a node with no address" "has no address" \
   --set 'inferenceNodes.nodes[1].address=' || rc=1
 refuse "the blackbox prober written with a scheme" "blackboxProber" \
   --set 'inferenceNodes.monitoring.blackboxProber=http://bb:9115' || rc=1
+refuse "management.enrolled that is not a boolean" "enrolled" \
+  --set 'inferenceNodes.nodes[0].management.enrolled=yes' || rc=1
+refuse "an unknown key under management" "management" \
+  --set 'inferenceNodes.nodes[0].management.adopt=true' || rc=1
+refuse "an aiNodes interval under a minute" "convergeIntervalSeconds" \
+  --set 'inferenceNodes.aiNodes.convergeIntervalSeconds=5' || rc=1
 
-python3 - "$tmp/default.yaml" "$tmp/nodes.yaml" "$tmp/policy.yaml" tests/golden/inference-nodes.yaml "$FIX" <<'PY' || rc=1
+python3 - "$tmp/default.yaml" "$tmp/nodes.yaml" "$tmp/policy.yaml" tests/golden/inference-nodes.yaml "$FIX" \
+  "$tmp/unenrolled.yaml" "$tmp/monoff.yaml" "$tmp/interval.yaml" <<'PY' || rc=1
 import sys, yaml
 
 def docs(path):
@@ -118,7 +132,7 @@ default, nodes, policy = docs(sys.argv[1]), docs(sys.argv[2]), docs(sys.argv[3])
 golden, fix = yaml.safe_load(open(sys.argv[4])), yaml.safe_load(open(sys.argv[5]))
 
 check(not any(d["metadata"]["name"].startswith(("tockmox-litellm-config", "tockmox-litellm-eval", "tockmox-inference-nodes",
-                                                  "tockmox-model-watch", "tockmox-ui"))
+                                                  "tockmox-model-watch", "tockmox-ui", "tockmox-ai-nodes"))
               for d in default),
       "the default render carries no node-route config, no eval gateway and no node monitoring")
 
@@ -141,6 +155,28 @@ check(pr is not None and len(got_pr) == len(eps) and all(
 check(pr is not None and pr["apiVersion"] == "monitoring.coreos.com/v1", "Probe is monitoring.coreos.com/v1")
 check(pr is not None and "://" not in pr["spec"]["prober"]["url"] and pr["spec"]["module"] == "http_inference",
       "the probe goes through the exporters layer's blackbox, module http_inference (401 and HTTP/1.0 read as up)")
+
+# ENROLLED NODES (tockmox-ai-node): alerts for the nodes that say management.enrolled, and for no other
+unenrolled, monoff, interval = docs(sys.argv[6]), docs(sys.argv[7]), docs(sys.argv[8])
+rule = find(nodes, "PrometheusRule", "tockmox-ai-nodes")
+ids = [n["id"] for n in fix["inferenceNodes"]["nodes"] if (n.get("management") or {}).get("enrolled")]
+alerts = {r["alert"]: r for g in (rule or {}).get("spec", {}).get("groups", []) for r in g["rules"]}
+check(rule is not None and set(alerts) == {"TockmoxAiNodeConvergeFailing", "TockmoxAiNodeConvergeStale", "TockmoxAiNodeSignatureUnverified"},
+      "an enrolled node renders the three TockmoxAiNode* alerts")
+check(ids and all(f'ai_node=~"{"|".join(ids)}"' in r["expr"] for r in alerts.values()),
+      "... each selecting exactly the enrolled ids (a node nobody enrolled alerts no one)")
+check(rule is not None and (rule["metadata"].get("labels") or {}).get("tockmox.com/managed-by") == "tockmox",
+      "... and is labelled as Tockmox-authored (tools/check-alert-rules.sh lints it)")
+st = alerts.get("TockmoxAiNodeConvergeStale", {}).get("expr", "")
+check("> 2700" in st and 'absent(tockmox_ai_node_converge_last_success_timestamp_seconds{ai_node="studio"})' in st,
+      "... Stale is three intervals (3 x 900 s) and has an absent() arm per enrolled node (never reported is not healthy)")
+check("> 900" in next((r["expr"] for g in (find(interval, "PrometheusRule", "tockmox-ai-nodes") or {"spec": {"groups": []}})["spec"]["groups"]
+                       for r in g["rules"] if r["alert"] == "TockmoxAiNodeConvergeStale"), ""),
+      "... and the threshold follows inferenceNodes.aiNodes.convergeIntervalSeconds (300 s gives 900 s)")
+check(find(unenrolled, "PrometheusRule", "tockmox-ai-nodes") is None, "no node enrolled renders no TockmoxAiNode* rule")
+check(find(monoff, "PrometheusRule", "tockmox-ai-nodes") is None, "monitoring off renders no TockmoxAiNode* rule (nothing would scrape the series)")
+check(find(unenrolled, "ScrapeConfig", "tockmox-inference-nodes") is not None and find(unenrolled, "Probe", "tockmox-inference-nodes") is not None,
+      "... while a fleet with nobody enrolled still gets its scrape and probe")
 
 cm = find(nodes, "ConfigMap", "tockmox-litellm-config")
 check(cm is not None, "the production gateway config renders as tockmox-litellm-config")

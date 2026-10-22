@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# Install each formula in homebrew_baseline_ensure that is missing, then pin each in
+# homebrew_baseline_pin. A formula that is present is never touched: no brew update, no upgrade,
+# so a converge does not move a version under a serving engine. Runs as the converge account.
+
+- name: Read which formulae are installed
+  ansible.builtin.command:
+    argv: ["{{ tn_brew }}", "list", "--formula", "--versions", "{{ item }}"]
+  environment: "{{ homebrew_baseline_env }}"
+  loop: "{{ homebrew_baseline_ensure }}"
+  register: homebrew_baseline_have
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install the missing ones
+  ansible.builtin.command:
+    argv: ["{{ tn_brew }}", "install", "--formula", "{{ item.item }}"]
+  environment: "{{ homebrew_baseline_env }}"
+  loop: "{{ homebrew_baseline_have.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.rc != 0
+  changed_when: true
+
+- name: Read which formulae are pinned
+  ansible.builtin.command: "{{ tn_brew }} list --pinned"
+  environment: "{{ homebrew_baseline_env }}"
+  register: homebrew_baseline_pinned
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: homebrew_baseline_pin | length > 0
+
+- name: Pin the serving binaries so an upgrade elsewhere does not move them
+  ansible.builtin.command:
+    argv: ["{{ tn_brew }}", "pin", "{{ item }}"]
+  environment: "{{ homebrew_baseline_env }}"
+  loop: "{{ homebrew_baseline_pin }}"
+  when:
+    - homebrew_baseline_pin | length > 0
+    - item not in homebrew_baseline_pinned.stdout_lines
+  changed_when: true

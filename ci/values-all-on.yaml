@@ -76,3 +76,20 @@ tockmoxUi:
       issuer: https://auth.int.example.com/application/o/tockmox-ui
       clientId: tockmox-ui
       redirectUrl: https://tockmox.int.example.com/auth/callback
+
+# tockmox-ai: inference-node monitoring with one ENROLLED node, so the TockmoxAiNode*
+# PrometheusRule renders here and tools/check-alert-rules.sh lints and unit-tests it
+# (tests/rules/ai-node-converge.yaml). Documentation address (RFC 5737). The node has no
+# endpoints, so no Probe and no gateway route is rendered: only the exporter scrape and the rules.
+inferenceNodes:
+  monitoring:
+    enabled: true
+  aiNodes:
+    convergeIntervalSeconds: 900
+  nodes:
+    - id: enrolled-mac
+      type: apple-silicon-mac
+      address: 192.0.2.30
+      metrics: {node_exporter: 9100}
+      management: {enrolled: true}
+      endpoints: []

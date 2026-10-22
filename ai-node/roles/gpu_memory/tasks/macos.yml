@@ -1,0 +1,46 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# iogpu.wired_limit_mb, live and at boot. The sysctl does not survive a restart, so a boot job
+# sets it again. Bounds: at least half the RAM (below that the setting is pointless and a
+# typo), at most RAM minus max(10 GiB, 10% of RAM) (above that the OS starves and the machine
+# wedges under load).
+
+- name: Work out the bounds for this machine
+  ansible.builtin.set_fact:
+    gpu_memory_ram_mib: "{{ ansible_facts['memtotal_mb'] | int }}"
+    gpu_memory_low_mib: "{{ (ansible_facts['memtotal_mb'] | int) // 2 }}"
+    gpu_memory_high_mib: >-
+      {{ (ansible_facts['memtotal_mb'] | int)
+         - ([gpu_memory_os_reserve_floor_mib | int, (ansible_facts['memtotal_mb'] | int) // 10] | max) }}
+
+- name: Refuse a limit outside the bounds
+  ansible.builtin.assert:
+    that:
+      - tn_wired_limit_mib | int >= gpu_memory_low_mib | int
+      - tn_wired_limit_mib | int <= gpu_memory_high_mib | int
+    fail_msg: >-
+      gpu.wiredLimitMiB is {{ tn_wired_limit_mib }} on a machine with {{ gpu_memory_ram_mib }} MiB of RAM. It
+      must be between {{ gpu_memory_low_mib }} (half the RAM) and {{ gpu_memory_high_mib }} (RAM minus the larger of
+      10 GiB and 10%). The skeleton proposes 87.5% of RAM, clamped into that range.
+    quiet: true
+
+- name: Read the live limit
+  ansible.builtin.command: "{{ gpu_memory_sysctl }} -n iogpu.wired_limit_mb"
+  register: gpu_memory_live
+  changed_when: false
+  check_mode: false
+
+- name: Set the live limit
+  become: true
+  ansible.builtin.command: "{{ gpu_memory_sysctl }} -w iogpu.wired_limit_mb={{ tn_wired_limit_mib | int }}"
+  when: (gpu_memory_live.stdout | trim | int) != (tn_wired_limit_mib | int)
+  changed_when: true
+
+- name: Set the limit again at every boot
+  ansible.builtin.include_role:
+    name: launchd_service
+  vars:
+    launchd_service_label: "{{ tn_prefix }}.wired-limit"
+    launchd_service_args: ["{{ gpu_memory_sysctl }}", -w, "iogpu.wired_limit_mb={{ tn_wired_limit_mib | int }}"]
+    launchd_service_keep_alive: false
+    launchd_service_reload: false

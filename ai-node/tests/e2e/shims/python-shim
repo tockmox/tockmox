@@ -1,0 +1,21 @@
+#!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Stands in for /opt/homebrew/opt/python@X/bin/pythonX: `-m venv DIR` makes a venv whose pip
+# installs nothing but remembers the version, so the role's read-then-install logic runs.
+if [ "$1" = -m ] && [ "$2" = venv ]; then
+  d="$3"; mkdir -p "$d/bin"
+  printf '#!/bin/sh\nexit 0\n' > "$d/bin/python"
+  printf '#!/bin/sh\nexit 0\n' > "$d/bin/mlx_lm.server"
+  cat > "$d/bin/pip" <<'PIP'
+#!/bin/bash
+v="$(dirname "$0")/.mlx-lm-version"
+case "$1" in
+  show) [ -e "$v" ] && printf 'Name: mlx-lm\nVersion: %s\n' "$(cat "$v")" && exit 0; exit 1 ;;
+  install) for a in "$@"; do case "$a" in mlx-lm==*) echo "${a#mlx-lm==}" > "$v" ;; esac; done; echo "Successfully installed mlx-lm"; exit 0 ;;
+esac
+exit 0
+PIP
+  chmod +x "$d/bin/python" "$d/bin/mlx_lm.server" "$d/bin/pip"
+  exit 0
+fi
+exec python3 "$@"

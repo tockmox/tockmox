@@ -30,6 +30,20 @@ production:
     api_base: http://192.0.2.10:8090
   model_info:
     tockmox_node: studio
+- model_name: local-omlx
+  litellm_params:
+    model: openai/mlx-community/Example-9B-8bit
+    api_base: http://192.0.2.10:8000/v1
+    api_key: no-auth
+  model_info:
+    tockmox_node: studio
+- model_name: local-vllm-mlx
+  litellm_params:
+    model: openai/mlx-community/Example-3B-4bit
+    api_base: http://192.0.2.10:8001/v1
+    api_key: no-auth
+  model_info:
+    tockmox_node: studio
 - model_name: big-chat
   litellm_params:
     model: openai/example/Big-70B-AWQ
@@ -61,5 +75,5 @@ hostedCandidates:
   model_info:
     endpoint_tier: external
     tockmox_catalog: hosted-new
-routesHash: 226d93d23628a860
+routesHash: c1f9ece195b3d424
 gatewayConfigHash: 7280ea0f146304d3
