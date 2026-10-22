@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+engine_ollama_binary: "{{ tn_brew_prefix }}/bin/ollama"
+# Keys the role sets itself. A site that lists one in engines.ollama.env is told to remove it,
+# because two sources for one setting is how a node ends up bound where nobody meant.
+engine_ollama_reserved_env: [OLLAMA_HOST, OLLAMA_MODELS, HOME, PATH]

@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+model_sync_helper: "{{ role_path }}/files/tockmox_model_sync.py"
+model_sync_hf_binary: "{{ tn_brew_prefix }}/bin/hf"
+model_sync_ollama_binary: "{{ tn_brew_prefix }}/bin/ollama"
+# A Hugging Face token, if the site has one, is a secret named hf-token with owner service.
+model_sync_hf_token_file: "{{ tn_root }}/secrets/hf-token"
+model_sync_desired_file: "{{ tn_root }}/var/models-desired.json"
+model_sync_present_file: "{{ tn_root }}/var/models-present.tsv"

@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# No unattended OS updates. An update on a machine serving production traffic happens in a window
+# somebody chose, never on its own. Checking stays on (softwareupdate --list still reports);
+# only the automatic download and install switches are turned off. XProtect and Gatekeeper data
+# (ConfigDataInstall, CriticalUpdateInstall) are deliberately left flowing.
+#
+# On macOS 27 these preferences are not enforced without device management, so this role
+# DETECTS as much as it enforces: it records the build and the facts exporter reports a build
+# that differs from os.expectedBuild. Drift is reported, never enforced.
+
+- name: Read the SoftwareUpdate preferences
+  ansible.builtin.command: "/usr/bin/defaults read /Library/Preferences/com.apple.SoftwareUpdate {{ item }}"
+  become: true
+  loop: [AutomaticDownload, AutomaticallyInstallMacOSUpdates]
+  register: macos_updates_prefs
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Turn automatic download and install off
+  when:
+    - not tn_auto_install_updates | bool
+    - item.stdout | trim != '0'
+  become: true
+  ansible.builtin.command: "/usr/bin/defaults write /Library/Preferences/com.apple.SoftwareUpdate {{ item.item }} -bool false"
+  loop: "{{ macos_updates_prefs.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  changed_when: true
+
+- name: Read the OS build
+  ansible.builtin.command: /usr/bin/sw_vers -buildVersion
+  register: macos_updates_build
+  changed_when: false
+  check_mode: false
+
+- name: Record the OS version and build this run saw
+  ansible.builtin.copy:
+    dest: "{{ tn_root }}/var/os-build"
+    owner: "{{ tn_converge_user }}"
+    group: staff
+    mode: "0644"
+    content: |
+      version={{ ansible_facts['distribution_version'] }}
+      build={{ macos_updates_build.stdout | trim }}
+      expected_build={{ tn_expected_build }}

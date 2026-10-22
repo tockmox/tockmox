@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# What every node needs from Homebrew. bootstrap-node.sh installs these first; the role keeps
+# them. Engines and exporters install their own formulae through tasks_from: ensure.
+homebrew_baseline_baseline: [git, sops, age, gnupg]
+# Callers of tasks_from: ensure set these.
+homebrew_baseline_ensure: []
+homebrew_baseline_pin: []
+homebrew_baseline_env:
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_ANALYTICS: "1"
+  HOMEBREW_NO_ENV_HINTS: "1"
+  HOMEBREW_NO_INSTALL_UPGRADE: "1"

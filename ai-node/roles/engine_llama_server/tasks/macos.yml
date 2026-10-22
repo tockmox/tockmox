@@ -1,0 +1,141 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# llama-server (llama.cpp), one process per instance, from Homebrew, started from the GGUF in the
+# snapshot of the pinned revision. Weights arrive only through model_sync.
+#
+# Which file in the snapshot? The desired state names a repository and a revision, not a file. The
+# role takes the single *.gguf in the snapshot; for a split model it takes the first shard; failing
+# that it matches the model's own name. Anything else is refused with the list it found.
+
+- name: Make sure the firewall verdict is known
+  ansible.builtin.include_role:
+    name: firewall
+    tasks_from: verify
+  when: firewall_anchor_verified is not defined
+
+- name: Pick the llama-server instances
+  ansible.builtin.set_fact:
+    engine_llama_server_wanted: "{{ tn_instances | selectattr('engine', 'equalto', 'llama-server') | list }}"
+
+- name: Install and run the instances
+  when: engine_llama_server_wanted | length > 0
+  block:
+    - name: Install llama.cpp and keep its version where it is
+      ansible.builtin.include_role:
+        name: homebrew_baseline
+        tasks_from: ensure
+      vars:
+        homebrew_baseline_ensure: ["{{ tn_llama_formula }}"]
+        homebrew_baseline_pin: ["{{ tn_llama_formula }}"]
+
+    - name: Look for each instance's snapshot
+      ansible.builtin.find:
+        paths: "{{ item.models[0].artifact.ref | tockmox_hf_snapshot(item.models[0].artifact.revision, tn_root) }}"
+        patterns: ["*.gguf"]
+        recurse: true
+        file_type: any
+        follow: false
+      loop: "{{ engine_llama_server_wanted }}"
+      loop_control:
+        label: "{{ item.id }}"
+      register: engine_llama_server_found
+
+    - name: Choose the GGUF file for each instance
+      ansible.builtin.set_fact:
+        engine_llama_server_resolved: >-
+          {{ (engine_llama_server_resolved | default([])) + [ {
+               'id': item.item.id,
+               'port': item.item.port | int,
+               'label': item.item | tockmox_instance_label(tn_prefix),
+               'model': item.item.models[0].model,
+               'ctx': item.item.models[0].contextTokens,
+               'secret': item.item.auth.secretRef,
+               'candidates': item.files | map(attribute='path') | sort | list,
+               'file': (item.files | map(attribute='path') | list) | tockmox_choose_gguf(item.item.models[0].model),
+               'log': tn_root ~ '/log/' ~ (item.item | tockmox_instance_slug) ~ '.log'
+             } ] }}
+      loop: "{{ engine_llama_server_found.results }}"
+      loop_control:
+        label: "{{ item.item.id }}"
+
+    - name: A model that is not on disk, or not one file, is not started
+      when: not ansible_check_mode
+      ansible.builtin.assert:
+        that:
+          - item.file | length > 0
+        fail_msg: >-
+          Instance {{ item.id }} ({{ item.model }}): found {{ item.candidates | length }} GGUF file(s)
+          {{ item.candidates | map('basename') | list }} in the pinned snapshot, and could not choose one. If
+          there are none, model_sync has not fetched the model; run the whole converge. If there are
+          several unrelated files, the repository is not a single model.
+        quiet: true
+      loop: "{{ engine_llama_server_resolved }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+    - name: Look for each instance's API key file
+      ansible.builtin.stat:
+        path: "{{ tn_root }}/secrets/{{ item.secret }}"
+      loop: "{{ engine_llama_server_resolved | selectattr('secret') | list }}"
+      loop_control:
+        label: "{{ item.id }}"
+      register: engine_llama_server_keys
+
+    - name: A key that is named must exist
+      when: not ansible_check_mode
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+        fail_msg: >-
+          Instance {{ item.item.id }} names the secret '{{ item.item.secret }}' but {{ tn_root }}/secrets/{{ item.item.secret }}
+          does not exist. Add it to ai-nodes/{{ tn_node_id }}/secrets.sops.yaml with owner service.
+        quiet: true
+      loop: "{{ engine_llama_server_keys.results }}"
+      loop_control:
+        label: "{{ item.item.id }}"
+
+    - name: Run each instance
+      ansible.builtin.include_role:
+        name: launchd_service
+      vars:
+        launchd_service_label: "{{ item.label }}"
+        launchd_service_user: "{{ tn_service_user }}"
+        launchd_service_firewalled: true
+        launchd_service_args: >-
+          {{ [engine_llama_server_binary, '--model', item.file,
+              '--host', ('0.0.0.0' if (firewall_anchor_verified | bool) else '127.0.0.1'), '--port', item.port | string]
+             + (['--ctx-size', item.ctx | string] if item.ctx else [])
+             + (['--api-key-file', tn_root ~ '/secrets/' ~ item.secret] if item.secret else [])
+             + (tn_llama_extra_args | map('string') | list) }}
+        launchd_service_log: "{{ item.log }}"
+        launchd_service_hold: "{{ tn_hold_engine_settings | bool }}"
+        launchd_service_process_type: Interactive
+        launchd_service_env:
+          HOME: "{{ tn_root }}/var/service-home"
+          HF_HOME: "{{ tn_root }}/models/hf"
+          HF_HUB_OFFLINE: "1"
+          PATH: "{{ tn_brew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+      loop: "{{ engine_llama_server_resolved }}"
+      loop_control:
+        label: "{{ item.id }}"
+
+- name: Find daemons of instances that are no longer wanted
+  when: tn_legacy is none
+  become: true
+  ansible.builtin.find:
+    paths: "{{ tn_launchd_dir }}"
+    patterns: "{{ tn_prefix }}.llama-server*.plist"
+  register: engine_llama_server_existing
+
+- name: Take them away
+  when:
+    - tn_legacy is none
+    - (item.path | basename | regex_replace('\.plist$', '')) not in (engine_llama_server_resolved | default([]) | map(attribute='label') | list)
+  ansible.builtin.include_role:
+    name: launchd_service
+  vars:
+    launchd_service_label: "{{ item.path | basename | regex_replace('\\.plist$', '') }}"
+    launchd_service_state: absent
+  loop: "{{ engine_llama_server_existing.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path | basename }}"

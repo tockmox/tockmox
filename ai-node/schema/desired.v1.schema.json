@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tockmox/tockmox/blob/main/ai-node/schema/desired.v1.schema.json",
+  "title": "tockmox ai-node desired.yaml v1",
+  "description": "The GENERATED half of an AI node's desired state: ai-nodes/<id>/desired.yaml. `python -m app.ai_nodes render` derives it from the site's inferenceNodes and modelLifecycle blocks and the node's ai-node.yaml; it is committed, and CI fails when it is stale. It is never edited by hand: the converger applies it and reports its inputsSha256. Unknown keys are refused at every level.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "aiNodeId", "inputsSha256", "instances", "firewall", "exporters", "modelsPresent"],
+  "properties": {
+    "schema": {
+      "const": "tockmox.ai-node.desired/v1",
+      "description": "The file's schema id and version."
+    },
+    "aiNodeId": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "description": "The node's id; equal to ai-nodes/<id>/ and an inferenceNodes node id."
+    },
+    "inputsSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the canonical JSON (sorted keys, no whitespace) of the inputs this file was derived from: the node's inferenceNodes slice, its routes, the joined catalog entries, the gateway's CIDRs and the node's ai-node.yaml. The exact projection is in tockmox-ui/app/ai_nodes.py. The converger reports it as desired_sha256."
+    },
+    "instances": {
+      "type": "array",
+      "description": "One engine instance per inferenceNodes endpoint that has at least one route, sorted by id.",
+      "items": {"$ref": "#/$defs/instance"}
+    },
+    "firewall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enginePorts", "engineAllowFrom", "exporterPorts", "exporterAllowFrom", "adminCidrs", "adminPorts"],
+      "description": "The host firewall. Engine ports are open only to the gateway's source networks, exporter ports to the scrape networks, administration ports to the administrators.",
+      "properties": {
+        "enginePorts": {"$ref": "#/$defs/ports", "description": "Every instance's port."},
+        "engineAllowFrom": {"$ref": "#/$defs/cidrs", "description": "inferenceNodes.gateway.sourceCidrs. Never empty."},
+        "exporterPorts": {"$ref": "#/$defs/ports", "description": "node_exporter, and macmon on macOS."},
+        "exporterAllowFrom": {"$ref": "#/$defs/cidrs", "description": "inferenceNodes.gateway.scrapeCidrs when set, else engineAllowFrom. Never empty."},
+        "adminCidrs": {"$ref": "#/$defs/cidrs", "description": "ai-node.yaml access.adminCidrs. Never empty."},
+        "adminPorts": {"$ref": "#/$defs/ports", "description": "22, and 5900 when access.screenSharing is true."}
+      }
+    },
+    "exporters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_exporter"],
+      "description": "Telemetry exporters and their ports, from ai-node.yaml telemetry. macmon is macOS only.",
+      "properties": {
+        "node_exporter": {"$ref": "#/$defs/port"},
+        "macmon": {"$ref": "#/$defs/port"}
+      }
+    },
+    "modelsPresent": {
+      "type": "array",
+      "description": "Every catalog entry at stage candidate or promoted that is routed to this node, sorted by model. The model_sync role makes these present at their pinned revisions; a model that leaves this list is removed after models.retain.keepUnreferencedDays.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["model", "artifact", "stage"],
+        "properties": {
+          "model": {"type": "string", "minLength": 1, "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._:/@-]*$"},
+          "artifact": {"$ref": "#/$defs/artifact"},
+          "stage": {"enum": ["candidate", "promoted"]}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "ports": {"type": "array", "items": {"$ref": "#/$defs/port"}, "uniqueItems": true},
+    "cidrs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[0-9A-Fa-f:.]+/[0-9]{1,3}$"}
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "ref", "revision"],
+      "description": "Where a model's files come from, pinned. huggingface: a repository and a 40-hex commit. ollama: name:tag and the manifest digest. modelkit: an OCI reference and its digest.",
+      "properties": {
+        "kind": {"enum": ["huggingface", "ollama", "modelkit"]},
+        "ref": {"type": "string", "minLength": 1, "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._:/@-]*$"},
+        "revision": {"type": "string"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"const": "huggingface"}}},
+          "then": {"properties": {"revision": {"pattern": "^[0-9a-f]{40}$"}}}
+        },
+        {
+          "if": {"properties": {"kind": {"enum": ["ollama", "modelkit"]}}},
+          "then": {"properties": {"revision": {"pattern": "^sha256:[0-9a-f]{64}$"}}}
+        }
+      ]
+    },
+    "instance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "engine", "port", "models", "gateway", "auth"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,39}$", "description": "The inferenceNodes endpoint id."},
+        "engine": {"type": "string", "pattern": "^[a-z0-9-]+$", "description": "An engine id from the UI's ENGINES table (tockmox-ui/app/nodes.py)."},
+        "port": {"$ref": "#/$defs/port", "description": "The port in the endpoint's url."},
+        "models": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Every model routed to this endpoint, sorted by model. mlx-lm, llama-server and the other one-model-per-process engines have exactly one.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["model", "artifact", "aliases", "contextTokens"],
+            "properties": {
+              "model": {"type": "string", "minLength": 1, "pattern": "^(?!.*\\.\\.)[A-Za-z0-9][A-Za-z0-9._:/@-]*$", "description": "The upstream model id the engine knows (the route's model). No spaces, no \"..\"."},
+              "artifact": {"$ref": "#/$defs/artifact"},
+              "aliases": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1},
+                "description": "The gateway aliases routed to this model on this endpoint, sorted."
+              },
+              "contextTokens": {
+                "type": ["integer", "null"],
+                "minimum": 1,
+                "description": "The context length, from the route's params.max_input_tokens or params.num_ctx (the largest across aliases); null when none is set."
+              }
+            }
+          }
+        },
+        "gateway": {
+          "enum": ["production", "eval"],
+          "description": "eval when every alias on the endpoint ends in -next (a candidate, reachable only through the eval gateway); production otherwise. A mixed endpoint is refused by the renderer."
+        },
+        "auth": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["secretRef"],
+          "properties": {
+            "secretRef": {"type": ["string", "null"], "description": "The endpoint's auth.secretRef (the NAME of a secret, never its value); null when the engine takes no token."}
+          }
+        }
+      }
+    }
+  }
+}

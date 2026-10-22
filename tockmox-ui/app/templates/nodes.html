@@ -20,6 +20,7 @@
     {% if h and h.why %}<p class="muted">{{ h.why }}</p>{% elif not h %}<p class="muted">{{ reading.reason or "no reading" }}</p>{% endif %}
     <dl class="facts">
       <div><dt>Memory</dt><dd>{% if h and h.memory %}{% if h.memory.used_gib is not none %}{{ h.memory.used_gib }} of {% endif %}{{ h.memory.total_gib }} GiB <span class="muted">(exporter)</span>{% elif n.memory_gib() %}{{ n.memory_gib()|round(1) }} GiB <span class="muted">({{ n.hardware.memory_gib.source }})</span>{% else %}<span class="muted">not recorded</span>{% endif %}</dd></div>
+      {% if n.enrolled %}<div><dt>Convergence</dt><dd>{{ badge(h.convergence.state if h and h.convergence else "unknown") }}</dd></div>{% endif %}
       <div><dt>Engines</dt><dd>{{ n.endpoints|length }}</dd></div>
       <div><dt>Routes</dt><dd>{{ row.routes|length }}</dd></div>
       <div><dt>Routes need</dt><dd>{% if row.fit.usable_gib %}{{ row.fit.placed_gib }} of {{ row.fit.usable_gib }} GiB{% if row.fit.unknown_sizes %} <span class="muted">+ {{ row.fit.unknown_sizes|length }} unsized</span>{% endif %}{% else %}<span class="muted">unknown</span>{% endif %}</dd></div>

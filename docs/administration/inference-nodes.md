@@ -132,6 +132,34 @@ inferenceNodes:
 - **Each derived entry carries `model_info.tockmox_node`**, so the gateway's own
   metrics and logs say which machine served a request.
 
+### Enrolling a node for convergence
+
+A node is **import-only** by default: you stand it up, Tockmox reads it. To have
+it converged from your own git by `tockmox-ai-node`, mark it enrolled, and say
+once, for the fleet, where the site repository is:
+
+```yaml
+inferenceNodes:
+  aiNodes:
+    siteRepo: git@git.example.com:team/site.git   # where ai-nodes/<id>/ai-node.yaml lives
+    toolkitRef: v0.1.0                            # the toolkit tag the nodes are pinned to
+    signingMode: warn                             # warn | enforce
+    convergeIntervalSeconds: 900                  # 60 to 86400; default 900
+    adminCidrs: [192.0.2.0/24]                    # who may reach SSH and the console
+  nodes:
+    - id: studio
+      type: apple-silicon-mac
+      management: {enrolled: true}              # the only key; a boolean
+```
+
+The [UI](tockmox-ui.md) writes `management` for you when you use "Enroll for
+GitOps" on the add-node page. The site repository and the toolkit ref come only
+from `aiNodes`, never from a link, so a crafted link cannot point a node at
+someone else's repository. How the toolkit works, and what it converges, is in
+[AI nodes](ai-nodes.md). The render refuses a `management` that is not
+`{enrolled: <boolean>}`, a `convergeIntervalSeconds` outside 60 to 86400, and
+any other key under either.
+
 **Node types:** `apple-silicon-mac`, `nvidia-dgx-spark`, `nvidia-gpu-linux`,
 `amd-strix-halo`, `openai-compatible`. Other hardware types are added on
 demand. The type is the hardware
@@ -140,10 +168,23 @@ it is `openai-compatible`, the generic profile. Any other value is refused by
 the render: the UI refuses it at start, and before 0.8.0's lab rehearsal the
 chart rendered it and the UI went into CrashLoopBackOff on `workstation`.
 
-**Engines:** `ollama`, `mlx-lm`, `llama-server`, `vllm`, `sglang`, `lm-studio`,
-`nim`, `tgi`, `exo`, `openai-compatible`. Use `openai-compatible` for an engine
-that is not listed and serves the OpenAI API; the render refuses any other name,
-for the same reason as the type.
+**Engines:** `ollama`, `mlx-lm`, `omlx`, `vllm-mlx`, `llama-server`, `vllm`,
+`sglang`, `lm-studio`, `nim`, `tgi`, `exo`, `openai-compatible`. Use
+`openai-compatible` for an engine that is not listed and serves the OpenAI API;
+the render refuses any other name, for the same reason as the type.
+
+- **`vllm`** is the id for both vLLM on a CUDA machine and vllm-metal on an
+  Apple silicon Mac. They serve the same API, so one id covers both.
+- **`omlx`** is Apple silicon only. It swaps models in and out of memory, least
+  recently used first, so it is on-demand: the first request for a model that is
+  not loaded waits for it. The [UI](tockmox-ui.md) shows it as swappable, not
+  resident. It refuses to listen beyond loopback without an API key, and it
+  exposes no Prometheus metrics of its own.
+- **`vllm-mlx`** is a separate project from vllm-metal, and it keeps its model
+  resident. Its default port is the same as oMLX's (8000), so give each a port
+  of its own when both run on one Mac.
+
+None of the three serves a rerank API through the gateway.
 
 **The gateways need a path to the node.** The AI namespace is default-deny for
 egress, so each node's address and engine ports go in the policy layer's
@@ -291,6 +332,56 @@ You still install the exporters on the node and open their ports to the
 cluster in the node's firewall; [external integrations](external-integrations.md)
 has the steps.
 
+### What an enrolled node reports
+
+For a node marked enrolled, the [UI](tockmox-ui.md) also reads what
+`tockmox-ai-node` pushes, matching the `ai_node` label to the node id:
+
+| Measurement | Series | Reads as |
+| --- | --- | --- |
+| Convergence | `tockmox_ai_node_converge_*` | Healthy, Needs a look, Problem, or Unknown |
+| Readiness | `tockmox_ai_node_readiness{check}` | one line per check: ok, problem or unknown |
+| Hardware | `tockmox_ai_node_info` | chip, memory, GPU cores, OS; shown with source `measured` |
+
+- **Healthy** is a converge that succeeded within two intervals (default 900
+  seconds) and exited 0.
+- **Needs a look** is a success older than two intervals; or a signature that
+  did not verify while signing is in `warn` mode; or a node that keeps
+  reporting changes on every run while its site commit stays the same, which
+  means something on the node undoes what the converge does.
+- **Problem** is a non-zero exit, which names the phase that failed, or no
+  success for three intervals.
+- **Unknown** is no converge series at all: "this node has not reported a
+  converge". A node you enrolled and that has never reported is never shown as
+  healthy.
+
+The "keeps reporting changes" test is an approximation. It looks back three
+intervals and compares the changed-task count and the site commit across the
+runs in that window. It cannot see runs further apart than that, and the first
+runs after enrolment, which really do change things, can raise it once.
+
+An import-only node shows no convergence row. If one starts reporting
+`tockmox_ai_node_*` series anyway, its page says so and suggests enrolling it.
+
+The measured hardware facts take precedence over a preset's, and the existing
+note about a disagreement of more than 1 GiB between the recorded and the
+measured memory covers them.
+
+### Alerts
+
+With monitoring on and at least one node enrolled, the chart also renders a
+PrometheusRule, `tockmox-ai-nodes`, from the same block as the scrape and probe
+objects. It is not rendered when no node is enrolled.
+
+| Alert | Fires when | Severity |
+| --- | --- | --- |
+| `TockmoxAiNodeConvergeFailing` | the last converge exited non-zero for 30 minutes | critical |
+| `TockmoxAiNodeConvergeStale` | no success for three intervals, or an enrolled node has never reported | critical |
+| `TockmoxAiNodeSignatureUnverified` | `signature_ok` is 0 for an hour | warning |
+
+The rules name the enrolled node ids, so a stray node that reports is silent,
+and the interval they use follows `aiNodes.convergeIntervalSeconds`.
+
 ## Candidate routes and the eval gateway
 
 A route whose alias ends in `-next` is a **candidate**: a model being compared
@@ -301,10 +392,19 @@ nowhere.
 
 ## What it does not do
 
-The chart does not contact a node; Prometheus does, when monitoring is on. It does not install engines, pull models,
-check that the model exists on the node, or manage the node's operating system
-or firewall. A typo in a model id renders cleanly and fails at the first
-request, as a hand-written entry would.
+The chart does not contact a node; Prometheus does, when monitoring is on. It
+does not check that the model exists on the node. A typo in a model id renders
+cleanly and fails at the first request, as a hand-written entry would.
+
+For a node you have not enrolled, the chart and the UI do nothing to the machine
+either: they do not install engines, pull models, or manage its operating system
+or firewall. Import-only nodes are unchanged, and that remains a first-class
+way to use them.
+
+With tockmox-ai-node enrolled, Tockmox converges a node's engines, firewall, memory ceiling and model store from the admin's own git, for nodes the admin enrolled, and nothing else; import-only nodes are unchanged.
+
+The UI still writes nothing and holds no credential. Enrolling is a change you
+commit: the UI generates it, and the node pulls from your repository.
 
 <!-- tockmox:footer:begin -->
 

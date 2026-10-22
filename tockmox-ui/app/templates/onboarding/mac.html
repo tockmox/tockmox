@@ -1,11 +1,69 @@
 {% include "onboarding/_sources.html" %}
 {%- set port = eng.port -%}
+<p>Two ways to set up this Mac. Enrolling hands the node's engines, firewall, memory ceiling and model store to a converger that pulls them from your own site repository, so a rebuilt Mac comes back the same. Managing it yourself is the list further down; it is complete on its own and is the right choice for a Mac you want to keep entirely by hand. A node you register without enrolling stays exactly as it is today.</p>
+
+<section class="enroll" aria-labelledby="enroll-h">
+  <h3 id="enroll-h">Enroll for GitOps (recommended)</h3>
+  <p>The only manual part is the console. After Setup Assistant the first thing you run on the Mac is one command, and everything after that is a commit to your site repository.</p>
+  <h4>1. At the console, once</h4>
+  <ol>
+    <li>Run Setup Assistant without an Apple Account: skip the sign-in. An Apple Account signed in on a server Mac can turn on features this setup turns off, and the readiness panel checks that none is signed in.</li>
+    <li>Decide FileVault on purpose. The default is off, for a Mac in a rack that restarts on its own after a power cut; turning it on means someone unlocks it over SSH after every restart. The posture is a setting in the node's <code>ai-node.yaml</code> and the converger reports when the Mac disagrees with it.</li>
+    <li>System Settings, General, Sharing: turn Remote Login on. Allow only the administrator account.</li>
+    <li>In System Settings, set "Start up when power is connected" to Always (older macOS calls it "Start up automatically after a power failure"), so the Mac comes back by itself after a power cut.</li>
+    <li>Install the current macOS update at the console, so the bootstrap starts from a supported release.</li>
+  </ol>
+  <h4>2. From your own computer</h4>
+  <p>Run this from a checkout of the Tockmox repository at the toolkit release your nodes pin. It copies one script to the Mac and runs it there under sudo (<code>ssh -t</code> lets it ask for the administrator's password), and it prints the public halves of the deploy key and the age key it makes, for you to add to your site repository.</p>
+  <form method="get" action="/nodes/add/{{ ntype }}" class="stack">
+    <input type="hidden" name="engine" value="{{ engine }}">
+    <label for="en-id">Node id <span class="muted">(lowercase letters, digits, dashes)</span></label>
+    <input id="en-id" name="node_id" type="text" value="{{ enroll.form.node_id }}" autocomplete="off" spellcheck="false" pattern="[a-z0-9][a-z0-9-]{0,39}">
+    <label for="en-host">The Mac's host name or IPv4 address</label>
+    <input id="en-host" name="host" type="text" value="{{ enroll.form.host }}" autocomplete="off" spellcheck="false">
+    <label for="en-user">Administrator account on the Mac <span class="muted">(the one Setup Assistant made; default admin)</span></label>
+    <input id="en-user" name="admin_user" type="text" value="{{ enroll.form.admin_user }}" autocomplete="off" spellcheck="false" placeholder="admin">
+    <label for="en-name">Display name <span class="muted">(optional)</span></label>
+    <input id="en-name" name="name" type="text" value="{{ enroll.form.name }}" autocomplete="off">
+    <label for="en-preset">Hardware</label>
+    <select id="en-preset" name="preset"><option value="">Not listed: the node will report it</option>{% for p in kind.presets %}<option value="{{ p.id }}" {% if p.id == enroll.form.preset %}selected{% endif %}>{{ p.label }}</option>{% endfor %}</select>
+    <button class="btn-ghost" type="submit">Fill in the command</button>
+  </form>
+  {% for note in enroll.cmd.notes %}<p class="muted">{{ note }}.</p>{% endfor %}
+<pre tabindex="0"><code>{{ enroll.cmd.text }}</code></pre>
+  {% if not enroll.repo_known or not enroll.ref_known %}<p class="muted">{% if not enroll.repo_known %}<code>SITE_REPO</code>{% endif %}{% if not enroll.repo_known and not enroll.ref_known %} and {% endif %}{% if not enroll.ref_known %}<code>TOOLKIT_REF</code>{% endif %} come from your site values (<code>inferenceNodes.aiNodes</code>) and are never taken from a link; replace {{ "it" if enroll.repo_known != enroll.ref_known else "them" }} by hand, or set {{ "it" if enroll.repo_known != enroll.ref_known else "them" }} there.</p>{% endif %}
+  {% if not enroll.converged %}<p class="warnbox">The converger handles {{ enroll.converged_list }} today. {{ eng.name }} can be recorded and routed to, but you start it yourself; pick one of those engines above to have it converged.</p>{% endif %}
+  <h4>3. Commit the change</h4>
+  {% if enroll.draft %}
+  <p>This generates the <code>inferenceNodes</code> record for the node, with <code>management: {enrolled: true}</code>, and the <code>ai-nodes/{{ enroll.form.node_id }}/ai-node.yaml</code> file to commit beside it. Nothing is changed until you commit them.</p>
+  <form method="post" action="/nodes/change">
+    <input type="hidden" name="csrf" value="{{ user.csrf }}">
+    <input type="hidden" name="draft" value="{{ enroll.draft }}">
+    <button class="btn" type="submit">Generate the change</button>
+  </form>
+  {% elif enroll.error %}<p class="warnbox">{{ enroll.error }}</p>
+  {% else %}<p class="muted">Give a node id and a host above and this button appears.</p>{% endif %}
+  <p class="muted">The converger's design, what it changes on the Mac and how to recover are in <code>docs/administration/ai-nodes.md</code>.</p>
+</section>
+
+<h3 id="manual-h">Manage it yourself</h3>
 <p>Every command runs on the Mac, in Terminal, as an administrator. The engine runs as a LaunchDaemon so it starts at boot without anyone signed in.</p>
 <ol>
   <li><h3>Keep the Mac awake and recover from power loss</h3>
 <pre tabindex="0" data-run="mac" data-step="power"><code>sudo pmset -a sleep 0 disksleep 0 autorestart 1 womp 1 standby 0 autopoweroff 0</code></pre></li>
   <li><h3>Install Homebrew, if it is not there</h3>
 <pre tabindex="0" data-run="mac" data-step="brew"><code>command -v brew || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</code></pre></li>
+  <li><h3>Let only the gateway in (pf), before anything listens</h3>
+    <p>macOS's packet filter, in its own anchor so a macOS update does not erase it. This comes before the engine so there is never a moment when it listens with nothing in front of it. {{ eng.note }}</p>
+<pre tabindex="0" data-run="mac" data-step="firewall"><code>sudo tee /etc/pf.anchors/com.tockmox.models &gt;/dev/null &lt;&lt;PF
+table &lt;gateway&gt; const { {{ src|join(", ") }} }
+pass in quick on lo0 proto tcp to any port {{ port }}
+pass in quick proto tcp from &lt;gateway&gt; to any port {{ port }}
+block return in quick proto tcp from any to any port {{ port }}
+PF
+grep -q com.tockmox.models /etc/pf.conf || printf 'anchor "com.tockmox.models"\nload anchor "com.tockmox.models" from "/etc/pf.anchors/com.tockmox.models"\n' | sudo tee -a /etc/pf.conf
+sudo pfctl -E -f /etc/pf.conf</code></pre>
+    <p>A macOS update can rewrite <code>/etc/pf.conf</code>; re-run the last two lines after one, or manage them with your configuration tool.</p></li>
 {% if engine == "ollama" %}
   <li><h3>Install Ollama and run it as a LaunchDaemon on the network</h3>
     <p>Use the Homebrew daemon, not the Ollama app: two copies fighting over port {{ port }} is a known trap.</p>
@@ -51,21 +109,13 @@ sudo tee /Library/LaunchDaemons/com.tockmox.mlx-lm-{{ port }}.plist &gt;/dev/nul
 &lt;/dict&gt;&lt;/plist&gt;
 PLIST
 sudo launchctl bootstrap system /Library/LaunchDaemons/com.tockmox.mlx-lm-{{ port }}.plist</code></pre></li>
+{% elif engine in ("omlx", "vllm-mlx", "vllm") %}
+  <li><h3>Install {{ eng.name }}</h3>
+    <p>{% if engine == "omlx" %}Follow oMLX's own install instructions, then run it headless as a LaunchDaemon in the same shape as the Ollama one, listening on port {{ port }}, with an API key set (it refuses to listen beyond this Mac without one) and its model directory at the folder that holds your models.{% elif engine == "vllm-mlx" %}Install <code>vllm-mlx</code> into its own Python environment (it wants an older mlx-lm than the mlx-lm server does), then run <code>vllm-mlx serve {{ model or "MODEL" }} --port {{ port }} --api-key KEYFILE-CONTENT</code> as a LaunchDaemon in the same shape as the Ollama one.{% else %}This is vllm-metal, the Apple silicon build of vLLM, under the same engine id as vLLM on NVIDIA hosts. Install it from its Homebrew tap (<code>brew tap vllm-project/vllm-metal</code>; it is not on PyPI), then run <code>vllm serve {{ model or "MODEL" }} --host 0.0.0.0 --port {{ port }} --api-key KEYFILE-CONTENT</code> as a LaunchDaemon in the same shape as the Ollama one. It is alpha: check the project's notes for the model you serve.{% endif %}</p></li>
 {% else %}
   <li><h3>Install {{ eng.name }}</h3>
     <p>{% if engine == "lm-studio" %}<code>curl -fsSL https://lmstudio.ai/install.sh | bash</code>, then <code>lms daemon up</code> and <code>lms server start --port {{ port }}</code>. Turn on API authentication in its server settings.{% else %}<code>brew install llama.cpp</code>, then run <code>llama-server --host 0.0.0.0 --port {{ port }} --api-key-file KEYFILE -hf {{ model or "MODEL" }}</code> as a LaunchDaemon in the same shape as the Ollama one.{% endif %}</p></li>
 {% endif %}
-  <li><h3>Let only the gateway in (pf)</h3>
-    <p>macOS's packet filter, in its own anchor so a macOS update does not erase it. {{ eng.note }}</p>
-<pre tabindex="0" data-run="mac" data-step="firewall"><code>sudo tee /etc/pf.anchors/com.tockmox.models &gt;/dev/null &lt;&lt;PF
-table &lt;gateway&gt; const { {{ src|join(", ") }} }
-pass in quick on lo0 proto tcp to any port {{ port }}
-pass in quick proto tcp from &lt;gateway&gt; to any port {{ port }}
-block return in quick proto tcp from any to any port {{ port }}
-PF
-grep -q com.tockmox.models /etc/pf.conf || printf 'anchor "com.tockmox.models"\nload anchor "com.tockmox.models" from "/etc/pf.anchors/com.tockmox.models"\n' | sudo tee -a /etc/pf.conf
-sudo pfctl -E -f /etc/pf.conf</code></pre>
-    <p>A macOS update can rewrite <code>/etc/pf.conf</code>; re-run the last two lines after one, or manage them with your configuration tool.</p></li>
   <li><h3>Check it locally</h3>
 <pre tabindex="0" data-run="mac" data-step="check"><code>{% if engine == "ollama" %}curl -s http://127.0.0.1:{{ port }}/api/version{% else %}curl -s http://127.0.0.1:{{ port }}/v1/models{% endif %}</code></pre></li>
   <li><h3>Export metrics (recommended)</h3>

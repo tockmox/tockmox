@@ -1,0 +1,167 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+- name: Check the machine
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['system'] == 'Darwin'
+      - ansible_facts['architecture'] in ['arm64', 'aarch64']
+      - ansible_facts['distribution_version'] is version(tn_min_version, '>=')
+    fail_msg: >-
+      This toolkit converges Apple-silicon Macs running macOS {{ tn_min_version }} or later. This
+      machine reports {{ ansible_facts['system'] }} {{ ansible_facts['distribution_version'] | default('?') }}
+      on {{ ansible_facts['architecture'] | default('?') }}. Raise os.minVersion only after the new floor is
+      tested; lower it never.
+    quiet: true
+
+- name: Check the schema ids
+  ansible.builtin.assert:
+    that:
+      - tn_ai_node.schema | default('') == 'tockmox.ai-node/v1'
+      - tn_desired.schema | default('') == 'tockmox.ai-node.desired/v1'
+    fail_msg: >-
+      ai-node.yaml must declare schema tockmox.ai-node/v1 and desired.yaml must declare
+      tockmox.ai-node.desired/v1. Got '{{ tn_ai_node.schema | default('?') }}' and
+      '{{ tn_desired.schema | default('?') }}'. A toolkit older than the files cannot read them.
+    quiet: true
+
+- name: Check the node identity, paths and labels
+  ansible.builtin.assert:
+    that:
+      - tn_node_id is match('^[a-z0-9-]+$')
+      - tockmox_ai_node_id is not defined or tockmox_ai_node_id == tn_node_id
+      - tockmox_ai_node_id is not defined or (tn_ai_node.aiNodeId | default(tockmox_ai_node_id)) == tockmox_ai_node_id
+      - tockmox_ai_node_id is not defined or (tn_desired.aiNodeId | default(tockmox_ai_node_id)) == tockmox_ai_node_id
+      - tn_root is match('^/[A-Za-z0-9._/-]*$')
+      - tn_prefix is match('^[a-z0-9]+(\.[a-z0-9-]+)+$')
+      - tn_converge_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+      - tn_service_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+      - tn_converge_user != tn_service_user
+      - tn_legacy is none or (tn_legacy is mapping and tn_legacy.root is defined and tn_legacy.serviceUser is defined)
+    fail_msg: >-
+      The node id, install root, label prefix and account names must be plain: lower-case letters,
+      digits and dashes for the id, an absolute path with no spaces for the root, a dotted
+      lower-case prefix for labels, and two different short account names. The id in the files
+      ({{ tn_ai_node.aiNodeId | default('missing') }}) must equal the id the converger was started for
+      ({{ tockmox_ai_node_id | default('not given') }}). A legacy block needs root and serviceUser.
+    quiet: true
+
+- name: Check the posture values are the words the schema allows
+  ansible.builtin.assert:
+    that:
+      - tn_filevault in ['off', 'on_ssh_unlock']
+      - tn_strip_spotlight in ['off', 'on']
+      - tn_strip_timemachine in ['off', 'on']
+      - tn_strip_analytics in ['off', 'on']
+      - tn_strip_siri in ['off', 'on']
+    fail_msg: >-
+      os.filevault is off or on_ssh_unlock; strip.* are off or on, all quoted. Read as
+      filevault={{ tn_filevault_raw }}, spotlight={{ tn_strip_spotlight_raw }}, timeMachine={{ tn_strip_timemachine_raw }},
+      analytics={{ tn_strip_analytics_raw }}, siri={{ tn_strip_siri_raw }}.
+    quiet: true
+
+- name: Check who may reach the node
+  ansible.builtin.assert:
+    that:
+      - tn_admin_cidrs | length > 0
+      - tn_admin_cidrs | select('match', '.*/0$') | list | length == 0
+      - tn_firewall.adminCidrs | default([]) | length > 0
+      - (tn_firewall.adminCidrs | default([]) | sort) == (tn_admin_cidrs | sort)
+      - tn_firewall.engineAllowFrom | default([]) | length > 0
+      - tn_firewall.engineAllowFrom | default([]) | select('match', '.*/0$') | list | length == 0
+      - tn_firewall.exporterAllowFrom | default([]) | length > 0
+      - tn_firewall.exporterAllowFrom | default([]) | select('match', '.*/0$') | list | length == 0
+    fail_msg: >-
+      access.adminCidrs must list at least one network and none may be /0: the firewall will not
+      load a rule set that could lock every administrator out, or one that admits the world.
+      desired.yaml's firewall.adminCidrs must equal it, and engineAllowFrom and exporterAllowFrom
+      must be non-empty and not /0. If desired.yaml is out of date, run
+      `python -m app.ai_nodes render --write` and commit it.
+    quiet: true
+
+- name: Check the ports
+  ansible.builtin.assert:
+    that:
+      - (tn_firewall.enginePorts | default([]) | map('int') | sort | list) == (tn_instances | map(attribute='port') | map('int') | sort | list)
+      - tn_firewall.exporterPorts | default([]) | map('int') | list | intersect([tn_node_exporter_port, tn_macmon_port]) | length == 2
+      - (tn_desired.exporters | default({})).node_exporter | default(tn_node_exporter_port) | int == tn_node_exporter_port
+      - (tn_desired.exporters | default({})).macmon | default(tn_macmon_port) | int == tn_macmon_port
+      - 22 in (tn_firewall.adminPorts | default([]) | map('int') | list)
+      - not tn_screen_sharing or 5900 in (tn_firewall.adminPorts | default([]) | map('int') | list)
+      - >-
+        ((tn_instances | map(attribute='port') | map('int') | list) + [tn_node_exporter_port, tn_macmon_port]
+          + (tn_firewall.adminPorts | default([]) | map('int') | list)) | unique | length
+        == ((tn_instances | map(attribute='port') | map('int') | list) + [tn_node_exporter_port, tn_macmon_port]
+          + (tn_firewall.adminPorts | default([]) | map('int') | list)) | length
+    fail_msg: >-
+      desired.yaml and ai-node.yaml disagree about ports, or two services claim one. The engine
+      ports must be exactly the instances' ports, the exporter ports must include telemetry's two,
+      administration must include 22 (and 5900 with screenSharing), and no port may repeat.
+      Render desired.yaml again after changing ai-node.yaml.
+    quiet: true
+
+- name: Check the engine instances
+  ansible.builtin.assert:
+    that:
+      - item.id is match('^[a-z0-9][a-z0-9-]{0,39}$')
+      - item.engine in ['mlx-lm', 'llama-server', 'ollama']
+      - item.models | length > 0
+      - item.engine == 'ollama' or item.models | length == 1
+      - >-
+        item.models | map(attribute='artifact.kind') | unique | list
+        == (['ollama'] if item.engine == 'ollama' else ['huggingface'])
+    fail_msg: >-
+      Instance {{ item.id }} ({{ item.engine }}) cannot be built here. This toolkit runs mlx-lm and
+      llama-server from Hugging Face files and ollama from Ollama manifests, one model per
+      mlx-lm or llama-server process. Other engines and other artifact kinds (modelkit) are not
+      implemented in this release.
+    quiet: true
+  loop: "{{ tn_instances }}"
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Check that at most one Ollama daemon is asked for
+  ansible.builtin.assert:
+    that:
+      - tn_instances | selectattr('engine', 'equalto', 'ollama') | list | length <= 1
+    fail_msg: >-
+      One Ollama daemon serves every model on its one port. desired.yaml asks for
+      {{ tn_instances | selectattr('engine', 'equalto', 'ollama') | map(attribute='id') | list }}.
+    quiet: true
+
+- name: Check every served model is in modelsPresent at the same revision
+  ansible.builtin.assert:
+    that:
+      - >-
+        (tn_models_present | selectattr('model', 'equalto', item.1.model) | map(attribute='artifact.revision') | list)
+        is contains(item.1.artifact.revision)
+    fail_msg: >-
+      Instance {{ item.0.id }} serves {{ item.1.model }} at {{ item.1.artifact.revision }}, which
+      modelsPresent does not list. The model would be started without ever being fetched.
+    quiet: true
+  loop: "{{ tn_instances | subelements('models') }}"
+  loop_control:
+    label: "{{ item.0.id }} {{ item.1.model }}"
+
+- name: Read the FileVault state
+  ansible.builtin.command: /usr/bin/fdesetup status
+  become: true
+  register: ai_node_assert_filevault
+  changed_when: false
+  check_mode: false
+
+- name: Check the FileVault posture the site declares
+  vars:
+    filevault_hint: >-
+      {{ 'With it on, a restart waits at the pre-boot unlock screen until someone unlocks the disk over SSH.'
+         if tn_filevault == 'on_ssh_unlock' else
+         'With it on, a headless restart hangs at the unlock screen until someone with a keyboard arrives.
+          Turn it off in System Settings > Privacy & Security > FileVault, or declare on_ssh_unlock.' }}
+  ansible.builtin.assert:
+    that:
+      - tn_filevault != 'off' or 'FileVault is Off' in ai_node_assert_filevault.stdout
+      - tn_filevault != 'on_ssh_unlock' or 'FileVault is On' in ai_node_assert_filevault.stdout
+    fail_msg: >-
+      os.filevault is '{{ tn_filevault }}' but this machine says: {{ ai_node_assert_filevault.stdout | trim }}.
+      FileVault cannot be changed from a script.
+      {{ filevault_hint }}
+    quiet: true

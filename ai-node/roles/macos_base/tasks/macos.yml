@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# Sleep, file limits and an awake guard. Everything is checked before it is set, because pmset has
+# no check mode and an unconditional write would report "changed" on every run.
+
+- name: Raise the open-file limit at boot
+  ansible.builtin.include_role:
+    name: launchd_service
+  vars:
+    launchd_service_label: "{{ tn_prefix }}.maxfiles"
+    launchd_service_args: [launchctl, limit, maxfiles, "{{ macos_base_maxfiles_soft }}", "{{ macos_base_maxfiles_hard }}"]
+    launchd_service_keep_alive: false
+
+- name: Read the current power settings
+  ansible.builtin.command: /usr/bin/pmset -g custom
+  become: true
+  register: macos_base_pmset_custom
+  changed_when: false
+  check_mode: false
+
+- name: Read the system-wide power flags
+  ansible.builtin.command: /usr/bin/pmset -g
+  become: true
+  register: macos_base_pmset_g
+  changed_when: false
+  check_mode: false
+
+- name: Hold the settings that keep an inference machine awake
+  become: true
+  ansible.builtin.command: "/usr/bin/pmset -c {{ item.key }} {{ item.value }}"
+  loop: "{{ macos_base_pmset_sleepless | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}={{ item.value }}"
+  # (?m): without it ^ and $ match only the ends of the whole text, the pattern never matches and
+  # pmset is written on every run.
+  when: >-
+    tn_prevent_sleep | bool
+    and macos_base_pmset_custom.stdout is not search('(?m)^\s*' ~ item.key ~ '\s+' ~ (item.value | string) ~ '\s*$')
+  changed_when: true
+
+- name: Hold the settings every node wants
+  become: true
+  ansible.builtin.command: "/usr/bin/pmset -c {{ item.key }} {{ item.value }}"
+  loop: "{{ macos_base_pmset_always | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}={{ item.value }}"
+  when: macos_base_pmset_custom.stdout is not search('(?m)^\s*' ~ item.key ~ '\s+' ~ (item.value | string) ~ '\s*$')
+  changed_when: true
+
+- name: Restart after a power failure
+  become: true
+  ansible.builtin.command: "/usr/bin/pmset -a autorestart {{ 1 if tn_auto_restart | bool else 0 }}"
+  when: macos_base_pmset_custom.stdout is not search('(?m)^\s*autorestart\s+' ~ (1 if tn_auto_restart | bool else 0) ~ '\s*$')
+  changed_when: true
+
+# disablesleep is set under that name but read back as SleepDisabled, so the generic loop above
+# can never see it. It is the stronger off-switch on current macOS.
+- name: Disable system sleep entirely
+  become: true
+  ansible.builtin.command: /usr/bin/pmset -a disablesleep 1
+  when:
+    - tn_prevent_sleep | bool
+    - macos_base_pmset_g.stdout is not search('(?m)^\s*SleepDisabled\s+1\s*$')
+  changed_when: true
+
+# powermode 2 is High Power. Only some models list it; a model that does not skips cleanly.
+- name: Ask for high power mode where the model has one
+  become: true
+  ansible.builtin.command: /usr/bin/pmset -c powermode 2
+  when:
+    - macos_base_pmset_custom.stdout is search('(?m)^\s*powermode\s+')
+    - macos_base_pmset_custom.stdout is not search('(?m)^\s*powermode\s+2\s*$')
+  changed_when: true
+
+# Belt and braces. A macOS update has been seen to reset pmset to defaults until the next run, and
+# some releases sleep despite the settings. -ims: no idle, disk or system sleep. No -d (the display
+# may sleep) and no -u (no user-active assertion).
+- name: Keep the machine awake with caffeinate
+  ansible.builtin.include_role:
+    name: launchd_service
+  vars:
+    launchd_service_label: "{{ tn_prefix }}.caffeinate"
+    launchd_service_args: [/usr/bin/caffeinate, -ims]
+    launchd_service_state: "{{ 'present' if tn_prevent_sleep | bool else 'absent' }}"

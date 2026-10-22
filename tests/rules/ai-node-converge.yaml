@@ -1,0 +1,154 @@
+# TockmoxAiNodeConvergeFailing, TockmoxAiNodeConvergeStale and TockmoxAiNodeSignatureUnverified.
+#
+# DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
+#
+# THE CONTROL. tockmox-ai-node writes tockmox_ai_node_converge_* series into node_exporter's textfile
+# collector on each enrolled node (the toolkit's metrics contract), every series carrying
+# `ai_node`. The render under test (ci/values-all-on.yaml) enrols ONE node, `enrolled-mac`, at a 900 s
+# interval, so Stale means no success for 2700 s (45 m).
+#
+# EVERY CASE ASSERTS ONE DIRECTION, AND THE FILE ASSERTS BOTH.
+#   failing:   1 (exit 0) and 2 (exit 1 for 20 m, under `for`) are silent; 3 (exit 1 for 40 m) fires;
+#              4 (a node nobody enrolled, exit 1) is silent: the selector names the enrolled ids.
+#   stale:     5 (a success 10 m ago) is silent; 6 (last success 60 m ago, series still scraped) fires;
+#              7 (NO series at all: enrolled, never reported) fires, which is the unconnected-wire case;
+#              8 (a success 40 m ago, under 3 intervals) is silent.
+#   signature: 9 (signature_ok 1) is silent; 10 (0 for 30 m, under `for`) is silent; 11 (0 for 90 m) fires.
+
+evaluation_interval: 1m
+
+tests:
+  # CASE 1: exit 0 throughout. Failing is silent.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ai_node_converge_last_exit_code{ai_node="enrolled-mac"}'
+        values: '0x120'
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: TockmoxAiNodeConvergeFailing
+        exp_alerts: []
+
+  # CASE 2: exit 1 from minute 10, evaluated at minute 30 (20 m of failure). Under `for: 30m`.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ai_node_converge_last_exit_code{ai_node="enrolled-mac"}'
+        values: '0x9 1x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxAiNodeConvergeFailing
+        exp_alerts: []
+
+  # CASE 3: exit 1 from minute 10, evaluated at minute 50 (40 m of failure). Fires, naming the node.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ai_node_converge_last_exit_code{ai_node="enrolled-mac"}'
+        values: '0x9 1x120'
+    alert_rule_test:
+      - eval_time: 50m
+        alertname: TockmoxAiNodeConvergeFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              ai_node: enrolled-mac
+            exp_annotations:
+              summary: "enrolled-mac has failed to converge for 30 minutes"
+              description: "The last tockmox-ai-node converge on enrolled-mac exited non-zero and every run for 30 minutes has. The Nodes page names the failing phase (fetch, verify, decrypt, load or run); the converge log is /opt/tockmox/log/converge.log on the node. The engines keep serving what they last loaded; nothing on the node is being brought back to the repository's version meanwhile."
+
+  # CASE 4: a node nobody enrolled fails for two hours. Silent: the rule names the enrolled ids.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ai_node_converge_last_exit_code{ai_node="stray-mac"}'
+        values: '1x180'
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: TockmoxAiNodeConvergeFailing
+        exp_alerts: []
+
+  # CASE 5: the last success was 10 m before the evaluation. Stale is silent.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ai_node_converge_last_success_timestamp_seconds{ai_node="enrolled-mac"}'
+        values: '3600x120'     # a timestamp that sits at 3600 s (minute 60) from the start
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: TockmoxAiNodeConvergeStale
+        exp_alerts: []
+
+  # CASE 6: the series is still scraped but the last success is at 3600 s and now is 7500 s (65 m later: over 45 m). Fires.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ai_node_converge_last_success_timestamp_seconds{ai_node="enrolled-mac"}'
+        values: '3600x180'
+    alert_rule_test:
+      - eval_time: 125m
+        alertname: TockmoxAiNodeConvergeStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              ai_node: enrolled-mac
+            exp_annotations:
+              summary: "enrolled-mac has not converged successfully in three intervals"
+              description: "No successful tockmox-ai-node converge on enrolled-mac for more than 2700 seconds, or the node reports no converge at all (the bootstrap never finished, the node is off, or its node_exporter cannot be scraped). Check the node is up, then the converge LaunchDaemon and /opt/tockmox/log/converge.log on it."
+
+  # CASE 7: enrolled, and not one converge series anywhere (a stand-in series proves the evaluation ran).
+  # The absent() arm fires. This is the case a plain freshness rule reads as healthy.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="stand-in"}'
+        values: '1x120'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxAiNodeConvergeStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              ai_node: enrolled-mac
+            exp_annotations:
+              summary: "enrolled-mac has not converged successfully in three intervals"
+              description: "No successful tockmox-ai-node converge on enrolled-mac for more than 2700 seconds, or the node reports no converge at all (the bootstrap never finished, the node is off, or its node_exporter cannot be scraped). Check the node is up, then the converge LaunchDaemon and /opt/tockmox/log/converge.log on it."
+
+  # CASE 8: the last success was 40 m before the evaluation (under three intervals of 15 m). Silent.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ai_node_converge_last_success_timestamp_seconds{ai_node="enrolled-mac"}'
+        values: '0x120'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: TockmoxAiNodeConvergeStale
+        exp_alerts: []
+
+  # CASE 9: signature_ok 1 throughout. Silent.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ai_node_converge_signature_ok{ai_node="enrolled-mac"}'
+        values: '1x180'
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: TockmoxAiNodeSignatureUnverified
+        exp_alerts: []
+
+  # CASE 10: signature_ok 0 from minute 10, evaluated at minute 40 (30 m). Under `for: 1h`.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ai_node_converge_signature_ok{ai_node="enrolled-mac"}'
+        values: '1x9 0x180'
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: TockmoxAiNodeSignatureUnverified
+        exp_alerts: []
+
+  # CASE 11: signature_ok 0 from minute 10, evaluated at minute 100 (90 m). Fires, a warning.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ai_node_converge_signature_ok{ai_node="enrolled-mac"}'
+        values: '1x9 0x180'
+    alert_rule_test:
+      - eval_time: 100m
+        alertname: TockmoxAiNodeSignatureUnverified
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              ai_node: enrolled-mac
+            exp_annotations:
+              summary: "enrolled-mac applied commits that did not verify"
+              description: "For an hour enrolled-mac has applied site commits that are not signed by a pinned signer (signing mode warn lets them through). Find the commit with an unsigned or unknown signature, or add its signer to the node's allowed signers with a commit signed by an already-pinned key, before switching the fleet to enforce."

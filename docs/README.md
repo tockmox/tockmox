@@ -67,6 +67,7 @@ Each of the four main sections has its own index with a reading order:
 | [Audit logging](administration/audit-logging.md) | Who did what to the API: one host-side flag, collection already wired |
 | [External integrations](administration/external-integrations.md) | DNS, firewall, inference hosts and the other equipment around the cluster |
 | [Inference nodes](administration/inference-nodes.md) | Experimental: record the machines that serve models off-cluster once, and let the chart derive the gateway's routes to them |
+| [AI nodes](administration/ai-nodes.md) | Experimental: turn an Apple-silicon Mac into an inference node that converges itself from your site repository, with a firewall, pinned models and no command channel |
 | [Model lifecycle](administration/model-lifecycle.md) | Experimental: why a new model needs two approvals, and the separate eval gateway candidates run on |
 | [The Tockmox UI](administration/tockmox-ui.md) | Experimental: the admin console for nodes and models, built from source, and exactly what its network policy lets it reach |
 | [Security Posture Probe](administration/posture-probe.md) | Experimental add-on: measures whether what the cluster enforces matches what you declared, from a role that holds no write verb, and gates on the difference |

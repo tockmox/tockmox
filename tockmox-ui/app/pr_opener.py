@@ -5,6 +5,9 @@ a person to merge it:
 
   admit     a candidate from the watcher's report -> catalog entry at stage candidate + <alias>-next (eval gateway)
   promote   a -next route whose comparative verdicts reach promotion.requiredPasses -> the alias moves
+  evidence  files the eval runner wrote (result twins, verdict records) -> a PR that ADDS them under evals/. A third
+            kind that is not an approval: it carries the proof the promotion PR will cite, and it never touches the
+            values file (see "Evidence PRs" below)
 
     python -m app.pr_opener CONFIG.yaml REPORT.json            # dry run: print the plan, touch nothing
     python -m app.pr_opener CONFIG.yaml REPORT.json --apply    # open the PRs
@@ -20,6 +23,18 @@ What it will not do:
   - open a PR while another model-lifecycle PR is open. Every PR rewrites the same file, and Jeff merges PRs in the
     order they appear, so they come one at a time: the next run plans against what was merged.
 
+Evidence PRs (the third kind; AC-45.9, design 3.1 stage 7):
+
+    python -m app.pr_opener evidence CONFIG.yaml DIR            # dry run
+    python -m app.pr_opener evidence CONFIG.yaml DIR --apply    # open the PR
+
+DIR is a tree whose paths are repo paths (DIR/evals/results/<node>/..., DIR/evals/verdicts/<run_id>.json). The opener
+ADDS those files and nothing else: it refuses a path outside evals/, a file over 1 MiB, more than 200 files or 8 MiB,
+an extension other than .json or .md, the values file, and any path that already exists with other bytes (a result is
+never edited; identical bytes are skipped). It opens no PR for files that would fail CI: a verdict must be named
+<run_id>.json, must cite its results as {path, sha256}, and each cited file must be in the same PR or already in the
+repo with that sha256. An evidence PR does not wait on, or block, an admit or promotion PR: they touch different files.
+
 Config, under modelLifecycle.watch.pullRequests:
   forge: github | forgejo        apiUrl: https://api.github.com | https://forgejo.example/api/v1
   repo: owner/name               baseBranch: main          valuesPath: site/values/models.yaml
@@ -30,6 +45,7 @@ Config, under modelLifecycle.watch.pullRequests:
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -42,8 +58,14 @@ import yaml
 
 from . import models as ml
 from . import nodes as nm
+from . import results as rs
 
 MAX_BYTES = 2 << 20
+EVIDENCE_BRANCH = "tockmox/evidence/"
+EVIDENCE_MAX_FILE = 1 << 20
+EVIDENCE_MAX_FILES = 200
+EVIDENCE_MAX_TOTAL = 8 << 20
+EVIDENCE_EXT = (".json", ".md")
 ADMIT_KINDS = ("quant", "successor", "frontier", "revision", "digest")
 
 
@@ -58,9 +80,10 @@ class PRSpec:
     branch: str
     title: str
     body: str
-    text: str                      # the whole new values file
-    kind: str                      # admit | promote
+    text: str                      # the whole new values file ("" for an evidence PR)
+    kind: str                      # admit | promote | evidence
     subject: str                   # candidate id or alias
+    files: dict = field(default_factory=dict)   # evidence PR only: repo path -> bytes to add
 
 
 @dataclass
@@ -106,7 +129,8 @@ def plan(values: dict, report: dict | None, verdicts, open_branches=(), max_open
     lc_raw, in_raw = values.get("modelLifecycle") or {}, values.get("inferenceNodes") or {}
     lc, inv = ml.parse(lc_raw), nm.parse_inventory(in_raw)
     gw_names = {str(m.get("model_name", "")) for m in (in_raw.get("gateway") or {}).get("modelList") or [] if isinstance(m, dict)}
-    out, busy = Plan(), set(open_branches)
+    # an evidence PR adds files under evals/ and never touches the values file, so it does not hold up the one-at-a-time lane
+    out, busy = Plan(), {b for b in open_branches if not b.startswith(EVIDENCE_BRANCH)}
     if busy:
         out.skipped.append(("this run", f"{len(busy)} model-lifecycle PR(s) already open ({', '.join(sorted(busy))}): one at a time"))
         return out
@@ -180,6 +204,131 @@ def plan(values: dict, report: dict | None, verdicts, open_branches=(), max_open
         verb = "Record a new build of" if cand.kind in ("revision", "digest") else "Admit for evaluation:"
         add(PRSpec(f"tockmox/admit/{branch_slug(cand.model)}", f"{verb} {cand.model}", body,
                    _values_text(ml.change_doc(lc_raw, in_raw, new_lc, new_inv), header), "admit", cand.id))
+    return out
+
+
+# ---------------------------------------------------------------- evidence PRs (additive files under evals/)
+
+def evidence_path_problem(path: str, values_path: str = "") -> str:
+    """Why `path` may not be added by an evidence PR, or "". Everything is refused unless it is a short, plain,
+    relative path under evals/ with a .json or .md extension, and not the values file."""
+    if not ml.evidence_path_ok(path):
+        return f"{path!r} is not a plain relative path under evals/"
+    if values_path and path == values_path.strip("/"):
+        return f"{path} is the values file: an evidence PR never touches it"
+    if not path.endswith(EVIDENCE_EXT):
+        return f"{path}: only {', '.join(EVIDENCE_EXT)} files are added"
+    return ""
+
+
+def plan_evidence(files: dict, existing, values_path: str = "", verdicts_dir: str = "evals/verdicts", label: str = "") -> PRSpec:
+    """The evidence PR for `files` ({repo path: bytes}), or Refused with the first reason it cannot be opened.
+
+    existing(path) -> bytes | None reads the file as it is on the base branch. Pure otherwise."""
+    verdicts_dir = verdicts_dir.strip("/")
+    if not files:
+        raise Refused("no files to add")
+    if len(files) > EVIDENCE_MAX_FILES:
+        raise Refused(f"{len(files)} files: an evidence PR adds at most {EVIDENCE_MAX_FILES}")
+    if sum(len(b) for b in files.values()) > EVIDENCE_MAX_TOTAL:
+        raise Refused(f"over {EVIDENCE_MAX_TOTAL >> 20} MiB in total")
+    new, skipped = {}, []
+    for path in sorted(files):
+        data = files[path]
+        why = evidence_path_problem(path, values_path)
+        if why:
+            raise Refused(why)
+        if not isinstance(data, (bytes, bytearray)) or len(data) > EVIDENCE_MAX_FILE:
+            raise Refused(f"{path}: over {EVIDENCE_MAX_FILE >> 20} MiB")
+        have = existing(path)
+        if have is not None:
+            if bytes(have) != bytes(data):
+                raise Refused(f"{path} already exists with other contents: evidence is added, never edited (measure again under a new name)")
+            skipped.append(path)
+            continue
+        new[path] = bytes(data)
+    if not new:
+        raise Refused("every file is already in the repo with these contents")
+    sha_of = lambda b: hashlib.sha256(b).hexdigest()  # noqa: E731
+
+    def resolve(path):
+        if path in files:
+            return bytes(files[path])
+        return existing(path)
+
+    runs, twins = [], 0
+    for path, data in new.items():
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            raise Refused(f"{path} is not UTF-8 text") from None
+        if path.endswith(".json") and path.startswith(verdicts_dir + "/"):
+            try:
+                v = ml.parse_verdict(text, path)
+            except ml.LifecycleError as e:
+                raise Refused(f"{path}: not a verdict record ({e})") from None
+            if path != f"{verdicts_dir}/{v.run_id}.json":
+                raise Refused(f"{path}: a verdict file is named <run_id>.json (this one is run {v.run_id})")
+            if v.warnings:
+                raise Refused(f"{path}: new evidence must be hashed: " + "; ".join(v.warnings))
+            for x in v.results:
+                got = resolve(x["path"])
+                if got is None:
+                    raise Refused(f"{path} cites {x['path']}, which is neither in this PR nor in the repo")
+                if sha_of(got) != x["sha256"]:
+                    raise Refused(f"{path} cites {x['path']} with a sha256 that does not match the file")
+            runs.append(v.run_id)
+        elif path.endswith(".json") and '"capability-result/1"' in text[:4096]:
+            try:
+                r = rs.parse(text, path)
+            except rs.ResultError as e:
+                raise Refused(f"{path}: not a valid capability-result/1 ({e})") from None
+            if path != rs.repo_path(r):
+                raise Refused(f"{path}: a result of this run belongs at {rs.repo_path(r)}")
+            twins += 1
+    names = ", ".join(sorted(new)[:8]) + (f" and {len(new) - 8} more" if len(new) > 8 else "")
+    tag = label or (runs[0] if runs else hashlib.sha256("\n".join(sorted(new)).encode()).hexdigest()[:10])
+    body = (f"Adds {len(new)} file(s) of evidence under evals/ ({twins} result twin(s), {len(runs)} verdict record(s)).\n\n"
+            + "".join(f"- `{p}` sha256 `{sha_of(new[p])[:16]}...`\n" for p in sorted(new)[:40])
+            + (f"\nAlready in the repo, skipped: {', '.join(skipped)}.\n" if skipped else "")
+            + "\nNothing here changes a model, a route or the values file. CI recomputes every sha256 a verdict cites "
+              "(verdict_check); a promotion PR can cite these verdicts once this is merged.")
+    return PRSpec(f"{EVIDENCE_BRANCH}{branch_slug(tag)}", f"Evidence: {names}"[:120], body, "", "evidence", tag, new)
+
+
+def run_evidence(cfg, files, forge, apply=False, log=print):
+    lc_cfg = cfg.get("modelLifecycle") or {}
+    pr_cfg = ((lc_cfg.get("watch") or {}).get("pullRequests")) or {}
+    base, path = pr_cfg.get("baseBranch", "main"), pr_cfg.get("valuesPath", "")
+    spec = plan_evidence(files, lambda p: forge.read_bytes(p, base), path, str(lc_cfg.get("verdictsRepoPath", "evals/verdicts")))
+    if spec.branch in forge.open_branches():
+        log(f"skipped     {spec.branch}: a PR for it is already open")
+        return spec, ""
+    if not apply:
+        log(f"would open  {spec.branch}  {spec.title}")
+        return spec, ""
+    trailers = [str(t) for t in pr_cfg.get("commitTrailers") or []]
+    url = forge.open_files_pr(base, spec, "Evidence" + ("\n\n" + "\n".join(trailers) if trailers else ""))
+    log(f"opened      {spec.branch}  {url}")
+    return spec, url
+
+
+def read_tree(root: str) -> dict:
+    """{repo path: bytes} for every file under root, refusing symlinks and anything over the per-file cap before reading it."""
+    out = {}
+    root = os.path.realpath(root)
+    for dp, dn, fns in os.walk(root):
+        for fn in fns:
+            full = os.path.join(dp, fn)
+            rel = os.path.relpath(full, root).replace(os.sep, "/")
+            if os.path.islink(full):
+                raise Refused(f"{rel} is a symlink")
+            if os.path.getsize(full) > EVIDENCE_MAX_FILE:
+                raise Refused(f"{rel}: over {EVIDENCE_MAX_FILE >> 20} MiB")
+            if len(out) >= EVIDENCE_MAX_FILES:
+                raise Refused(f"more than {EVIDENCE_MAX_FILES} files")
+            with open(full, "rb") as fh:
+                out[rel] = fh.read()
     return out
 
 
@@ -267,6 +416,41 @@ class Forge:
         d = self._req("GET", f"/contents/{quote(path)}?ref={quote(ref, safe='')}")
         return base64.b64decode(d.get("content") or "").decode("utf-8"), d.get("sha", "")
 
+    def read_bytes(self, path, ref):
+        """The file's bytes at ref, or None when it does not exist."""
+        try:
+            d = self._req("GET", f"/contents/{quote(path)}?ref={quote(ref, safe='')}")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            raise
+        if isinstance(d, list):
+            raise Refused(f"{path} is a directory in the repo")
+        return base64.b64decode(d.get("content") or "")
+
+    def open_files_pr(self, base, spec: PRSpec, message):
+        """A branch that ADDS spec.files (a PUT with no sha fails if the path exists, so an existing file can never be
+        overwritten even if it appeared since the plan), and a PR for it. A failure part-way removes the branch."""
+        if self.kind == "github":
+            self._req("POST", "/git/refs", {"ref": f"refs/heads/{spec.branch}", "sha": self.base_sha(base)})
+        else:
+            self._req("POST", "/branches", {"new_branch_name": spec.branch, "old_branch_name": base})
+        try:
+            for path, data in sorted(spec.files.items()):
+                self._req("PUT", f"/contents/{quote(path)}", {"message": f"{message}: add {path}", "branch": spec.branch,
+                                                              "content": base64.b64encode(data).decode()})
+            pr = self._req("POST", "/pulls", {"title": spec.title, "head": spec.branch, "base": base, "body": spec.body})
+        except Exception:
+            try:
+                if self.kind == "github":
+                    self._req("DELETE", f"/git/refs/heads/{quote(spec.branch, safe='')}", ok=(200, 204))
+                else:
+                    self._req("DELETE", f"/branches/{quote(spec.branch, safe='')}", ok=(200, 204))
+            except Exception:  # noqa: BLE001 - the original failure is the one to report
+                pass
+            raise
+        return pr.get("html_url") or pr.get("url") or ""
+
     def list_dir(self, path, ref):
         try:
             d = self._req("GET", f"/contents/{quote(path)}?ref={quote(ref, safe='')}")
@@ -334,17 +518,7 @@ def run(cfg, report, forge, apply=False, env=os.environ, log=print):
     return p, opened
 
 
-def main(argv):
-    args = [a for a in argv[1:] if not a.startswith("--")]
-    apply = "--apply" in argv
-    if len(args) != 2:
-        print("usage: python -m app.pr_opener CONFIG.yaml REPORT.json [--apply]", file=sys.stderr)
-        return 2
-    cfg = yaml.safe_load(open(args[0], encoding="utf-8")) or {}
-    pr_cfg = (((cfg.get("modelLifecycle") or {}).get("watch") or {}).get("pullRequests")) or {}
-    if not pr_cfg.get("enabled", False):
-        print("the PR opener is off (modelLifecycle.watch.pullRequests.enabled is false)", file=sys.stderr)
-        return 0
+def _forge_from(cfg, pr_cfg):
     token = os.environ.get(pr_cfg.get("tokenEnv", "TOCKMOX_BOT_TOKEN"), "")
     app = pr_cfg.get("githubApp") or {}
     if not token and app and pr_cfg.get("forge", "github") == "github":
@@ -354,9 +528,36 @@ def main(argv):
                                            str(app["appId"]), fh.read())
     if not token:
         print(f"no token in ${pr_cfg.get('tokenEnv', 'TOCKMOX_BOT_TOKEN')} and no githubApp configured", file=sys.stderr)
+        return None
+    return Forge(pr_cfg.get("forge", "github"), pr_cfg.get("apiUrl", "https://api.github.com"), pr_cfg.get("repo", ""), token)
+
+
+def main(argv):
+    args = [a for a in argv[1:] if not a.startswith("--")]
+    apply = "--apply" in argv
+    evidence = bool(args) and args[0] == "evidence"
+    if evidence:
+        args = args[1:]
+    if len(args) != 2:
+        print("usage: python -m app.pr_opener CONFIG.yaml REPORT.json [--apply]\n"
+              "       python -m app.pr_opener evidence CONFIG.yaml DIR [--apply]", file=sys.stderr)
         return 2
+    cfg = yaml.safe_load(open(args[0], encoding="utf-8")) or {}
+    pr_cfg = (((cfg.get("modelLifecycle") or {}).get("watch") or {}).get("pullRequests")) or {}
+    if not pr_cfg.get("enabled", False):
+        print("the PR opener is off (modelLifecycle.watch.pullRequests.enabled is false)", file=sys.stderr)
+        return 0
+    forge = _forge_from(cfg, pr_cfg)
+    if forge is None:
+        return 2
+    if evidence:
+        try:
+            run_evidence(cfg, read_tree(args[1]), forge, apply)
+        except Refused as e:
+            print(f"refused: {e}", file=sys.stderr)
+            return 1
+        return 0
     report = json.load(open(args[1], encoding="utf-8")) if os.path.exists(args[1]) else None
-    forge = Forge(pr_cfg.get("forge", "github"), pr_cfg.get("apiUrl", "https://api.github.com"), pr_cfg.get("repo", ""), token)
     run(cfg, report, forge, apply)
     return 0
 

@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: Apache-2.0
+# ai-nodes/.sops.yaml: who can decrypt ai-nodes/<id>/secrets.sops.yaml.
+# Each rule lists the administrators' age public keys plus that node's own age public key
+# (printed by bootstrap-node.sh). Public keys only; a private key never goes in git.
+creation_rules:
+  - path_regex: example-mac/secrets\.sops\.yaml$
+    age: >-
+      age1rpcqvuxc6350q4sp393ma2280q62w20ysql3vf5sxss8jzv5094qnzvwnm

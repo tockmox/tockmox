@@ -1,0 +1,17 @@
+#!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# `ollama pull REF` stores a manifest whose bytes are "manifest:<REF>" plus a newline, so a test
+# can pin the matching sha256 (or a wrong one).
+m="${OLLAMA_MODELS:-/opt/tockmox/models/ollama}"
+path_of() {
+  local ref="$1" tag=latest name ns=library
+  case "$ref" in *:*) tag="${ref##*:}"; ref="${ref%:*}" ;; esac
+  case "$ref" in */*) ns="${ref%%/*}"; name="${ref#*/}" ;; *) name="$ref" ;; esac
+  echo "$m/manifests/registry.ollama.ai/$ns/$name/$tag"
+}
+case "$1" in
+  pull) p="$(path_of "$2")"; mkdir -p "$(dirname "$p")"; printf 'manifest:%s\n' "$2" > "$p"; exit 0 ;;
+  rm)   rm -f "$(path_of "$2")"; exit 0 ;;
+  list) echo "NAME ID SIZE MODIFIED"; exit 0 ;;
+esac
+exit 0

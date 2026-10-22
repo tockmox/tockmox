@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+rootfacts_dir: "{{ tn_root }}/var/rootfacts.d"

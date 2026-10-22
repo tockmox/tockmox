@@ -1,0 +1,53 @@
+{# SPDX-License-Identifier: Apache-2.0 -#}
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Managed by tockmox-ai-node (role launchd_service). Edit the site repository, not this file. -->
+  <key>Label</key>
+  <string>{{ launchd_service_label | e }}</string>
+{% if launchd_service_user | length > 0 %}
+  <key>UserName</key>
+  <string>{{ launchd_service_user | e }}</string>
+{% endif %}
+  <key>ProgramArguments</key>
+  <array>
+{% if launchd_service_firewalled | bool %}
+    <string>{{ launchd_service_start_wrapper | e }}</string>
+{% endif %}
+{% for a in launchd_service_args %}
+    <string>{{ a | string | e }}</string>
+{% endfor %}
+  </array>
+  <key>RunAtLoad</key>
+  <{{ 'true' if launchd_service_run_at_load | bool else 'false' }}/>
+{% if launchd_service_interval | int > 0 %}
+  <key>StartInterval</key>
+  <integer>{{ launchd_service_interval | int }}</integer>
+{% elif launchd_service_keep_alive | bool %}
+  <key>KeepAlive</key>
+  <true/>
+{% endif %}
+{% if launchd_service_log | length > 0 %}
+  <key>StandardOutPath</key>
+  <string>{{ launchd_service_log | e }}</string>
+  <key>StandardErrorPath</key>
+  <string>{{ launchd_service_log | e }}</string>
+{% endif %}
+{% if launchd_service_workdir | length > 0 %}
+  <key>WorkingDirectory</key>
+  <string>{{ launchd_service_workdir | e }}</string>
+{% endif %}
+{% if launchd_service_env | length > 0 %}
+  <key>EnvironmentVariables</key>
+  <dict>
+{% for k in launchd_service_env | dictsort %}
+    <key>{{ k[0] | string | e }}</key>
+    <string>{{ k[1] | string | e }}</string>
+{% endfor %}
+  </dict>
+{% endif %}
+  <key>ProcessType</key>
+  <string>{{ launchd_service_process_type | e }}</string>
+</dict>
+</plist>

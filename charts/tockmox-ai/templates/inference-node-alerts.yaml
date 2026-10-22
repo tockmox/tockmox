@@ -1,0 +1,98 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+Alerts for the inference nodes the admin ENROLLED for GitOps convergence (tockmox-ai-node). Rendered only when
+inferenceNodes.monitoring is on (the textfile series below arrive through the node_exporter the ScrapeConfig in
+inference-node-monitoring.yaml scrapes) AND at least one node says `management: {enrolled: true}`. An import-only node
+has nothing converging it and nothing to alert on, so a site that enrols none renders exactly what it rendered before.
+
+THE SERIES ARE THE CONTRACT (tockmox-ai-node, "Metrics contract"), every one carrying `ai_node`, the node's id:
+
+  tockmox_ai_node_converge_last_exit_code                  0 = the last run succeeded
+  tockmox_ai_node_converge_last_success_timestamp_seconds  when the last run exited 0
+  tockmox_ai_node_converge_signature_ok                    0 = a commit did not verify against the pinned signers
+
+Selectors name the enrolled ids, so a stray series for a node nobody enrolled alerts no one, the same line the Tockmox
+UI draws. Cases: tests/rules/ai-node-converge.yaml, run against THIS render by tools/check-alert-rules.sh.
+
+ABSENCE IS NOT GREEN. A freshness rule over series that do not exist returns nothing and looks healthy, which is the
+case that matters most for a node: one that was enrolled and never reported (the bootstrap did not finish) or whose
+exporter has been down for minutes. TockmoxAiNodeConvergeStale therefore has an absent() arm per enrolled node.
+*/ -}}
+{{- $in := .Values.inferenceNodes | default dict -}}
+{{- $mon := $in.monitoring | default dict -}}
+{{- $ids := list -}}
+{{- range $n := ($in.nodes | default list) -}}
+{{- if (($n.management | default dict).enrolled) -}}{{- $ids = append $ids $n.id -}}{{- end -}}
+{{- end -}}
+{{- if and $mon.enabled $ids (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors")) -}}
+{{- $interval := (($in.aiNodes | default dict).convergeIntervalSeconds) | default 900 | int -}}
+{{- $sel := printf "ai_node=~%q" (join "|" $ids) -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tockmox-ai-nodes
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: tockmox.ai.ai-nodes
+      interval: 1m
+      rules:
+        - alert: TockmoxAiNodeConvergeFailing
+          # The last run exited non-zero, and has for 30 minutes: not one slow or interrupted run, but a node whose
+          # configuration cannot be applied (a task failed, a fetch or decrypt failed, or an enforcing node refused an
+          # unsigned commit). `max by` so a node that reports twice is judged on the worse. Critical because the
+          # node's firewall, memory ceiling and engines are managed by this run: while it fails nothing is being kept.
+          expr: >-
+            max by (ai_node) (tockmox_ai_node_converge_last_exit_code{ {{- $sel -}} }) != 0
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ "{{ $labels.ai_node }}" }} has failed to converge for 30 minutes"
+            description: >-
+              The last tockmox-ai-node converge on {{ "{{ $labels.ai_node }}" }} exited non-zero and every run
+              for 30 minutes has. The Nodes page names the failing phase (fetch, verify, decrypt, load or run); the
+              converge log is /opt/tockmox/log/converge.log on the node. The engines keep serving what they
+              last loaded; nothing on the node is being brought back to the repository's version meanwhile.
+        - alert: TockmoxAiNodeConvergeStale
+          # No success for three intervals ({{ $interval }} s each, inferenceNodes.aiNodes.convergeIntervalSeconds,
+          # which must equal ai-nodes/fleet.yaml's). Three, not two: the UI calls two "needs a look", and a run missed
+          # to a reboot or a maintenance window must not page. The absent() arms are the node that never reported and
+          # the node whose exporter has been gone for the rule's lookback; both read Stale, not healthy.
+          expr: >-
+            (
+              time() - max by (ai_node) (tockmox_ai_node_converge_last_success_timestamp_seconds{ {{- $sel -}} })
+              > {{ mul 3 $interval }}
+            )
+            {{- range $ids }}
+            or absent(tockmox_ai_node_converge_last_success_timestamp_seconds{ai_node={{ . | quote }}})
+            {{- end }}
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "{{ "{{ $labels.ai_node }}" }} has not converged successfully in three intervals"
+            description: >-
+              No successful tockmox-ai-node converge on {{ "{{ $labels.ai_node }}" }} for more than
+              {{ mul 3 $interval }} seconds, or the node reports no converge at all (the bootstrap never finished,
+              the node is off, or its node_exporter cannot be scraped). Check the node is up, then the converge
+              LaunchDaemon and /opt/tockmox/log/converge.log on it.
+        - alert: TockmoxAiNodeSignatureUnverified
+          # signature_ok is 0 in warn mode when a commit since the last applied one did not verify against the
+          # signers pinned on the node: the run went ahead, and an enforcing node would have refused. An hour, so
+          # one rebase or an unsigned hotfix that the next signed commit supersedes does not nag.
+          expr: >-
+            min by (ai_node) (tockmox_ai_node_converge_signature_ok{ {{- $sel -}} }) == 0
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ "{{ $labels.ai_node }}" }} applied commits that did not verify"
+            description: >-
+              For an hour {{ "{{ $labels.ai_node }}" }} has applied site commits that are not signed by a pinned
+              signer (signing mode warn lets them through). Find the commit with an unsigned or unknown signature,
+              or add its signer to the node's allowed signers with a commit signed by an already-pinned key, before
+              switching the fleet to enforce.
+{{- end }}

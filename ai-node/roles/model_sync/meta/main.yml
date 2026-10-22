@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+galaxy_info:
+  author: Tockmox contributors
+  description: Models present at pinned revisions, verified, with an audit trail.
+  license: Apache-2.0
+  min_ansible_version: "2.16"
+  platforms:
+    - name: MacOSX
+      versions: [all]
+  galaxy_tags: [macos]
+dependencies: []

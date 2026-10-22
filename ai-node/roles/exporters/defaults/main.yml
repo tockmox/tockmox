@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+exporters_macmon_interval_ms: 1000
+exporters_node_exporter_binary: "{{ tn_brew_prefix }}/bin/node_exporter"
+exporters_macmon_binary: "{{ tn_brew_prefix }}/bin/macmon"

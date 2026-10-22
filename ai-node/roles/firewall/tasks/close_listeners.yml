@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# Needs firewall_block_in_force (verify.yml). When pf is off, or no ruleset with the managed-port
+# block is live in the sub-anchor: remove the boot
+# marker and boot out every engine and exporter, so none outlives the rules that protected it.
+# Called by the firewall role when it fails, and by rootfacts (in `always`), which also covers a
+# converge that failed before it reached the firewall role. Check mode changes nothing.
+
+- name: Is the script that closes the listeners installed
+  ansible.builtin.stat:
+    path: "{{ firewall_stop_listeners }}"
+  register: firewall_stop_script
+  become: true
+  check_mode: false
+
+- name: Remove the boot marker and stop every engine and exporter
+  when:
+    - not ansible_check_mode
+    - not (firewall_block_in_force | bool)
+    - firewall_stop_script.stat.exists
+  become: true
+  ansible.builtin.command: "{{ firewall_stop_listeners }}"
+  register: firewall_closed
+  changed_when: "'stopped' in firewall_closed.stdout"

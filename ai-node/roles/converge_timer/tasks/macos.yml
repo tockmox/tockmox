@@ -1,0 +1,107 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# The converger and the facts writer, and the two LaunchDaemons that run them.
+#
+#   converge  runs as the converge account every convergeIntervalSeconds, at load, and so at boot.
+#   facts     runs as the service account every minute and writes the readiness textfile.
+#
+# The converge job is the process that is running this play when a timer run changes its own
+# plist. Reloading it inline would kill the run that is doing the reloading, so a changed plist
+# is reloaded by a detached one-shot (launchctl submit) a few seconds after this run exits.
+
+- name: Let the converge account become root without a password
+  become: true
+  ansible.builtin.copy:
+    dest: "{{ converge_timer_sudoers }}"
+    owner: root
+    group: wheel
+    mode: "0440"
+    content: |
+      # Managed by tockmox-ai-node (role converge_timer). The converge job runs as
+      # {{ tn_converge_user }} with no password and no terminal; bootstrap-node.sh seeds this file.
+      {{ tn_converge_user }} ALL=(ALL) NOPASSWD: ALL
+    validate: /usr/sbin/visudo -cf %s
+
+- name: Install the converger and the facts writer from the toolkit checkout
+  ansible.builtin.copy:
+    src: "{{ converge_timer_toolkit_bin }}/{{ item }}"
+    dest: "{{ tn_root }}/bin/{{ item }}"
+    remote_src: true
+    owner: "{{ tn_converge_user }}"
+    group: staff
+    mode: "0755"
+  loop: [tockmox-ai-node-converge, tockmox-ai-node-facts]
+
+- name: Tell the facts writer what the site expects
+  ansible.builtin.copy:
+    dest: "{{ tn_root }}/etc/facts.env"
+    owner: "{{ tn_converge_user }}"
+    group: staff
+    mode: "0644"
+    content: |
+      # Managed by tockmox-ai-node (role converge_timer). Read by tockmox-ai-node-facts.
+      AI_NODE_ID={{ tn_node_id }}
+      MIN_VERSION={{ tn_min_version }}
+      FILEVAULT_POSTURE={{ tn_filevault }}
+      WIRED_LIMIT_MIB={{ tn_wired_limit_mib }}
+      CONVERGE_LABEL={{ tn_prefix }}.converge
+      CONVERGE_INTERVAL={{ tn_converge_interval }}
+      MACMON_PORT={{ tn_macmon_port }}
+      EXPECTED_BUILD={{ tn_expected_build }}
+      ROOTFACTS_MAX_AGE={{ [3600, (tn_converge_interval | int) * 3] | max }}
+
+- name: Run the facts writer every minute
+  ansible.builtin.include_role:
+    name: launchd_service
+  vars:
+    launchd_service_label: "{{ tn_prefix }}.facts"
+    launchd_service_user: "{{ tn_service_user }}"
+    launchd_service_args: ["{{ tn_root }}/bin/tockmox-ai-node-facts"]
+    launchd_service_keep_alive: false
+    launchd_service_interval: "{{ converge_timer_facts_interval_seconds }}"
+    launchd_service_log: "{{ tn_root }}/log/facts.log"
+    launchd_service_env:
+      TOCKMOX_ROOT: "{{ tn_root }}"
+      PATH: "{{ tn_brew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+- name: Write the converge job (the reload is done below, detached)
+  ansible.builtin.include_role:
+    name: launchd_service
+  vars:
+    launchd_service_label: "{{ tn_prefix }}.converge"
+    launchd_service_user: "{{ tn_converge_user }}"
+    launchd_service_args: ["{{ tn_root }}/bin/tockmox-ai-node-converge"]
+    launchd_service_keep_alive: false
+    launchd_service_interval: "{{ tn_converge_interval }}"
+    launchd_service_log: "{{ tn_root }}/log/converge.log"
+    launchd_service_activate: false
+    launchd_service_env:
+      HOME: "{{ converge_timer_home }}"
+      TOCKMOX_ROOT: "{{ tn_root }}"
+      PATH: "{{ tn_brew_prefix }}/bin:{{ tn_brew_prefix }}/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+- name: Load the converge job, or schedule its reload after this run
+  when: not ansible_check_mode
+  become: true
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -u
+      label={{ (tn_prefix ~ '.converge') | quote }}
+      plist={{ (tn_launchd_dir ~ '/' ~ tn_prefix ~ '.converge.plist') | quote }}
+      reload_label={{ (tn_prefix ~ '.converge-reload') | quote }}
+      changed={{ '1' if (launchd_service_plist is defined and launchd_service_plist is changed) else '0' }}
+      if launchctl print "system/$label" >/dev/null 2>&1; then
+        if [ "$changed" = 1 ]; then
+          launchctl remove "$reload_label" >/dev/null 2>&1 || true
+          launchctl submit -l "$reload_label" -- /bin/sh -c "sleep 15; launchctl bootout system/$label; launchctl bootstrap system $plist" || exit 1
+          echo reload-scheduled
+        else
+          echo unchanged
+        fi
+      else
+        launchctl bootstrap system "$plist" || exit 1
+        echo loaded
+      fi
+  register: converge_timer_job
+  changed_when: converge_timer_job.stdout in ['loaded', 'reload-scheduled']

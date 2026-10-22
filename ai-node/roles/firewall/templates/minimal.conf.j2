@@ -1,0 +1,11 @@
+{# SPDX-License-Identifier: Apache-2.0 -#}
+# Managed by tockmox-ai-node (role firewall), rendered from desired.yaml for node {{ tn_node_id }}.
+# The smallest ruleset that is safe to fall back to: the timed rollback loads this when no ruleset
+# was ever confirmed. Loopback, the administration ports from anywhere (a node that has just rolled
+# back must be reachable), and the managed engine and exporter ports blocked for everyone else.
+admin_ports = "{ {{ ((tn_firewall.adminPorts | default([])) + [22]) | map('int') | unique | sort | join(', ') }} }"
+closed_ports = "{ {{ ((tn_firewall.enginePorts | default([])) + (tn_firewall.exporterPorts | default([]))) | map('int') | unique | sort | join(', ') }} }"
+
+pass in quick on lo0 all
+pass in quick proto tcp from any to any port $admin_ports flags any keep state
+block return in quick proto tcp from any to any port $closed_ports

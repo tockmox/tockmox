@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# Four readiness facts the unprivileged facts exporter cannot read. Each is one line, 0 or 1,
+# written fresh on every run (so its modification time says how old it is), and left unwritten when
+# the question could not be answered: an absent fact is "unknown", never "ok".
+#
+#   filevault_on                fdesetup status
+#   pf_anchor                   the allowlist is loaded and in force (pfctl needs root)
+#   remote_login                something listens on port 22
+#   apple_account_signed_out    no account on the machine is signed in to an Apple Account
+#
+# Runs in the play's `always`, so it also refreshes after a failed converge, and closes the engine
+# and exporter listeners if the allowlist is not in force.
+
+- name: Make sure the firewall verdict is current
+  ansible.builtin.include_role:
+    name: firewall
+    tasks_from: verify
+
+# This role runs in `always`, so it also covers a converge that failed before, or without reaching,
+# the firewall role: listeners do not stay up behind an allowlist that is not in force.
+- name: Close the listeners if the allowlist is not in force
+  ansible.builtin.include_role:
+    name: firewall
+    tasks_from: close_listeners
+
+# Everything below reads or writes with values taken from the site files (the install root, the
+# account that owns the facts), so it runs only for site files that passed their schemas. The
+# verdict and the listener close above use none of them.
+- name: Read and write the readiness facts
+  when: ai_node_assert_site_valid | default(false) | bool
+  block:
+    - name: Read FileVault
+      become: true
+      ansible.builtin.command: /usr/bin/fdesetup status
+      register: rootfacts_filevault
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Read whether sshd is listening
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -o pipefail
+          /usr/sbin/netstat -an -p tcp | grep -E '[.:]22[[:space:]].*LISTEN' | head -1 || true
+      register: rootfacts_ssh
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Look for an Apple Account on any local account
+      become: true
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -u -o pipefail
+          state=signed_out
+          for u in $(/usr/bin/dscl . -list /Users UniqueID | /usr/bin/awk '$2 >= 500 {print $1}'); do
+            home="$(/usr/bin/dscl . -read "/Users/$u" NFSHomeDirectory 2>/dev/null | /usr/bin/awk '{print $2}')"
+            [ -n "$home" ] || continue
+            prefs="$home/Library/Preferences/MobileMeAccounts"
+            [ -e "$prefs.plist" ] || continue
+            if out="$(/usr/bin/defaults read "$prefs" Accounts 2>/dev/null)"; then
+              if printf '%s' "$out" | grep -q AccountID; then state=signed_in; break; fi
+            else
+              state=unknown
+            fi
+          done
+          echo "$state"
+      register: rootfacts_apple
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Make sure the facts directory exists (this role also runs after a failure that came before the tree was made)
+      when: not ansible_check_mode
+      become: true
+      ansible.builtin.file:
+        path: "{{ rootfacts_dir }}"
+        state: directory
+        owner: "{{ tn_converge_user }}"
+        group: staff
+        mode: "0755"
+
+    - name: Write the facts that could be answered
+      when: not ansible_check_mode
+      become: true
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -eu
+          d={{ rootfacts_dir | quote }}
+          put() { printf '%s\n' "$2" > "$d/.$1.tmp" && chmod 0644 "$d/.$1.tmp" && mv -f "$d/.$1.tmp" "$d/$1"; }
+          {% if rootfacts_filevault.stdout is search('FileVault is (On|Off)') %}
+          put filevault_on {{ '1' if 'FileVault is On' in rootfacts_filevault.stdout else '0' }}
+          {% endif %}
+          put pf_anchor {{ '1' if firewall_anchor_verified | bool else '0' }}
+          put remote_login {{ '1' if rootfacts_ssh.stdout | trim | length > 0 else '0' }}
+          {% if rootfacts_apple.stdout | trim in ['signed_in', 'signed_out'] %}
+          put apple_account_signed_out {{ '1' if rootfacts_apple.stdout | trim == 'signed_out' else '0' }}
+          {% endif %}
+      changed_when: false

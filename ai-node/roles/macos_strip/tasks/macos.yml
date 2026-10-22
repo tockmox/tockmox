@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# Turn off the background services a headless inference machine does not need. Each switch is
+# "off" (the toolkit turns it off) or "on" (left as found).
+#
+# WHAT THIS DOES NOT DO, honestly. System Integrity Protection stays on, so the daemons behind
+# Spotlight (mds, mdworker), Siri (assistantd, siriknowledged), analytics (analyticsd) and Time
+# Machine (backupd) are protected system services that cannot be unloaded or disabled by a
+# script. What is turned off is the user-visible switch each one reads: indexing, the backup
+# schedule, the diagnostics-sharing preference, the assistant preference. The daemons stay
+# resident and idle. On macOS 27 there is no longer a supported off-switch for Apple Intelligence,
+# so none is attempted; sign the Apple Account out at the console (a readiness check reports it).
+
+- name: Spotlight indexing off on every volume
+  when: tn_strip_spotlight == 'off'
+  become: true
+  block:
+    - name: Read the indexing state
+      ansible.builtin.command: /usr/bin/mdutil -s /
+      register: macos_strip_mdutil
+      changed_when: false
+      check_mode: false
+
+    - name: Turn indexing off
+      ansible.builtin.command: /usr/bin/mdutil -a -i off
+      when: "'Indexing enabled' in macos_strip_mdutil.stdout"
+      changed_when: true
+
+- name: Time Machine off
+  when: tn_strip_timemachine == 'off'
+  become: true
+  block:
+    - name: Read the automatic-backup setting
+      ansible.builtin.command: /usr/bin/defaults read /Library/Preferences/com.apple.TimeMachine AutoBackup
+      register: macos_strip_tm
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Turn automatic backups off
+      ansible.builtin.command: /usr/bin/tmutil disable
+      when: macos_strip_tm.stdout | trim == '1'
+      changed_when: true
+
+- name: Diagnostics sharing off
+  when: tn_strip_analytics == 'off'
+  become: true
+  block:
+    - name: Read the diagnostics preference
+      ansible.builtin.command: '/usr/bin/defaults read "/Library/Application Support/CrashReporter/DiagnosticMessagesHistory" AutoSubmit'
+      register: macos_strip_analytics
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Do not submit diagnostics to Apple or to app developers
+      ansible.builtin.command: '/usr/bin/defaults write "/Library/Application Support/CrashReporter/DiagnosticMessagesHistory" {{ item }} -bool false'
+      loop: [AutoSubmit, ThirdPartyDataSubmit]
+      when: macos_strip_analytics.stdout | trim != '0'
+      changed_when: true
+
+- name: The assistant off, for the accounts this toolkit owns
+  when: tn_strip_siri == 'off'
+  become: true
+  block:
+    - name: Read the assistant setting for each account
+      ansible.builtin.command: "/usr/bin/defaults read /Users/{{ item }}/Library/Preferences/com.apple.assistant.support 'Assistant Enabled'"
+      loop: "{{ [tn_converge_user] | unique }}"
+      register: macos_strip_siri
+      changed_when: false
+      # An account that never opened Setup Assistant has no such key, which already means off.
+      failed_when: false
+      check_mode: false
+
+    - name: Turn it off where it is on
+      ansible.builtin.command: "/usr/bin/defaults write /Users/{{ item.item }}/Library/Preferences/com.apple.assistant.support 'Assistant Enabled' -bool false"
+      loop: "{{ macos_strip_siri.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stdout | trim == '1'
+      changed_when: true

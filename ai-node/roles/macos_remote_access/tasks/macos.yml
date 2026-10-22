@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# Remote Login is ASSERTED, never healed. Turning it on needs systemsetup, which needs Full Disk
+# Access for the calling process, and a converge job that quietly re-enabled the one service that
+# lets people in would be doing more than it should. If it is off, say how to turn it on.
+#
+# What this role does change: an sshd drop-in that limits the accounts allowed to log in. That
+# is the lockout-prone edit, so it is validated with `sshd -t` before it is put in place, and it is
+# written only when the allowed list provably contains the administrator's account.
+
+- name: Read whether sshd is listening
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -o pipefail
+      /usr/sbin/netstat -an -p tcp | grep -E '[.:]22[[:space:]].*LISTEN' | head -1 || true
+  register: macos_remote_access_listen
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Assert Remote Login is on
+  ansible.builtin.assert:
+    that:
+      - macos_remote_access_listen.stdout | trim | length > 0
+    fail_msg: >-
+      Nothing is listening on port 22. Turn Remote Login on at the console: System Settings >
+      General > Sharing > Remote Login (allow the administrator and {{ tn_converge_user }}). This
+      toolkit does not turn it on for you and does not turn it off.
+    quiet: true
+
+- name: Say when Screen Sharing is wanted but not listening
+  when: tn_screen_sharing | bool
+  block:
+    - name: Read whether port 5900 is listening
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -o pipefail
+          /usr/sbin/netstat -an -p tcp | grep -E '[.:]5900[[:space:]].*LISTEN' | head -1 || true
+      register: macos_remote_access_vnc
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Report it
+      ansible.builtin.debug:
+        msg: >-
+          access.screenSharing is true but nothing listens on 5900. Turn it on at the console:
+          System Settings > General > Sharing > Screen Sharing. The firewall already admits the
+          administrator networks to that port.
+      when: macos_remote_access_vnc.stdout | trim | length == 0
+
+- name: Work out who sshd should allow
+  ansible.builtin.set_fact:
+    macos_remote_access_allow: >-
+      {{ (tn_ssh_allow_users if (tn_ssh_allow_users | length > 0)
+          else ([tn_admin_user, tn_converge_user] | select | list)) | unique | list }}
+
+- name: Limit the accounts that may log in
+  when:
+    - tn_admin_user | length > 0 or tn_ssh_allow_users | length > 0
+    - tn_admin_user | length == 0 or tn_admin_user in macos_remote_access_allow
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/100-tockmox-ai-node.conf
+    owner: root
+    group: wheel
+    mode: "0644"
+    content: |
+      # Managed by tockmox-ai-node (role macos_remote_access). Edit access.sshAllowUsers in git.
+      AllowUsers {{ macos_remote_access_allow | join(' ') }}
+      PermitRootLogin no
+    validate: /usr/sbin/sshd -t -f %s
+
+- name: Say why the drop-in was not written
+  when:
+    - tn_admin_user | length > 0
+    - tn_admin_user not in macos_remote_access_allow
+  ansible.builtin.debug:
+    msg: >-
+      access.sshAllowUsers does not include the administrator account '{{ tn_admin_user }}'. The
+      drop-in is NOT written, because it would lock that account out. Add it to the list.

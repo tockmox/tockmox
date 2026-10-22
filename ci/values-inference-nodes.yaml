@@ -14,16 +14,21 @@ inferenceNodes:
     configMapName: tockmox-litellm-config
   monitoring:
     enabled: true
+  aiNodes:
+    convergeIntervalSeconds: 900
   nodes:
     - id: studio
       name: Mac Studio
       type: apple-silicon-mac
       address: 192.0.2.10
       metrics: {node_exporter: 9100, macmon: 9101}
+      management: {enrolled: true}      # tockmox-ai-node converges this one; `spark` below is import-only
       endpoints:
         - {id: mlx-lm-8080, engine: mlx-lm, url: "http://192.0.2.10:8080"}
         - {id: ollama-11434, engine: ollama, url: "http://192.0.2.10:11434"}
         - {id: llama-server-8090, engine: llama-server, url: "http://192.0.2.10:8090"}
+        - {id: omlx-8000, engine: omlx, url: "http://192.0.2.10:8000"}
+        - {id: vllm-mlx-8001, engine: vllm-mlx, url: "http://192.0.2.10:8001"}
     - id: spark
       name: DGX Spark
       type: nvidia-dgx-spark
@@ -37,6 +42,8 @@ inferenceNodes:
     - {alias: local-coder, node: studio, endpoint: ollama-11434, model: "example-coder:30b", kind: chat, params: {keep_alive: -1, num_ctx: 16384}}
     - {alias: local-embed, node: studio, endpoint: ollama-11434, model: example-embed, kind: embedding, params: {num_ctx: 8192}}
     - {alias: local-rerank, node: studio, endpoint: llama-server-8090, model: example-reranker, kind: rerank}
+    - {alias: local-omlx, node: studio, endpoint: omlx-8000, model: mlx-community/Example-9B-8bit, kind: chat}
+    - {alias: local-vllm-mlx, node: studio, endpoint: vllm-mlx-8001, model: mlx-community/Example-3B-4bit, kind: chat}
     - {alias: big-chat, node: spark, endpoint: vllm-8000, model: example/Big-70B-AWQ, kind: chat, modelInfo: {note: "<a&b>"}}
 
 modelLifecycle:
@@ -74,7 +81,7 @@ litellm:
     general_settings:
       master_key: os.environ/PROXY_MASTER_KEY
   podAnnotations:
-    tockmox.com/node-routes: "226d93d23628a860"
+    tockmox.com/node-routes: "c1f9ece195b3d424"
     tockmox.com/gateway-config: "7280ea0f146304d3"
 
 tockmoxUi:

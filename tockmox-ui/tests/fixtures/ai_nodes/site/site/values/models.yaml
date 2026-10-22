@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: Apache-2.0
+# Fixture site for the ai-node renderer's tests and gate. Generic hardware on RFC 5737 documentation addresses.
+inferenceNodes:
+  gateway:
+    sourceCidrs: [198.51.100.0/24]
+  nodes:
+    - id: example-mac
+      name: Example Mac Studio
+      type: apple-silicon-mac
+      address: 192.0.2.10
+      management: {enrolled: true}
+      hardware:
+        memory_gib: {value: 256, source: operator}
+      metrics: {node_exporter: 9100, macmon: 9101}
+      endpoints:
+        - {id: mlx-lm-8080, engine: mlx-lm, url: "http://192.0.2.10:8080"}
+        - {id: mlx-lm-8082, engine: mlx-lm, url: "http://192.0.2.10:8082"}
+        - {id: ollama-11434, engine: ollama, url: "http://192.0.2.10:11434", auth: {secretRef: example-ollama-key}}
+    - id: example-unenrolled
+      name: Example Mac mini, registered but not converged
+      type: apple-silicon-mac
+      address: 192.0.2.20
+      endpoints:
+        - {id: mlx-lm-8080, engine: mlx-lm, url: "http://192.0.2.20:8080"}
+  routes:
+    - {alias: local-medium, node: example-mac, endpoint: mlx-lm-8080, model: mlx-community/Example-27B-8bit, params: {max_input_tokens: 32768}}
+    - {alias: local-medium-next, node: example-mac, endpoint: mlx-lm-8082, model: mlx-community/Example-2-27B-8bit, params: {max_input_tokens: 65536}}
+    - {alias: local-coder, node: example-mac, endpoint: ollama-11434, model: "example-coder:30b", params: {num_ctx: 16384}}
+    - {alias: local-embed, node: example-mac, endpoint: ollama-11434, model: example-embed, kind: embedding}
+    - {alias: legacy-chat, node: example-unenrolled, endpoint: mlx-lm-8080, model: mlx-community/Example-Old-32B-4bit}
+
+modelLifecycle:
+  catalog:
+    - id: example-27b-8bit
+      model: mlx-community/Example-27B-8bit
+      stage: promoted
+      source: {kind: huggingface, ref: mlx-community/Example-27B-8bit, revision: "0123456789abcdef0123456789abcdef01234567"}
+    - id: example-2-27b-8bit
+      model: mlx-community/Example-2-27B-8bit
+      stage: candidate
+      source: {kind: huggingface, ref: mlx-community/Example-2-27B-8bit, revision: "fedcba9876543210fedcba9876543210fedcba98"}
+    - id: example-coder-30b
+      model: "example-coder:30b"
+      stage: promoted
+      source: {kind: ollama, ref: "example-coder:30b", revision: "sha256:1111111111111111111111111111111111111111111111111111111111111111"}
+    - id: example-embed
+      model: example-embed
+      stage: promoted
+      source: {kind: ollama, ref: "example-embed:latest", revision: "sha256:2222222222222222222222222222222222222222222222222222222222222222"}
+    - id: example-old-32b
+      model: mlx-community/Example-Old-32B-4bit
+      stage: promoted
+      source: {kind: huggingface, ref: mlx-community/Example-Old-32B-4bit}
+    - id: example-retired
+      model: mlx-community/Example-Retired-7B
+      stage: retired
+      source: {kind: huggingface, ref: mlx-community/Example-Retired-7B, revision: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}

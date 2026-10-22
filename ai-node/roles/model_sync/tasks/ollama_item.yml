@@ -1,0 +1,108 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# One Ollama model. The pinned revision is the sha256 digest of the manifest the registry serves for
+# name:tag. Ollama pulls by name and tag, so the digest is checked after the pull and a model that
+# does not match is removed again, never served.
+
+- name: Find the Ollama daemon
+  ansible.builtin.set_fact:
+    model_sync_ollama_port: "{{ tn_instances | selectattr('engine', 'equalto', 'ollama') | map(attribute='port') | first | default('') }}"
+
+- name: A model for Ollama needs an Ollama instance
+  ansible.builtin.assert:
+    that:
+      - model_sync_ollama_port | string | length > 0
+    fail_msg: >-
+      {{ model_sync_item.model }} is an Ollama model but desired.yaml has no Ollama instance to pull it into.
+    quiet: true
+
+- name: Check whether the pinned manifest is already stored
+  become: true
+  become_user: "{{ tn_service_user }}"
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ model_sync_helper }}"
+      - check-ollama
+      - "{{ tn_root }}"
+      - "{{ model_sync_item.artifact.ref }}"
+      - "{{ model_sync_item.artifact.revision }}"
+  register: model_sync_ollama_check
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Pull and check it
+  when:
+    - model_sync_ollama_check.rc != 0
+    - not ansible_check_mode
+  block:
+    - name: Wait for the daemon
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ model_sync_ollama_port | int }}"
+        timeout: 90
+
+    - name: Pull the model
+      become: true
+      become_user: "{{ tn_service_user }}"
+      ansible.builtin.command:
+        argv: ["{{ model_sync_ollama_binary }}", "pull", "{{ model_sync_item.artifact.ref }}"]
+      environment:
+        OLLAMA_HOST: "127.0.0.1:{{ model_sync_ollama_port }}"
+        HOME: "{{ tn_root }}/var/service-home"
+      register: model_sync_ollama_pull
+      changed_when: true
+
+    - name: Check the manifest against the pinned digest
+      become: true
+      become_user: "{{ tn_service_user }}"
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - "{{ model_sync_helper }}"
+          - check-ollama
+          - "{{ tn_root }}"
+          - "{{ model_sync_item.artifact.ref }}"
+          - "{{ model_sync_item.artifact.revision }}"
+      register: model_sync_ollama_after
+      changed_when: false
+      failed_when: false
+
+    - name: Remove a model that does not match its pin
+      when: model_sync_ollama_after.rc != 0
+      become: true
+      become_user: "{{ tn_service_user }}"
+      ansible.builtin.command:
+        argv: ["{{ model_sync_ollama_binary }}", "rm", "{{ model_sync_item.artifact.ref }}"]
+      environment:
+        OLLAMA_HOST: "127.0.0.1:{{ model_sync_ollama_port }}"
+        HOME: "{{ tn_root }}/var/service-home"
+      changed_when: true
+
+    - name: Record the verdict
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - "{{ model_sync_helper }}"
+          - audit
+          - "{{ tn_root }}"
+          - --verdict
+          - "{{ 'verified' if model_sync_ollama_after.rc == 0 else 'verify_failed' }}"
+          - --kind
+          - ollama
+          - --ref
+          - "{{ model_sync_item.artifact.ref }}"
+          - --revision
+          - "{{ model_sync_item.artifact.revision }}"
+          - --detail
+          - "{{ model_sync_ollama_after.stdout | trim }}"
+      changed_when: false
+
+    - name: Stop the converge on a mismatch
+      when: model_sync_ollama_after.rc != 0
+      ansible.builtin.fail:
+        msg: >-
+          {{ model_sync_item.model }} ({{ model_sync_item.artifact.ref }}) did not match its pin:
+          {{ model_sync_ollama_after.stdout | trim }}. It has been removed. If the registry replaced the tag
+          on purpose, update the pinned digest in the catalog.

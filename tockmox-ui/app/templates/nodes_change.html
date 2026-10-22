@@ -7,6 +7,7 @@
   <h2 id="sum-h">What it does</h2>
   <ul>
     {% for n in summary.new_nodes %}<li>Adds node <strong>{{ n.name }}</strong> ({{ n.id }}, {{ n.endpoints|length }} engine endpoint(s))</li>{% endfor %}
+    {% for n in summary.enrolled %}<li>Enrolls <strong>{{ n.name }}</strong> ({{ n.id }}) for GitOps convergence: <code>management: {enrolled: true}</code> on its record, and a new file <code>ai-nodes/{{ n.id }}/ai-node.yaml</code></li>{% endfor %}
     {% for n in summary.changed_nodes %}<li>Replaces node <strong>{{ n.name }}</strong> ({{ n.id }})</li>{% endfor %}
     {% for r in summary.new_routes %}<li>Adds route <code>{{ r.alias }}</code> to {{ r.model }} on {{ r.node }}</li>{% endfor %}
     {% for r in summary.changed_routes %}<li>Changes route <code>{{ r.alias }}</code> (now {{ r.model }} on {{ r.node }})</li>{% endfor %}
@@ -26,6 +27,29 @@
 <pre tabindex="0"><code>{{ text }}</code></pre>
   </details>
 </section>
+{% if ai_files or ai_missing %}
+<section class="panel steps" aria-labelledby="ai-h">
+  <h2 id="ai-h">The node's own file</h2>
+  <p>Commit this beside the values block, in the same commit, to the site repository. It holds what the node's configuration needs that the inventory does not: operating-system posture, access, the GPU memory ceiling, engine versions. Edit it before you commit; the renderer fills in the rest (<code>desired.yaml</code>) from the inventory and the model catalog, and CI refuses a commit where that file is stale (<code>docs/administration/ai-nodes.md</code>).</p>
+  {% if ai_missing %}<p class="warnbox">This build of the UI has no ai-node.yaml generator, so there is no file to download. The record above still enrols the node; write <code>ai-nodes/ID/ai-node.yaml</code> by hand from the schema in <code>docs/administration/ai-nodes.md</code>.</p>{% endif %}
+  {% if ai_admin_cidrs_unset and ai_files %}<p class="warnbox">The UI was not told your administrator network (<code>inferenceNodes.aiNodes.adminCidrs</code>), so the file's <code>access.adminCidrs</code> is empty. The firewall step refuses to run with an empty list, so that it can never lock you out: fill it in before you commit.</p>{% endif %}
+  {% for f in ai_files %}
+  <h3>{{ f.path }}</h3>
+  <form method="post" action="/nodes/change">
+    <input type="hidden" name="csrf" value="{{ user.csrf }}">
+    <input type="hidden" name="draft" value="{{ draft }}">
+    <input type="hidden" name="format" value="ai-node">
+    <input type="hidden" name="ai_node" value="{{ f.id }}">
+    <button class="btn" type="submit">Download it</button>
+  </form>
+  <details><summary>Show the file</summary>
+<pre tabindex="0"><code>{{ f.text }}</code></pre>
+  </details>
+  <p>After you commit, on your own computer, from a checkout of the Tockmox repository:</p>
+<pre tabindex="0"><code>{{ f.command }}</code></pre>
+  {% endfor %}
+</section>
+{% endif %}
 {% if model_list %}
 <section class="panel steps" aria-labelledby="ml-h">
   <h2 id="ml-h">What the gateway will get</h2>

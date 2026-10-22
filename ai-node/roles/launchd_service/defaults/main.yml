@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# One LaunchDaemon, from a description. Every other role that runs a service calls this one, so
+# the plist shape, the user, the log, the reload rule and the removal rule exist exactly once.
+#
+# present  render the plist; load it; reload it when it changed (unless held).
+# absent   unload it and delete the plist.
+launchd_service_state: present
+launchd_service_label: ""
+launchd_service_args: []
+# Empty means root. Engines and exporters set the service account; the converge job sets tockmox.
+launchd_service_user: ""
+launchd_service_env: {}
+launchd_service_keep_alive: true
+launchd_service_run_at_load: true
+# Seconds between runs for a timer job; 0 means not a timer.
+launchd_service_interval: 0
+launchd_service_log: ""
+launchd_service_process_type: Background
+launchd_service_workdir: ""
+# false: write the plist and stop. The boot-time pf job is written this way, because loading it
+# would run the firewall load outside the firewall role's rollback protection.
+launchd_service_activate: true
+# true: bounce a loaded job when its plist changed.
+launchd_service_reload: true
+# The caller sets this when something the job runs changed without the plist changing (a new
+# launcher, a new package version).
+launchd_service_force_reload: false
+# Adopt-in-place: write the plist, but never bounce a job that is already running. The job picks the
+# new settings up at its next restart.
+launchd_service_hold: false
+launchd_service_wait_seconds: 20
+launchd_service_dir: "{{ tn_launchd_dir | default('/Library/LaunchDaemons') }}"
+# true: the job starts through the firewall role's start-when-firewalled wrapper, which waits until
+# the allowlist is in force for this boot and then execs the program. Every engine and exporter
+# sets it; the converge, facts and system-tuning jobs do not listen and do not.
+launchd_service_firewalled: false
+launchd_service_start_wrapper: "{{ tn_libexec | default('/usr/local/libexec/tockmox-ai-node') }}/start-when-firewalled"

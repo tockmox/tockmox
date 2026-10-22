@@ -203,6 +203,12 @@ class Prober:
                     f.hint = ("answers like mlx-lm (Hugging Face repo ids on a Mac, nothing else to go on), "
                               "so mlx-lm is pre-selected below; change it if you know better")
                     f.suggested = "mlx-lm"
+                elif {"omlx", "vllm-mlx"} & set(engines):
+                    # oMLX and vllm-mlx both listen on 8000 by default and neither has a signature this probe can
+                    # tell apart with a fixed GET (research C 2.1 found none that is not shared with another engine).
+                    # Saying what is known beats guessing: vLLM and vllm-metal, which share one, were tried first.
+                    f.hint = ("answers like an OpenAI-compatible server on a port oMLX and vllm-mlx both use by default; "
+                              "it did not answer like vLLM. Choose oMLX or vllm-mlx below if you know which you run")
                 return f
             return Finding(port, None, url, reason=f"no engine recognised (HTTP {st})" if st else "no engine recognised")
         except Refused as e:

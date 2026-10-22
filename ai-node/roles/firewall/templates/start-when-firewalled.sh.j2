@@ -1,0 +1,35 @@
+{# SPDX-License-Identifier: Apache-2.0 -#}
+#!/bin/bash
+# Managed by tockmox-ai-node (role firewall). Root-owned. Every engine and exporter LaunchDaemon
+# starts through this script:
+#
+#   start-when-firewalled PROGRAM [ARGUMENT...]
+#
+# It waits until the marker written by pf-load.sh holds THIS boot's kern.boottime, which is
+# written only after the managed-port block rule was seen in the live sub-anchor. Then it execs the
+# program. After a reboot, or a pf reset, a listener that binds every interface therefore does not
+# exist until the allowlist is in force, and if the allowlist never loads it never starts.
+# bash 3.2 and the BSD userland: this runs on macOS.
+MARKER='{{ firewall_boot_marker }}'
+SYSCTL='{{ firewall_sysctl }}'
+
+if [ "$#" -lt 1 ]; then
+  echo "usage: start-when-firewalled PROGRAM [ARGUMENT...]" >&2
+  exit 64
+fi
+
+boot_id() { "$SYSCTL" -n kern.boottime 2>/dev/null | /usr/bin/sed 's/}.*/}/'; }
+
+told=0
+while :; do
+  now="$(boot_id)"
+  have=""
+  if [ -r "$MARKER" ]; then IFS= read -r have < "$MARKER" || true; fi
+  if [ -n "$now" ] && [ "$have" = "$now" ]; then break; fi
+  if [ "$told" = 0 ]; then
+    echo "$(/bin/date -u +%Y-%m-%dT%H:%M:%SZ) waiting for the firewall allowlist to be in force before starting $1"
+    told=1
+  fi
+  /bin/sleep 2
+done
+exec "$@"

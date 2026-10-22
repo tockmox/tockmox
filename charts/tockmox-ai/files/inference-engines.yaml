@@ -51,6 +51,14 @@ ollama:
   provider:
     chat: ollama_chat
     embedding: ollama
+omlx:
+  base_path:
+    chat: /v1
+    embedding: /v1
+    rerank: ''
+  provider:
+    chat: openai
+    embedding: openai
 openai-compatible:
   base_path:
     chat: /v1
@@ -76,6 +84,14 @@ tgi:
   provider:
     chat: openai
 vllm:
+  base_path:
+    chat: /v1
+    embedding: /v1
+    rerank: ''
+  provider:
+    chat: openai
+    embedding: openai
+vllm-mlx:
   base_path:
     chat: /v1
     embedding: /v1

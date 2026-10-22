@@ -2,8 +2,10 @@
 {% from "macros.html" import badge, source_line %}
 {% block title %}Promote {{ row.route.alias }}{% endblock %}
 {% block main %}
-<h1>Promote {{ row.route.alias }}</h1>
+<h1>{{ "Move" if row.replacement else "Promote" }} {{ row.route.alias }}</h1>
 <p class="lede"><code>{{ row.alias }}</code> serves <code>{{ row.live.model if row.live else "nothing yet" }}</code> on the production gateway. <code>{{ row.route.alias }}</code> serves <code>{{ row.route.model }}</code> on the eval gateway. The alias moves only after {{ row.required }} passing comparison(s){% if row.klass %} for class {{ row.klass }}{% endif %}, counted from the eval runner's verdict records. A fail resets the count.</p>
+{% if row.replacement %}<p>{{ badge("warning", "Re-placement") }} This moves <code>{{ row.route.model }}</code> from {{ row.move.from_node }} to {{ row.move.to_node }}. It is the same model, so nothing is retired and the catalog entry stays promoted. Only class <code>perf</code> comparisons that name this move count; a comparison for another move does not.</p>
+{% elif not row.live %}<p>{{ badge("warning", "New alias") }} <code>{{ row.alias }}</code> does not exist yet, so there is no model to be better than. It is judged on absolute bars, and only comparisons that name no incumbent count.</p>{% endif %}
 {% if verdict_reading is not none %}<p>{{ source_line(verdict_reading) }}</p>{% endif %}
 {% if error %}<p>{{ badge("critical", "Not promoted") }} {{ error }}</p>{% endif %}
 <section class="panel" aria-labelledby="c-h">

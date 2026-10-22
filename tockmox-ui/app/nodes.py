@@ -22,7 +22,7 @@ import yaml
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 ALIAS_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$")
 KINDS = ("chat", "embedding", "rerank")
-FACT_SOURCES = ("preset", "operator", "metrics", "engine")
+FACT_SOURCES = ("preset", "operator", "metrics", "engine", "measured")   # measured: tockmox_ai_node_info from an enrolled node
 RESERVED_NODE_IDS = frozenset({"add", "import", "probe", "change"})   # /nodes/<id> must not shadow a page
 
 
@@ -65,7 +65,28 @@ ENGINES: dict[str, dict] = {
         "provider": {"chat": "openai", "embedding": "openai", "rerank": None},
         "base_path": {"chat": "/v1", "embedding": "/v1", "rerank": ""},
         "pull": "vllm serve {model}",
-        "note": "Supports --api-key; one model per server process.",
+        "note": "The cross-platform id: vLLM on CUDA (DGX Spark, GPU workstations) and vllm-metal on Apple silicon share the API server and "
+                "its flags. Supports --api-key; one model per server process.",
+    },
+    "omlx": {
+        # Swappable: its engine pool loads models on demand and evicts the least recently used, with per-model pin and TTL
+        # (research C 2.1). A pinned model is resident in practice; the fit check plans the safe side (largest swappable one).
+        "loading": "on-demand",
+        "name": "oMLX", "port": 8000, "auth": "bearer",
+        "provider": {"chat": "openai", "embedding": "openai", "rerank": None},
+        "base_path": {"chat": "/v1", "embedding": "/v1", "rerank": ""},
+        "pull": "(oMLX loads models from its --model-dir; download them there first)",
+        "note": "Apple silicon only. Serves several models from one process and swaps them least-recently-used; pin the ones that must stay resident. "
+                "Refuses to listen beyond loopback without --api-key, so give the gateway the same key. No Prometheus metrics of its own: the "
+                "blackbox probe is what shows it is up.",
+    },
+    "vllm-mlx": {
+        "name": "vllm-mlx", "port": 8000, "auth": "bearer",
+        "provider": {"chat": "openai", "embedding": "openai", "rerank": None},
+        "base_path": {"chat": "/v1", "embedding": "/v1", "rerank": ""},
+        "pull": "vllm-mlx serve {model}",
+        "note": "Apple silicon only; a different project from vllm-metal (which is the id vllm). Supports --api-key. A server process holds its "
+                "model resident. Releases to date pin mlx-lm below 0.32, so it wants its own Python environment beside mlx-lm.",
     },
     "sglang": {
         "name": "SGLang", "port": 30000, "auth": "bearer",
@@ -125,9 +146,13 @@ CATALOG: dict[str, dict] = {
     "apple-silicon-mac": {
         "name": "Apple silicon Mac", "examples": "Mac Studio, Mac mini, MacBook Pro (M-series)",
         "os": "macOS", "memory_kind": "unified", "usable": 0.75, "onboarding": "mac",
-        "engines": ["mlx-lm", "ollama", "llama-server", "lm-studio"],
+        # `vllm` here is vllm-metal (the same id as vLLM on CUDA, by design: one table for both platforms).
+        "engines": ["mlx-lm", "omlx", "vllm-mlx", "vllm", "ollama", "llama-server", "lm-studio"],
         "metrics": {"node_exporter": 9100, "macmon": 9101},
+        # Presets carry no memory-bandwidth figure: a hardware fact is chip, memory or accelerator (parse_inventory), and
+        # nothing here reads a bandwidth. The decode prior of fit v2 will want one; it adds the field then.
         "presets": [
+            {"id": "m5-ultra-96", "label": "Mac Studio M5 Ultra, 96 GB", "chip": "Apple M5 Ultra", "memory_gib": 96},
             {"id": "m5-ultra-256", "label": "Mac Studio M5 Ultra, 256 GB", "chip": "Apple M5 Ultra", "memory_gib": 256},
             {"id": "m5-ultra-512", "label": "Mac Studio M5 Ultra, 512 GB", "chip": "Apple M5 Ultra", "memory_gib": 512},
             {"id": "m5-max-128", "label": "Mac Studio M5 Max, 128 GB", "chip": "Apple M5 Max", "memory_gib": 128},
@@ -208,6 +233,14 @@ class Node:
     hardware: dict[str, Fact] = field(default_factory=dict)   # chip, memory_gib, accelerator
     metrics: dict[str, int] = field(default_factory=dict)     # exporter name -> port on `address`
     labels: dict[str, str] = field(default_factory=dict)
+    management: dict = field(default_factory=dict)            # {"enrolled": True} when tockmox-ai-node converges it
+
+    @property
+    def enrolled(self) -> bool:
+        """True only for a node the admin enrolled for GitOps convergence (`management.enrolled: true`). An import-only
+        node, the default and a first-class path, is not: it has no convergence or readiness to report, so the UI shows
+        neither for it (design 0 A14)."""
+        return self.management.get("enrolled") is True
 
     @property
     def kind(self) -> dict:
@@ -237,10 +270,58 @@ class Route:
     size_gib: float | None = None   # what the fit check plans with, when known
 
 
+DEFAULT_CONVERGE_INTERVAL_S = 900     # ai-nodes/fleet.yaml defaults.convergeIntervalSeconds (CONTRACT)
+SIGNING_MODES = ("warn", "enforce")
+# Shell-safe by construction: these two values reach an operator's terminal in the enroll one-liner, so they are
+# matched against an allow list (no quote, space, $, `, ;, &, |, newline) and set by SITE VALUES ONLY, never by a link.
+_REPO_RE = re.compile(r"^(https://[A-Za-z0-9][A-Za-z0-9._~/:%+@-]{0,299}|[a-z][a-z0-9_-]{0,31}@[A-Za-z0-9][A-Za-z0-9.-]{0,252}:[A-Za-z0-9._~/+-]{1,299})$")
+_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/+-]{0,99}$")
+
+
+@dataclass
+class AiNodeSettings:
+    """`inferenceNodes.aiNodes`: what the fleet shares, from site values. Everything is optional."""
+    site_repo: str = ""                 # where the nodes pull the site repo from (the bootstrap's --site-repo)
+    toolkit_ref: str = ""               # the tockmox release tag the nodes pin (the bootstrap's --toolkit-ref)
+    signing_mode: str = ""              # warn | enforce, as ai-nodes/fleet.yaml says; informational
+    converge_interval_s: int = DEFAULT_CONVERGE_INTERVAL_S
+    admin_cidrs: tuple = ()             # offered to the ai-node.yaml skeleton as access.adminCidrs
+
+
+def parse_ai_settings(raw) -> AiNodeSettings:
+    if raw in (None, {}):
+        return AiNodeSettings()
+    if not isinstance(raw, dict):
+        raise NodeError("aiNodes must be a map")
+    extra = set(raw) - {"siteRepo", "toolkitRef", "signingMode", "convergeIntervalSeconds", "adminCidrs"}
+    if extra:
+        raise NodeError(f"aiNodes: unknown key(s) {sorted(extra)}")
+    repo = str(raw.get("siteRepo", "") or "")
+    if repo and not _REPO_RE.match(repo):
+        raise NodeError("aiNodes.siteRepo must be an https:// URL or user@host:path, with no spaces or shell characters")
+    ref = str(raw.get("toolkitRef", "") or "")
+    if ref and not _REF_RE.match(ref):
+        raise NodeError("aiNodes.toolkitRef must be a tag or branch name")
+    mode = str(raw.get("signingMode", "") or "")
+    if mode and mode not in SIGNING_MODES:
+        raise NodeError(f"aiNodes.signingMode must be one of {SIGNING_MODES}")
+    iv = raw.get("convergeIntervalSeconds", DEFAULT_CONVERGE_INTERVAL_S)
+    if isinstance(iv, bool) or not isinstance(iv, int) or not (60 <= iv <= 86400):
+        raise NodeError("aiNodes.convergeIntervalSeconds must be a whole number of seconds from 60 to 86400")
+    cidrs = []
+    for c in raw.get("adminCidrs") or []:
+        try:
+            cidrs.append(str(ipaddress.ip_network(str(c), strict=False)))
+        except ValueError:
+            raise NodeError(f"aiNodes.adminCidrs: {c!r} is not a CIDR") from None
+    return AiNodeSettings(repo, ref, mode, iv, tuple(cidrs))
+
+
 @dataclass
 class Inventory:
     nodes: list[Node] = field(default_factory=list)
     routes: list[Route] = field(default_factory=list)
+    ai: AiNodeSettings = field(default_factory=AiNodeSettings)
 
     def node(self, nid: str) -> Node | None:
         return next((n for n in self.nodes if n.id == nid), None)
@@ -281,7 +362,7 @@ def check_origin(url: str) -> str:
 
 def parse_inventory(doc: dict | None) -> Inventory:
     doc = doc or {}
-    inv = Inventory()
+    inv = Inventory(ai=parse_ai_settings(doc.get("aiNodes")))
     seen = set()
     for raw in doc.get("nodes") or []:
         nid = str(raw.get("id", ""))
@@ -324,7 +405,12 @@ def parse_inventory(doc: dict | None) -> Inventory:
                 raise NodeError(f"node {nid}: metrics.{k} must be a port number")
             metrics[str(k)] = p
         labels = {str(k): str(v) for k, v in (raw.get("labels") or {}).items()}
-        inv.nodes.append(Node(nid, str(raw.get("name", nid)), ntype, addr, eps, hw, metrics, labels))
+        mgmt = raw.get("management")
+        if mgmt is not None:
+            if not isinstance(mgmt, dict) or set(mgmt) - {"enrolled"} or not isinstance(mgmt.get("enrolled", False), bool):
+                raise NodeError(f"node {nid}: management must be {{enrolled: true|false}}")
+        inv.nodes.append(Node(nid, str(raw.get("name", nid)), ntype, addr, eps, hw, metrics, labels,
+                              {"enrolled": True} if (mgmt or {}).get("enrolled") else {}))
     aliases = set()
     for raw in doc.get("routes") or []:
         r = _route_from(raw)
@@ -630,14 +716,37 @@ def _unique(base: str, taken: set[str]) -> str:
 # ---------------------------------------------------------------- fit (AC-47.5)
 
 _PARAMS = re.compile(r"(?<![A-Za-z0-9.])(\d+(?:\.\d+)?)\s*[bB](?![A-Za-z])")
+
+# Bits per weight, scales included. ORDER MATTERS: the first match wins, so the specific formats come before the
+# generic "q8" / "q4" markers. "gpt-oss-120b-MXFP4-Q8" used to match q8 (8.5 bits) before mxfp4 and read 2.4x too big
+# (research D 1.3). MXFP4 is 4 bits plus an 8-bit scale per 32 weights. NVFP4 is nominally 4.5 (a scale per 16), but
+# nothing has measured an NVFP4 file, so it takes the MXFP4 figure the design names; fit v2 replaces both with bytes.
 _QUANT = [
+    (re.compile(r"(?i)(mxfp4|nvfp4)"), 4.25),
     (re.compile(r"(?i)(bf16|fp16|f16)"), 16.0),
     (re.compile(r"(?i)(fp8|8bit|q8_0|q8|int8)"), 8.5),
     (re.compile(r"(?i)(6bit|q6_k|q6\b)"), 6.6),
     (re.compile(r"(?i)(5bit|q5_k_m|q5)"), 5.7),
-    (re.compile(r"(?i)(4bit|q4_k_m|q4_0|q4|int4|awq|gptq|mxfp4|nvfp4)"), 4.6),
+    (re.compile(r"(?i)(4bit|q4_k_m|q4_0|q4|int4|awq|gptq)"), 4.6),
     (re.compile(r"(?i)(3bit|q3)"), 3.6),
 ]
+
+# Weights a name cannot see, each FITTED TO ONE ROW of research D's measured table (one model each), so they are
+# narrow on purpose and are not a model of the families. The estimate stays an estimate; the watcher's exact byte
+# count (fit v2) is what retires them.
+#   gemma: a vision tower and a 262k-token vocabulary on top of the language model (gemma-3-27b-it-4bit: +0.35 bit).
+#   gpt-oss MXFP4 up to 30B: attention and embeddings kept at 8 bits are a larger share of a small model
+#   (gpt-oss-20b-MXFP4-Q8: +0.55 bit; the 120b has no such residual).
+_RESIDUAL_BITS = [   # (name pattern, extra bits per weight, applies up to this many billion parameters, only with this quant)
+    (re.compile(r"(?i)gemma"), 0.35, None, None),
+    (re.compile(r"(?i)gpt-oss"), 0.55, 30.0, re.compile(r"(?i)(mxfp4|nvfp4)")),
+]
+
+# The figure is gigabytes (1e9 bytes, what parameters x bits / 8 gives) and the planner's unit is GiB (2^30). The
+# 1.1 this used to multiply by was meant as overhead but landed on top of a 4.6-bit figure that already carries the
+# group scales, and 8-bit read about 15% high and 4-bit 9 to 21% high (research D 1.3). Nothing is added now; the
+# conversion alone is the correction.
+GB_TO_GIB = 1e9 / (1 << 30)
 
 
 # The smallest size a route may carry. parse_route refuses sizeGiB unless it is positive, so every size
@@ -660,7 +769,11 @@ def planning_size(gib) -> float | None:
 
 
 def estimate_size_gib(model_id: str, default_bits: float = 4.6) -> float | None:
-    """Weights only, from the model's name: parameters x bits / 8, plus 10%. An ESTIMATE.
+    """Weights only, from the model's name: parameters x bits / 8, in GiB. An ESTIMATE.
+
+    Checked against research D's measured table (tests/test_nodes_fit.py): every MLX 4-bit, 8-bit and MXFP4 repo in it
+    within 5%. The name cannot see a model's real parameter count or its non-quantised parts, so a model outside that
+    table can be off by more; the page says "estimate" wherever it shows this.
 
     MoE names ("35B-A3B") count total parameters, because every expert is resident.
     Returns None when the name carries no parameter count; the fit check then says so.
@@ -683,13 +796,109 @@ def estimate_size_gib(model_id: str, default_bits: float = 4.6) -> float | None:
         # Hugging Face repo id is the publisher's weights, which vLLM, NIM and SGLang serve in bf16
         # (review finding: Qwen/Qwen3-32B read as 20 GiB, about 3.5x under).
         bits = default_bits if (":" in model_id or "gguf" in model_id.lower()) else 16.0
-    return planning_size(params_b * bits / 8 * 1.1)
+    for rx, extra, max_b, only_quant in _RESIDUAL_BITS:
+        if rx.search(q) and (max_b is None or params_b <= max_b) and (only_quant is None or only_quant.search(q)):
+            bits += extra
+            break
+    return planning_size(params_b * bits / 8 * GB_TO_GIB)
 
 
 def loading(engine: str) -> str:
     """resident: the server holds its model all the time (mlx-lm, llama-server, vLLM ...).
     on-demand: the engine loads a model when asked and can unload it (Ollama, LM Studio)."""
     return ENGINES.get(engine, {}).get("loading", "resident")
+
+
+# ---------------------------------------------------------------- enrolled nodes (tockmox-ai-node)
+#
+# A node is ENROLLED when the admin has asked tockmox-ai-node to converge it from the site repo
+# (`management.enrolled: true`). Only an enrolled node has a convergence or readiness to report; an import-only node
+# (register it, probe it, Tockmox converges nothing) is a first-class path and shows neither.
+
+# The engines tockmox-ai-node v1 converges (CONTRACT, ai-node.yaml `engines`). Any other engine id is still a valid
+# endpoint to record and route to; the admin starts it themselves.
+CONVERGED_ENGINES = ("mlx-lm", "llama-server", "ollama")
+
+# The facts exporter's checks on macOS, in the order the readiness panel lists them (CONTRACT, metrics).
+READINESS_CHECKS = {
+    "os_min_version": "macOS is at or above the declared minimum",
+    "filevault_posture": "FileVault matches the declared posture",
+    "remote_login": "Remote Login (SSH) is on",
+    "wired_limit": "The GPU wired-memory limit is set",
+    "pf_anchor": "The firewall anchor is loaded",
+    "converge_loaded": "The converge job is loaded",
+    "spotlight_off": "Spotlight indexing is off",
+    "autoinstall_off": "Automatic macOS installs are off",
+    "macmon_up": "macmon is running",
+    "apple_account_signed_out": "No Apple Account is signed in",
+}
+
+_SSH_USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+_SSH_HOST_RE = re.compile(r"^[A-Za-z0-9]([A-Za-z0-9-]{0,62})(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}))*$")
+
+
+@dataclass
+class EnrollCommand:
+    text: str                  # the copy-paste one-liner, placeholders where a value is unknown or was refused
+    complete: bool             # True when the node id and the host are real values, so a change can be generated
+    notes: list = field(default_factory=list)   # why a value was replaced; never the value itself (nothing is echoed back)
+
+
+def enroll_command(node_id: str, host: str, site_repo: str = "", toolkit_ref: str = "", admin_user: str = "admin") -> EnrollCommand:
+    """The bootstrap one-liner, built so that NO value can carry shell syntax into the operator's terminal.
+
+    A value that arrives in a link (node id, host, admin user) is matched against an allow list and replaced by a
+    visible placeholder when it fails; it is never echoed back. The site repository and the toolkit ref are not taken
+    from a link at all: a link that could name them would let a stranger point a node at a repository of theirs. They
+    come from site values (`inferenceNodes.aiNodes`), which are validated the same way. Each value that survives is also
+    shell-quoted, at both levels (the remote command, then the whole of it for the local shell)."""
+    import shlex
+    notes = []
+
+    def pick(value, ok, placeholder, what, rule):
+        v = (value or "").strip()
+        if v and ok(v):
+            return v, True
+        if v:
+            notes.append(f"{what} was not used: {rule}")
+        return placeholder, False
+
+    nid, nid_ok = pick(node_id, lambda v: bool(ID_RE.match(v)) and v not in RESERVED_NODE_IDS, "NODE_ID", "The node id",
+                       "lowercase letters, digits and dashes, up to 40 characters")
+    hst, hst_ok = pick(host, lambda v: bool(_SSH_HOST_RE.match(v)) and len(v) <= 253, "HOST", "The host",
+                       "a host name or an IPv4 address")
+    usr, _ = pick(admin_user, lambda v: bool(_SSH_USER_RE.match(v)), "ADMIN_USER", "The admin user",
+                  "a short account name in lowercase letters, digits, dashes and underscores")
+    if not (admin_user or "").strip():
+        usr = "admin"
+    repo, _ = pick(site_repo, lambda v: bool(_REPO_RE.match(v)), "SITE_REPO", "The site repository", "set it in inferenceNodes.aiNodes.siteRepo")
+    ref, _ = pick(toolkit_ref, lambda v: bool(_REF_RE.match(v)), "TOOLKIT_REF", "The toolkit ref", "set it in inferenceNodes.aiNodes.toolkitRef")
+
+    def q(v, real):
+        return shlex.quote(v) if real else v
+
+    remote = " ".join(["bash", "/tmp/bootstrap-node.sh", "--ai-node-id", q(nid, nid_ok),
+                       "--site-repo", q(repo, repo != "SITE_REPO"), "--toolkit-ref", q(ref, ref != "TOOLKIT_REF")])
+    target = f"{q(usr, usr != 'ADMIN_USER')}@{q(hst, hst_ok)}"
+    text = f"scp ai-node/bootstrap-node.sh {target}:/tmp/ && ssh -t {target} {shlex.quote(remote)}"
+    return EnrollCommand(text, nid_ok and hst_ok, notes)
+
+
+def enroll_inventory(node_id: str, host: str, name: str, preset: str, engine: str) -> Inventory:
+    """The inferenceNodes record an enrolment adds: a Mac, its exporters, one endpoint for the engine it will run, and
+    `management.enrolled`. No routes yet: placing a model on the node is the next step, from its page."""
+    kind = CATALOG["apple-silicon-mac"]
+    if engine not in kind["engines"]:
+        raise NodeError(f"{engine!r} is not an engine for {kind['name']}")
+    hw = {}
+    p = next((x for x in kind["presets"] if x["id"] == preset), None)
+    if p:
+        hw["chip"] = Fact(p["chip"], "preset")
+        hw["memory_gib"] = Fact(p["memory_gib"], "preset")
+    port = ENGINES[engine]["port"]
+    n = Node(node_id, (name.strip() or node_id)[:80], "apple-silicon-mac", host,
+             [Endpoint(f"{engine}-{port}", engine, f"http://{host}:{port}")], hw, dict(kind["metrics"]), {}, {"enrolled": True})
+    return parse_inventory(inventory_to_doc(Inventory([n], [])))      # the same validation the change applies
 
 
 @dataclass
@@ -711,11 +920,18 @@ class Fit:
         return round(self.placed_gib + (self.new_gib or 0), 1)
 
 
-def fit(node: Node, routes: list[Route], new_size: float | None, new_engine: str = "") -> Fit:
+def fit(node: Node, routes: list[Route], new_size: float | None, new_engine: str = "", v2: dict | None = None) -> Fit:
     """Plan against the worst moment: every resident model, plus the largest on-demand one.
 
     Two aliases on one model on one endpoint cost one copy. The figure is weights only
-    (estimate_size_gib); context comes on top. It never blocks a placement."""
+    (estimate_size_gib); context comes on top. It never blocks a placement.
+
+    `v2` (REQ-0048 AC-48.14) plans with exact sizes instead: {"sizes": {model: SizeRecord}, "facts": {"wired_limit_mib": ...},
+    "need": fit.Need, "new_record": SizeRecord, "new_measured": fit.Measured, "overhead": {engine: fraction}}. See
+    app/fit.py fit_compat, which returns this same Fit. Without it the answer is unchanged."""
+    if v2 is not None:
+        from . import fit as fitmod        # imported here: app/fit.py imports this module
+        return fitmod.fit_compat(node, routes, new_size, new_engine, **v2)
     mem = node.memory_gib()
     usable = round(mem * node.kind["usable"], 1) if mem else None
     resident, od_max, unknown, seen = 0.0, 0.0, [], set()
@@ -760,6 +976,8 @@ def inventory_to_doc(inv: Inventory) -> dict:
             d["metrics"] = dict(n.metrics)
         if n.labels:
             d["labels"] = dict(n.labels)
+        if n.enrolled:
+            d["management"] = {"enrolled": True}
         d["endpoints"] = []
         for e in n.endpoints:
             ed = {"id": e.id, "engine": e.engine, "url": e.url}
@@ -793,19 +1011,25 @@ def merge_node(old: Node, new: Node) -> Node:
         eps[e.id] = Endpoint(e.id, e.engine, e.url, e.auth_secret or (prev.auth_secret if prev else ""), e.note or (prev.note if prev else ""))
     hw = dict(old.hardware)
     hw.update(new.hardware)
+    # Enrolment is only ever added by a merge: a re-probe or re-import (which cannot know) must not un-enrol a node.
+    # Taking it out is an edit to the values, made on purpose.
+    mgmt = {"enrolled": True} if (new.enrolled or old.enrolled) else {}
     return Node(new.id, new.name or old.name, new.type if new.type != "openai-compatible" else old.type, new.address,
-                list(eps.values()), hw, new.metrics or dict(old.metrics), {**old.labels, **new.labels})
+                list(eps.values()), hw, new.metrics or dict(old.metrics), {**old.labels, **new.labels}, mgmt)
 
 
 def merge(base: Inventory, add: Inventory) -> Inventory:
     """`add` wins per alias and per field it states; everything else in `base` is kept."""
     out = parse_inventory(inventory_to_doc(base))
+    out.ai = base.ai
     for n in add.nodes:
         old = out.node(n.id)
         out.nodes = [x for x in out.nodes if x.id != n.id] + [merge_node(old, n) if old else n]
     for r in add.routes:
         out.routes = [x for x in out.routes if x.alias != r.alias] + [r]
-    return parse_inventory(inventory_to_doc(out))    # re-validate the whole result
+    res = parse_inventory(inventory_to_doc(out))     # re-validate the whole result
+    res.ai = base.ai
+    return res
 
 
 class _Dumper(yaml.SafeDumper):

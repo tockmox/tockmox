@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+converge_timer_toolkit_bin: "{{ tn_toolkit_dir }}/ai-node/bin"
+converge_timer_home: "/Users/{{ tn_converge_user }}"
+converge_timer_facts_interval_seconds: 60
+converge_timer_sudoers: /etc/sudoers.d/tockmox-ai-node

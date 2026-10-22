@@ -1,0 +1,98 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# Every model in desired.yaml's modelsPresent is on disk at its pinned revision, verified, and
+# nothing else is fetched. A model that leaves the list is kept for models.retain.keepUnreferencedDays
+# and then removed. Each fetch, check and removal is a line in var/audit/model-updates.jsonl.
+#
+#   huggingface  hf download <repo> --revision <40-hex commit>; every file is then hashed against
+#                its blob name once, and re-checked cheaply (names and sizes) on later runs.
+#   ollama       ollama pull <name:tag>; the manifest must hash to the pinned sha256 digest, or
+#                the model is removed again and the converge fails.
+#   modelkit     not implemented in this release; refused by ai_node_assert.
+#
+# The serving daemons run with HF_HUB_OFFLINE=1, so this role is the only thing that talks to
+# a model registry.
+
+- name: Sort the models by where they come from
+  ansible.builtin.set_fact:
+    model_sync_hf: "{{ tn_models_present | selectattr('artifact.kind', 'equalto', 'huggingface') | list }}"
+    model_sync_ollama: "{{ tn_models_present | selectattr('artifact.kind', 'equalto', 'ollama') | list }}"
+
+- name: Refuse a model kind this release cannot fetch
+  ansible.builtin.assert:
+    that:
+      - (tn_models_present | map(attribute='artifact.kind') | unique | list) is subset(['huggingface', 'ollama'])
+    fail_msg: >-
+      modelsPresent holds an artifact kind this toolkit release cannot fetch. Supported: huggingface, ollama.
+    quiet: true
+
+- name: Write the desired model list where the helper reads it
+  ansible.builtin.copy:
+    dest: "{{ model_sync_desired_file }}"
+    owner: "{{ tn_converge_user }}"
+    group: staff
+    mode: "0644"
+    content: "{{ tn_models_present | to_nice_json }}\n"
+
+# Made by the service account itself, not by root: the parent is a directory that account owns, and
+# root creating and chowning inside it would follow a link the service account put there.
+- name: Create the helper's state directory
+  become: true
+  become_user: "{{ tn_service_user }}"
+  ansible.builtin.file:
+    path: "{{ tn_root }}/models/.tockmox/verified"
+    state: directory
+    follow: false
+    mode: "0755"
+
+- name: Install the Hugging Face CLI
+  ansible.builtin.include_role:
+    name: homebrew_baseline
+    tasks_from: ensure
+  vars:
+    homebrew_baseline_ensure: [hf]
+  when: model_sync_hf | length > 0
+
+- name: Bring each Hugging Face model to its revision
+  ansible.builtin.include_tasks: hf_item.yml
+  loop: "{{ model_sync_hf }}"
+  loop_control:
+    loop_var: model_sync_item
+    label: "{{ model_sync_item.model }}@{{ model_sync_item.artifact.revision[:12] }}"
+
+- name: Bring each Ollama model to its digest
+  ansible.builtin.include_tasks: ollama_item.yml
+  loop: "{{ model_sync_ollama }}"
+  loop_control:
+    loop_var: model_sync_item
+    label: "{{ model_sync_item.model }}"
+
+- name: Remove what has been unreferenced for longer than the retention
+  become: true
+  become_user: "{{ tn_service_user }}"
+  ansible.builtin.command:
+    argv: >-
+      {{ [ansible_playbook_python, model_sync_helper, 'prune', tn_root,
+          '--desired', model_sync_desired_file, '--keep-days', tn_keep_unreferenced_days | string,
+          '--ollama', model_sync_ollama_binary]
+         + (['--ollama-host', '127.0.0.1:' ~ (tn_instances | selectattr('engine', 'equalto', 'ollama') | map(attribute='port') | first | string)]
+            if (tn_instances | selectattr('engine', 'equalto', 'ollama') | list | length > 0) else [])
+         + (['--dry-run'] if ansible_check_mode else []) }}
+  register: model_sync_prune
+  changed_when: (model_sync_prune.stdout | from_json).removed | length > 0
+  check_mode: false
+  when: tn_models_present | length > 0
+
+- name: Write the table the facts exporter reads
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - "{{ model_sync_helper }}"
+      - report
+      - "{{ tn_root }}"
+      - --desired
+      - "{{ model_sync_desired_file }}"
+      - --out
+      - "{{ model_sync_present_file }}"
+  changed_when: false
+  when: not ansible_check_mode

@@ -1,0 +1,139 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+- name: Refuse a job that is not fully described
+  ansible.builtin.assert:
+    that:
+      - launchd_service_label is match('^[A-Za-z0-9][A-Za-z0-9._-]*$')
+      - launchd_service_state in ['present', 'absent']
+      - launchd_service_state == 'absent' or (launchd_service_args | length) > 0
+    fail_msg: >-
+      launchd_service needs a label made of letters, digits, dot, dash and underscore, and, for a
+      job that is to exist, a non-empty argument list. Got label '{{ launchd_service_label }}'.
+    quiet: true
+
+- name: Install and load the job
+  when: launchd_service_state == 'present'
+  become: true
+  block:
+    - name: Look at the log path without following links
+      when: launchd_service_log | length > 0
+      ansible.builtin.stat:
+        path: "{{ launchd_service_log }}"
+        follow: false
+      register: launchd_service_log_stat
+
+    - name: Remove a link that was planted at the log path
+      when:
+        - launchd_service_log | length > 0
+        - launchd_service_log_stat.stat.exists
+        - launchd_service_log_stat.stat.islnk
+      ansible.builtin.file:
+        path: "{{ launchd_service_log }}"
+        state: absent
+
+    # root creates the file and hands it to the account that writes it; the directory belongs to
+    # the converge account and is not writable by the service account, so there is nothing to
+    # plant a link in, and follow: false means a link is never chased in any case.
+    - name: Make sure the log file exists and belongs to the account that writes it
+      when: launchd_service_log | length > 0
+      ansible.builtin.file:
+        path: "{{ launchd_service_log }}"
+        state: touch
+        follow: false
+        owner: "{{ launchd_service_user if launchd_service_user | length > 0 else 'root' }}"
+        group: "{{ 'staff' if launchd_service_user | length > 0 else 'wheel' }}"
+        mode: "0644"
+        modification_time: preserve
+        access_time: preserve
+
+    - name: The start wrapper must be installed before a job that starts through it is written
+      when:
+        - launchd_service_firewalled | bool
+        - not ansible_check_mode
+      ansible.builtin.stat:
+        path: "{{ launchd_service_start_wrapper }}"
+      register: launchd_service_wrapper_stat
+      failed_when: not launchd_service_wrapper_stat.stat.exists
+
+    - name: Render the LaunchDaemon plist
+      ansible.builtin.template:
+        src: daemon.plist.j2
+        dest: "{{ launchd_service_dir }}/{{ launchd_service_label }}.plist"
+        owner: root
+        group: wheel
+        mode: "0644"
+      register: launchd_service_plist
+
+    - name: Make the job match the plist
+      when: launchd_service_activate | bool
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -u
+          label={{ launchd_service_label | quote }}
+          plist={{ (launchd_service_dir ~ '/' ~ launchd_service_label ~ '.plist') | quote }}
+          want_reload={{ '1' if (launchd_service_reload | bool and (launchd_service_plist is changed or launchd_service_force_reload | bool)) else '0' }}
+          hold={{ '1' if launchd_service_hold | bool else '0' }}
+          wait={{ launchd_service_wait_seconds | int }}
+          loaded=0
+          if launchctl print "system/$label" >/dev/null 2>&1; then loaded=1; fi
+          action=unchanged
+          if [ "$loaded" = 1 ] && [ "$want_reload" = 1 ]; then
+            if [ "$hold" = 1 ]; then
+              echo held
+              exit 0
+            fi
+            launchctl bootout "system/$label" >/dev/null 2>&1 || true
+            i=0
+            while launchctl print "system/$label" >/dev/null 2>&1 && [ "$i" -lt "$wait" ]; do
+              sleep 1
+              i=$((i + 1))
+            done
+            if launchctl print "system/$label" >/dev/null 2>&1; then
+              echo "$label is still loaded $wait seconds after bootout" >&2
+              exit 1
+            fi
+            loaded=0
+            action=reloaded
+          fi
+          if [ "$loaded" = 0 ]; then
+            launchctl bootstrap system "$plist" || exit 1
+            if [ "$action" = unchanged ]; then action=loaded; fi
+          fi
+          echo "$action"
+      register: launchd_service_result
+      changed_when: launchd_service_result.stdout in ['loaded', 'reloaded']
+
+    - name: Say that a held job keeps running with its old settings
+      when:
+        - launchd_service_activate | bool
+        - launchd_service_result.stdout | default('') == 'held'
+      ansible.builtin.debug:
+        msg: >-
+          {{ launchd_service_label }} has a new plist on disk and keeps running with its old
+          settings (adopt-in-place hold). Restart it when you are ready:
+          sudo launchctl kickstart -k system/{{ launchd_service_label }}
+
+- name: Unload and remove the job
+  when: launchd_service_state == 'absent'
+  become: true
+  block:
+    - name: Unload the job if it is loaded
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -u
+          label={{ launchd_service_label | quote }}
+          if launchctl print "system/$label" >/dev/null 2>&1; then
+            launchctl bootout "system/$label" >/dev/null 2>&1 || true
+            echo unloaded
+          else
+            echo absent
+          fi
+      register: launchd_service_unload
+      changed_when: launchd_service_unload.stdout == 'unloaded'
+
+    - name: Delete the plist
+      ansible.builtin.file:
+        path: "{{ launchd_service_dir }}/{{ launchd_service_label }}.plist"
+        state: absent

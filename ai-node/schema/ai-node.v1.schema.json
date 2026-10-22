@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tockmox/tockmox/blob/main/ai-node/schema/ai-node.v1.schema.json",
+  "title": "tockmox ai-node.yaml v1",
+  "description": "The AUTHORED half of an AI node's desired state: ai-nodes/<id>/ai-node.yaml in the site repository. It holds what cannot be derived (OS posture, power, access, GPU memory limit, engine versions and arguments, retention, telemetry ports). Which engine instances and models the node serves is NOT here: the renderer derives that from site/values/models.yaml into desired.yaml. YAML 1.1 reads an unquoted off, on, yes and no as booleans; the renderer refuses them, so write \"off\" in quotes. Unknown keys are refused at every level, so a misspelt key is an error and not a silent default.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "aiNodeId", "os", "access"],
+  "properties": {
+    "schema": {
+      "const": "tockmox.ai-node/v1",
+      "description": "The file's schema id and version."
+    },
+    "aiNodeId": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "maxLength": 40,
+      "description": "The node's id. It must equal the directory name ai-nodes/<id>/ and an inferenceNodes.nodes[].id in site/values/models.yaml."
+    },
+    "os": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["family"],
+      "description": "The operating system the node runs and its posture.",
+      "properties": {
+        "family": {
+          "enum": ["macos", "linux"],
+          "description": "macos or linux. It must agree with the inferenceNodes node type (apple-silicon-mac is macos; the NVIDIA and AMD types are linux)."
+        },
+        "minVersion": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+){0,2}$",
+          "description": "The lowest OS version the node is allowed to run, as a quoted string such as \"26.2\". The facts exporter reports the os_min_version readiness check against it."
+        },
+        "expectedBuild": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9A-Za-z]+$",
+          "description": "Optional OS build such as \"26A434\". Drift is reported by the facts exporter and never enforced."
+        },
+        "filevault": {
+          "enum": ["off", "on_ssh_unlock"],
+          "description": "macOS disk-encryption posture. off (the default) suits a lights-out machine on a UPS that must come back by itself; on_ssh_unlock keeps FileVault on and needs a person to unlock the disk over SSH after a restart. The role asserts the posture declared here and fails with a message naming it. Quote the value: an unquoted off is a YAML 1.1 boolean."
+        }
+      }
+    },
+    "power": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Power behaviour. 'Start up when power is connected' is a console checklist item, not a key here.",
+      "properties": {
+        "preventSleep": {"type": "boolean", "description": "Keep the machine awake. Default true."},
+        "autoRestart": {"type": "boolean", "description": "Restart automatically after a power failure. Default true."}
+      }
+    },
+    "access": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adminCidrs"],
+      "description": "Who may reach the node's management ports.",
+      "properties": {
+        "adminCidrs": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/cidr"},
+          "uniqueItems": true,
+          "description": "Networks always admitted to port 22 (and 5900 when screenSharing). An empty list is valid YAML and the renderer refuses it: the firewall role will not load an anchor that could lock every administrator out."
+        },
+        "sshAllowUsers": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/user"},
+          "uniqueItems": true,
+          "description": "Accounts sshd allows. Default: the human administrator and the converge account."
+        },
+        "screenSharing": {"type": "boolean", "description": "Open and admit port 5900 to adminCidrs. Default false."}
+      }
+    },
+    "accounts": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The two service accounts the toolkit creates.",
+      "properties": {
+        "converge": {"$ref": "#/$defs/user", "description": "Admin-group account with passwordless sudo that runs the converge daemon. Default tockmox."},
+        "service": {"$ref": "#/$defs/user", "description": "Hidden standard account that runs every engine and exporter and owns the model store. Default inference."}
+      }
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Service-manager labels.",
+      "properties": {
+        "prefix": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(\\.[a-z0-9-]+)+$",
+          "description": "LaunchDaemon label prefix; services are <prefix>.<service>. Default com.tockmox.ai-node. An adopt-in-place node keeps its legacy prefix here."
+        }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where the toolkit installs on the node.",
+      "properties": {
+        "root": {"$ref": "#/$defs/path", "description": "Install root. Default /opt/tockmox."}
+      }
+    },
+    "gpu": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wiredLimitMiB"],
+      "description": "GPU memory. Required on macOS.",
+      "properties": {
+        "wiredLimitMiB": {
+          "type": "integer",
+          "minimum": 1024,
+          "description": "The wired-memory limit (iogpu.wired_limit_mb) in MiB. The renderer checks, when the node's memory is recorded in inferenceNodes, that RAM/2 <= value <= RAM - max(10 GiB, 10% of RAM); the skeleton proposes 87.5% of RAM, clamped into that range."
+        }
+      }
+    },
+    "engines": {
+      "type": "object",
+      "description": "Engine versions and arguments. Which engine INSTANCES exist comes from desired.yaml. Other engine ids from the UI's engine table may appear and take any of these keys.",
+      "properties": {
+        "mlx-lm": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "version": {"type": "string", "pattern": "^[0-9][0-9A-Za-z.+-]*$", "description": "mlx-lm release to install, such as \"0.32.2\". A version only: no spaces, slashes or options."},
+            "python": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+$", "description": "Python minor version for the engine's virtual environment, such as \"3.12\"."},
+            "extraArgs": {"$ref": "#/$defs/args"}
+          }
+        },
+        "llama-server": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "brewFormula": {"type": "string", "pattern": "^[a-z0-9][a-z0-9@._+-]*$", "description": "Homebrew formula that provides llama-server. Default llama.cpp. A core formula name only: no tap (no slash), no spaces, no options; it is installed with --formula as the converge account."},
+            "extraArgs": {"$ref": "#/$defs/args"}
+          }
+        },
+        "ollama": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "env": {
+              "type": "object",
+              "additionalProperties": {"type": ["string", "integer"]},
+              "description": "Environment for the Ollama daemon. Quote values that YAML would read as booleans."
+            }
+          }
+        }
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": {"type": "string", "pattern": "^[0-9][0-9A-Za-z.+-]*$"},
+          "extraArgs": {"$ref": "#/$defs/args"},
+          "env": {"type": "object", "additionalProperties": {"type": ["string", "integer"]}}
+        }
+      }
+    },
+    "models": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Model-store behaviour.",
+      "properties": {
+        "retain": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "keepUnreferencedDays": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "How long a model that is no longer in modelsPresent stays on disk before the model_sync role removes it. Default 14."
+            }
+          }
+        }
+      }
+    },
+    "strip": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Background services the toolkit turns off on a headless inference machine. \"off\" means the toolkit turns the feature off; \"on\" leaves it as found. Quote both.",
+      "properties": {
+        "spotlight": {"enum": ["off", "on"]},
+        "timeMachine": {"enum": ["off", "on"]},
+        "analytics": {"enum": ["off", "on"]},
+        "siri": {"enum": ["off", "on"]}
+      }
+    },
+    "updates": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "OS update handling.",
+      "properties": {
+        "autoInstall": {"type": "boolean", "description": "Let the OS install updates itself. Default false: updates are detected and alerted, not enforced."}
+      }
+    },
+    "telemetry": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Exporter ports. They must agree with inferenceNodes.nodes[].metrics when that is set.",
+      "properties": {
+        "nodeExporterPort": {"$ref": "#/$defs/port", "description": "node_exporter. Default 9100."},
+        "macmonPort": {"$ref": "#/$defs/port", "description": "macmon exporter (macOS only). Default 9101."}
+      }
+    },
+    "legacy": {
+      "description": "Adopt-in-place only: a node whose services already run under an older layout. null for a node built by this toolkit.",
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["root", "serviceUser"],
+          "properties": {
+            "root": {"$ref": "#/$defs/path", "description": "The existing install root."},
+            "serviceUser": {"$ref": "#/$defs/user", "description": "The account the existing services run as."},
+            "holdEngineSettings": {"type": "boolean", "description": "Leave the existing engine settings untouched until each daemon's next natural restart."}
+          }
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["os"],
+        "properties": {"os": {"required": ["family"], "properties": {"family": {"const": "macos"}}}}
+      },
+      "then": {
+        "required": ["gpu"]
+      }
+    }
+  ],
+  "$defs": {
+    "cidr": {
+      "type": "string",
+      "pattern": "^[0-9A-Fa-f:.]+/[0-9]{1,3}$",
+      "description": "A network in CIDR notation (IPv4 or IPv6)."
+    },
+    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "user": {"type": "string", "pattern": "^[a-z_][a-z0-9_-]{0,31}$", "description": "A short account name."},
+    "path": {"type": "string", "pattern": "^/[A-Za-z0-9._/-]*$", "description": "An absolute path with no spaces."},
+    "args": {"type": "array", "items": {"type": "string"}, "description": "Extra command-line arguments, one list item per argument."}
+  }
+}

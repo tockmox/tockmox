@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+macos_base_maxfiles_soft: 524288
+macos_base_maxfiles_hard: 1048576
+# pmset keys the role holds. sleep and the others below are only held when power.preventSleep is true.
+macos_base_pmset_sleepless:
+  sleep: 0
+  displaysleep: 30
+  disksleep: 0
+  powernap: 0
+  standby: 0
+  autopoweroff: 0
+  networkoversleep: 0
+macos_base_pmset_always:
+  womp: 1
+  tcpkeepalive: 1

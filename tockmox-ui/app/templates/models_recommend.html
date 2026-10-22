@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, source_line %}
+{% block title %}Recommend for {{ node.name }}{% endblock %}
+{% block main %}
+<h1>Recommend for {{ node.name }}</h1>
+<p class="lede">A shortlist per alias class: candidates worth evaluating on this node, ranked by whether they fit and then by predicted speed. <strong>Tockmox does not pick your models.</strong> It proposes candidates and makes the evaluation and the change easy to review. Nothing here admits a model or writes a file: <em>Admit for evaluation</em> shows the change to commit, the same one the Models page makes, and a model only reaches an agent after its comparisons pass and you approve the promotion.</p>
+
+<nav aria-label="Nodes" class="muted"><p>Node:{% for n in nodes %} {% if n.id == node.id %}<strong aria-current="page">{{ n.name }}</strong>{% else %}<a href="/models/recommend?node={{ n.id|urlencode }}">{{ n.name }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</p></nav>
+
+<section class="panel" aria-labelledby="basis-h">
+  <h2 id="basis-h">What this is based on</h2>
+  <ul>
+    <li>{{ badge("ok" if rec.usable.provenance == "measured" else "unknown", rec.usable.provenance|capitalize) }} {{ rec.usable.line }}{% if rec.usable.provenance != "measured" %} <span class="muted">No measured wired limit is available for this node: commit a result that records <code>environment.wired_limit_mb</code>.</span>{% endif %}</li>
+    <li>{% if rec.bandwidth_gbps %}Memory bandwidth {{ rec.bandwidth_gbps|round|int }} GB/s ({{ rec.bandwidth_from }}). Predicted speed is <em>bandwidth x {{ rec.constants.eta_dense }} (dense) or {{ rec.constants.eta_moe }} (mixture of experts) / bytes read per token</em>. It is a prior to rank by, not a measurement; measure it before relying on it.{% else %}No bandwidth figure for this node, so no speed is predicted. Set <code>modelLifecycle.recommend.nodes.{{ node.id }}.bandwidthGBps</code>.{% endif %}</li>
+    <li>Memory is weights + cache for the class's context and slots + {{ (rec.constants.engine_overhead_fraction * 100)|round|int }}% engine overhead. Each figure says where it came from: <strong>measured</strong> beats <strong>exact</strong> (file sizes and <code>config.json</code> at the pinned revision) beats <strong>estimate</strong> (from the model name).</li>
+    <li>Licences on the allow list: {{ cfg.licence_allow|join(", ") }}. {% if cfg.exceptions %}Site exceptions: {% for m, why in cfg.exceptions.items() %}<code>{{ m }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.{% else %}No site exceptions.{% endif %}</li>
+    <li>{{ source_line(reading) }}</li>
+  </ul>
+  {% for n in rec.notes %}<p>{{ badge("warning", "Note") }} {{ n }}</p>{% endfor %}
+  <p>{{ badge({"fits": "ok", "tight": "warning", "over": "critical", "unknown": "unknown"}[rec.stack_state], rec.stack_state|capitalize) }} {{ rec.stack_line }}</p>
+</section>
+
+{% for c in rec.classes %}
+<section class="panel" aria-labelledby="k-{{ c.spec.name }}-h">
+  <h2 id="k-{{ c.spec.name }}-h">{{ c.spec.name }} <span class="muted">({{ c.spec.context|int }} tokens x {{ c.spec.slots }} slot{{ "s" if c.spec.slots != 1 }}{% if c.spec.kind == "chat" %}, {{ c.spec.params[0]|round|int }} to {{ c.spec.params[1]|round|int }}B parameters{% endif %})</span></h2>
+  <p class="muted">{{ c.spec.about }}.{% if c.live_alias %} Today <code>{{ c.live_alias }}</code> serves <code>{{ c.live_model }}</code>.{% else %} No live alias matches this class yet, so a model admitted here becomes a new alias (<code>local-{{ c.spec.name }}</code>), judged on absolute bars.{% endif %} {{ c.considered }} candidate(s) considered, {{ c.excluded }} outside this class's size band or kind.</p>
+  {% if c.rows %}
+  <ul class="cands">
+  {% for r in c.rows %}
+    <li>
+      <p><code>{{ r.option.model }}</code> <span class="muted">· from {{ r.option.origin }}{% if r.option.source.kind == "huggingface" %}, {{ r.option.source.ref }}{% endif %}</span></p>
+      <p>
+        {{ badge({"fits": "ok", "tight": "warning", "over": "critical", "unknown": "unknown"}[r.fit.state], "Fit: " ~ r.fit.state) }}
+        {% if r.fit.total_gib is not none %}{{ "%.1f"|format(r.fit.footprint.total_gib) }} GiB ({{ r.fit.provenance }}){% else %}size unknown{% endif %}
+        · {% if r.tps is not none %}about {{ r.tps }} tokens/s <span class="muted">predicted</span>{% else %}no speed predicted <span class="muted">({{ r.tps_how }})</span>{% endif %}
+        {% if r.endpoints %}<span class="muted">· on {{ r.endpoints|map(attribute=0)|join(", ") }}</span>{% endif %}
+      </p>
+      {% if r.flags %}<ul>{% for f in r.flags %}<li>{{ badge("warning" if f.severity == "warn" else "unknown", {"licence": "Licence", "issue": "Known issue", "hint": "Hint", "note": "Note"}[f.kind]) }} {{ f.text }}</li>{% endfor %}</ul>{% endif %}
+      {% if r.hints %}<p class="muted">Hints, not measurements: {{ r.hints|join("; ") }}</p>{% endif %}
+      <details><summary>The arithmetic</summary>
+        <ul>{% for l in r.fit.lines %}<li>{{ l }}</li>{% endfor %}</ul>
+        {% if r.tps is not none %}<p>Decode: {{ r.tps_how }} = {{ r.tps }} tokens/s, single stream, predicted.</p>{% endif %}
+      </details>
+      {% if r.action == "incumbent" %}
+      <p class="muted">{{ r.why_not }}.</p>
+      {% elif r.admissible %}
+      <form method="post" action="/models/recommend/admit" class="inline">
+        <input type="hidden" name="csrf" value="{{ user.csrf }}">
+        <input type="hidden" name="node" value="{{ node.id }}"><input type="hidden" name="cls" value="{{ c.spec.name }}"><input type="hidden" name="model" value="{{ r.option.model }}">
+        {% if r.endpoints|length > 1 %}<label for="ep-{{ c.spec.name }}-{{ loop.index }}">Endpoint</label>
+        <select id="ep-{{ c.spec.name }}-{{ loop.index }}" name="endpoint">{% for eid, eng in r.endpoints %}<option value="{{ eid }}">{{ eid }} ({{ eng }})</option>{% endfor %}</select>{% else %}<input type="hidden" name="endpoint" value="{{ r.endpoints[0][0] }}">{% endif %}
+        <button class="btn-ghost" type="submit">Admit for evaluation<span class="visually-hidden"> {{ r.option.model }} as {{ r.alias }}-next</span></button>
+        <span class="muted">{% if r.action == "new" %}new alias {{ r.alias }}{% elif r.action == "replace" %}moves {{ r.alias }} here{% else %}against {{ c.live_model }}{% endif %}</span>
+      </form>
+      {% else %}
+      <p class="muted">Not offered for admission: {{ r.why_not }}</p>
+      {% endif %}
+    </li>
+  {% endfor %}
+  </ul>
+  {% else %}<p class="empty">Nothing in the catalog, the watcher's report or the seeds matches this class. Name a model under <code>modelLifecycle.recommend.seeds</code> to put it on the list.</p>{% endif %}
+</section>
+{% endfor %}
+
+<p class="muted">Known-issue flags and benchmark hints are site data (<code>modelLifecycle.recommend.knownIssues</code>, <code>benchmarkHints</code>), not findings. Public benchmark figures are hints about a model in general; whether it suits this workload on this node is what the evaluation measures. <a href="/models">Back to Models</a></p>
+{% endblock %}

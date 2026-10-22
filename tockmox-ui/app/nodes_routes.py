@@ -4,12 +4,14 @@ which shows the site-values change for the admin to commit (AC-47.8).
 
   GET  /nodes                 inventory: each node, its health and memory, its routes
   GET  /nodes/add             the node-type catalog
-  GET  /nodes/add/<type>      onboarding steps for that type, then a probe or a manual endpoint
+  GET  /nodes/add/<type>      onboarding steps for that type, then a probe or a manual endpoint. For a Mac: enrol it for
+                              GitOps (a console checklist, the bootstrap one-liner, then a change) or manage it yourself
   POST /nodes/probe           probe a named host (bounded: app/probe.py), propose endpoints and routes
   GET  /nodes/import          import from the gateway's route list (no network)
   POST /nodes/import          the same, from a pasted model_list
   GET  /nodes/<id>            one node; `?model=&endpoint=&alias=` previews a placement and its fit
-  POST /nodes/change          the generated change (also ?format=yaml as a download)
+  POST /nodes/change          the generated change (also format=yaml as a download); a newly enrolled node's
+                              ai-nodes/<id>/ai-node.yaml skeleton comes with it (format=ai-node&ai_node=<id>)
 """
 from __future__ import annotations
 
@@ -50,7 +52,12 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_nodes,
             # Prometheus did not answer THIS time: what `data` holds is the last good answer. Its
             # per-node states must not be shown as current (lab finding D3, 2026-10-07: a node read
             # Healthy for as long as Prometheus stayed down).
-            return r, {x["id"]: dict(x, state="unknown", why=f"no current reading ({r.reason}); last answered {r.age_text()}")
+            stale = f"no current reading ({r.reason}); last answered {r.age_text()}"
+            return r, {x["id"]: dict(x, state="unknown", why=stale,
+                                     # a last-good Healthy convergence is as stale as the node's own state
+                                     convergence=({"state": "unknown", "why": stale, "interval_s": x["convergence"].get("interval_s")}
+                                                  if x.get("convergence") else None),
+                                     readiness=({"state": "unknown", "why": stale, "items": []} if x.get("readiness") else None))
                        for x in r.data}
         return r, {x["id"]: x for x in r.data}
 
@@ -78,7 +85,8 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_nodes,
         return render(request, "nodes_add.html", u, catalog=nm.CATALOG, engines=nm.ENGINES)
 
     @app.get("/nodes/add/{ntype}")
-    def nodes_add_type(request: Request, ntype: str, engine: str = "", model: str = ""):
+    def nodes_add_type(request: Request, ntype: str, engine: str = "", model: str = "", node_id: str = "", host: str = "",
+                       name: str = "", preset: str = "", admin_user: str = ""):
         u, deny = admin(request)
         if deny:
             return deny
@@ -90,10 +98,28 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_nodes,
         # a model id to fill into the commands; shown as text, and restricted to the
         # characters model ids use so a crafted link cannot plant shell syntax in a step
         model = model if re.match(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$", model or "") else ""
+        enroll = _enroll_context(ntype, kind, engine, node_id, host, name, preset, admin_user) if kind["onboarding"] == "mac" else None
         return render(request, "nodes_add_type.html", u, ntype=ntype, kind=kind, engine=engine,
                       eng=nm.ENGINES[engine], engines=nm.ENGINES, probe_on=prober.enabled,
                       sources=list(ns.gateway_sources), src=list(ns.gateway_sources) or ["GATEWAY_SOURCE_CIDR"],
-                      allowed=list(ns.probe_allowed), model=model)
+                      allowed=list(ns.probe_allowed), model=model, enroll=enroll)
+
+    def _enroll_context(ntype, kind, engine, node_id, host, name, preset, admin_user):
+        """What the "Enroll for GitOps" section shows. The one-liner is built by nm.enroll_command, which refuses (and never
+        echoes) a value that could carry shell syntax; the site repository and toolkit ref come from site values only."""
+        ai = ns.inventory.ai
+        cmd = nm.enroll_command(node_id, host, ai.site_repo, ai.toolkit_ref, admin_user)
+        draft, error = "", ""
+        if cmd.complete:
+            try:
+                inv = nm.enroll_inventory(node_id.strip(), host.strip(), name, preset if any(p["id"] == preset for p in kind["presets"]) else "", engine)
+                draft = json.dumps(nm.inventory_to_doc(inv))
+            except nm.NodeError as e:
+                error = str(e)
+        return {"cmd": cmd, "draft": draft, "error": error, "converged": engine in nm.CONVERGED_ENGINES,
+                "converged_list": ", ".join(nm.ENGINES[e]["name"] for e in nm.CONVERGED_ENGINES),
+                "ref_known": bool(ai.toolkit_ref), "repo_known": bool(ai.site_repo),
+                "form": {"node_id": node_id[:40], "host": host[:253], "name": name[:80], "preset": preset[:40], "admin_user": admin_user[:32]}}
 
     # ------------------------------------------------------------ probe (the only outbound request)
 
@@ -268,9 +294,21 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_nodes,
         if form.get("format") == "yaml":
             return Response(text, media_type="application/yaml",
                             headers={"Content-Disposition": 'attachment; filename="inference-nodes.values.yaml"'})
+        # A node enrolled by THIS change gets an ai-nodes/<id>/ai-node.yaml skeleton beside the values. One already
+        # enrolled does not: that file exists in the site repo, hand-edited, and a regenerated skeleton would invite
+        # overwriting it.
+        enrolled_now = [n for n in add.nodes if n.enrolled and not (ns.inventory.node(n.id) and ns.inventory.node(n.id).enrolled)]
+        ai_files, ai_missing = _ai_node_files(enrolled_now, merged)
+        if form.get("format") == "ai-node":
+            f = next((x for x in ai_files if x["id"] == str(form.get("ai_node", ""))), None)
+            if f is None:
+                return bad(request, u, "That change enrols no such node, so there is no ai-node.yaml for it.")
+            return Response(f["text"], media_type="application/yaml",
+                            headers={"Content-Disposition": f'attachment; filename="ai-node.{f["id"]}.yaml"'})
         before = {n.id for n in ns.inventory.nodes}
         before_r = {r.alias for r in ns.inventory.routes}
         summary = {"new_nodes": [n for n in add.nodes if n.id not in before],
+                   "enrolled": enrolled_now,
                    "changed_nodes": [n for n in add.nodes if n.id in before],
                    "new_routes": [r for r in add.routes if r.alias not in before_r],
                    "changed_routes": [r for r in add.routes if r.alias in before_r]}
@@ -279,7 +317,26 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_nodes,
                       model_list=nm.model_list_yaml(derived) if nm.gateway_routes(derived) else "",
                       eval_list=nm.model_list_yaml(derived, "eval") if nm.gateway_routes(derived, "eval") else "",
                       draft=json.dumps(nm.inventory_to_doc(add)), values_file=ns.values_file,
-                      secrets=sorted({e.auth_secret for n in add.nodes for e in n.endpoints if e.auth_secret}))
+                      secrets=sorted({e.auth_secret for n in add.nodes for e in n.endpoints if e.auth_secret}),
+                      ai_files=ai_files, ai_missing=ai_missing, ai_admin_cidrs_unset=not ns.inventory.ai.admin_cidrs)
+
+    def _ai_node_files(enrolled, merged):
+        """[{id, path, text, command}] for each node enrolled by the change. The skeleton comes from app/ai_nodes.py (the
+        renderer); the second return is True when that module is not part of this build."""
+        if not enrolled:
+            return [], False
+        try:
+            from .ai_nodes import skeleton_ai_node_yaml
+        except ImportError:
+            return [], True
+        ai = ns.inventory.ai
+        out = []
+        for n in enrolled:
+            node = merged.node(n.id) or n
+            text = skeleton_ai_node_yaml(node.id, node.type, node.memory_gib(), list(ai.admin_cidrs))
+            out.append({"id": node.id, "path": f"ai-nodes/{node.id}/ai-node.yaml", "text": text,
+                        "command": nm.enroll_command(node.id, node.address, ai.site_repo, ai.toolkit_ref).text})
+        return out, False
 
 
 # ---------------------------------------------------------------- helpers (pure)

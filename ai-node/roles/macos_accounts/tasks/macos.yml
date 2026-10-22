@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+# The two accounts are CREATED by bootstrap-node.sh, at the console, by the human administrator.
+# This role does not create accounts (a script with no human at it should not mint a login).
+# It checks they are what the rest of the toolkit assumes and converges the attributes that can
+# drift, then owns the install tree.
+
+- name: Read the accounts
+  ansible.builtin.command: "/usr/bin/dscl . -read /Users/{{ item }} UniqueID"
+  become: true
+  register: macos_accounts_read
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  loop:
+    - "{{ tn_converge_user }}"
+    - "{{ tn_service_user }}"
+
+- name: Refuse to go on without the accounts
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+    fail_msg: >-
+      The account '{{ item.item }}' does not exist. Create it with ai-node/bootstrap-node.sh (it
+      makes both accounts, the service account hidden), then converge again.
+    quiet: true
+  loop: "{{ macos_accounts_read.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Read the converge account's group membership
+  ansible.builtin.command: "/usr/sbin/dseditgroup -o checkmember -m {{ tn_converge_user }} admin"
+  become: true
+  register: macos_accounts_admin
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: The converge account must be an administrator
+  ansible.builtin.assert:
+    that:
+      - macos_accounts_admin.rc == 0
+    fail_msg: >-
+      '{{ tn_converge_user }}' is not in the admin group. Homebrew and the converge job need it. Run
+      sudo dseditgroup -o edit -a {{ tn_converge_user }} -t user admin, or bootstrap again.
+    quiet: true
+
+- name: Read whether the service account is hidden and has no login shell
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -u -o pipefail
+      h="$(/usr/bin/dscl . -read /Users/{{ tn_service_user | quote }} IsHidden 2>/dev/null | awk '{print $2}')"
+      s="$(/usr/bin/dscl . -read /Users/{{ tn_service_user | quote }} UserShell 2>/dev/null | awk '{print $2}')"
+      printf 'hidden=%s\nshell=%s\n' "${h:-0}" "${s:-}"
+  become: true
+  register: macos_accounts_service
+  changed_when: false
+  check_mode: false
+
+- name: Hide the service account and take its login shell away
+  when: tn_legacy is none
+  become: true
+  block:
+    - name: Mark it hidden
+      ansible.builtin.command: "/usr/bin/dscl . -create /Users/{{ tn_service_user }} IsHidden 1"
+      when: "'hidden=1' not in macos_accounts_service.stdout_lines"
+      changed_when: true
+
+    - name: No login shell
+      ansible.builtin.command: "/usr/bin/dscl . -create /Users/{{ tn_service_user }} UserShell /usr/bin/false"
+      when: "'shell=/usr/bin/false' not in macos_accounts_service.stdout_lines"
+      changed_when: true
+
+- name: Own the install tree
+  become: true
+  ansible.builtin.file:
+    path: "{{ (tn_root ~ '/' ~ item.path) if item.path | length > 0 else tn_root }}"
+    state: directory
+    # root acts here on paths inside trees the service account owns (models/hf and the rest): never
+    # chase a link it may have put in place of one of them.
+    follow: false
+    owner: "{{ tn_converge_user if item.owner == 'converge' else tn_service_user }}"
+    group: staff
+    mode: "{{ item.mode }}"
+  loop: "{{ macos_accounts_tree }}"
+  loop_control:
+    label: "{{ item.path | default('') or '/' }}"

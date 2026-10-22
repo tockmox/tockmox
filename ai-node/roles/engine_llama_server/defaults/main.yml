@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: Apache-2.0
+---
+engine_llama_server_binary: "{{ tn_brew_prefix }}/bin/llama-server"
