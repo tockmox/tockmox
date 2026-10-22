@@ -147,7 +147,11 @@ PY2
   mkdir -p "$T/m2"; cp "$T"/good/*.yaml "$T/m2/"
   sed 's/    - { name: metrics, port: 9464, targetPort: metrics }/    - { name: metricz, port: 9464, targetPort: metrics }/' "$T/good/tockmox-ai.yaml" > "$T/m2/tockmox-ai.yaml"
   cmp -s "$T/good/tockmox-ai.yaml" "$T/m2/tockmox-ai.yaml" && { echo "selftest FAIL: M2 mutation did not apply"; bad=1; }
-  if python3 "$T/check.py" "$EXTERNAL" "$T"/m2/*.yaml > "$T/o2"; then echo "selftest FAIL: M2 a missing port passed"; bad=1; else echo "selftest ok: M2 a ServiceMonitor port the Service does not declare goes red"; fi
+  # Exit 1 is also what a Python traceback returns, so the code alone cannot tell the rule from a crash:
+  # require the rule's own FAIL line (M2 and M3), the way M1 does.
+  python3 "$T/check.py" "$EXTERNAL" "$T"/m2/*.yaml > "$T/o2" 2>&1; rc=$?
+  if [ "$rc" = 1 ] && grep -q '^FAIL tockmox-ai ServiceMonitor tockmox-ai/tockmox-ui selects nothing the layers render' "$T/o2"; then echo "selftest ok: M2 a ServiceMonitor port the Service does not declare goes red, with the rule's own FAIL line"
+  else echo "selftest FAIL: M2 a missing port was not reported by the rule (exit $rc)"; tail -3 "$T/o2"; bad=1; fi
   # M3: a PodMonitor whose selector no pod template carries.
   mkdir -p "$T/m3"; cp "$T"/good/*.yaml "$T/m3/"
   python3 - "$T/m3/tockmox-platform.yaml" <<'PY3' || { echo "selftest FAIL: M3 setup"; bad=1; }
@@ -160,7 +164,9 @@ for b in s.split("\n---\n"):
     out.append(b)
 open(p, "w").write("\n---\n".join(out)); sys.exit(0 if done else 1)
 PY3
-  if python3 "$T/check.py" "$EXTERNAL" "$T"/m3/*.yaml > "$T/o3"; then echo "selftest FAIL: M3 an unmatched PodMonitor passed"; bad=1; else echo "selftest ok: M3 a PodMonitor no pod template matches goes red"; fi
+  python3 "$T/check.py" "$EXTERNAL" "$T"/m3/*.yaml > "$T/o3" 2>&1; rc=$?
+  if [ "$rc" = 1 ] && grep -q '^FAIL tockmox-platform PodMonitor .* selects nothing the layers render' "$T/o3"; then echo "selftest ok: M3 a PodMonitor no pod template matches goes red, with the rule's own FAIL line"
+  else echo "selftest FAIL: M3 an unmatched PodMonitor was not reported by the rule (exit $rc)"; tail -3 "$T/o3"; bad=1; fi
   # M4: an external entry that has started matching is reported.
   python3 "$T/check.py" "$EXTERNAL
 tockmox-ai ServiceMonitor tockmox-ui # wrong" "$T"/good/*.yaml > "$T/o4"

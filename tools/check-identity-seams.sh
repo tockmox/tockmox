@@ -352,6 +352,9 @@ selftest() {
   # The default itself, mutated in the chart (a copy, never the tree): the helper
   # ignores the capability, which is the old `false` default in new clothes.
   mkdir -p "$t/mut"; cp -r "$AIC" "$t/mut/tockmox-ai"
+  # Through the same copy, unmutated: a chart that will not render where it was copied to
+  # (a dependency left behind, a missing charts/) would read below as a mutation going red.
+  render "$t/mut/tockmox-ai" -f $CI > "$t/c"; s7_backed "$t/c" || { echo "selftest: the unmutated copy of $AIC does not render and pass; fix the tree first"; rm -rf "$t"; return 1; }
   # Write and move, not bare `sed -i`: BSD sed reads -i's next argument as a suffix (TM-0996).
   sed 's/"override" \.Values\.modelGateway\.database\.backup\.enabled/"override" false/' "$t/mut/tockmox-ai/templates/_backup.tpl" > "$t/mut/_backup.tpl" && mv "$t/mut/_backup.tpl" "$t/mut/tockmox-ai/templates/_backup.tpl"
   render "$t/mut/tockmox-ai" -f $CI > "$t/m"; red "S7 chart default pinned off (helper mutated)" s7_backed "$t/m"
@@ -398,7 +401,11 @@ selftest() {
   local bin; bin=$(mktemp -d); echo x > "$bin/cert.pem"
   printf '#!/bin/sh\ncat >/dev/null; echo "kind: SealedSecret"\n' > "$bin/kubeseal"; chmod +x "$bin/kubeseal"
   PATH="$bin:$PATH" bash "$t/tools/mint-secrets.sh" --cert "$bin/cert.pem" --out "$t/mo" --no-prompt --no-next -y --only sso >/dev/null 2>&1
-  if [ "$(ls "$t/mo" 2>/dev/null | sort | tr '\n' ' ')rc=0" = "$SSO_FILES" ]; then echo "  FAIL selftest: S5 passed with --only neutered"; bad=1; else echo "  ok   S5 --only neutered goes red"; fi
+  local mrc=$? sf miss=0
+  # Red for the right reason: the copy ran to the end (exit 0) and minted the four sso files AND others.
+  # A copy that crashed mints fewer files, which also differs from SSO_FILES and would have passed.
+  for sf in ${SSO_FILES% rc=0}; do [ -e "$t/mo/$sf" ] || miss=1; done
+  if [ "$mrc" = 0 ] && [ "$miss" = 0 ] && [ "$(ls "$t/mo" 2>/dev/null | wc -l)" -gt 4 ]; then echo "  ok   S5 --only neutered goes red"; else echo "  FAIL selftest: S5 --only neutered did not mint the sso files plus others (exit $mrc, $(ls "$t/mo" 2>/dev/null | wc -l) files)"; bad=1; fi
   rm -rf "$bin" "$t"
   [ "$bad" -eq 0 ] && echo "selftest: every assertion can go red" || echo "selftest: FAILED" >&2
   return "$bad"

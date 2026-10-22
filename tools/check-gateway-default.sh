@@ -427,9 +427,12 @@ open(p, "w").write(s2)
 PY
   r m23 ai; must_refuse "G7 a failed check no longer degrades the AI layer in Argo CD" g7 "$T/m23" "$T/pol.m"
   cp charts/tockmox-ai/templates/console-key-check.yaml "$CK"
-  # G6: the mint default restored to 0.7.x.
+  # G6: the mint default restored to 0.7.x. Green on the untouched copy first, and red because it
+  # minted the others without the gateway's: a copy that crashed mints nothing and reads as red too.
+  g6 || { echo "selftest FAIL: G6 is red on the unmutated copy, so the mutation below proves nothing"; fail=1; }
   sedi 's/DRY=false; WITH_LITELLM=true;/DRY=false; WITH_LITELLM=false;/' "$M/tools/mint-secrets.sh"
   must_refuse "G6 mint-secrets no longer mints the gateway credentials by default" g6
+  case "$(mint_files)" in ""|*litellm*) echo "selftest FAIL: G6 the mutated copy did not mint the other credentials and leave out the gateway's"; fail=1 ;; esac
   sedi 's/    --without-litellm) WITH_LITELLM=false; shift ;;/    --without-litellm) WITH_LITELLM=true; shift ;;/' "$M/tools/mint-secrets.sh"
   must_refuse "G6 --without-litellm no longer leaves them out" g6_without
   [ "$fail" -eq 0 ] || exit 1

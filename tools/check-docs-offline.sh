@@ -277,6 +277,23 @@ INJECT = [
     ("CSS @import string", "assets/a.css", "@import url('b.css');", '@import "//fonts.example.net/f.css";'),
     ("CSS font-face url()", "assets/b.css", ".y{color:red}", "@font-face{font-family:F;src:url(https://fonts.gstatic.example/f.woff2)}"),
     ("SVG href", "assets/i.svg", "</svg>", "<image href='https://img.example.net/x.png'/></svg>"),
+    # The remaining forms the header promises to catch. Each is the only thing its case adds, so a
+    # form dropped from URL_ATTRS, or the <style> and inline-script scans, stays green no longer.
+    ("source srcset", "index.html", "</body>", '<picture><source srcset="https://images.example.net/x.webp 1x"></picture></body>'),
+    ("video src", "index.html", "</body>", '<video src="https://media.example.net/v.mp4"></video></body>'),
+    ("video poster", "index.html", "</body>", '<video poster="https://media.example.net/p.png"></video></body>'),
+    ("audio src", "index.html", "</body>", '<audio src="https://media.example.net/a.mp3"></audio></body>'),
+    ("embed src", "index.html", "</body>", '<embed src="https://embed.example.net/x.swf"></body>'),
+    ("object data", "index.html", "</body>", '<object data="https://embed.example.net/x.pdf"></object></body>'),
+    ("input src", "index.html", "</body>", '<input type="image" src="https://img.example.net/b.png"></body>'),
+    ("track src", "index.html", "</body>", '<video><track src="https://captions.example.net/c.vtt"></video></body>'),
+    ("base href", "index.html", "</head>", '<base href="https://elsewhere.example.net/"></head>'),
+    ("svg use href in a page", "index.html", "</body>", '<svg><use href="https://sprites.example.net/s.svg#i"></use></svg></body>'),
+    ("svg use xlink:href in a page", "index.html", "</body>", '<svg><use xlink:href="https://sprites.example.net/s.svg#i"></use></svg></body>'),
+    ("svg image href in a page", "index.html", "</body>", '<svg><image href="https://img.example.net/x.png"></image></svg></body>'),
+    ("svg image xlink:href in a page", "index.html", "</body>", '<svg><image xlink:href="https://img.example.net/x.png"></image></svg></body>'),
+    ("inline <style> url(), unquoted", "index.html", "</head>", '<style>.z{background:url(https://img.example.net/b.png)}</style></head>'),
+    ("inline <script> URL literal", "index.html", "</body>", '<script>var u = "https://cdn.example.net/x.js";</script></body>'),
 ]
 
 
@@ -315,6 +332,13 @@ def selftest(real):
             print("  SELFTEST FAIL: an empty site passed"); bad += 1
         else:
             print("  red, as required")
+        print("-- a site with no pages, and a page with nothing to check, must not pass either")
+        for name, rel, text in (("only-css", "assets/a.css", ".x{}"), ("bare-page", "index.html", "<!doctype html><title>x</title>")):
+            write(os.path.join(tmp, name, rel), text)
+            if report(os.path.join(tmp, name), quiet=True):
+                print("  SELFTEST FAIL: %s passed" % name); bad += 1
+            else:
+                print("  red, as required: %s" % name)
         if real:
             print("-- the real site, mutated in a copy")
             d = os.path.join(tmp, "real"); shutil.copytree(real, d)

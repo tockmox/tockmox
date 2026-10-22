@@ -197,11 +197,24 @@ assert old in s, "selftest: %r not found in %s; update the selftest" % (old, p)
 open(p, "w").write(s.replace(old, new, 1))
 PY
   }
+  # Controls: the same layers copied the same way, untouched, must be green. A failed render is also a
+  # finding under A, B, R and D, so a chart that will not render where it was copied to (its
+  # file://../tockmox-common dependency left behind) would otherwise read below as a mutation going red.
+  : > "$tmp/refused"; : > "$tmp/byo-count"
+  for l in policy platform identity; do
+    rm -rf "$tmp/c-$l"; cp -R "charts/tockmox-$l" "$tmp/c-$l"
+    if gate_layer "$l" "$tmp/c-$l" >"$tmp/c.out" 2>&1 && byo_layer "$l" "$tmp/c-$l" >>"$tmp/c.out" 2>&1; then
+      echo "selftest ok   control: an untouched copy of tockmox-$l is green where it is copied to"
+    else
+      echo "selftest FAIL control: an untouched copy of tockmox-$l is not green, so a red below could be the copy"; head -5 "$tmp/c.out"; fail=1
+    fi
+  done
   GATE='{{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") }}'
   # 2. A: policy with its rule gate removed renders a PrometheusRule with the capability off.
   mutate policy "$tmp/m-policy" rbac-guardrails.yaml "$GATE" '{{- if true }}'
   out=$(gate_layer policy "$tmp/m-policy") && rc=0 || rc=$?
-  red "A  policy with its monitor gate removed" "$rc" "$out" 'FAIL  A'
+  red "A  policy with its monitor gate removed" "$rc" "$out" 'FAIL  A  tockmox-policy renders '
+  red "B  policy with its monitor gate removed, profile applied" "$rc" "$out" 'FAIL  B  tockmox-policy (plain) still renders '
   # 3. B: a profile that leaves one subchart switch on. It must fail on B (the
   # layer refuses with the profile applied) and nowhere be silently accepted.
   python3 - "$PROFILE_DEFAULT" "$tmp/prof-mut.yaml" <<'PY'
@@ -213,22 +226,24 @@ open(sys.argv[2], "w").write(s.replace(old, old.replace("false", "true"), 1))
 PY
   out=$(gate_layer platform charts/tockmox-platform "$tmp/prof-mut.yaml") && rc=0 || rc=$?
   red "B  profile missing one subchart switch" "$rc" "$out" 'FAIL  B'
+  red "B  profile missing one subchart switch (named in the refusal)" "$rc" "$out" 'still on: cert-manager.prometheus.servicemonitor.enabled'
   # 4. R: platform with the refusal switched off must go red; so must identity.
   REF='{{- if and (not $obsOn) (not $byo) -}}'
   mutate platform "$tmp/m-platform" preflight.yaml "$REF" '{{- if false -}}'
   out=$(gate_layer platform "$tmp/m-platform") && rc=0 || rc=$?
-  red "R  platform with the refusal removed" "$rc" "$out" 'FAIL  R'
+  red "R  platform with the refusal removed" "$rc" "$out" 'FAIL  R  tockmox-platform rendered with the capability off'
   mutate identity "$tmp/m-identity" preflight.yaml "$REF" '{{- if false -}}'
   out=$(gate_layer identity "$tmp/m-identity") && rc=0 || rc=$?
-  red "R  identity with the refusal removed" "$rc" "$out" 'FAIL  R'
+  red "R  identity with the refusal removed" "$rc" "$out" 'FAIL  R  tockmox-identity rendered with the capability off'
   # 5. R: the refusal still fires but no longer names the profile.
   mutate platform "$tmp/m-platform2" preflight.yaml 'pass profiles/observability-off.yaml to this layer' 'pass the right profile to this layer'
   out=$(gate_layer platform "$tmp/m-platform2") && rc=0 || rc=$?
-  red "R  refusal message that does not name the profile" "$rc" "$out" 'does not name'
+  red "R  refusal message that does not name the profile" "$rc" "$out" 'FAIL  R  tockmox-platform refused, but the message does not name profiles/observability-off.yaml'
   # 6. D: the refusal fires on the bring-your-own route (the $byo exemption removed).
   mutate platform "$tmp/m-platform3" preflight.yaml "$REF" '{{- if not $obsOn -}}'
   : > "$tmp/byo-count"; out=$(byo_layer platform "$tmp/m-platform3") && rc=0 || rc=$?
   red "D  refusal that ignores apps.serviceMonitors" "$rc" "$out" 'FAIL  D'
+  red "D  refusal that ignores apps.serviceMonitors (by the refusal's own message)" "$rc" "$out" 'vendored subchart monitor switch'
   # 7. D: the coherence guard back in the policy preflight refuses the route.
   python3 - "$tmp/m-policy2" <<'PY'
 import sys, shutil
@@ -239,10 +254,11 @@ open(p, "w").write(s)
 PY
   : > "$tmp/byo-count"; out=$(byo_layer policy "$tmp/m-policy2") && rc=0 || rc=$?
   red "D  coherence guard on serviceMonitors back in policy" "$rc" "$out" 'FAIL  D'
+  red "D  coherence guard on serviceMonitors back in policy (by its own message)" "$rc" "$out" 'apps.serviceMonitors.enabled is true but the observability capability is off'
   # 8. D non-vacuous: an empty count for platform is a finding.
   printf 'platform 0\nidentity 2\npolicy 1\nobservability 3\nselfcheck 1\n' > "$tmp/byo-count"
   out=$(byo_nonvacuous) && rc=0 || rc=$?
-  red "D  route that renders no platform monitor" "$rc" "$out" 'FAIL  D'
+  red "D  route that renders no platform monitor" "$rc" "$out" 'FAIL  D  tockmox-platform renders no monitor object'
   # 9. The untouched tree is green on every assertion.
   : > "$tmp/refused"; : > "$tmp/byo-count"; bad=""
   for l in platform identity policy; do gate_layer "$l" >"$tmp/g.out" 2>&1 || bad="$bad $l(gate)"; byo_layer "$l" >>"$tmp/g.out" 2>&1 || bad="$bad $l(byo)"; done

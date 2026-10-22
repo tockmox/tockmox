@@ -103,8 +103,8 @@ STUB
 
   : > "$T/none.txt"
   out="$(STUB_PRESENT="$T/present.txt" PATH="$T/bin:$PATH" bash "$SELF" --registry reg.test/m --images "$T/none.txt" --verify 2>&1)"; rc=$?
-  if [ "$rc" -ne 0 ]; then ok "an empty images file refuses rather than passing vacuously"
-  else bad "empty images file passed: $out"; fi
+  if [ "$rc" -eq 2 ] && grep -q 'carries no image entries' <<<"$out"; then ok "an empty images file refuses (exit 2, saying so) rather than passing vacuously"
+  else bad "empty images file: expected exit 2 and the no-entries message, got rc=$rc: $out"; fi
 
   echo; echo "mirror-images --selftest: $pass passed, $fail failed"
   [ "$fail" -eq 0 ]; exit $?
