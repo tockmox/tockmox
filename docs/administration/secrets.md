@@ -230,6 +230,7 @@ values file points:
 | `tockmox-sso-grafana` | `tockmox-monitoring` | `client-secret` | Grafana OIDC. Same value as `GRAFANA_CLIENT_SECRET` |
 | `tockmox-sso-openwebui` | `tockmox-ai` | `client-secret` | Open WebUI OIDC. Same value as `OPENWEBUI_CLIENT_SECRET` |
 | `tockmox-sso-argo` | `tockmox-devops` | `client-id` (= `tockmox-argo`), `client-secret` | Argo Workflows SSO. Same value as `ARGO_CLIENT_SECRET` |
+| `tockmox-sso-tockmox-ui` | `tockmox-authentik` | `TOCKMOX_UI_CLIENT_SECRET` | The Tockmox UI's blueprint, only with `sso.apps.tockmoxUi.enabled` (0.9.0). Same value as the UI's own `tockmox-sso-tockmox-ui` `client-secret` in `tockmox-ai`. Optional: the identity layer starts without it |
 | `tockmox-ntfy-auth` | `tockmox-monitoring` | `NTFY_AUTH_USERS`, `NTFY_AUTH_ACCESS`, `NTFY_AUTH_TOKENS`, `NTFY_BRIDGE_TOKEN` | ntfy users, ACL and publish token. Without it ntfy is `deny-all` with no users and **no alert reaches anybody** |
 | `tockmox-apprise-config` | `tockmox-monitoring` | `tockmox` | Apprise destination URLs, newline-separated, each as `tockmox=<url>`. Only needed with `notifications.apprise.enabled` |
 | `tockmox-litellm` | `tockmox-ai` | `masterkey` | The model gateway's admin key. Needed with the model gateway, which is on by default since 0.8.0 (`apps.litellm` follows `capabilities.aiPlane`); `mint-secrets.sh` mints it by default, `--without-litellm` opts out |

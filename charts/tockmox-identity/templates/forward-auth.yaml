@@ -1,0 +1,100 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# FORWARD-AUTH FOR CONSOLES WITH NO SIGN-IN OF THEIR OWN (TM-0425).
+#
+# Two things live here, beside the blueprint in sso-blueprints.yaml that creates
+# the per-console proxy providers:
+#
+# 1. ONE Traefik Middleware, `tockmox-forward-auth`, asking Authentik's embedded
+#    outpost whether the request may pass. Every forward-auth console attaches
+#    it by its provider-qualified name (tockmox.forwardAuthRef in
+#    tockmox-common), so it is the same object for Prometheus, Alertmanager,
+#    Longhorn and the Traefik dashboard, and for any route of your own you put
+#    behind it. The outpost decides PER HOST which provider applies, so sharing
+#    the Middleware does not share the access decision. Rendered only when at
+#    least one console is on (`sso.forwardAuth.apps`), so an install that runs
+#    its own ingress controller without Traefik's CRDs never meets the kind.
+#    The address is this release's own
+#    Authentik server Service on its plain-HTTP port, in-cluster: no TLS trust
+#    to wire, and no dependency on the auth.<domain> name resolving.
+#
+#    `authResponseHeaders` passes Authentik's identity headers to the console.
+#    None of the four shipped consoles reads them; they are there for a route of
+#    your own that does.
+#
+# 2. Per enabled console, an Ingress on THAT console's host for
+#    /outpost.goauthentik.io/ only. In `forward_single` mode the sign-in ends
+#    with a redirect to <console host>/outpost.goauthentik.io/callback, which
+#    must reach Authentik to set the session cookie for that host. The console's
+#    own route (in another layer) matches `/`; Traefik prefers the longer rule,
+#    so the callback path lands here and everything else there. Without this
+#    Ingress the login loops back to the sign-in page forever.
+{{- $faAny := false }}
+{{- range $k, $c := ((.Values.sso.forwardAuth | default dict).apps | default dict) }}
+{{- if eq ($c | default dict).enabled true }}{{- $faAny = true }}{{- end }}
+{{- end }}
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "authentik")) .Values.sso.enabled $faAny }}
+{{- $server := printf "%s-authentik-server" .Release.Name }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: tockmox-forward-auth
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  forwardAuth:
+    address: http://{{ $server }}.{{ .Release.Namespace }}.svc.cluster.local/outpost.goauthentik.io/auth/traefik
+    trustForwardHeader: true
+    authResponseHeaders:
+      - X-authentik-username
+      - X-authentik-groups
+      - X-authentik-email
+      - X-authentik-name
+      - X-authentik-uid
+{{- $certIssuer := .Values.global.certIssuer }}
+{{- range $key := list "prometheus" "alertmanager" "longhorn" "traefik" }}
+{{- $c := index ((($.Values.sso.forwardAuth | default dict).apps) | default dict) $key | default dict }}
+{{- if eq $c.enabled true }}
+{{- $host := $c.host | default (include "tockmox.internalHost" (dict "svc" $key "ctx" $)) }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: forward-auth-{{ $key }}
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+  {{- $extra := $.Values.ingress.annotations }}
+  {{- if or $certIssuer $extra }}
+  annotations:
+    {{- if $certIssuer }}
+    cert-manager.io/cluster-issuer: {{ $certIssuer }}
+    {{- end }}
+    {{- with $extra }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+spec:
+  {{- with $.Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  rules:
+    - host: {{ $host }}
+      http:
+        paths:
+          - path: /outpost.goauthentik.io/
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $server }}
+                port:
+                  number: 80
+  {{- if $certIssuer }}
+  tls:
+    - hosts:
+        - {{ $host }}
+      secretName: forward-auth-{{ $key }}-tls
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

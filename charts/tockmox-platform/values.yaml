@@ -64,10 +64,29 @@ ingress:
   # would break on rename. Set this only to pin a specific class.
   className: ""
   annotations: {}
+  # The Authentik Middleware a forward-auth route attaches, provider-qualified.
+  # Empty uses the identity layer's on a stock install
+  # (tockmox-authentik-tockmox-forward-auth@kubernetescrd).
+  forwardAuth:
+    middleware: ""
+  # Longhorn and the Traefik dashboard ship no sign-in. Turning a route on puts
+  # Authentik's forward-auth in front of it (TM-0425), which needs the SAME
+  # console on in the identity layer (`sso.forwardAuth.apps.<app>.enabled`), and
+  # fails the render if the identity capability is off. `forwardAuth: false`
+  # routes the console with NO sign-in: only behind your own authentication.
+  # docs/administration/identity.md, "Consoles behind forward-auth".
   apps:
     longhorn:
       enabled: false
       host: ""            # override the derived longhorn.<internalDomain>
+      forwardAuth: true
+    # The dashboard and its API at traefik.<internalDomain>, /dashboard/ and
+    # /api only. The port-forward path (traefik.api.insecure) stays as the
+    # break-glass, on purpose: see templates/ingress.yaml.
+    traefik:
+      enabled: false
+      host: ""            # override the derived traefik.<internalDomain>
+      forwardAuth: true
 
 # ---------------------------------------------------------------------------
 # Per-app toggles. Each maps to an upstream chart dependency.

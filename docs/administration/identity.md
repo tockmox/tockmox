@@ -265,7 +265,93 @@ The same shape serves any other console without OIDC. Add a key under
 | `access` | `users` | `admin` or `users`, as for the OAuth tiles. |
 
 A link needs `sso.enabled`, like every tile. Its slug is `tockmox-<key>`; a key
-that matches one of the OAuth applications fails the render.
+that matches one of the shipped applications (the OAuth consoles and the
+forward-auth consoles below) fails the render.
+
+**Argo CD has a link entry too, off by default** (`sso.links.argocd`). Argo CD
+is a prerequisite rather than a Tockmox component, so the product ships no route
+and no OIDC client for it. Once you give it a hostname, set
+`sso.links.argocd.enabled: true` (and `host`, if it is not
+`argocd.<internalDomain>`) and it gets a tile. [Argo CD, a hostname and a portal
+tile](argocd.md#a-hostname-and-a-portal-tile) has the recipe.
+
+## Consoles behind forward-auth
+
+Prometheus, Alertmanager, Longhorn and the Traefik dashboard have no sign-in of
+their own and cannot speak OIDC. Each can be put behind Authentik instead: the
+request reaches Traefik, Traefik asks Authentik's embedded outpost whether it
+may pass, and a browser with no session is sent to the Authentik login first.
+
+Each console is turned on twice, in the identity layer and in the layer that
+serves it, because the layers cannot read each other's values:
+
+```yaml
+# site/values/identity.yaml ... Authentik's half
+sso:
+  forwardAuth:
+    apps:
+      prometheus:
+        enabled: true
+        # host: metrics.example.com   # only if you override the route's host too
+        # access: users               # default admin
+
+# site/values/observability.yaml ... the route
+ingress:
+  apps:
+    prometheus:
+      enabled: true
+```
+
+Longhorn and the Traefik dashboard take their route from the platform layer
+(`ingress.apps.longhorn`, `ingress.apps.traefik`); Prometheus and Alertmanager
+from observability.
+
+| Layer | Renders |
+|---|---|
+| identity | Per console: a proxy provider in `forward_single` mode for that one host, an application (a tile on the portal) and the `access` binding, the same as the OAuth consoles. Once: one Traefik Middleware, `tockmox-forward-auth`. Per console: an Ingress on its host for `/outpost.goauthentik.io/` only, the sign-in callback. |
+| observability, platform | The console's route, with the Middleware attached (`traefik.ingress.kubernetes.io/router.middlewares`). |
+
+**One provider per console, not one for the domain.** A single domain-level
+provider would gate every console with one access decision, so letting a role
+see Prometheus would also let it into Longhorn. Here each console has its own
+binding, and `sso.forwardAuth.apps.<console>.access` (`admin` by default, since
+these are operator consoles and Longhorn can delete volumes) is decided per
+console. The Middleware is shared; the outpost picks the provider by host, so
+sharing it does not share the decision.
+
+**Both halves or neither.** The identity half alone gives a tile that opens
+nothing. The route alone is refused by Authentik, which has no provider for that
+host. A route turned on while the identity capability is off fails the render.
+`ingress.apps.<console>.forwardAuth: false` routes the console with no sign-in,
+for a site with its own authentication in front of it.
+
+**The embedded outpost's provider list is owned by the identity layer** once any
+console is on. Authentik stores which providers the embedded outpost serves as
+one list, and a blueprint sets the list whole: it cannot append. A proxy
+provider you created yourself on the embedded outpost is detached at the next
+apply unless you name it:
+
+```yaml
+sso:
+  forwardAuth:
+    keepProviders: ["my-own-proxy-provider"]   # by provider name; it must exist
+```
+
+A name that does not exist puts the blueprint in error, and one blueprint in
+error stops discovery for all of them ([the greenfield rule](#the-greenfield-rule-for-blueprints)).
+With every console off, the outpost is not touched.
+
+**Port-forward still works**, and stays the break-glass: an Authentik outage
+otherwise locks you out of Prometheus and Alertmanager, the two consoles you
+would use to see why. [Configuration, hostnames and
+TLS](configuration.md#hostnames-and-tls) covers the Traefik dashboard's.
+
+**Using the Middleware for a route of your own.** Attach
+`tockmox-authentik-tockmox-forward-auth@kubernetescrd` to your Ingress or
+IngressRoute and create a proxy provider for its host (`forward_single`) on the
+embedded outpost, then list that provider in `keepProviders`. The Middleware
+passes `X-authentik-username`, `-groups`, `-email`, `-name` and `-uid` to the
+backend.
 
 ## Day-to-day administration
 
@@ -447,6 +533,36 @@ block is set, and no apply clears that block. The upgrade would fail on
 exactly the installs that need it. New numbers on the same `RollingUpdate`
 type are accepted.
 
+## Signing out
+
+**Signing out of Authentik does not sign you out of the consoles.** Each console keeps its own session after sign-in, in its own cookie or on its own server, so ending the Authentik session changes nothing a console already holds. The shipped providers also register no logout address with Authentik, so Authentik has no way to tell a console that you left.
+
+The rows below answer three questions per console: what its own Sign out does, what signing out of Authentik does to it, and what actually ends its session. Versions are those in `images.txt` for this tree; read the file for yours.
+
+| Console | Its own Sign out | After you sign out of Authentik | What ends its session | RP-initiated logout upstream (not set by Tockmox) |
+|---|---|---|---|---|
+| Grafana | Ends the Grafana session and returns to Grafana's login page. One click on the SSO button signs you back in without a prompt while the Authentik session lives. | Nothing. Grafana stays signed in. | Its own Sign out, or Grafana's login lifetime: 7 days idle and 30 days in total by default. Tockmox sets neither. | Yes. `signout_redirect_url` in `[auth]` (`GF_AUTH_SIGNOUT_REDIRECT_URL`), set to Authentik's end-session address with a `post_logout_redirect_uri`; Grafana then adds `id_token_hint`. |
+| Open WebUI | Ends the Open WebUI session, then sends the browser to Authentik's end-session address. With the shipped `default-provider-invalidation-flow` that ends only this application's session at Authentik, not the Authentik session. | Nothing. Back-channel logout (`ENABLE_OAUTH_BACKCHANNEL_LOGOUT`) is off. | Its own Sign out, or sign-in token expiry: 4 weeks by default (`JWT_EXPIRES_IN`). Tockmox sets neither. | Yes, already used. It reads `end_session_endpoint` from the issuer's discovery document. `WEBUI_AUTH_SIGNOUT_REDIRECT_URL` sets where the browser lands; `OPENID_END_SESSION_ENDPOINT` overrides the address. |
+| Argo Workflows | Argo's own session only. No provider logout in this version. | Nothing. | Its own Sign out, or session expiry: 10 hours by default (`sso.sessionExpiry`). | Not in the shipped version. From v4.2, `sso.logoutRedirectUrl` turns it on. The installer's Argo values do not set it. |
+| Tockmox UI | Ends the UI session, then sends the browser to Authentik's end-session address (`config.oidc.endSession`, on by default). Whether that ends the Authentik session depends on the provider's invalidation flow; [the UI page](tockmox-ui.md#register-the-ui-with-authentik) asks for `default-invalidation-flow`. | Nothing. | Its own Sign out, or the UI's session cookie: 8 hours by default. Rotating the session secret signs everyone out. | Yes, shipped. `config.oidc.endSession` and `config.oidc.postLogoutRedirectUrl`, described on the UI page. |
+
+The two Authentik flows differ in one way that matters here. `default-invalidation-flow` runs when you sign out of Authentik itself, ends the Authentik session and triggers single logout for applications that registered a logout address. `default-provider-invalidation-flow` is the default for a logout started from an application and ends only that application's session. The shipped OAuth blueprints for Grafana, Open WebUI and Argo Workflows use the second. The Tockmox UI's blueprint (`sso.apps.tockmoxUi`) uses the first, so its Sign out ends the Authentik session; registered by hand instead, its flow is your choice.
+
+Consoles behind Authentik's forward-auth ([above](#consoles-behind-forward-auth): Prometheus, Alertmanager, Longhorn and the Traefik dashboard) are a different case. They have no sign-in or Sign out of their own; the session is the outpost's cookie on the console's host. For a proxy provider in single-application mode, upstream documents `/outpost.goauthentik.io/sign_out` on the console's own host, which "invalidates all sessions for that user within the respective outpost". It documents neither what signing out of Authentik does to that session nor how long the outpost keeps it. RP-initiated logout does not apply: the proxy has its own sign-out path.
+
+### On a shared browser
+
+Households and small teams often share one browser profile. After you sign out of Authentik, the next person on that browser is still signed in to Grafana, Open WebUI, Argo Workflows and the Tockmox UI as you, with your role, until each session ends. Sign out of each console you opened, then Authentik. Closing the browser is not enough: the Tockmox UI sets an 8 hour cookie lifetime, so its session survives a restart, and the other consoles were not checked. A private window per person, closed afterwards, is the cheapest habit.
+
+### What is not certified here
+
+Nothing in this section was measured on a cluster. No sign-out was performed against Authentik or any console while writing it. Three kinds of claim sit in the table, and they are not equally strong.
+
+- **Derived from this tree.** The shipped consoles render no logout setting: no `signout_redirect_url` in the Grafana environment, none of the Open WebUI sign-out variables, no `logoutRedirectUrl` in the installer's Argo values, and no logout address or method in the three console blueprints, which set `default-provider-invalidation-flow`. Check with `grep -rniE 'logout|signout|end_session' charts install`.
+- **The upstream documentation says.** The Grafana [setting](https://grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/) and its login lifetimes, Argo's 10 hour default and [`sso.logoutRedirectUrl`](https://argo-workflows.readthedocs.io/en/latest/argo-server-sso/) from v4.2, Authentik's [two invalidation flows](https://docs.goauthentik.io/add-secure-apps/flows-stages/flow/default-flows/) and [single logout](https://docs.goauthentik.io/add-secure-apps/providers/single-logout/), and the [proxy provider's sign-out path](https://docs.goauthentik.io/add-secure-apps/providers/proxy/). Those pages change; read them before relying on a default.
+- **Read in upstream source, not run.** What Open WebUI 0.12.3 does on Sign out (`backend/open_webui/routers/auths.py`), and its 4 week token default.
+- **Nothing has tested** that an Open WebUI sign-out leaves the Authentik session alive under the shipped flow, that Grafana's SSO button signs back in without a prompt, what Argo's own Logout does in the shipped version, what signing out of Authentik does to a forward-auth session, or whether Open WebUI revokes a signed-out token without Redis.
+
 ## Break-glass, deliberately
 
 Local logins stay enabled alongside SSO:
@@ -584,6 +700,17 @@ Authentik on a fresh install, proves they bind. The
 
 The dates in the greenfield section come from the commit history of this
 repository and are checkable there.
+
+**Forward-auth (added for 0.9.0) is a render, not a login.** The proxy
+providers, bindings, Middleware and callback Ingresses are proved to render by
+the chart gates; that a browser with no session is sent to Authentik and then
+reaches the console, and that a user outside the binding is refused, is the
+0.9.0 lab leg's to show, and until then it is configuration, not observation.
+Two Authentik behaviours it relies on are taken from Authentik's documentation
+rather than measured here: that a blueprint updating an existing object applies
+only the fields it names (so the embedded outpost keeps its own configuration),
+and that a `forward_single` provider needs the `/outpost.goauthentik.io/`
+callback on the console's own host.
 
 <!-- tockmox:footer:begin -->
 

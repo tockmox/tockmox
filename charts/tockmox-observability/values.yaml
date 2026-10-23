@@ -217,7 +217,10 @@ sso:
 # Grafana is exposed by default: it has its own login. Prometheus and
 # Alertmanager are NOT ... neither ships authentication, and an unauthenticated
 # admin surface is not a default. Reach them with `kubectl port-forward`, or
-# enable them here once something in front of them does auth.
+# turn their route on here: it then goes through Authentik's forward-auth
+# (TM-0425), which needs the SAME console turned on in the identity layer
+# (`sso.forwardAuth.apps.<app>.enabled: true`), or Authentik refuses the host.
+# docs/administration/identity.md, "Consoles behind forward-auth".
 # ---------------------------------------------------------------------------
 ingress:
   # Empty uses the cluster's DEFAULT IngressClass ... the Traefik the platform
@@ -226,16 +229,27 @@ ingress:
   # would break on rename. Set this only to pin a specific class.
   className: ""
   annotations: {}
+  # The Authentik Middleware a forward-auth route attaches, provider-qualified.
+  # Empty uses the identity layer's on a stock install
+  # (tockmox-authentik-tockmox-forward-auth@kubernetescrd); set it only if you
+  # moved the identity layer to another namespace.
+  forwardAuth:
+    middleware: ""
   apps:
     grafana:
       enabled: true
       host: ""            # override the derived grafana.<internalDomain>
+    # `forwardAuth: true` puts Authentik in front, and the render fails if the
+    # identity capability is off. `false` routes the console with NO sign-in:
+    # only for a site that puts its own authentication in front.
     prometheus:
       enabled: false
       host: ""
+      forwardAuth: true
     alertmanager:
       enabled: false
       host: ""
+      forwardAuth: true
     # ntfy IS exposed: it has its own authentication, and the web app is how a
     # human subscribes to the alert topic. Its metrics port is not routed here.
     ntfy:

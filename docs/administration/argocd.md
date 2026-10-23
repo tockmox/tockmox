@@ -453,6 +453,85 @@ Two notes if you are building the git server inside the cluster:
 - A bare repository created as root is refused by a server running as another
   uid with `detected dubious ownership`. Set `safe.directory`.
 
+## A hostname and a portal tile
+
+Every Tockmox console has a name, TLS and a tile on the Authentik portal; Argo
+CD, as a prerequisite you installed, has none of them until you give it them.
+It matters more than it looks: Argo CD is the console that shows a layer stuck
+in `ComparisonError` while every health surface reads `Healthy`, and nobody
+opens a console that has no address.
+
+Tockmox does not ship Argo CD's route or OIDC client, for the same reason it
+does not install Argo CD. It ships the tile, off by default, and this recipe for
+the other two. Argo CD speaks OIDC itself, so it signs in through Authentik
+directly rather than behind the forward-auth proxy the consoles without a
+sign-in use.
+
+**1. A hostname, in your Argo CD Helm values** (`argocd.<internalDomain>` keeps
+the house naming):
+
+```yaml
+# your argo-cd chart values
+global:
+  domain: argocd.int.example.com
+configs:
+  params:
+    server.insecure: true        # TLS terminates at Traefik
+server:
+  ingress:
+    enabled: true
+    annotations:
+      cert-manager.io/cluster-issuer: tockmox-ca   # your global.certIssuer
+    tls: true
+```
+
+**2. Sign-in through Authentik.** Create an OAuth2/OpenID provider and
+application for Argo CD in your site repository (a blueprint beside your other
+site blueprints, or the admin UI), confidential client, redirect URIs
+`https://argocd.<internalDomain>/auth/callback` (strict) and
+`http://localhost:8085/auth/callback` for the `argocd login --sso` CLI, scopes
+`openid`, `email`, `profile`, grant types `authorization_code` and
+`refresh_token`, bound to the admin group. Then in the Argo CD values:
+
+```yaml
+configs:
+  cm:
+    oidc.config: |
+      name: Authentik
+      issuer: https://auth.int.example.com/application/o/argocd/
+      clientID: argocd
+      clientSecret: $argocd-oidc:client-secret     # a Secret you create in the argocd namespace
+      requestedScopes: ["openid", "profile", "email"]
+  rbac:
+    policy.csv: |
+      g, tockmox-admins, role:admin
+    scopes: "[groups]"
+```
+
+Authentik puts the user's groups in the `groups` claim, which is what the
+`g, tockmox-admins, role:admin` line matches. Keep the local `admin` account as
+the break-glass: an Authentik outage should not lock you out of the tool that
+deploys Authentik.
+
+**3. The tile.** In the identity layer's values:
+
+```yaml
+sso:
+  links:
+    argocd:
+      enabled: true
+      # host: gitops.example.com   # only if not argocd.<internalDomain>
+```
+
+The tile is a link (no provider of its own); the sign-in behind it is step 2's.
+`access` is `admin` by default.
+
+**What is not certified here.** None of this section has been executed on a
+Tockmox install; it is assembled from the Argo CD chart's documented values and
+Authentik's OIDC provider settings, and the tile's render is the only part a
+Tockmox gate checks. The Argo CD values keys move between chart majors: read
+your chart version's `values.yaml` before applying them.
+
 ## Related
 
 - [Prerequisites](../deployment/prerequisites.md) ... what to install before Tockmox

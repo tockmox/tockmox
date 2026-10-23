@@ -159,22 +159,34 @@ each is overridable per app.
 | `auth.<internalDomain>` | Authentik | on (with the identity layer) | Is the login |
 | `workflows.<internalDomain>` | Argo Workflows | on | Behind SSO |
 | `ntfy.<internalDomain>` | ntfy | on | Has its own authentication, and the web app is how a human subscribes to the alert topic |
-| `prometheus.<internalDomain>` | Prometheus | **off** | Ships no authentication |
-| `alertmanager.<internalDomain>` | Alertmanager | **off** | Ships no authentication |
-| `longhorn.<internalDomain>` | Longhorn | **off** | Ships no authentication, and can delete volumes |
+| `prometheus.<internalDomain>` | Prometheus | **off** | Ships no authentication; behind Authentik when on |
+| `alertmanager.<internalDomain>` | Alertmanager | **off** | Ships no authentication; behind Authentik when on |
+| `longhorn.<internalDomain>` | Longhorn | **off** | Ships no authentication, and can delete volumes; behind Authentik when on |
+| `traefik.<internalDomain>` | Traefik dashboard | **off** | Ships no authentication; behind Authentik when on |
 
 The four that ship **off** are not a limitation to work around. An
 unauthenticated admin surface is not a default. Reach them with
-`kubectl port-forward`, or enable one here once something in front of it does
-authentication.
+`kubectl port-forward`, or turn one on: its route then goes through Authentik's
+forward-auth, and the console must be turned on in the identity layer too
+(`sso.forwardAuth.apps.<console>`). [Identity, consoles behind
+forward-auth](identity.md#consoles-behind-forward-auth) has the values and what
+each half does. With the identity capability off, turning one on fails the
+render rather than publishing a console nobody signs in to;
+`ingress.apps.<console>.forwardAuth: false` is the explicit way to route it
+without Authentik, for a site that puts its own authentication in front.
 
-**The Traefik dashboard is a fifth, and it does not work the same way.** It has
-no row above because it is not an `ingress.apps` entry: the chart's own route
-matches `PathPrefix(/dashboard)` and `PathPrefix(/api)` with no Host rule and no
-auth, so it answers on every internal hostname that reaches Traefik and `/api`
-hands out router and service configuration. It ships off for that reason.
+**The Traefik dashboard's route is its own, not the chart's.** The upstream
+chart's dashboard route (`traefik.ingressRoute.dashboard.enabled`) matches
+`PathPrefix(/dashboard)` and `PathPrefix(/api)` with no Host rule and no auth,
+so it answers on every internal hostname that reaches Traefik and `/api` hands
+out router and service configuration. It stays off.
+`ingress.apps.traefik.enabled` in the platform layer renders a different one: a
+Host-matched IngressRoute to `api@internal` for `/dashboard` and `/api` on
+`traefik.<internalDomain>` only, behind Authentik, with its own certificate.
 
-Unlike the four above, **`kubectl port-forward` alone does not reach it.**
+The port-forward path below stays as the break-glass whichever you choose, and
+on purpose. **Unlike the other consoles, `kubectl port-forward` alone does not
+reach the dashboard.**
 `api.dashboard: true` without `api.insecure` makes the dashboard available to be
 *routed* to `api@internal` and serves it on no entrypoint ... measured on a
 stock install, Traefik v3.7.12: `/ping` on the traefik entrypoint answers `200`
@@ -203,11 +215,10 @@ reaching it takes pod-network access or a port-forward, and the policy layer's
 NetworkPolicies constrain the first. Leave it off on anything you did not build
 to be poked at.
 
-A Host-matched route behind forward-auth is the better answer and is not shipped
-yet: the platform chart has no forward-auth middleware. Until it does, this is
-a break-glass path, which is arguably where a router's own dashboard belongs
-anyway ... **a console that tells you why routing is broken should not be
-reachable only through the routing you are trying to debug.**
+Keep this path even with the Authentik route on. **A console that tells you why
+routing is broken should not be reachable only through the routing you are
+trying to debug**, and an Authentik outage would otherwise lock you out of the
+tool you would use to find it.
 
 ```yaml
 # site/values/observability.yaml

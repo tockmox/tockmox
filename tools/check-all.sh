@@ -302,6 +302,8 @@ run_gate "a lanCIDR containing the clusterCIDR is refused when nodeOriginSources
 run_gate "garage.blockSize renders block_size only when set, above the tables (TM-0782)" bash tools/check-garage-block-size.sh
 run_gate "SSO blueprints are parseable YAML" bash tools/check-blueprint-discovery.sh
 run_gate "every SSO application is bound to a role group" bash tools/check-sso-bindings.sh
+run_gate "forward-auth consoles: provider, Middleware, callback and route name each other across layers (TM-0425)" bash tools/check-forward-auth.sh
+run_gate "the forward-auth gate goes red on every mutation (TM-0425)" bash tools/check-forward-auth.sh --selftest
 run_gate "identity and AI seams: host, sub_mode, merge-by-email, DB recovery and backup default, Grafana email path, admin-users Job, mint --only (TM-0820, TM-0312, TM-0667)" bash tools/check-identity-seams.sh
 run_gate "the identity-seams gate goes red on every assertion (TM-0820)" bash tools/check-identity-seams.sh --selftest
 run_gate "platform seams: namespace labels, probe hosts, dashboard keys, CNPG PodMonitor, etcd, Retain (TM-0820)" bash tools/check-platform-seams.sh

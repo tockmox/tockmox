@@ -145,6 +145,21 @@ four lines per app and removes the ordering dependency entirely.
       (dict "key" "openwebui" "title" "Open WebUI"     "host" (.Values.sso.apps.openWebui.host | default "") "subMode" (.Values.sso.apps.openWebui.subMode | default $.Values.sso.subMode | default "") "cid" .Values.sso.apps.openWebui.clientId     "access" (.Values.sso.apps.openWebui.access | default "users")     "env" "OPENWEBUI_CLIENT_SECRET" "hostPrefix" "chat"      "path" "/oauth/oidc/callback" "desc" "Chat with models running on your own hardware." "group" "AI Apps" "icon" "app-openwebui.svg")
       (dict "key" "argo"      "title" "Argo Workflows" "host" (.Values.sso.apps.argoWorkflows.host | default "") "subMode" (.Values.sso.apps.argoWorkflows.subMode | default $.Values.sso.subMode | default "") "cid" .Values.sso.apps.argoWorkflows.clientId "access" (.Values.sso.apps.argoWorkflows.access | default "users") "env" "ARGO_CLIENT_SECRET"      "hostPrefix" "workflows" "path" "/oauth2/callback"    "desc" "Run and inspect workflows." "group" "Infrastructure" "icon" "app-argo-workflows.svg") }}
 {{- /*
+THE TOCKMOX UI (TM-0956) joins the list only when `sso.apps.tockmoxUi.enabled`
+is true: off by default in 0.9.0, because its secret is a key an older
+`tockmox-sso` Secret lacks, and an `!Env` that resolves to nothing puts this
+blueprint in `error` and stops discovery for every other one (values.yaml says
+how to turn it on safely). Two fields the other three do not carry, both from
+docs/administration/tockmox-ui.md: the invalidation flow is
+`default-invalidation-flow`, so the UI's Sign out ends the Authentik session and
+not only this application's; and the UI's own address is registered as a
+post-logout redirect URI, so Sign out lands back on its sign-in page.
+*/ -}}
+{{- $ui := .Values.sso.apps.tockmoxUi | default dict }}
+{{- if eq $ui.enabled true }}
+{{- $apps = append $apps (dict "key" "tockmoxui" "title" "Tockmox" "host" ($ui.host | default "") "subMode" ($ui.subMode | default $.Values.sso.subMode | default "") "cid" ($ui.clientId | default "tockmox-ui") "access" ($ui.access | default "admin") "env" "TOCKMOX_UI_CLIENT_SECRET" "hostPrefix" "tockmox" "path" "/auth/callback" "desc" "Platform administration: status, nodes, models and versions." "group" "Infrastructure" "icon" "" "invalidation" "default-invalidation-flow" "logoutPath" "/") }}
+{{- end }}
+{{- /*
 LINK-ONLY APPLICATIONS (`sso.links.<key>`): a tile that opens a console which
 has no OIDC to attach a provider to. Authentik's Application.provider is
 optional (a nullable one-to-one on the model, and absent from the blueprint
@@ -166,7 +181,10 @@ another layer's values, so it follows the capability, not the other layer's
 per-component switches ... a site that turns the console itself off without
 declining the capability sets `enabled: false` here as well.
 */ -}}
-{{- $oauthKeys := list "grafana" "openwebui" "argo" }}
+{{- /* Keys whose `tockmox-<key>` slug is already taken by a shipped application
+(the OAuth consoles and the forward-auth consoles): a link with one of these
+keys would overwrite that application's tile. */ -}}
+{{- $oauthKeys := list "grafana" "openwebui" "argo" "tockmoxui" "prometheus" "alertmanager" "longhorn" "traefik" }}
 {{- $links := list }}
 {{- range $key, $l := (.Values.sso.links | default dict) }}
 {{- if has $key $oauthKeys }}
@@ -227,7 +245,7 @@ declining the capability sets `enabled: false` here as well.
             - authorization_code
             - refresh_token
           authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, {{ $app.invalidation | default "default-provider-invalidation-flow" }}]]
           signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
           property_mappings:
             - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]
@@ -236,6 +254,11 @@ declining the capability sets `enabled: false` here as well.
           redirect_uris:
             - matching_mode: strict
               url: "{{ $scheme }}://{{ $appHost }}{{ $app.path }}"
+{{- if $app.logoutPath }}
+            - matching_mode: strict
+              url: "{{ $scheme }}://{{ $appHost }}{{ $app.logoutPath }}"
+              redirect_uri_type: logout
+{{- end }}
 {{- end }}
       - model: authentik_core.application
         state: present
@@ -310,6 +333,129 @@ declining the capability sets `enabled: false` here as well.
         attrs:
           order: 1
           enabled: true
+{{- end }}
+{{- end }}
+{{- /*
+FORWARD-AUTH CONSOLES (TM-0425, TM-0217). One blueprint file for all of them,
+because the embedded outpost's provider list is ONE field: it is set whole from
+every enabled console plus `keepProviders`, and two files setting it would undo
+each other. values.yaml (`sso.forwardAuth`) explains why the list is owned here.
+
+Each console gets a proxy provider in `forward_single` mode for exactly its
+host, an application (tile) and the same group bindings as the OAuth apps, so
+`tools/check-sso-bindings.sh` covers them too. A console switched OFF renders
+its provider and application as `state: absent`: a blueprint never removes an
+object just because its entry disappeared, so without this a console turned off
+here would keep a provider the outpost no longer serves and a tile that opens a
+route which is gone. On an install that never had them, absent is a no-op.
+
+THE OUTPOST ENTRY IS RENDERED ONLY WHEN AT LEAST ONE CONSOLE IS ON, and with
+none on the embedded outpost is left exactly as it is. It is identified by
+`managed`, the stable marker Authentik itself creates it with, never by its
+display name, which an operator can rename.
+
+Greenfield rule: the only lookups are the two default flows already used above.
+`keepProviders` names objects a stock install does not have, which is why it is
+empty by default and why values.yaml says a missing name fails the blueprint.
+*/ -}}
+{{- $faApps := list
+      (dict "key" "prometheus"   "title" "Prometheus"        "prefix" "prometheus"   "desc" "Metrics and the alert rules as Prometheus evaluates them." "group" "Observability" "icon" "")
+      (dict "key" "alertmanager" "title" "Alertmanager"      "prefix" "alertmanager" "desc" "Firing alerts, silences and inhibitions."                  "group" "Observability" "icon" "")
+      (dict "key" "longhorn"     "title" "Longhorn"          "prefix" "longhorn"     "desc" "Volumes, replicas and backups. Can delete volumes."       "group" "Infrastructure" "icon" "")
+      (dict "key" "traefik"      "title" "Traefik dashboard" "prefix" "traefik"      "desc" "Routers, services and middlewares as Traefik sees them."  "group" "Infrastructure" "icon" "") }}
+{{- $faCfg := (.Values.sso.forwardAuth | default dict) }}
+{{- $faOn := list }}
+{{- range $fa := $faApps }}
+{{- $c := index ($faCfg.apps | default dict) $fa.key | default dict }}
+{{- if not (has ($c.access | default "admin") (list "admin" "users")) }}
+{{- fail (printf "sso.forwardAuth.apps.%s.access must be \"admin\" or \"users\", got %q" $fa.key $c.access) }}
+{{- end }}
+{{- if eq $c.enabled true }}{{- $faOn = append $faOn $fa.key }}{{- end }}
+{{- end }}
+  tockmox-forward-auth.yaml: |
+    version: 1
+    metadata:
+      name: tockmox-forward-auth
+      labels:
+        blueprints.goauthentik.io/description: "Tockmox consoles behind forward-auth (no sign-in of their own)"
+    entries:
+{{- range $fa := $faApps }}
+{{- $c := index ($faCfg.apps | default dict) $fa.key | default dict }}
+{{- $on := eq $c.enabled true }}
+{{- $faHost := $c.host | default (printf "%s.%s" $fa.prefix $domain) }}
+{{- $access := $c.access | default "admin" }}
+      - model: authentik_providers_proxy.proxyprovider
+        state: {{ ternary "present" "absent" $on }}
+        id: provider-fa-{{ $fa.key }}
+        identifiers:
+          name: tockmox-fa-{{ $fa.key }}
+{{- if $on }}
+        attrs:
+          mode: forward_single
+          external_host: "{{ $scheme }}://{{ $faHost }}"
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+{{- end }}
+      - model: authentik_core.application
+        state: {{ ternary "present" "absent" $on }}
+        id: app-fa-{{ $fa.key }}
+        identifiers:
+          slug: tockmox-{{ $fa.key }}
+{{- if $on }}
+        attrs:
+          name: {{ $fa.title | quote }}
+          provider: !KeyOf provider-fa-{{ $fa.key }}
+          meta_launch_url: "{{ $scheme }}://{{ $faHost }}{{ if eq $fa.key "traefik" }}/dashboard/{{ end }}"
+          meta_description: {{ $fa.desc | quote }}
+          meta_publisher: {{ $.Values.brand.title | quote }}
+          group: {{ $fa.group | quote }}
+          open_in_new_tab: {{ $.Values.sso.openInNewTab }}
+{{- if and $accessOn }}
+      - model: authentik_core.group
+        state: present
+        id: group-admin-fa-{{ $fa.key }}
+        identifiers:
+          name: {{ $.Values.sso.adminGroup }}
+        attrs:
+          is_superuser: false
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          target: !KeyOf app-fa-{{ $fa.key }}
+          group: !KeyOf group-admin-fa-{{ $fa.key }}
+        attrs:
+          order: 0
+          enabled: true
+      - model: authentik_core.group
+        state: present
+        id: group-user-fa-{{ $fa.key }}
+        identifiers:
+          name: {{ $.Values.sso.userGroup }}
+        attrs:
+          is_superuser: false
+      - model: authentik_policies.policybinding
+        state: {{ ternary "present" "absent" (eq $access "users") }}
+        identifiers:
+          target: !KeyOf app-fa-{{ $fa.key }}
+          group: !KeyOf group-user-fa-{{ $fa.key }}
+        attrs:
+          order: 1
+          enabled: true
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if $faOn }}
+      - model: authentik_outposts.outpost
+        state: present
+        identifiers:
+          managed: goauthentik.io/outposts/embedded
+        attrs:
+          providers:
+{{- range $k := $faOn }}
+            - !KeyOf provider-fa-{{ $k }}
+{{- end }}
+{{- range $name := ($faCfg.keepProviders | default list) }}
+            - !Find [authentik_providers_proxy.proxyprovider, [name, {{ $name | quote }}]]
 {{- end }}
 {{- end }}
 {{- end }}
