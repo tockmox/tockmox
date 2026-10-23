@@ -104,6 +104,11 @@ all, or because macOS asks a person. At the console:
 2. Turn on Remote Login (System Settings, General, Sharing). The toolkit
    asserts it is on and fails the converge when it is not. It does not turn it
    on.
+   Then put your public key in the administrator's `~/.ssh/authorized_keys`
+   (`ssh-copy-id admin@mac.example.com` from the machine you administer it
+   from). The toolkit turns password and keyboard-interactive logins off only
+   once it finds a key there, so a node without one keeps password logins and
+   says so in the converge log.
 3. Apply pending macOS updates. The toolkit turns automatic installation off and
    reports the build it sees; a node that updates itself overnight is a node
    that restarts under load.

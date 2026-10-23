@@ -32,9 +32,12 @@
   loop_control:
     label: "{{ item.key }}={{ item.value }}"
   # (?m): without it ^ and $ match only the ends of the whole text, the pattern never matches and
-  # pmset is written on every run.
+  # pmset is written on every run. A key this machine does not report is not held at all: pmset
+  # accepts a write to a key the hardware lacks (autopoweroff on an M5 Ultra Mac Studio, macOS 27.0.1)
+  # and never reports it back, so writing it would show "changed" on every converge.
   when: >-
     tn_prevent_sleep | bool
+    and macos_base_pmset_custom.stdout is search('(?m)^\s*' ~ item.key ~ '\s')
     and macos_base_pmset_custom.stdout is not search('(?m)^\s*' ~ item.key ~ '\s+' ~ (item.value | string) ~ '\s*$')
   changed_when: true
 
@@ -44,7 +47,9 @@
   loop: "{{ macos_base_pmset_always | dict2items }}"
   loop_control:
     label: "{{ item.key }}={{ item.value }}"
-  when: macos_base_pmset_custom.stdout is not search('(?m)^\s*' ~ item.key ~ '\s+' ~ (item.value | string) ~ '\s*$')
+  when: >-
+    macos_base_pmset_custom.stdout is search('(?m)^\s*' ~ item.key ~ '\s')
+    and macos_base_pmset_custom.stdout is not search('(?m)^\s*' ~ item.key ~ '\s+' ~ (item.value | string) ~ '\s*$')
   changed_when: true
 
 - name: Restart after a power failure
