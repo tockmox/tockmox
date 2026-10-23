@@ -1,0 +1,133 @@
+{{- /*
+CNPG INSTANCE AND SCRAPE-TARGET RULES. Two ways a Postgres cluster is short of what the
+operator was asked for, and neither raised an alert before.
+
+Both read the Cluster resource through kube-state-metrics (customResourceState in
+values.yaml), which lists from the API and so covers every namespace whether or
+not anything scrapes the database. That is the property that lets the second rule
+exist at all: a rule on an instance metric (`cnpg_collector_*`) disappears with
+the target it describes.
+
+A PrometheusRule needs an operator to evaluate it AND the CRD to exist, so these
+follow serviceMonitors, as the other rules in this layer do. With no CNPG Cluster
+in the cluster the series do not exist and neither rule can fire.
+
+Both are classified for the kured reboot gate in tools/kured-gate.txt.
+*/ -}}
+{{- $monitors := include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") }}
+{{- if $monitors }}
+{{- $ns := .Values.namespaces.monitoring -}}
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tockmox-cnpg
+  namespace: {{ $ns }}
+  annotations:
+    # Sync wave 1 of the sync phase, so ArgoCD applies this rule only after the
+    # operator Deployment (wave 0) that serves the admission webhook is healthy.
+    # check-upgrade-safety.sh F4 asserts it.
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: tockmox.cnpg.instances
+      interval: 1m
+      rules:
+        - alert: TockmoxCNPGInstancesNotReady
+          # READY BELOW DESIRED, AND READY ABSENT.
+          #
+          # The first branch is the ordinary case: fewer ready instances than
+          # `spec.instances`. The second branch is the case the first cannot
+          # see. `status.readyInstances` is not required by the CRD, and a
+          # cluster with no ready instance may not carry it, so the ready series
+          # is ABSENT exactly when the cluster is worst off. A subtraction
+          # against an absent series returns nothing, which would make this
+          # alert silent when every instance is down. `unless` asks the other
+          # way round: here is every cluster that wants instances, minus the
+          # ones that report a ready count. Both directions are in
+          # tests/rules/cnpg-instances.yaml.
+          #
+          # A cluster that has been hibernated on purpose reads as all instances
+          # missing and fires; silence it for the length of the hibernation.
+          #
+          # for: 15m outlasts a switchover, a rolling restart and a node drain,
+          # all of which take an instance down for a few minutes, and still
+          # fires well inside the hour a cluster should not run short.
+          expr: |
+            (
+              (
+                max by (name, namespace) (tockmox_cnpg_cluster_desired_instances)
+                - on (name, namespace)
+                max by (name, namespace) (tockmox_cnpg_cluster_ready_instances)
+              ) > 0
+            )
+            or
+            (
+              max by (name, namespace) (tockmox_cnpg_cluster_desired_instances)
+              unless on (name, namespace)
+              max by (name, namespace) (tockmox_cnpg_cluster_ready_instances)
+            )
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CNPG Cluster {{ `{{ $labels.namespace }}/{{ $labels.name }}` }} has fewer ready instances than it was asked for"
+            description: >-
+              The cluster has been short {{ `{{ $value }}` }} instance(s) for fifteen
+              minutes and is serving with less redundancy than configured.
+              Kubernetes' replica-mismatch alerts cannot see this: the operator
+              manages instance Pods directly, so there is no StatefulSet or
+              Deployment to compare. Look at the instance Pods:
+              `kubectl -n {{ `{{ $labels.namespace }}` }} get pods -l cnpg.io/cluster={{ `{{ $labels.name }}` }}`.
+              A Pod stuck Pending usually means a volume that will not attach or
+              a node that will not schedule it.
+    - name: tockmox.cnpg.scrape
+      interval: 1m
+      rules:
+        - alert: TockmoxCNPGScrapeTargetAbsent
+          # A CLUSTER THAT EXISTS WITH NO SCRAPE TARGET.
+          #
+          # `job` for a PodMonitor target is `<namespace>/<PodMonitor name>`, and
+          # the PodMonitor for a Cluster is named after the Cluster (the one this
+          # chart renders and the one CNPG creates both are). So the target a
+          # Cluster should have is `job="<namespace>/<name>"`. The Cluster side
+          # comes from kube-state-metrics, which survives the target going dark;
+          # the target side is `up`, so a target that exists but is down is NOT
+          # this alert (TockmoxTargetsDown owns that). This one is for a target
+          # that is not there at all: no PodMonitor, a selector that matches no
+          # pod, or a label rename.
+          #
+          # Measured on a running install on 2026-10-23: of eight Clusters, six
+          # had a target and two (created after the install, with no PodMonitor)
+          # had never had one for the five days they had existed. Nothing else
+          # said so; their phase read `Cluster in healthy state` throughout.
+          #
+          # A site that scrapes a Cluster under a differently named PodMonitor
+          # reads as absent. Name the PodMonitor after the Cluster, or accept
+          # the alert as the reminder it is.
+          #
+          # for: 30m covers the minutes between a Cluster appearing and its
+          # PodMonitor being picked up.
+          expr: |
+            label_join(
+              max by (name, namespace) (tockmox_cnpg_cluster_desired_instances),
+              "job", "/", "namespace", "name"
+            )
+            unless on (job)
+            up
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "CNPG Cluster {{ `{{ $labels.namespace }}/{{ $labels.name }}` }} has no Prometheus scrape target"
+            description: >-
+              No `up` series exists for job `{{ `{{ $labels.job }}` }}`, so the cluster's
+              database metrics are not being collected and every alert that
+              reads them is blind, not quiet. The cluster's own phase can read
+              healthy throughout. Check that a PodMonitor named
+              `{{ `{{ $labels.name }}` }}` exists in `{{ `{{ $labels.namespace }}` }}`
+              (`spec.monitoring.enablePodMonitor` on the Cluster creates one)
+              and that its selector matches the instance Pods.
+{{- end }}

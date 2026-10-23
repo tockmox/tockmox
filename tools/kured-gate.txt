@@ -35,6 +35,8 @@ alert TockmoxLonghornVolumeStuckAttaching block  # a volume cannot attach; a dra
 alert TockmoxLonghornVolumeDegraded       block  # fewer healthy replicas than configured for 30 minutes and not rebuilding; the next node may hold the survivor
 alert TockmoxLonghornStorageFull          block  # past the point where replicas stop scheduling; an evicted replica has nowhere to rebuild
 alert TockmoxCNPGClusterNotHealthy        block  # the operator cannot see or manage an instance; failover state is unknown while a node drains
+alert TockmoxCNPGInstancesNotReady      block  # fewer ready instances than wanted; draining the node that holds the survivor takes the database down
+alert TockmoxCNPGScrapeTargetAbsent       pass   # database metrics are not collected; a blind spot, and a reboot does not change it
 alert TockmoxPersistentVolumeClaimPending pass   # a claim nothing provisioned; a reboot does not make it better or worse
 alert TockmoxCNPGBackupUnhealthy          pass   # backups are failing; availability is unchanged by a reboot
 alert TockmoxCertificateNotReady          pass   # certificate issuance; unrelated to node availability
