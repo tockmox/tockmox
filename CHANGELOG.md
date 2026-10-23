@@ -39,6 +39,12 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **AI nodes: the firewall's timed rollback and the converge job's self-reload work
+  on macOS 27.** Both were started with `launchctl submit`, which on macOS 27.0.1
+  returns 0 and starts nothing `launchctl` can see, so the first converge on a
+  real Mac stopped before loading the allowlist (safely: pf untouched, no engine
+  started). They are now one-shot jobs bootstrapped from their own plists and
+  checked with `launchctl print` before the rules load.
 - **The model size estimate no longer over-sizes MXFP4 models 2.4x and MLX
   4-bit and 8-bit models by up to a fifth.** The quant markers are matched in
   the right order and the overhead factor is gone; it is still labelled an

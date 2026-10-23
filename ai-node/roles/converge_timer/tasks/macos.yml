@@ -7,7 +7,8 @@
 #
 # The converge job is the process that is running this play when a timer run changes its own
 # plist. Reloading it inline would kill the run that is doing the reloading, so a changed plist
-# is reloaded by a detached one-shot (launchctl submit) a few seconds after this run exits.
+# is reloaded by a detached one-shot job (bootstrapped from its own plist; `launchctl submit` starts
+# nothing launchctl can see on macOS 27) a few seconds after this run exits.
 
 - name: Let the converge account become root without a password
   become: true
@@ -80,6 +81,33 @@
       TOCKMOX_ROOT: "{{ tn_root }}"
       PATH: "{{ tn_brew_prefix }}/bin:{{ tn_brew_prefix }}/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
+- name: Write the one-shot job that reloads the converge job after this run
+  become: true
+  block:
+    - name: Make sure the root-owned state directory exists
+      ansible.builtin.file:
+        path: "{{ converge_timer_reload_plist | dirname }}"
+        state: directory
+        owner: root
+        group: wheel
+        mode: "0755"
+
+    - name: Write the reload job
+      vars:
+        oneshot_label: "{{ tn_prefix }}.converge-reload"
+        oneshot_args:
+          - /bin/sh
+          - -c
+          - >-
+            sleep 15; launchctl bootout system/{{ tn_prefix }}.converge;
+            launchctl bootstrap system {{ tn_launchd_dir }}/{{ tn_prefix }}.converge.plist
+      ansible.builtin.template:
+        src: "{{ role_path }}/../launchd_service/templates/oneshot.plist.j2"
+        dest: "{{ converge_timer_reload_plist }}"
+        owner: root
+        group: wheel
+        mode: "0644"
+
 - name: Load the converge job, or schedule its reload after this run
   when: not ansible_check_mode
   become: true
@@ -93,8 +121,10 @@
       changed={{ '1' if (launchd_service_plist is defined and launchd_service_plist is changed) else '0' }}
       if launchctl print "system/$label" >/dev/null 2>&1; then
         if [ "$changed" = 1 ]; then
+          launchctl bootout "system/$reload_label" >/dev/null 2>&1 || true
           launchctl remove "$reload_label" >/dev/null 2>&1 || true
-          launchctl submit -l "$reload_label" -- /bin/sh -c "sleep 15; launchctl bootout system/$label; launchctl bootstrap system $plist" || exit 1
+          launchctl bootstrap system {{ converge_timer_reload_plist | quote }} || exit 1
+          launchctl print "system/$reload_label" >/dev/null 2>&1 || exit 1
           echo reload-scheduled
         else
           echo unchanged

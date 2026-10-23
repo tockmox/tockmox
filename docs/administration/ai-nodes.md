@@ -445,7 +445,7 @@ the toolkit assumes.
 | An engine port is closed to a host outside `engineAllowFrom` | `nc -vz mac.example.com 8080` from such a host |
 | `flags any` keeps an SSH session that predates pf alive | run the first converge over SSH and watch it survive |
 | The `pfctl -ss` state lines are read as the evidence parser expects | `sudo pfctl -ss \| grep ESTABLISHED` during an SSH session |
-| `launchctl submit` runs the timed rollback detached | `sudo launchctl list \| grep pf-rollback` just after an administrator-rule change |
+| The timed rollback runs detached as a one-shot job bootstrapped from `/var/db/tockmox-ai-node/pf-rollback.plist` (`launchctl submit`, used before, returned 0 and started nothing visible on macOS 27.0.1) | `sudo launchctl print system/com.tockmox.ai-node.pf-rollback` just after an administrator-rule change |
 | The rollback puts the last confirmed rules back and the managed ports stay closed | after an unconfirmed change and five minutes, `sudo pfctl -a com.apple/250.tockmox -sr` shows the old rules, including a `block` line |
 | `sysctl -n kern.boottime` prints `{ sec = N, usec = M } ...` and the braces part does not change during a boot, also after a clock step | `sysctl -n kern.boottime` before and after `sudo sntp -sS time.apple.com`, and `cat /var/db/tockmox-ai-node/pf-boot-ok` |
 | `pfctl -a com.apple/250.tockmox -sr` prints the block rule as a line that starts with `block` | `sudo pfctl -a com.apple/250.tockmox -sr \| grep '^block'` |

@@ -25,6 +25,9 @@ firewall_last_confirmed: "{{ firewall_state_dir }}/pf-last-confirmed.rules"
 firewall_minimal_rules: "{{ firewall_state_dir }}/pf-minimal.rules"
 firewall_boot_label: "{{ tn_prefix }}.pf"
 firewall_rollback_label: "{{ tn_prefix }}.pf-rollback"
+# The rollback runs as a one-shot job loaded from this root-owned file (not from
+# /Library/LaunchDaemons, so a restart does not bring it back).
+firewall_rollback_plist: "{{ firewall_state_dir }}/pf-rollback.plist"
 # A change to the rules that decide who may administer the node is applied with a rollback armed.
 # Unless the change is confirmed within this many minutes, the sub-anchor is put back to the last
 # confirmed ruleset (or a minimal one: loopback, the administration ports from anywhere, and the

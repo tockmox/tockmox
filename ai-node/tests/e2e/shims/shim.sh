@@ -77,8 +77,9 @@ socket.create_connection((h,int(p)),1).close()' "$hostport" 2>/dev/null && break
              [ -e "$S/loaded/$l.pid" ] && { kill "$(cat "$S/loaded/$l.pid")" 2>/dev/null; rm -f "$S/loaded/$l.pid"; }
              rm -f "$S/loaded/$l"; exit 0 ;;
     list) [ -n "${1:-}" ] || exit 0; [ -e "$S/submitted/$1" ] || [ -e "$S/loaded/$1" ] && exit 0; exit 113 ;;
-    submit) l=""; while [ $# -gt 0 ]; do case "$1" in -l) l="$2"; shift 2 ;; --) shift; break ;; *) shift ;; esac; done
-            echo "$*" > "$S/submitted/$l"; exit 0 ;;
+    # macOS 27.0.1, measured 2026-10-22: submit returns 0 and starts nothing that list or print can
+    # see. The stand-in does the same, so a role that goes back to submit fails here as it did there.
+    submit) exit 0 ;;
     remove) rm -f "$S/submitted/$1"; exit 0 ;;
     limit|kickstart) exit 0 ;;
   esac; exit 0 ;;
