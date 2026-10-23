@@ -454,6 +454,40 @@ WAL to it and takes a scheduled base backup.
 > one pod was read back through the other, and both reported database `ok`.
 > **Not yet run: a fresh install with the database on from the first sync.**
 
+## Loki is one replica by default, and the way to more than one (TM-0778)
+
+Loki ships as a single pod with its chunks and index on a local volume. That is
+deliberate, not an oversight: a week of logs on one disk is cheap to lose and
+cheap to run, and the storage policy treats it that way (see
+[storage](../administration/storage.md)). The cost is that a node reboot or a
+node loss stops log ingest until the pod is back, and the logs on that node's
+disk go with the node.
+
+Raising `loki.singleBinary.replicas` on its own does not help. With filesystem
+storage the Loki chart refuses to render more than one replica and says it needs
+an object storage backend, so there is no quiet way to end up with two pods that
+each hold half the logs. The way to more than one replica is an object store:
+
+- `ci/values-loki-ha.yaml` is the documented shape. Three replicas,
+  `replication_factor: 3`, and the object store named in all three places Loki
+  reads it from: the schema, the storage block and the compactor's
+  `delete_request_store`. Leave one on `filesystem` and the retention or the
+  chunks quietly stay on a local disk.
+- The endpoint in that file is the Garage the platform layer ships with
+  `dataProtection`. Create the three buckets in it, and a Secret named
+  `loki-s3` in the monitoring namespace with `ACCESS_KEY` and `SECRET_KEY`.
+  The values read them from the environment; no credential is in the file.
+- Switching a running install from filesystem to an object store starts a new
+  schema period. Add a second entry to `schemaConfig.configs` with a `from` date
+  in the future instead of editing the first, or Loki cannot read what it has.
+
+`tools/check-loki-ha.sh` renders the default, renders filesystem with two
+replicas and asserts it is refused, and renders the HA values and asserts three
+replicas against the object store. What it does not prove is that three
+replicas keep ingesting while a node goes away. That needs a lab run, and until
+one has been done this is a shape the chart will render, not a measured
+guarantee.
+
 ## Scraping a host outside the cluster
 
 A Mac, a firewall or any other machine that is not a pod is scraped with a

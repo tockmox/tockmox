@@ -94,6 +94,12 @@ costs you, with the reasoning in the documentation rather than here.
   no Prometheus scrape target. A hibernated cluster fires the first.
   kube-state-metrics gains `tockmox_cnpg_cluster_desired_instances`. The first
   is a `block` in the kured reboot gate.
+- **Loki's single replica is documented, with a way past it.** Loki stays one
+  pod on a local volume by default, and the Loki chart already refuses a second
+  replica on the filesystem. `ci/values-loki-ha.yaml` is three replicas on an
+  object store such as the shipped Garage, and `tools/check-loki-ha.sh` renders
+  it. No lab run has shown it surviving a node loss yet. See
+  `docs/operations/monitoring.md`.
 
 ### Changed
 
