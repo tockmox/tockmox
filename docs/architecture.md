@@ -243,7 +243,7 @@ switch, because an escape hatch is not the same as declining the layer.
 
 <!-- tockmox:layers:end -->
 
-**600 resources** render with the CI values. Every UI hostname derives from one
+**601 resources** render with the CI values. Every UI hostname derives from one
 `internalDomain` value, and TLS follows a single `certIssuer` value.
 
 ### Guards fail loudly rather than starting insecure

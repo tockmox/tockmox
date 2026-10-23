@@ -19,7 +19,7 @@ Honest inventory. Anything not built says so. Counts are from
 `helm template` with the CI values and are re-checked whenever this page
 changes.
 
-## Today ... nine layers, 600 rendered resources
+## Today ... nine layers, 601 rendered resources
 
 Counts describe the revision you are reading, not the last tag. The release
 this page ships with is stamped in the footer.
@@ -29,7 +29,7 @@ this page ships with is stamped in the footer.
 | crds | 10 | Cross-layer CRDs (prometheus-operator), wave 0 so nothing races its definitions |
 | policy | 75 | Namespaces, 43 NetworkPolicies (default-deny in every namespace this layer creates), RBAC admission guardrails, PriorityClasses, the diagnostic identity |
 | platform | 234 | Traefik, MetalLB, cert-manager, Longhorn, CloudNativePG, kured, snapshot-controller |
-| observability | 171 | kube-prometheus-stack, Loki, Alloy ... persisted, bounded retention, resource requests |
+| observability | 172 | kube-prometheus-stack, Loki, Alloy ... persisted, bounded retention, resource requests |
 | exporters | 7 | blackbox / SNMP / smartctl, separate so wrong-for-your-hardware is one flag |
 | identity | 32 | Authentik. Its credentials come from operator-created Secrets, so the pods wait with a config error until you supply them |
 | devops | 35 | Argo Workflows (client auth, not authenticate-nobody). No registry: see [registry](../deployment/registry.md) |
@@ -79,12 +79,14 @@ will arrive Tockmox-authored) and a RAG index for the AI plane.
 **Corrected 2026-09-03.** This list also carried the three Grafana boards that
 know Tockmox's own shapes ... the drill register, the storage contract, the
 alert-delivery path. All three shipped on 2026-08-19 and this page did not
-follow. **Nine Tockmox-authored boards** ship: Traefik, cert-manager, MetalLB,
+follow. **Ten Tockmox-authored boards** ship: the Overview (health, capacity,
+AI spend and local share on one page), Traefik, cert-manager, MetalLB,
 Authentik and Admission & Policy, plus Drill Register, Storage Contract, Alert
-Delivery and Argo Workflows ... alongside upstream's kubernetes-mixin set. See
-[monitoring](../operations/monitoring.md), which has been right about this all
-along. A tenth, ArgoCD's, ships with `apps.argocdMonitoring` (on with observability),
-and reads "No data" on an ArgoCD installed without metrics.
+Delivery and Argo Workflows ... alongside upstream's kubernetes-mixin set, each
+set in its own Grafana folder. See [monitoring](../operations/monitoring.md),
+which has been right about this all along. An eleventh, ArgoCD's, ships with
+`apps.argocdMonitoring` (on with observability), and reads "No data" on an ArgoCD
+installed without metrics.
 
 Two items formerly on this list shipped on 2026-08-19: **scheduled restore
 drills** (weekly, PASS/FAIL register, freshness-alerted, on by default with

@@ -403,8 +403,8 @@ This project is pre-1.0. This section goes away at 1.0.
   from backup and the nine in the hash scope matching a pre-move whole-tree hash
   ([architecture § revision channels](docs/architecture.md#revision-channels)).
 - **Thin.** The glue: site-specific alert rules beyond the self-check set, and
-  a few dashboards waiting on their scrapes (nine Tockmox-authored boards ship;
-  ArgoCD's follows when its metrics config lands). All additive.
+  a few dashboards waiting on their scrapes (ten Tockmox-authored boards ship,
+  and ArgoCD's as an eleventh once its metrics are on). All additive.
 - **Support.** One maintainer, best-effort response, no SLA. Read
   [SUPPORT.md](SUPPORT.md) before depending on this for something that mustn't
   break.

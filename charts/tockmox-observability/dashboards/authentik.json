@@ -81,7 +81,7 @@
       "type": "prometheus",
       "uid": "${datasource}"
      },
-     "expr": "count(up{namespace=\"authentik\"}==1) OR on() vector(0)",
+     "expr": "count(up{job=~\".*authentik-(server|worker)-metrics\"}==1) OR on() vector(0)",
      "refId": "A"
     }
    ],
@@ -198,11 +198,11 @@
       "type": "prometheus",
       "uid": "${datasource}"
      },
-     "expr": "sum(process_resident_memory_bytes{namespace=\"authentik\"}) OR on() vector(0)",
+     "expr": "sum(container_memory_working_set_bytes{pod=~\".*authentik-(server|worker)-.*\",container=~\"server|worker\"})",
      "refId": "A"
     }
    ],
-   "title": "Process RSS",
+   "title": "Memory (working set)",
    "type": "stat"
   },
   {
@@ -367,7 +367,7 @@
       "type": "prometheus",
       "uid": "${datasource}"
      },
-     "expr": "sum(rate(process_cpu_seconds_total{namespace=\"authentik\"}[5m])) by (pod)",
+     "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{pod=~\".*authentik-(server|worker)-.*\",container=~\"server|worker\"}[5m]))",
      "legendFormat": "{{pod}}",
      "refId": "A"
     }
@@ -418,7 +418,7 @@
       "type": "prometheus",
       "uid": "${datasource}"
      },
-     "expr": "process_resident_memory_bytes{namespace=\"authentik\"}",
+     "expr": "sum by (pod) (container_memory_working_set_bytes{pod=~\".*authentik-(server|worker)-.*\",container=~\"server|worker\"})",
      "legendFormat": "{{pod}}",
      "refId": "A"
     }

@@ -891,6 +891,17 @@ kube-prometheus-stack:
         # their own. This is the documented extension point.
         searchNamespace: ALL
         label: grafana_dashboard
+        # FOLDERS (DESIGN-2026-10-23-dashboard-set). A ConfigMap's grafana_folder annotation names
+        # the Grafana folder its board lands in: the product's boards say "Tockmox", upstream's
+        # mixins say "Kubernetes" (the annotations below are what kube-prometheus-stack stamps on
+        # its own dashboard ConfigMaps), and a site's boards say whatever the site chooses
+        # ("Site" by convention). A board with no annotation lands in General, as before. Both keys
+        # are needed: the sidecar writes the folder, Grafana's provider has to read it.
+        folderAnnotation: grafana_folder
+        provider:
+          foldersFromFilesStructure: true
+        annotations:
+          grafana_folder: Kubernetes
       datasources:
         enabled: true
     # ------------------------------------------------------------------------
