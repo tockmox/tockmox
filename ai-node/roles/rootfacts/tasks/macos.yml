@@ -38,12 +38,15 @@
       failed_when: false
       check_mode: false
 
+    # lsof as root, not netstat: netstat under a Python parent lists nothing on macOS 27.0.1
+    # (see macos_remote_access), which wrote remote_login 0 on a node that was listening.
     - name: Read whether sshd is listening
+      become: true
       ansible.builtin.shell:
         executable: /bin/bash
         cmd: |
           set -o pipefail
-          /usr/sbin/netstat -an -p tcp | grep -E '[.:]22[[:space:]].*LISTEN' | head -1 || true
+          /usr/sbin/lsof -nP -t -iTCP:22 -sTCP:LISTEN 2>/dev/null | head -1 || true
       register: rootfacts_ssh
       changed_when: false
       failed_when: false

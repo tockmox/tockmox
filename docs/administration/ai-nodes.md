@@ -242,7 +242,11 @@ nothing running as root writes there.
 A model that is not on disk is not started, and a pinned model that does not
 match its pin is removed and fails the converge. The check is the blob name for a
 Hugging Face file (the cache names each blob by its hash) and the manifest's
-sha256 for Ollama.
+sha256 for Ollama. A file Hugging Face stores with its Xet backend is cached under
+its Xet hash instead, which is not the SHA-256 of the content; for such a file the
+node reads the Hub's record of it at the pinned commit and requires the blob's name
+to be the listed Xet hash and the content to hash to the listed SHA-256. If the Hub
+cannot be reached the model is refused, not trusted.
 
 ## Signatures and the history they cover
 
@@ -452,7 +456,7 @@ the toolkit assumes.
 | An engine does not listen while the marker is absent, and starts when pf-load writes it | `sudo rm /var/db/tockmox-ai-node/pf-boot-ok`, `sudo launchctl kickstart -k system/com.tockmox.ai-node.ollama`, `sudo lsof -nP -iTCP:11434 -sTCP:LISTEN` (nothing), then `sudo /usr/local/libexec/tockmox-ai-node/pf-load.sh` and the same `lsof` (a listener) |
 | After a restart no engine listens before the allowlist is loaded | restart, then `sudo launchctl print system/com.tockmox.ai-node.ollama` and `/opt/tockmox/log/ollama.log` for the "waiting for the firewall" line |
 | `launchctl bootout` of an engine from the stop script ends its listener | `sudo /usr/local/libexec/tockmox-ai-node/stop-listeners.sh` and `sudo lsof -nP -iTCP -sTCP:LISTEN` |
-| `hf download --revision` stores the commit as the snapshot name | `ls /opt/tockmox/models/hf/hub/models--*/snapshots/` |
+| `hf download --revision` stores the commit as the snapshot name (seen on macOS 27.0.1 with hf 2.2.0; its blobs for Xet-backed files are named by the Xet hash, which the helper now checks against the Hub) | `ls /opt/tockmox/models/hf/hub/models--*/snapshots/` |
 | An Ollama manifest file hashes to the registry digest | `shasum -a 256` of the file under `/opt/tockmox/models/ollama/manifests/` equals the pinned digest |
 | `sshd -t` accepts the drop-in | `sudo sshd -t` and `sudo sshd -T \| grep -i allowusers` |
 | The facts writer can read what it needs as the service account | `sudo -u inference /opt/tockmox/bin/tockmox-ai-node-facts` then `cat /opt/tockmox/textfile/facts.prom` |
