@@ -1,8 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 ---
 # mlx-lm, one server process per instance (a process serves one model), in a virtual
-# environment at a pinned version, started from the snapshot of the pinned revision with the
-# Hugging Face hub in offline mode. The weights arrive only through model_sync.
+# environment at a pinned version, with the Hugging Face hub in offline mode. The weights arrive only
+# through model_sync.
+#
+# THE ENGINE IS STARTED BY REPOSITORY ID, NOT BY SNAPSHOT PATH. mlx_lm.server 0.32 keys its
+# loaded model by the string it was started with and treats a request's "model" as a name to load: started
+# with the snapshot path, it listed that path in /v1/models and answered a request naming the repository id
+# (what every gateway route sends) by trying to load the id from the cache at `main`, which offline and with
+# no refs/main fails. Started with the id, the default model and a request by id are the same key (no
+# reload), /v1/models lists the id, and the id resolves offline to the pinned snapshot through the refs/main
+# model_sync writes. mlx-lm has no served-name flag, so the route's model must BE the repository id.
 
 - name: Make sure the firewall verdict is known
   ansible.builtin.include_role:
@@ -22,6 +30,7 @@
            'port': item.port | int,
            'label': item | tockmox_instance_label(tn_prefix),
            'model': item.models[0].model,
+           'repo': item.models[0].artifact.ref,
            'snapshot': item.models[0].artifact.ref | tockmox_hf_snapshot(item.models[0].artifact.revision, tn_root),
            'log': tn_root ~ '/log/' ~ (item | tockmox_instance_slug) ~ '.log'
          } ] }}
@@ -84,6 +93,20 @@
         engine_mlx_lm_installed.stdout is not search('(?m)^Version: ' ~ (tn_mlx_version | regex_escape) ~ '$')
       changed_when: true
 
+    - name: Each instance serves its model under the repository id the routes send
+      ansible.builtin.assert:
+        that:
+          - item.model == item.repo
+          - item.repo not in (tn_models_present | tockmox_refs_at_several_revisions)
+        fail_msg: >-
+          {{ item.id }}: mlx-lm answers only to the Hugging Face repository id it was started with, and the
+          cache names one revision per repository. The model must equal the artifact ref (got {{ item.model }}
+          and {{ item.repo }}), and {{ item.repo }} must not be pinned at two revisions on this node.
+        quiet: true
+      loop: "{{ engine_mlx_lm_resolved }}"
+      loop_control:
+        label: "{{ item.id }}"
+
     - name: Look for each instance's model on disk
       ansible.builtin.stat:
         path: "{{ item.snapshot }}"
@@ -113,7 +136,7 @@
         launchd_service_user: "{{ tn_service_user }}"
         launchd_service_firewalled: true
         launchd_service_args: >-
-          {{ [engine_mlx_lm_venv ~ '/bin/mlx_lm.server', '--model', item.snapshot, '--host',
+          {{ [engine_mlx_lm_venv ~ '/bin/mlx_lm.server', '--model', item.repo, '--host',
               ('0.0.0.0' if (firewall_anchor_verified | bool) else '127.0.0.1'), '--port', item.port | string]
              + (tn_mlx_extra_args | map('string') | list) }}
         launchd_service_log: "{{ item.log }}"

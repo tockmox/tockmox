@@ -106,3 +106,22 @@
           {{ model_sync_item.model }} at revision {{ model_sync_item.artifact.revision }} could not be fetched
           and verified: {{ (model_sync_hf_verify.stdout | default('')) or 'the download failed' }}. Nothing that depends on it is started.
           See var/audit/model-updates.jsonl.
+
+# An engine asked for a model by its repository id (the id the gateway's routes carry) finds it through the
+# cache, and offline the cache resolves a repository id only through refs/main. `hf download --revision` with a
+# commit writes no ref, so without this a request by repository id is refused (measured with
+# huggingface_hub 2.2.0 under mlx-lm 0.32.2 on macOS 27). Skipped for a repository pinned at two revisions on
+# this node, which no ref can name; engine_mlx_lm refuses to serve such a repository by id.
+- name: Point the cache's main ref at the pinned revision
+  when: model_sync_item.artifact.ref not in model_sync_hf_shared
+  become: true
+  become_user: "{{ tn_service_user }}"
+  ansible.builtin.command:
+    argv: >-
+      {{ [ansible_playbook_python, model_sync_helper, 'pin-main', tn_root,
+          model_sync_item.artifact.ref, model_sync_item.artifact.revision]
+         + (['--dry-run'] if ansible_check_mode else []) }}
+  register: model_sync_hf_pin
+  changed_when: (model_sync_hf_pin.stdout | trim) in ['changed', 'would change']
+  failed_when: model_sync_hf_pin.rc != 0 and not ansible_check_mode
+  check_mode: false

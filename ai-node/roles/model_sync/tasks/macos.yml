@@ -17,6 +17,7 @@
   ansible.builtin.set_fact:
     model_sync_hf: "{{ tn_models_present | selectattr('artifact.kind', 'equalto', 'huggingface') | list }}"
     model_sync_ollama: "{{ tn_models_present | selectattr('artifact.kind', 'equalto', 'ollama') | list }}"
+    model_sync_hf_shared: "{{ tn_models_present | tockmox_refs_at_several_revisions }}"
 
 - name: Refuse a model kind this release cannot fetch
   ansible.builtin.assert:
