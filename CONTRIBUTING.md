@@ -190,6 +190,11 @@ on a Mac, or say so in the pull request and the maintainer will run
 `./tools/check-all.sh` runs the gates in parallel, as many at once as you have CPUs; set
 `CHECK_ALL_JOBS=1` to run them one at a time with live output when you are chasing one.
 
+`check-all.yaml` also runs an advisory shellcheck job: it never blocks a merge,
+and it annotates only the findings your change adds against
+`tools/shellcheck-baseline.txt` (`tools/check-shellcheck.sh` to see them
+locally; `--update` after you fix one, so the baseline shrinks with you).
+
 `./tools/check-all.sh` handles the dependency step and both lint passes. By
 hand:
 

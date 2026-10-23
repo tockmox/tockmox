@@ -33,6 +33,15 @@ on:
 permissions:
   contents: read
 
+env:
+  # shellcheck for the advisory job below (TM-0847). Pinned here, not in ci.yaml,
+  # because this job is the only user. The project publishes no checksum file, so
+  # SHELLCHECK_SHA256 is the SHA-256 of the release asset as downloaded when the
+  # pin was set; a bump that does not update it fails the download step, which
+  # is the prompt to re-measure it.
+  SHELLCHECK_VERSION: "0.11.0"
+  SHELLCHECK_SHA256: "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"  # shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz
+
 concurrency:
   group: check-all-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -88,3 +97,31 @@ jobs:
         env:
           TOCKMOX_UI_PYTHON: build/ui-venv/bin/python
         run: bash tools/check-all.sh
+
+  shellcheck-advisory:
+    # ADVISORY (TM-0847): reports what a change ADDS against
+    # tools/shellcheck-baseline.txt, as warning annotations on the pull request.
+    # continue-on-error keeps it from blocking a merge; it is not a check-all.sh
+    # gate for the same reason. See tools/check-shellcheck.sh.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: shellcheck, checksum-verified
+        shell: bash -euo pipefail {0}
+        run: |
+          curl -fsSL -o shellcheck.tar.xz "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf shellcheck.tar.xz && sudo install -m755 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/
+          rm -rf shellcheck.tar.xz "shellcheck-v${SHELLCHECK_VERSION}"
+          shellcheck --version | head -2
+
+      - name: the advisory's own selftest
+        shell: bash -euo pipefail {0}
+        run: bash tools/check-shellcheck.sh --selftest
+
+      - name: new shellcheck findings against the baseline (advisory)
+        shell: bash -euo pipefail {0}
+        run: bash tools/check-shellcheck.sh
