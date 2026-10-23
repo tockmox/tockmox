@@ -47,6 +47,21 @@ def tockmox_hf_repo_dir(ref, root):
     return "%s/models/hf/hub/models--%s" % (str(root).rstrip("/"), str(ref).replace("/", "--"))
 
 
+def tockmox_refs_at_several_revisions(models):
+    """The Hugging Face repositories that a model list pins at more than one revision, sorted.
+
+    The cache has one refs/main per repository, so a repository id names one revision on a node; model_sync
+    pins refs/main only for a repository that is not in this list, and an engine that serves by repository id
+    refuses one that is.
+    """
+    revs = {}
+    for m in models or []:
+        art = (m or {}).get("artifact") or {}
+        if art.get("kind") == "huggingface":
+            revs.setdefault(art.get("ref"), set()).add(art.get("revision"))
+    return sorted(r for r, s in revs.items() if len(s) > 1)
+
+
 def tockmox_choose_gguf(candidates, model):
     """Pick the GGUF file to serve out of the *.gguf files found in a snapshot, or ''.
 
@@ -234,6 +249,7 @@ class FilterModule(object):
             "tockmox_hf_snapshot": tockmox_hf_snapshot,
             "tockmox_hf_repo_dir": tockmox_hf_repo_dir,
             "tockmox_choose_gguf": tockmox_choose_gguf,
+            "tockmox_refs_at_several_revisions": tockmox_refs_at_several_revisions,
             "tockmox_ollama_manifest": tockmox_ollama_manifest,
             "tockmox_schema_errors": tockmox_schema_errors,
         }

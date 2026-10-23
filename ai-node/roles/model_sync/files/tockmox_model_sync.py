@@ -4,6 +4,7 @@
 
   check-hf    <root> <ref> <revision>            fast check of a verified snapshot (exit 0, or 3)
   verify-hf   <root> <ref> <revision> [--token-file F]   hash every file of a snapshot, write the stamp
+  pin-main    <root> <ref> <revision> [--dry-run]   point the cache's refs/main at the pinned revision
   check-ollama <root> <ref> <digest>             does the stored manifest hash to the pinned digest
   prune       <root> --desired FILE --keep-days N [--ollama BIN --ollama-host H] [--dry-run]
   report      <root> --desired FILE --out FILE   write the models-present table the facts exporter reads
@@ -233,6 +234,47 @@ def check_hf(root, ref, revision):
     return True, "stamp ok"
 
 
+
+def pin_main(root, ref, revision, dry_run=False):
+    """Make refs/main of one cached repository name the pinned revision. Returns (state, detail).
+
+    Why: an engine that is asked for a model by its repository id (the id the gateway's routes carry) finds it
+    through the Hugging Face cache, and offline the cache resolves a repository id only through refs/main.
+    `hf download <repo> --revision <40-hex commit>` writes the snapshot and no ref at all, so a request by
+    repository id is refused ("Cannot find an appropriate cached snapshot folder for the specified revision",
+    huggingface_hub 2.2.0 under mlx-lm 0.32.2 on macOS 27, 2026-10-22). This is the node's private cache and
+    the converger is the only writer, so main here means "the revision this node is pinned to".
+
+    state is "unchanged", "changed" or "would change"; ("missing", ...) when the snapshot is not on disk.
+    Never follows a link: a refs directory or a main file that is a link is refused.
+    """
+    if not HEX40.match(str(revision)):
+        raise ValueError("a revision must be a 40-hex commit, got %r" % (revision,))
+    snap = snapshot_dir(root, ref, revision)
+    if not os.path.isdir(snap) or os.path.islink(snap):
+        return "missing", "no snapshot at %s" % snap
+    refs = os.path.join(hub_dir(root), repo_dirname(ref), "refs")
+    main = os.path.join(refs, "main")
+    for p in (refs, main):
+        if os.path.islink(p):
+            raise ValueError("%s is a link; refusing to write through it" % p)
+    try:
+        with open(main) as f:
+            if f.read().strip() == revision:
+                return "unchanged", "refs/main is %s" % revision
+    except OSError:
+        pass
+    if dry_run:
+        return "would change", "refs/main would be set to %s" % revision
+    os.makedirs(refs, exist_ok=True)
+    tmp = main + ".tmp.%d" % os.getpid()
+    with open(tmp, "w") as f:
+        f.write(revision)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, main)
+    return "changed", "refs/main set to %s" % revision
+
+
 # ---------------------------------------------------------------- ollama
 
 def check_ollama(root, ref, digest):
@@ -439,6 +481,11 @@ def main(argv=None):
         s.add_argument("revision")
         if name == "verify-hf":
             s.add_argument("--token-file", default="")
+    s = sub.add_parser("pin-main")
+    s.add_argument("root")
+    s.add_argument("ref")
+    s.add_argument("revision")
+    s.add_argument("--dry-run", action="store_true")
     s = sub.add_parser("check-ollama")
     s.add_argument("root")
     s.add_argument("ref")
@@ -471,6 +518,11 @@ def main(argv=None):
         ok, msg = verify_hf(a.root, a.ref, a.revision, token=read_token(a.token_file))
         print(msg)
         return 0 if ok else 3
+    if a.cmd == "pin-main":
+        state, msg = pin_main(a.root, a.ref, a.revision, a.dry_run)
+        print(state)
+        print(msg, file=sys.stderr)
+        return 3 if state == "missing" else 0
     if a.cmd == "check-ollama":
         ok, msg = check_ollama(a.root, a.ref, a.digest)
         print(msg)

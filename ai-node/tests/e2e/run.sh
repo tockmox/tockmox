@@ -132,7 +132,11 @@ for l in node-exporter macmon ollama mlx-lm-8080 mlx-lm-8082 converge facts wire
   check "service $l is loaded" "[ -e $S/loaded/$(label $l) ]"
 done
 check "the pf boot job is written but not loaded here" "[ -e /Library/LaunchDaemons/$(label pf).plist ] && [ ! -e $S/loaded/$(label pf) ]"
-check "mlx-lm-8080 serves the pinned snapshot" "plist_get mlx-lm-8080 args | grep -q -- '--model /opt/tockmox/models/hf/hub/models--mlx-community--Example-27B-8bit/snapshots/0123456789abcdef0123456789abcdef01234567'"
+check "mlx-lm-8080 is started by the repository id the routes send" "plist_get mlx-lm-8080 args | grep -q -- '--model mlx-community/Example-27B-8bit --host'"
+check "the cache's main ref names the pinned revision, so the id resolves offline" "[ \"\$(cat /opt/tockmox/models/hf/hub/models--mlx-community--Example-27B-8bit/refs/main)\" = 0123456789abcdef0123456789abcdef01234567 ] && [ \"\$(cat /opt/tockmox/models/hf/hub/models--mlx-community--Example-2-27B-8bit/refs/main)\" = fedcba9876543210fedcba9876543210fedcba98 ]"
+if python3 -c 'import huggingface_hub' 2>/dev/null; then
+  check "huggingface_hub resolves the id offline to the pinned snapshot" "[ \"\$(HF_HOME=/opt/tockmox/models/hf HF_HUB_OFFLINE=1 python3 -c 'from huggingface_hub import snapshot_download as s; print(s(\"mlx-community/Example-27B-8bit\"))')\" = /opt/tockmox/models/hf/hub/models--mlx-community--Example-27B-8bit/snapshots/0123456789abcdef0123456789abcdef01234567 ]"
+fi
 check "mlx-lm-8080 listens on all interfaces once pf is verified" "plist_get mlx-lm-8080 args | grep -q -- '--host 0.0.0.0 --port 8080'"
 check "mlx-lm runs as the service account" "[ \"\$(plist_get mlx-lm-8080 UserName)\" = inference ]"
 check "mlx-lm is offline" "python3 -c 'import plistlib;d=plistlib.load(open(\"/Library/LaunchDaemons/$(label mlx-lm-8080).plist\",\"rb\"));assert d[\"EnvironmentVariables\"][\"HF_HUB_OFFLINE\"]==\"1\"'"

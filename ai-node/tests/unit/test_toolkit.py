@@ -59,6 +59,14 @@ class Filters(unittest.TestCase):
         with self.assertRaises(ValueError):
             F.tockmox_hf_snapshot("org/Name", "main", "/r")
 
+    def test_refs_at_several_revisions(self):
+        hf = lambda ref, rev: {"artifact": {"kind": "huggingface", "ref": ref, "revision": rev}}
+        models = [hf("o/a", REV), hf("o/b", REV), hf("o/b", "cd" * 20), hf("o/a", REV),
+                  {"artifact": {"kind": "ollama", "ref": "x:1", "revision": "sha256:1"}},
+                  {"artifact": {"kind": "ollama", "ref": "x:1", "revision": "sha256:2"}}]
+        self.assertEqual(F.tockmox_refs_at_several_revisions(models), ["o/b"])
+        self.assertEqual(F.tockmox_refs_at_several_revisions(None), [])
+
     def test_choose_gguf(self):
         self.assertEqual(F.tockmox_choose_gguf(["a/M-Q4.gguf"], "org/M"), "a/M-Q4.gguf")
         self.assertEqual(F.tockmox_choose_gguf([], "org/M"), "")
@@ -304,6 +312,63 @@ class ModelSync(unittest.TestCase):
             rows = [l.split("\t") for l in f.read().splitlines()]
         self.assertEqual(rows[0][:3], ["org/m", REV, "huggingface"])
 
+    def test_pin_main_points_the_cache_at_the_pin_once(self):
+        # `hf download --revision <commit>` leaves a snapshot and no ref; offline, a repository id
+        # resolves only through refs/main, so the pin must be written there, and only once.
+        make_hf(self.root, "org/m", REV, {"config.json": b"{}"})
+        main = os.path.join(M.hub_dir(self.root), M.repo_dirname("org/m"), "refs", "main")
+        self.assertFalse(os.path.exists(main))
+        self.assertEqual(M.pin_main(self.root, "org/m", REV, dry_run=True)[0], "would change")
+        self.assertFalse(os.path.exists(main), "a dry run wrote the ref")
+        self.assertEqual(M.pin_main(self.root, "org/m", REV)[0], "changed")
+        with open(main) as f:
+            self.assertEqual(f.read(), REV)
+        self.assertEqual(M.pin_main(self.root, "org/m", REV)[0], "unchanged")
+        # a new pin moves it
+        make_hf(self.root, "org/m", "cd" * 20, {"config.json": b"{}"})
+        self.assertEqual(M.pin_main(self.root, "org/m", "cd" * 20)[0], "changed")
+        with open(main) as f:
+            self.assertEqual(f.read(), "cd" * 20)
+
+    def test_pin_main_refuses_a_missing_snapshot_a_branch_and_a_link(self):
+        self.assertEqual(M.pin_main(self.root, "org/m", REV)[0], "missing")
+        with self.assertRaises(ValueError):
+            M.pin_main(self.root, "org/m", "main")
+        make_hf(self.root, "org/m", REV, {"config.json": b"{}"})
+        repo = os.path.join(M.hub_dir(self.root), M.repo_dirname("org/m"))
+        elsewhere = os.path.join(self.root, "elsewhere")
+        os.makedirs(elsewhere)
+        os.symlink(elsewhere, os.path.join(repo, "refs"))
+        with self.assertRaises(ValueError):
+            M.pin_main(self.root, "org/m", REV)
+        self.assertEqual(os.listdir(elsewhere), [])
+
+    def test_prune_takes_the_ref_with_the_revision(self):
+        make_hf(self.root, "org/m", REV, {"config.json": b"{}"})
+        M.pin_main(self.root, "org/m", REV)
+        M.remove_hf_revision(self.root, M.repo_dirname("org/m"), REV)
+        self.assertFalse(os.path.exists(os.path.join(M.hub_dir(self.root), M.repo_dirname("org/m"))))
+
+    def test_huggingface_hub_resolves_the_id_offline_only_once_pinned(self):
+        # The real resolver mlx-lm calls, when it is installed: red on the layout `hf download --revision`
+        # leaves, green once refs/main names the pin. Measured red on macOS 27 with huggingface_hub 2.2.0.
+        try:
+            import huggingface_hub  # noqa: F401
+        except ImportError:
+            self.skipTest("huggingface_hub is not installed")
+        make_hf(self.root, "org/m", REV, {"config.json": b"{}"})
+        code = ("import sys\nfrom huggingface_hub import snapshot_download\n"
+                "try:\n    print(snapshot_download('org/m'))\nexcept Exception as e:\n"
+                "    print(type(e).__name__); sys.exit(3)\n")
+        env = dict(os.environ, HF_HOME=os.path.join(self.root, "models", "hf"), HF_HUB_OFFLINE="1",
+                   HF_HUB_DISABLE_TELEMETRY="1")
+        before = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+        self.assertEqual(before.returncode, 3, before.stdout + before.stderr)
+        M.pin_main(self.root, "org/m", REV)
+        after = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+        self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
+        self.assertEqual(after.stdout.strip(), M.snapshot_dir(self.root, "org/m", REV))
+
     def test_the_command_line_exit_codes(self):
         script = os.path.join(AI, "roles/model_sync/files/tockmox_model_sync.py")
         make_hf(self.root, "org/m", REV, {"a": b"1"})
@@ -311,6 +376,10 @@ class ModelSync(unittest.TestCase):
         self.assertEqual(ok.returncode, 0, ok.stderr)
         bad = subprocess.run([sys.executable, "-I", script, "verify-hf", self.root, "org/m", "cd" * 20], capture_output=True)
         self.assertEqual(bad.returncode, 3)
+        pin = subprocess.run([sys.executable, "-I", script, "pin-main", self.root, "org/m", REV], capture_output=True, text=True)
+        self.assertEqual((pin.returncode, pin.stdout.strip()), (0, "changed"), pin.stderr)
+        gone = subprocess.run([sys.executable, "-I", script, "pin-main", self.root, "org/gone", REV], capture_output=True, text=True)
+        self.assertEqual((gone.returncode, gone.stdout.strip()), (3, "missing"))
 
 
 class PfEvidence(unittest.TestCase):
