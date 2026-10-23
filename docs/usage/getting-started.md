@@ -337,7 +337,7 @@ something is wrong later.
 
 ![Grafana's login page with the Tockmox SSO button](../assets/getting-started/grafana-sso-login.jpg)
 
-![The dashboard list after discovery from labelled ConfigMaps, scrolled to the top: the upstream kubernetes-mixin boards. The nine Tockmox-authored boards sort under a `Tockmox /` prefix further down the same list](../assets/getting-started/grafana-dashboards.jpg)
+![The dashboard list after discovery from labelled ConfigMaps, scrolled to the top: the upstream kubernetes-mixin boards. Shot before the boards moved into folders; today the Tockmox-authored boards sit in a Tockmox folder and the upstream ones in Kubernetes](../assets/getting-started/grafana-dashboards.jpg)
 
 **Success condition:** you are signed in as your own user and the shipped
 dashboards are listed.

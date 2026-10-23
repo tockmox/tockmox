@@ -333,17 +333,18 @@ states: [0-9]+ gates
 # The board count drifted the other way: what-you-get.md said five while nine
 # ship, and the three it still listed under "Not yet built" had shipped two
 # weeks earlier. monitoring.md was the source of the drift, since it headlined
-# the five-board component subset and added the rest further down.
+# the five-board component subset and added the rest further down. Ten since the
+# Overview joined (2026-10-23).
 page:   docs/usage/what-you-get.md
 claim:  Tockmox-authored boards** ship
 test:   ls charts/tockmox-observability/dashboards/*.json | wc -l | tr -d ' '
-expect: 9
+expect: 10
 states: [A-Za-z]+ Tockmox-authored boards
 
 page:   docs/operations/monitoring.md
 claim:  Tockmox-authored boards** ship under
 test:   ls charts/tockmox-observability/dashboards/*.json | wc -l | tr -d ' '
-expect: 9
+expect: 10
 states: [A-Za-z]+ Tockmox-authored boards
 
 # CONTRIBUTING gained the count on 2026-09-03 when it stopped listing a subset
@@ -526,7 +527,7 @@ why:    same phrase again, in the agent skill that mirrors the troubleshooting t
 class:  Tockmox-authored boards
 match:  [A-Za-z0-9*]+ Tockmox-authored boards
 test:   ls charts/tockmox-observability/dashboards/*.json | wc -l | tr -d ' '
-expect: 9
+expect: 10
 
 class:  schemas
 match:  [A-Za-z0-9*]+ schemas\b
@@ -686,13 +687,13 @@ states: [0-9]+ exemptions
 page:   docs/usage/what-you-get.md
 claim:  rendered resources
 test:   tools/render-counts.sh --read total
-expect: 600
+expect: 601
 states: [0-9]+ rendered resources
 
 page:   docs/architecture.md
 claim:  resources** render with the CI values
 test:   tools/render-counts.sh --read total
-expect: 600
+expect: 601
 states: [0-9]+ resources\*\* render
 
 page:   docs/usage/what-you-get.md
@@ -714,9 +715,9 @@ expect: 234
 states: [0-9]+ \| Traefik, MetalLB
 
 page:   docs/usage/what-you-get.md
-claim:  | observability | 171 | kube-prometheus-stack, Loki
+claim:  | observability | 172 | kube-prometheus-stack, Loki
 test:   tools/render-counts.sh --read observability
-expect: 171
+expect: 172
 states: [0-9]+ \| kube-prometheus-stack, Loki
 
 page:   docs/usage/what-you-get.md
