@@ -39,6 +39,15 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **AI nodes: SSH is keys-only once the administrator has a key.** The drop-in
+  limited who may log in but left password and keyboard-interactive logins on.
+  It now turns both off, and only when the administrator's
+  `~/.ssh/authorized_keys` holds a public key, so it cannot lock the
+  administrator out.
+- **AI nodes: a power setting the Mac does not have no longer changes on every
+  converge.** `pmset` accepts `autopoweroff` on an M5 Ultra Mac Studio and never
+  reports it back, so the node never converged with nothing to change. Only keys
+  the machine reports are held.
 - **AI nodes: Remote Login is detected on macOS 27.** The check read `netstat`,
   which lists no sockets at all when started from an Ansible task on macOS
   27.0.1, so every converge failed with "nothing is listening on port 22" and

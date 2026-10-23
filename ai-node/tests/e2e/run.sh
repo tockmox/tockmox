@@ -155,9 +155,11 @@ check "the sudoers fragment is in place" "grep -q '^tockmox ALL=(ALL) NOPASSWD: 
 check "the converger and the facts writer are installed" "[ -x /opt/tockmox/bin/tockmox-ai-node-converge ] && [ -x /opt/tockmox/bin/tockmox-ai-node-facts ]"
 check "models belong to the service account, the secrets directory to the converge account" "[ \"\$(stat -c %U /opt/tockmox/models)\" = inference ] && [ \"\$(stat -c %U /opt/tockmox/secrets)\" = tockmox ] && [ \"\$(stat -c %a /opt/tockmox/secrets)\" = 711 ]"
 check "sleep is held off" "grep -q 'pmset -a disablesleep 1' $S/calls.log"
+check "a power key this Mac does not report is never written" "! grep -q 'pmset -c autopoweroff' $S/calls.log"
 check "automatic OS install is off" "[ \"\$(cat $S/defaults/_Library_Preferences_com.apple.SoftwareUpdate/AutomaticallyInstallMacOSUpdates)\" = 0 ]"
 check "Spotlight is off" "[ -e $S/spotlight-off ]"
 check "sshd is limited to the administrator and the converge account" "grep -q '^AllowUsers admin tockmox' /etc/ssh/sshd_config.d/100-tockmox-ai-node.conf"
+check "password logins stay on while the administrator has no key" "! grep -q 'PasswordAuthentication' /etc/ssh/sshd_config.d/100-tockmox-ai-node.conf && grep -q 'Password logins stay on' $OUT/first.log"
 
 echo "scenario 2: a second converge changes nothing"
 play second "$NODE"; rc=$?
@@ -387,6 +389,17 @@ play template "$WORK/node-template"; rc=$?
 [ "$rc" = 0 ] && ok "a node whose env value looks like a template converges" || bad "a node whose env value looks like a template converges" "rc=$rc; $(tail -12 "$OUT/template.log" | tr '\n' '|')"
 check "the template was not evaluated" "[ ! -e /tmp/tockmox-pwned ]"
 check "it reached the plist as the literal text" "python3 -c 'import plistlib;d=plistlib.load(open(\"/Library/LaunchDaemons/$(label ollama).plist\",\"rb\"));assert d[\"EnvironmentVariables\"][\"X_NOTE\"]==\"{{ lookup(\x27pipe\x27, \x27touch /tmp/tockmox-pwned\x27) }}\"'"
+
+echo "scenario 12: an administrator key turns password logins off, and only then"
+mkdir -p /Users/admin/.ssh
+printf 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleExample admin@example\n' > /Users/admin/.ssh/authorized_keys
+play keysonly "$NODE"; rc=$?
+[ "$rc" = 0 ] && ok "a converge with the administrator's key on disk exits 0" || bad "a converge with the administrator's key on disk exits 0" "rc=$rc; $(tail -12 "$OUT/keysonly.log" | tr '\n' '|')"
+check "password and keyboard-interactive logins are off" "grep -qx 'PasswordAuthentication no' /etc/ssh/sshd_config.d/100-tockmox-ai-node.conf && grep -qx 'KbdInteractiveAuthentication no' /etc/ssh/sshd_config.d/100-tockmox-ai-node.conf"
+check "AllowUsers and PermitRootLogin are still there" "grep -q '^AllowUsers admin tockmox' /etc/ssh/sshd_config.d/100-tockmox-ai-node.conf && grep -qx 'PermitRootLogin no' /etc/ssh/sshd_config.d/100-tockmox-ai-node.conf"
+play keysonly2 "$NODE"; rc=$?
+r="$(recap keysonly2)"
+case "$r" in *"changed=0"*) ok "and the next converge changes nothing" ;; *) bad "and the next converge changes nothing" "rc=$rc; $r" ;; esac
 
 cp "$S/calls.log" "$OUT/calls.log" 2>/dev/null; cp "$S/listener.err" "$OUT/listener.err" 2>/dev/null
 echo

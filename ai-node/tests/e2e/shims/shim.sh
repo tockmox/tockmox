@@ -131,12 +131,18 @@ dseditgroup)
   [ "$2" = checkmember ] && [ -e "$S/users/$4/admin" ] && exit 0; exit 67 ;;
 
 pmset)
+  # The keys an M5 Ultra Mac Studio reports on macOS 27.0.1 (pmset -g custom, 2026-10-22), plus the
+  # ones only ever written (disablesleep, read back as SleepDisabled) or probed (powermode). A write
+  # to any other key (autopoweroff, say) is accepted and not reported back, as on the real machine.
+  supported=" sleep displaysleep disksleep powernap standby networkoversleep womp tcpkeepalive autorestart autorestartatconnect ttyskeepawake lowpowermode disablesleep powermode "
+  [ -e "$S/pmset/state" ] || printf ' sleep 1\n displaysleep 10\n disksleep 10\n powernap 1\n standby 0\n networkoversleep 0\n womp 1\n tcpkeepalive 1\n autorestart 0\n' > "$S/pmset/state"
   if [ "${1:-}" = -g ]; then
     if [ "${2:-}" = custom ]; then echo "AC Power:"; sed 's/^/ /' "$S/pmset/state" 2>/dev/null; grep -q "^ *powermode " "$S/pmset/state" 2>/dev/null || echo " powermode 0"
     else sed -n 's/^ *disablesleep \(.*\)/ SleepDisabled\t\1/p' "$S/pmset/state" 2>/dev/null; echo " System-wide power settings:"; fi
     exit 0
   fi
   k="$2"; v="$3"
+  case "$supported" in *" $k "*) ;; *) exit 0 ;; esac
   touch "$S/pmset/state"; grep -v "^ *$k " "$S/pmset/state" > "$S/pmset/new"; echo " $k $v" >> "$S/pmset/new"; mv "$S/pmset/new" "$S/pmset/state"; exit 0 ;;
 
 defaults)
