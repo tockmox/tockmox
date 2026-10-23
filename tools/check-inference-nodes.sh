@@ -23,7 +23,7 @@
 #   - the policy layer's namespace-wide allows skip isolated pods;
 #   - the default render has none of it;
 #   - one scrape target per node exporter and one blackbox target per engine endpoint, with the
-#     instance labels the Tockmox UI matches on;
+#     instance labels the Tockmox UI matches on, and an mlx-lm endpoint probed on /health;
 #   - the TockmoxAiNode* PrometheusRule renders for the nodes that say management.enrolled and ONLY for them: not
 #     in the default render, not with monitoring off, not when no node is enrolled, and its selector names the
 #     enrolled ids and its Stale threshold is three of aiNodes.convergeIntervalSeconds;
@@ -149,9 +149,11 @@ pr = find(nodes, "Probe", "tockmox-inference-nodes")
 eps = [e for n in fix["inferenceNodes"]["nodes"] for e in n["endpoints"]]
 got_pr = (pr or {}).get("spec", {}).get("targets", {}).get("staticConfig", {}).get("static", [])
 check(pr is not None and len(got_pr) == len(eps) and all(
-          any(t == e["url"].rstrip("/") + ("/api/version" if e["engine"] == "ollama" else "/v1/models") for t in got_pr)
+          any(t == e["url"].rstrip("/") + {"ollama": "/api/version", "mlx-lm": "/health"}.get(e["engine"], "/v1/models") for t in got_pr)
           and any(t.startswith(e["url"] + "/") for t in got_pr) for e in eps),
-      "one blackbox target per engine endpoint: <url>/api/version for Ollama, <url>/v1/models otherwise")
+      "one blackbox target per engine endpoint: <url>/api/version for Ollama, <url>/health for mlx-lm, <url>/v1/models otherwise")
+check(pr is not None and "http://192.0.2.10:8080/health" in got_pr and "http://192.0.2.10:8080/v1/models" not in got_pr,
+      "... an mlx-lm endpoint is probed on /health, which answers 503 when its generation thread died (/v1/models stays 200)")
 check(pr is not None and pr["apiVersion"] == "monitoring.coreos.com/v1", "Probe is monitoring.coreos.com/v1")
 check(pr is not None and "://" not in pr["spec"]["prober"]["url"] and pr["spec"]["module"] == "http_inference",
       "the probe goes through the exporters layer's blackbox, module http_inference (401 and HTTP/1.0 read as up)")
@@ -161,8 +163,9 @@ unenrolled, monoff, interval = docs(sys.argv[6]), docs(sys.argv[7]), docs(sys.ar
 rule = find(nodes, "PrometheusRule", "tockmox-ai-nodes")
 ids = [n["id"] for n in fix["inferenceNodes"]["nodes"] if (n.get("management") or {}).get("enrolled")]
 alerts = {r["alert"]: r for g in (rule or {}).get("spec", {}).get("groups", []) for r in g["rules"]}
-check(rule is not None and set(alerts) == {"TockmoxAiNodeConvergeFailing", "TockmoxAiNodeConvergeStale", "TockmoxAiNodeSignatureUnverified"},
-      "an enrolled node renders the three TockmoxAiNode* alerts")
+check(rule is not None and set(alerts) == {"TockmoxAiNodeConvergeFailing", "TockmoxAiNodeConvergeStale", "TockmoxAiNodeSignatureUnverified",
+                                           "TockmoxAiNodeEngineRestarting"},
+      "an enrolled node renders the four TockmoxAiNode* alerts")
 check(ids and all(f'ai_node=~"{"|".join(ids)}"' in r["expr"] for r in alerts.values()),
       "... each selecting exactly the enrolled ids (a node nobody enrolled alerts no one)")
 check(rule is not None and (rule["metadata"].get("labels") or {}).get("tockmox.com/managed-by") == "tockmox",

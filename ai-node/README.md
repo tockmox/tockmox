@@ -13,6 +13,7 @@ directory and the commands for working on it. Experimental, macOS only.
 | `bootstrap-node.sh` | The first step on a new Mac: accounts, Homebrew, keys, pins, first converge. Bash 3.2, run as the human administrator |
 | `bin/tockmox-ai-node-converge` | The converger: fetch, verify signatures, decrypt, load, run; writes `converge.prom` and `state.json` |
 | `bin/tockmox-ai-node-facts` | The unprivileged readiness writer, run by launchd as the service account |
+| `bin/tockmox-ai-node-engine-watch` | Restarts an engine that is up but answers 503 on its health path (mlx-lm: generation thread died), every 60 s as root; writes `engine-watch.prom` |
 | `playbooks/ai-node.yml` | The one playbook; `playbooks/filter_plugins/` holds its Python filters |
 | `roles/` | One role per concern; `launchd_service` is the helper the others call |
 | `schema/` | JSON Schemas for `ai-node.yaml` and `desired.yaml` (written by the renderer) |

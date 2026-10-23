@@ -3,6 +3,7 @@
 converge_timer_toolkit_bin: "{{ tn_toolkit_dir }}/ai-node/bin"
 converge_timer_home: "/Users/{{ tn_converge_user }}"
 converge_timer_facts_interval_seconds: 60
+converge_timer_engine_watch_interval_seconds: 60
 converge_timer_sudoers: /etc/sudoers.d/tockmox-ai-node
 # The detached reload of the converge job runs as a one-shot loaded from this root-owned file.
 converge_timer_reload_plist: /var/db/tockmox-ai-node/converge-reload.plist

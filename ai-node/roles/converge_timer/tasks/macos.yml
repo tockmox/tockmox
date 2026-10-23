@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 ---
-# The converger and the facts writer, and the two LaunchDaemons that run them.
+# The converger, the facts writer and the engine watch, and the LaunchDaemons that run them.
 #
-#   converge  runs as the converge account every convergeIntervalSeconds, at load, and so at boot.
-#   facts     runs as the service account every minute and writes the readiness textfile.
+#   converge      runs as the converge account every convergeIntervalSeconds, at load, and so at boot.
+#   facts         runs as the service account every minute and writes the readiness textfile.
+#   engine-watch  runs as root every minute: restarts an engine whose health path answers 503 (up, but
+#                 unable to serve) and writes engine-watch.prom. Root only for launchctl kickstart.
 #
 # The converge job is the process that is running this play when a timer run changes its own
 # plist. Reloading it inline would kill the run that is doing the reloading, so a changed plist
@@ -23,7 +25,7 @@
       {{ tn_converge_user }} ALL=(ALL) NOPASSWD: ALL
     validate: /usr/sbin/visudo -cf %s
 
-- name: Install the converger and the facts writer from the toolkit checkout
+- name: Install the converger, the facts writer and the engine watch from the toolkit checkout
   ansible.builtin.copy:
     src: "{{ converge_timer_toolkit_bin }}/{{ item }}"
     dest: "{{ tn_root }}/bin/{{ item }}"
@@ -31,7 +33,7 @@
     owner: "{{ tn_converge_user }}"
     group: staff
     mode: "0755"
-  loop: [tockmox-ai-node-converge, tockmox-ai-node-facts]
+  loop: [tockmox-ai-node-converge, tockmox-ai-node-facts, tockmox-ai-node-engine-watch]
 
 - name: Tell the facts writer what the site expects
   ansible.builtin.copy:
@@ -64,6 +66,19 @@
     launchd_service_env:
       TOCKMOX_ROOT: "{{ tn_root }}"
       PATH: "{{ tn_brew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+- name: Run the engine watch every minute
+  ansible.builtin.include_role:
+    name: launchd_service
+  vars:
+    launchd_service_label: "{{ tn_prefix }}.engine-watch"
+    launchd_service_args: ["{{ tn_root }}/bin/tockmox-ai-node-engine-watch"]
+    launchd_service_keep_alive: false
+    launchd_service_interval: "{{ converge_timer_engine_watch_interval_seconds }}"
+    launchd_service_log: "{{ tn_root }}/log/engine-watch.log"
+    launchd_service_env:
+      TOCKMOX_ROOT: "{{ tn_root }}"
+      PATH: "/usr/bin:/bin:/usr/sbin:/sbin"
 
 - name: Write the converge job (the reload is done below, detached)
   ansible.builtin.include_role:

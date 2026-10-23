@@ -298,8 +298,10 @@ layer ships:
 - a **ScrapeConfig**, `tockmox-inference-nodes`, with one target per exporter a
   node lists under `metrics`, at `<address>:<port>`;
 - a **Probe**, `tockmox-inference-nodes`, with one blackbox target per engine
-  endpoint: `<url>/api/version` for Ollama, `<url>/v1/models` for everything
-  else.
+  endpoint: `<url>/api/version` for Ollama, `<url>/health` for mlx-lm,
+  `<url>/v1/models` for everything else. mlx-lm gets `/health` because its
+  `/v1/models` keeps answering 200 after the thread that generates has died,
+  while `/health` answers 503 (mlx-lm 0.32 and later).
 
 ```yaml
 inferenceNodes:
@@ -378,6 +380,7 @@ objects. It is not rendered when no node is enrolled.
 | `TockmoxAiNodeConvergeFailing` | the last converge exited non-zero for 30 minutes | critical |
 | `TockmoxAiNodeConvergeStale` | no success for three intervals, or an enrolled node has never reported | critical |
 | `TockmoxAiNodeSignatureUnverified` | `signature_ok` is 0 for an hour | warning |
+| `TockmoxAiNodeEngineRestarting` | the node's engine watch restarted the same engine more than once in six hours | warning |
 
 The rules name the enrolled node ids, so a stray node that reports is silent,
 and the interval they use follows `aiNodes.convergeIntervalSeconds`.

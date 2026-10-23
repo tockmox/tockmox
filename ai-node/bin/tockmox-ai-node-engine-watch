@@ -1,0 +1,114 @@
+#!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# tockmox-ai-node-engine-watch: restart an engine that is up but can no longer serve, every 60 s
+# from launchd, and say so in a Prometheus textfile (<root>/textfile/engine-watch.prom).
+#
+# WHY. mlx_lm.server answers HTTP on one thread and generates on another. When the generation thread
+# dies (it logs "generation thread died" and every completion then fails) the process lives on, so
+# launchd's KeepAlive never fires, /v1/models keeps answering 200, and the node serves nothing until
+# a person restarts it. /health answers 503 in exactly that state (mlx-lm 0.32 and later; earlier
+# versions answer 200 while the process is up, so this never acts on them).
+#
+# WHAT IT DOES, for each line of every <root>/etc/engine-watch.d/*.tsv (label TAB port TAB path; each
+# engine role that has a health path writes its own file at every converge):
+#
+#   GET http://127.0.0.1:<port><path>
+#   503                      one strike; at STRIKES consecutive strikes, launchctl kickstart -k
+#                            system/<label> and count the restart
+#   200                      clear the strikes
+#   anything else            clear the strikes and do nothing: no answer means the process is down
+#                            or still loading its model, which launchd and the converge own
+#
+# ROOT. kickstart in the system domain needs it; the LaunchDaemon runs it as root. It reads only the
+# file the converge writes and talks only to 127.0.0.1.
+#
+# SERIES (every one carries ai_node and the engine's launchd label and port):
+#   tockmox_ai_node_engine_healthy                   1 when the last check answered 200, else 0
+#   tockmox_ai_node_engine_restarts_total            restarts this watch made (a counter; it survives
+#                                                    reboots in <root>/var/engine-watch/)
+#   tockmox_ai_node_engine_watch_last_run_timestamp_seconds
+#
+# Bash 3.2 and BSD userland only.
+
+set -uo pipefail
+
+SELF="${BASH_SOURCE[0]:-$0}"
+if [ -z "${TOCKMOX_ROOT:-}" ]; then
+  _bin_dir="$(cd "$(dirname "$SELF")" 2>/dev/null && pwd -P)"
+  case "$_bin_dir" in */bin) TOCKMOX_ROOT="$(dirname "$_bin_dir")" ;; *) TOCKMOX_ROOT=/opt/tockmox ;; esac
+fi
+ROOT="$TOCKMOX_ROOT"
+LISTDIR="$ROOT/etc/engine-watch.d"
+STATE="$ROOT/var/engine-watch"
+OUT="$ROOT/textfile/engine-watch.prom"
+ENVF="$ROOT/etc/facts.env"
+STRIKES="${TOCKMOX_ENGINE_WATCH_STRIKES:-2}"
+TIMEOUT="${TOCKMOX_ENGINE_WATCH_TIMEOUT:-5}"
+LAUNCHCTL="${TOCKMOX_LAUNCHCTL:-launchctl}"
+
+log() { printf '%s engine-watch: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+prom_escape() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+read_int() { local v; v="$(cat "$1" 2>/dev/null)"; case "$v" in ''|*[!0-9]*) echo 0 ;; *) echo "$v" ;; esac; }
+
+AI_NODE_ID="$(sed -n 's/^AI_NODE_ID=//p' "$ENVF" 2>/dev/null | head -1)"
+IDL="$(prom_escape "${AI_NODE_ID:-unknown}")"
+
+mkdir -p "$STATE" "$ROOT/textfile" 2>/dev/null || exit 0
+TMP="$(mktemp "$ROOT/textfile/engine-watch.prom.XXXXXX")" || exit 0
+trap 'rm -f "$TMP"' EXIT
+
+healthy_lines=""
+restart_lines=""
+for list in "$LISTDIR"/*.tsv; do
+  [ -r "$list" ] || continue
+  while IFS="$(printf '\t')" read -r label port path; do
+    case "$label" in ''|'#'*) continue ;; esac
+    case "$port" in ''|*[!0-9]*) log "skipping $label: port '$port' is not a number"; continue ;; esac
+    [ -n "$path" ] || path=/health
+    code="$(curl -s -o /dev/null -m "$TIMEOUT" -w '%{http_code}' "http://127.0.0.1:${port}${path}" 2>/dev/null)"
+    code="${code:-000}"
+    strikes_f="$STATE/$label.strikes"
+    restarts_f="$STATE/$label.restarts"
+    strikes=0
+    case "$code" in
+      503)
+        strikes=$(( $(read_int "$strikes_f") + 1 ))
+        if [ "$strikes" -ge "$STRIKES" ]; then
+          if "$LAUNCHCTL" kickstart -k "system/$label" >/dev/null 2>&1; then
+            printf '%s\n' $(( $(read_int "$restarts_f") + 1 )) > "$restarts_f"
+            log "restarted $label: ${path} answered 503 on $strikes consecutive checks"
+          else
+            log "could not restart $label (launchctl kickstart failed); will try again"
+          fi
+          strikes=0
+        else
+          log "$label: ${path} answered 503 ($strikes of $STRIKES)"
+        fi
+        ;;
+    esac
+    printf '%s\n' "$strikes" > "$strikes_f"
+    lbl="ai_node=\"$IDL\",label=\"$(prom_escape "$label")\",port=\"$port\""
+    if [ "$code" = 200 ]; then h=1; else h=0; fi
+    healthy_lines="${healthy_lines}tockmox_ai_node_engine_healthy{$lbl} $h
+"
+    restart_lines="${restart_lines}tockmox_ai_node_engine_restarts_total{$lbl} $(read_int "$restarts_f")
+"
+  done < "$list"
+done
+
+{
+  echo '# HELP tockmox_ai_node_engine_healthy 1 when the engine answered its health path 200 at the last check, else 0.'
+  echo '# TYPE tockmox_ai_node_engine_healthy gauge'
+  printf '%s' "$healthy_lines"
+  echo '# HELP tockmox_ai_node_engine_restarts_total Restarts the engine watch made because the engine was up but unhealthy.'
+  echo '# TYPE tockmox_ai_node_engine_restarts_total counter'
+  printf '%s' "$restart_lines"
+  echo '# HELP tockmox_ai_node_engine_watch_last_run_timestamp_seconds When the engine watch last ran.'
+  echo '# TYPE tockmox_ai_node_engine_watch_last_run_timestamp_seconds gauge'
+  echo "tockmox_ai_node_engine_watch_last_run_timestamp_seconds{ai_node=\"$IDL\"} $(date +%s)"
+} > "$TMP"
+chmod 0644 "$TMP" 2>/dev/null
+mv -f "$TMP" "$OUT"
+trap - EXIT
+exit 0

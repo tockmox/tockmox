@@ -18,6 +18,8 @@
 #   - the converger wrapper's recap parser, metrics writer, signature verification (warn and
 #     enforce, a signer rotation, a rewritten history), the "another converger" refusal and a play
 #     that fails to load behave as documented, against a real git repository and a fake ansible;
+#   - the engine watch restarts an engine whose health path answers 503 on consecutive checks, once,
+#     and counts it; a single 503, a 200, no answer or a failed kickstart restart or count nothing;
 #   - the toolkit selection (the repository is pinned on the node, the ref comes only from a verified
 #     head) and the root-run firewall scripts, rendered from their templates and run against a fake
 #     pfctl: the boot marker, the rollback that restores the last confirmed rules (never an empty
@@ -139,7 +141,7 @@ python3 -c 'import yaml, jinja2' 2>/dev/null || { echo "check-ai-node: python3 n
 
 # --------------------------------------------------------------------- shellcheck and portability
 echo "shell scripts"
-if out="$(shellcheck -x "$AI/bootstrap-node.sh" "$AI"/bin/* "$AI/tests/converge-wrapper.sh" "$AI/tests/bootstrap-flow.sh" "$AI/tests/firewall-scripts.sh" "$AI/tests/e2e/run.sh" "$AI"/tests/e2e/shims/* 2>&1 | head -n 40)"; [ -z "$out" ]; then ok "shellcheck passes on every ai-node script"; else bad "shellcheck" "$out"; fi
+if out="$(shellcheck -x "$AI/bootstrap-node.sh" "$AI"/bin/* "$AI/tests/converge-wrapper.sh" "$AI/tests/bootstrap-flow.sh" "$AI/tests/firewall-scripts.sh" "$AI/tests/engine-watch.sh" "$AI/tests/e2e/run.sh" "$AI"/tests/e2e/shims/* 2>&1 | head -n 40)"; [ -z "$out" ]; then ok "shellcheck passes on every ai-node script"; else bad "shellcheck" "$out"; fi
 out="$(lint_bash4 "$AI")"; [ -z "$out" ] && ok "no bash 4 feature in the scripts that run on the Mac" || bad "bash 4 features (macOS ships bash 3.2)" "$out"
 out="$(lint_gnu "$AI")";   [ -z "$out" ] && ok "no GNU-only option in the scripts that run on the Mac" || bad "GNU-only options (macOS has BSD userland)" "$out"
 out="$(lint_secret_print "$AI")"; [ -z "$out" ] && ok "no script prints a private key" || bad "a script prints a private key" "$out"
@@ -147,7 +149,7 @@ for f in "$AI/bootstrap-node.sh" "$AI"/bin/*; do
   head -n 1 "$f" | grep -qE '^#!(/bin/bash|/usr/bin/env bash)$' || bad "$f has a shebang other than bash" "$(head -n 1 "$f")"
   [ -x "$f" ] || bad "$f is not executable"
 done
-bash -n "$AI/bootstrap-node.sh" && bash -n "$AI/bin/tockmox-ai-node-converge" && bash -n "$AI/bin/tockmox-ai-node-facts" && ok "bash -n passes" || bad "bash -n"
+bash -n "$AI/bootstrap-node.sh" && bash -n "$AI/bin/tockmox-ai-node-converge" && bash -n "$AI/bin/tockmox-ai-node-facts" && bash -n "$AI/bin/tockmox-ai-node-engine-watch" && ok "bash -n passes" || bad "bash -n"
 
 # --------------------------------------------------------------------- the playbook
 echo "playbook"
@@ -161,6 +163,8 @@ if out="$(python3 -W error -m unittest discover -s "$AI/tests/unit" 2>&1 | tail 
 if out="$(bash "$AI/tests/converge-wrapper.sh" 2>&1)"; then ok "converger wrapper tests: $(echo "$out" | tail -n 1)"; else bad "converger wrapper tests" "$(echo "$out" | grep -E 'FAIL|want' | head -n 15)"; fi
 
 if out="$(bash "$AI/tests/firewall-scripts.sh" 2>&1)"; then ok "firewall script tests: $(echo "$out" | tail -n 1)"; else bad "firewall script tests" "$(echo "$out" | grep -E 'FAIL|want' | head -n 15)"; fi
+
+if out="$(bash "$AI/tests/engine-watch.sh" 2>&1)"; then ok "engine watch tests: $(echo "$out" | tail -n 1)"; else bad "engine watch tests" "$(echo "$out" | grep -E 'FAIL|want' | head -n 15)"; fi
 
 if out="$(bash "$AI/tests/bootstrap-flow.sh" 2>&1)"; then ok "bootstrap flow tests: $(echo "$out" | tail -n 1)"; else bad "bootstrap flow tests" "$(echo "$out" | grep -E 'FAIL|want' | head -n 15)"; fi
 

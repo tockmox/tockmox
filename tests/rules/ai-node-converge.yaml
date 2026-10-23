@@ -1,4 +1,5 @@
-# TockmoxAiNodeConvergeFailing, TockmoxAiNodeConvergeStale and TockmoxAiNodeSignatureUnverified.
+# TockmoxAiNodeConvergeFailing, TockmoxAiNodeConvergeStale, TockmoxAiNodeSignatureUnverified and
+# TockmoxAiNodeEngineRestarting.
 #
 # DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
 #
@@ -14,6 +15,8 @@
 #              7 (NO series at all: enrolled, never reported) fires, which is the unconnected-wire case;
 #              8 (a success 40 m ago, under 3 intervals) is silent.
 #   signature: 9 (signature_ok 1) is silent; 10 (0 for 30 m, under `for`) is silent; 11 (0 for 90 m) fires.
+#   restarts:  12 (one restart in six hours) is silent; 13 (two restarts in six hours) fires; 14 (two
+#              restarts on a node nobody enrolled) is silent; 15 (two restarts eight hours apart) is silent.
 
 evaluation_interval: 1m
 
@@ -152,3 +155,50 @@ tests:
             exp_annotations:
               summary: "enrolled-mac applied commits that did not verify"
               description: "For an hour enrolled-mac has applied site commits that are not signed by a pinned signer (signing mode warn lets them through). Find the commit with an unsigned or unknown signature, or add its signer to the node's allowed signers with a commit signed by an already-pinned key, before switching the fleet to enforce."
+
+  # CASE 12: one restart at minute 60, evaluated at minute 120. The watch did its job; silent.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ai_node_engine_restarts_total{ai_node="enrolled-mac", label="com.example.ai-node.mlx-lm-8080", port="8080"}'
+        values: '0x59 1x120'
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: TockmoxAiNodeEngineRestarting
+        exp_alerts: []
+
+  # CASE 13: restarts at minute 60 and minute 90, evaluated at minute 120. Fires, a warning.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ai_node_engine_restarts_total{ai_node="enrolled-mac", label="com.example.ai-node.mlx-lm-8080", port="8080"}'
+        values: '0x59 1x29 2x60'
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: TockmoxAiNodeEngineRestarting
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              ai_node: enrolled-mac
+              label: com.example.ai-node.mlx-lm-8080
+            exp_annotations:
+              summary: "enrolled-mac keeps restarting com.example.ai-node.mlx-lm-8080"
+              description: "The engine watch on enrolled-mac restarted com.example.ai-node.mlx-lm-8080 more than once in six hours because its health path answered 503 (up, unable to serve). The restarts keep it serving; the cause is still there. Read the engine's log under /opt/tockmox/log/ on the node for the line before each restart (/opt/tockmox/log/engine-watch.log has the times), and look at what it was serving then: context length, concurrency, memory."
+
+  # CASE 14: the same two restarts on a node nobody enrolled. Silent: the selector names the enrolled ids.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ai_node_engine_restarts_total{ai_node="stray-mac", label="com.example.ai-node.mlx-lm-8080", port="8080"}'
+        values: '0x59 1x29 2x60'
+    alert_rule_test:
+      - eval_time: 120m
+        alertname: TockmoxAiNodeEngineRestarting
+        exp_alerts: []
+
+  # CASE 15: one restart at minute 10 and one at minute 490 (eight hours apart), evaluated at minute 500. Silent.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_ai_node_engine_restarts_total{ai_node="enrolled-mac", label="com.example.ai-node.mlx-lm-8080", port="8080"}'
+        values: '0x9 1x479 2x30'
+    alert_rule_test:
+      - eval_time: 500m
+        alertname: TockmoxAiNodeEngineRestarting
+        exp_alerts: []

@@ -38,6 +38,31 @@
   loop_control:
     label: "{{ item.id }}"
 
+# The engine watch (bin/tockmox-ai-node-engine-watch, every 60 s as root) restarts an instance whose
+# /health answers 503: the process is up but its generation thread died, so launchd's KeepAlive never
+# fires. Written on every run, empty when no instance is wanted, so a removed instance stops being watched.
+- name: Tell the engine watch which instances to check
+  become: true
+  block:
+    - name: Create the engine watch directory
+      ansible.builtin.file:
+        path: "{{ tn_root }}/etc/engine-watch.d"
+        state: directory
+        owner: "{{ tn_converge_user }}"
+        group: staff
+        mode: "0755"
+
+    - name: List the mlx-lm instances and their health path
+      ansible.builtin.copy:
+        dest: "{{ tn_root }}/etc/engine-watch.d/mlx-lm.tsv"
+        owner: "{{ tn_converge_user }}"
+        group: staff
+        mode: "0644"
+        content: |
+          # Managed by tockmox-ai-node (role engine_mlx_lm). label<TAB>port<TAB>health path.
+          {% for i in engine_mlx_lm_resolved | default([]) %}{{ [i.label, i.port, '/health'] | join(engine_mlx_lm_tab) }}
+          {% endfor %}
+
 - name: Install and run the instances
   when: engine_mlx_lm_wanted | length > 0
   block:

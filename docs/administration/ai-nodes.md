@@ -370,6 +370,7 @@ gated Hugging Face models is the secret named `hf-token`.
 ```bash
 cat /opt/tockmox/textfile/converge.prom
 cat /opt/tockmox/textfile/facts.prom
+cat /opt/tockmox/textfile/engine-watch.prom
 sudo -u tockmox /opt/tockmox/bin/tockmox-ai-node-converge --check --diff
 ```
 
@@ -383,6 +384,15 @@ The last command changes nothing and shows what a converge would change.
 | `tockmox_ai_node_converge_signature_ok` | 1 when every new commit verified |
 | `tockmox_ai_node_readiness{check=...}` | 1 holds, 0 does not, absent is unknown |
 | `tockmox_ai_node_model_present` | A pinned model revision that is on disk |
+| `tockmox_ai_node_engine_healthy{label=...,port=...}` | 1 when the engine's health path answered 200 at the last check |
+| `tockmox_ai_node_engine_restarts_total{label=...,port=...}` | Restarts the engine watch made because the engine was up but unhealthy |
+
+The engine watch (`tockmox-ai-node-engine-watch`, root, every 60 s) asks each
+mlx-lm instance for `/health` on 127.0.0.1. Two 503 answers in a row mean the
+process is up but its generation thread died, which launchd's KeepAlive never
+sees: the watch restarts that engine with `launchctl kickstart -k` and counts
+it. No answer at all (the process is down or loading its model) is left to
+launchd and the converge. Its log is `/opt/tockmox/log/engine-watch.log`.
 
 Absent means unknown and nothing downstream should read it as healthy. The
 facts writer runs as the unprivileged service account; the few facts only root can
@@ -467,6 +477,7 @@ the toolkit assumes.
 | The facts writer can read what it needs as the service account | `sudo -u inference /opt/tockmox/bin/tockmox-ai-node-facts` then `cat /opt/tockmox/textfile/facts.prom` |
 | macmon serves its metrics and its bind address | `lsof -nP -iTCP:9101 -sTCP:LISTEN` |
 | `iogpu.wired_limit_mb` exists and takes the value on this macOS | `sysctl iogpu.wired_limit_mb` |
+| The engine watch restarts an mlx-lm instance whose `/health` answers 503, and only then | on a node serving mlx-lm 0.32 or later, `sudo /opt/tockmox/bin/tockmox-ai-node-engine-watch` and `cat /opt/tockmox/textfile/engine-watch.prom` (healthy 1, restarts 0); the 503 path itself needs an engine whose generation thread died |
 | A converge can reload its own LaunchDaemon without dying | change the interval in `fleet.yaml`, then `sudo launchctl print system/com.tockmox.ai-node.converge` after the run |
 | The Apple Account check finds a signed-in account | `sudo defaults read /Users/admin/Library/Preferences/MobileMeAccounts Accounts` |
 | The scripts run under macOS's bash 3.2 | `/bin/bash --version` and `/bin/bash -n /opt/tockmox/bin/tockmox-ai-node-converge` |
