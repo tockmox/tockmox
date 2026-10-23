@@ -272,6 +272,40 @@
                   "description": "Authentik OIDC sub claim mode for this provider. Empty leaves Authentik's default."
                 }
               }
+            },
+            "tockmoxUi": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Register the Tockmox UI with Authentik from a blueprint. Off by default: needs TOCKMOX_UI_CLIENT_SECRET in the tockmox-sso-tockmox-ui Secret first, or every blueprint stops applying."
+                },
+                "clientId": {
+                  "type": "string"
+                },
+                "access": {
+                  "type": "string",
+                  "enum": [
+                    "admin",
+                    "users"
+                  ]
+                },
+                "host": {
+                  "type": "string",
+                  "description": "Hostname registered as the redirect and post-logout URI and the launch URL. Empty derives tockmox.<internalDomain>."
+                },
+                "subMode": {
+                  "type": "string",
+                  "enum": [
+                    "",
+                    "hashed_user_id",
+                    "user_id",
+                    "user_uuid",
+                    "user_username",
+                    "user_email"
+                  ]
+                }
+              }
             }
           }
         },
@@ -329,6 +363,107 @@
                   "users"
                 ]
               }
+            }
+          }
+        },
+        "forwardAuth": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Consoles with no sign-in of their own, behind Authentik's embedded outpost (TM-0425). Each needs its route turned on in the layer that serves it too.",
+          "properties": {
+            "apps": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "prometheus": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "host": {
+                      "type": "string",
+                      "description": "The console's hostname; keep it equal to its route's host. Empty derives <console>.<internalDomain>."
+                    },
+                    "access": {
+                      "type": "string",
+                      "enum": [
+                        "admin",
+                        "users"
+                      ]
+                    }
+                  }
+                },
+                "alertmanager": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "host": {
+                      "type": "string",
+                      "description": "The console's hostname; keep it equal to its route's host. Empty derives <console>.<internalDomain>."
+                    },
+                    "access": {
+                      "type": "string",
+                      "enum": [
+                        "admin",
+                        "users"
+                      ]
+                    }
+                  }
+                },
+                "longhorn": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "host": {
+                      "type": "string",
+                      "description": "The console's hostname; keep it equal to its route's host. Empty derives <console>.<internalDomain>."
+                    },
+                    "access": {
+                      "type": "string",
+                      "enum": [
+                        "admin",
+                        "users"
+                      ]
+                    }
+                  }
+                },
+                "traefik": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "host": {
+                      "type": "string",
+                      "description": "The console's hostname; keep it equal to its route's host. Empty derives <console>.<internalDomain>."
+                    },
+                    "access": {
+                      "type": "string",
+                      "enum": [
+                        "admin",
+                        "users"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            "keepProviders": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Names of proxy providers you created on the embedded outpost, kept when the identity layer sets its provider list. Each must exist."
             }
           }
         }

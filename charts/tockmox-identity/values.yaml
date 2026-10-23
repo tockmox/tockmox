@@ -322,6 +322,73 @@ sso:
       access: users
       host: ""
       subMode: ""
+    # The Tockmox UI (TM-0956). OFF by default in 0.9.0, unlike the three
+    # above, and the reason is the greenfield rule at the top of
+    # templates/sso-blueprints.yaml: its client secret comes from
+    # TOCKMOX_UI_CLIENT_SECRET in a `tockmox-sso-tockmox-ui` Secret in THIS
+    # namespace, an install made before 0.9.0 does not have it, and a blueprint
+    # whose `!Env` resolves to nothing goes to `error` and stops discovery for
+    # EVERY blueprint, the three working consoles included. So: create that
+    # Secret first (tools/mint-secrets.sh --with-tockmox-ui writes it, the same
+    # value as the UI's own `tockmox-sso-tockmox-ui` in the AI namespace), then
+    # set `enabled: true`. Replaces the hand
+    # registration in docs/administration/tockmox-ui.md. Admins only by
+    # default: it is the admin console.
+    tockmoxUi:
+      enabled: false
+      clientId: tockmox-ui
+      access: admin
+      host: ""            # same value as tockmoxUi.ingress.host in the AI layer
+      subMode: ""
+  # FORWARD-AUTH CONSOLES (TM-0425): consoles with NO sign-in of their own,
+  # put behind Authentik by its embedded outpost instead of each speaking OIDC.
+  # Each one turned on here renders, in its own blueprint file entry:
+  #   - a proxy provider in `forward_single` mode for that ONE host, and an
+  #     application with a tile and the same `access` binding as the OAuth apps.
+  #     Per console, not one provider for a whole domain, so changing who may
+  #     reach Longhorn does not also open Prometheus (the shared-gate blast
+  #     radius a domain-level provider has);
+  #   - an Ingress on that host for /outpost.goauthentik.io/ only, the sign-in
+  #     callback, which must reach Authentik on the console's own hostname.
+  # The ONE Traefik Middleware every console attaches (`tockmox-forward-auth`
+  # in this namespace) renders whenever SSO is on; it is inert until a route
+  # references it.
+  #
+  # THE SAME CONSOLE MUST BE TURNED ON TWICE, here and in the layer that serves
+  # it (`ingress.apps.<console>.enabled` in observability or platform), and with
+  # the same host if you override it: the layers cannot read each other's
+  # values. Here without there is a tile that opens nothing; there without here
+  # is a route Authentik refuses with "no provider for this host".
+  #
+  # THE EMBEDDED OUTPOST'S PROVIDER LIST IS OWNED HERE once any console is on.
+  # Authentik stores which providers the embedded outpost serves as one list,
+  # and a blueprint sets that list whole: it cannot append. So a proxy provider
+  # you created yourself and attached to the embedded outpost is detached on
+  # the next apply unless you name it in `keepProviders` (by provider name; it
+  # must exist, or the blueprint fails and stops discovery for all of them).
+  # With every console off, the outpost is not touched at all.
+  #
+  # `access`: admin | users, exactly as for the OAuth applications. Admin by
+  # default: these are operator consoles, and Longhorn can delete volumes.
+  forwardAuth:
+    apps:
+      prometheus:
+        enabled: false
+        host: ""          # empty derives prometheus.<internalDomain>
+        access: admin
+      alertmanager:
+        enabled: false
+        host: ""          # empty derives alertmanager.<internalDomain>
+        access: admin
+      longhorn:
+        enabled: false
+        host: ""          # empty derives longhorn.<internalDomain>
+        access: admin
+      traefik:
+        enabled: false
+        host: ""          # empty derives traefik.<internalDomain>
+        access: admin
+    keepProviders: []
   # LINK-ONLY TILES: consoles that have no OIDC, so there is nothing to sign in
   # WITH ... only a tile to open them from. Each entry renders an Authentik
   # application with a launch URL, icon, description and group heading, opened
@@ -363,6 +430,22 @@ sso:
       group: Observability
       icon: app-ntfy.svg
       access: users
+    # Argo CD (TM-0740). A prerequisite, not a Tockmox component, so the
+    # product ships no route or OIDC client for it: this tile is OFF until you
+    # give Argo CD a hostname yourself, and then opens it from the portal.
+    # docs/administration/argocd.md, "A hostname and a portal tile", has the
+    # Ingress and Argo CD's own OIDC recipe. Set `host` if yours is not
+    # argocd.<internalDomain>.
+    argocd:
+      enabled: false
+      title: Argo CD
+      hostPrefix: argocd
+      host: ""
+      path: ""
+      description: "Opens Argo CD, the GitOps controller that applies every layer. It signs you in with its own login unless you connected it to this portal (docs: administration/argocd.md)."
+      group: Infrastructure
+      icon: ""
+      access: admin
 
 authentik:
   # -------------------------------------------------------------------------
@@ -398,6 +481,13 @@ authentik:
       - secretRef:
           name: tockmox-sso
           optional: true    # sso.enabled=false installs run without it
+      # TOCKMOX_UI_CLIENT_SECRET for sso.apps.tockmoxUi (TM-0956). Its own
+      # Secret rather than a key in tockmox-sso, so an install minted before
+      # 0.9.0 adds it without re-minting the three console secrets.
+      # tools/mint-secrets.sh --with-tockmox-ui writes both halves.
+      - secretRef:
+          name: tockmox-sso-tockmox-ui
+          optional: true
   blueprints:
     configMaps:
       - tockmox-sso-blueprints

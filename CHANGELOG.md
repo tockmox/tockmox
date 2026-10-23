@@ -11,6 +11,33 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **Prometheus, Alertmanager, Longhorn and the Traefik dashboard can be routed
+  behind Authentik (forward-auth).** Each is still off by default. Turning one on
+  takes two values: `sso.forwardAuth.apps.<console>.enabled` in the identity
+  layer (a per-console proxy provider, tile and group binding, `admin` by
+  default) and `ingress.apps.<console>.enabled` in the layer that serves it. The
+  Traefik dashboard gets its own Host-matched route (`ingress.apps.traefik`,
+  platform layer); the port-forward break-glass stays. A route turned on with
+  the identity capability off fails the render; `forwardAuth: false` routes it
+  without Authentik. Once any console is on, the identity layer owns the embedded
+  outpost's provider list: name your own proxy providers in
+  `sso.forwardAuth.keepProviders` or they are detached. See
+  `docs/administration/identity.md`, "Consoles behind forward-auth".
+- **The Tockmox UI can be registered by the identity layer** with
+  `sso.apps.tockmoxUi.enabled: true` (off by default): a blueprint with the
+  invalidation flow that makes Sign out end the Authentik session and the
+  post-logout redirect URI. It needs `TOCKMOX_UI_CLIENT_SECRET` in a new
+  `tockmox-sso-tockmox-ui` Secret in the Authentik namespace first, or every SSO
+  blueprint stops applying; `tools/mint-secrets.sh --with-tockmox-ui` writes it.
+  `docs/administration/tockmox-ui.md` has the order and the command for an
+  install minted before 0.9.0.
+- **An Argo CD portal tile, off by default** (`sso.links.argocd`), and a recipe
+  for giving Argo CD a hostname and Authentik sign-in in
+  `docs/administration/argocd.md`.
+- **Signing out is documented per console** in
+  `docs/administration/identity.md`: signing out of Authentik does not sign you
+  out of the consoles, and the page says what does.
+
 - **AI nodes can be managed from git (experimental).** `ai-node/` is
   `tockmox-ai-node`: a bootstrap script and a converger that keep an
   Apple-silicon Mac's engines, firewall, memory ceiling and model store at what

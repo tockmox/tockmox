@@ -5,6 +5,11 @@
 # Prometheus/Alertmanager the kube-prometheus-stack fullname, which upstream
 # truncates to 26 characters ... replicated below rather than assumed, so a
 # differently-named release still resolves.
+#
+# Prometheus and Alertmanager ship no sign-in. Their routes are off by default
+# and, when turned on, go through Authentik's forward-auth unless
+# `ingress.apps.<app>.forwardAuth: false` (TM-0425; tockmox.forwardAuthAnnotations
+# in tockmox-common says why a missing identity layer fails the render).
 {{- $kpsFullname := printf "%s-kube-prometheus-stack" .Release.Name | trunc 26 | trimSuffix "-" }}
 {{- if (include "tockmox.appEnabled" (dict "ctx" $ "app" "kubePrometheusStack")) }}
 {{- with .Values.ingress.apps.grafana }}
@@ -16,13 +21,13 @@
 {{- with .Values.ingress.apps.prometheus }}
 {{- if .enabled }}
 ---
-{{ include "tockmox.ingress" (dict "ctx" $ "name" "prometheus" "prefix" "prometheus" "host" .host "service" (printf "%s-prometheus" $kpsFullname) "port" 9090) }}
+{{ include "tockmox.ingress" (dict "ctx" $ "name" "prometheus" "prefix" "prometheus" "host" .host "service" (printf "%s-prometheus" $kpsFullname) "port" 9090 "annotations" (include "tockmox.forwardAuthAnnotations" (dict "ctx" $ "app" "prometheus" "on" .forwardAuth) | fromYaml)) }}
 {{- end }}
 {{- end }}
 {{- with .Values.ingress.apps.alertmanager }}
 {{- if .enabled }}
 ---
-{{ include "tockmox.ingress" (dict "ctx" $ "name" "alertmanager" "prefix" "alertmanager" "host" .host "service" (printf "%s-alertmanager" $kpsFullname) "port" 9093) }}
+{{ include "tockmox.ingress" (dict "ctx" $ "name" "alertmanager" "prefix" "alertmanager" "host" .host "service" (printf "%s-alertmanager" $kpsFullname) "port" 9093 "annotations" (include "tockmox.forwardAuthAnnotations" (dict "ctx" $ "app" "alertmanager" "on" .forwardAuth) | fromYaml)) }}
 {{- end }}
 {{- end }}
 {{- end }}

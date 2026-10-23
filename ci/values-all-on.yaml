@@ -42,6 +42,15 @@ ingress:
     # netpol-selector story with a hostname.
     longhorn:
       enabled: true
+    # The other three forward-auth consoles (TM-0425), so their routes render
+    # with the Middleware attached and the Ingress, TLS and netpol gates see
+    # them. The identity half is under sso.forwardAuth below.
+    prometheus:
+      enabled: true
+    alertmanager:
+      enabled: true
+    traefik:
+      enabled: true
 
 traefik:
   ingressRoute:
@@ -56,6 +65,24 @@ sso:
   # it against `restricted` in tockmox-authentik (TM-0820).
   adminUsers:
     - admin
+  # Every forward-auth console's identity half (TM-0425): proxy providers,
+  # bindings, the Middleware, the callback Ingresses and the outpost entry,
+  # so check-sso-bindings, check-blueprint-discovery and the Ingress gates
+  # cover them. tools/check-forward-auth.sh asserts the pairing.
+  forwardAuth:
+    apps:
+      prometheus: {enabled: true}
+      alertmanager: {enabled: true}
+      longhorn: {enabled: true}
+      traefik: {enabled: true}
+  # The Tockmox UI's blueprint (TM-0956) and the Argo CD link tile (TM-0740),
+  # both off by default.
+  apps:
+    tockmoxUi:
+      enabled: true
+  links:
+    argocd:
+      enabled: true
 
 # tockmox-observability: Grafana on CloudNativePG (TM-0786), so the CNPG
 # Cluster, its env Secret and the preflight's agreement checks are rendered and

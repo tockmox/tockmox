@@ -300,6 +300,9 @@ PAIRS_SSO="sso.sealed.yaml:sso-grafana.sealed.yaml sso.sealed.yaml:sso-openwebui
 PAIRS=""
 want authentik && PAIRS="$PAIRS_AUTHENTIK"
 want sso && PAIRS="$PAIRS $PAIRS_SSO"
+# The Tockmox UI's client secret, on both sides (TM-0956): the UI reads it in the
+# AI namespace, the identity layer's blueprint reads it in the Authentik one.
+$WITH_UI && PAIRS="$PAIRS sso-tockmox-ui.sealed.yaml:sso-tockmox-ui-authentik.sealed.yaml"
 check_pairs() {
   local p a b bad=0
   for p in $PAIRS; do
@@ -775,17 +778,24 @@ else
 fi
 
 # The 0.8.0 experimental features (lab F3, 2026-10-08: the pages named these
-# Secrets and gave no command). Neither pairs with anything this script mints:
-# the UI's OIDC client secret is registered in Authentik by hand
-# (docs/administration/tockmox-ui.md), so it is read back from the cluster, not
-# from a second file here.
+# Secrets and gave no command). The UI's OIDC client secret is a PAIR since 0.9.0
+# (TM-0956): the same value in the AI namespace for the UI and in the Authentik
+# namespace for the identity layer's blueprint (sso.apps.tockmoxUi), so the UI no
+# longer needs registering by hand. check_pairs refuses a half-present pair;
+# docs/administration/tockmox-ui.md says how an install minted before 0.9.0 gets
+# the Authentik half from the value it already has.
+SSO_UI=""
+if $WITH_UI && [ ! -e "$OUT/sso-tockmox-ui.sealed.yaml" ]; then SSO_UI=$(openssl rand -hex 32); fi
 if $WITH_UI; then
   have tockmox-ui-session.sealed.yaml tockmox-ui-session || \
   mk tockmox-ui-session.sealed.yaml tockmox-ai tockmox-ui-session \
     --from-literal=secret="$(openssl rand -hex 32)"
   have sso-tockmox-ui.sealed.yaml tockmox-sso-tockmox-ui || \
   mk sso-tockmox-ui.sealed.yaml tockmox-ai tockmox-sso-tockmox-ui \
-    --from-literal=client-secret="$(openssl rand -hex 32)"
+    --from-literal=client-secret="$SSO_UI"
+  have sso-tockmox-ui-authentik.sealed.yaml tockmox-sso-tockmox-ui || \
+  mk sso-tockmox-ui-authentik.sealed.yaml tockmox-authentik tockmox-sso-tockmox-ui \
+    --from-literal=TOCKMOX_UI_CLIENT_SECRET="$SSO_UI"
 else
   _u1=false; _u2=false
   have tockmox-ui-session.sealed.yaml tockmox-ui-session && _u1=true

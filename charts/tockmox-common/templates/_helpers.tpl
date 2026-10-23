@@ -70,6 +70,12 @@ certificate. A second Ingress object for the same host would need its own tls
 block and its own cert, and if you omit that block the path is reachable over
 plain HTTP only ... which looks like a routing bug and is really a TLS one.
 */}}
+{{- /*
+`annotations` (a dict) is added to THIS Ingress only, before the site-wide
+`ingress.annotations`. It exists for the forward-auth route (TM-0425): a console
+behind Authentik carries the router.middlewares annotation that
+tockmox.forwardAuthAnnotations renders, and no other Ingress in the layer does.
+*/ -}}
 {{- define "tockmox.ingress" -}}
 {{- $host := .host | default (include "tockmox.internalHost" (dict "svc" .prefix "ctx" .ctx)) -}}
 apiVersion: networking.k8s.io/v1
@@ -80,13 +86,16 @@ metadata:
     {{- include "tockmox.labels" .ctx | nindent 4 }}
   {{- $certIssuer := .ctx.Values.global.certIssuer }}
   {{- $extra := .ctx.Values.ingress.annotations }}
-  {{- if or $certIssuer $extra .wave }}
+  {{- if or $certIssuer $extra .wave .annotations }}
   annotations:
     {{- if .wave }}
     argocd.argoproj.io/sync-wave: {{ .wave | toString | quote }}
     {{- end }}
     {{- if $certIssuer }}
     cert-manager.io/cluster-issuer: {{ $certIssuer }}
+    {{- end }}
+    {{- with .annotations }}
+    {{- toYaml . | nindent 4 }}
     {{- end }}
     {{- with $extra }}
     {{- toYaml . | nindent 4 }}
@@ -214,4 +223,45 @@ pod spec rather than a Secret, so changing them already rolls the pod.
 */}}
 {{- define "tockmox.ssoEnvRevision" -}}
 {{- printf "certIssuer=%s;internalDomain=%s" (.Values.global.certIssuer | default "") (.Values.global.internalDomain | default "") | sha256sum | trunc 16 -}}
+{{- end -}}
+
+{{/*
+FORWARD-AUTH FOR A CONSOLE THAT HAS NO SIGN-IN OF ITS OWN (TM-0425).
+
+Prometheus, Alertmanager, Longhorn and the Traefik dashboard ship no
+authentication. Each can now be routed at a Host-matched name with Authentik in
+front: the identity layer renders ONE Traefik Middleware
+(`tockmox-forward-auth` in its own namespace) pointing at Authentik's embedded
+outpost, plus a per-console proxy provider, application and group binding
+(`sso.forwardAuth.apps.<console>` in the identity layer). The console's own
+layer only attaches the Middleware, by reference, with the annotation below.
+
+The reference is provider-qualified (`<namespace>-<name>@kubernetescrd`), which
+is how Traefik resolves a Middleware in another namespace from an Ingress
+annotation or an IngressRoute. The default matches a stock install (identity in
+`tockmox-authentik`); `ingress.forwardAuth.middleware` overrides it for a site
+that moved the identity layer.
+
+THE CONSOLE REFUSES TO RENDER UNAUTHENTICATED BY ACCIDENT. An app with
+`forwardAuth: true` (the default) while the identity capability is off fails the
+render: the Middleware would not exist, and Traefik answers a route whose
+middleware is missing with a 404, which reads as a routing bug rather than a
+missing sign-in. `forwardAuth: false` is the explicit way to route the console
+without Authentik (your own auth in front, via `ingress.annotations`).
+
+Usage: include "tockmox.forwardAuthAnnotations" (dict "ctx" $ "app" "prometheus" "on" .forwardAuth)
+returns a YAML dict (empty when `on` is false) for tockmox.ingress's `annotations`.
+*/}}
+{{- define "tockmox.forwardAuthRef" -}}
+{{- $fa := (.ctx.Values.ingress | default dict).forwardAuth | default dict -}}
+{{- $fa.middleware | default "tockmox-authentik-tockmox-forward-auth@kubernetescrd" -}}
+{{- end -}}
+
+{{- define "tockmox.forwardAuthAnnotations" -}}
+{{- if .on -}}
+{{- if not (include "tockmox.capabilityEnabled" (dict "ctx" .ctx "capability" "identity")) -}}
+{{- fail (printf "ingress.apps.%s.forwardAuth is true (the default), but capabilities.identity is off, so there is no Authentik to sign in with and the route would answer 404. Turn the identity capability on, or set ingress.apps.%s.forwardAuth: false and put your own authentication in front (ingress.annotations), or leave ingress.apps.%s.enabled: false and use kubectl port-forward." .app .app .app) -}}
+{{- end -}}
+traefik.ingress.kubernetes.io/router.middlewares: {{ include "tockmox.forwardAuthRef" (dict "ctx" .ctx) }}
+{{- end -}}
 {{- end -}}

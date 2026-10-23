@@ -77,7 +77,22 @@
               },
               "host": {
                 "type": "string"
+              },
+              "forwardAuth": {
+                "type": "boolean",
+                "description": "Put Authentik forward-auth in front of this console's route (consoles with no sign-in of their own). The render fails if the identity capability is off; false routes it with no sign-in."
               }
+            }
+          }
+        },
+        "forwardAuth": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Forward-auth (TM-0425): which Authentik Middleware a console route attaches.",
+          "properties": {
+            "middleware": {
+              "type": "string",
+              "description": "Provider-qualified Traefik Middleware. Empty uses the identity layer's on a stock install: tockmox-authentik-tockmox-forward-auth@kubernetescrd."
             }
           }
         }

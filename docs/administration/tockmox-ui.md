@@ -136,11 +136,42 @@ and `secrets/sso-tockmox-ui.sealed.yaml`; commit them with the values change.
 
 ### Register the UI with Authentik
 
-The identity layer's blueprints register Grafana, Open WebUI and Argo
-Workflows. They do not register the UI, so until you do, sign-in ends at
-Authentik with an unknown client. Register it the way
-[adding an application](adding-an-application.md#5-single-sign-on) describes,
-with these values:
+Since 0.9.0 the identity layer can register the UI itself. It is **off by
+default**, because its blueprint reads the client secret from a Secret an
+install minted before 0.9.0 does not have, and a blueprint that cannot resolve
+its secret stops discovery for every other blueprint too
+([identity, the greenfield rule](identity.md#the-greenfield-rule-for-blueprints)).
+Turn it on in two steps, in this order:
+
+1. The identity layer needs the client secret in its own namespace, as
+   `TOCKMOX_UI_CLIENT_SECRET` in a Secret named `tockmox-sso-tockmox-ui` in the
+   Authentik namespace. A fresh `tools/mint-secrets.sh --with-tockmox-ui` writes
+   it (`secrets/sso-tockmox-ui-authentik.sealed.yaml`) with the same value as
+   the UI's own. If you minted the UI's Secret before 0.9.0, the script refuses
+   to mint one half of the pair; seal the Authentik half from the value you
+   already have instead:
+
+   ```bash
+   kubectl --context <yours> -n tockmox-ai get secret tockmox-sso-tockmox-ui \
+     -o jsonpath='{.data.client-secret}' | base64 -d > /tmp/ui-client-secret
+   kubectl create secret generic tockmox-sso-tockmox-ui -n tockmox-authentik \
+     --from-file=TOCKMOX_UI_CLIENT_SECRET=/tmp/ui-client-secret \
+     --dry-run=client -o yaml | kubeseal --context <yours> -o yaml \
+     > secrets/sso-tockmox-ui-authentik.sealed.yaml
+   rm -f /tmp/ui-client-secret
+   ```
+
+   Commit it and let it sync before step 2.
+2. Set `sso.apps.tockmoxUi.enabled: true` in the identity layer's values (and
+   `sso.apps.tockmoxUi.host` if you moved the UI off `tockmox.<internalDomain>`).
+   The blueprint registers everything in the table below, including the
+   `default-invalidation-flow` and the post-logout redirect URI, and binds the
+   application to the admin group (`access: users` opens it to both groups).
+
+To register it by hand instead (an install that keeps the identity layer at an
+older release, say), follow
+[adding an application](adding-an-application.md#5-single-sign-on) with these
+values:
 
 | Field | Value |
 |---|---|
