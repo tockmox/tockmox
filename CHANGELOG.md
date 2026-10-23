@@ -81,6 +81,13 @@ costs you, with the reasoning in the documentation rather than here.
   A site can replace the catalog (`tockmoxUi.platformCatalog.configMap`) and
   connect an agent ledger (`ledgerUrl`, `secrets.platformLedgerToken`). Tockmox
   still ships no agent. See `docs/administration/platform-management.md`.
+- **The kured reboot gate has a printed answer and a check.**
+  `docs/operations/monitoring.md` gives the `alertFilterRegexp` to use, built
+  from one `block` or `pass` decision per alert Tockmox authors
+  (`tools/kured-gate.txt`). `tools/check-kured-gate.sh` fails the build when an
+  alert has no decision, when a decision names an alert that is gone, or when the
+  printed regexp drifts. Defaults are unchanged: the gate stays off until a site
+  sets `prometheusUrl` and the regexp.
 
 ### Changed
 

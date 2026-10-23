@@ -336,6 +336,59 @@ To check a live install, query the Service from one pod several times and
 compare, as in `tools/check-platform-seams.sh` S10 for the render and the lab
 steps in TM-0781 for the behaviour.
 
+## The reboot gate: which alerts hold a kured reboot (TM-0225)
+
+kured can hold a node reboot while chosen alerts are firing. Tockmox ships
+`kured.configuration.prometheusUrl` and `alertFilterRegexp` empty, so the gate
+is off until a site sets both. This section is what to set, and how the list
+stays honest.
+
+```yaml
+kured:
+  configuration:
+    prometheusUrl: http://tockmox-observability-kube-prometheus.<monitoring-namespace>.svc:9090
+    alertFilterRegexp: "^(KubeDaemonSetNotScheduled|KubeDeploymentReplicasMismatch|KubeNodeNotReady|KubeNodeReadinessFlapping|KubeNodeUnreachable|KubePdbNotEnoughHealthyPods|KubeStatefulSetReplicasMismatch|KubeletDown|TockmoxCNPGClusterNotHealthy|TockmoxLonghornStorageFull|TockmoxLonghornVolumeDegraded|TockmoxLonghornVolumeFaulted|TockmoxLonghornVolumeStuckAttaching|etcdInsufficientMembers|etcdMembersDown|etcdNoLeader)$"
+    alertFilterMatchOnly: true
+    alertFiringOnly: true
+```
+
+Set `alertFilterMatchOnly: true`. Without it kured reads the expression as a
+list of alerts to **ignore**, which inverts the gate. The Service name is the
+Prometheus Service from [two Prometheus replicas](#two-prometheus-replicas-and-alerts-tm-0781)
+above; read the real one with `kubectl get svc -n <monitoring-namespace>`.
+
+**What the regexp is built from.** One decision per alert Tockmox authors,
+`block` or `pass`, in `tools/kured-gate.txt`, plus the upstream
+kube-prometheus-stack alerts the gate names (node readiness, PodDisruptionBudgets,
+replica shortfalls, etcd quorum). `./tools/check-kured-gate.sh --print-regexp`
+prints the regexp those decisions imply; the line above is that output. A
+`block` means a firing alert says the cluster has lost redundancy, quorum or
+capacity that a drain would spend. The decisions are the project's, not facts:
+a site that disagrees overrides `alertFilterRegexp` in its own values, and
+should keep any alert of its own that matters in the list.
+
+**Why a list file and a check.** The gate is an inclusion list, so an alert
+that is not on it never holds a reboot and nothing reports that. The check,
+`tools/check-kured-gate.sh`, fails the build when a Tockmox alert has no
+decision, when a decision names an alert that no longer renders, when an
+upstream alert on the list has been renamed, and when the regexp above is not
+the one the decisions imply. A rule can carry its decision itself instead, as
+the annotation `kured_gate: block` or `kured_gate: pass` (an annotation name
+cannot contain a dot or a slash). The check does not see a site's own rules:
+a site that wants the same guarantee needs the same check over its own rules.
+
+**What kured does with the answer.** Read from the kured 1.23.0 source, not run
+here: it asks the Prometheus URL for the instant query `ALERTS` on every poll,
+keeps the series whose `alertname` matches (and, with `alertFiringOnly`, whose
+`alertstate` is `firing`), and holds the reboot if any remain. A query error
+also holds the reboot. Two things follow. With `alertFiringOnly: true` an alert
+that is still `pending` holds nothing, which is exactly what two Prometheus
+replicas with different `for:` clocks disagree about; `alertFiringOnly: false`
+makes a pending alert hold the reboot too, at the cost of holding for every
+alert that is merely pending (a Longhorn volume rebuilding after the previous
+node's reboot is the usual one). And because Alertmanager does not serve
+`/api/v1/query`, the URL has to be a Prometheus, not Alertmanager.
+
 ## Grafana on CloudNativePG, and more than one Grafana (TM-0786)
 
 **Optional, off by default, new in 0.8.0.** What you get: Grafana's own state

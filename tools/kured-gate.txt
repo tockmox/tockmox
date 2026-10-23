@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE KURED REBOOT GATE: one decision per alert Tockmox authors.
+#
+# kured can hold a node reboot while named alerts fire. It holds only for the
+# alerts a site lists in kured.configuration.alertFilterRegexp (with
+# alertFilterMatchOnly: true), so an alert nobody listed never holds a reboot,
+# and nothing errors. The old failure was loud (every alert blocked, patching
+# stopped); the inclusion list fails quietly. This file is what makes the quiet
+# direction loud: tools/check-kured-gate.sh fails when a Tockmox alert has no
+# line here, when a line names an alert that no longer renders, when an upstream
+# alert the gate names has been renamed, and when the regexp printed in
+# docs/operations/monitoring.md is not the one this file implies.
+#
+# FORMAT, one entry per line, a reason after the # is required:
+#
+#   alert NAME block  # a firing NAME means: do not take another node down now
+#   alert NAME pass   # NAME does not change whether a reboot is safe
+#   upstream NAME     # an alert a subchart ships that the gate names; it must still render
+#
+# Rules of thumb used below. block: the alert says the cluster has lost
+# redundancy, quorum or capacity that a drain would spend. pass: the alert is
+# about delivery, backups, certificates, tooling or a service a reboot does not
+# worsen. These are decisions, not facts; a site that disagrees overrides
+# alertFilterRegexp in its own values. The alternative to a line here is an
+# annotation on the rule, `kured_gate: block|pass` (an annotation name cannot
+# contain a dot or a slash); a rule must be classified in one place, not both.
+#
+# Alerts the gate cannot see: a site's own rules are not in this file. A site
+# that wants the same guarantee runs the same kind of check over its own rules.
+
+# ---- platform: storage and databases ----
+alert TockmoxLonghornVolumeFaulted        block  # no healthy replica; a drain can remove the last copy a rebuild needs
+alert TockmoxLonghornVolumeStuckAttaching block  # a volume cannot attach; a drain moves more workloads onto the same fault
+alert TockmoxLonghornVolumeDegraded       block  # fewer healthy replicas than configured for 30 minutes and not rebuilding; the next node may hold the survivor
+alert TockmoxLonghornStorageFull          block  # past the point where replicas stop scheduling; an evicted replica has nowhere to rebuild
+alert TockmoxCNPGClusterNotHealthy        block  # the operator cannot see or manage an instance; failover state is unknown while a node drains
+alert TockmoxPersistentVolumeClaimPending pass   # a claim nothing provisioned; a reboot does not make it better or worse
+alert TockmoxCNPGBackupUnhealthy          pass   # backups are failing; availability is unchanged by a reboot
+alert TockmoxCertificateNotReady          pass   # certificate issuance; unrelated to node availability
+alert TockmoxCertificateExpiringSoon      pass   # renewal is failing; unrelated to node availability
+
+# ---- platform: self-checks ----
+alert TockmoxSelfCheckStale               pass   # the heartbeat is stale; kured already fails closed when Prometheus cannot answer
+alert TockmoxTargetsDown                  pass   # scrape targets down; a drain is not what fixes or worsens them
+alert TockmoxPersistentVolumeFillingUp    pass   # a volume is filling; a reboot does not change the rate
+
+# ---- ai layer ----
+alert TockmoxConsoleKeyRejected           pass   # a credential problem
+alert TockmoxAiNodeConvergeFailing        pass   # an AI node is a separate Mac, not a cluster node kured reboots
+alert TockmoxAiNodeConvergeStale          pass   # same
+alert TockmoxAiNodeSignatureUnverified    pass   # same
+alert TockmoxAiNodeEngineRestarting       pass   # same: an engine restart on a Mac, not a cluster node
+alert TockmoxWalArchiveBacklog            pass   # archiving is behind; availability is unchanged by a reboot
+alert TockmoxRestoreDrillStale            pass   # the drill is overdue
+alert TockmoxRestoreDrillNeverRan         pass   # the drill has not run
+alert TockmoxRestoreDrillFailed           pass   # the drill failed
+alert TockmoxUISignInFailing              pass   # the console sign-in; a service fault, not node safety
+alert TockmoxUIUnreachable                pass   # the console is down; a service fault, not node safety
+
+# ---- exporters, identity, observability, policy ----
+alert TockmoxConsoleUnreachable           pass   # the console probe; a service fault, not node safety
+alert TockmoxConsoleCertificateExpiringSoon pass # a certificate
+alert TockmoxAuthentikBackupStale         pass   # a backup is late
+alert TockmoxAuthentikBackupNeverRan      pass   # a backup has not run
+alert TockmoxArgoCDCannotCompare          pass   # GitOps sync state; a reboot does not change it
+alert TockmoxArgoCDMetricsAbsent          pass   # Argo CD metrics are not scraped
+alert KubeJobFailed                       pass   # upstream's rule re-shipped without the console-key Jobs; a failed Job is not node safety
+alert TockmoxNotificationSinkDown         pass   # delivery path; a reboot does not change it
+alert TockmoxNotificationDeliveryFailing  pass   # delivery path
+alert TockmoxNotificationBridgeAbsent     pass   # delivery path
+alert TockmoxNtfyDown                     pass   # delivery path
+alert ClusterAdminBindingAttempt          pass   # a policy event
+alert LonghornSupportBundleClusterAdminInUse pass # a policy event
+alert StaticSATokenRotationOverdue        pass   # a credential age
+
+# ---- upstream: kube-prometheus-stack rules the gate names ----
+# Not authored here, so not annotatable. Each must still render, or a chart bump
+# that renames one drops it from the gate without a word.
+upstream KubeletDown                      # a node's kubelet is not scraped
+upstream KubeNodeNotReady                 # a node is not Ready; draining the next one spends capacity already lost
+upstream KubeNodeUnreachable              # a node is unreachable
+upstream KubeNodeReadinessFlapping        # a node keeps changing readiness
+upstream KubePdbNotEnoughHealthyPods      # a drain would be refused or would break the budget
+upstream KubeStatefulSetReplicasMismatch  # a replicated workload is already short
+upstream KubeDeploymentReplicasMismatch   # a replicated workload is already short
+upstream KubeDaemonSetNotScheduled        # a per-node workload is missing from a node
+upstream etcdInsufficientMembers          # etcd has lost quorum margin
+upstream etcdNoLeader                     # etcd has no leader
+upstream etcdMembersDown                  # an etcd member is down
