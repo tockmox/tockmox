@@ -11,6 +11,7 @@ THE SERIES ARE THE CONTRACT (tockmox-ai-node, "Metrics contract"), every one car
   tockmox_ai_node_converge_last_exit_code                  0 = the last run succeeded
   tockmox_ai_node_converge_last_success_timestamp_seconds  when the last run exited 0
   tockmox_ai_node_converge_signature_ok                    0 = a commit did not verify against the pinned signers
+  tockmox_ai_node_engine_restarts_total                    restarts the engine watch made (an engine up but unhealthy)
 
 Selectors name the enrolled ids, so a stray series for a node nobody enrolled alerts no one, the same line the Tockmox
 UI draws. Cases: tests/rules/ai-node-converge.yaml, run against THIS render by tools/check-alert-rules.sh.
@@ -95,4 +96,22 @@ spec:
               signer (signing mode warn lets them through). Find the commit with an unsigned or unknown signature,
               or add its signer to the node's allowed signers with a commit signed by an already-pinned key, before
               switching the fleet to enforce.
+        - alert: TockmoxAiNodeEngineRestarting
+          # The node's engine watch restarts an engine whose health path answers 503 on consecutive checks (for mlx-lm:
+          # its generation thread died, so the process is up and serves nothing). One restart is the watch doing its
+          # job and pages no one. Two or more in six hours is a cause that comes back: a model, a load or a setting
+          # that keeps killing the engine, and every restart drops the requests in flight. `> 1.5`, not `>= 2` or
+          # `> 1`: increase() extrapolates to the window's edges, so two restarts can read 1.9 and one can read 1.01.
+          expr: >-
+            sum by (ai_node, label) (increase(tockmox_ai_node_engine_restarts_total{ {{- $sel -}} }[6h])) > 1.5
+          labels:
+            severity: warning
+          annotations:
+            summary: "{{ "{{ $labels.ai_node }}" }} keeps restarting {{ "{{ $labels.label }}" }}"
+            description: >-
+              The engine watch on {{ "{{ $labels.ai_node }}" }} restarted {{ "{{ $labels.label }}" }} more than
+              once in six hours because its health path answered 503 (up, unable to serve). The restarts keep it
+              serving; the cause is still there. Read the engine's log under /opt/tockmox/log/ on the node for the
+              line before each restart (/opt/tockmox/log/engine-watch.log has the times), and look at what it was
+              serving then: context length, concurrency, memory.
 {{- end }}

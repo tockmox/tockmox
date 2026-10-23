@@ -74,6 +74,14 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **An mlx-lm engine that stops generating is noticed and restarted.** When
+  mlx-lm's generation thread dies the process stays up, `/v1/models` keeps
+  answering 200 and every completion fails until someone restarts it. The
+  inference-node Probe now asks mlx-lm for `/health` (503 in that state), and
+  enrolled AI nodes run an engine watch every minute that restarts such an
+  engine and counts it (`tockmox_ai_node_engine_restarts_total`).
+  `TockmoxAiNodeEngineRestarting` warns when it happens twice in six hours.
+
 - **The Authentik board reads your Authentik wherever it runs.** "Workers up"
   and the memory and CPU panels selected `namespace="authentik"` and read 0 on
   any install that runs it elsewhere (Tockmox's own default is

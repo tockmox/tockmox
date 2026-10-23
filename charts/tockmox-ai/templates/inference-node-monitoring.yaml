@@ -10,7 +10,13 @@ selectors take every namespace):
   ScrapeConfig tockmox-inference-nodes   one target per exporter a node lists under `metrics`
                                          (node_exporter, macmon, dcgm ...), at <address>:<port>.
   Probe        tockmox-inference-nodes   one blackbox target per engine endpoint: <url>/api/version
-                                         for Ollama, <url>/v1/models for everything else.
+                                         for Ollama, <url>/health for mlx-lm, <url>/v1/models for
+                                         everything else.
+
+WHY /health FOR mlx-lm. mlx_lm.server answers HTTP on one thread and generates on another. When the
+generation thread dies the process lives on and /v1/models keeps answering 200 while every completion
+fails; /health answers 503 in exactly that state (mlx-lm 0.32 and later; earlier versions answer 200
+while the process is up, so the probe reads them as it did before).
 
 THE INSTANCE LABEL IS THE CONTRACT. The Tockmox UI reads node health from Prometheus and matches on it:
 an exporter by `instance == <address>:<port>`, an endpoint by an `instance` that starts with
@@ -37,7 +43,7 @@ firewall to the cluster for the exporter ports (the setup steps list them).
 {{- $scrape = append $scrape (dict "target" (printf "%s:%v" $n.address $port) "node" $n.id "exporter" $exp) -}}
 {{- end -}}
 {{- range $ep := ($n.endpoints | default list) -}}
-{{- $path := ternary "/api/version" "/v1/models" (eq $ep.engine "ollama") -}}
+{{- $path := get (dict "ollama" "/api/version" "mlx-lm" "/health") $ep.engine | default "/v1/models" -}}
 {{- $probe = append $probe (dict "target" (printf "%s%s" (trimSuffix "/" $ep.url) $path) "node" $n.id "endpoint" $ep.id "engine" $ep.engine) -}}
 {{- end -}}
 {{- end -}}
