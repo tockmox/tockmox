@@ -1,0 +1,127 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# tools/check-all.sh on Linux, on every pull request (TM-1006).
+#
+# ci.yaml does not run check-all.sh. About two dozen gates run only through it
+# (check-immutable-fields, check-upgrade-safety, check-pod-security,
+# check-identity-seams, check-policy-gate and the rest: the run_gate lines in
+# check-all.sh that have no step in ci.yaml), and until this workflow their only
+# CI was portability-macos, which is weekly and manual (TM-1006, Jeff
+# 2026-10-11). A chart-only pull request ran none of them. This is the per-PR
+# home for every one, and the reason a release checkpoint no longer runs
+# check-all.sh by hand: this run on the tagged commit is that check.
+#
+# Its own workflow, not a step in ci.yaml, for the reason portability-macos
+# gives: ci.yaml's named steps are a counted, pinned surface (tools/doc-claims.txt).
+#
+# TOOL PINS COME FROM ci.yaml. Renovate's custom managers bump HELM_VERSION and
+# KUBECONFORM_VERSION in ci.yaml only, so this file reads them (and the
+# kubeconform checksum) from there at run time rather than carrying a copy that
+# would drift. The Tockmox UI's packages go in a venv, as ci.yaml builds one,
+# so the UI tests and the AI-node render gate run here rather than skip. Gates
+# needing a tool installed nowhere here (promtool, gitleaks, the MkDocs venv)
+# report SKIPPED, as on a laptop; ci.yaml runs those.
+name: check-all
+on:
+  pull_request:
+  push:
+    # release-* for the same reason as ci.yaml (TM-0775): a point release is
+    # tagged on a release-branch commit, and a pull_request run tests a merge
+    # commit, not that one.
+    branches: [main, 'release-*']
+
+permissions:
+  contents: read
+
+env:
+  # shellcheck for the advisory job below (TM-0847). Pinned here, not in ci.yaml,
+  # because this job is the only user. The project publishes no checksum file, so
+  # SHELLCHECK_SHA256 is the SHA-256 of the release asset as downloaded when the
+  # pin was set; a bump that does not update it fails the download step, which
+  # is the prompt to re-measure it.
+  SHELLCHECK_VERSION: "0.11.0"
+  SHELLCHECK_SHA256: "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"  # shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz
+
+concurrency:
+  group: check-all-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check-all-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # check-values-tiers and check-immutable-fields compare against the
+          # previous release tag; without tags they report that half skipped.
+          fetch-depth: 0
+
+      - name: read the tool pins from ci.yaml
+        shell: bash -euo pipefail {0}
+        run: |
+          pin() { sed -n "s/^  $1: \"\([^\"]*\)\".*/\1/p" .github/workflows/ci.yaml | head -1; }
+          for k in HELM_VERSION KUBECONFORM_VERSION KUBECONFORM_SHA256; do
+            v="$(pin "$k")"
+            [ -n "$v" ] || { echo "::error::$k not found in ci.yaml's env block"; exit 1; }
+            echo "$k=$v" >> "$GITHUB_ENV"
+            echo "$k=$v"
+          done
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: kubeconform, PyYAML and jq
+        shell: bash -euo pipefail {0}
+        run: |
+          curl -fsSL -o kubeconform.tar.gz "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          echo "${KUBECONFORM_SHA256}  kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf kubeconform.tar.gz kubeconform && sudo install -m755 kubeconform /usr/local/bin/
+          rm -f kubeconform kubeconform.tar.gz
+          python3 -c 'import yaml' 2>/dev/null || python3 -m pip install -q pyyaml
+          command -v jq >/dev/null || sudo apt-get install -y -q jq
+          echo "bash:        $(bash --version | head -1)"
+          echo "helm:        $(helm version --short)"
+          echo "kubeconform: $(kubeconform -v)"
+          echo "python:      $(python3 --version) PyYAML $(python3 -c 'import yaml; print(yaml.__version__)')"
+
+      - name: the Tockmox UI's packages, in a venv
+        shell: bash -euo pipefail {0}
+        run: |
+          python3 -m venv build/ui-venv
+          build/ui-venv/bin/pip install -q -r tockmox-ui/requirements.txt pytest
+
+      - name: every static gate, on Linux
+        shell: bash -euo pipefail {0}
+        env:
+          TOCKMOX_UI_PYTHON: build/ui-venv/bin/python
+        run: bash tools/check-all.sh
+
+  shellcheck-advisory:
+    # ADVISORY (TM-0847): reports what a change ADDS against
+    # tools/shellcheck-baseline.txt, as warning annotations on the pull request.
+    # continue-on-error keeps it from blocking a merge; it is not a check-all.sh
+    # gate for the same reason. See tools/check-shellcheck.sh.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: shellcheck, checksum-verified
+        shell: bash -euo pipefail {0}
+        run: |
+          curl -fsSL -o shellcheck.tar.xz "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf shellcheck.tar.xz && sudo install -m755 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck" /usr/local/bin/
+          rm -rf shellcheck.tar.xz "shellcheck-v${SHELLCHECK_VERSION}"
+          shellcheck --version | head -2
+
+      - name: the advisory's own selftest
+        shell: bash -euo pipefail {0}
+        run: bash tools/check-shellcheck.sh --selftest
+
+      - name: new shellcheck findings against the baseline (advisory)
+        shell: bash -euo pipefail {0}
+        run: bash tools/check-shellcheck.sh

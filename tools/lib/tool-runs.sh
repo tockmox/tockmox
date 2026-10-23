@@ -28,6 +28,7 @@ tool_runs() {
   case "$1" in
     helm)     helm version >/dev/null 2>&1 ;;
     promtool) promtool --version >/dev/null 2>&1 ;;
+    kubeconform) kubeconform -v >/dev/null 2>&1 ;;
     kubectl)  kubectl version --client >/dev/null 2>&1 ;;
     jq)       jq --version >/dev/null 2>&1 ;;
     yq)       yq --version >/dev/null 2>&1 ;;

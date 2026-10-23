@@ -20,20 +20,29 @@
 # A site with zero OK nodes FAILS: "checked nothing" is not "nothing wrong".
 # WHAT IT DOES NOT PROVE: that a converger applies the file. The toolkit's tests and the lab do that.
 #
-# EXIT 2 (skipped, not passed) when the python3 on PATH lacks PyYAML or jsonschema; TOCKMOX_UI_PYTHON names one
-# that has them (pip install -r tockmox-ui/requirements.txt). check-all.sh reports exit 2 as skipped.
+# EXIT 2 (skipped, not passed) when the python3 on PATH cannot import the renderer and its packages; TOCKMOX_UI_PYTHON
+# names one that can (pip install -r tockmox-ui/requirements.txt). check-all.sh reports exit 2 as skipped.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
 py="${TOCKMOX_UI_PYTHON:-python3}"
-if ! "$py" -c 'import yaml, jsonschema' >/dev/null 2>&1; then
-  echo "check-ai-node-render: SKIPPED: $py lacks PyYAML or jsonschema."
+root="$(pwd)"
+# Absolute before any cd: the renderer runs from tockmox-ui/, so a relative
+# TOCKMOX_UI_PYTHON (build/ui-venv/bin/python) must not be resolved from there,
+# and `command -v` returns a path containing a slash unchanged.
+case "$py" in /*) ;; */*) py="$root/$py" ;; *) py="$(command -v "$py" || echo "$py")" ;; esac
+# The probe imports the renderer itself, not a hand-kept module list. The list
+# said PyYAML and jsonschema; the renderer then grew an import chain to httpx
+# (ai_nodes -> models -> probe), and a python3 with the first two and not httpx
+# FAILED this gate with a traceback instead of skipping it (found on a Linux
+# check-all run, TM-1006). Importing app.ai_nodes asks the only question that
+# matters: can this interpreter run the renderer.
+if ! ( cd "$root/tockmox-ui" && "$py" -c 'import yaml, jsonschema, app.ai_nodes' ) >/dev/null 2>&1; then
+  echo "check-ai-node-render: SKIPPED: $py cannot import the renderer (tockmox-ui/app/ai_nodes.py) and its packages."
   echo "  python3 -m venv build/ui-venv && build/ui-venv/bin/pip install -r tockmox-ui/requirements.txt"
   echo "  TOCKMOX_UI_PYTHON=build/ui-venv/bin/python ./tools/check-ai-node-render.sh"
   exit 2
 fi
-case "$py" in /*) ;; *) py="$(command -v "$py")" ;; esac
-root="$(pwd)"
 FIXTURE="tockmox-ui/tests/fixtures/ai_nodes/site"
 EXAMPLE="ai-node/examples/site"
 

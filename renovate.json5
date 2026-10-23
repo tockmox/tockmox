@@ -110,6 +110,15 @@
     },
     {
       customType: "regex",
+      description: "CI tool pin: shellcheck (advisory job; SHELLCHECK_SHA256 must be re-measured in the same PR)",
+      managerFilePatterns: ["/^\\.github/workflows/check-all\\.ya?ml$/"],
+      matchStrings: ["SHELLCHECK_VERSION:\\s*\"(?<currentValue>[^\"]+)\""],
+      depNameTemplate: "koalaman/shellcheck",
+      datasourceTemplate: "github-releases",
+      extractVersionTemplate: "^v(?<version>.+)$",
+    },
+    {
+      customType: "regex",
       description: "busybox wait-for-ca init container (registry threaded through tpl)",
       managerFilePatterns: ["/^charts/tockmox-devops/values\\.yaml$/"],
       matchStrings: ["/library/busybox:(?<currentValue>[0-9][^'\"\\s]*)"],

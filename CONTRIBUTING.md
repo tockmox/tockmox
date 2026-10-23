@@ -82,7 +82,8 @@ is wrong" from "the tool is absent".
 CI also runs, and `check-all.sh` names as skipped:
 
 - `gitleaks` across the full history (needs a full clone and the binary)
-- `kubeconform` over the rendered output (needs the binary)
+- `kubeconform` over the rendered output: `check-all.sh` runs it too when the
+  `kubeconform` binary is on your PATH, and names it as skipped when it is not
 - the DCO sign-off check, per commit against what your branch adds
 - the release-time render diff between the previous tag and the candidate
 
@@ -175,9 +176,12 @@ brew install bash
 /opt/homebrew/bin/bash tools/check-capabilities.sh
 ```
 
-CI runs the gates on Linux with bash 5, and `portability-macos.yaml` runs
-`check-all.sh` on a macOS runner (Homebrew bash, BSD `sed`, `grep` and `wc`)
-weekly and on demand, not on pull requests. A gate that passes only with GNU
+Which runs where: `check-all.yaml` runs `check-all.sh` on Linux (bash 5, GNU
+userland) on every pull request and every push to `main` and `release-*`, so
+every gate in it is checked per pull request, including the ones `ci.yaml` has
+no step for. `portability-macos.yaml` runs the same script on a macOS runner
+(Homebrew bash, BSD `sed`, `grep` and `wc`) weekly and on demand, not on pull
+requests. A gate that passes only with GNU
 tools fails there within a week. If you change a gate's shell, run `check-all.sh`
 on a Mac, or say so in the pull request and the maintainer will run
 `portability-macos.yaml` for you: a fork cannot dispatch that workflow here
@@ -185,6 +189,11 @@ on a Mac, or say so in the pull request and the maintainer will run
 
 `./tools/check-all.sh` runs the gates in parallel, as many at once as you have CPUs; set
 `CHECK_ALL_JOBS=1` to run them one at a time with live output when you are chasing one.
+
+`check-all.yaml` also runs an advisory shellcheck job: it never blocks a merge,
+and it annotates only the findings your change adds against
+`tools/shellcheck-baseline.txt` (`tools/check-shellcheck.sh` to see them
+locally; `--update` after you fix one, so the baseline shrinks with you).
 
 `./tools/check-all.sh` handles the dependency step and both lint passes. By
 hand:
