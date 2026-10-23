@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, state_icon, source_line %}
+{% from "platform_macros.html" import sched_badge, mode_tag, rail, when, practice_badge %}
+{% block title %}Platform Management{% endblock %}
+{% block main %}
+<h1>Platform Management</h1>
+<p class="lede">The platform's virtual organization: three teams of agent roles, each owning a part of running the service, the scheduled work for it and the numbers that say how it is going. This page reads and links; decisions happen in the conversation.</p>
+
+<section class="verdict st-{{ org_state }}" aria-labelledby="pm-verdict">
+  <div class="verdict-ico">{{ state_icon(org_state) }}</div>
+  <div>
+    <h2 id="pm-verdict" class="verdict-h">{{ {"ok": "Every running practice reports healthy", "warning": "A practice needs a look", "critical": "A practice has a problem", "unknown": "Not every practice can be confirmed healthy"}[org_state] }}</h2>
+    <p>{{ org_why | sentence }}.</p>
+    <p class="muted">As of <time datetime="{{ now | iso }}">{{ now | local(tz) }}</time>. Agent runs: {% if ledger_on %}read from the agent ledger{% else %}not connected, so this verdict comes from live signals and scheduled jobs only{% endif %}.</p>
+  </div>
+</section>
+
+<section aria-labelledby="needs-you">
+  <h2 id="needs-you">Needs you</h2>
+  {% if not ledger_on %}
+  <div class="panel quiet">
+    <p>No agent ledger is connected, so this page cannot list what the agents are waiting on you for. That is not the same as nothing waiting.</p>
+    <p class="muted">Set <code>features.platform.ledgerUrl</code> to the orchestrator's read API to fill this in.{% if interface_url %} Decisions are made in <a href="{{ interface_url }}">the conversation</a>.{% endif %}</p>
+  </div>
+  {% elif readings.ledger.fetched_at is none %}
+  <div class="panel quiet">
+    <p>{{ badge("unknown", "Unknown") }} The agent ledger did not answer ({{ readings.ledger.reason or "no answer" }}), so this page cannot list what the agents are waiting on you for. That is not the same as nothing waiting.</p>
+  </div>
+  {% elif waiting %}
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="needs-you">
+  <table>
+    <caption>{{ waiting | length }} item{{ "s" if waiting | length != 1 }} waiting on a decision, oldest first. Review each one in the conversation.{% if readings.ledger.reason and readings.ledger.state == "warning" %} The ledger {{ readings.ledger.reason }}.{% endif %}</caption>
+    <thead><tr><th scope="col">Asked by</th><th scope="col">Item</th><th scope="col">Waiting since</th><th scope="col">Where to decide</th></tr></thead>
+    <tbody>
+    {% for v, j in waiting | sort(attribute="1.created") %}
+    <tr><th scope="row">{% if j.unrouted %}<code>{{ j.profile or "no profile" }}</code> <span class="muted">(no role in this catalog)</span>{% else %}<a href="/platform/agents/{{ v.agent.id }}">{{ v.agent.name }}</a>{% endif %}</th>
+        <td><code>{{ j.id }}</code></td><td>{{ when(j.created | ts, tz) }}</td>
+        <td>{% if interface_url %}<a href="{{ interface_url }}/jobs/{{ j.id | pathseg }}">Review in the conversation</a>{% else %}<span class="muted">conversation link not configured</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="panel quiet">Nothing is waiting on you. The ledger answered and holds no item needing a decision{% if readings.ledger.state == "warning" %}, but it {{ readings.ledger.reason }}{% endif %}.</p>
+  {% endif %}
+</section>
+
+<section aria-labelledby="org">
+  <h2 id="org">The organization</h2>
+  <p class="muted">Two facts per role, never merged: how its practice is doing (live signals and scheduled jobs) and how its agent is doing (agent runs). A role with nothing live yet reads Not started and stays out of the verdict.</p>
+  <ol class="flow" aria-label="How work moves between the teams">
+    <li><span>Run notices</span> an incident and restores service</li>
+    <li><span>Run learns</span> why it keeps happening</li>
+    <li><span>Change plans</span> the lasting fix</li>
+    <li><span>Change gates</span> it, tests it and ships it</li>
+    <li><span>Improve checks</span> the platform is getting better</li>
+  </ol>
+  {% for t in teams %}
+  <section class="team-block" aria-labelledby="team-{{ t.team.id }}">
+    <div class="team-head">
+      <h3 id="team-{{ t.team.id }}">{{ t.team.name }}</h3>
+      {{ practice_badge(t.lead.practice_state) }}
+      <p class="muted">{{ t.team.purpose }}</p>
+    </div>
+    <div class="table-wrap" tabindex="0" role="region" aria-labelledby="team-{{ t.team.id }}">
+    <table class="team">
+      <thead><tr><th scope="col">Role</th><th scope="col">Practice</th><th scope="col">Agent</th><th scope="col">Mode</th><th scope="col">Scheduled work</th><th scope="col">Next run</th></tr></thead>
+      <tbody>
+      {% for v in [t.lead] + t.members %}
+      {% set live = v.schedules | selectattr("source", "equalto", "cluster") | list %}
+      {% set planned = v.schedules | rejectattr("source", "equalto", "cluster") | list %}
+      {% set bad = live | selectattr("state", "in", ["failed", "missed", "late", "stuck", "unknown", "never", "paused"]) | list %}
+      <tr class="{{ 'lead' if v.agent.is_lead else 'reports' }}">
+        <th scope="row"><a class="agent-name" href="/platform/agents/{{ v.agent.id }}">{{ v.agent.name }}</a>
+          <span class="ref">{% if v.agent.is_lead %}Leads {{ t.team.name }}. {% endif %}{{ v.agent.reference.itil }}</span></th>
+        <td>{{ practice_badge(v.practice_state) }}<span class="why">{{ v.practice_reason | sentence }}</span></td>
+        <td>{{ badge(v.agent_state, v.agent_word) }}</td>
+        <td>{{ mode_tag(v.agent) }}</td>
+        <td>{% if live %}{{ live | length }} deployed{% if bad %}, <strong>{{ bad | length }} not on schedule</strong>{% endif %}{% else %}<span class="muted">none deployed</span>{% endif %}
+            {%- if planned %}<br><span class="muted">{{ planned | length }} planned</span>{% endif %}</td>
+        <td>{{ when(v.next_run, tz) }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </section>
+  {% endfor %}
+</section>
+
+<section aria-labelledby="rota">
+  <h2 id="rota">The next 24 hours</h2>
+  {{ rail(rota, "Who runs what, and when, over the next 24 hours.") }}
+  {% if rota.clashes %}
+  <p class="clash">{{ badge("warning", "Start together") }} {{ rota.clashes | length }} time{{ "s" if rota.clashes | length != 1 }} in the next day when two or more different jobs start within five minutes:
+    {% for g in rota.clashes[:4] %}{{ g[0].when }} ({{ g | map(attribute="name") | join(", ") }}){{ "; " if not loop.last }}{% endfor %}{% if rota.clashes | length > 4 %} and more{% endif %}.</p>
+  {% endif %}
+  <details>
+    <summary>Every run in the next 24 hours, as a list ({{ rota.rows | length }})</summary>
+    <ol class="runlist">
+    {% for r in rota.rows %}<li><time>{{ r.when }}</time> {{ r.name }}{% if r.frequent %} ({{ r.every }}){% endif %} <span class="muted">· {{ r.owner }}{% if r.planned %} · planned{% endif %}</span></li>{% endfor %}
+    </ol>
+  </details>
+  <p><a href="/platform/schedule">See every scheduled job and the next seven days</a></p>
+</section>
+
+{% if unowned %}
+<section aria-labelledby="unowned">
+  <h2 id="unowned">Scheduled work with no owner</h2>
+  <p class="muted">These run on the cluster but match no role. Add a catalog pattern that matches the name, or, for an Argo CronWorkflow, a <code>tockmox.com/practice</code> label, so someone owns them.</p>
+  <ul class="plain">{% for x in unowned %}<li>{{ sched_badge(x.state, sched_words) }} <code>{{ x.namespace }}/{{ x.name }}</code> <span class="muted">· {{ x.cadence }}</span></li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+<section aria-labelledby="pm-sources">
+  <h2 id="pm-sources">Where this page reads from</h2>
+  <ul class="srcs">{% for k, r in readings.items() %}{% if k != "ledger" or ledger_on %}<li>{{ source_line(r) }}</li>{% endif %}{% endfor %}
+  {% if not ledger_on %}<li><span class="src">{{ badge("unknown", "Not connected") }} <span class="src-name">Agent ledger</span><span class="muted">: not configured</span></span></li>{% endif %}</ul>
+</section>
+{% endblock %}

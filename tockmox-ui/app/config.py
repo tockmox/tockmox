@@ -257,10 +257,10 @@ def parse(doc: dict) -> Settings:
         return _check_url(str(v), what) if v else ""
 
     feats = []
-    names = {"posture": "Security posture", "scanning": "Vulnerability scanning", "agents": "Agents"}
+    names = {"posture": "Security posture", "scanning": "Vulnerability scanning", "agents": "Agents", "platform": "Platform Management"}
     for fid, raw in (doc.get("features") or {}).items():
         raw = dict(raw or {})
-        for k in ("url", "rendererUrl", "apiUrl"):
+        for k in ("url", "rendererUrl", "apiUrl", "ledgerUrl", "interfaceUrl"):
             if raw.get(k):
                 raw[k] = _opt_url(raw[k], f"features.{fid}.{k}")
         feats.append(Feature(id=fid, name=raw.get("name", names.get(fid, fid)),
@@ -268,6 +268,11 @@ def parse(doc: dict) -> Settings:
                              admin_only=bool(raw.get("adminOnly", True)),
                              options={k: v for k, v in raw.items()
                                       if k not in ("enabled", "name", "adminOnly")}))
+
+    # /platform is a route only while Platform Management is on, so the id is reserved only then: a site
+    # with an app called "platform" and the feature off keeps working after an upgrade.
+    if any(f.id == "platform" and f.enabled for f in feats) and "platform" in seen:
+        raise ConfigError("app id 'platform' is reserved by the UI while features.platform is enabled")
 
     src = doc.get("sources") or {}
     kube = src.get("kubernetes") or {}

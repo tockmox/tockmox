@@ -728,6 +728,7 @@ tockmoxUi:
   secrets:
     session: tockmox-ui-session          # key: secret
     oidcClient: tockmox-sso-tockmox-ui   # key: client-secret (when config.oidc.issuer is set)
+    # platformLedgerToken: ""            # key: token; the agent ledger's bearer token for Platform Management
   ingress:
     enabled: true
     host: ""                             # empty: tockmox.<global.internalDomain>
@@ -739,6 +740,10 @@ tockmoxUi:
   # config.updateCheck.feedUrl `file:///feed/releases.json`. With a file feed the
   # NetworkPolicy opens no HTTPS out. Empty mounts nothing.
   updateFeed:
+    configMap: ""
+  # Platform Management (config.features.platform.enabled; docs/administration/platform-management.md):
+  # a site's own catalog from a ConfigMap, key catalog.yaml. Empty uses the product's default catalog.
+  platformCatalog:
     configMap: ""
 
 open-webui:

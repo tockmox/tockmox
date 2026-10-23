@@ -28,7 +28,9 @@ if ! "$py" -c 'import fastapi, httpx, jwt, itsdangerous, yaml, pytest' >/dev/nul
   echo "  TOCKMOX_UI_PYTHON=build/ui-venv/bin/python ./tools/check-tockmox-ui-tests.sh"
   exit 2
 fi
-case "$py" in /*) ;; *) py="$(pwd)/$py" ;; esac
+# A relative path (build/ui-venv/bin/python) is made absolute before the cd below; a bare command name
+# (python3, the default) is left for PATH to find.
+case "$py" in /*) ;; */*) py="$(pwd)/$py" ;; esac
 n=$(find tockmox-ui/tests -name 'test_*.py' | wc -l | tr -d ' ')
 if [ "$n" -eq 0 ]; then
   echo "check-tockmox-ui-tests: FAILED: no test files under tockmox-ui/tests/"

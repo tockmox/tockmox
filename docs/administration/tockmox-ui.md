@@ -230,7 +230,8 @@ With probing and the update check off, the UI cannot reach an inference node or
 the internet at all, and the render check holds that.
 
 **Kubernetes authority:** get and list on nodes, and on Argo CD applications in
-their namespace. No Secrets and no writes. The Role and RoleBinding live in the
+their namespace; with [Platform Management](platform-management.md) on, list on
+Argo CronWorkflows as well. No Secrets and no writes. The Role and RoleBinding live in the
 Argo CD namespace, so the Application that installs the AI layer must be allowed
 to create them there.
 
@@ -360,6 +361,13 @@ The page changes nothing: to turn a capability on or off, set
 `TockmoxHeartbeat` (the self-check to its off-cluster dead-man's switch) fire
 all the time on purpose. The status page shows each as **Alive** and never as a
 row in "Alerts firing", and neither counts toward the verdict.
+
+## Platform Management
+
+An optional read-only page, `/platform`, that shows the platform's operations
+roles, the scheduled work each one owns and the numbers each one watches. Off by
+default; it adds one Kubernetes read when on. See
+[Platform Management](platform-management.md).
 
 ## The status API (provisional)
 

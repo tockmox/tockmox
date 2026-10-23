@@ -171,3 +171,68 @@ main p code, main li code, .cands li, .cands p { overflow-wrap: anywhere; }   /*
 .signin-hero img { width: min(320px, 70vw); height: auto; }
 .verdict-mascot { order: 3; margin-left: auto; width: 140px; height: auto; flex-shrink: 0; }
 @media (max-width: 720px) { .verdict-mascot { display: none; } }
+
+/* Platform Management (DESIGN-2026-10-23). Structure carries meaning: the copper rule marks who reports
+   to the Platform Manager; the rail is a picture of the run list beneath it, never the only copy. */
+:root { --st-planned: var(--tx-info); --st-info: var(--tx-steel-300); --rail-live: var(--tx-copper-400); --rail-now: var(--tx-emerald-300); }
+[data-theme="light"] { --st-planned: #1F5F8B; --st-info: #4A524E; --rail-live: var(--tx-copper-700); --rail-now: var(--tx-emerald-700); }
+.st-planned { color: var(--st-planned); } .st-info { color: var(--st-info); }
+.verdict-h { font-size: clamp(1.15rem, 1rem + .8vw, 1.5rem); margin: 0 0 .25rem; }
+.quiet { color: var(--tx-text-muted); }
+.quiet p { margin: .25rem 0; }
+.crumb { margin: 0 0 .35rem; font-size: .92rem; }
+.ref, .why { display: block; font-size: .85rem; color: var(--tx-text-muted); font-weight: 400; margin-top: .15rem; }
+.agent-name { font-family: var(--tx-font-display); font-size: 1.02rem; font-weight: 700; }
+table.team tr.lead th, table.team tr.lead td { border-bottom: 2px solid var(--tx-trim); }
+table.team tr.reports th { border-left: 3px solid var(--tx-trim); padding-left: 1rem; }
+.mode { display: inline-flex; align-items: center; gap: .35rem; font-weight: 600; white-space: nowrap; }
+.mode-observe { color: var(--tx-text-muted); } .mode-propose { color: var(--tx-accent-text); } .mode-act { color: var(--st-warning); }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ref-line { color: var(--tx-copper-400); margin: 0 0 .5rem; font-weight: 600; }
+[data-theme="light"] .ref-line { color: var(--tx-copper-700); }
+.mission { font-size: 1.12rem; max-width: 64ch; margin: 0 0 1.25rem; }
+.facts-band { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem 1.5rem; padding: 1rem 1.15rem; background: var(--tx-surface); border: 1px solid var(--tx-border); border-top: 3px solid var(--tx-trim); border-radius: var(--tx-radius-md); }
+.facts-band .kicker { font: 600 .9rem var(--tx-font-body); color: var(--tx-text-muted); margin: 0 0 .3rem; }
+.facts-band .why { margin-top: .3rem; }
+.scope { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem 1.5rem; }
+.scope ul { margin: .25rem 0 0; padding-left: 1.1rem; display: grid; gap: .2rem; }
+.scope .never h3 { color: var(--st-critical); }
+.reports-list { list-style: none; padding: 0; margin: 0; display: grid; gap: .4rem; }
+.reports-list li { border-left: 3px solid var(--tx-trim); padding-left: .75rem; }
+.clash { margin: .5rem 0; }
+.runlist { columns: 2 18rem; padding-left: 1.4rem; margin: .5rem 0; }
+.runlist li { break-inside: avoid; margin-bottom: .2rem; }
+.runlist time { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* the rail: one lane per manager, now at the left edge */
+.rail { margin: .5rem 0 1rem; }
+.rail figcaption { margin-bottom: .5rem; }
+.rail-grid { display: grid; grid-template-columns: minmax(8rem, 12rem) 1fr; align-items: center; row-gap: .15rem; column-gap: .75rem; }
+.rail-name { font-size: .85rem; line-height: 1.2; color: var(--tx-text-muted); overflow-wrap: anywhere; }
+.rail-lane { width: 100%; height: 24px; display: block; }
+.rail-scale { display: grid; font-size: .78rem; color: var(--tx-text-muted); font-variant-numeric: tabular-nums; border-left: 2px solid var(--rail-now); }
+.rail-scale span { padding-left: .3rem; }
+.rail-scale-4 { grid-template-columns: repeat(4, 1fr); } .rail-scale-7 { grid-template-columns: repeat(7, 1fr); }
+.rail-base { stroke: var(--tx-border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.rail-hour { stroke: var(--tx-border); stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; }
+.tick-live { fill: var(--rail-live); }
+.tick-planned { fill: none; stroke: var(--st-planned); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.rail-key { font-size: .85rem; margin-top: .5rem; }
+.key-live, .key-planned { display: inline-block; width: .7rem; height: .7rem; margin: 0 .3rem 0 .6rem; vertical-align: -.05rem; }
+.key-live { background: var(--rail-live); width: .3rem; height: .9rem; }
+.key-planned { border: 1.5px solid var(--st-planned); transform: rotate(45deg); }
+@media (max-width: 640px) {
+  .rail-grid { grid-template-columns: 6.5rem 1fr; }
+  .runlist { columns: 1; }
+}
+.band-live { fill: var(--rail-live); opacity: .55; }
+.band-planned { fill: none; stroke: var(--st-planned); stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+.key-band { display: inline-block; width: 1.4rem; height: .35rem; margin: 0 .3rem 0 .6rem; background: var(--rail-live); opacity: .55; vertical-align: .15rem; }
+.team-block { margin: 1.25rem 0 1.75rem; }
+.team-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem 1rem; margin-bottom: .35rem; }
+.team-head h3 { font-size: 1.3rem; margin: 0; }
+.team-head p { flex-basis: 100%; margin: 0; }
+.flow { list-style: none; counter-reset: step; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .5rem; padding: 0; margin: .75rem 0 1rem; }
+.flow li { counter-increment: step; position: relative; padding: .55rem .7rem .55rem 2.3rem; background: var(--tx-surface); border: 1px solid var(--tx-border); border-radius: var(--tx-radius-sm); font-size: .9rem; color: var(--tx-text-muted); }
+.flow li::before { content: counter(step); position: absolute; left: .65rem; top: .5rem; font: 700 1rem var(--tx-font-display); color: var(--tx-trim); }
+.flow li span { display: block; color: var(--tx-text); font-weight: 700; }

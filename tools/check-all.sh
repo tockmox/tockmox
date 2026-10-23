@@ -274,6 +274,7 @@ run_gate "no namespace enforces a Pod Security level its pods fail (TM-0135)" ba
 run_gate "every rendered Ingress terminates TLS" bash tools/check-ingress-tls.sh
 run_gate "every shipped table panel that hides columns also orders them" bash tools/check-dashboard-panels.sh
 run_gate "the overview board is what its generator writes" python3 tools/gen-dashboard-overview.py --check
+run_gate "the Platform Management page lists the catalog the UI ships" python3 tools/gen-platform-catalog-doc.py --check
 run_gate "every OIDC console gets a trust bundle" bash tools/check-trust-wiring.sh
 run_gate "site LiteLLM hooks load through values alone (TM-0787)" bash tools/check-litellm-hooks.sh
 run_gate "inference-node routes match the UI and the eval gateway is fenced (TM-0920)" bash tools/check-inference-nodes.sh

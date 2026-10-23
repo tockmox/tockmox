@@ -1192,6 +1192,11 @@
             "oidcClient": {
               "type": "string",
               "minLength": 1
+            },
+            "platformLedgerToken": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Optional. A Secret (key: token) holding the bearer token for the agent ledger Platform Management reads (config.features.platform.ledgerUrl). Mounted only when config.features.platform.enabled."
             }
           }
         },
@@ -1247,6 +1252,16 @@
           "type": "object",
           "additionalProperties": false,
           "description": "The update feed from a ConfigMap mounted at /feed (TM-1027); set config.updateCheck.feedUrl to file:///feed/releases.json. A file feed opens no HTTPS egress.",
+          "properties": {
+            "configMap": {
+              "type": "string"
+            }
+          }
+        },
+        "platformCatalog": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Platform Management's catalog from a ConfigMap (key catalog.yaml) instead of the product default; used only when config.features.platform.enabled. See docs/administration/platform-management.md.",
           "properties": {
             "configMap": {
               "type": "string"

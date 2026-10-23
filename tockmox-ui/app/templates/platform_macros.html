@@ -1,0 +1,59 @@
+{% from "macros.html" import badge, state_icon %}
+{# Platform Management macros. Every state is shape + word + colour; the rail is a picture of a list. #}
+
+{% macro sched_badge(state, words) -%}
+{%- set w = words.get(state, ("Unknown", "unknown")) -%}
+{%- if state == "planned" -%}
+<span class="badge st-planned"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M10 2.5L17.5 10 10 17.5 2.5 10z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="2.6 2"/></svg><span>{{ w[0] }}</span></span>
+{%- elif state == "paused" -%}
+<span class="badge st-warning"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 6.5v7M12 6.5v7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg><span>{{ w[0] }}</span></span>
+{%- else -%}
+{{ badge(w[1], w[0]) }}
+{%- endif -%}
+{%- endmacro %}
+
+{% macro signal_badge(state) -%}
+{%- if state == "info" -%}<span class="badge st-info"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="2" y="2" width="16" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M10 9v5M10 6.2v.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>For information</span></span>
+{%- elif state == "absent" -%}<span class="badge st-unknown"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2 2.4"/><path d="M6 10h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Not installed</span></span>
+{%- else -%}{{ badge(state) }}{%- endif -%}
+{%- endmacro %}
+
+{% macro when(ts, tz) -%}
+{%- if ts -%}<time datetime="{{ ts | iso }}">{{ ts | local(tz) }}</time> <span class="muted">({{ ts | rel }})</span>
+{%- else -%}<span class="muted">none</span>{%- endif -%}
+{%- endmacro %}
+
+{% macro mode_tag(agent) -%}
+<span class="mode mode-{{ agent.mode }}"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+{%- if agent.mode == "observe" -%}<path d="M2 10s3-5.5 8-5.5S18 10 18 10s-3 5.5-8 5.5S2 10 2 10z" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="10" cy="10" r="2.4" fill="currentColor"/>
+{%- elif agent.mode == "propose" -%}<path d="M4 16l1-4L13.5 3.5l3 3L8 15z M12 5l3 3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+{%- else -%}<path d="M11 2L4 11h5l-1 7 7-9h-5z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>{%- endif -%}
+</svg><span>{{ agent.mode_word }}</span></span>
+{%- endmacro %}
+
+{% macro rail(r, caption) -%}
+<figure class="rail" aria-labelledby="rail-cap">
+  <figcaption id="rail-cap">{{ caption }} <span class="muted">The list below the picture holds the same runs.</span></figcaption>
+  <div class="rail-grid" aria-hidden="true">
+    <div></div>
+    <div class="rail-scale rail-scale-{{ r.segments }}">{% for m in r.marks %}<span>{{ m.label }}</span>{% endfor %}</div>
+    {% for lane in r.lanes %}
+    <div class="rail-name">{{ lane.name }}</div>
+    <svg class="rail-lane" viewBox="0 0 1000 24" preserveAspectRatio="none" focusable="false">
+      <line x1="0" y1="12" x2="1000" y2="12" class="rail-base"/>
+      {% for m in r.marks %}<line x1="{{ (m.x * 1000) | round(1) }}" y1="2" x2="{{ (m.x * 1000) | round(1) }}" y2="22" class="rail-hour"/>{% endfor %}
+      {% for t in lane.ticks %}
+      {% if t.band %}<rect x="0" y="9" width="1000" height="6" class="{{ 'band-planned' if t.planned else 'band-live' }}"/>
+      {% elif t.planned %}<rect x="{{ (t.x * 1000 - 4) | round(1) }}" y="7" width="8" height="10" class="tick-planned" transform="rotate(45 {{ (t.x * 1000) | round(1) }} 12)"/>
+      {% else %}<rect x="{{ (t.x * 1000 - 2) | round(1) }}" y="3" width="4" height="18" class="tick-live"/>{% endif %}
+      {% endfor %}
+    </svg>
+    {% endfor %}
+  </div>
+  <p class="rail-key muted" aria-hidden="true"><span class="key-live"></span> deployed and running on its schedule <span class="key-planned"></span> planned agent task, not deployed yet <span class="key-band"></span> runs every few minutes, all day. The left edge is now.</p>
+</figure>
+{%- endmacro %}
+
+{% macro practice_badge(state) -%}
+{%- if state == "planned" -%}{{ sched_badge("planned", {"planned": ("Not started", "unknown")}) }}{%- else -%}{{ badge(state) }}{%- endif -%}
+{%- endmacro %}
