@@ -89,5 +89,6 @@ this policy in full, with two specifics:
 
 ## Contact
 
-Questions and permission requests: open an issue in this repository or
-contact the maintainer.
+Questions and permission requests: email legal@tockmox.com. Public questions
+can also go in an issue in this repository; send anything private, such as
+a permission request that names a product or a customer, to the email.
