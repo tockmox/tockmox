@@ -1,0 +1,409 @@
+# SPDX-License-Identifier: Apache-2.0
+# Platform Management catalog: the platform's virtual organization, as data
+# (DESIGN-2026-10-23-platform-management.md). This is the product default; a site replaces it with
+# features.platform.catalogFile.
+#
+# A role-agent is DATA read by a fixed executor (locked 2026-09-04): this file names who owns what,
+# what each role may read and propose, which scheduled work it owns and which numbers it watches.
+# The UI reads it; it runs nothing. Adding a role is a row here, not a deployment.
+#
+# Three teams, after ITIL 4's value chain: RUN keeps the service healthy (service management
+# practices), CHANGE plans and delivers what changes it (project, change, release, testing, assets,
+# suppliers), IMPROVE governs and learns (general management practices). Each team has a lead who
+# orchestrates its members. One role may own several practices; every ITIL 4 practice has an owner or
+# a stated reason it has none (the design doc's practice map).
+#
+# Names are plain English first; the ITIL 4 practice and FitSM process ride along as references.
+#
+# modes:   observe  reads and reports; changes nothing
+#          propose  drafts a change as a pull request or a card; a person approves it in chat
+#          act      may run named, reversible actions on its own (no role has this in v1)
+#
+# schedules.match: which CronJobs and Argo CronWorkflows a role owns. A workload labelled
+#   tockmox.com/practice=<role id> always belongs to that role; otherwise the first role (in file
+#   order) whose pattern fully matches the name owns it. Unmatched work is listed as "No owner".
+# schedules.planned: work the design calls for that is not deployed yet. Shown as Planned.
+# schedules.external: work that runs where this page cannot see it (another tool). Never healthy here.
+#
+# signals: one PromQL instant query each. good: below|above, warn/crit thresholds. No answer is
+#   Unknown. informational: shown, never counted. optional: no answer means the component is not
+#   installed, shown as "Not installed" and left out of the verdict. presence: PromQL that answers while
+#   the component is installed (usually last_over_time over 30 days); with it, an optional signal that
+#   stops answering reads Unknown instead of "Not installed". Never end a health query in
+#   `or on() vector(0)`: that turns a missing metric into a healthy 0. `or (count(<metric>) * 0)` is zero
+#   only while the metric exists.
+version: 2
+
+teams:
+  # ------------------------------------------------------------------ RUN
+  - id: run
+    name: Run
+    purpose: Keeps the platform healthy today. Notices, investigates, forecasts and proves recovery.
+    lead:
+      id: platform-manager
+      name: Platform Manager
+      reference: {itil: "Service level management; Measurement and reporting; Service desk", fitsm: "SLM, SRM, SMS governance"}
+      mission: >-
+        Runs the platform's operations team. Reads every manager's findings, decides what matters
+        today, writes the one daily platform report and is the one you talk to about the platform.
+        It hands investigation and drafting to the managers below it and never changes the platform itself.
+      mode: propose
+      mayRead: [every manager's findings, the alert stream, the platform verdict, the task boards]
+      mayPropose: [the daily platform report, follow-up jobs for a manager, cards for work that needs a person, a change freeze while an incident is open]
+      never: [change the cluster, merge anything, approve its own proposals, read personal or protected data]
+      dataClass: internal
+      schedules:
+        planned:
+          - {name: daily-platform-report, cron: "30 6 * * *", what: "Writes the one daily platform report: urgent, today, upcoming, links to drill-downs"}
+          - {name: weekly-service-review, cron: "0 7 * * 1", what: "Reviews the week against service levels and lists what is worth improving"}
+    members:
+      - id: incident
+        name: Incident Manager
+        reference: {itil: "Incident management; Monitoring and event management", fitsm: "ISRM"}
+        mission: >-
+          Notices when something breaks, works out what is affected and how badly, investigates with
+          read-only tools and keeps the incident record until it is resolved.
+        mode: observe
+        mayRead: [firing alerts, metrics, logs, Kubernetes objects and events, runbooks]
+        mayPropose: [runbook steps for a person to run, an incident record]
+        never: [restart, scale or delete anything, silence an alert]
+        dataClass: internal
+        grafana: tockmox-alert-delivery
+        schedules:
+          match: ["tockmox-heartbeat", ".*alert-relay.*"]
+          planned:
+            - {name: alert-triage, cron: "event", what: "Starts on a critical alert: groups it, investigates read-only, opens or updates the incident record"}
+        signals:
+          - {id: critical, label: "Critical alerts firing", unit: count, good: below, crit: 0,
+             query: 'count(ALERTS{alertstate="firing",severity="critical"}) or (count(ALERTS{alertname="Watchdog",alertstate="firing"}) * 0)'}
+          - {id: warnings, label: "Warnings firing", unit: count, good: below, warn: 0,
+             query: 'count(ALERTS{alertstate="firing",severity="warning"}) or (count(ALERTS{alertname="Watchdog",alertstate="firing"}) * 0)'}
+          - {id: heartbeat, label: "Alert pipeline heartbeat", unit: bool, good: above, crit: 0.5,
+             query: 'count(ALERTS{alertname="Watchdog",alertstate="firing"}) > 0'}
+          - {id: probes, label: "Endpoints answering", unit: ratio, good: above, warn: 0.999, crit: 0.9, optional: true,
+             presence: 'count(last_over_time(probe_success[30d]))',
+             query: 'sum(probe_success) / count(probe_success)'}
+
+      - id: problem
+        name: Problem Manager
+        reference: {itil: "Problem management", fitsm: "PM"}
+        mission: >-
+          Looks across incidents for the ones that keep coming back, finds the underlying cause and
+          records known errors and their workarounds.
+        mode: observe
+        mayRead: [alert history, incident records, runbooks, lessons]
+        mayPropose: [a known-error record, a card for the underlying fix]
+        never: [change anything, close an incident]
+        dataClass: internal
+        schedules:
+          match: [".*catches.*"]
+          planned:
+            - {name: recurring-alert-review, cron: "0 8 * * 0", what: "Lists the alerts that fired most this week and asks why each one keeps coming back"}
+        signals:
+          - {id: distinct-7d, label: "Different alerts fired this week", unit: count, informational: true,
+             query: 'count(count by (alertname) (count_over_time(ALERTS{alertstate="firing",alertname!~"Watchdog|InfoInhibitor"}[7d]))) or (count(ALERTS{alertname="Watchdog",alertstate="firing"}) * 0)'}
+
+      - id: capacity
+        name: Capacity Manager
+        reference: {itil: "Capacity and performance management", fitsm: "CAPM"}
+        mission: >-
+          Watches how much of the platform is in use and how fast that is growing: compute, memory,
+          storage and model memory. Warns before something fills up and says whether the local models
+          are carrying their share.
+        mode: observe
+        mayRead: [metrics, capacity trend reports, gateway routing counters]
+        mayPropose: [a capacity forecast, a card to add or rebalance capacity]
+        never: [resize, evict or move anything]
+        dataClass: internal
+        grafana: tockmox-overview
+        schedules:
+          match: [".*capacity.*"]
+        signals:
+          - {id: memory, label: "Busiest node, memory used", unit: ratio, good: below, warn: 0.8, crit: 0.9,
+             query: 'max(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)'}
+          - {id: cpu, label: "Busiest node, CPU over the last hour", unit: ratio, good: below, warn: 0.8, crit: 0.95,
+             query: 'max(1 - avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[1h])))'}
+          - {id: volume, label: "Fullest volume", unit: ratio, good: below, warn: 0.8, crit: 0.9,
+             query: 'max(1 - kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes)'}
+          - {id: local-share, label: "AI requests served locally, last 24h", unit: ratio, informational: true, optional: true,
+             query: 'sum(increase(tockmox_gate_served_total{endpoint_tier="local",status="ok"}[24h])) / sum(increase(tockmox_gate_served_total{endpoint_tier=~"local|external",status="ok"}[24h]))'}
+
+      - id: continuity
+        name: Continuity Manager
+        reference: {itil: "Service continuity management; Availability management", fitsm: "SACM"}
+        mission: >-
+          Makes sure the platform can be brought back. Backups run, restore drills prove the data
+          comes back intact and the proof is kept. Says plainly when a backup or a drill is overdue.
+        mode: observe
+        mayRead: [backup and drill results, the restore register, storage health]
+        mayPropose: [a register entry, a card for an overdue drill or a failing backup]
+        never: [restore into production, delete a backup or a snapshot]
+        dataClass: internal
+        grafana: tockmox-backup-proof
+        schedules:
+          match: [".*drill.*", ".*backup.*", "snapshot-.*", ".*restore.*", ".*export.*"]
+        signals:
+          - {id: drill-age, label: "Days since a restore drill passed", unit: days, good: below, warn: 8, crit: 15,
+             query: '(time() - max(kube_cronjob_status_last_successful_time{cronjob=~".*drill.*"})) / 86400'}
+          - {id: backups-overdue, label: "Backup jobs whose last run did not succeed", unit: count, good: below, crit: 0,
+             optional: true, presence: 'count(kube_cronjob_info{cronjob=~".*backup.*"})',
+             query: '(count((kube_cronjob_status_last_schedule_time{cronjob=~".*backup.*"} - on(namespace, cronjob) kube_cronjob_status_last_successful_time{cronjob=~".*backup.*"}) > 21600) or (count(kube_cronjob_info{cronjob=~".*backup.*"}) * 0)) + (count((kube_cronjob_created{cronjob=~".*backup.*"} < time() - 172800) unless on(namespace, cronjob) kube_cronjob_status_last_successful_time) or (count(kube_cronjob_info{cronjob=~".*backup.*"}) * 0))'}
+
+      - id: security
+        name: Security Manager
+        reference: {itil: "Information security management", fitsm: "ISM"}
+        mission: >-
+          Keeps an eye on exposure: known vulnerabilities in what is running, certificates close to
+          expiry, policy denials and sign-in health. Ranks what to fix first and drafts the fix.
+        mode: propose
+        mayRead: [vulnerability reports, certificates, admission decisions, the posture report]
+        mayPropose: [a ranked fix list, a pull request that bumps an image or a policy]
+        never: [change a policy, a secret or an identity setting]
+        dataClass: internal
+        grafana: tockmox-cert-manager
+        schedules:
+          match: [".*posture.*", ".*scan.*", ".*trivy.*", ".*key-check.*"]
+          planned:
+            - {name: weekly-exposure-review, cron: "0 9 * * 3", what: "Ranks this week's exposure and drafts the top fix"}
+        signals:
+          - {id: cert, label: "Days until the next certificate expires", unit: days, good: above, warn: 21, crit: 7, optional: true,
+             presence: 'count(last_over_time(certmanager_certificate_expiration_timestamp_seconds[30d]))',
+             query: '(min(certmanager_certificate_expiration_timestamp_seconds) - time()) / 86400'}
+          - {id: vulns, label: "Critical vulnerabilities with a fix", unit: count, good: below, warn: 0, optional: true,
+             presence: 'count(last_over_time(trivy:distinct_critical_fixable:count[30d]))',
+             query: 'sum(trivy:distinct_critical_fixable:count)'}
+
+      - id: requests
+        name: Request Manager
+        reference: {itil: "Service request management; Service catalogue management", fitsm: "ISRM (requests)"}
+        mission: >-
+          Takes the everyday asks (a new user, a new model, more storage for an app) and turns each into
+          the exact change it needs, ready for a person to approve, from a short catalogue of what this
+          platform offers.
+        mode: propose
+        mayRead: [the service catalogue, the site values, the identity directory's group names]
+        mayPropose: [the values change for a request, a card when a request needs a person]
+        never: [create a user, grant access or apply a change itself]
+        dataClass: internal
+        schedules:
+          planned:
+            - {name: request-queue, cron: "event", what: "Starts on a request in the conversation and drafts the change it needs"}
+
+  # ------------------------------------------------------------------ CHANGE
+  - id: change
+    name: Change
+    purpose: Plans and delivers what changes the platform, and lets a change through only when it is ready.
+    lead:
+      id: project-manager
+      name: Project Manager
+      reference: {itil: "Project management; Portfolio management", fitsm: "SPM (portfolio)"}
+      mission: >-
+        Oversees the whole effort: what is being built, in what order and why. Keeps the roadmap
+        honest against what actually shipped, names the one thing holding the most back and hands the
+        sprint to the Scrum Master.
+      mode: propose
+      mayRead: [the roadmap, epics and cards, release history, the Run team's findings]
+      mayPropose: [a plan or a re-plan, a scope cut, cards and epics]
+      never: [change a card's status to done, commit a release date, merge anything]
+      dataClass: internal
+      schedules:
+        planned:
+          - {name: weekly-portfolio-review, cron: "0 20 * * 0", what: "Reviews every workstream on a now, next, later horizon and names the gating item"}
+    members:
+      - id: scrum-master
+        name: Scrum Master
+        reference: {itil: "Project management (iterative delivery); Workforce and talent management", fitsm: "-"}
+        mission: >-
+          Keeps the sprint running: the daily standup, the board and its cards, the plan on Monday and
+          the review and retro on Sunday. Spots blocked and stale cards and keeps the board true.
+        mode: propose
+        mayRead: [the task boards, the sprint object, recent commits and pull requests]
+        mayPropose: [card edits (status short of done, priority, owner), the sprint plan, the standup]
+        never: [mark a card done, delete a card, change a card's scope]
+        dataClass: internal
+        schedules:
+          planned:
+            - {name: daily-standup, cron: "30 3 * * *", what: "Writes the standup: focus, what moved, what is blocked"}
+            - {name: sprint-plan, cron: "0 7 * * 1", what: "Drafts the week's sprint against capacity"}
+            - {name: review-and-retro, cron: "0 19 * * 0", what: "Reviews what the sprint delivered and what to change"}
+
+      - id: change
+        name: Change Manager
+        reference: {itil: "Change enablement", fitsm: "CHM"}
+        mission: >-
+          The gate between Change and Run. Keeps track of every change heading for the platform
+          (dependency updates, upgrades, configuration) and checks each one is ready and safe, and that
+          the Run team is not in the middle of an incident, before it goes in front of you.
+        mode: propose
+        mayRead: [open pull requests, release notes, Argo CD sync state, the Run team's verdict]
+        mayPropose: [a review of a pull request, a go or hold on a change, a card for drift]
+        never: [merge, sync or roll back anything]
+        dataClass: internal
+        grafana: tockmox-argocd
+        schedules:
+          match: [".*renovate.*", ".*label-reconciler.*"]
+          planned:
+            - {name: change-review, cron: "45 8 * * 1,4", what: "Reviews dependency-update pull requests and lists which are safe, which need a look and which to hold"}
+        signals:
+          - {id: outofsync, label: "Layers not both synced with git and healthy", unit: count, good: below, warn: 0,
+             query: 'count(argocd_app_info unless argocd_app_info{sync_status="Synced",health_status="Healthy"}) or (count(argocd_app_info) * 0)'}
+          - {id: degraded, label: "Layers degraded or missing", unit: count, good: below, crit: 0,
+             query: 'count(argocd_app_info{health_status=~"Degraded|Missing"}) or (count(argocd_app_info) * 0)'}
+
+      - id: release
+        name: Release Manager
+        reference: {itil: "Release management; Deployment management", fitsm: "RDM"}
+        mission: >-
+          Cuts and ships releases: the version bump, the gates, the lab proof and the release notes,
+          then confirms every site layer landed on the new version.
+        mode: propose
+        mayRead: [the release checklist, gate results, the lab, the running version]
+        mayPropose: [a release pull request, release notes, a rollback plan]
+        never: [tag or publish a release, push to a protected branch]
+        dataClass: internal
+        schedules:
+          planned:
+            - {name: release-readiness, cron: "0 8 * * 2", what: "Checks what is ready for the next release and what still blocks it"}
+
+      - id: test
+        name: Test Manager
+        reference: {itil: "Service validation and testing", fitsm: "-"}
+        mission: >-
+          Proves changes work before they reach you: quick checks on a change, the full suite on a
+          release candidate and the accessibility sweep, with results decided by checks rather than by
+          a model's opinion.
+        mode: observe
+        mayRead: [test results, the lab, the release candidate]
+        mayPropose: [a test report, a card for a regression]
+        never: [change code, skip a gate, mark a failing check as passing]
+        dataClass: internal
+        schedules:
+          planned:
+            - {name: nightly-regression, cron: "0 2 * * *", what: "Runs the regression suite against the lab and reports what changed"}
+
+      - id: assets
+        name: Configuration and Asset Manager
+        reference: {itil: "Service configuration management; IT asset management; Infrastructure and platform management", fitsm: "CONFM"}
+        mission: >-
+          Knows what the platform is made of and keeps that record true: nodes and machines, AI nodes
+          and the models on them, certificates, licences and firmware. Git is the record; this role
+          checks that what runs matches it.
+        mode: observe
+        mayRead: [nodes, the AI node inventory, models on disk, certificates, the site repository]
+        mayPropose: [an inventory correction, a card for a machine that drifted from its record]
+        never: [enrol, wipe or re-image a machine, change firmware]
+        dataClass: internal
+        signals:
+          - {id: nodes-not-ready, label: "Cluster nodes not ready", unit: count, good: below, crit: 0,
+             query: 'count(kube_node_status_condition{condition="Ready",status="true"} == 0) or (count(kube_node_status_condition{condition="Ready",status="true"}) * 0)'}
+          - {id: ai-node-unverified, label: "AI nodes running an unverified configuration", unit: count, good: below, crit: 0, optional: true,
+             presence: 'count(last_over_time(tockmox_ai_node_converge_signature_ok[30d]))',
+             query: 'count(tockmox_ai_node_converge_signature_ok == 0) or (count(tockmox_ai_node_converge_signature_ok) * 0)'}
+        schedules:
+          planned:
+            - {name: inventory-reconcile, cron: "0 4 * * *", what: "Compares what runs with what git says should run and lists the differences"}
+
+      - id: suppliers
+        name: Supplier Manager
+        reference: {itil: "Supplier management; Relationship management", fitsm: "SUPPM"}
+        mission: >-
+          Watches the projects and vendors the platform depends on: upstream releases and security
+          notices, model providers and their pricing, hardware firmware. Says what changed upstream and
+          what it means here.
+        mode: observe
+        mayRead: [upstream release notes, model catalogues, vendor advisories]
+        mayPropose: [an upstream summary, a card for an upgrade worth taking]
+        never: [sign up for, buy or cancel anything]
+        dataClass: internal
+        schedules:
+          planned:
+            - {name: upstream-watch, cron: "0 7 * * 3", what: "Summarises what changed upstream this week and what is worth taking"}
+            - {name: firmware-advisory, cron: "0 9 7 1,4,7,10 *", what: "Checks vendor firmware against what each machine runs"}
+
+  # ------------------------------------------------------------------ IMPROVE
+  - id: improve
+    name: Improve
+    purpose: Governs and learns. Measures how well the platform is run, keeps knowledge current and watches cost and risk.
+    lead:
+      id: improvement-manager
+      name: Improvement Manager
+      reference: {itil: "Continual improvement; Measurement and reporting; Strategy management", fitsm: "CSI, SMS governance"}
+      mission: >-
+        Asks whether the platform is being run well and getting better. Re-scores service management
+        maturity each quarter, prunes what nobody uses and picks the few improvements worth making.
+      mode: propose
+      mayRead: [every team's reports and registers, the maturity history, the role catalogue]
+      mayPropose: [an improvement plan, a maturity snapshot, cards for the top improvements, a change to this catalogue]
+      never: [change a role's scope itself, retire a role without a person agreeing]
+      dataClass: internal
+      schedules:
+        planned:
+          - {name: quarterly-maturity-review, cron: "0 9 1 1,4,7,10 *", what: "Re-scores maturity against the last snapshot and proposes the cheapest level-ups"}
+    members:
+      - id: knowledge
+        name: Knowledge Manager
+        reference: {itil: "Knowledge management", fitsm: "SMS document control"}
+        mission: >-
+          Keeps the runbooks and the record of what was learned current. Folds each resolved incident's
+          lesson into the runbooks and flags pages that no longer match the platform.
+        mode: propose
+        mayRead: [runbooks, docs, incident and problem records, lessons]
+        mayPropose: [a runbook edit as a pull request, a lesson]
+        never: [publish anything, edit a page outside the docs and runbooks]
+        dataClass: internal
+        schedules:
+          planned:
+            - {name: runbook-currency, cron: "0 10 * * 5", what: "Checks every runbook touched by this week's incidents still matches the platform"}
+
+      - id: finance
+        name: Finance Manager
+        reference: {itil: "Service financial management", fitsm: "-"}
+        mission: >-
+          Watches what the platform costs to run: frontier model spend against budget, which work pays
+          for the frontier and what the local models saved. Flags a spend spike the day it happens.
+        mode: observe
+        mayRead: [gateway spend and budget counters, routing counters, the hardware register]
+        mayPropose: [a spend report, a card to move a workload to a local model]
+        never: [change a budget, a key or a price]
+        dataClass: internal
+        signals:
+          - {id: spend-24h, label: "Frontier spend, last 24h", unit: usd, informational: true, optional: true,
+             query: 'sum(increase(litellm_spend_metric_total[24h]))'}
+          - {id: spend-30d, label: "Frontier spend, last 30 days", unit: usd, informational: true, optional: true,
+             query: 'sum(increase(litellm_spend_metric_total[30d]))'}
+          - {id: budget-left, label: "Least budget left on any gateway key", unit: ratio, good: above, warn: 0.2, crit: 0.05, optional: true,
+             presence: 'count(last_over_time(litellm_api_key_max_budget_metric[30d]))',
+             query: 'min(litellm_remaining_api_key_budget_metric / litellm_api_key_max_budget_metric)'}
+        schedules:
+          planned:
+            - {name: weekly-spend-report, cron: "0 8 * * 1", what: "Reports last week's spend by model and workload against budget"}
+
+      - id: architect
+        name: Architect
+        reference: {itil: "Architecture management; Service design", fitsm: "SPM (design)"}
+        mission: >-
+          Keeps the platform's design coherent: reviews proposals that change how pieces fit together,
+          keeps the decision records current and says when a choice made earlier no longer holds.
+        mode: propose
+        mayRead: [decision records, design documents, the platform's charts]
+        mayPropose: [a design review, a decision record update]
+        never: [accept or overturn a decision itself]
+        dataClass: internal
+        schedules:
+          planned:
+            - {name: decision-currency, cron: "0 9 15 * *", what: "Lists decision records whose assumptions changed this month"}
+
+      - id: risk
+        name: Risk and Compliance Manager
+        reference: {itil: "Risk management; Information security management (compliance)", fitsm: "ISM (risk)"}
+        mission: >-
+          Keeps the list of what could go badly wrong and whether each control still holds: licences,
+          claims made in public, accessibility conformance and the controls the security posture relies on.
+        mode: observe
+        mayRead: [the risk register, licences, the claims register, accessibility results, the posture report]
+        mayPropose: [a risk register update, a card for a control that stopped holding]
+        never: [accept a risk, publish a claim]
+        dataClass: internal
+        schedules:
+          planned:
+            - {name: monthly-risk-review, cron: "0 7 1 * *", what: "Re-checks each control the risk register relies on"}

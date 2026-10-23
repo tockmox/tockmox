@@ -17,7 +17,8 @@ namespace-wide allows skip it, and this policy is the whole of what it may do:
             tockmoxUi.updateFeed); and tockmoxUi.networkPolicy.extraEgress.
 Everything else is refused, including the inference nodes themselves when probing is off.
 
-Kubernetes authority: get/list on nodes, and on Argo CD applications in their namespace. Nothing else.
+Kubernetes authority: get/list on nodes, and on Argo CD applications in their namespace; with Platform Management
+on (config.features.platform.enabled), list on Argo CronWorkflows as well. Nothing else.
 
 IN-CLUSTER TRUST (lab F7, 2026-10-08). The UI performs the OIDC token exchange itself, from inside the pod, so
 with global.certIssuer (tockmox-ca by default) it must trust the Tockmox CA. Without it every /login answered 503
@@ -107,8 +108,27 @@ site's UI said "No apps are assigned to your account" because it set no tockmoxU
 {{- $_ := set $caps $k (ne (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" $k)) "") -}}
 {{- end -}}
 {{- $_ := set $cfg "capabilities" $caps -}}
-{{- $cfgText := $cfg | toYaml -}}
 {{- $sec := $ui.secrets | default dict -}}
+{{- /*
+PLATFORM MANAGEMENT (TM-1112; DESIGN-2026-10-23-platform-management.md). Off unless the site sets
+config.features.platform.enabled. With it on, the UI gains exactly one Kubernetes read (list on Argo
+CronWorkflows, cluster-wide, so the schedule shows every lane) and nothing else: CronJobs come from
+kube-state-metrics through the Prometheus egress above. The agent ledger is the site's orchestrator, so
+its address is the site's to allow (networkPolicy.extraEgress) and its token the site's Secret
+(secrets.platformLedgerToken, key `token`), mounted here and named to the UI as ledgerTokenFile.
+*/ -}}
+{{- $plat := (($cfg.features | default dict).platform) | default dict -}}
+{{- $platOn := $plat.enabled -}}
+{{- $ledgerSec := $sec.platformLedgerToken | default "" -}}
+{{- if and $platOn $ledgerSec -}}
+{{- $_ := set $plat "ledgerTokenFile" "/etc/tockmox-ui/platform-ledger/token" -}}
+{{- end -}}
+{{- /* A site's own catalog (its roles, its scheduled work) from a ConfigMap, key catalog.yaml. */ -}}
+{{- $catCm := (($ui.platformCatalog | default dict).configMap) | default "" -}}
+{{- if and $platOn $catCm -}}
+{{- $_ := set $plat "catalogFile" "/etc/tockmox-ui/platform-catalog/catalog.yaml" -}}
+{{- end -}}
+{{- $cfgText := $cfg | toYaml -}}
 {{- $api := $np.apiServer | default list -}}
 {{- if and (not $api) ((.Values.global | default dict).lanCIDR) -}}
 {{- $api = list (dict "cidr" .Values.global.lanCIDR "port" 6443) -}}
@@ -140,6 +160,9 @@ metadata:
     {{- include "tockmox.labels" . | nindent 4 }}
 rules:
   - { apiGroups: [""], resources: [nodes], verbs: [get, list] }
+  {{- if $platOn }}
+  - { apiGroups: [argoproj.io], resources: [cronworkflows], verbs: [list] }
+  {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -313,6 +336,12 @@ spec:
             # site's own signed test feed), set config.updateCheck.feedUrl to file:///feed/releases.json.
             - { name: update-feed, mountPath: /feed, readOnly: true }
             {{- end }}
+            {{- if and $platOn $ledgerSec }}
+            - { name: platform-ledger, mountPath: /etc/tockmox-ui/platform-ledger, readOnly: true }
+            {{- end }}
+            {{- if and $platOn $catCm }}
+            - { name: platform-catalog, mountPath: /etc/tockmox-ui/platform-catalog, readOnly: true }
+            {{- end }}
       volumes:
         - name: tockmox-trust
           emptyDir: { sizeLimit: 4Mi }
@@ -344,6 +373,23 @@ spec:
         {{- if $feedCm }}
         - name: update-feed
           configMap: { name: {{ $feedCm | quote }} }
+        {{- end }}
+        {{- if and $platOn $ledgerSec }}
+        # optional: a missing Secret leaves the ledger unauthorised (it reads Unknown on the page), never a
+        # pod stuck in ContainerCreating
+        - name: platform-ledger
+          secret:
+            secretName: {{ $ledgerSec | quote }}
+            optional: true
+            items: [{ key: token, path: token }]
+        {{- end }}
+        {{- if and $platOn $catCm }}
+        # optional: a missing ConfigMap is a catalog that did not load (/platform answers 503 and says so)
+        - name: platform-catalog
+          configMap:
+            name: {{ $catCm | quote }}
+            optional: true
+            items: [{ key: catalog.yaml, path: catalog.yaml }]
         {{- end }}
 ---
 apiVersion: v1

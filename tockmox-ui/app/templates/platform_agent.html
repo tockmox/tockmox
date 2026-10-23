@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, source_line %}
+{% from "platform_macros.html" import sched_badge, signal_badge, mode_tag, when, practice_badge %}
+{% block title %}{{ v.agent.name }} · Platform Management{% endblock %}
+{% block main %}
+<p class="crumb"><a href="/platform">Platform Management</a> / {{ team_obj.name }}{% if not v.agent.is_lead %} / reports to <a href="/platform/agents/{{ lead.agent.id }}">the {{ lead.agent.name }}</a>{% else %} / leads the team{% endif %}</p>
+<h1>{{ v.agent.name }}</h1>
+<p class="ref-line">ITIL 4: {{ v.agent.reference.itil }}. FitSM: {{ v.agent.reference.fitsm }}.</p>
+<p class="mission">{{ v.agent.mission }}</p>
+
+<section class="facts-band" aria-label="Status">
+  <div><h2 class="kicker">Practice</h2>{{ practice_badge(v.practice_state) }}<p class="why">{{ v.practice_reason | sentence }}</p></div>
+  <div><h2 class="kicker">Agent</h2>{{ badge(v.agent_state, v.agent_word) }}<p class="why">{{ v.agent_reason | sentence }}</p></div>
+  <div><h2 class="kicker">Mode</h2>{{ mode_tag(v.agent) }}<p class="why">{{ v.agent.mode_text }}</p></div>
+</section>
+
+<section aria-labelledby="scope">
+  <h2 id="scope">What it may do</h2>
+  <div class="scope">
+    <div><h3>May read</h3><ul>{% for x in v.agent.may_read %}<li>{{ x | sentence }}</li>{% endfor %}</ul></div>
+    <div><h3>May propose</h3><ul>{% for x in v.agent.may_propose %}<li>{{ x | sentence }}</li>{% endfor %}</ul></div>
+    <div class="never"><h3>Never</h3><ul>{% for x in v.agent.never %}<li>{{ x | sentence }}</li>{% endfor %}</ul></div>
+  </div>
+  <p class="muted">Data it may handle: {{ v.agent.data_class }}. A proposal becomes real only when a person approves it in the conversation, and a change to the cluster arrives as a merged pull request, never as a call from this agent.</p>
+</section>
+
+{% if team %}
+<section aria-labelledby="reports">
+  <h2 id="reports">Its team</h2>
+  <ul class="reports-list">
+  {% for t in team %}<li><a href="/platform/agents/{{ t.agent.id }}">{{ t.agent.name }}</a> {{ practice_badge(t.practice_state) }} <span class="muted">{{ t.practice_reason }}</span></li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if v.signals %}
+<section aria-labelledby="signals">
+  <h2 id="signals">What it watches</h2>
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="signals">
+  <table>
+    <caption>Live from Prometheus. No answer reads Unknown, never healthy.{% if grafana and v.agent.grafana %} History: <a href="{{ grafana.url }}/d/{{ v.agent.grafana }}">the {{ v.agent.name }} board in Grafana</a>.{% endif %}</caption>
+    <thead><tr><th scope="col">Signal</th><th scope="col">Now</th><th scope="col">State</th><th scope="col">Rule</th></tr></thead>
+    <tbody>
+    {% for x in v.signals %}
+    <tr><th scope="row">{{ x.sig.label }}</th><td class="num">{{ x.text }}</td><td>{{ signal_badge(x.state) }}{% if x.why %}<span class="why">{{ x.why }}</span>{% endif %}</td><td class="muted">{{ x.threshold }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <details><summary>The queries</summary><ul class="plain">{% for x in v.signals %}<li><strong>{{ x.sig.label }}</strong><pre>{{ x.sig.query }}</pre></li>{% endfor %}</ul></details>
+</section>
+{% endif %}
+
+<section aria-labelledby="work">
+  <h2 id="work">Scheduled work it owns</h2>
+  {% if v.schedules %}
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="work">
+  <table>
+    <caption>Last success is a different fact from last run: a failing job keeps its last success, so you can see how long it has been broken.</caption>
+    <thead><tr><th scope="col">Job</th><th scope="col">State</th><th scope="col">Runs</th><th scope="col">Last run</th><th scope="col">Last success</th><th scope="col">Next</th></tr></thead>
+    <tbody>
+    {% for x in v.schedules %}
+    <tr><th scope="row">{{ x.name }}{% if x.namespace %}<span class="ref">{{ x.kind }} in {{ x.namespace }}</span>{% else %}<span class="ref">{{ x.kind }}</span>{% endif %}</th>
+        <td>{{ sched_badge(x.state, sched_words) }}<span class="why">{{ x.why }}</span></td>
+        <td>{{ x.cadence }}{% if x.schedule and x.schedule != x.cadence and x.schedule != "event" %}<br><code>{{ x.schedule }}</code>{% endif %}</td>
+        <td>{{ when(x.last_run, tz) }}</td><td>{{ when(x.last_success, tz) }}</td>
+        <td>{% if x.next %}{{ when(x.next, tz) }}{% elif x.planned_next %}<span class="muted">would run {{ x.planned_next | local(tz) }}</span>{% else %}<span class="muted">none</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="panel quiet">No scheduled work is owned by this role yet, deployed or planned.</p>
+  {% endif %}
+</section>
+
+<section aria-labelledby="runs">
+  <h2 id="runs">Agent runs</h2>
+  {% if v.agent_word == "Not connected" %}
+  <p class="panel quiet">No agent ledger is connected, so this page cannot show this agent's runs. When one is, each run appears here with its status, cost and a link to read it in the conversation. The run's own words never render on this page.</p>
+  {% elif v.runs %}
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="runs">
+  <table>
+    <caption>The newest {{ v.runs | length }} runs. Cost over 30 days: ${{ "%.2f" | format(v.cost or 0) }}.</caption>
+    <thead><tr><th scope="col">Run</th><th scope="col">Status</th><th scope="col">Started</th><th scope="col">Cost</th><th scope="col">Read it</th></tr></thead>
+    <tbody>
+    {% for j in v.runs %}
+    {% set st = {"completed": "ok", "failed": "critical", "input_required": "warning", "working": "ok", "queued": "unknown", "cancelled": "unknown"}.get(j.status, "unknown") %}
+    <tr><th scope="row"><code>{{ j.id }}</code></th><td>{{ badge(st, {"completed": "Completed", "failed": "Failed", "input_required": "Waiting on you", "working": "Running", "queued": "Queued", "cancelled": "Cancelled"}.get(j.status, j.status or "Unknown")) }}</td>
+        <td>{{ when(j.created | ts, tz) }}</td><td class="num">{% if j.cost_usd is not none %}${{ "%.2f" | format(j.cost_usd | float) }}{% else %}<span class="muted">unknown</span>{% endif %}</td>
+        <td>{% if interface_url %}<a href="{{ interface_url }}/jobs/{{ j.id | pathseg }}">In the conversation</a>{% else %}<span class="muted">not linked</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="panel quiet">{{ v.agent_reason | sentence }}.</p>
+  {% endif %}
+</section>
+{% endblock %}

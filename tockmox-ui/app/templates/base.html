@@ -23,6 +23,7 @@
         <li><a href="/nodes" {% if path.startswith("/nodes") %}aria-current="page"{% endif %}>Inference Nodes</a></li>
         <li><a href="/models" {% if path.startswith("/models") %}aria-current="page"{% endif %}>Models</a></li>
         <li><a href="/capabilities" {% if path == "/capabilities" %}aria-current="page"{% endif %}>Capabilities</a></li>
+        {% if platform_on %}<li><a href="/platform" {% if path.startswith("/platform") %}aria-current="page"{% endif %}>Platform</a></li>{% endif %}
         {% endif %}
         {% for t in tabs %}
         <li><a href="/tabs/{{ t.id }}" {% if path == "/tabs/" ~ t.id %}aria-current="page"{% endif %}>{{ t.name }}</a></li>

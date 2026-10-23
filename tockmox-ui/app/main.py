@@ -37,6 +37,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from . import feed as feedmod
 from . import models_routes
 from . import nodes_routes
+from . import platform as platform_mod
 from . import redirects
 from . import sources as sources_mod
 from . import status_api
@@ -123,6 +124,7 @@ class Transports:
     feed: httpx.BaseTransport | None = None
     posture: httpx.BaseTransport | None = None
     probe: httpx.BaseTransport | None = None      # inference-node probe (REQ-0047)
+    ledger: httpx.BaseTransport | None = None     # agent ledger (Platform Management)
     resolver: object = None                       # DNS for the probe; None = socket.getaddrinfo
 
 
@@ -145,6 +147,33 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         return f"{d}s ago" if d < 60 else (f"{d // 60}m ago" if d < 3600 else f"{d // 3600}h ago")
 
     tpl.env.filters["ago"] = _ago
+
+    def _iso(ts):
+        from datetime import datetime, timezone
+        return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if ts else ""
+
+    def _local(ts, tz="UTC"):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        if not ts:
+            return ""
+        d = datetime.fromtimestamp(ts, ZoneInfo(tz))
+        return d.strftime("%a %d %b %H:%M") if abs(time.time() - ts) > 86400 * 5 else d.strftime("%a %H:%M")
+
+    def _rel(ts):
+        """'in 3h 10m' or '2d 4h ago': relative time, paired with the absolute one in <time>."""
+        if not ts:
+            return "never"
+        d = int(ts - time.time())
+        fut, d = d > 0, abs(d)
+        txt = (f"{d // 86400}d {d % 86400 // 3600}h" if d >= 86400 else
+               f"{d // 3600}h {d % 3600 // 60}m" if d >= 3600 else f"{d // 60}m" if d >= 60 else "under a minute")
+        return f"in {txt}" if fut else f"{txt} ago"
+
+    tpl.env.filters.update(iso=_iso, local=_local, rel=_rel, ts=platform_mod._ts,
+                           sentence=lambda t: (t[:1].upper() + t[1:]) if t else t,
+                           # one URL path segment: "/" and "?" encoded too (Jinja's urlencode keeps "/")
+                           pathseg=lambda v: quote(str(v), safe=""))
 
     sessions = Sessions(s.session_secret, s.session_max_age_s, s.admin_group, s.secure_cookies)
     oidc = OIDC(s.oidc_issuer, s.oidc_client_id, s.oidc_client_secret, s.oidc_redirect_url,
@@ -183,7 +212,8 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
     revoked: set = set()   # logged-out session ids; per process (one replica in v0), bounded by session max-age
 
     def tabs_for(u: User):
-        return [f for f in s.features if f.enabled and (u.is_admin or not f.admin_only)]
+        # Platform Management is its own area (/platform), never a generic feature tab.
+        return [f for f in s.features if f.enabled and f.id != "platform" and (u.is_admin or not f.admin_only)]
 
     def docs_repo_link() -> str:
         """The docs folder in the source repository AT THE RUNNING RELEASE, so the page a reader
@@ -217,6 +247,7 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
 
     def render(request, name, u: User | None, status_code=200, **ctx):
         ctx.update(request=request, user=u, site=s, tabs=tabs_for(u) if u else [],
+                   platform_on=bool(s.feature("platform") and s.feature("platform").enabled),
                    app_version=APP_VERSION, path=request.url.path, verdict_text=VERDICT_TEXT,
                    footer=footer_version(u))
         return tpl.TemplateResponse(request, name, ctx, status_code=status_code)
@@ -526,6 +557,10 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
     src_verdicts = VerdictSource(s.lifecycle.verdicts_dir, s.lifecycle.verdicts_repo_path)
     models_routes.register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report, src_demand, APP_VERSION,
                            src_verdicts, prober)
+
+    # ------------------------------------------------------------ platform management (DESIGN-2026-10-23)
+
+    platform_mod.register(app, s, render, user_of, need_login, forbidden, kube, tp)
 
     # ------------------------------------------------------------ read-only status API (TM-0841)
 

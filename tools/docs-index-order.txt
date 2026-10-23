@@ -40,6 +40,7 @@ inference-nodes
 ai-nodes
 model-lifecycle
 tockmox-ui
+platform-management
 posture-probe
 
 [operations]

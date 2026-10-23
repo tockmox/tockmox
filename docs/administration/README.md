@@ -44,7 +44,8 @@ Pages marked experimental in their description are not covered by the stable val
 | 18 | [AI nodes](ai-nodes.md) | Turn an Apple-silicon Mac into an inference node that converges itself from your site repository: accounts, firewall, engines, pinned models, telemetry and its own updates, with no agent that accepts commands |
 | 19 | [Model lifecycle and the eval gateway](model-lifecycle.md) | Why a new model, local or hosted, is unusable until a person approves it twice, why that needs a second gateway rather than an access group, how to run the eval gateway the chart ships, and how the UI recommends candidates, sizes them and records the evidence |
 | 20 | [The Tockmox UI](tockmox-ui.md) | Run the Tockmox admin console in the AI layer: build its image from source, turn it on, know exactly what its network policy lets it reach, and read its provisional status API |
-| 21 | [Security Posture Probe](posture-probe.md) | Install the experimental posture-probe add-on, read what it found, and know exactly what its read-only role and its network policy allow it to do |
+| 21 | [Platform Management](platform-management.md) | Turn on the Tockmox UI's read-only operations view: the platform's operations roles, the scheduled work each one owns, the numbers each one watches, what the page may read, and how a site replaces the catalog |
+| 22 | [Security Posture Probe](posture-probe.md) | Install the experimental posture-probe add-on, read what it found, and know exactly what its read-only role and its network policy allow it to do |
 
 <!-- tockmox:section-index:end -->
 
