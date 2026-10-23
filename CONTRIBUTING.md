@@ -82,7 +82,8 @@ is wrong" from "the tool is absent".
 CI also runs, and `check-all.sh` names as skipped:
 
 - `gitleaks` across the full history (needs a full clone and the binary)
-- `kubeconform` over the rendered output (needs the binary)
+- `kubeconform` over the rendered output: `check-all.sh` runs it too when the
+  `kubeconform` binary is on your PATH, and names it as skipped when it is not
 - the DCO sign-off check, per commit against what your branch adds
 - the release-time render diff between the previous tag and the candidate
 

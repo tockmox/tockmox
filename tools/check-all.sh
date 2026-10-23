@@ -30,7 +30,8 @@
 # WHAT IT DOES NOT COVER, stated rather than skipped silently:
 #
 #   - `gitleaks (full history)` needs the gitleaks binary and a full clone.
-#   - `kubeconform rendered output` needs kubeconform.
+#   - `kubeconform rendered output` runs only with kubeconform on PATH
+#     (tools/check-kubeconform.sh; skipped, never passed, without it).
 #   - `every commit carries a DCO sign-off` is checked against the commits a
 #     pull request adds, which a working tree does not know. Run
 #     `git log --format='%B' origin/main..HEAD | grep -c '^Signed-off-by:'`
@@ -422,20 +423,16 @@ have gitleaks \
   && run_gate "gitleaks" gitleaks detect --source . --redact --exit-code 1 \
   || skip_gate "gitleaks" "binary not installed; CI runs it over full history"
 
-# NEVER run_gate THIS. Until 2026-09-13 the line here was
-#
-#   run_gate "kubeconform" bash -c 'echo "(see ci.yaml ...)"; exit 0'
-#
-# which never invoked kubeconform at all. With the binary installed the suite
-# printed a green "kubeconform" line produced by a hardcoded `exit 0` ... a gate
-# that could not fail under any tree state, sitting in the report next to gates
-# that can. Proven by putting a kubeconform stub that itself exits 1 first on
-# PATH: the line still read pass.
-#
-# A green that cannot go red is worse than an honest absence, because it is
-# counted. So this is a SKIP in both branches until the render pipeline is
-# actually wired here (carded), and it names where the real check runs.
-skip_gate "kubeconform" "runs in ci.yaml against the full render; NOT executed by this script"
+# KUBECONFORM, RUN FOR REAL (TM-0584). Until 2026-09-13 the line here printed a
+# green "kubeconform" from a hardcoded `exit 0`, a gate that could not fail; it
+# was then a SKIP in both branches until the render pipeline was wired here.
+# Now ci.yaml's "kubeconform rendered output" step and this line both call
+# tools/check-kubeconform.sh, so they run one pipeline. Without the binary it
+# reports skipped (exit 2), never passed; with it, a chart where kubeconform
+# validated nothing (schemas unreachable) fails rather than reading as green.
+# The selftest is what proves the line can go red.
+run_gate "kubeconform -strict over every layer's render (TM-0584)" bash tools/check-kubeconform.sh
+run_gate "the kubeconform gate goes red on an unknown field, a wrong type and empty input (TM-0584)" bash tools/check-kubeconform.sh --selftest
 
 # --------------------------------------------------------------------- result
 if [ "$JOBS" -gt 1 ]; then
