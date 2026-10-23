@@ -1,7 +1,8 @@
 {# SPDX-License-Identifier: Apache-2.0 -#}
 #!/bin/sh
 # Managed by tockmox-ai-node (role firewall). The timed rollback for a change to who may
-# administer the node. Started by the firewall role with `launchctl submit`, it sleeps, then puts
+# administer the node. Started by the firewall role as a one-shot job (pf-rollback.plist, bootstrapped
+# into the system domain), it sleeps, then puts
 # the sub-anchor back unless the change was confirmed after it was armed.
 #
 # "Back" is the last ruleset an administrator confirmed (saved by the firewall role when it

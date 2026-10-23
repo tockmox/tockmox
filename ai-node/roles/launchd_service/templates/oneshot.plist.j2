@@ -1,0 +1,27 @@
+{# SPDX-License-Identifier: Apache-2.0 -#}
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Managed by tockmox-ai-node. A detached one-shot: bootstrapped into the system domain from
+       this file (never from /Library/LaunchDaemons, so it does not come back at boot), it runs
+       once at load and is booted out by whoever stands it down. It replaces launchctl's legacy submit subcommand,
+       which returns 0 and starts nothing that launchctl can see on macOS 27. -->
+  <key>Label</key>
+  <string>{{ oneshot_label | e }}</string>
+  <key>ProgramArguments</key>
+  <array>
+{% for a in oneshot_args %}
+    <string>{{ a | string | e }}</string>
+{% endfor %}
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+{% if oneshot_log | default('') | length > 0 %}
+  <key>StandardOutPath</key>
+  <string>{{ oneshot_log | e }}</string>
+  <key>StandardErrorPath</key>
+  <string>{{ oneshot_log | e }}</string>
+{% endif %}
+</dict>
+</plist>

@@ -170,6 +170,23 @@
         - firewall_needs_load | bool
       become: true
       block:
+        - name: Write the one-shot job that runs the rollback (only when the administrator rules change)
+          when: firewall_admin_changed | bool
+          vars:
+            oneshot_label: "{{ firewall_rollback_label }}"
+            oneshot_args: ["/bin/sh", "{{ firewall_libexec }}/pf-rollback.sh", "{{ firewall_rollback_minutes | int }}"]
+            oneshot_log: "{{ firewall_state_dir }}/pf.log"
+          ansible.builtin.template:
+            src: "{{ role_path }}/../launchd_service/templates/oneshot.plist.j2"
+            dest: "{{ firewall_rollback_plist }}"
+            owner: root
+            group: wheel
+            mode: "0644"
+
+        # `launchctl submit` is not used: on macOS 27.0.1 it returns 0 and starts no job that
+        # `launchctl list` or `launchctl print system/...` can see, so it could neither be checked
+        # nor stood down (found on the first real Mac, 2026-10-22). The job is bootstrapped into the
+        # system domain from its own plist and must be visible there before the rules load.
         - name: Arm the timed rollback (only when the administrator rules change)
           when: firewall_admin_changed | bool
           ansible.builtin.shell:
@@ -178,11 +195,13 @@
               set -eu
               d={{ firewall_state_dir | quote }}
               label={{ firewall_rollback_label | quote }}
+              plist={{ firewall_rollback_plist | quote }}
               printf '%s\n' {{ firewall_file_sha | quote }} > "$d/pf-pending.sha256"
               date +%s > "$d/pf-armed"
+              launchctl bootout "system/$label" >/dev/null 2>&1 || true
               launchctl remove "$label" >/dev/null 2>&1 || true
-              launchctl submit -l "$label" -- /bin/sh {{ (firewall_libexec ~ '/pf-rollback.sh') | quote }} {{ firewall_rollback_minutes | int }}
-              launchctl list "$label" >/dev/null 2>&1
+              launchctl bootstrap system "$plist"
+              launchctl print "system/$label" >/dev/null 2>&1
           changed_when: true
 
         - name: Load the sub-anchor and turn pf on
@@ -237,6 +256,7 @@
               d={{ firewall_state_dir | quote }}
               printf '%s\n' {{ firewall_admin_sig | quote }} > "$d/pf-admin-sig"
               rm -f "$d/pf-rolled-back"
+              launchctl bootout {{ ('system/' ~ firewall_rollback_label) | quote }} >/dev/null 2>&1 || true
               launchctl remove {{ firewall_rollback_label | quote }} >/dev/null 2>&1 || true
           changed_when: true
 

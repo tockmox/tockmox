@@ -87,6 +87,46 @@ class Plist(unittest.TestCase):
 
 
 @unittest.skipIf(jinja2 is None, "jinja2 is not installed")
+class OneShot(unittest.TestCase):
+    """The detached jobs (the firewall's timed rollback, the converge job's reload) are plists
+    bootstrapped into the system domain. `launchctl submit` started nothing visible on macOS 27.0.1."""
+
+    def oneshot(self, **ctx):
+        return plistlib.loads(render("roles/launchd_service/templates/oneshot.plist.j2", **ctx).encode())
+
+    def test_runs_once_at_load_and_never_stays_up(self):
+        d = self.oneshot(oneshot_label="com.tockmox.ai-node.pf-rollback",
+                         oneshot_args=["/bin/sh", "/usr/local/libexec/tockmox-ai-node/pf-rollback.sh", 5],
+                         oneshot_log="/var/db/tockmox-ai-node/pf.log")
+        self.assertEqual(d["Label"], "com.tockmox.ai-node.pf-rollback")
+        self.assertEqual(d["ProgramArguments"], ["/bin/sh", "/usr/local/libexec/tockmox-ai-node/pf-rollback.sh", "5"])
+        self.assertIs(d["RunAtLoad"], True)
+        for k in ("KeepAlive", "StartInterval", "UserName"):
+            self.assertNotIn(k, d)
+        self.assertEqual(d["StandardErrorPath"], "/var/db/tockmox-ai-node/pf.log")
+
+    def test_a_shell_line_survives_as_one_argument(self):
+        line = "sleep 15; launchctl bootout system/x.converge; launchctl bootstrap system /L/x.converge.plist & <ok>"
+        d = self.oneshot(oneshot_label="x.converge-reload", oneshot_args=["/bin/sh", "-c", line])
+        self.assertEqual(d["ProgramArguments"], ["/bin/sh", "-c", line])
+        self.assertNotIn("StandardOutPath", d)
+
+
+class NoSubmit(unittest.TestCase):
+    def test_no_role_uses_launchctl_submit(self):
+        hits = []
+        for root, _, files in os.walk(os.path.join(AI, "roles")):
+            for name in files:
+                path = os.path.join(root, name)
+                with open(path, errors="replace") as f:
+                    for n, line in enumerate(f, 1):
+                        code = line.split("#", 1)[0]
+                        if re.search(r"launchctl\s+submit\b", code):
+                            hits.append("%s:%d" % (os.path.relpath(path, AI), n))
+        self.assertEqual(hits, [], "launchctl submit starts nothing visible on macOS 27; use a one-shot plist")
+
+
+@unittest.skipIf(jinja2 is None, "jinja2 is not installed")
 class Firewall(unittest.TestCase):
     CTX = dict(
         firewall_boot_marker="/var/db/tockmox-ai-node/pf-boot-ok", firewall_sysctl="/usr/sbin/sysctl", firewall_launchctl="/bin/launchctl",
