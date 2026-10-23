@@ -57,6 +57,12 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Changed
 
+- **Every pull request runs `tools/check-all.sh` on Linux.** A new
+  `check-all` workflow runs the whole local suite per pull request and on every
+  push to `main` and `release-*`, so the gates `ci.yaml` has no step for are
+  checked before merge rather than weekly. `portability-macos` stays weekly and
+  on demand. The AI-node render gate now reports skipped, not failed, when the
+  Python it is given cannot import the renderer.
 - **Grafana files the boards in folders.** Tockmox's boards go in `Tockmox`,
   upstream's in `Kubernetes`, anything unannotated stays in General (the
   sidecar's `grafana_folder` annotation). Upgrading moves existing boards with

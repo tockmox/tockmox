@@ -175,9 +175,12 @@ brew install bash
 /opt/homebrew/bin/bash tools/check-capabilities.sh
 ```
 
-CI runs the gates on Linux with bash 5, and `portability-macos.yaml` runs
-`check-all.sh` on a macOS runner (Homebrew bash, BSD `sed`, `grep` and `wc`)
-weekly and on demand, not on pull requests. A gate that passes only with GNU
+Which runs where: `check-all.yaml` runs `check-all.sh` on Linux (bash 5, GNU
+userland) on every pull request and every push to `main` and `release-*`, so
+every gate in it is checked per pull request, including the ones `ci.yaml` has
+no step for. `portability-macos.yaml` runs the same script on a macOS runner
+(Homebrew bash, BSD `sed`, `grep` and `wc`) weekly and on demand, not on pull
+requests. A gate that passes only with GNU
 tools fails there within a week. If you change a gate's shell, run `check-all.sh`
 on a Mac, or say so in the pull request and the maintainer will run
 `portability-macos.yaml` for you: a fork cannot dispatch that workflow here
