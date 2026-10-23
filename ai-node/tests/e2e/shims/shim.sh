@@ -153,8 +153,12 @@ mdutil)
 tmutil) touch "$S/tm-off"; echo 0 > "$S/defaults/_Library_Preferences_com.apple.TimeMachine_AutoBackup" 2>/dev/null; exit 0 ;;
 fdesetup) echo "FileVault is Off."; exit 0 ;;
 sw_vers) case "$1" in -buildVersion) echo 27A5001 ;; -productVersion) echo 27.0 ;; esac; exit 0 ;;
-netstat) printf 'tcp4       0      0  *.22                   *.*                    LISTEN\n'; exit 0 ;;
-lsof) echo 4242; exit 0 ;;
+# macOS 27.0.1, measured 2026-10-22: netstat run under a Python parent (every Ansible task) lists no
+# sockets and exits 0. The stand-in always does that, so a role that reads netstat sees what it would on
+# the Mac. lsof as root sees launchd's sshd on :22; nothing listens on :5900 unless a test says so.
+netstat) exit 0 ;;
+lsof) case "$*" in *TCP:5900*) [ -e "$S/vnc-listening" ] && echo 4343; exit 0 ;; esac
+      echo 4242; exit 0 ;;
 ps) echo /opt/homebrew/bin/ollama; exit 0 ;;
 sshd) exit 0 ;;
 visudo) exit 0 ;;

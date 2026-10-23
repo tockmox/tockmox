@@ -8,12 +8,16 @@
 # is the lockout-prone edit, so it is validated with `sshd -t` before it is put in place, and it is
 # written only when the allowed list provably contains the administrator's account.
 
+# lsof as root, not netstat: on macOS 27.0.1 netstat started under a Python parent (every
+# Ansible task is one) lists no sockets at all and still exits 0, so this read came back empty with
+# sshd listening (first real Mac, 2026-10-22). lsof run as root sees launchd's listener on :22.
 - name: Read whether sshd is listening
+  become: true
   ansible.builtin.shell:
     executable: /bin/bash
     cmd: |
       set -o pipefail
-      /usr/sbin/netstat -an -p tcp | grep -E '[.:]22[[:space:]].*LISTEN' | head -1 || true
+      /usr/sbin/lsof -nP -t -iTCP:22 -sTCP:LISTEN 2>/dev/null | head -1 || true
   register: macos_remote_access_listen
   changed_when: false
   failed_when: false
@@ -32,12 +36,13 @@
 - name: Say when Screen Sharing is wanted but not listening
   when: tn_screen_sharing | bool
   block:
-    - name: Read whether port 5900 is listening
+    - name: Read whether port 5900 is listening (lsof as root; see the port 22 read above)
+      become: true
       ansible.builtin.shell:
         executable: /bin/bash
         cmd: |
           set -o pipefail
-          /usr/sbin/netstat -an -p tcp | grep -E '[.:]5900[[:space:]].*LISTEN' | head -1 || true
+          /usr/sbin/lsof -nP -t -iTCP:5900 -sTCP:LISTEN 2>/dev/null | head -1 || true
       register: macos_remote_access_vnc
       changed_when: false
       failed_when: false

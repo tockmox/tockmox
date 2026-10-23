@@ -3,7 +3,7 @@
 """Model store helper for the model_sync role. Standard library only.
 
   check-hf    <root> <ref> <revision>            fast check of a verified snapshot (exit 0, or 3)
-  verify-hf   <root> <ref> <revision>            hash every file of a snapshot, write the stamp
+  verify-hf   <root> <ref> <revision> [--token-file F]   hash every file of a snapshot, write the stamp
   check-ollama <root> <ref> <digest>             does the stored manifest hash to the pinned digest
   prune       <root> --desired FILE --keep-days N [--ollama BIN --ollama-host H] [--dry-run]
   report      <root> --desired FILE --out FILE   write the models-present table the facts exporter reads
@@ -12,6 +12,12 @@
 A Hugging Face snapshot holds symlinks into ../../blobs/. A blob is named by what it must hash
 to: 64 hex is the SHA-256 of the content (a large LFS file), 40 hex is the git blob SHA-1 (a small
 file). That is what makes a pinned revision checkable without trusting the downloader.
+
+One exception, measured on macOS 27 with hf 2.2.0 (2026-10-22): a file stored with Hugging Face's
+Xet backend is cached under its Xet hash, which is 64 hex but not the SHA-256 of the content and
+cannot be recomputed with the standard library. For such a blob the helper reads the Hub's record
+of the file at the pinned commit (the tree API) and requires both: the blob's name is the Xet hash
+the Hub lists for that path, and the content's SHA-256 is the LFS SHA-256 the Hub lists for it.
 """
 import argparse
 import hashlib
@@ -23,6 +29,8 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.parse
+import urllib.request
 
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -113,8 +121,48 @@ def snapshot_files(snap):
 
 # ---------------------------------------------------------------- hf
 
-def verify_hf(root, ref, revision, log=print):
-    """Hash every file in the snapshot against its blob name. Returns (ok, detail)."""
+def hub_tree(ref, revision, token=None, endpoint=None, timeout=60):
+    """The Hub's record of every file in a model repo at a commit: {path: {size, sha256, xet}}.
+    sha256 is the LFS object id (absent for small files); xet is the Xet hash (absent when the file
+    is not stored with Xet). Follows the API's Link: rel="next" pages."""
+    endpoint = (endpoint or os.environ.get("HF_ENDPOINT") or "https://huggingface.co").rstrip("/")
+    url = "%s/api/models/%s/tree/%s?recursive=true&expand=true" % (
+        endpoint, urllib.parse.quote(ref, safe="/"), urllib.parse.quote(revision, safe=""))
+    headers = {"User-Agent": "tockmox-ai-node-model-sync"}
+    if token:
+        headers["Authorization"] = "Bearer %s" % token
+    out = {}
+    while url:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as r:
+            entries = json.load(r)
+            link = r.headers.get("Link", "") or ""
+        if not isinstance(entries, list):
+            raise ValueError("the Hub's tree answer is not a list")
+        for e in entries:
+            if not isinstance(e, dict) or e.get("type") != "file" or not isinstance(e.get("path"), str):
+                continue
+            lfs = e.get("lfs") if isinstance(e.get("lfs"), dict) else {}
+            out[e["path"]] = {"size": e.get("size"), "sha256": lfs.get("oid"), "xet": e.get("xetHash")}
+        m = re.search(r'<([^>]+)>\s*;\s*rel="next"', link)
+        url = m.group(1) if m else None
+    return out
+
+
+def read_token(path):
+    if not path:
+        return None
+    try:
+        with open(path) as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def verify_hf(root, ref, revision, log=print, token=None, fetch_tree=hub_tree):
+    """Hash every file in the snapshot against its blob name. Returns (ok, detail).
+    A 64-hex blob whose content does not hash to its name is accepted only as a Xet-named blob:
+    the Hub's record at this commit must give that name as the file's Xet hash and the content's
+    SHA-256 as its LFS SHA-256."""
     if not HEX40.match(revision):
         return False, "revision is not a 40-hex commit"
     snap = snapshot_dir(root, ref, revision)
@@ -125,6 +173,7 @@ def verify_hf(root, ref, revision, log=print):
         return False, "the snapshot is empty"
     manifest = {}
     total = 0
+    tree = None
     for rel, full in files:
         if not os.path.exists(full):
             return False, "%s is a dangling link" % rel
@@ -135,11 +184,24 @@ def verify_hf(root, ref, revision, log=print):
             got = git_blob_sha1(full)
         else:
             return False, "%s points at %s, which is not named by a hash" % (rel, blob)
-        if got != blob:
-            return False, "%s hashes to %s but its blob is named %s" % (rel, got, blob)
         size = os.path.getsize(full)
+        named_by = "sha256" if HEX64.match(blob) else "git-sha1"
+        if got != blob:
+            if not HEX64.match(blob):
+                return False, "%s hashes to %s but its blob is named %s" % (rel, got, blob)
+            if tree is None:
+                try:
+                    tree = fetch_tree(ref, revision, token=token)
+                except (OSError, ValueError) as e:
+                    return False, ("%s hashes to %s but its blob is named %s, and the Hub's record of the file "
+                                   "at %s could not be read to check a Xet name: %s" % (rel, got, blob, revision, e))
+            rec = tree.get(rel) or {}
+            if rec.get("xet") != blob or rec.get("sha256") != got or rec.get("size") not in (None, size):
+                return False, ("%s hashes to %s but its blob is named %s; the Hub lists sha256 %s, xet %s, size %s "
+                               "for it at %s" % (rel, got, blob, rec.get("sha256"), rec.get("xet"), rec.get("size"), revision))
+            named_by = "xet"
         total += size
-        manifest[rel] = {"size": size, "blob": blob}
+        manifest[rel] = {"size": size, "blob": blob, "named_by": named_by}
     stamp = stamp_path(root, ref, revision)
     os.makedirs(os.path.dirname(stamp), exist_ok=True)
     tmp = stamp + ".tmp"
@@ -375,6 +437,8 @@ def main(argv=None):
         s.add_argument("root")
         s.add_argument("ref")
         s.add_argument("revision")
+        if name == "verify-hf":
+            s.add_argument("--token-file", default="")
     s = sub.add_parser("check-ollama")
     s.add_argument("root")
     s.add_argument("ref")
@@ -404,7 +468,7 @@ def main(argv=None):
         print(msg)
         return 0 if ok else 3
     if a.cmd == "verify-hf":
-        ok, msg = verify_hf(a.root, a.ref, a.revision)
+        ok, msg = verify_hf(a.root, a.ref, a.revision, token=read_token(a.token_file))
         print(msg)
         return 0 if ok else 3
     if a.cmd == "check-ollama":

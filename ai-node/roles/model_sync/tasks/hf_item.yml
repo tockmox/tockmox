@@ -55,6 +55,10 @@
           - "{{ tn_root }}"
           - "{{ model_sync_item.artifact.ref }}"
           - "{{ model_sync_item.artifact.revision }}"
+          - --token-file
+          - "{{ model_sync_hf_token_file }}"
+      environment:
+        HF_HUB_DISABLE_TELEMETRY: "1"
       register: model_sync_hf_verify
       changed_when: false
 

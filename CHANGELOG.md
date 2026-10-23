@@ -39,6 +39,18 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **AI nodes: Remote Login is detected on macOS 27.** The check read `netstat`,
+  which lists no sockets at all when started from an Ansible task on macOS
+  27.0.1, so every converge failed with "nothing is listening on port 22" and
+  the readiness fact `remote_login` read 0 on a node that was listening. It now
+  asks `lsof` as root.
+- **AI nodes: models stored with Hugging Face's Xet backend verify.** `hf`
+  names a Xet-backed file's cache blob by its Xet hash, not its SHA-256, so the
+  helper refused correct downloads. For such a blob it now reads the Hub's record
+  of the file at the pinned commit and requires the blob's name to be the listed
+  Xet hash and the content's SHA-256 to be the listed LFS SHA-256; an unreachable
+  Hub refuses rather than trusts. Gated repositories need the `hf-token` secret
+  for this check as for the download.
 - **AI nodes: the firewall's timed rollback and the converge job's self-reload work
   on macOS 27.** Both were started with `launchctl submit`, which on macOS 27.0.1
   returns 0 and starts nothing `launchctl` can see, so the first converge on a

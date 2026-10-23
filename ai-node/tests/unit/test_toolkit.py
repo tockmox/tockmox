@@ -99,6 +99,11 @@ class Filters(unittest.TestCase):
         del used
 
 
+def xet_name(data):
+    """A stand-in Xet hash: 64 hex that is not the SHA-256 of the content."""
+    return hashlib.sha256(b"xet:" + data).hexdigest()
+
+
 def make_hf(root, ref, revision, files, name_by="sha256"):
     """Build a cache snapshot: blobs named by their hash, snapshot entries linking to them."""
     repo = os.path.join(M.hub_dir(root), M.repo_dirname(ref))
@@ -108,6 +113,8 @@ def make_hf(root, ref, revision, files, name_by="sha256"):
     for rel, data in files.items():
         if name_by == "sha1":
             h = hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+        elif name_by == "xet":
+            h = xet_name(data)
         else:
             h = hashlib.sha256(data).hexdigest()
         blob = os.path.join(repo, "blobs", h)
@@ -145,6 +152,62 @@ class ModelSync(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("hashes to", detail)
         self.assertFalse(os.path.exists(M.stamp_path(self.root, "org/m", REV)), "a failed model must not be stamped")
+
+    def hub(self, files, **over):
+        tree = {rel: {"size": len(d), "sha256": hashlib.sha256(d).hexdigest(), "xet": xet_name(d)} for rel, d in files.items()}
+        for rel, rec in over.items():
+            tree[rel].update(rec)
+        calls = []
+
+        def fetch(ref, revision, token=None):
+            calls.append((ref, revision, token))
+            return tree
+        return fetch, calls
+
+    def test_verify_accepts_a_xet_named_blob_the_hub_vouches_for(self):
+        files = {"model.safetensors": b"weights", "config.json": b"{}"}
+        make_hf(self.root, "org/m", REV, {"model.safetensors": files["model.safetensors"]}, name_by="xet")
+        make_hf(self.root, "org/m", REV, {"config.json": files["config.json"]}, name_by="sha1")
+        fetch, calls = self.hub(files)
+        ok, detail = M.verify_hf(self.root, "org/m", REV, fetch_tree=fetch, token="t")
+        self.assertTrue(ok, detail)
+        self.assertEqual(calls, [("org/m", REV, "t")], "the Hub is read once, at the pinned commit")
+        self.assertTrue(M.check_hf(self.root, "org/m", REV)[0])
+
+    def test_a_sha256_named_snapshot_never_asks_the_hub(self):
+        make_hf(self.root, "org/m", REV, {"model.safetensors": b"weights"})
+        fetch, calls = self.hub({"model.safetensors": b"weights"})
+        self.assertTrue(M.verify_hf(self.root, "org/m", REV, fetch_tree=fetch)[0])
+        self.assertEqual(calls, [])
+
+    def test_a_tampered_xet_named_blob_is_refused(self):
+        snap = make_hf(self.root, "org/m", REV, {"model.safetensors": b"weights"}, name_by="xet")
+        with open(os.path.realpath(os.path.join(snap, "model.safetensors")), "wb") as f:
+            f.write(b"poisond")
+        fetch, _ = self.hub({"model.safetensors": b"weights"})
+        ok, detail = M.verify_hf(self.root, "org/m", REV, fetch_tree=fetch)
+        self.assertFalse(ok)
+        self.assertIn("the Hub lists sha256", detail)
+        self.assertFalse(os.path.exists(M.stamp_path(self.root, "org/m", REV)))
+
+    def test_a_blob_named_by_some_other_hash_is_refused(self):
+        make_hf(self.root, "org/m", REV, {"model.safetensors": b"weights"}, name_by="xet")
+        fetch, _ = self.hub({"model.safetensors": b"weights"}, **{"model.safetensors": {"xet": "0" * 64}})
+        self.assertFalse(M.verify_hf(self.root, "org/m", REV, fetch_tree=fetch)[0])
+
+    def test_a_file_the_hub_does_not_list_is_refused(self):
+        make_hf(self.root, "org/m", REV, {"model.safetensors": b"weights"}, name_by="xet")
+        fetch, _ = self.hub({"other.safetensors": b"x"})
+        self.assertFalse(M.verify_hf(self.root, "org/m", REV, fetch_tree=fetch)[0])
+
+    def test_an_unreachable_hub_refuses_rather_than_trusts(self):
+        make_hf(self.root, "org/m", REV, {"model.safetensors": b"weights"}, name_by="xet")
+
+        def down(ref, revision, token=None):
+            raise OSError("no route to host")
+        ok, detail = M.verify_hf(self.root, "org/m", REV, fetch_tree=down)
+        self.assertFalse(ok)
+        self.assertIn("could not be read", detail)
 
     def test_verify_refuses_a_branch_name_and_a_missing_snapshot(self):
         self.assertFalse(M.verify_hf(self.root, "org/m", "main")[0])

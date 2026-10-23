@@ -112,6 +112,19 @@ class OneShot(unittest.TestCase):
         self.assertNotIn("StandardOutPath", d)
 
 
+class NoBlindProbe(unittest.TestCase):
+    def test_no_role_reads_netstat(self):
+        hits = []
+        for root, _, files in os.walk(os.path.join(AI, "roles")):
+            for name in files:
+                path = os.path.join(root, name)
+                with open(path, errors="replace") as f:
+                    for n, line in enumerate(f, 1):
+                        if re.search(r"\bnetstat\b", line.split("#", 1)[0]):
+                            hits.append("%s:%d" % (os.path.relpath(path, AI), n))
+        self.assertEqual(hits, [], "netstat lists no sockets under a Python parent on macOS 27; use lsof as root")
+
+
 class NoSubmit(unittest.TestCase):
     def test_no_role_uses_launchctl_submit(self):
         hits = []
