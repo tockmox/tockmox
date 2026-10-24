@@ -99,9 +99,9 @@
     },
     {
       "name": "ghcr.io/berriai/litellm-database",
-      "purl": "pkg:oci/litellm-database?repository_url=ghcr.io/berriai/litellm-database&tag=1.106.2",
+      "purl": "pkg:oci/litellm-database?repository_url=ghcr.io/berriai/litellm-database&tag=1.106.3",
       "type": "container",
-      "version": "1.106.2"
+      "version": "1.106.3"
     },
     {
       "name": "ghcr.io/cloudnative-pg/cloudnative-pg",
@@ -275,9 +275,9 @@
     {
       "description": "Helm chart dependency of tockmox-ai",
       "name": "litellm-helm",
-      "purl": "pkg:generic/helm/litellm-helm@1.106.2",
+      "purl": "pkg:generic/helm/litellm-helm@1.106.3",
       "type": "application",
-      "version": "1.106.2"
+      "version": "1.106.3"
     },
     {
       "description": "Helm chart dependency of tockmox-crds",
