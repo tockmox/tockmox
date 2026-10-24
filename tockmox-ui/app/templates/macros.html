@@ -11,12 +11,13 @@
 {%- endif -%}
 {%- endmacro %}
 
+{# One state vocabulary across every page (UI standard §2). #}
 {% macro state_word(state) -%}
-{{ {"ok": "Healthy", "warning": "Needs a look", "critical": "Problem", "unknown": "Unknown"}.get(state, "Unknown") }}
+{{ {"ok": "OK", "warning": "Warning", "critical": "Problem", "unknown": "Unknown"}.get(state, "Unknown") }}
 {%- endmacro %}
 
-{% macro badge(state, word=None) -%}
-<span class="badge st-{{ state }}">{{ state_icon(state) }}<span>{{ word or state_word(state) }}</span></span>
+{% macro badge(state, word=None, lg=false) -%}
+<span class="badge st-{{ state }}{% if lg %} lg{% endif %}">{{ state_icon(state) }}<span>{{ word or state_word(state) }}</span></span>
 {%- endmacro %}
 
 {% macro argo_badge(value, kind) -%}
@@ -45,8 +46,50 @@
 </svg>
 {%- endmacro %}
 
+{# Source line: state, source name, reason, and how long since it last answered. One format everywhere. #}
 {% macro source_line(r) -%}
 <span class="src">{{ badge(r.state) }} <span class="src-name">{{ r.source }}</span>
 {%- if r.reason %}<span class="muted">: {{ r.reason }}</span>{% endif -%}
-<span class="muted age"> (last answered {{ r.age_text() }})</span></span>
+<span class="muted age"> · last answered {{ r.age_text() }}</span></span>
+{%- endmacro %}
+
+{# The problems table: exceptions first, each row linking to its page. Rows come from views.problems(). #}
+{% macro problems_table(rows, caption=None) -%}
+<div class="table-wrap" role="region" aria-label="{{ caption or 'Problems' }}" tabindex="0">
+<table class="problems">
+  {% if caption %}<caption>{{ caption }}</caption>{% endif %}
+  <thead><tr><th scope="col">State</th><th scope="col">What</th><th scope="col">Detail</th><th scope="col">Since</th><th scope="col"><span class="visually-hidden">Action</span></th></tr></thead>
+  <tbody>
+  {% for p in rows %}
+    <tr>
+      <td>{{ badge(p.state) }}</td>
+      <th scope="row">{% if p.href %}<a href="{{ p.href }}">{{ p.what }}</a>{% else %}{{ p.what }}{% endif %} <span class="muted small">{{ p.kind }}</span></th>
+      <td>{{ p.detail }}</td>
+      <td class="num muted">{{ p.since or "–" }}</td>
+      <td class="num">{% if p.action %}<a href="{{ p.action_href }}" class="small">{{ p.action }}<span class="visually-hidden"> {{ p.what }}</span></a>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{%- endmacro %}
+
+{# App tiles: icon, name, one line. The URL is the link; it is not printed under it. #}
+{% macro app_tiles(items, site) -%}
+<ul class="apps">
+  {% for a in items %}
+  <li>
+    <a class="app" href="/{{ a.id }}/" rel="noopener" target="_blank" title="{{ site.domain and ('tockmox.' ~ site.domain ~ '/' ~ a.id) or ('/' ~ a.id) }}">
+      {{ app_icon(a.icon) }}
+      <span class="app-text"><span class="app-name">{{ a.name }}<span class="visually-hidden"> (opens in a new tab)</span></span>
+      {% if a.description %}<span class="app-desc">{{ a.description }}</span>{% endif %}</span>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{%- endmacro %}
+
+{# A healthy group folded to one row: badge, title, source line, chevron. The body is the detail. #}
+{% macro fold_summary(state, word, title, reading=None) -%}
+<summary>{{ badge(state, word) }}<span class="fold-title">{{ title }}</span>{% if reading %}<span class="src"><span class="src-name">{{ reading.source }}</span>{% if reading.reason %}<span class="muted">: {{ reading.reason }}</span>{% endif %}<span class="muted age"> · last answered {{ reading.age_text() }}</span></span>{% else %}<span></span>{% endif %}<span class="chev" aria-hidden="true"></span></summary>
 {%- endmacro %}
