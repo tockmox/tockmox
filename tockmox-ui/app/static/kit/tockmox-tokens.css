@@ -1,0 +1,102 @@
+/*
+ * Tockmox brand design tokens v2.1 (2026-10-23: adds --tx-font-ui)
+ * Canonical source: the Tockmox brand kit. Copied here so the UI renders with no network.
+ * All accent-on-dark pairs verified WCAG AA or better against --tx-bg.
+ *
+ * Fonts (all SIL Open Font License, self-hosted beside the kit in fonts/, never fetched at runtime):
+ *   ui:       Source Sans 3 (400/600/700), every app surface
+ *   mono:     JetBrains Mono (400)
+ *   display:  Inknut Antiqua is the wordmark face only; it is outlined in the lockup SVG, so no
+ *             app loads it. --tx-font-display and --tx-font-body stay for documents and decks.
+ */
+
+:root {
+  /* ---- core neutrals (steel ramp, slight green-cool cast) ---- */
+  --tx-black-950: #0A0D0B;   /* Void ... page background, dark UI */
+  --tx-black-900: #111512;   /* Matte ... surface */
+  --tx-steel-800: #1C2220;   /* raised surface, cards */
+  --tx-steel-700: #2A312E;   /* borders, dividers */
+  --tx-steel-500: #56605B;   /* disabled, faint */
+  --tx-steel-300: #9AA5A0;   /* secondary text on dark (7.7:1 on Void) */
+  --tx-steel-100: #E4E9E6;   /* primary text on dark (15.9:1 on Void); the wordmark on dark */
+
+  /* ---- ink (v2): wordmark and display text on light ---- */
+  --tx-ink-900:   #16110D;   /* 17.3:1 on Parchment */
+
+  /* ---- emerald (primary accent: action, life, "on") ---- */
+  --tx-emerald-700: #1E7A33; /* pressed; also emerald-on-light */
+  --tx-emerald-600: #27993F;
+  --tx-emerald-500: #2FB44A; /* primary accent */
+  --tx-emerald-400: #4ED36A; /* hover, glow cores */
+  --tx-emerald-300: #7FE596; /* accent text on dark */
+
+  /* ---- copper / brass (secondary accent: craft, machinery, trim) ---- */
+  --tx-copper-700: #8A6526;  /* copper-on-light */
+  --tx-copper-600: #9C742E;
+  --tx-copper-500: #B98A45;  /* trim, rules, seals */
+  --tx-copper-400: #D2A968;  /* copper text on dark */
+  --tx-copper-300: #E3C792;  /* bright trim, thin rings */
+
+  /* ---- ember orange (energy, warmth, sparing CTAs) ---- */
+  --tx-ember-600: #C2511F;   /* ember-on-light */
+  --tx-ember-500: #E0662B;
+  --tx-ember-400: #F0833F;   /* ember accents on dark */
+  --tx-ember-300: #F7A468;
+
+  /* ---- semantic ---- */
+  --tx-success:   var(--tx-emerald-400);
+  --tx-warning:   var(--tx-ember-400);
+  --tx-error:     #F0716E;   /* 6.8:1 on Void */
+  --tx-error-strong: #E5484D;
+  --tx-info:      #6FB3DD;   /* 8.5:1 on Void */
+
+  /* ---- dark theme semantic aliases (default) ---- */
+  --tx-bg:            var(--tx-black-950);
+  --tx-surface:       var(--tx-black-900);
+  --tx-surface-raised: var(--tx-steel-800);
+  --tx-border:        var(--tx-steel-700);
+  --tx-text:          var(--tx-steel-100);
+  --tx-text-muted:    var(--tx-steel-300);
+  --tx-text-display:  var(--tx-steel-100);
+  --tx-accent:        var(--tx-emerald-500);
+  --tx-accent-hover:  var(--tx-emerald-400);
+  --tx-accent-text:   var(--tx-emerald-300);
+  --tx-trim:          var(--tx-copper-500);
+
+  /* Buttons: filled emerald buttons use DARK text, never white
+     (white on emerald-600 is only 3.7:1; Void on emerald-500 is 7.2:1). */
+  --tx-btn-bg:   var(--tx-emerald-500);
+  --tx-btn-text: var(--tx-black-950);
+
+  /* ---- type ---- */
+  --tx-font-display: 'Inknut Antiqua', Georgia, serif;
+  --tx-font-body:    'Nunito Sans', system-ui, sans-serif;
+  --tx-font-ui:      'Source Sans 3', 'Segoe UI', system-ui, sans-serif;   /* v2.1 (2026-10-23): every app surface; display stays in the lockup */
+  --tx-font-mono:    'JetBrains Mono', ui-monospace, monospace;
+
+  /* ---- shape & effects ---- */
+  --tx-radius-sm: 4px;
+  --tx-radius-md: 8px;
+  --tx-radius-lg: 14px;
+  --tx-chamfer: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px); /* clip-path for chamfered panels */
+  --tx-glow-emerald: 0 0 12px rgba(78, 211, 106, 0.35);
+  --tx-glow-ember:   0 0 12px rgba(240, 131, 63, 0.35);
+  --tx-shadow-raise: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+/* ---- light theme (documents, print; dark is the product default) ---- */
+[data-theme="light"], .tx-light {
+  --tx-bg:            #F7F6F2;  /* warm parchment white */
+  --tx-surface:       #FFFFFF;
+  --tx-surface-raised:#FFFFFF;
+  --tx-border:        #D8D6CE;
+  --tx-text:          #1A1E1B;  /* 15.6:1 on bg */
+  --tx-text-display:  var(--tx-ink-900);
+  --tx-text-muted:    #56605B;
+  --tx-accent:        var(--tx-emerald-700);  /* 5.4:1 on white */
+  --tx-accent-hover:  var(--tx-emerald-600);
+  --tx-accent-text:   var(--tx-emerald-700);
+  --tx-trim:          var(--tx-copper-700);   /* 5.3:1 on white */
+  --tx-btn-bg:        var(--tx-emerald-700);
+  --tx-btn-text:      #FFFFFF;
+}

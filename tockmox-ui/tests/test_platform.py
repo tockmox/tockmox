@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Platform Management (DESIGN-2026-10-23-platform-management.md): the operations team, read-only."""
+import calendar
 import os
 import time
+import types
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -136,13 +138,28 @@ def test_nothing_answers_reads_unknown_never_healthy(world):
     assert "Not connected" in t and "not the same as nothing waiting" in t
 
 
-def test_healthy_world_is_ok_and_says_what_is_not_started(world):
+# The same scenario with the page's clock pinned, including just after the top of an hour (TM-1134). The page
+# reads its clock through app.platform's `time`, so pinning is one monkeypatch on that module; nothing else in
+# the process sees it. The fixture below is staged from the SAME instant the page reads, so the scenario cannot
+# straddle an hour boundary between the test's clock and the page's, which a module-level NOW read at import
+# time and a page clock read a request later could.
+HEARTBEAT_CLOCKS = [
+    pytest.param(None, id="clock-at-import"),
+    pytest.param(calendar.timegm((2026, 10, 24, 4, 0, 8)), id="hh-00-08"),
+    pytest.param(calendar.timegm((2026, 10, 24, 4, 0, 29)), id="hh-00-29"),
+]
+
+
+@pytest.mark.parametrize("pinned", HEARTBEAT_CLOCKS)
+def test_healthy_world_is_ok_and_says_what_is_not_started(world, monkeypatch, pinned):
+    now = NOW if pinned is None else pinned
+    monkeypatch.setattr(pm, "time", types.SimpleNamespace(time=lambda: now))
     healthy_signals(world)
     hour = 3600
-    prev = Cron("0 * * * *").prev_before(NOW)
-    # Never stage the success after the test's own clock: at hh:00:08, prev + 30 is in the future and the
-    # job reads as not yet succeeded, so this test failed in the first 30 s of every hour (TM-1134).
-    ok = max(prev, min(prev + 30, NOW - 1))
+    prev = Cron("0 * * * *").prev_before(now)
+    # Never stage the success after the clock the page reads: at hh:00:08, prev + 30 is 22 s in the future
+    # (TM-1134). The clamp keeps the staged job's times at or before `now` at every second of the hour.
+    ok = max(prev, min(prev + 30, now - 1))
     add_cronjob(world, "tockmox-selfcheck", "tockmox-heartbeat", "0 * * * *", last_run=prev, last_ok=ok, nxt=prev + hour)
     c, app, s = client_for(world, doc_with_platform(), cronworkflows=[])
     login_as(c, s, ["tockmox-admins"])

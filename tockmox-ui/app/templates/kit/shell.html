@@ -1,0 +1,31 @@
+{#- tockmox-ui-kit shell: top bar (lockup, site name, account), an underline tab row for the sections,
+    main, footer. An app's base template extends this and fills the blocks.
+    Context it reads: kit_static (URL prefix the kit's static/ is served under, e.g. "/static/kit"),
+    asset_v (cache-busting token, may be empty), site_name (may be empty), home_href (default "/").
+    Blocks: title, head (favicon, the app's own stylesheet), brand, site, nav, who, main, foot. -#}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{% endblock %} · Tockmox</title>
+<link rel="stylesheet" href="{{ kit_static }}/tockmox-tokens.css{% if asset_v %}?v={{ asset_v }}{% endif %}">
+<link rel="stylesheet" href="{{ kit_static }}/kit.css{% if asset_v %}?v={{ asset_v }}{% endif %}">
+{% block head %}{% endblock %}
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+  <div class="top-inner">
+    {% block brand %}<a class="brand" href="{{ home_href or '/' }}">Tockmox</a>{% endblock %}
+    {% block site %}{% if site_name %}<span class="site-name"><strong>{{ site_name }}</strong></span>{% endif %}{% endblock %}
+    {% block nav %}{% endblock %}
+    {% block who %}{% endblock %}
+  </div>
+</header>
+<main id="main" tabindex="-1">
+{% block main %}{% endblock %}
+</main>
+{% block foot %}{% endblock %}
+</body>
+</html>

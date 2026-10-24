@@ -1,20 +1,14 @@
-{% from "macros.html" import badge, state_icon %}<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}{{ site.site_name }}{% endblock %} · Tockmox</title>
+{% extends "kit/shell.html" %}
+{#- The shell (top bar, tab row, main, footer frame) and its stylesheets come from the vendored kit;
+    this template fills the Tockmox UI's blocks. -#}
+{% block title %}{{ site.site_name }}{% endblock %}
+{% block head %}
 <link rel="icon" href="/static/brand/tockmox-favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/static/brand/tockmox-tokens.css?v={{ asset_v }}">
 <link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
-</head>
-<body>
-<a class="skip" href="#main">Skip to content</a>
-<header class="top">
-  <div class="top-inner">
-    <a class="brand" href="/"><img src="/static/brand/tockmox-lockup-horizontal-white.svg" alt="Tockmox home" width="144" height="36" class="logo-dark"><img src="/static/brand/tockmox-lockup-horizontal-ink.svg" alt="Tockmox home" width="144" height="36" class="logo-light"></a>
-    <span class="site-name"><strong>{{ site.site_name }}</strong></span>
-    {% if user %}
+{% endblock %}
+{% block brand %}<a class="brand" href="/"><img src="/static/brand/tockmox-lockup-horizontal-white.svg" alt="Tockmox home" width="144" height="36" class="logo-dark"><img src="/static/brand/tockmox-lockup-horizontal-ink.svg" alt="Tockmox home" width="144" height="36" class="logo-light"></a>{% endblock %}
+{% block site %}<span class="site-name"><strong>{{ site.site_name }}</strong></span>{% endblock %}
+{% block nav %}{% if user %}
     <nav aria-label="Main">
       <ul class="nav">
         <li><a href="/" {% if path == "/" %}aria-current="page"{% endif %}>Home</a></li>
@@ -31,16 +25,14 @@
         {% endfor %}
       </ul>
     </nav>
+{% endif %}{% endblock %}
+{% block who %}{% if user %}
     <div class="who">
       <span class="who-name">{{ user.name }}{% if user.is_admin %} <span class="role">admin</span>{% endif %}</span>
       <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ user.csrf }}"><button class="btn-ghost" type="submit">Sign out</button></form>
     </div>
-    {% endif %}
-  </div>
-</header>
-<main id="main" tabindex="-1">
-{% block main %}{% endblock %}
-</main>
+{% endif %}{% endblock %}
+{% block foot %}
 <footer class="foot">
   <p>{{ site.site_name }} ·
     {%- if footer and footer.state == "single" %} Tockmox {{ footer.version }}
@@ -53,5 +45,4 @@
     · <a href="{{ docs_repo_link }}" rel="noopener">Docs on GitHub</a>
     · <a href="/recovery">If something is down</a></p>
 </footer>
-</body>
-</html>
+{% endblock %}

@@ -28,9 +28,11 @@ def test_stylesheets_carry_a_version_and_static_revalidates(tmp_path, world):
     t = c.get("/").text
     m = re.search(r'href="/static/app\.css\?v=([0-9a-f]{10})"', t)
     assert m, "app.css is linked without a version"
-    assert f'href="/static/brand/tockmox-tokens.css?v={m.group(1)}"' in t
-    r = c.get("/static/app.css")
-    assert r.status_code == 200 and r.headers.get("cache-control") == "no-cache"
+    assert f'href="/static/kit/tockmox-tokens.css?v={m.group(1)}"' in t
+    assert f'href="/static/kit/kit.css?v={m.group(1)}"' in t
+    for css in ("/static/app.css", "/static/kit/kit.css", "/static/kit/fonts/source-sans-3-latin-400-normal.woff2"):
+        r = c.get(css)
+        assert r.status_code == 200 and r.headers.get("cache-control") == "no-cache", css
     assert c.get("/").headers.get("cache-control") == "no-store"
 
 

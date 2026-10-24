@@ -1,12 +1,13 @@
 /*
- * Tockmox brand design tokens v2.0
+ * Tockmox brand design tokens v2.1 (2026-10-23: adds --tx-font-ui)
  * Canonical source: the Tockmox brand kit. Copied here so the UI renders with no network.
  * All accent-on-dark pairs verified WCAG AA or better against --tx-bg.
  *
- * Fonts (all SIL Open Font License, self-hosted in static/brand/fonts/, never fetched at runtime):
- *   display:  Inknut Antiqua (700)
- *   body/ui:  Nunito Sans (400/700)
+ * Fonts (all SIL Open Font License, self-hosted beside the kit in fonts/, never fetched at runtime):
+ *   ui:       Source Sans 3 (400/600/700), every app surface
  *   mono:     JetBrains Mono (400)
+ *   display:  Inknut Antiqua is the wordmark face only; it is outlined in the lockup SVG, so no
+ *             app loads it. --tx-font-display and --tx-font-body stay for documents and decks.
  */
 
 :root {

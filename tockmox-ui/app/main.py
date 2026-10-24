@@ -94,7 +94,7 @@ def _asset_version(static_dir: str) -> str:
     """A short hash of the stylesheets, appended to their URLs as ?v=, so a new image is a new URL."""
     import hashlib
     h = hashlib.sha256()
-    for rel in ("app.css", "brand/tockmox-tokens.css"):
+    for rel in ("app.css", "kit/kit.css", "kit/tockmox-tokens.css"):
         try:
             with open(os.path.join(static_dir, rel), "rb") as f:
                 h.update(f.read())
@@ -272,7 +272,7 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         ctx.update(request=request, user=u, site=s, tabs=tabs_for(u) if u else [],
                    platform_on=bool(s.feature("platform") and s.feature("platform").enabled),
                    app_version=APP_VERSION, path=request.url.path, verdict_text=VERDICT_TEXT,
-                   footer=footer_version(u), asset_v=asset_v,
+                   footer=footer_version(u), asset_v=asset_v, kit_static="/static/kit",
                    # signed out, the footer links main: no source is read for an anonymous page
                    docs_repo_link=docs_repo_link() if u else f"{s.docs_repo_url}/tree/main/docs")
         return tpl.TemplateResponse(request, name, ctx, status_code=status_code)
