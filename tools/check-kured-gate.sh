@@ -29,7 +29,7 @@
 #
 # EXIT 2 is skipped, not passed, as everywhere in this directory.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 # shellcheck source=tools/lib/tool-runs.sh
 . tools/lib/tool-runs.sh
 

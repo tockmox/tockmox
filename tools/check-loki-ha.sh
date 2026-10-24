@@ -22,7 +22,7 @@
 # That needs a lab run; this gate proves the documented values are a shape the
 # chart will render, and that the shape the docs warn against is still refused.
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 # Probed before --selftest too: without helm or PyYAML every run below exits 2,
 # and the selftest would read that as the unmutated file going red.
 command -v helm >/dev/null 2>&1 || { echo "check-loki-ha: helm not on PATH" >&2; exit 2; }
@@ -33,7 +33,8 @@ if [ "${1:-}" = "--selftest" ]; then
   st="$(mktemp -d "${TMPDIR:-/tmp}/loki-ha-st.XXXXXX")"; trap 'rm -rf "$st"' EXIT
   rc=0
   run() { LOKI_HA_VALUES="$1" bash tools/check-loki-ha.sh >"$st/out" 2>&1; }
-  run ci/values-loki-ha.yaml && echo "  ok   unmutated values: green" || { echo "  FAIL unmutated values should be green"; cat "$st/out"; rc=1; }
+  if run ci/values-loki-ha.yaml; then echo "  ok   unmutated values: green"
+  else echo "  FAIL unmutated values should be green"; cat "$st/out"; rc=1; fi
   mutate() { # name, python expression over d
     python3 -I - "$1" "$2" "$st/m.yaml" <<'PY'
 import sys, yaml
