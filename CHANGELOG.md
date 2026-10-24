@@ -81,6 +81,25 @@ costs you, with the reasoning in the documentation rather than here.
   A site can replace the catalog (`tockmoxUi.platformCatalog.configMap`) and
   connect an agent ledger (`ledgerUrl`, `secrets.platformLedgerToken`). Tockmox
   still ships no agent. See `docs/administration/platform-management.md`.
+- **The kured reboot gate has a printed answer and a check.**
+  `docs/operations/monitoring.md` gives the `alertFilterRegexp` to use, built
+  from one `block` or `pass` decision per alert Tockmox authors
+  (`tools/kured-gate.txt`). `tools/check-kured-gate.sh` fails the build when an
+  alert has no decision, when a decision names an alert that is gone, or when the
+  printed regexp drifts. Defaults are unchanged: the gate stays off until a site
+  sets `prometheusUrl` and the regexp.
+- **Two CloudNativePG alerts.** `TockmoxCNPGInstancesNotReady` fires when a
+  cluster has fewer ready instances than it asks for, including when none is
+  ready. `TockmoxCNPGScrapeTargetAbsent` fires when a cluster exists and has
+  no Prometheus scrape target. A hibernated cluster fires the first.
+  kube-state-metrics gains `tockmox_cnpg_cluster_desired_instances`. The first
+  is a `block` in the kured reboot gate.
+- **Loki's single replica is documented, with a way past it.** Loki stays one
+  pod on a local volume by default, and the Loki chart already refuses a second
+  replica on the filesystem. `ci/values-loki-ha.yaml` is three replicas on an
+  object store such as the shipped Garage, and `tools/check-loki-ha.sh` renders
+  it. No lab run has shown it surviving a node loss yet. See
+  `docs/operations/monitoring.md`.
 
 ### Changed
 

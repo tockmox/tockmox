@@ -629,6 +629,21 @@ kube-prometheus-stack:
                     type: Gauge
                     gauge:
                       path: [status, readyInstances]
+                # The DESIRED count, beside the ready count above. A CNPG Cluster
+                # is neither a StatefulSet nor a Deployment (the operator manages
+                # the instance Pods itself), so KubeStatefulSetReplicasMismatch
+                # cannot see a Postgres instance that is down, and ready alone
+                # cannot say "short" without knowing how many were wanted.
+                # `spec.instances` is required by the CRD (default 1). The ready
+                # count is `status.readyInstances`, which the CRD does not
+                # require: when no instance is ready it may be absent, and the
+                # TockmoxCNPGInstancesNotReady rule handles that case on purpose.
+                - name: cluster_desired_instances
+                  help: "CNPG Cluster spec.instances"
+                  each:
+                    type: Gauge
+                    gauge:
+                      path: [spec, instances]
                 # ADDED 2026-09-16 (TM-0659). The rc4 Phase E soak found a site
                 # app's database with ContinuousArchiving=False and a failed
                 # nightly backup for thirteen hours, and NOTHING could alert on

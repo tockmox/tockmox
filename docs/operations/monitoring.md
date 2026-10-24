@@ -144,6 +144,7 @@ reasoning lives as comments beside its expression:
 | Console key | `TockmoxConsoleKeyRejected`: the newest run of the console-key check was answered 401 or 403 by the model gateway and no later run passed. The uptime probe carries no key and cannot see this; the restore drill's newest-failure-against-newest-success shape, so one passing run clears it. A gateway that does not answer is left out by the Job's failure reason. What to do: [ai-plane](../usage/ai-plane.md#when-the-gateway-rejects-the-consoles-key) | `tockmox-ai`, beside the check |
 | Failed Jobs | `KubeJobFailed` is upstream's rule (warning, a failed Job that still exists after 15 minutes), re-shipped with the console-key check's Jobs left out: that check keeps 24 failed Jobs on purpose, so the owning alert can read the newest rejection, and the upstream rule fired one copy per kept Job beside it (five at once on the lab). Every other Job's failure fires it as before. `defaultRules.disabled.KubeJobFailed` is the switch; false brings the upstream copy back, never both | `tockmox-observability` (`templates/kube-job-failed.yaml`) |
 | WAL archiving | `TockmoxWalArchiveBacklog`: WAL segments waiting to be archived, more than 3 for 15 minutes. The one CNPG backup metric that still reports under the barman-cloud plugin; the last-backup-age metrics read 0 there and would fire forever | `tockmox-ai`, beside the database |
+| CNPG instances and scrape targets | `TockmoxCNPGInstancesNotReady`: fewer ready instances than the Cluster asks for, 15 minutes, including the case where no instance is ready and the ready count is absent. Kubernetes' replica-mismatch alerts cannot see a CloudNativePG cluster, because the operator manages the instance Pods itself. `TockmoxCNPGScrapeTargetAbsent`: a Cluster exists and no `up` series exists for job `<namespace>/<cluster name>`, 30 minutes. The cluster reads healthy throughout, so only the missing target says its metrics are not collected. A hibernated cluster fires the first; a PodMonitor not named after its Cluster fires the second | `tockmox-observability` (`templates/cnpg-rules.yaml`), reading kube-state-metrics' view of the Cluster |
 | Notification path | the bridge's own delivery health, alerting on its own failure | `tockmox-observability` |
 | Self-check | the heartbeat that proves the whole alerting chain, end to end | `tockmox-selfcheck` |
 
@@ -336,6 +337,59 @@ To check a live install, query the Service from one pod several times and
 compare, as in `tools/check-platform-seams.sh` S10 for the render and the lab
 steps in TM-0781 for the behaviour.
 
+## The reboot gate: which alerts hold a kured reboot (TM-0225)
+
+kured can hold a node reboot while chosen alerts are firing. Tockmox ships
+`kured.configuration.prometheusUrl` and `alertFilterRegexp` empty, so the gate
+is off until a site sets both. This section is what to set, and how the list
+stays honest.
+
+```yaml
+kured:
+  configuration:
+    prometheusUrl: http://tockmox-observability-kube-prometheus.<monitoring-namespace>.svc:9090
+    alertFilterRegexp: "^(KubeDaemonSetNotScheduled|KubeDeploymentReplicasMismatch|KubeNodeNotReady|KubeNodeReadinessFlapping|KubeNodeUnreachable|KubePdbNotEnoughHealthyPods|KubeStatefulSetReplicasMismatch|KubeletDown|TockmoxCNPGClusterNotHealthy|TockmoxCNPGInstancesNotReady|TockmoxLonghornStorageFull|TockmoxLonghornVolumeDegraded|TockmoxLonghornVolumeFaulted|TockmoxLonghornVolumeStuckAttaching|etcdInsufficientMembers|etcdMembersDown|etcdNoLeader)$"
+    alertFilterMatchOnly: true
+    alertFiringOnly: true
+```
+
+Set `alertFilterMatchOnly: true`. Without it kured reads the expression as a
+list of alerts to **ignore**, which inverts the gate. The Service name is the
+Prometheus Service from [two Prometheus replicas](#two-prometheus-replicas-and-alerts-tm-0781)
+above; read the real one with `kubectl get svc -n <monitoring-namespace>`.
+
+**What the regexp is built from.** One decision per alert Tockmox authors,
+`block` or `pass`, in `tools/kured-gate.txt`, plus the upstream
+kube-prometheus-stack alerts the gate names (node readiness, PodDisruptionBudgets,
+replica shortfalls, etcd quorum). `./tools/check-kured-gate.sh --print-regexp`
+prints the regexp those decisions imply; the line above is that output. A
+`block` means a firing alert says the cluster has lost redundancy, quorum or
+capacity that a drain would spend. The decisions are the project's, not facts:
+a site that disagrees overrides `alertFilterRegexp` in its own values, and
+should keep any alert of its own that matters in the list.
+
+**Why a list file and a check.** The gate is an inclusion list, so an alert
+that is not on it never holds a reboot and nothing reports that. The check,
+`tools/check-kured-gate.sh`, fails the build when a Tockmox alert has no
+decision, when a decision names an alert that no longer renders, when an
+upstream alert on the list has been renamed, and when the regexp above is not
+the one the decisions imply. A rule can carry its decision itself instead, as
+the annotation `kured_gate: block` or `kured_gate: pass` (an annotation name
+cannot contain a dot or a slash). The check does not see a site's own rules:
+a site that wants the same guarantee needs the same check over its own rules.
+
+**What kured does with the answer.** Read from the kured 1.23.0 source, not run
+here: it asks the Prometheus URL for the instant query `ALERTS` on every poll,
+keeps the series whose `alertname` matches (and, with `alertFiringOnly`, whose
+`alertstate` is `firing`), and holds the reboot if any remain. A query error
+also holds the reboot. Two things follow. With `alertFiringOnly: true` an alert
+that is still `pending` holds nothing, which is exactly what two Prometheus
+replicas with different `for:` clocks disagree about; `alertFiringOnly: false`
+makes a pending alert hold the reboot too, at the cost of holding for every
+alert that is merely pending (a Longhorn volume rebuilding after the previous
+node's reboot is the usual one). And because Alertmanager does not serve
+`/api/v1/query`, the URL has to be a Prometheus, not Alertmanager.
+
 ## Grafana on CloudNativePG, and more than one Grafana (TM-0786)
 
 **Optional, off by default, new in 0.8.0.** What you get: Grafana's own state
@@ -399,6 +453,40 @@ WAL to it and takes a scheduled base backup.
 > `replicas: 2` and persistence off both pods ran, an annotation written through
 > one pod was read back through the other, and both reported database `ok`.
 > **Not yet run: a fresh install with the database on from the first sync.**
+
+## Loki is one replica by default, and the way to more than one (TM-0778)
+
+Loki ships as a single pod with its chunks and index on a local volume. That is
+deliberate, not an oversight: a week of logs on one disk is cheap to lose and
+cheap to run, and the storage policy treats it that way (see
+[storage](../administration/storage.md)). The cost is that a node reboot or a
+node loss stops log ingest until the pod is back, and the logs on that node's
+disk go with the node.
+
+Raising `loki.singleBinary.replicas` on its own does not help. With filesystem
+storage the Loki chart refuses to render more than one replica and says it needs
+an object storage backend, so there is no quiet way to end up with two pods that
+each hold half the logs. The way to more than one replica is an object store:
+
+- `ci/values-loki-ha.yaml` is the documented shape. Three replicas,
+  `replication_factor: 3`, and the object store named in all three places Loki
+  reads it from: the schema, the storage block and the compactor's
+  `delete_request_store`. Leave one on `filesystem` and the retention or the
+  chunks quietly stay on a local disk.
+- The endpoint in that file is the Garage the platform layer ships with
+  `dataProtection`. Create the three buckets in it, and a Secret named
+  `loki-s3` in the monitoring namespace with `ACCESS_KEY` and `SECRET_KEY`.
+  The values read them from the environment; no credential is in the file.
+- Switching a running install from filesystem to an object store starts a new
+  schema period. Add a second entry to `schemaConfig.configs` with a `from` date
+  in the future instead of editing the first, or Loki cannot read what it has.
+
+`tools/check-loki-ha.sh` renders the default, renders filesystem with two
+replicas and asserts it is refused, and renders the HA values and asserts three
+replicas against the object store. What it does not prove is that three
+replicas keep ingesting while a node goes away. That needs a lab run, and until
+one has been done this is a shape the chart will render, not a measured
+guarantee.
 
 ## Scraping a host outside the cluster
 
