@@ -1,5 +1,5 @@
 /*
- * Tockmox brand design tokens v2.1 (2026-10-23: adds --tx-font-ui)
+ * Tockmox brand design tokens v2.2 (2026-10-24: white links and button text; v2.1 2026-10-23 added --tx-font-ui)
  * Canonical source: the Tockmox brand kit. Copied here so the UI renders with no network.
  * All accent-on-dark pairs verified WCAG AA or better against --tx-bg.
  *
@@ -60,13 +60,22 @@
   --tx-text-display:  var(--tx-steel-100);
   --tx-accent:        var(--tx-emerald-500);
   --tx-accent-hover:  var(--tx-emerald-400);
-  --tx-accent-text:   var(--tx-emerald-300);
+  --tx-accent-text:   #FFFFFF;   /* v2.2: links and accent text are white and underlined; green is for the
+                                   primary button and the OK state only (Jeff, 2026-10-24) */
+  --tx-link:          #FFFFFF;   /* v2.2: 19.5:1 on Void; underline carries it apart from body text */
   --tx-trim:          var(--tx-copper-500);
 
-  /* Buttons: filled emerald buttons use DARK text, never white
-     (white on emerald-600 is only 3.7:1; Void on emerald-500 is 7.2:1). */
-  --tx-btn-bg:   var(--tx-emerald-500);
-  --tx-btn-text: var(--tx-black-950);
+  /* Buttons, v2.2 (Jeff, 2026-10-24: "white for hyperlinks and text on green and black buttons so
+     they are more legible"). Primary: white on emerald-700, 5.4:1; hover goes DARKER (6.6:1), never
+     lighter (white on emerald-600 is only 3.7:1). Secondary: white on Void with a 4.1:1 border.
+     v2.0 to v2.1 used dark text on emerald-500; retired. */
+  --tx-btn-bg:          var(--tx-emerald-700);
+  --tx-btn-bg-hover:    #1A6B2D;
+  --tx-btn-text:        #FFFFFF;
+  --tx-btn2-bg:         var(--tx-black-950);
+  --tx-btn2-bg-hover:   var(--tx-steel-800);
+  --tx-btn2-text:       #FFFFFF;
+  --tx-btn2-border:     #6B756F;
 
   /* ---- type ---- */
   --tx-font-display: 'Inknut Antiqua', Georgia, serif;
@@ -99,4 +108,10 @@
   --tx-trim:          var(--tx-copper-700);   /* 5.3:1 on white */
   --tx-btn-bg:        var(--tx-emerald-700);
   --tx-btn-text:      #FFFFFF;
+  --tx-btn-bg-hover:  #1A6B2D;
+  --tx-link:          var(--tx-emerald-700);  /* light theme unchanged by v2.2 */
+  --tx-btn2-bg:       #FFFFFF;
+  --tx-btn2-bg-hover: #F0EFEA;
+  --tx-btn2-text:     #1A1E1B;
+  --tx-btn2-border:   #6B756F;
 }

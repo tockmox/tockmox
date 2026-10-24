@@ -111,6 +111,11 @@ costs you, with the reasoning in the documentation rather than here.
   now a shared kit in `ui-kit/` that the UI serves its own copy of
   (`ui-kit/README.md`); the UI's tests fail if that copy is edited in place.
   Fonts stay self-hosted. Nothing to do on upgrade.
+- **Links are white and underlined, and buttons carry white text.** A primary
+  button is white on a darker green (5.4:1) that darkens on hover; a secondary
+  button is white on black with a grey border; the focus ring is white. Green
+  is kept for the primary action and the OK state. The same change reaches the
+  documentation site's links and buttons.
 - **Every pull request runs `tools/check-all.sh` on Linux.** A new
   `check-all` workflow runs the whole local suite per pull request and on every
   push to `main` and `release-*`, so the gates `ci.yaml` has no step for are
