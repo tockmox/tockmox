@@ -237,10 +237,12 @@ selftest() {
   mutate "the prometheus route drops the Middleware" tockmox-observability/templates/ingress.yaml 's/"on" .forwardAuth) | fromYaml/"on" false) | fromYaml/'
   mutate "providers in forward_domain mode" tockmox-identity/templates/sso-blueprints.yaml 's/mode: forward_single/mode: forward_domain/'
   mutate "the callback routes the whole host" tockmox-identity/templates/forward-auth.yaml 's|path: /outpost.goauthentik.io/|path: /|'
+  # shellcheck disable=SC2016  # the $ is Helm template text the mutation must match literally, not a shell variable
   mutate "the Middleware points at another Service" tockmox-identity/templates/forward-auth.yaml 's|http://{{ $server }}|http://authentik|'
   mutate "the console route names a Middleware nobody renders" tockmox-common/templates/_helpers.tpl 's/tockmox-authentik-tockmox-forward-auth@kubernetescrd/tockmox-platform-forward-auth@kubernetescrd/'
   mutate "the outpost entry is dropped" tockmox-identity/templates/sso-blueprints.yaml 's/model: authentik_outposts.outpost/model: authentik_outposts.outpostx/'
   mutate "the identity refusal is removed" tockmox-common/templates/_helpers.tpl 's/{{- if not (include "tockmox.capabilityEnabled" (dict "ctx" .ctx "capability" "identity")) -}}/{{- if false -}}/'
+  # shellcheck disable=SC2016  # the $ is Helm template text the mutation must match literally, not a shell variable
   mutate "disabled consoles left present" tockmox-identity/templates/sso-blueprints.yaml 's/state: {{ ternary "present" "absent" $on }}/state: present/'
   rm -rf "$t"
   if [ "$fails" -eq 0 ]; then echo "selftest: every assertion can go red"; return 0; fi

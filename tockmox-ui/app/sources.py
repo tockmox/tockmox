@@ -44,6 +44,8 @@ class Reading:
         if ts is None:
             return "never"
         s = int((now or time.time()) - ts)
+        if s < 5:
+            return "just now"
         if s < 60:
             return f"{s}s ago"
         if s < 3600:

@@ -48,9 +48,9 @@
 
 {# Source line: state, source name, reason, and how long since it last answered. One format everywhere. #}
 {% macro source_line(r) -%}
-<span class="src">{{ badge(r.state) }} <span class="src-name">{{ r.source }}</span>
+<span class="src">{{ badge(r.state) }}<span><span class="src-name">{{ r.source }}</span>
 {%- if r.reason %}<span class="muted">: {{ r.reason }}</span>{% endif -%}
-<span class="muted age"> · last answered {{ r.age_text() }}</span></span>
+<span class="muted age"> · last answered {{ r.age_text() }}</span></span></span>
 {%- endmacro %}
 
 {# The problems table: exceptions first, each row linking to its page. Rows come from views.problems(). #}
@@ -90,6 +90,7 @@
 {%- endmacro %}
 
 {# A healthy group folded to one row: badge, title, source line, chevron. The body is the detail. #}
-{% macro fold_summary(state, word, title, reading=None) -%}
-<summary>{{ badge(state, word) }}<span class="fold-title">{{ title }}</span>{% if reading %}<span class="src"><span class="src-name">{{ reading.source }}</span>{% if reading.reason %}<span class="muted">: {{ reading.reason }}</span>{% endif %}<span class="muted age"> · last answered {{ reading.age_text() }}</span></span>{% else %}<span></span>{% endif %}<span class="chev" aria-hidden="true"></span></summary>
+{% macro fold_summary(state, word, title, reading=None, note=None) -%}
+{%- set why = note if note is not none else (reading.reason if reading else "") -%}
+<summary>{{ badge(state, word) }}<span class="fold-title">{{ title }}</span>{% if reading %}<span class="src"><span><span class="src-name">{{ reading.source }}</span>{% if why %}<span class="muted">: {{ why }}</span>{% endif %}<span class="muted age"> · last answered {{ reading.age_text() }}</span></span></span>{% else %}<span></span>{% endif %}<span class="chev" aria-hidden="true"></span></summary>
 {%- endmacro %}

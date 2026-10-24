@@ -90,6 +90,19 @@ def verdict(states) -> str:
     return OK
 
 
+def _asset_version(static_dir: str) -> str:
+    """A short hash of the stylesheets, appended to their URLs as ?v=, so a new image is a new URL."""
+    import hashlib
+    h = hashlib.sha256()
+    for rel in ("app.css", "brand/tockmox-tokens.css"):
+        try:
+            with open(os.path.join(static_dir, rel), "rb") as f:
+                h.update(f.read())
+        except OSError:
+            h.update(rel.encode())
+    return h.hexdigest()[:10]
+
+
 class SecurityHeaders(BaseHTTPMiddleware):
     def __init__(self, app, hsts: bool, csp: str = CSP):
         super().__init__(app)
@@ -110,6 +123,10 @@ class SecurityHeaders(BaseHTTPMiddleware):
         h["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), interest-cohort=()"
         if not request.url.path.startswith("/static/"):
             h["Cache-Control"] = "no-store"
+        else:
+            # Revalidate every time (the ETag makes that a 304): an upgrade must not leave a browser
+            # styling new HTML with the previous release's CSS (seen live 2026-10-23, TM-1127).
+            h["Cache-Control"] = "no-cache"
         if self.hsts:
             h["Strict-Transport-Security"] = "max-age=31536000"
         return resp
@@ -138,6 +155,7 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
     app = FastAPI(title="Tockmox UI", docs_url=None, redoc_url=None, openapi_url=None)
     app.add_middleware(SecurityHeaders, hsts=s.secure_cookies, csp=csp_for(s.oidc_issuer, s.oidc_end_session))
     app.mount("/static", StaticFiles(directory=os.path.join(HERE, "static")), name="static")
+    asset_v = _asset_version(os.path.join(HERE, "static"))
     tpl = Jinja2Templates(directory=os.path.join(HERE, "templates"))
     tpl.env.autoescape = True
 
@@ -254,7 +272,7 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         ctx.update(request=request, user=u, site=s, tabs=tabs_for(u) if u else [],
                    platform_on=bool(s.feature("platform") and s.feature("platform").enabled),
                    app_version=APP_VERSION, path=request.url.path, verdict_text=VERDICT_TEXT,
-                   footer=footer_version(u),
+                   footer=footer_version(u), asset_v=asset_v,
                    # signed out, the footer links main: no source is read for an anonymous page
                    docs_repo_link=docs_repo_link() if u else f"{s.docs_repo_url}/tree/main/docs")
         return tpl.TemplateResponse(request, name, ctx, status_code=status_code)
