@@ -103,6 +103,14 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Changed
 
+- **The Tockmox UI, and the documentation site's headings, use Source Sans 3;
+  the display face stays in the wordmark.** Pages follow one standard:
+  problems first with healthy groups folded to a count, one answer at the top
+  of a page, tables for sets and one status vocabulary (OK, Warning, Problem,
+  Unknown). The tokens, stylesheet, page shell, status macros and fonts are
+  now a shared kit in `ui-kit/` that the UI serves its own copy of
+  (`ui-kit/README.md`); the UI's tests fail if that copy is edited in place.
+  Fonts stay self-hosted. Nothing to do on upgrade.
 - **Every pull request runs `tools/check-all.sh` on Linux.** A new
   `check-all` workflow runs the whole local suite per pull request and on every
   push to `main` and `release-*`, so the gates `ci.yaml` has no step for are

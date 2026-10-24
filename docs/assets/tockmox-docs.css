@@ -31,7 +31,9 @@
    subpath. */
 @font-face { font-family: "Nunito Sans"; src: url("fonts/nunito-sans-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
 @font-face { font-family: "Nunito Sans"; src: url("fonts/nunito-sans-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: swap; }
-@font-face { font-family: "Inknut Antiqua"; src: url("fonts/inknut-antiqua-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Source Sans 3"; src: url("fonts/source-sans-3-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Source Sans 3"; src: url("fonts/source-sans-3-latin-600-normal.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Source Sans 3"; src: url("fonts/source-sans-3-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: swap; }
 @font-face { font-family: "JetBrains Mono"; src: url("fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
 /* Material composes --md-text-font-family itself, on body, from --md-text-font
    (with `_` as the placeholder when unset), so overriding the -family variable
@@ -42,8 +44,11 @@
   --md-text-font: "Nunito Sans";
   --md-code-font: "JetBrains Mono";
 }
-.md-typeset h1, .md-typeset h2, .md-typeset h3 { font-family: "Inknut Antiqua", Georgia, serif; font-weight: 700; line-height: 1.35; }
-.md-header__title { font-family: "Inknut Antiqua", Georgia, serif; }
+/* Headings and the header title are Source Sans 3, the UI family. The
+   display face is reserved for the wordmark, which is outlined paths in the
+   lockup SVG and needs no font file. Fallback stack: Segoe UI, system-ui. */
+.md-typeset h1, .md-typeset h2, .md-typeset h3 { font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif; font-weight: 700; line-height: 1.35; }
+.md-header__title { font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif; font-weight: 600; }
 
 [data-md-color-scheme="slate"] {
   --md-default-bg-color: var(--tx-bg);

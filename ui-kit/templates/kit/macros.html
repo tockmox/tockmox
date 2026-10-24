@@ -1,0 +1,36 @@
+{# tockmox-ui-kit macros: the status language and the source line, one format on every surface.
+   A reading passed to source_line / fold_summary has .state, .source, .reason and .age_text(). #}
+{# State is never colour alone: a distinct SHAPE, a WORD, and a colour token. #}
+{% macro state_icon(state) -%}
+{%- if state == "ok" -%}
+<svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 10.3l2.6 2.6L14.2 7.3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+{%- elif state == "warning" -%}
+<svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M10 2.2L18.6 17H1.4z" fill="currentColor"/><path d="M10 7.5v4.5M10 14.2v.3" stroke="var(--on-state)" stroke-width="2" stroke-linecap="round"/></svg>
+{%- elif state == "critical" -%}
+<svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M10 1.5L18.5 10 10 18.5 1.5 10z" fill="currentColor"/><path d="M10 6v5M10 13.6v.3" stroke="var(--on-state)" stroke-width="2" stroke-linecap="round"/></svg>
+{%- else -%}
+<svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8.5" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2.2"/><path d="M7.6 7.6a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1 .8-1 1.5v.4M10 14.2v.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+{%- endif -%}
+{%- endmacro %}
+
+{# One state vocabulary across every page (UI standard §2). #}
+{% macro state_word(state) -%}
+{{ {"ok": "OK", "warning": "Warning", "critical": "Problem", "unknown": "Unknown"}.get(state, "Unknown") }}
+{%- endmacro %}
+
+{% macro badge(state, word=None, lg=false) -%}
+<span class="badge st-{{ state }}{% if lg %} lg{% endif %}">{{ state_icon(state) }}<span>{{ word or state_word(state) }}</span></span>
+{%- endmacro %}
+
+{# Source line: state, source name, reason, and how long since it last answered. One format everywhere. #}
+{% macro source_line(r) -%}
+<span class="src">{{ badge(r.state) }}<span><span class="src-name">{{ r.source }}</span>
+{%- if r.reason %}<span class="muted">: {{ r.reason }}</span>{% endif -%}
+<span class="muted age"> · last answered {{ r.age_text() }}</span></span></span>
+{%- endmacro %}
+
+{# A healthy group folded to one row: badge, title, source line, chevron. The body is the detail. #}
+{% macro fold_summary(state, word, title, reading=None, note=None) -%}
+{%- set why = note if note is not none else (reading.reason if reading else "") -%}
+<summary>{{ badge(state, word) }}<span class="fold-title">{{ title }}</span>{% if reading %}<span class="src"><span><span class="src-name">{{ reading.source }}</span>{% if why %}<span class="muted">: {{ why }}</span>{% endif %}<span class="muted age"> · last answered {{ reading.age_text() }}</span></span></span>{% else %}<span></span>{% endif %}<span class="chev" aria-hidden="true"></span></summary>
+{%- endmacro %}
