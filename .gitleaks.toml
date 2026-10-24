@@ -73,3 +73,10 @@ condition = "AND"
 paths = ['''tools/check-notify-and-drill\.sh''']
 regexes = ['''tok-SECRET-9f3a''']
 regexTarget = "line"
+
+[[rules.allowlists]]
+description = "sha256 lines in a UI kit manifest (ui-kit.json): ui_kit.py records the hash of every vendored file so a copy edited in place is caught, and a path like static/tockmox-tokens.css puts the word 'tokens' beside a 64-character hex string, which is the generic-api-key shape. A content hash of a published file, not a secret. Only lines that are exactly a quoted path mapped to 64 lowercase hex, only in files named ui-kit.json; anything else in that file is still scanned. Measured 2026-10-24 at 8.30.1: the manifest is allowed; the same line planted in README.md is flagged; a GitHub PAT and a generic key planted in ui-kit.json are flagged."
+condition = "AND"
+paths = ['''(^|/)ui-kit\.json$''']
+regexes = ['''^\s*"[A-Za-z0-9._/-]+": "[0-9a-f]{64}",?\s*$''']
+regexTarget = "line"
