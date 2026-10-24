@@ -14,7 +14,7 @@ the 2026-10-04 throwaway-cluster pilot) and against reports the engine writes no
   - the process exit code equals summary.gateExit on clean, drift and
     could-not-run inputs, and is 0, 2 and 1 respectively.
 """
-import copy, json, os, subprocess, sys, unittest
+import copy, json, os, subprocess, sys, tempfile, unittest
 from _common import FIX, ROOT, SCHEMA
 from posture_probe import schema as ppschema, differential
 
@@ -117,10 +117,15 @@ class GateContract(unittest.TestCase):
         self.assertEqual((rc, rep["summary"]["gateExit"]), (2, 2))
 
     def test_unobserved_is_1_not_clean(self):
-        empty = os.path.join(os.environ.get("TMPDIR", "/tmp"), "pp-empty-observed.json")
-        json.dump({"observations": []}, open(empty, "w"))
-        rc, rep = self.gate(empty, os.path.join(FIX, "intent.yaml"))
-        self.assertEqual((rc, rep["summary"]["gateExit"]), (1, 1))
+        # A private directory, not a fixed name under /tmp: check-all runs this
+        # gate and its selftest at the same time, both run this suite, and a
+        # shared file let one run truncate it while the other's gate read it.
+        with tempfile.TemporaryDirectory() as d:
+            empty = os.path.join(d, "empty-observed.json")
+            with open(empty, "w") as f:
+                json.dump({"observations": []}, f)
+            rc, rep = self.gate(empty, os.path.join(FIX, "intent.yaml"))
+        self.assertEqual((rc, rep and rep["summary"]["gateExit"]), (1, 1))
 
     def test_unreadable_intent_is_1(self):
         rc, rep = self.gate(os.path.join(FIX, "observed-clean.json"), "/nonexistent/intent.yaml")

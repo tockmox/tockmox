@@ -103,6 +103,9 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Changed
 
+- **The documentation site's body text is Source Sans 3 as well,** so the
+  whole site reads in the UI family; the previous body face's font files are
+  removed.
 - **The Tockmox UI, and the documentation site's headings, use Source Sans 3;
   the display face stays in the wordmark.** Pages follow one standard:
   problems first with healthy groups folded to a count, one answer at the top
