@@ -160,6 +160,10 @@ five-edit version bump happens only on `release-X.Y`.
 
 A release bar names **a property to hold, not a number to beat** (TM-0157).
 
+The per-RC checks table and the upgrade leg's standing assertions are also kept
+as data in `tools/release-bars.yaml`. `tools/check-release-bars.sh` fails when
+the two disagree, so a row changed here is changed there in the same commit.
+
 ## The patch train
 
 How a patch is cut once `X.Y.0` has shipped and `main` has moved on. It runs

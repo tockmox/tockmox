@@ -1,0 +1,168 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE RELEASE BAR AS DATA. RELEASING.md is the text of record; this file is the
+# same bar in a form a program can read, so a plan for a release candidate is
+# compiled from it and cannot quietly drop a row.
+#
+# tools/check-release-bars.sh fails when this file and RELEASING.md disagree,
+# in either direction: a row in one and not the other, or a row whose words
+# differ. Edit both in the same change.
+#
+#   rc_checks            "Which checks run per RC, and which run once at the tag"
+#     check, per_rc, at_tag   the start of the table cell; each must be a prefix of
+#                             the cell, with markdown links, bold and spacing removed
+#     at                      rc and/or tag; a cell of "..." or one starting "Not run
+#                             again" means no run at that stage, and the gate derives
+#                             this list from the cells
+#     kind                    static: a script in this tree, run offline
+#                             ci: a GitHub workflow
+#                             lab: needs the lab cluster
+#                             human: a person does it or signs it
+#     command, needs          static rows only: what to run, and what it must be given
+#     path                    files that must exist; a .sh under tools/ must be executable
+#
+#   upgrade_assertions   "The upgrade leg's standing assertions"
+#     assertion, read, red_if  the full table cell, same cleaning, compared exactly
+#
+# A row that cannot be read on a leg is UNVERIFIED with the reason, never PASS
+# (RELEASING.md, under the assertions table). on_unreadable records that.
+schema: 1
+source: RELEASING.md
+on_unreadable: UNVERIFIED
+
+rc_checks:
+  table: "Which checks run per RC, and which run once at the tag"
+  rows:
+    - id: full-ci
+      check: "Full CI (`ci.yaml`)"
+      per_rc: "Every rc push"
+      at_tag: "..."
+      at: [rc]
+      kind: ci
+      path: [.github/workflows/ci.yaml]
+
+    - id: release-preflight
+      check: "`tools/release-preflight.sh`"
+      per_rc: "Once prose is expected final"
+      at_tag: "Again, on the exact commit being tagged"
+      at: [rc, tag]
+      kind: static
+      command: tools/release-preflight.sh
+      path: [tools/release-preflight.sh]
+
+    - id: greenfield-gate
+      check: "Greenfield gate on the lab"
+      per_rc: "At least on the rc the tag is cut from"
+      at_tag: "Not repeated if the tagged commit does not differ from that rc's gated commit"
+      at: [rc, tag]
+      kind: lab
+
+    - id: site-template-drift
+      check: "`tockmox-site-template` drift check"
+      per_rc: "Yes"
+      at_tag: "Two halves, one automated"
+      at: [rc, tag]
+      kind: static
+      command: tools/site-template-diff.sh
+      needs: [a checkout of tockmox-site-template]
+      path: [tools/site-template-diff.sh, tools/site-pin-at-tag.sh, tools/site-template-divergences.txt]
+
+    - id: version-shaped-prose-sweep
+      check: "Version-shaped-prose sweep"
+      per_rc: "Yes"
+      at_tag: "..."
+      at: [rc]
+      kind: static
+      command: "grep -rn 'v0\\.' install docs README.md"
+
+    - id: values-tier-drift
+      check: "Values-tier drift (`tools/check-values-tiers.sh --drift-only`)"
+      per_rc: "Yes, but pass `BASELINE_REF`"
+      at_tag: "Again at the tag, same override"
+      at: [rc, tag]
+      kind: static
+      command: tools/check-values-tiers.sh --drift-only
+      needs: [BASELINE_REF]
+      path: [tools/check-values-tiers.sh]
+
+    - id: upgrade-leg
+      check: "Upgrade leg (TM-0281)"
+      per_rc: "Required once per cycle, on the rc the tag is cut from"
+      at_tag: "Not repeated if the tagged commit is that rc's commit"
+      at: [rc, tag]
+      kind: lab
+      carries: upgrade_assertions
+
+    - id: immutable-field-check
+      check: "Immutable-field check"
+      per_rc: "Yes, on every rc whose chart version differs from the baseline"
+      at_tag: "Not repeated if the tagged commit is that rc's commit"
+      at: [rc, tag]
+      kind: static
+      command: tools/check-immutable-fields.sh
+      needs: [BASELINE_REF]
+      path: [tools/check-immutable-fields.sh]
+
+    - id: airgap-reproof
+      check: "Air-gap re-proof"
+      per_rc: "..."
+      at_tag: "Once per release, or explicitly skipped in the notes"
+      at: [tag]
+      kind: lab
+
+    - id: checksums-and-signed-gate-report
+      check: "`SHA256SUMS`, signed gate report"
+      per_rc: "..."
+      at_tag: "Generated from the tag"
+      at: [tag]
+      kind: human
+
+    - id: outside-eyes-pass
+      check: "Outside-eyes pass (minor releases)"
+      per_rc: "Once, on the last rc"
+      at_tag: "Not run again on the final tag"
+      at: [rc]
+      kind: human
+
+upgrade_assertions:
+  table: "The upgrade leg's standing assertions"
+  rows:
+    - id: starting-state
+      assertion: "Starting state is the recorded previous release"
+      read: "every layer's synced revision, before the push"
+      red_if: "any layer not on the previous tag, or an autosync before the leg was ready"
+
+    - id: documented-edits-only
+      assertion: "The upgrade is the documented edits only"
+      read: "the site diff, plus every other action taken"
+      red_if: "any step not in the CHANGELOG or `docs/deployment/upgrade.md`"
+
+    - id: convergence
+      assertion: "Convergence"
+      read: "time from push to every Application Synced/Healthy, retryCount per layer"
+      red_if: "a layer not Synced/Healthy, or `field is immutable` in any condition"
+
+    - id: data-survived
+      assertion: "Data survived"
+      read: "probe row counts and checksums in each database; PVC name, uid and volume"
+      red_if: "any count, checksum, uid or volume differs"
+
+    - id: one-default-storageclass
+      assertion: "Exactly one default StorageClass"
+      read: "count of StorageClasses annotated `storageclass.kubernetes.io/is-default-class: \"true\"`, before and after"
+      red_if: "0 or more than 1 after the upgrade"
+
+    - id: sealed-secret-decrypts
+      assertion: "A secret sealed under the previous release still decrypts"
+      read: "a SealedSecret sealed with the previous release's controller certificate before the push; after convergence, its Secret exists and its `Synced` condition is True"
+      red_if: "no Secret, or `no key could decrypt secret`"
+
+    - id: per-volume-used-bytes
+      assertion: "Per-volume used bytes"
+      read: "used bytes per PVC (`kubelet_volume_stats_used_bytes`, or `df` from a pod mounting the claim where Prometheus is off), before and after"
+      red_if: "a volume that fell sharply or to near zero: a claim can keep its uid and still come back empty"
+
+    - id: stable-keys-survive
+      assertion: "`stable` values keys survive"
+      read: "the previous release's site values, setting at least one `stable` key per layer it configures, render and sync on the candidate with no edit beyond the documented ones; `BASELINE_REF=<previous tag> tools/check-values-tiers.sh --drift-only`"
+      red_if: "a `stable` key renamed, dropped, retyped or rejected by the schema, or a layer that needs an undocumented values edit"

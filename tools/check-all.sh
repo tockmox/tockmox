@@ -329,6 +329,10 @@ run_gate "every rendered container has a memory limit or a written reason (TM-05
 run_gate "the memory-limit gate goes red on a dropped limit, a new container and a stale residue entry (TM-0595)" bash tools/check-memory-limits.sh --selftest
 run_gate "the alert bridge logs each delivery, ntfy stays single-replica, drill rows name their backup (TM-0779/0780/0794)" bash tools/check-notify-and-drill.sh
 run_gate "the notify-and-drill gate goes red on every mutation (TM-0779/0780/0794)" bash tools/check-notify-and-drill.sh --selftest
+# TM-0969. The release bar kept as data (tools/release-bars.yaml) says what RELEASING.md says. Not in
+# ci.yaml yet, for the reason at the top of this file.
+run_gate "the release bar in tools/release-bars.yaml agrees with RELEASING.md (TM-0969)" bash tools/check-release-bars.sh
+run_gate "the release-bars gate goes red on a missing row, a drifted cell and a missing file (TM-0969)" bash tools/check-release-bars.sh --selftest
 # TM-0460 (REQ-0004 AC-4.1, ruled 2026-10-08): the gateway is the shipped
 # default and the console goes through it on a chart-minted key. Not in
 # ci.yaml yet, for the reason at the top of this file.
