@@ -6,10 +6,10 @@
     "static/fonts/source-sans-3-latin-400-normal.woff2": "0f73f35e08cde0a2f10c109c6e01d71459d97e4099ecd9a50f1b6c0209e4de2b",
     "static/fonts/source-sans-3-latin-600-normal.woff2": "14527d193b0e30bc32ef931549a246cdfd286573bb12869b7e052b8101a39d38",
     "static/fonts/source-sans-3-latin-700-normal.woff2": "ae35266f2ab0d5314ff9a04127931eb26c793e4f1269bb240046d4d2db4b7bb1",
-    "static/kit.css": "5428be5c0d28e453022c3c1bc27678ce725cebd1f659ae1ed6e2bd0bbf8a0291",
-    "static/tockmox-tokens.css": "e44f839fd6edb5998da49314da7ed9ab676257daafd65dcf873c41532b3d8f4d",
+    "static/kit.css": "570f843120e1dc02ab403acd1c8ef2a634bad10f400190a51e03d3bede625fd1",
+    "static/tockmox-tokens.css": "ec1fac9d7b7cee0b8a12136525b830c72ef0ca09c6ce2ac02602ea9a289c7623",
     "templates/kit/macros.html": "330e206fee77e69f20edf4f891a3692646174d9eca27abd918c4f0ab176ec136",
     "templates/kit/shell.html": "6d16510b9ca411a9f13a4662cc0082565d1ce2f11b687fafce4b3a09fb2182bb"
   },
-  "version": "0.1.0"
+  "version": "0.2.0"
 }

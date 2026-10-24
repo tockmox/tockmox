@@ -18,7 +18,8 @@
 :root {
   --tx-bg: #0A0D0B; --tx-surface: #111512; --tx-border: #2A312E;
   --tx-text: #E4E9E6; --tx-muted: #9AA5A0;
-  --tx-emerald: #2FB44A; --tx-emerald-bright: #4ED36A;
+  --tx-emerald: #2FB44A; --tx-emerald-bright: #4ED36A; --tx-emerald-700: #1E7A33;
+  --tx-link: #FFFFFF; --tx-field-border: #6B756F;
   --tx-copper: #B98A45; --tx-ember: #F0833F;
 }
 
@@ -48,14 +49,24 @@
    display face is reserved for the wordmark, which is outlined paths in the
    lockup SVG and needs no font file. Fallback stack: Segoe UI, system-ui. */
 .md-typeset h1, .md-typeset h2, .md-typeset h3 { font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif; font-weight: 700; line-height: 1.35; }
+[data-md-color-scheme="slate"] .md-typeset h1, [data-md-color-scheme="slate"] .md-typeset h2 { color: var(--tx-text); }  /* Material greys h1 and h2; full-strength text reads better (tokens v2.2) */
 .md-header__title { font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif; font-weight: 600; }
 
 [data-md-color-scheme="slate"] {
   --md-default-bg-color: var(--tx-bg);
-  --md-primary-fg-color: var(--tx-emerald);
-  --md-accent-fg-color: var(--tx-emerald-bright);
-  --md-typeset-a-color: var(--tx-emerald-bright);
+  /* Tokens v2.2 (2026-10-24): links are white and underlined, and green is spent only on the primary
+     button and the OK state. Buttons are white text on emerald-700 (5.4:1), not dark text on bright green. */
+  --md-primary-fg-color: var(--tx-emerald-700);
+  --md-primary-bg-color: #FFFFFF;
+  --md-accent-fg-color: var(--tx-link);
+  --md-typeset-a-color: var(--tx-link);
 }
+[data-md-color-scheme="slate"] .md-typeset a { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+[data-md-color-scheme="slate"] .md-typeset a:hover { text-decoration-thickness: 2px; }
+[data-md-color-scheme="slate"] .md-typeset .md-button { color: #FFFFFF; border-color: var(--tx-field-border); background: var(--tx-bg); text-decoration: none; }
+[data-md-color-scheme="slate"] .md-typeset .md-button--primary { background: var(--tx-emerald-700); border-color: var(--tx-emerald-700); }
+[data-md-color-scheme="slate"] .md-typeset .md-button:hover, [data-md-color-scheme="slate"] .md-typeset .md-button:focus { color: #FFFFFF; background: #1C2220; border-color: var(--tx-field-border); }
+[data-md-color-scheme="slate"] .md-typeset .md-button--primary:hover, [data-md-color-scheme="slate"] .md-typeset .md-button--primary:focus { background: #1A6B2D; border-color: #1A6B2D; }
 
 /* The header takes the surface colour, NOT the emerald primary. A full-width
    accent header reads as a marketing site; documentation wants the accent
@@ -68,7 +79,7 @@
    the lockup to full width. */
 .md-banner { background: var(--tx-bg); color: var(--tx-text); }
 .md-banner .md-banner__inner { margin: 0; max-width: none; }
-.md-banner .tx-banner { display: flex; align-items: center; padding: 5px 16px; border-bottom: 2px solid var(--tx-emerald); box-sizing: border-box; }
+.md-banner .tx-banner { display: flex; align-items: center; padding: 5px 16px; border-bottom: 2px solid var(--tx-copper); box-sizing: border-box; }
 .md-banner img.tx-banner-logo { height: 45px !important; width: auto !important; max-width: none !important; margin: 0; }
 .md-banner .tx-banner-tagline { margin-left: 16px; color: #9aa0a6; font-size: 11px; line-height: 1.2; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; font-family: "Nunito Sans", system-ui, sans-serif; }
 @media screen and (max-width: 480px) { .md-banner .tx-banner-tagline { display: none; } }
@@ -79,10 +90,10 @@
 .tx-draft, .tx-planned { background: rgba(240,131,63,.15); color: #F7A468; border: 1px solid #F0833F; }
 .tx-legacy, .tx-retired { background: rgba(154,165,160,.12); color: #9AA5A0; border: 1px solid #56605B; }
 
-/* Material grid cards, branded: emerald icons and an emerald hover edge. */
+/* Material grid cards: copper icons (structure, not action) and a neutral hover edge (tokens v2.2). */
 .md-typeset .grid.cards > ul > li { background: var(--tx-surface); border-color: var(--tx-border); transition: border-color .15s ease; }
-.md-typeset .grid.cards > ul > li:hover { border-color: var(--tx-emerald); }
-.md-typeset .grid.cards .twemoji.lg { color: var(--tx-emerald); }
+.md-typeset .grid.cards > ul > li:hover { border-color: var(--tx-field-border); }
+.md-typeset .grid.cards .twemoji.lg { color: var(--tx-copper); }
 
 /* Tables: the docs lean on them heavily, and Material's default header is
    nearly invisible on a dark surface. */
@@ -90,7 +101,7 @@
 [data-md-color-scheme="slate"] .md-typeset table:not([class]) { border: 1px solid var(--tx-border); }
 
 /* Copper is the trim colour in this brand: rules, seals, thin rings. Spent
-   here on blockquote edges so the accent stays emerald. */
+   here on blockquote edges. */
 [data-md-color-scheme="slate"] .md-typeset blockquote { border-left-color: var(--tx-copper); color: var(--tx-muted); }
 [data-md-color-scheme="slate"] .md-typeset hr { border-bottom-color: var(--tx-border); }
 

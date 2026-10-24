@@ -24,7 +24,7 @@
   --st-critical-soft: rgba(240, 113, 110, .16);
   --st-unknown-soft: rgba(154, 165, 160, .14);
   --on-state: var(--tx-bg);
-  --focus: var(--tx-emerald-300);
+  --focus: #FFFFFF;   /* tokens v2.2: green is for the primary button and the OK state only */
   --field-border: #6B756F;   /* 3.9:1 on surface; steel-500 is under the 3:1 non-text bar */
   --fs-0: 12px; --fs-1: 13px; --fs-2: 14px; --fs-3: 16px; --fs-4: 20px; --fs-5: 24px; --fs-6: 30px;
 }
@@ -45,8 +45,10 @@
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--tx-bg); color: var(--tx-text); font: 400 var(--fs-2)/1.5 var(--ui-font); -webkit-font-smoothing: antialiased; }
-a { color: var(--tx-accent-text); text-underline-offset: 2px; }
-a:hover { color: var(--tx-accent-hover); }
+/* Links are white and always underlined (tokens v2.2): white and the body grey are too close in luminance
+   to tell apart by colour, so the underline carries it (WCAG 1.4.1). Hover thickens the line. */
+a { color: var(--tx-link, var(--tx-accent-text)); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { color: var(--tx-link, var(--tx-accent-text)); text-decoration-thickness: 2px; }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
 code, pre { font-family: var(--tx-font-mono); font-size: .92em; }
 h1, h2, h3 { font-family: var(--ui-font); font-weight: 600; line-height: 1.25; letter-spacing: -0.005em; text-wrap: balance; }
@@ -102,14 +104,14 @@ section { margin: 0; }
 /* ---- controls ---- */
 .btn, .btn-ghost, .btn-link { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; min-height: 36px; min-width: 44px; padding: 0 .85rem; border-radius: var(--tx-radius-sm); font: 600 var(--fs-2)/1 var(--ui-font); cursor: pointer; text-decoration: none; }
 .btn { background: var(--tx-btn-bg); color: var(--tx-btn-text); border: 1px solid transparent; }
-.btn:hover { background: var(--tx-accent-hover); color: var(--tx-btn-text); }
-.btn-ghost { background: var(--tx-surface-raised); color: var(--tx-text); border: 1px solid var(--field-border); }
-.btn-ghost:hover { border-color: var(--tx-text-muted); }
-.btn-link { color: var(--tx-accent-text); }
+.btn:hover { background: var(--tx-btn-bg-hover); color: var(--tx-btn-text); }
+.btn-ghost { background: var(--tx-btn2-bg); color: var(--tx-btn2-text); border: 1px solid var(--tx-btn2-border); }
+.btn-ghost:hover { background: var(--tx-btn2-bg-hover); color: var(--tx-btn2-text); }
+.btn-link { color: var(--tx-link); }
 .link-strong { font-weight: 600; }
 .help { color: var(--tx-text-muted); text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
 .panel.flush > p, .panel.flush > .empty { padding: .6rem 1rem; margin: 0; }
-.linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--tx-accent-text); cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--tx-link); cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
 input[type=text], input[type=search], input[type=password], select, textarea { min-height: 36px; padding: 0 .7rem; border: 1px solid var(--field-border); border-radius: var(--tx-radius-sm); background: var(--tx-bg); color: var(--tx-text); font: inherit; margin: .35rem .5rem .35rem 0; max-width: 100%; }
 label { font-weight: 600; display: block; }
 form.inline { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-top: .5rem; }
