@@ -261,7 +261,7 @@ check_changelog() {
     return 1
   fi
   [ "$cc_name" = "$cc_ver" ] || { fail "top-most CHANGELOG section is [$cc_name], not [$cc_ver]"; return 1; }
-  printf '%s\n' "$cc_head" | grep -qE '[0-9]{4}-[0-9]{2}-[0-9]{2}' \
+  printf '%s\n' "$cc_head" | grep -E '[0-9]{4}-[0-9]{2}-[0-9]{2}' >/dev/null \
     || warn "the [$cc_ver] heading carries no date; released sections read '## [X.Y.Z] ... YYYY-MM-DD'"
   grep -q "^\[$cc_ver\]:" "$cc_f" \
     || warn "no link-reference definition '[$cc_ver]: ...' at the foot of CHANGELOG.md"
@@ -597,7 +597,7 @@ selftest() {
     probe_out() { # probe_out LABEL REGEX COMMAND...  ... the state NAME is printed, not only the code
       po_label="$1"; po_re="$2"; shift 2
       po_o=$("$@" 2>&1)
-      if printf '%s\n' "$po_o" | grep -Eq "$po_re"; then echo "  ok  $po_label"
+      if printf '%s\n' "$po_o" | grep -E "$po_re" >/dev/null; then echo "  ok  $po_label"
       else echo "  SELFTEST FAIL: '$po_label' wanted /$po_re/:"; printf '%s\n' "$po_o" | sed 's/^/            /'; fails=1; fi
     }
     s="$tmp/site-res"; mksite "$s" "$V" 2
@@ -642,7 +642,7 @@ esac
 [ "${2:-}" = "--selftest" ] && selftest
 
 VER="${1#v}"
-printf '%s\n' "$VER" | grep -Eq "$SEMVER_RE" || {
+printf '%s\n' "$VER" | grep -E "$SEMVER_RE" >/dev/null || {
   echo "release-preflight: \"$1\" is not a version (want X.Y.Z or X.Y.Z-rcN, with or without a leading v)"
   exit 1
 }

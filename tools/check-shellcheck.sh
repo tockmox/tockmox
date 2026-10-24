@@ -89,7 +89,7 @@ if [ "${1:-}" = "--selftest" ]; then
   if run "$tmp/clean.sh" "$tmp/empty-baseline"; then echo "  selftest ok: a clean script reports nothing"
   else echo "  SELFTEST FAIL: a clean script reported a finding"; fails=1; fi
   out="$(SHELLCHECK_FILES="$tmp/planted.sh" SHELLCHECK_BASELINE="$tmp/empty-baseline" bash "$0" 2>&1)"; rc=$?
-  if [ "$rc" -eq 1 ] && printf '%s\n' "$out" | grep -q 'NEW: .*planted.sh SC2086'; then
+  if [ "$rc" -eq 1 ] && printf '%s\n' "$out" | grep 'NEW: .*planted.sh SC2086' >/dev/null; then
     echo "  selftest ok: a planted unquoted \$1 is a new SC2086"
   else echo "  SELFTEST FAIL: a planted unquoted \$1 was not reported as a new SC2086 (exit $rc)"; fails=1; fi
   SHELLCHECK_FILES="$tmp/planted.sh" SHELLCHECK_BASELINE="$tmp/planted-baseline" bash "$0" --update >/dev/null 2>&1

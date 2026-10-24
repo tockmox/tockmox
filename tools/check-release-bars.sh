@@ -303,7 +303,7 @@ if [ "$MODE" = selftest ]; then
     echo "check-release-bars selftest: FAILED (the plant changed nothing)"; exit 1
   fi
   out="$(bash "$0" --releasing "$tmp/RELEASING.md" --bars "$tmp/bars-planted.yaml" --root "$ROOT" 2>&1)" && rc=0 || rc=$?
-  if [ "$rc" -ne 1 ] || ! printf '%s\n' "$out" | grep -q 'RELEASING.md row not in the YAML: Air-gap re-proof'; then
+  if [ "$rc" -ne 1 ] || ! printf '%s\n' "$out" | grep 'RELEASING.md row not in the YAML: Air-gap re-proof' >/dev/null; then
     echo "check-release-bars selftest: FAILED (a row removed from the YAML did not go red: exit $rc)"
     printf '%s\n' "$out" | head -5
     exit 1

@@ -161,7 +161,7 @@ if [ "${1:-}" = "--selftest" ]; then
   ( cd "$tmp" && git init -q . && git add -A ) >/dev/null 2>&1
   mkdir -p "$tmp/tools"; cp "$0" "$tmp/tools/check.sh"
   out=$(TOCKMOX_SITE_PATTERNS_FILE="$tmp/site-patterns" bash "$tmp/tools/check.sh" 2>&1); rc=$?
-  if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q 'FAIL  selftest node name'; then
+  if [ "$rc" = 1 ] && printf '%s' "$out" | grep 'FAIL  selftest node name' >/dev/null; then
     echo "  selftest ok: a site rule file is loaded and its rule fires"
   else
     echo "  SELFTEST FAIL: a rule from TOCKMOX_SITE_PATTERNS_FILE did not fire (exit $rc): $out"; fails=1
@@ -224,7 +224,7 @@ PROBE
     # pass: it had never tested the scan set. Exit 1 and the rule's own label now.
     mkdir -p "$newdir/tools"; cp "$0" "$newdir/tools/check-no-site-specifics.sh"
     out=$(cd "$newdir" && TOCKMOX_SITE_PATTERNS_FILE= HOME=/nonexistent bash tools/check-no-site-specifics.sh 2>&1); rc=$?
-    if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q 'FAIL  internal git host'; then
+    if [ "$rc" = 1 ] && printf '%s' "$out" | grep 'FAIL  internal git host' >/dev/null; then
       echo "  selftest ok: a top-level directory this script never heard of is scanned"
     else
       echo "  SELFTEST FAIL: a NEW top-level directory carrying an internal host was not refused"

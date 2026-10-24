@@ -277,7 +277,7 @@ S=S04-ls-remote-github
 if ! done_step "$S"; then budget_left || yield "S04+"
   step_begin "$S" 'git ls-remote https://github.com/tockmox/tockmox.git refs/tags/v0.8.0' || exit 3
   execute_begin "install.md Phase 1 precondition ls-remote"; GIT_TERMINAL_PROMPT=0 run_ws "$S" "$(block 'git ls-remote https://github.com/tockmox/tockmox.git refs/tags/v0.8.0')"; execute_end $?
-  record "$S" "ls-remote of the public repo prints a SHA and the tag (xfail before the tag is pushed: this path runs on the candidate)" "prints" "$(out_of "$S" | grep -qE '^[0-9a-f]{40}' && echo prints || echo nothing)" xfail
+  record "$S" "ls-remote of the public repo prints a SHA and the tag (xfail before the tag is pushed: this path runs on the candidate)" "prints" "$(out_of "$S" | grep -E '^[0-9a-f]{40}' >/dev/null && echo prints || echo nothing)" xfail
   note "S04: source 1 for this run is ${TM_URL} @ ${TM_REV}, a harness snapshot of the tree under test, NOT the published tag. Nothing below is evidence about GitHub's copy."
   mark_done "$S"
 fi
@@ -527,7 +527,7 @@ if ! done_step "$S"; then budget_left || yield "S17+"
     # Stop waiting early when the only residue is the DNS-blocked state the
     # page itself lists as expected, held for three minutes (same bar).
     if [ "$(out_of "${S}-bar" | awk '{print $1}' | sort -u | tr '\n' ' ')" = "tockmox-devops " ] \
-       && kubectl --context="$KUBE_CONTEXT" -n tockmox-devops logs deploy/tockmox-devops-argo-workflows-server --tail=3 2>/dev/null | grep -q 'no such host'; then
+       && kubectl --context="$KUBE_CONTEXT" -n tockmox-devops logs deploy/tockmox-devops-argo-workflows-server --tail=3 2>/dev/null | grep 'no such host' >/dev/null; then
       if [ -f "${STATE}/bar-dns-only-since" ]; then
         [ $(( now - $(cat "${STATE}/bar-dns-only-since") )) -ge 180 ] && break
       else printf '%s' "$now" > "${STATE}/bar-dns-only-since"; fi
@@ -548,7 +548,7 @@ if ! done_step "$S"; then budget_left || yield "S17+"
     # measured reason; anything else left is a real FAIL.
     left="$(out_of "${S}-bar" | awk '{print $1}' | sort -u | tr '\n' ' ')"
     tail3="$(kubectl --context="$KUBE_CONTEXT" -n tockmox-devops logs deploy/tockmox-devops-argo-workflows-server --tail=3 2>/dev/null | tr '\n' ' ')"
-    if [ "$left" = "tockmox-devops " ] && printf '%s' "$tail3" | grep -q 'no such host'; then
+    if [ "$left" = "tockmox-devops " ] && printf '%s' "$tail3" | grep 'no such host' >/dev/null; then
       record "$S" "readiness bar: clean twice ... BLOCKED by the environment: only tockmox-devops remains and its log ends 'no such host' for auth.${INTERNAL_DOMAIN_V} (the page's expected-broken row 2; clears with DNS, lab only)" "clean twice" "devops only, DNS" xfail
     else
       record "$S" "readiness bar: prints nothing, and nothing again at least three minutes later (site-apps excluded)" "clean twice" "not clean after $(( now - $(cat "${STATE}/root-applied-at") ))s: $(out_of "${S}-bar" | tr '\n' ';' | cut -c1-200)"
@@ -562,7 +562,7 @@ S=S18-policy-render
 if ! done_step "$S"; then budget_left || yield "S18+"
   step_begin "$S" 'helm template "$TOCKMOX/charts/tockmox-policy"' || exit 3
   execute_begin "install.md 3c render the policy layer"; run_ws "$S" "$(block 'helm template "$TOCKMOX/charts/tockmox-policy"')"; execute_end $?
-  record "$S" "3c render: the policy chart renders NetworkPolicy objects" "yes" "$(out_of "$S" | grep -q 'kind: NetworkPolicy' && echo yes || echo no)"
+  record "$S" "3c render: the policy chart renders NetworkPolicy objects" "yes" "$(out_of "$S" | grep 'kind: NetworkPolicy' >/dev/null && echo yes || echo no)"
   note "S18: rendered kinds: $(out_of "$S" | grep 'kind:' | sed 's/^ *//' | tr '\n' ';' | cut -c1-240)  (the page's own table is 'illustrative rather than a measurement')"
   mark_done "$S"
 fi
@@ -597,7 +597,7 @@ if ! done_step "$S"; then budget_left || yield "S21+"
   step_begin "$S" '-l app.kubernetes.io/name=traefik' || exit 3
   execute_begin "install.md Traefik Service read"; run_ws "$S" "$(block '-l app.kubernetes.io/name=traefik')"; execute_end $?
   ext="$(out_of "$S" | awk '/LoadBalancer/{print $4}' | head -1)"
-  record "$S" "Traefik Service shows an EXTERNAL-IP from the pool rather than <pending> (MetalLB installed and assigning)" "assigned" "$( printf '%s' "$ext" | grep -qE '^[0-9]+\.' && echo assigned || echo "${ext:-none}" )"
+  record "$S" "Traefik Service shows an EXTERNAL-IP from the pool rather than <pending> (MetalLB installed and assigning)" "assigned" "$( printf '%s' "$ext" | grep -E '^[0-9]+\.' >/dev/null && echo assigned || echo "${ext:-none}" )"
   B="$(block 'export LAN_RESOLVER=YOUR_LAN_RESOLVER_IP')"; B="${B//YOUR_LAN_RESOLVER_IP/${TOCKMOX_P09_LAN_RESOLVER:-YOUR_LAN_RESOLVER_IP}}"
   run_ws "${S}-domain" "$B"
   record "$S" "the domain block reads internalDomain back out of the generated site values" "domain: ${INTERNAL_DOMAIN_V}" "$(out_of "${S}-domain" | grep -m1 -o 'domain: [^ ]*')"
@@ -631,9 +631,9 @@ S=S22-verify-authored
 if ! done_step "$S"; then budget_left || yield "S22+"
   step_begin "$S" 'get ns -l app.kubernetes.io/part-of=tockmox' || exit 3
   execute_begin "install.md Verify what Tockmox authored"; run_ws "$S" "$(block 'get ns -l app.kubernetes.io/part-of=tockmox')"; execute_end $?
-  record "$S" "verify: namespaces with the reserved tockmox- prefix are listed" "yes" "$(out_of "$S" | grep -q '^tockmox-' && echo yes || echo no)"
+  record "$S" "verify: namespaces with the reserved tockmox- prefix are listed" "yes" "$(out_of "$S" | grep '^tockmox-' >/dev/null && echo yes || echo no)"
   record "$S" "verify: NetworkPolicies carrying the part-of label exist" "yes" "$(out_of "$S" | awk '$1 ~ /^tockmox-/ && $2 ~ /./ {n++} END{print (n>0)?"yes":"no"}')"
-  record "$S" "verify: ValidatingAdmissionPolicies present at cluster scope" "yes" "$(out_of "$S" | grep -qi 'tockmox' && echo yes || echo no)"
+  record "$S" "verify: ValidatingAdmissionPolicies present at cluster scope" "yes" "$(out_of "$S" | grep -i 'tockmox' >/dev/null && echo yes || echo no)"
   mark_done "$S"
 fi
 

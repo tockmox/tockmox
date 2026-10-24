@@ -167,7 +167,7 @@ USERDATA="$S/userdata"
 S="${TMP}/create-deny"; new_state "$S"; seed_stale "$S"; : >"$S/deny-delete"
 run_tc "$S" create
 if [ "$RC" -eq 2 ] && ! grep -q '^APPLY VirtualMachine' "$S/log" \
-   && printf '%s' "$OUT" | grep -q "REFUSING.*${VM}-kubeconfig"; then
+   && printf '%s' "$OUT" | grep "REFUSING.*${VM}-kubeconfig" >/dev/null; then
   ok "create refuses, before any VM, when the stale Secret cannot be deleted"
 else
   bad "create refuses, before any VM, when the stale Secret cannot be deleted" \
@@ -177,7 +177,7 @@ fi
 S="${TMP}/create-sticky"; new_state "$S"; seed_stale "$S"; : >"$S/sticky"
 run_tc "$S" create
 if [ "$RC" -eq 2 ] && ! grep -q '^APPLY VirtualMachine' "$S/log" \
-   && printf '%s' "$OUT" | grep -q "still exists"; then
+   && printf '%s' "$OUT" | grep "still exists" >/dev/null; then
   ok "create refuses when a delete returns 0 but the stale Secret is still there"
 else
   bad "create refuses when a delete returns 0 but the stale Secret is still there" \
@@ -260,7 +260,7 @@ fi
 # ---- clause 3: destroy and the harness Secrets -----------------------------
 S="${TMP}/destroy-clean"; new_state "$S"; seed_stale "$S"; : >"$S/secrets/${VM}-cloudinit"
 run_tc "$S" destroy
-if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'ARTEFACT: secrets owned by' \
+if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep 'ARTEFACT: secrets owned by' >/dev/null \
    && [ -z "$(secrets_left "$S")" ]; then
   ok "destroy removes harness Secrets and counts them to zero"
 else
@@ -273,8 +273,8 @@ S="${TMP}/destroy-scoped"; new_state "$S"; seed_stale "$S"; : >"$S/secrets/${VM}
 : >"$S/secrets/someone-else-01-kubeconfig"; : >"$S/secrets/someone-else-01-cloudinit"
 run_tc "$S" destroy
 left="$(secrets_left "$S" | tr '\n' ' ')"
-if [ "$RC" -eq 0 ] && printf '%s' "$left" | grep -q 'someone-else-01-kubeconfig' \
-   && printf '%s' "$left" | grep -q 'someone-else-01-cloudinit' && ! printf '%s' "$left" | grep -q "${VM}-"; then
+if [ "$RC" -eq 0 ] && printf '%s' "$left" | grep 'someone-else-01-kubeconfig' >/dev/null \
+   && printf '%s' "$left" | grep 'someone-else-01-cloudinit' >/dev/null && ! printf '%s' "$left" | grep "${VM}-" >/dev/null; then
   ok "destroy removes its own VM's Secrets and leaves another VM's alone"
 else
   bad "destroy removes its own VM's Secrets and leaves another VM's alone" "rc=${RC}; left: ${left}"
@@ -283,7 +283,7 @@ fi
 # reset is the namespace-wide sweep and refuses without its confirmation.
 S="${TMP}/reset-unconfirmed"; new_state "$S"; : >"$S/secrets/someone-else-01-kubeconfig"
 run_tc "$S" reset
-if [ "$RC" -eq 2 ] && printf '%s' "$OUT" | grep -q 'REFUSING: reset deletes EVERY VM' \
+if [ "$RC" -eq 2 ] && printf '%s' "$OUT" | grep 'REFUSING: reset deletes EVERY VM' >/dev/null \
    && [ -n "$(secrets_left "$S")" ]; then
   ok "reset refuses without --every-vm-in-<namespace> and deletes nothing"
 else
@@ -292,8 +292,8 @@ fi
 
 S="${TMP}/destroy-deny"; new_state "$S"; seed_stale "$S"; : >"$S/deny-delete"
 run_tc "$S" destroy
-if [ "$RC" -ne 0 ] && ! printf '%s' "$OUT" | grep -q 'RESULT:   PASS' \
-   && printf '%s' "$OUT" | grep -q 'Forbidden'; then
+if [ "$RC" -ne 0 ] && ! printf '%s' "$OUT" | grep 'RESULT:   PASS' >/dev/null \
+   && printf '%s' "$OUT" | grep 'Forbidden' >/dev/null; then
   ok "destroy fails, and shows the error, when a Secret delete is refused"
 else
   bad "destroy fails, and shows the error, when a Secret delete is refused" "rc=${RC}; $(printf '%s' "$OUT" | grep RESULT | tr '\n' ' ')"
@@ -301,7 +301,7 @@ fi
 
 S="${TMP}/destroy-sticky"; new_state "$S"; seed_stale "$S"; : >"$S/sticky"
 run_tc "$S" destroy
-if [ "$RC" -ne 0 ] && ! printf '%s' "$OUT" | grep -q 'RESULT:   PASS'; then
+if [ "$RC" -ne 0 ] && ! printf '%s' "$OUT" | grep 'RESULT:   PASS' >/dev/null; then
   ok "destroy fails when harness Secrets survive a delete that returned 0"
 else
   bad "destroy fails when harness Secrets survive a delete that returned 0" "rc=${RC}; $(printf '%s' "$OUT" | grep RESULT | tr '\n' ' ')"
@@ -334,7 +334,7 @@ for case_ in "admin:$(jwt 'system:admin')" "other-ns:$(jwt 'system:serviceaccoun
   n="${case_%%:*}"; tok="${case_#*:}"
   S="${TMP}/tok-${n}"; new_state "$S"; printf '%s' "$tok" > "$S/token"
   run_tc "$S" create
-  if [ "$RC" -eq 2 ] && printf '%s' "$OUT" | grep -q 'copies this kubeconfig.s token into the guest' \
+  if [ "$RC" -eq 2 ] && printf '%s' "$OUT" | grep 'copies this kubeconfig.s token into the guest' >/dev/null \
      && ! grep -q 'apply' "$S/calls" && [ ! -f "$S/userdata" ]; then
     ok "secret handoff refuses a ${n} token before any VM or cloud-init exists"
   else
@@ -345,7 +345,7 @@ done
 for verb in create destroy exec; do
   S="${TMP}/noctx-${verb}"; new_state "$S"
   SUBSTRATE_CTX="" run_tc "$S" "$verb"
-  if [ "$RC" -ne 0 ] && [ ! -s "$S/calls" ] && printf '%s' "$OUT" | grep -q 'TOCKMOX_SUBSTRATE_CONTEXT'; then
+  if [ "$RC" -ne 0 ] && [ ! -s "$S/calls" ] && printf '%s' "$OUT" | grep 'TOCKMOX_SUBSTRATE_CONTEXT' >/dev/null; then
     ok "${verb} with an empty substrate context refuses before any kubectl call"
   else
     bad "${verb} with an empty substrate context refuses before any kubectl call" \
@@ -353,7 +353,7 @@ for verb in create destroy exec; do
   fi
 done
 
-if grep -h 'STUB-UNHANDLED' "$TMP"/*/log 2>/dev/null | grep -q .; then
+if grep -h 'STUB-UNHANDLED' "$TMP"/*/log 2>/dev/null | grep . >/dev/null; then
   printf 'note: calls the kubectl stub did not model:\n'; grep -h 'STUB-UNHANDLED' "$TMP"/*/log | sort -u | sed 's/^/  /'
 fi
 

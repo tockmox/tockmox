@@ -99,7 +99,7 @@ b1() { # py
   [ "$(grep -c '^delivery ' "$T/log403")" = 2 ] || return 1
   [ "$(grep -c '^delivery .* http=403 result=failed$' "$T/log403")" = 2 ] || return 1
   # No secret and no sink URL on any delivery line.
-  if grep -h '^delivery ' "$T/log200" "$T/log403" | grep -q -e "$SECRET" -e '127.0.0.1'; then return 1; fi
+  if grep -h '^delivery ' "$T/log200" "$T/log403" | grep -e "$SECRET" -e '127.0.0.1' >/dev/null; then return 1; fi
   return 0
 }
 
@@ -109,7 +109,7 @@ b2() {
     && grep -q 'TM-0779' charts/tockmox-observability/templates/ntfy.yaml \
     && grep -q 'TockmoxNtfyDown' charts/tockmox-observability/templates/ntfy.yaml \
     && grep -q 'runs as one replica, deliberately' docs/operations/monitoring.md \
-    && grep -A8 'runs as one replica, deliberately' docs/operations/monitoring.md | grep -q 'TockmoxNtfyDown'
+    && grep -A8 'runs as one replica, deliberately' docs/operations/monitoring.md | grep 'TockmoxNtfyDown' >/dev/null
 }
 
 # ---- N1 ---------------------------------------------------------------------

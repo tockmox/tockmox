@@ -175,7 +175,7 @@ expect_red() {  # fixture dir name, fragment the finding must contain
   local out rc=0
   out=$(scan "$tmp/$1" 2>&1) || rc=$?
   [ "$rc" -eq 1 ] || { echo "selftest FAIL: $1 did not go red (exit $rc): $out"; exit 1; }
-  printf '%s' "$out" | grep -q -- "$2" || { echo "selftest FAIL: $1 went red on the wrong finding: $out"; exit 1; }
+  printf '%s' "$out" | grep -- "$2" >/dev/null || { echo "selftest FAIL: $1 went red on the wrong finding: $out"; exit 1; }
   echo "selftest ok: $1 goes red ($2)"
 }
 
@@ -201,7 +201,7 @@ jobs:
           docker build -t example.invalid/x:1 .
 YAML
 out=$(scan "$tmp/clean" 2>&1) || { echo "selftest FAIL: the clean fixture went red: $out"; exit 1; }
-printf '%s' "$out" | grep -q 'scanned 1 workflow/action file(s), 3 step(s)' \
+printf '%s' "$out" | grep 'scanned 1 workflow/action file(s), 3 step(s)' >/dev/null \
   || { echo "selftest FAIL: the clean fixture went green without being read: $out"; exit 1; }
 echo "selftest ok: a workflow that builds without pushing, reads packages and mentions push in a comment stays green (and was read)"
 

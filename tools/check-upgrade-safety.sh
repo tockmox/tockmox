@@ -138,43 +138,43 @@ PY
 
 if [ "${1:-}" = "--selftest" ]; then
   out=$(bash tools/check-upgrade-safety.sh --mutate-static-name 2>&1) && { echo "selftest FAIL: F1 passed with a migrations Job name that ignores its pod template"; exit 1; }
-  printf '%s' "$out" | grep -q 'FAIL F1: ' || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F1: ' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F1 assertion goes red when the migrations Job keeps one name across template changes"
   out=$(bash tools/check-upgrade-safety.sh --mutate-drift 2>&1) && { echo "selftest FAIL: F1b passed with a pod spec that differs from the subchart's"; exit 1; }
-  printf '%s' "$out" | grep -q 'FAIL F1b: ' || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F1b: ' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F1b assertion goes red when the owned Job drifts from the subchart's"
   out=$(bash tools/check-upgrade-safety.sh --mutate-sync 2>&1) && { echo "selftest FAIL: F3b passed with garage.web.syncAtInstall off"; exit 1; }
-  printf '%s' "$out" | grep -q 'FAIL F3b' || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F3b' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F3b assertion goes red when the install-time sync is off"
   out=$(bash tools/check-upgrade-safety.sh --mutate-cron 2>&1) && { echo "selftest FAIL: F3 passed with concurrencyPolicy Allow"; exit 1; }
-  printf '%s' "$out" | grep -q 'FAIL F3: .*concurrencyPolicy' || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F3: .*concurrencyPolicy' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F3 assertion goes red when a sync CronJob allows concurrent runs"
   out=$(bash tools/check-upgrade-safety.sh --mutate-default 2>&1) && { echo "selftest FAIL: F3d passed with a sync CronJob in the default render"; exit 1; }
-  printf '%s' "$out" | grep -q 'FAIL F3d: a default render has sync CronJob' || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F3d: a default render has sync CronJob' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F3d assertion goes red when the default render has a docs-side sync CronJob"
   out=$(bash tools/check-upgrade-safety.sh --mutate-placeholder 2>&1) && { echo "selftest FAIL: F3d passed with the docs site off (no placeholder)"; exit 1; }
-  printf '%s' "$out" | grep -q 'FAIL F3d: .*placeholder' || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F3d: .*placeholder' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F3d assertion goes red when the placeholder page is not rendered"
   out=$(bash tools/check-upgrade-safety.sh --mutate-rulewave 2>&1) && { echo "selftest FAIL: F4 passed with the PrometheusRule waves removed"; exit 1; }
-  printf '%s' "$out" | grep -q 'FAIL F4: .*sync-wave' || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F4: .*sync-wave' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F4 assertion goes red when a PrometheusRule has no sync wave"
   out=$(bash tools/check-upgrade-safety.sh --mutate-webhookphase 2>&1) && { echo "selftest FAIL: F4 passed with the webhook configurations not hooks"; exit 1; }
-  printf '%s' "$out" | grep -q 'FAIL F4: .*is not an ArgoCD PreSync hook' || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F4: .*is not an ArgoCD PreSync hook' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F4 assertion goes red when a webhook configuration is not a PreSync hook"
   out=$(bash tools/check-upgrade-safety.sh --mutate-failpolicy 2>&1) && { echo "selftest FAIL: F4 passed with failurePolicy Fail"; exit 1; }
-  printf '%s' "$out" | grep -q 'FAIL F4: .*failurePolicy' || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F4: .*failurePolicy' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F4 assertion goes red when failurePolicy is changed from the upstream Ignore"
   out=$(bash tools/check-upgrade-safety.sh --mutate-patchphase 2>&1) && { echo "selftest FAIL: F4 passed with the patch Job in PostSync"; exit 1; }
-  printf '%s' "$out" | grep -q 'FAIL F4: .*patch Job' || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F4: .*patch Job' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F4 assertion goes red when the caBundle patch Job is left in PostSync"
   out=$(bash tools/check-upgrade-safety.sh --mutate-ingresswave 2>&1) && { echo "selftest FAIL: F5 passed with the Ingress waves removed"; exit 1; }
-  printf '%s' "$out" | grep -q 'FAIL F5: .*Ingress' || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F5: .*Ingress' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F5 assertion goes red when an Ingress shares a wave with, or precedes, the LoadBalancer Service"
   out=$(bash tools/check-upgrade-safety.sh --mutate-ns-missing 2>&1) && { echo "selftest FAIL: F6 passed with a copy target nobody creates"; exit 1; }
-  printf '%s' "$out" | grep -q 'FAIL F6: .*does not exist' || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F6: .*does not exist' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F6 assertion goes red when a namespaced object targets a namespace no earlier layer creates"
   out=$(bash tools/check-upgrade-safety.sh --mutate-ns-twice 2>&1) && { echo "selftest FAIL: F6 passed with a Namespace owned by two layers"; exit 1; }
-  printf '%s' "$out" | grep -q 'FAIL F6: .*two layers' || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F6: .*two layers' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F6 assertion goes red when two layers both render one Namespace"
   exit 0
 fi
@@ -189,7 +189,7 @@ if [ "$base" = "NOJOB" ]; then
   bad "F1: no litellm migrations Job in the render of $AI_CHART with ci/values.yaml"
 elif [ "$(printf '%s\n' "$base" | wc -l | tr -d ' ')" != "1" ]; then
   bad "F1: more than one migrations Job renders ($(echo $base)); two Jobs would migrate one database"
-elif ! printf '%s' "$base" | grep -Eqx 't-litellm-migrations-[0-9a-f]{10}'; then
+elif ! printf '%s' "$base" | grep -Ex 't-litellm-migrations-[0-9a-f]{10}' >/dev/null; then
   bad "F1: the migrations Job is '$base', not named after its pod template (t-litellm-migrations-<10 hex>). A Job keeping one name across a template change fails with 'field is immutable' on every existing site"
 else
   good "F1: one migrations Job, named after its pod template ($base)"

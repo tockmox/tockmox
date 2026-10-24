@@ -93,7 +93,7 @@ if [ "${1:-}" = "--selftest" ]; then
       [ -z "$2" ] || { echo "selftest FAIL: $1 passed"; exit 1; }
     else
       [ -n "$2" ] || { echo "selftest FAIL: $1 failed: $out"; exit 1; }
-      printf '%s' "$out" | grep -q -- "$2" || { echo "selftest FAIL: $1: wrong message: $out"; exit 1; }
+      printf '%s' "$out" | grep -- "$2" >/dev/null || { echo "selftest FAIL: $1: wrong message: $out"; exit 1; }
     fi
     echo "selftest ok: $1"
   }

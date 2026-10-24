@@ -98,7 +98,7 @@ selftest() {
     if [ "$got" = "$2" ]; then echo "  ok  $1: $got as expected"
     else echo "  SELFTEST FAIL: $1 wanted $2, got $got"; sed 's/^/        /' "$tmp/out"; fails=1; fi
   }
-  tagok() { printf '%s\n' "$1" | grep -Eq "$TAG_RE" && echo pass || echo fail; }
+  tagok() { printf '%s\n' "$1" | grep -E "$TAG_RE" >/dev/null && echo pass || echo fail; }
 
   echo "selftest: site pin at tag"
   mk "$tmp/g" v1.2.3 v1.2.3 v1.2.3;           probe "template on the pushed tag" pass "$tmp/g" v1.2.3
@@ -128,7 +128,7 @@ while [ $# -gt 0 ]; do
     *) TAG="${1#refs/tags/}"; shift ;;
   esac
 done
-printf '%s\n' "$TAG" | grep -Eq "$TAG_RE" || {
+printf '%s\n' "$TAG" | grep -E "$TAG_RE" >/dev/null || {
   echo "site-pin-at-tag: \"$TAG\" is not a release tag (want vX.Y.Z or vX.Y.Z-rcN)"; exit 2; }
 
 if [ -z "$DIR" ]; then

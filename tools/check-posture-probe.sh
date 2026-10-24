@@ -61,7 +61,7 @@ check() {
   local chart="$1" rc=0 tmp out
   tmp=$(mktemp -d)
   out=$(helm template t "$chart" -n "$REL_NS" 2>&1) || { echo "  FAIL default render failed: $(echo "$out" | tail -1)"; rm -rf "$tmp"; return 1; }
-  if printf '%s\n' "$out" | grep -q '^kind:'; then echo "  FAIL the default render is not empty: the add-on must be off until enabled"; rc=1
+  if printf '%s\n' "$out" | grep '^kind:' >/dev/null; then echo "  FAIL the default render is not empty: the add-on must be off until enabled"; rc=1
   else echo "  ok off by default: the default render holds no object"; fi
   if ! helm template t "$chart" -n "$REL_NS" "${ON[@]}" > "$tmp/on.yaml" 2> "$tmp/on.err"; then
     echo "  FAIL the enabled render failed: $(tail -1 "$tmp/on.err")"; rm -rf "$tmp"; return 1
@@ -92,7 +92,7 @@ PY
   refuse() { # refuse LABEL MESSAGE ARGS...
     local label="$1" msg="$2"; shift 2; local o
     if o=$(helm template t "$chart" -n "$REL_NS" "${ON[@]}" "$@" 2>&1); then echo "  FAIL rendered anyway: $label"; return 1; fi
-    if printf '%s' "$o" | grep -qF "$msg"; then echo "  ok refused: $label"; else echo "  FAIL refused, but not for the stated reason: $label"; return 1; fi
+    if printf '%s' "$o" | grep -F "$msg" >/dev/null; then echo "  ok refused: $label"; else echo "  FAIL refused, but not for the stated reason: $label"; return 1; fi
   }
   refuse "enabled with no image" "image is empty" --set image= || rc=1
   refuse "installed into a measured namespace" "is also a measured namespace" -n tockmox-ai || rc=1
@@ -102,7 +102,7 @@ PY
     --set 'intent.rows[0].subject=tockmox-ai->tockmox-platform' --set 'intent.rows[0].dimension=egress' --set 'intent.rows[0].intent=deny' || rc=1
   refuse "no API address for the differential's policy" "networkPolicy.apiServer is empty" --set 'networkPolicy.apiServer=null' || rc=1
   if o=$(helm template t "$chart" -n "$REL_NS" "${ON[@]}" --set 'namespaces={tockmox-platform,tockmox-monitoring}' --set 'identityVantages=null' 2>&1) \
-     && printf '%s' "$o" | grep -q 'presetRowsDropped\\":[1-9]'; then echo "  ok preset rows for namespaces a site does not measure are dropped and counted, not failed"
+     && printf '%s' "$o" | grep 'presetRowsDropped\\":[1-9]' >/dev/null; then echo "  ok preset rows for namespaces a site does not measure are dropped and counted, not failed"
   else echo "  FAIL the preset does not narrow to the measured namespaces (a declined capability would break the render)"; rc=1; fi
   rm -rf "$tmp"
   return $rc
@@ -142,7 +142,7 @@ PY
   local o
   if [ "${5:-}" = unit ]; then o=$(unit "$work/a" 2>&1) && { echo "selftest FAIL  $1: unit tests stayed GREEN"; fail=1; return; }
   else o=$(check "$work/a/chart" 2>&1) && { echo "selftest FAIL  $1: gate stayed GREEN"; fail=1; return; }; fi
-  if printf '%s' "$o" | grep -qF "$4"; then echo "selftest ok    $1: RED on '$4'"
+  if printf '%s' "$o" | grep -F "$4" >/dev/null; then echo "selftest ok    $1: RED on '$4'"
   else echo "selftest FAIL  $1: red, but not for the expected reason"; printf '%s\n' "$o" | grep -E 'FAIL' | head -3; fail=1; fi
 }
 R=chart/templates/rbac.yaml

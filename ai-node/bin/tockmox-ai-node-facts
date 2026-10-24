@@ -232,7 +232,7 @@ main() {
 
   # macmon_up
   if [ -n "$MACMON_PORT" ]; then
-    if curl -fsS -m 3 "http://127.0.0.1:$MACMON_PORT/metrics" 2>/dev/null | grep -q '^macmon_\|^# HELP macmon_'; then
+    if curl -fsS -m 3 "http://127.0.0.1:$MACMON_PORT/metrics" 2>/dev/null | grep '^macmon_\|^# HELP macmon_' >/dev/null; then
       readiness macmon_up 1
     else
       readiness macmon_up 0

@@ -112,7 +112,7 @@ load_spec() {
   for v in REL_BRANCH TRAIN_BRANCH TAG WITNESS TEMPLATE_PIN_PR GATE_REPORT SIGNING_KEY RELEASE_NOTES; do
     eval "val=\${$v:-}"; [ -n "$val" ] || stop "spec is missing $v"
   done
-  printf '%s\n' "$TAG" | grep -Eq "$TAG_RE" || stop "TAG '$TAG' is not vX.Y.Z (this script cuts finals; an rc is not a morning)"
+  printf '%s\n' "$TAG" | grep -E "$TAG_RE" >/dev/null || stop "TAG '$TAG' is not vX.Y.Z (this script cuts finals; an rc is not a morning)"
   case "$TEMPLATE_PIN_PR" in ''|*[!0-9]*) stop "TEMPLATE_PIN_PR '$TEMPLATE_PIN_PR' is not a PR number" ;; esac
   for f in "$WITNESS" "$GATE_REPORT" "$RELEASE_NOTES"; do [ -s "$f" ] || stop "spec names a file that is missing or empty: $f"; done
   [ -r "$SIGNING_KEY" ] || stop "cannot read SIGNING_KEY $SIGNING_KEY"
@@ -270,7 +270,7 @@ merge_template_pin() {
       readme=$(gh api "repos/$TEMPLATE_REPO/contents/README.md?ref=$head" --jq .content \
         | python3 -I -c 'import base64,sys; sys.stdout.write(base64.b64decode(sys.stdin.read()).decode())') \
         || stop "cannot read README.md at the PR head"
-      printf '%s\n' "$readme" | grep -q "Pinned to \*\*${TAG}\*\*" \
+      printf '%s\n' "$readme" | grep "Pinned to \*\*${TAG}\*\*" >/dev/null \
         || stop "PR #$TEMPLATE_PIN_PR does not pin $TAG (README has: $(printf '%s\n' "$readme" | grep -m1 'Pinned to' || echo '<no Pinned to line>'))"
       say "  PR head pins $TAG"
       gh pr checks "$TEMPLATE_PIN_PR" --repo "$TEMPLATE_REPO" >/dev/null 2>&1 \
@@ -376,7 +376,7 @@ publish() {
     names=$(gh release view "$TAG" --repo "$GH_REPO" --json assets \
       | python3 -I -c 'import json,sys; print("\n".join(a["name"] for a in json.load(sys.stdin)["assets"]))')
     missing=""
-    for a in "${ASSETS[@]}"; do printf '%s\n' "$names" | grep -qx "$(basename "$a")" || missing="$missing $(q "$a")"; done
+    for a in "${ASSETS[@]}"; do printf '%s\n' "$names" | grep -x "$(basename "$a")" >/dev/null || missing="$missing $(q "$a")"; done
     if [ -z "$missing" ]; then say "  Release exists with every asset; skipping"; return 0; fi
     say "  Release exists; uploading what it lacks:$missing"
     act "gh release upload $TAG --repo $GH_REPO$missing"

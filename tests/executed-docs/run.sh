@@ -395,7 +395,7 @@ export KUBE_CONTEXT
 # A context we were handed (or derived) must exist in the file, or every call
 # below would fail with a message that reads like a cluster fault.
 # ctx-exempt-next: lists context NAMES in a kubeconfig file; reaches no cluster
-if ! KUBECONFIG="$GUEST_KUBECONFIG" kubectl config get-contexts -o name 2>/dev/null | grep -Fxq -- "$KUBE_CONTEXT"; then
+if ! KUBECONFIG="$GUEST_KUBECONFIG" kubectl config get-contexts -o name 2>/dev/null | grep -Fx -- "$KUBE_CONTEXT" >/dev/null; then
   echo "REFUSING: context '${KUBE_CONTEXT}' is not in ${GUEST_KUBECONFIG}." | tee -a "$REPORT"
   exit 1
 fi

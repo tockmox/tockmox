@@ -1644,7 +1644,7 @@ destroy() {
   # happened on 2026-09-04 when a caller had KUBECONFIG pointed at the guest
   # rather than the hypervisor. See run.sh, which hands destroy the substrate
   # credential.
-  if ! kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" api-resources --api-group=kubevirt.io 2>/dev/null | grep -q '\bvirtualmachines\b'; then
+  if ! kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" api-resources --api-group=kubevirt.io 2>/dev/null | grep '\bvirtualmachines\b' >/dev/null; then
     echo "REFUSING: this cluster has no kubevirt.io/virtualmachines resource." >&2
     echo "          KUBECONFIG is almost certainly pointed at the GUEST rather" >&2
     echo "          than the hypervisor. Tearing down here would delete nothing" >&2

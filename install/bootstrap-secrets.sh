@@ -657,7 +657,7 @@ else
     die "the key export failed. No backup was written and nothing has been sealed."
   fi
   if [[ "$ENC" == "age" && -z "$AGE_IDENTITY" ]]; then
-    head -c 32 "$BAK_TMP" | grep -q 'age-encryption.org' \
+    head -c 32 "$BAK_TMP" | grep 'age-encryption.org' >/dev/null \
       || die "the export does not look like an age file. Nothing has been sealed."
     warn "NOT VERIFIED: age cannot open its own output without your identity. Once, yourself:"
     info "age -d -i YOUR-IDENTITY $BACKUP_OUT | grep -c 'tls.key'      (expect $NK)"

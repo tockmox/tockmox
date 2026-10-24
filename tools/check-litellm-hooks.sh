@@ -167,7 +167,7 @@ expect_refusal() {
   local out
   if out=$(helm template t "$CHART" -f "$BASE" -f "$FIX" "$@" 2>&1); then
     echo "FAIL refusal ($label): the render succeeded"; rc=1
-  elif printf '%s' "$out" | grep -q -- "$needle"; then
+  elif printf '%s' "$out" | grep -- "$needle" >/dev/null; then
     echo "  ok refusal ($label)"
   else
     echo "FAIL refusal ($label): failed, but not with the expected message"; rc=1

@@ -95,7 +95,7 @@ spec:
     local name="$1" want="$2" fixture="$3" out
     if out="$(printf '%s\n' "$fixture" | validate_some "$name" 2>&1)"; then
       echo "  SELFTEST FAIL: a Deployment with $name passed"; fails=1
-    elif printf '%s\n' "$out" | grep -q "$want"; then
+    elif printf '%s\n' "$out" | grep "$want" >/dev/null; then
       echo "  selftest ok: a Deployment with $name is rejected, naming $want"
     else
       echo "  SELFTEST FAIL: a Deployment with $name was rejected, but not for $want:"

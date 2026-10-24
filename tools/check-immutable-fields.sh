@@ -280,7 +280,7 @@ run_pair() { # base-name head-name
   local layers=""
   for c in "$work/$2"/charts/tockmox-*; do
     n=$(basename "$c"); case "$n" in tockmox-common|tockmox-crds) continue ;; esac
-    [ -n "$LAYERS" ] && ! printf ' %s ' $LAYERS | grep -q " $n " && continue
+    [ -n "$LAYERS" ] && ! printf ' %s ' $LAYERS | grep " $n " >/dev/null && continue
     if [ -d "$work/$1/charts/$n" ]; then layers="$layers $n"; else echo "  note: $n is new in the head tree; nothing live to conflict with"; fi
   done
   [ -n "$layers" ] || { echo "check-immutable-fields: no layer chart to compare" >&2; return 2; }
@@ -341,7 +341,7 @@ if [ "$SELFTEST" = 1 ]; then
     printf 'apiVersion: batch/v1\nkind: Job\nmetadata:\n  name: %s\n  namespace: ns\n  labels: {helm.sh/chart: other}\n%s\nspec:\n  template:\n    metadata:\n      labels: {helm.sh/chart: %s}\n    spec: {restartPolicy: Never}\n' "$1" "$3" "$2"; }
   pair() { printf '%s\n' "$2" > "$fx/$1.old.yaml"; printf '%s\n' "$3" > "$fx/$1.new.yaml"; }
   run() { python3 "$work/cmp.py" "${3:--}" "L|defaults|$fx/$1.old.yaml|$fx/$1.new.yaml" 2>&1; }
-  expect_red()   { local out; out=$(run "$1" "" "${3:-}") && die "$2 passed"; printf '%s' "$out" | grep -q "$4" || die "$2: wrong output: $out"; ok "$2"; }
+  expect_red()   { local out; out=$(run "$1" "" "${3:-}") && die "$2 passed"; printf '%s' "$out" | grep "$4" >/dev/null || die "$2: wrong output: $out"; ok "$2"; }
   expect_green() { local out; out=$(run "$1" "" "${3:-}") || die "$2 failed: $out"; ok "$2"; }
   ANN='  annotations: {argocd.argoproj.io/hook: PostSync, argocd.argoproj.io/hook-delete-policy: BeforeHookCreation}'
   pair j1 "$(job creds tockmox-platform-0.6.0 '')" "$(job creds tockmox-platform-0.6.1 '')"
@@ -372,9 +372,9 @@ if [ "$SELFTEST" = 1 ]; then
   expect_red s3 "a StatefulSet volumeClaimTemplates change (even a label) is flagged" "" 'spec.volumeClaimTemplates changes'
   pair a1 "$(job creds tockmox-platform-0.6.0 '')" "$(job creds tockmox-platform-0.6.1 '')"
   printf 'L Job creds spec.template # selftest\n' > "$fx/allow.txt"
-  out=$(run a1 "" "$fx/allow.txt") || die "an allow-listed hit failed"; printf '%s' "$out" | grep -q 'allowed L Job ns/creds' || die "allowed hit not printed"; ok "an allow-listed hit passes and is still printed"
+  out=$(run a1 "" "$fx/allow.txt") || die "an allow-listed hit failed"; printf '%s' "$out" | grep 'allowed L Job ns/creds' >/dev/null || die "allowed hit not printed"; ok "an allow-listed hit passes and is still printed"
   printf 'L Job other spec.template\n' > "$fx/allow2.txt"
-  out=$(run j2 "" "$fx/allow2.txt"); printf '%s' "$out" | grep -q 'matched nothing' || die "stale allow entry not reported"; ok "an allow entry that matches nothing is reported"
+  out=$(run j2 "" "$fx/allow2.txt"); printf '%s' "$out" | grep 'matched nothing' >/dev/null || die "stale allow entry not reported"; ok "an allow entry that matches nothing is reported"
   # Real renders: a version bump of the real platform chart, with and without the TM-0753 fix.
   command -v helm >/dev/null || die "helm"
   ver=$(awk '$1=="version:"{print $2; exit}' charts/tockmox-platform/Chart.yaml)
@@ -383,22 +383,22 @@ if [ "$SELFTEST" = 1 ]; then
   stage_dir sa "$ROOT"; stage_dir sb "$ROOT"; bump sb
   fill_deps sa 2>/dev/null; fill_deps sb 2>/dev/null
   out=$(bash "$self" --base-dir "$work/sa" --head-dir "$work/sb" --layers tockmox-platform 2>&1) || die "the real platform chart, version-bumped, was flagged: $out"
-  printf '%s' "$out" | grep -Eq 'the rendered diff is [1-9][0-9]* changed lines; 0 immutable' || die "green bump did not show a non-empty rendered diff: $out"
+  printf '%s' "$out" | grep -E 'the rendered diff is [1-9][0-9]* changed lines; 0 immutable' >/dev/null || die "green bump did not show a non-empty rendered diff: $out"
   ok "the real platform chart bumped $ver -> 9.9.9 has a non-empty rendered diff and no immutable-field change (TM-0753 fix in place)"
   for s in sa sb; do f="$work/$s/charts/tockmox-platform/templates/garage-bootstrap.yaml"; sed 's/^  name: {{ \$credName }}$/  name: {{ $name }}-credentials/' "$f" > "$f.n" && mv "$f.n" "$f"; done
   out=$(bash "$self" --base-dir "$work/sa" --head-dir "$work/sb" --layers tockmox-platform 2>&1) && die "the pre-TM-0753 Job name passed: $out"
-  printf '%s' "$out" | grep -Eq 'FAIL tockmox-platform Job .*-credentials: spec.template changes .*helm.sh/chart' || die "wrong output: $out"
+  printf '%s' "$out" | grep -E 'FAIL tockmox-platform Job .*-credentials: spec.template changes .*helm.sh/chart' >/dev/null || die "wrong output: $out"
   ok "the same bump with the version taken out of the credentials Job's name is flagged, naming that Job"
   # --perturb-images (TM-1022): the fixed tree passes; the credentials Job named for the version again fails, naming it.
   pt="$work/pt"; mkdir -p "$pt"; (cd "$ROOT" && tar -c charts ci tools) | tar -x -C "$pt"
   out=$(bash "$pt/tools/check-immutable-fields.sh" --perturb-images 2>&1) || die "--perturb-images failed on this tree: $out"
-  printf '%s' "$out" | grep -Eq 'perturbed [1-9][0-9]* image references' || die "--perturb-images changed nothing: $out"
+  printf '%s' "$out" | grep -E 'perturbed [1-9][0-9]* image references' >/dev/null || die "--perturb-images changed nothing: $out"
   ok "--perturb-images: every image tag changed, no surviving Job keeps its name with a changed template"
   f="$pt/charts/tockmox-platform/templates/garage-bootstrap.yaml"
   sed 's/^{{- \$credName := printf "%s-credentials-%s" \$name (\$credPod | sha256sum | trunc 10) -}}$/{{- $credName := printf "%s-credentials-%s" $name (.Chart.Version | replace "." "-") -}}/' "$f" > "$f.n" && mv "$f.n" "$f"
   grep -q 'Chart.Version | replace' "$f" || die "selftest could not put the version-only name back"
   out=$(bash "$pt/tools/check-immutable-fields.sh" --perturb-images 2>&1) && die "--perturb-images passed a version-named Job: $out"
-  printf '%s' "$out" | grep -Eq 'FAIL tockmox-platform Job .*/tockmox-garage-credentials-[0-9-]*: spec.template changes .*image' || die "wrong output: $out"
+  printf '%s' "$out" | grep -E 'FAIL tockmox-platform Job .*/tockmox-garage-credentials-[0-9-]*: spec.template changes .*image' >/dev/null || die "wrong output: $out"
   ok "--perturb-images flags the credentials Job named for the version only, as on the homelab 2026-10-11"
   # A subchart version that differs between the two sides (the 0.8.1 cut): the base
   # side's lock names a version the candidate no longer vendors. Two throwaway sides,
@@ -451,7 +451,7 @@ STUB
   [ -f "$sdc/selftest-dep-0.1.0.tgz" ] && [ -f "$work/db/charts/tockmox-selftest/charts/selftest-dep-0.2.0.tgz" ] || die "exact versions in the pool were not vendored into the sides"
   [ ! -s "$sd/pulls.log" ] || die "exact versions in the pool still pulled: $(cat "$sd/pulls.log")"
   out=$(render 1) || die "two sides on different pooled subchart versions did not render: $out"
-  printf '%s' "$out" | grep -Eq 'the rendered diff is [1-9][0-9]* changed lines; 0 immutable' || die "wrong output: $out"
+  printf '%s' "$out" | grep -E 'the rendered diff is [1-9][0-9]* changed lines; 0 immutable' >/dev/null || die "wrong output: $out"
   ok "a subchart at 0.1.0 on the base side and 0.2.0 on the head side: both exact versions come from the pool, nothing is fetched, both sides render"
   # (b) the base side's exact version is not in the pool: fetched by exact version into the cache, then served from the cache offline
   rm -f "$sd/pool/selftest-dep-0.1.0.tgz"; rm -rf "$sd/cache" "$sdc"; : > "$sd/pulls.log"
@@ -467,7 +467,7 @@ STUB
   [ -f "$sdc/selftest-dep-0.1.0.tgz" ] || die "the cached subchart was not vendored into the side"
   [ ! -s "$sd/pulls.log" ] || die "a cached subchart was pulled again: $(cat "$sd/pulls.log")"
   out=$(render 1) || die "the cached baseline subchart did not render both sides with the network refused: $out"
-  printf '%s' "$out" | grep -Eq 'the rendered diff is [1-9][0-9]* changed lines; 0 immutable' || die "wrong output: $out"
+  printf '%s' "$out" | grep -E 'the rendered diff is [1-9][0-9]* changed lines; 0 immutable' >/dev/null || die "wrong output: $out"
   ok "the cached version is used offline, nothing is pulled again, and both sides render with no IMMUTABLE_DEPS_DIR for the baseline"
   # (c) no exact version anywhere and no network: the nearest vendored version is refused, not substituted
   rm -rf "$sd/cache" "$sdc"; : > "$sd/pulls.log"
@@ -475,7 +475,7 @@ STUB
   grep -q 'no subchart selftest-dep 0.1.0 for tockmox-selftest (da side)' "$sd/err" && grep -q 'A nearest version (selftest-dep-0.2.0.tgz) is NOT a substitute' "$sd/err" || die "wrong refusal: $(cat "$sd/err")"
   [ ! -e "$sdc/selftest-dep-0.2.0.tgz" ] || die "the nearest version was copied into the side anyway"
   out=$(render 1); rc=$?; [ "$rc" = 2 ] || die "the whole run on a missing baseline subchart exited $rc, not 2: $out"
-  printf '%s' "$out" | grep -q 'NOT a substitute' || die "the whole run did not say why: $out"
+  printf '%s' "$out" | grep 'NOT a substitute' >/dev/null || die "the whole run did not say why: $out"
   ok "a nearest version is refused with the exact version named, nothing is copied in, and the run exits 2 instead of warning"
   echo "check-immutable-fields selftest: ok"
   exit 0

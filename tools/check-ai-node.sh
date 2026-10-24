@@ -146,7 +146,7 @@ out="$(lint_bash4 "$AI")"; [ -z "$out" ] && ok "no bash 4 feature in the scripts
 out="$(lint_gnu "$AI")";   [ -z "$out" ] && ok "no GNU-only option in the scripts that run on the Mac" || bad "GNU-only options (macOS has BSD userland)" "$out"
 out="$(lint_secret_print "$AI")"; [ -z "$out" ] && ok "no script prints a private key" || bad "a script prints a private key" "$out"
 for f in "$AI/bootstrap-node.sh" "$AI"/bin/*; do
-  head -n 1 "$f" | grep -qE '^#!(/bin/bash|/usr/bin/env bash)$' || bad "$f has a shebang other than bash" "$(head -n 1 "$f")"
+  head -n 1 "$f" | grep -E '^#!(/bin/bash|/usr/bin/env bash)$' >/dev/null || bad "$f has a shebang other than bash" "$(head -n 1 "$f")"
   [ -x "$f" ] || bad "$f is not executable"
 done
 bash -n "$AI/bootstrap-node.sh" && bash -n "$AI/bin/tockmox-ai-node-converge" && bash -n "$AI/bin/tockmox-ai-node-facts" && bash -n "$AI/bin/tockmox-ai-node-engine-watch" && ok "bash -n passes" || bad "bash -n"
@@ -155,11 +155,11 @@ bash -n "$AI/bootstrap-node.sh" && bash -n "$AI/bin/tockmox-ai-node-converge" &&
 echo "playbook"
 if out="$(cd "$AI" && ANSIBLE_CONFIG=ansible.cfg ansible-playbook -i localhost, --syntax-check playbooks/ai-node.yml 2>&1)"; then ok "ansible-playbook --syntax-check"; else bad "ansible-playbook --syntax-check" "$out"; fi
 if out="$(cd "$AI" && yamllint -s . 2>&1)"; then ok "yamllint (strict)"; else bad "yamllint" "$out"; fi
-if out="$(cd "$AI" && ansible-lint 2>&1 | tail -n 15)"; echo "$out" | grep -q "Passed: 0 failure(s), 0 warning(s)"; then ok "ansible-lint, production profile"; else bad "ansible-lint" "$out"; fi
+if out="$(cd "$AI" && ansible-lint 2>&1 | tail -n 15)"; echo "$out" | grep "Passed: 0 failure(s), 0 warning(s)" >/dev/null; then ok "ansible-lint, production profile"; else bad "ansible-lint" "$out"; fi
 
 # --------------------------------------------------------------------- tests
 echo "tests"
-if out="$(python3 -W error -m unittest discover -s "$AI/tests/unit" 2>&1 | tail -n 25)"; echo "$out" | grep -q '^OK'; then ok "python unit tests: $(echo "$out" | grep '^Ran')"; else bad "python unit tests" "$out"; fi
+if out="$(python3 -W error -m unittest discover -s "$AI/tests/unit" 2>&1 | tail -n 25)"; echo "$out" | grep '^OK' >/dev/null; then ok "python unit tests: $(echo "$out" | grep '^Ran')"; else bad "python unit tests" "$out"; fi
 if out="$(bash "$AI/tests/converge-wrapper.sh" 2>&1)"; then ok "converger wrapper tests: $(echo "$out" | tail -n 1)"; else bad "converger wrapper tests" "$(echo "$out" | grep -E 'FAIL|want' | head -n 15)"; fi
 
 if out="$(bash "$AI/tests/firewall-scripts.sh" 2>&1)"; then ok "firewall script tests: $(echo "$out" | tail -n 1)"; else bad "firewall script tests" "$(echo "$out" | grep -E 'FAIL|want' | head -n 15)"; fi
@@ -171,18 +171,18 @@ if out="$(bash "$AI/tests/bootstrap-flow.sh" 2>&1)"; then ok "bootstrap flow tes
 # bootstrap refuses an incomplete or wrong call, before it touches anything
 b="$AI/bootstrap-node.sh"
 out="$(bash "$b" 2>&1)"; rc=$?
-[ "$rc" != 0 ] && echo "$out" | grep -q -- '--ai-node-id is required' && ok "bootstrap: no node id is refused" || bad "bootstrap: no node id is refused" "$out"
+[ "$rc" != 0 ] && echo "$out" | grep -- '--ai-node-id is required' >/dev/null && ok "bootstrap: no node id is refused" || bad "bootstrap: no node id is refused" "$out"
 out="$(bash "$b" --ai-node-id Bad_Id --site-repo x 2>&1)"; rc=$?
-[ "$rc" != 0 ] && echo "$out" | grep -q 'lower-case' && ok "bootstrap: a malformed node id is refused" || bad "bootstrap: a malformed node id is refused" "$out"
+[ "$rc" != 0 ] && echo "$out" | grep 'lower-case' >/dev/null && ok "bootstrap: a malformed node id is refused" || bad "bootstrap: a malformed node id is refused" "$out"
 out="$(bash "$b" --ai-node-id n1 --site-repo x --signing-mode lax 2>&1)"; rc=$?
-[ "$rc" != 0 ] && echo "$out" | grep -q 'warn or enforce' && ok "bootstrap: an unknown signing mode is refused" || bad "bootstrap: an unknown signing mode is refused" "$out"
+[ "$rc" != 0 ] && echo "$out" | grep 'warn or enforce' >/dev/null && ok "bootstrap: an unknown signing mode is refused" || bad "bootstrap: an unknown signing mode is refused" "$out"
 out="$(bash "$b" --bogus 2>&1)"; rc=$?
 [ "$rc" = 64 ] && ok "bootstrap: an unknown option exits 64" || bad "bootstrap: an unknown option exits 64" "rc=$rc $out"
 out="$(bash "$b" --help 2>&1)"; rc=$?
-[ "$rc" = 0 ] && echo "$out" | grep -q -- '--site-repo' && ok "bootstrap: --help prints the options" || bad "bootstrap: --help prints the options" "$out"
+[ "$rc" = 0 ] && echo "$out" | grep -- '--site-repo' >/dev/null && ok "bootstrap: --help prints the options" || bad "bootstrap: --help prints the options" "$out"
 if [ "$(uname -s)" != Darwin ]; then
   out="$(bash "$b" --ai-node-id n1 --site-repo https://example.invalid/s.git --dry-run 2>&1)"; rc=$?
-  [ "$rc" != 0 ] && echo "$out" | grep -q 'for macOS' && ok "bootstrap: a non-Mac stops at preflight" || bad "bootstrap: a non-Mac stops at preflight" "$out"
+  [ "$rc" != 0 ] && echo "$out" | grep 'for macOS' >/dev/null && ok "bootstrap: a non-Mac stops at preflight" || bad "bootstrap: a non-Mac stops at preflight" "$out"
 fi
 out="$(bash "$AI/bin/tockmox-ai-node-converge" --bogus 2>&1)"; rc=$?
 [ "$rc" = 64 ] && ok "converger: an unknown option exits 64" || bad "converger: an unknown option exits 64" "rc=$rc"
