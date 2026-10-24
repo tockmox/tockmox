@@ -25,8 +25,11 @@
   <div class="panel-head"><h2 id="healthy-h">Everything else</h2><span class="muted small">folded; open a row for every item</span></div>
 
   {% set ar = readings["apps"] %}
+  {% set ok_apps = (ar.data or []) | selectattr("sync", "equalto", "Synced") | selectattr("health", "equalto", "Healthy") | list %}
+  {% set bad_apps = (ar.data or []) | length - ok_apps | length %}
   <details class="fold">
-    {{ fold_summary(ar.state, "Synced · Healthy" if ar.state == "ok" else none, (ar.data|length ~ " applications") if ar.data else "Applications", ar) }}
+    {{ fold_summary("unknown" if ar.state == "unknown" else "ok", none if ar.state == "unknown" else "Synced · Healthy",
+                    ((ok_apps|length ~ " of " ~ ar.data|length ~ " applications · " ~ bad_apps ~ " in Problems above") if bad_apps else (ar.data|length ~ " applications")) if ar.data else "Applications", ar) }}
     <div class="fold-body">
     {% if ar.data %}
     <div class="fold-tools"><span class="muted small">Revision is shown where it is not a branch head; <code>main</code> says nothing.</span></div>
@@ -46,8 +49,11 @@
   </details>
 
   {% set nr = readings["nodes"] %}
+  {% set ready_nodes = (nr.data or []) | selectattr("ready", "equalto", "Ready") | list %}
+  {% set bad_nodes = (nr.data or []) | length - ready_nodes | length %}
   <details class="fold">
-    {{ fold_summary(nr.state, "Ready" if nr.state == "ok" else none, (nr.data|length ~ " nodes") if nr.data else "Nodes", nr) }}
+    {{ fold_summary("unknown" if nr.state == "unknown" else "ok", none if nr.state == "unknown" else "Ready",
+                    ((ready_nodes|length ~ " of " ~ nr.data|length ~ " nodes · " ~ bad_nodes ~ " in Problems above") if bad_nodes else (nr.data|length ~ " nodes")) if nr.data else "Nodes", nr) }}
     <div class="fold-body">
     {% if nr.data %}
     <div class="table-wrap" role="region" aria-labelledby="nodes-cap" tabindex="0">
@@ -68,7 +74,8 @@
   {% set pr = readings["prometheus"] %}
   {% set down = (pr.data or []) | rejectattr("up") | list %}
   <details class="fold">
-    {{ fold_summary(pr.state, "Up" if pr.state == "ok" else none, ((pr.data|length - down|length) ~ " of " ~ pr.data|length ~ " scrape targets") if pr.data else "Scrape targets", pr) }}
+    {{ fold_summary("unknown" if pr.state == "unknown" else "ok", none if pr.state == "unknown" else "Up",
+                    ((pr.data|length - down|length) ~ " of " ~ pr.data|length ~ " scrape targets" ~ ((" · " ~ down|length ~ " in Problems above") if down else "")) if pr.data else "Scrape targets", pr) }}
     <div class="fold-body">
     {% if down %}
     <ul class="plain fold-list">{% for t in down[:25] %}<li>{{ badge("warning", "Down") }} <code>{{ t.job }}</code> {{ t.instance }}</li>{% endfor %}</ul>
@@ -84,7 +91,8 @@
   {% set hb_on = (am.data or []) | selectattr("name", "equalto", heartbeat) | list %}
   {% set real = (am.data or []) | rejectattr("name", "in", pipeline) | list %}
   <details class="fold">
-    {{ fold_summary("ok" if hb_on else am.state, "Alive" if hb_on else none, "Alerting pipeline", am) }}
+    {{ fold_summary("ok" if hb_on else am.state, "Alive" if hb_on else none, "Alerting pipeline", am,
+                    note=((real|length ~ " firing, listed above") if real else "nothing firing") if am.state != "unknown" else none) }}
     <div class="fold-body">
       <p class="small">{% if hb_on %}{{ badge("ok", "Alive") }} <code>{{ heartbeat }}</code> is firing, as it always should: alerts can reach a person.{% else %}{{ badge("unknown", "Silent") }} <code>{{ heartbeat }}</code> is not firing, so nothing shows alerts can arrive.{% endif %}</p>
       {% for name, why in hb_purpose.items() if name != heartbeat %}{% if (am.data or []) | selectattr("name", "equalto", name) | list %}
@@ -96,7 +104,9 @@
   {% if readings.get("inference_nodes") %}{% set inr = readings["inference_nodes"] %}
   {% set healthy_inodes = (inr.data or []) | selectattr("state", "equalto", "ok") | list %}
   <details class="fold">
-    {{ fold_summary(inr.state, "Healthy" if inr.state == "ok" else none, (healthy_inodes|length ~ " of " ~ inr.data|length ~ " inference nodes") if inr.data else "Inference nodes", inr) }}
+    {% set bad_inodes = (inr.data or []) | length - healthy_inodes | length %}
+    {{ fold_summary("unknown" if inr.state == "unknown" else "ok", none if inr.state == "unknown" else "Healthy",
+                    (healthy_inodes|length ~ " of " ~ inr.data|length ~ " inference nodes" ~ ((" · " ~ bad_inodes ~ " in Problems above") if bad_inodes else "")) if inr.data else "Inference nodes", inr) }}
     <div class="fold-body">
     {% if inr.data %}
     <ul class="plain fold-list">{% for x in inr.data %}<li>{{ badge(x.state if inr.fetched_at else "unknown") }} <a href="/nodes/{{ x.id }}">{{ x.name or x.id }}</a>{% if x.why %}<span class="muted">: {{ x.why }}</span>{% endif %}</li>{% endfor %}</ul>

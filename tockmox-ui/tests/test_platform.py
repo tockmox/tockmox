@@ -140,7 +140,10 @@ def test_healthy_world_is_ok_and_says_what_is_not_started(world):
     healthy_signals(world)
     hour = 3600
     prev = Cron("0 * * * *").prev_before(NOW)
-    add_cronjob(world, "tockmox-selfcheck", "tockmox-heartbeat", "0 * * * *", last_run=prev, last_ok=prev + 30, nxt=prev + hour)
+    # Never stage the success after the test's own clock: at hh:00:08, prev + 30 is in the future and the
+    # job reads as not yet succeeded, so this test failed in the first 30 s of every hour (TM-1134).
+    ok = max(prev, min(prev + 30, NOW - 1))
+    add_cronjob(world, "tockmox-selfcheck", "tockmox-heartbeat", "0 * * * *", last_run=prev, last_ok=ok, nxt=prev + hour)
     c, app, s = client_for(world, doc_with_platform(), cronworkflows=[])
     login_as(c, s, ["tockmox-admins"])
     t = c.get("/platform").text

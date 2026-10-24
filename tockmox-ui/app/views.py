@@ -35,10 +35,10 @@ def _since(iso: str) -> str:
     if d < 0:
         return ""
     if d < 3600:
-        return f"{max(d // 60, 1)} min"
+        return f"{max(d // 60, 1)}m"
     if d < 86400:
-        return f"{d // 3600} h"
-    return f"{d // 86400} d"
+        return f"{d // 3600}h"
+    return f"{d // 86400}d"
 
 
 def problems(readings: dict, pipeline: list | None = None) -> list[dict]:
@@ -152,7 +152,9 @@ def sources_sentence(readings: dict) -> str:
     answered = [r for r in rs if r.fetched_at]
     if len(answered) == len(rs):
         age = max(int(time.time() - r.fetched_at) for r in answered)
-        within = f"{age} s" if age < 60 else (f"{age // 60} min" if age < 3600 else f"{age // 3600} h")
+        if age < 5:
+            return f"All {len(rs)} sources answered just now."
+        within = f"{age}s" if age < 60 else (f"{age // 60}m" if age < 3600 else f"{age // 3600}h")
         return f"All {len(rs)} sources answered within {within}."
     missing = [r.source for r in rs if not r.fetched_at]
     return f"{len(answered)} of {len(rs)} sources answered; not answering: {', '.join(missing)}."
