@@ -70,6 +70,7 @@
   /* ---- type ---- */
   --tx-font-display: 'Inknut Antiqua', Georgia, serif;
   --tx-font-body:    'Nunito Sans', system-ui, sans-serif;
+  --tx-font-ui:      'Source Sans 3', 'Segoe UI', system-ui, sans-serif;   /* v2.1 (2026-10-23): every app surface; display stays in the lockup */
   --tx-font-mono:    'JetBrains Mono', ui-monospace, monospace;
 
   /* ---- shape & effects ---- */

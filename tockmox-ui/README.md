@@ -10,7 +10,7 @@ result in `tockmoxUi.image`. Everything an operator needs is in
 |---|---|
 | `Dockerfile` | the build recipe, run from the repository root; the image runs as 65534 with a read-only root filesystem |
 | `app/` | the FastAPI application; there is deliberately no route that writes to the cluster, to git or to a node |
-| `app/static/brand/fonts/` | Inknut Antiqua, Nunito Sans and JetBrains Mono, each with its SIL Open Font License beside it |
+| `app/static/brand/fonts/` | Source Sans 3 (the UI face since 2026-10-23, TM-1127) and JetBrains Mono, each with its SIL Open Font License beside it. Inknut Antiqua and Nunito Sans woff2 remain until the operator removes them: the UI no longer references them (the wordmark is outlined paths in the lockup SVG) |
 | (repository) `CHANGELOG.md` | copied in at build time so the release notes of the tag you built render with no network |
 | `requirements.txt` | the Python dependencies the build installs |
 | `config.example.yaml` | the shape of the config the chart renders; not read by a real install |

@@ -29,6 +29,7 @@ def parse_changelog(md: str) -> dict:
     out: dict = {}
     cur = None
     para: list[str] = []
+    li_raw = ""                                        # the current bullet's source, re-rendered on each wrapped line
 
     def flush():
         if cur is not None and para:
@@ -51,12 +52,13 @@ def parse_changelog(md: str) -> dict:
             out[cur]["blocks"].append(("h", _inline(line[4:].strip())))
         elif re.match(r"^\s*[-*] ", line):
             flush()
-            out[cur]["blocks"].append(("li", _inline(re.sub(r"^\s*[-*] ", "", line).strip())))
+            li_raw = re.sub(r"^\s*[-*] ", "", line).strip()
+            out[cur]["blocks"].append(("li", _inline(li_raw)))
         elif line.strip() == "":
             flush()
         elif out[cur]["blocks"] and out[cur]["blocks"][-1][0] == "li" and line.startswith("  "):
-            k, v = out[cur]["blocks"][-1]
-            out[cur]["blocks"][-1] = (k, Markup(v + " ") + _inline(line.strip()))
+            li_raw = (li_raw + " " + line.strip()).strip()
+            out[cur]["blocks"][-1] = ("li", _inline(li_raw))
         else:
             para.append(line.strip())
     flush()

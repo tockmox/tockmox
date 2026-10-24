@@ -2,56 +2,58 @@
 {% from "macros.html" import badge, source_line %}
 {% block title %}Version{% endblock %}
 {% block main %}
-<h1>Version</h1>
+{# One answer, then evidence (TM-1127): what runs, what is newest, when it was checked, as a band of
+   facts; the release notes below. "Not a release" is a fact about this site, not a warning. #}
+<div class="page-head">
+  <div><h1>Version</h1><p class="lede">What is running, what shipped with it, and whether anything newer exists.</p></div>
+  <div class="page-actions">
+    {% if feed.enabled %}
+    <form method="post" action="/check-updates"><input type="hidden" name="csrf" value="{{ user.csrf }}"><button class="btn-ghost" type="submit">Check now</button></form>
+    {% endif %}
+    {% if target %}<a class="btn" href="/upgrade?to={{ target.version|urlencode }}">Upgrade to {{ target.version }}</a>{% endif %}
+  </div>
+</div>
 
-<section class="panel" aria-labelledby="run-h">
-  <h2 id="run-h">What is running</h2>
-  {% if ver.state == "single" %}
-    <p class="big">Tockmox <strong>{{ ver.version }}</strong> on {{ ver.layers|length }} layer{{ "" if ver.layers|length == 1 else "s" }}.</p>
-  {% elif ver.state == "floating" %}
-    <p>{{ badge("warning", "Not a release") }} The Tockmox layers track <code>{{ ver.ref }}</code>, not a release tag, so there is no version to compare or upgrade from.</p>
-  {% elif ver.state == "mixed" %}
-    <p>{{ badge("warning", "Mixed versions") }} The Tockmox layers are on different revisions: {{ ver.revisions|join(", ") }}. That is normal for a few minutes during an upgrade, and a problem if it lasts.</p>
-  {% else %}
-    <p>{{ badge("unknown", "Version unknown") }} {{ ver.reason or "No Argo CD application deploys a Tockmox layer, or Argo CD could not be read." }}</p>
-  {% endif %}
-  <p>{{ source_line(apps_reading) }}</p>
-</section>
-
-<section class="panel" aria-labelledby="upd-h">
-  <h2 id="upd-h">Newer versions</h2>
-  {% if not feed.enabled %}
-    <p>{{ badge("unknown", "Update check is off") }} This is the default: the UI makes no request outside your cluster. To be told about new releases, set <code>updateCheck.enabled: true</code> in your site values and commit it. When it is on, the UI downloads one signed file about once a day and sends nothing about your site (no identifier, no version).</p>
-    <p>Air-gapped? Point <code>updateCheck.feedUrl</code> at a mirror, or at a file you import (<code>file:///</code>).</p>
-  {% elif feed.error and not feed.verified %}
-    <p>{{ badge("critical", "Not verified") }} {{ feed.error|capitalize }}. Nothing from it is shown.</p>
-  {% elif feed.verified and not ver.version %}
+<section class="stats" aria-label="Version facts">
+  <div class="stat">
+    <div class="label">Running</div>
+    {% if ver.state == "single" %}
+    <div class="value">{{ ver.version }}</div><div class="sub">Tockmox on {{ ver.layers|length }} layer{{ "" if ver.layers|length == 1 else "s" }}</div>
+    {% elif ver.state == "floating" %}
+    <div class="value"><code title="{{ ver.ref }}">{{ ver.ref[:7] }}</code></div><div class="sub">Not a release: the layers track a commit, so there is no version to compare or upgrade from.</div>
+    {% elif ver.state == "mixed" %}
+    <div class="value">{{ badge("warning", "Mixed versions") }}</div><div class="sub">Layers on different revisions: {{ ver.revisions|join(", ") }}. Normal for minutes during an upgrade; a problem if it lasts.</div>
+    {% else %}
+    <div class="value">{{ badge("unknown", "Unknown") }}</div><div class="sub">{{ ver.reason or "No Argo CD application deploys a Tockmox layer, or Argo CD could not be read." }}</div>
+    {% endif %}
+  </div>
+  <div class="stat">
+    <div class="label">Newest release</div>
+    {% if not feed.enabled %}
+    <div class="value">{{ badge("unknown", "Update check is off") }}</div><div class="sub">The default: the UI makes no request outside your cluster. Set <code>updateCheck.enabled: true</code> in your site values to be told about releases; it then reads one signed file about once a day and sends nothing about your site. Air-gapped: point <code>updateCheck.feedUrl</code> at a mirror or a <code>file:///</code> you import.</div>
+    {% elif feed.error and not feed.verified %}
+    <div class="value">{{ badge("critical", "Not verified") }}</div><div class="sub">{{ feed.error|capitalize }}. Nothing from it is shown.</div>
+    {% elif feed.verified and not ver.version %}
     {% set newest = feed.latest() %}
-    <p>{{ badge("ok", "Feed verified") }} {% if newest %}The newest release in it is Tockmox <strong>{{ newest.version }}</strong>{% if newest.date %}, released {{ newest.date }}{% endif %}.{% else %}It lists no stable release yet.{% endif %} No single release tag names what is running here, so the UI has nothing to compare it with.</p>
-  {% elif target %}
-    <p class="big">{{ badge("warning", "Update available") }} Tockmox <strong>{{ target.version }}</strong>{% if target.date %}, released {{ target.date }}{% endif %}.{% if target.security %} <strong>Includes security fixes.</strong>{% endif %}</p>
-    {% if target.notes %}<p>{{ target.notes }}</p>{% endif %}
-    <p><a class="btn" href="/upgrade?to={{ target.version|urlencode }}">Upgrade to {{ target.version }}</a> <span class="muted">Shows the steps and checks your platform first. Changes nothing.</span></p>
-  {% elif feed.verified %}
-    <p>{{ badge("ok", "Up to date") }} No newer stable release in the verified feed.</p>
-  {% else %}
-    <p>{{ badge("unknown", "Not checked yet") }}</p>
-  {% endif %}
-  {% if feed.enabled and feed.error and feed.verified %}
-  <p class="muted">The latest check failed ({{ feed.error }}); this is what was last verified.</p>
-  {% endif %}
-  {% if feed.enabled %}
-  <form method="post" action="/check-updates" class="inline">
-    <input type="hidden" name="csrf" value="{{ user.csrf }}">
-    <button class="btn-ghost" type="submit">Check now</button>
-    <span class="muted">{% if feed.checked_at %}Last checked {{ feed.checked_at|ago }}.{% endif %}</span>
-  </form>
-  {% endif %}
+    <div class="value">{% if newest %}{{ newest.version }}{% else %}–{% endif %}</div><div class="sub">{{ badge("ok", "Feed verified") }} {% if newest %}The newest release in it is Tockmox <strong>{{ newest.version }}</strong>{% if newest.date %}, released {{ newest.date }}{% endif %}.{% else %}It lists no stable release yet.{% endif %} No single release tag names what is running here, so the UI has nothing to compare it with.</div>
+    {% elif target %}
+    <div class="value">{{ target.version }}</div><div class="sub">{{ badge("warning", "Update available") }} Tockmox <strong>{{ target.version }}</strong>{% if target.date %}, released {{ target.date }}{% endif %}.{% if target.security %} <strong>Includes security fixes.</strong>{% endif %}{% if target.notes %} {{ target.notes }}{% endif %} The Upgrade button shows the steps and checks your platform first; it changes nothing.</div>
+    {% elif feed.verified %}
+    <div class="value">{{ ver.version }}</div><div class="sub">{{ badge("ok", "Up to date") }} No newer stable release in the verified feed.</div>
+    {% else %}
+    <div class="value">{{ badge("unknown", "Not checked yet") }}</div><div class="sub">&nbsp;</div>
+    {% endif %}
+  </div>
+  <div class="stat">
+    <div class="label">Last checked</div>
+    <div class="value">{% if feed.enabled and feed.checked_at %}{{ feed.checked_at|ago }}{% elif feed.enabled %}never{% else %}–{% endif %}</div>
+    <div class="sub">{% if feed.enabled and feed.error and feed.verified %}The latest check failed ({{ feed.error }}); this is what was last verified.{% else %}{{ source_line(apps_reading) }}{% endif %}</div>
+  </div>
 </section>
 
 <section class="panel notes" aria-labelledby="notes-h">
   <h2 id="notes-h">{% if notes and notes_of_build %}Release notes this build carries{% if notes.version != "Unreleased" %} ({{ notes.version }}){% endif %}{% else %}Release notes{% if notes %} for {{ notes.version }}{% if notes.date %} ({{ notes.date }}){% endif %}{% endif %}{% endif %}</h2>
-  {% if notes and notes_of_build %}<p class="muted">No single release tag names what is running, so these are the notes bundled with this build{% if notes.version == "Unreleased" %}, for a release that has not been tagged yet{% endif %}.</p>{% endif %}
+  {% if notes and notes_of_build %}<p class="muted small">No single release tag names what is running, so these are the notes bundled with this build{% if notes.version == "Unreleased" %}, for a release that has not been tagged yet{% endif %}.</p>{% endif %}
   {% if notes %}
     {% set ns = namespace(open=false) %}
     {% for kind, text in notes.blocks %}

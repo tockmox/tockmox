@@ -705,7 +705,7 @@ class InferenceNodesSource(_HttpSource):
         elif measured.get("memory_gib") and conf and src not in ("metrics", "measured") and abs(conf - measured["memory_gib"]) > 1:
             disagree = (f"the node's memory is recorded as {conf:g} GiB ({src}) "
                         f"but tockmox-ai-node measured {measured['memory_gib']:g} GiB")
-        return {"id": n.id, "state": state, "why": why, "checks": checks, "memory": mem, "chip": chip,
+        return {"id": n.id, "name": n.name, "state": state, "why": why, "checks": checks, "memory": mem, "chip": chip,
                 "disagree": disagree, "enrolled": n.enrolled, "convergence": conv, "readiness": ready,
                 "measured": measured or None, "reports_unenrolled": reports_unenrolled}
 

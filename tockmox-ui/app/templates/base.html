@@ -12,7 +12,8 @@
 <a class="skip" href="#main">Skip to content</a>
 <header class="top">
   <div class="top-inner">
-    <a class="brand" href="/"><img src="/static/brand/tockmox-lockup-horizontal-white.svg" alt="Tockmox home" width="180" height="45" class="logo-dark"><img src="/static/brand/tockmox-lockup-horizontal-ink.svg" alt="Tockmox home" width="180" height="45" class="logo-light"></a>
+    <a class="brand" href="/"><img src="/static/brand/tockmox-lockup-horizontal-white.svg" alt="Tockmox home" width="144" height="36" class="logo-dark"><img src="/static/brand/tockmox-lockup-horizontal-ink.svg" alt="Tockmox home" width="144" height="36" class="logo-light"></a>
+    <span class="site-name"><strong>{{ site.site_name }}</strong></span>
     {% if user %}
     <nav aria-label="Main">
       <ul class="nav">
@@ -43,12 +44,13 @@
 <footer class="foot">
   <p>{{ site.site_name }} ·
     {%- if footer and footer.state == "single" %} Tockmox {{ footer.version }}
-    {%- elif footer and footer.state == "floating" %} Tockmox <code>{{ footer.ref[:12] }}</code> (not a release)
+    {%- elif footer and footer.state == "floating" %} Tockmox <code title="{{ footer.ref }}">{{ footer.ref[:12] }}</code> (not a release)
     {%- elif footer and footer.state == "mixed" %} Tockmox (layers on mixed revisions)
     {%- else %} Tockmox{% endif %}
     {%- if footer and footer.newer %} <a class="pill" href="/version">New version available: {{ footer.newer }}</a>{% endif %}
     · read-only
-    {%- if site.docs_url %} · <a href="{{ site.docs_url }}" rel="noopener">Documentation</a>{% endif %}
+    {%- if site.docs_url %} · <a href="{{ site.docs_url }}/" rel="noopener">Documentation</a>{% endif %}
+    · <a href="{{ docs_repo_link }}" rel="noopener">Docs on GitHub</a>
     · <a href="/recovery">If something is down</a></p>
 </footer>
 </body>

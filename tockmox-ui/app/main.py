@@ -43,6 +43,7 @@ from . import sources as sources_mod
 from . import status_api
 from . import capabilities as capmod
 from . import telemetry
+from . import views
 from .auth import IDT_MAX_BYTES, OIDC, Sessions, User
 from .config import Settings, load
 from .notes import ReleaseNotes
@@ -174,6 +175,10 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
                            sentence=lambda t: (t[:1].upper() + t[1:]) if t else t,
                            # one URL path segment: "/" and "?" encoded too (Jinja's urlencode keeps "/")
                            pathseg=lambda v: quote(str(v), safe=""))
+    # UI standard (TM-1127): exceptions first, folded healthy groups, one state vocabulary.
+    tpl.env.globals.update(problems=views.problems, verdict_sentence=views.verdict_sentence,
+                           sources_sentence=views.sources_sentence, healthy_parts=views.healthy_parts,
+                           app_groups=views.app_groups, not_main=views.not_main, short_ref=views.short_ref)
 
     sessions = Sessions(s.session_secret, s.session_max_age_s, s.admin_group, s.secure_cookies)
     oidc = OIDC(s.oidc_issuer, s.oidc_client_id, s.oidc_client_secret, s.oidc_redirect_url,
@@ -249,7 +254,9 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         ctx.update(request=request, user=u, site=s, tabs=tabs_for(u) if u else [],
                    platform_on=bool(s.feature("platform") and s.feature("platform").enabled),
                    app_version=APP_VERSION, path=request.url.path, verdict_text=VERDICT_TEXT,
-                   footer=footer_version(u))
+                   footer=footer_version(u),
+                   # signed out, the footer links main: no source is read for an anonymous page
+                   docs_repo_link=docs_repo_link() if u else f"{s.docs_repo_url}/tree/main/docs")
         return tpl.TemplateResponse(request, name, ctx, status_code=status_code)
 
     def need_login(request: Request):
@@ -391,7 +398,7 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
             checker.check()
         return render(request, "home.html", u, verdict=v, readings=r, apps=apps, version=ver,
                       target=_latest_target(ver.get("version")) if ver else None,
-                      docs_repo_link=docs_repo_link())
+                      pipeline=list(sources_mod.pipeline_alerts(s.alertmanager_heartbeat)))
 
     @app.get("/status", response_class=HTMLResponse)
     def status(request: Request):

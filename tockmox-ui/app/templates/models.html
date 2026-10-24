@@ -2,8 +2,13 @@
 {% from "macros.html" import badge, source_line %}
 {% block title %}Models{% endblock %}
 {% block main %}
-<h1>Models</h1>
-<p class="lede">Every model the platform runs, where its bytes came from, and what is newer upstream. Nothing here changes a model by itself, and a new model needs two approvals, each a change you commit. <strong>Admit</strong> it: it goes to the eval gateway only, as a <code>-next</code> route beside the live alias, where no agent can call it. <strong>Promote</strong> it: after {{ lc.required_passes }} passing comparisons against the current model{% if lc.required_by_class %} (per class: {% for k, v in lc.required_by_class.items() %}{{ k }} {{ v }}{% if not loop.last %}, {% endif %}{% endfor %}){% endif %}, the alias moves on the production gateway.</p>
+<div class="page-head">
+  <div><h1>Models</h1><p class="lede">Every model the platform runs, what it is pinned to, and what is waiting on a comparison. <span class="help" title="A new model is admitted to the eval gateway as a -next route beside the live alias, where no agent can call it. After {{ lc.required_passes }} passing comparisons against the current model{% if lc.required_by_class %} (per class: {% for k, v in lc.required_by_class.items() %}{{ k }} {{ v }}{% if not loop.last %}, {% endif %}{% endfor %}){% endif %} it is promoted and the alias moves on the production gateway. Each step is a change you commit.">How admission and promotion work</span></p></div>
+  <div class="page-actions">
+    {% if probe_on %}<form method="post" action="/models/builds"><input type="hidden" name="csrf" value="{{ user.csrf }}"><button class="btn-ghost" type="submit">Check builds on the nodes</button></form>{% endif %}
+    <a class="btn-ghost" href="/models/profiles">Workload profiles</a>
+  </div>
+</div>
 
 <section class="panel" aria-labelledby="watch-h">
   <h2 id="watch-h">Upstream</h2>
@@ -39,34 +44,40 @@
 </section>
 {% endfor %}
 
-<section class="panel" aria-labelledby="next-h">
-  <h2 id="next-h">Comparisons in progress</h2>
-  {% if verdict_reading is none %}<p>{{ badge("unknown", "No verdicts") }} No verdict directory is configured (<code>modelLifecycle.verdictsDir</code>), so no comparison can be counted yet. The REQ-0045 eval runner writes one record per run there.</p>
-  {% else %}<p>{{ source_line(verdict_reading) }}</p>{% endif %}
+<section class="panel flush" aria-labelledby="next-h">
+  <div class="panel-head"><h2 id="next-h">Comparisons in progress</h2>
+    {% if verdict_reading is none %}<span class="src">{{ badge("unknown", "No verdicts") }}<span class="muted">no verdict directory is configured (<code>modelLifecycle.verdictsDir</code>), so no comparison can be counted yet; the REQ-0045 eval runner writes one record per run there</span></span>
+    {% else %}{{ source_line(verdict_reading) }}{% endif %}</div>
   {% if nexts or hosted %}
-  <ul class="cands">
-  {% for x in nexts %}
-    <li>
-      <p><code>{{ x.route.alias }}</code> serves <code>{{ x.route.model }}</code> on {{ x.route.node }}, against <code>{{ x.live.model if x.live else "nothing yet" }}</code> on <code>{{ x.alias }}</code>.</p>
-      {% if x.replacement %}<p>{{ badge("warning", "Re-placement") }} the same model, moving from {{ x.move.from_node }} to {{ x.move.to_node }}: decided by class <code>perf</code>, nothing is retired.</p>{% endif %}
-      <p>{% if x.ready %}{{ badge("ok", "Ready to promote") }}{% elif x.counted %}{{ badge("warning", x.counted|length ~ " of " ~ x.required) }}{% else %}{{ badge("unknown", "0 of " ~ x.required) }}{% endif %} passing comparison(s){% if x.klass %} for class {{ x.klass }}{% endif %}.{% if not x.entry %} <span class="muted">Not in the catalog yet: add it before promoting.</span>{% endif %}</p>
-      {% if x.notes %}<p class="muted">{{ x.notes|join("; ") }}</p>{% endif %}
-      <p><a href="/models/evaluate?alias={{ x.route.alias|urlencode }}">Start an evaluation<span class="visually-hidden"> of {{ x.route.alias }}</span></a> · <a href="/models/promote?alias={{ x.route.alias|urlencode }}">{{ "Promote" if x.ready else "See the count" }}<span class="visually-hidden"> for {{ x.route.alias }}</span></a></p>
-    </li>
-  {% endfor %}
-  {% for e in hosted %}
-    <li>
-      <p><code>{{ e.model }}</code> is a hosted candidate on the eval gateway, untagged.</p>
-      <p><a href="/models/evaluate?entry={{ e.id|urlencode }}">Start an evaluation<span class="visually-hidden"> of {{ e.model }}</span></a> · <a href="/models/promote-hosted?entry={{ e.id|urlencode }}">Promote<span class="visually-hidden"> {{ e.model }}</span></a></p>
-    </li>
-  {% endfor %}
-  </ul>
+  <div class="table-wrap" role="region" aria-labelledby="cands-cap" tabindex="0">
+  <table>
+    <caption id="cands-cap" class="visually-hidden">Candidates and their comparisons</caption>
+    <thead><tr><th scope="col">Candidate</th><th scope="col">Replaces</th><th scope="col">Node</th><th scope="col">Passing</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+    <tbody>
+    {% for x in nexts %}
+      <tr>
+        <th scope="row"><code>{{ x.route.alias }}</code><div class="muted small"><code>{{ x.route.model }}</code></div></th>
+        <td><code>{{ x.alias }}</code><div class="muted small">{% if x.live %}<code>{{ x.live.model }}</code>{% else %}nothing yet{% endif %}</div>{% if x.replacement %}<div class="small">{{ badge("warning", "Re-placement") }} <span class="muted">the same model, moving from {{ x.move.from_node }} to {{ x.move.to_node }}: decided by class <code>perf</code>, nothing is retired</span></div>{% endif %}</td>
+        <td>{{ x.route.node }}</td>
+        <td>{% if x.ready %}{{ badge("ok", "Ready to promote") }}{% elif x.counted %}{{ badge("warning", x.counted|length ~ " of " ~ x.required) }}{% else %}{{ badge("unknown", "0 of " ~ x.required) }}{% endif %}<div class="muted small">passing comparison(s){% if x.klass %} for class {{ x.klass }}{% endif %}{% if not x.entry %}; not in the catalog yet: add it before promoting{% endif %}{% if x.notes %}; {{ x.notes|join("; ") }}{% endif %}</div></td>
+        <td class="num"><a href="/models/evaluate?alias={{ x.route.alias|urlencode }}" class="small">Start an evaluation<span class="visually-hidden"> of {{ x.route.alias }}</span></a><br><a href="/models/promote?alias={{ x.route.alias|urlencode }}" class="small">{{ "Promote" if x.ready else "See the count" }}<span class="visually-hidden"> for {{ x.route.alias }}</span></a></td>
+      </tr>
+    {% endfor %}
+    {% for e in hosted %}
+      <tr>
+        <th scope="row"><code>{{ e.model }}</code><div class="muted small">hosted candidate on the eval gateway, untagged</div></th>
+        <td><span class="muted">–</span></td><td><span class="muted">hosted</span></td><td><span class="muted">–</span></td>
+        <td class="num"><a href="/models/evaluate?entry={{ e.id|urlencode }}" class="small">Start an evaluation<span class="visually-hidden"> of {{ e.model }}</span></a><br><a href="/models/promote-hosted?entry={{ e.id|urlencode }}" class="small">Promote<span class="visually-hidden"> {{ e.model }}</span></a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
   {% else %}<p class="empty">No candidate is being compared. Admit one from the watcher's list above.</p>{% endif %}
 </section>
 
 <section class="panel" aria-labelledby="builds-h">
-  <h2 id="builds-h">Builds on the nodes</h2>
-  <p>Git holds the build each model is pinned to; the node holds the one it actually serves. For every pinned Ollama or Hugging Face model, this asks the node serving it (Ollama's digest from <code>/api/tags</code>, llama-server's Hugging Face snapshot from its model path) and compares. When it cannot tell, it says Unknown and why.</p>
+  <h2 id="builds-h">Builds on the nodes <span class="muted small" title="Git holds the build each model is pinned to; the node holds the one it actually serves. For every pinned Ollama or Hugging Face model, this asks the node serving it (Ollama's digest from /api/tags, llama-server's Hugging Face snapshot from its model path) and compares. When it cannot tell, it says Unknown and why.">pinned in git vs. served on the node{% if checked_at %} · last checked {{ checked_at.strftime("%Y-%m-%d %H:%M UTC") }}{% elif probe_on %} · not checked yet{% endif %}</span></h2>
   {% if drift_findings %}
   <p>{{ badge("critical", "Build drift") }} {{ drift_findings|length }} route(s) serve a build the catalog does not pin. Pull the pinned build on the node, or record the node's build as the entry's <code>pending</code> one and evaluate it.</p>
   <ul>{% for f in drift_findings %}<li>{{ f }}</li>{% endfor %}</ul>
@@ -80,8 +91,8 @@
     {% for x in drift %}
       <tr><th scope="row"><code>{{ x.alias }}</code><br><span class="muted">{{ x.node }} · {{ x.endpoint }}</span></th>
         <td><code>{{ x.entry.model }}</code></td>
-        <td><code>{{ x.pinned[:19] }}</code></td>
-        <td>{% if x.actual %}<code>{{ x.actual[:12] }}</code>{% if x.how %}<br><span class="muted">{{ x.how }}</span>{% endif %}{% else %}<span class="muted">unknown</span>{% endif %}</td>
+        <td><code title="{{ x.pinned }}">{{ x.pinned[:7] }}</code></td>
+        <td>{% if x.actual %}<code title="{{ x.actual }}">{{ x.actual[:7] }}</code>{% if x.how %}<br><span class="muted">{{ x.how }}</span>{% endif %}{% else %}<span class="muted">unknown</span>{% endif %}</td>
         <td>{% if x.state == "current" %}{{ badge("ok", "Holds the pinned build") }}{% elif x.state == "drift" %}{{ badge("critical", "Drift") }}{% else %}{{ badge("unknown", "Unknown" if checked_at else "Not checked") }}<br><span class="muted">{{ x.reason }}</span>{% endif %}</td></tr>
     {% endfor %}
     </tbody>
@@ -89,11 +100,7 @@
   </div>
   {% else %}<p class="empty">No catalogued Ollama or Hugging Face model with a pinned revision is routed, so there is nothing to compare.</p>{% endif %}
   {% if probe_on %}
-  <form method="post" action="/models/builds" class="inline">
-    <input type="hidden" name="csrf" value="{{ user.csrf }}">
-    <button class="btn-ghost" type="submit">Check the nodes now</button>
-  </form>
-  {% if checked_at %}<p class="muted">Last checked {{ checked_at.strftime("%Y-%m-%d %H:%M UTC") }}. A check older than an hour reads Unknown.</p>{% endif %}
+  {% if checked_at %}<p class="muted small">A check older than an hour reads Unknown.</p>{% endif %}
   {% else %}<p>{{ badge("unknown", "Not checked") }} Reading a node is a request to it, so it rides the probe's fences, and probing is off: set <code>inferenceNodes.probe.allowedCidrs</code> to the range your inference nodes live in.</p>{% endif %}
 </section>
 
@@ -110,7 +117,7 @@
     {% for row in catalog %}{% set e = row.entry %}
       <tr><th scope="row"><a href="/models/m/{{ e.id|urlencode }}"><code>{{ e.model }}</code></a>{% if e.size_gib is not none %}<br><span class="muted">{{ e.size_gib }} GiB</span>{% endif %}</th>
         <td>{{ badge({"promoted": "ok", "candidate": "warning", "retired": "unknown"}[e.stage], e.stage) }}{% if e.promotion %}<br><span class="muted">{{ e.promotion.evidence|length }} pass(es){% if e.promotion.evidence %}, last {{ e.promotion.evidence[-1].date }}{% endif %}</span>{% elif e.adopted %}<br><span class="muted">adopted {{ e.adopted }}</span>{% endif %}{% if e.pending %}<br><span class="muted">newer build pending</span>{% endif %}</td>
-        <td>{{ e.source.kind }}{% if e.source.revision %}<br><code>{{ e.source.revision[:19] }}</code>{% else %}<br><span class="muted">no pinned revision</span>{% endif %}</td>
+        <td>{{ e.source.kind }}{% if e.source.revision %}<br><code title="{{ e.source.revision }}">{{ e.source.revision[:7] }}</code>{% else %}<br><span class="muted">no pinned revision</span>{% endif %}</td>
         <td>{% for r in row.routes %}<code>{{ r.alias }}</code> <span class="muted">({{ r.node }})</span>{% if not loop.last %}<br>{% endif %}{% else %}<span class="muted">none</span>{% endfor %}</td>
         <td>{{ e.track|join(", ") or "nothing" }}</td></tr>
     {% endfor %}
@@ -120,6 +127,5 @@
   {% else %}<p class="empty">The catalog is empty. Add an entry per model under <code>modelLifecycle.catalog</code>; the operator doc shows the shape.</p>{% endif %}
   {% if uncatalogued %}<p class="muted">Routed but not in the catalog, so nothing watches them: {% for m, rs in uncatalogued %}<code>{{ m }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
 </section>
-<p><a href="/models/profiles">Workload profiles and what each node keeps loaded</a></p>
 {% if nodes %}<p>Recommend: a shortlist per alias class for one node, to review and admit by hand.{% for n in nodes %} <a href="/models/recommend?node={{ n.id|urlencode }}">{{ n.name }}<span class="visually-hidden"> (recommendations)</span></a>{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
 {% endblock %}
