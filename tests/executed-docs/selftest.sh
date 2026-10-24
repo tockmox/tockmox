@@ -839,7 +839,7 @@ if [ -f "$PROFILE_LIB" ]; then
   # on the guest at boot, on a lane with no console. This was a real defect,
   # found by auditing the emitted scripts rather than the generator.
   for fn in microos_driver microos_heartbeat microos_beacon microos_handoff; do
-    if "$fn" | grep -q '^\. "\$H/env"'; then ok "${fn} sources the runtime env"
+    if "$fn" | grep '^\. "\$H/env"' >/dev/null; then ok "${fn} sources the runtime env"
     else bad "${fn} sources the runtime env" "it reads runtime vars without sourcing them"; fi
   done
   if microos_handoff | bash -n 2>/dev/null; then ok "microos_handoff emits a script that parses"
@@ -852,13 +852,13 @@ if [ -f "$PROFILE_LIB" ]; then
   # Asserted on the EMITTED driver: every line that executes a file from
   # blocks/ must go through runuser.
   mx_rootlines="$(microos_driver | grep -E 'bash[^|]*\$H/blocks/' | grep -v 'runuser -u "\$RUN_AS"' || true)"
-  if [ -z "$mx_rootlines" ] && microos_driver | grep -q 'runuser -u "\$RUN_AS"'; then
+  if [ -z "$mx_rootlines" ] && microos_driver | grep 'runuser -u "\$RUN_AS"' >/dev/null; then
     ok "the driver runs every documented block as the unprivileged user"
   else
     bad "the driver runs every documented block as the unprivileged user" "root lines: ${mx_rootlines:-<no runuser at all>}"
   fi
   # LESSON 5: the success condition is polled, then recorded once more.
-  if microos_driver | grep -q 'grep -qw Ready' && microos_driver | grep -q 'run_block s4a-success'; then
+  if microos_driver | grep 'grep -qw Ready' >/dev/null && microos_driver | grep 'run_block s4a-success' >/dev/null; then
     ok "the driver polls 4a's success condition before recording it"
   else
     bad "the driver polls 4a's success condition before recording it" "a point-in-time read right after install reads NotReady"
@@ -868,8 +868,8 @@ if [ -f "$PROFILE_LIB" ]; then
   # 203/EXEC the instant it starts, while systemd-run reports success. The unit
   # must run the script THROUGH the shell, and the spawn must be checked.
   mx_spawn="$(microos_driver | grep 'systemd-run ' || true)"
-  if printf '%s' "$mx_spawn" | grep -q '/bin/bash "\$H/driver.sh" await-go' \
-     && microos_driver | grep -q 'systemctl is-active --quiet tockmox-harness-await'; then
+  if printf '%s' "$mx_spawn" | grep '/bin/bash "\$H/driver.sh" await-go' >/dev/null \
+     && microos_driver | grep 'systemctl is-active --quiet tockmox-harness-await' >/dev/null; then
     ok "the waiter unit runs the driver through /bin/bash and its spawn is verified"
   else
     bad "the waiter unit runs the driver through /bin/bash and its spawn is verified" "got: ${mx_spawn:-<no systemd-run>}"
@@ -1055,7 +1055,7 @@ MD
   mx_fresh_install "" '**NODE** ... every node' > "${MXD}/docs/deployment/fresh-install.md"
   mx_err="$(MICROOS_PAGE_ROOT="$MXD" microos_extract_blocks fixture "${TMP}/mx-relabel" 2>&1 >/dev/null)"
   mx_rc=$?
-  if [ "$mx_rc" = "3" ] && printf '%s' "$mx_err" | grep -q 'REFUSING: extraction failed for s2-iscsid'; then
+  if [ "$mx_rc" = "3" ] && printf '%s' "$mx_err" | grep 'REFUSING: extraction failed for s2-iscsid' >/dev/null; then
     ok "the enable without its MicroOS label makes s2-iscsid REFUSE, not pick a block"
   else
     bad "the enable without its MicroOS label makes s2-iscsid REFUSE, not pick a block" \
@@ -1066,7 +1066,7 @@ MD
   mx_err="$( microos_block_table() { printf '%s\n' "s2-x|docs/deployment/fresh-install.md|${MICROOS_S2_SECTION}|--block|2|"; }
              MICROOS_PAGE_ROOT="$MXD" microos_extract_blocks fixture "${TMP}/mx-ordinal" 2>&1 >/dev/null )"
   mx_rc=$?
-  if [ "$mx_rc" = "3" ] && printf '%s' "$mx_err" | grep -q 'REFUSING: s2-x is selected by --block 2'; then
+  if [ "$mx_rc" = "3" ] && printf '%s' "$mx_err" | grep 'REFUSING: s2-x is selected by --block 2' >/dev/null; then
     ok "a profile row that selects by ordinal is refused"
   else
     bad "a profile row that selects by ordinal is refused" "rc=${mx_rc}: ${mx_err}"
@@ -1127,7 +1127,7 @@ while IFS= read -r line; do
 done <<EOF_HS
 $HS_OUT
 EOF_HS
-if [ "$HS_CASES" -eq 0 ] || { [ "$HS_RC" -ne 0 ] && ! printf '%s\n' "$HS_OUT" | grep -q '^FAIL'; }; then
+if [ "$HS_CASES" -eq 0 ] || { [ "$HS_RC" -ne 0 ] && ! printf '%s\n' "$HS_OUT" | grep '^FAIL' >/dev/null; }; then
   bad "handoff-secret-test.sh ran its cases" "rc=${HS_RC}, ${HS_CASES} case(s): $(printf '%s' "$HS_OUT" | tail -3)"
 fi
 

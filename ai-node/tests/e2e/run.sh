@@ -132,19 +132,19 @@ for l in node-exporter macmon ollama mlx-lm-8080 mlx-lm-8082 converge facts wire
   check "service $l is loaded" "[ -e $S/loaded/$(label $l) ]"
 done
 check "the pf boot job is written but not loaded here" "[ -e /Library/LaunchDaemons/$(label pf).plist ] && [ ! -e $S/loaded/$(label pf) ]"
-check "mlx-lm-8080 is started by the repository id the routes send" "plist_get mlx-lm-8080 args | grep -q -- '--model mlx-community/Example-27B-8bit --host'"
+check "mlx-lm-8080 is started by the repository id the routes send" "plist_get mlx-lm-8080 args | grep -- '--model mlx-community/Example-27B-8bit --host'"
 check "the cache's main ref names the pinned revision, so the id resolves offline" "[ \"\$(cat /opt/tockmox/models/hf/hub/models--mlx-community--Example-27B-8bit/refs/main)\" = 0123456789abcdef0123456789abcdef01234567 ] && [ \"\$(cat /opt/tockmox/models/hf/hub/models--mlx-community--Example-2-27B-8bit/refs/main)\" = fedcba9876543210fedcba9876543210fedcba98 ]"
 if python3 -c 'import huggingface_hub' 2>/dev/null; then
   check "huggingface_hub resolves the id offline to the pinned snapshot" "[ \"\$(HF_HOME=/opt/tockmox/models/hf HF_HUB_OFFLINE=1 python3 -c 'from huggingface_hub import snapshot_download as s; print(s(\"mlx-community/Example-27B-8bit\"))')\" = /opt/tockmox/models/hf/hub/models--mlx-community--Example-27B-8bit/snapshots/0123456789abcdef0123456789abcdef01234567 ]"
 fi
-check "mlx-lm-8080 listens on all interfaces once pf is verified" "plist_get mlx-lm-8080 args | grep -q -- '--host 0.0.0.0 --port 8080'"
+check "mlx-lm-8080 listens on all interfaces once pf is verified" "plist_get mlx-lm-8080 args | grep -- '--host 0.0.0.0 --port 8080'"
 check "mlx-lm runs as the service account" "[ \"\$(plist_get mlx-lm-8080 UserName)\" = inference ]"
 check "mlx-lm is offline" "python3 -c 'import plistlib;d=plistlib.load(open(\"/Library/LaunchDaemons/$(label mlx-lm-8080).plist\",\"rb\"));assert d[\"EnvironmentVariables\"][\"HF_HUB_OFFLINE\"]==\"1\"'"
 check "ollama listens on its port" "python3 -c 'import plistlib;d=plistlib.load(open(\"/Library/LaunchDaemons/$(label ollama).plist\",\"rb\"));assert d[\"EnvironmentVariables\"][\"OLLAMA_HOST\"]==\"0.0.0.0:11434\"'"
-check "node_exporter reads the textfile directory" "plist_get node-exporter args | grep -q -- '--collector.textfile.directory=/opt/tockmox/textfile'"
+check "node_exporter reads the textfile directory" "plist_get node-exporter args | grep -- '--collector.textfile.directory=/opt/tockmox/textfile'"
 check "the converge job runs as the converge account every 900 s" "[ \"\$(plist_get converge UserName)\" = tockmox ] && [ \"\$(plist_get converge StartInterval)\" = 900 ]"
 check "the facts job runs as the service account every 60 s" "[ \"\$(plist_get facts UserName)\" = inference ] && [ \"\$(plist_get facts StartInterval)\" = 60 ]"
-check "the engine watch runs as root every 60 s" "[ -e $S/loaded/$(label engine-watch) ] && [ \"\$(plist_get engine-watch UserName)\" = None ] && [ \"\$(plist_get engine-watch StartInterval)\" = 60 ] && plist_get engine-watch args | grep -qx /opt/tockmox/bin/tockmox-ai-node-engine-watch"
+check "the engine watch runs as root every 60 s" "[ -e $S/loaded/$(label engine-watch) ] && [ \"\$(plist_get engine-watch UserName)\" = None ] && [ \"\$(plist_get engine-watch StartInterval)\" = 60 ] && plist_get engine-watch args | grep -x /opt/tockmox/bin/tockmox-ai-node-engine-watch"
 check "the engine watch is installed" "[ -x /opt/tockmox/bin/tockmox-ai-node-engine-watch ]"
 check "the engine watch lists every mlx-lm instance with /health" "[ \"\$(grep -v '^#' /opt/tockmox/etc/engine-watch.d/mlx-lm.tsv)\" = \"\$(printf '%s\\t8080\\t/health\\n%s\\t8082\\t/health' $(label mlx-lm-8080) $(label mlx-lm-8082))\" ]"
 check "the wired limit is set live" "[ \"\$(cat $S/iogpu)\" = 229376 ]"
@@ -232,8 +232,8 @@ mkdir -p /opt/tockmox/secrets; printf 'k' > /opt/tockmox/secrets/example-llama-k
 printf 'all tcp 192.0.2.10:22 <- 203.0.113.9:51234       ESTABLISHED:ESTABLISHED\n' > "$S/pf/states"
 play llama "$WORK/node-llama"; rc=$?
 [ "$rc" = 0 ] && ok "a node with a llama-server instance converges" || bad "a node with a llama-server instance converges" "rc=$rc; $(tail -15 "$OUT/llama.log" | tr '\n' '|')"
-check "llama-server is started on the one GGUF in the snapshot" "plist_get llama-server-8090 args | grep -q -- '--model /opt/tockmox/models/hf/hub/models--example-org--Example-7B-GGUF/snapshots/abababababababababababababababababababab/Example-7B-Q4_K_M.gguf'"
-check "llama-server gets the context and the key file" "plist_get llama-server-8090 args | grep -q -- '--ctx-size 8192' && plist_get llama-server-8090 args | grep -q -- '--api-key-file /opt/tockmox/secrets/example-llama-key'"
+check "llama-server is started on the one GGUF in the snapshot" "plist_get llama-server-8090 args | grep -- '--model /opt/tockmox/models/hf/hub/models--example-org--Example-7B-GGUF/snapshots/abababababababababababababababababababab/Example-7B-Q4_K_M.gguf'"
+check "llama-server gets the context and the key file" "plist_get llama-server-8090 args | grep -- '--ctx-size 8192' && plist_get llama-server-8090 args | grep -- '--api-key-file /opt/tockmox/secrets/example-llama-key'"
 
 echo "scenario 7: an instance that is no longer wanted is taken away"
 play back "$NODE"; rc=$?
@@ -266,8 +266,8 @@ echo "scenario 8: after a restart, nothing listens until the allowlist is in for
 play settle "$NODE"; rc=$?
 [ "$rc" = 0 ] && ok "the node is converged before the restart" || bad "the node is converged before the restart" "rc=$rc; $(tail -12 "$OUT/settle.log" | tr '\n' '|')"
 check "the engine listens on 11434 before the restart" "wait_listening 11434 5"
-check "every engine and exporter plist starts through the wrapper" "for n in ollama node-exporter macmon mlx-lm-8080 mlx-lm-8082; do plist_get \$n args | grep -q '^$LIBEXEC/start-when-firewalled ' || exit 1; done"
-check "the converge job does not" "! plist_get converge args | grep -q start-when-firewalled"
+check "every engine and exporter plist starts through the wrapper" "for n in ollama node-exporter macmon mlx-lm-8080 mlx-lm-8082; do plist_get \$n args | grep '^$LIBEXEC/start-when-firewalled ' || exit 1; done"
+check "the converge job does not" "! plist_get converge args | grep start-when-firewalled"
 check "the boot marker holds the boot id" "grep -qx '{ sec = 1700000000, usec = 0 }' $MARK"
 restart_node 1700000500
 sleep 4

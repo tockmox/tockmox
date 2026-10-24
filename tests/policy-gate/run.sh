@@ -117,10 +117,10 @@ code=$(req '{"model":"local-chat","messages":[{"role":"user","content":"four"}],
   || bad "4 local down: the external backend was reached $(( $(ext) - e0 )) time(s)"
 la="$(last_audit)"
 [ "$(printf '%s' "$la" | field status)" = error ] && [ "$(printf '%s' "$la" | field endpoint_tier)" = local ] \
-  && printf '%s' "$la" | grep -q '127.0.0.1:18001' && ! printf '%s' "$la" | grep -q '18002' \
+  && printf '%s' "$la" | grep '127.0.0.1:18001' >/dev/null && ! printf '%s' "$la" | grep '18002' >/dev/null \
   && ok "4 local down: audit line status=error endpoint_tier=local, names the local endpoint and no external one" \
   || bad "4 local down: audit line was $la"
-printf '%s' "$la" | grep -q '"stripped": \["fallbacks"\]' -- 2>/dev/null || true
+printf '%s' "$la" | grep '"stripped": \["fallbacks"\]' -- 2>/dev/null >/dev/null || true
 
 # 5
 mv "$TOCKMOX_POLICY_PATH" "$TOCKMOX_POLICY_PATH.away"; a0=$(audits)

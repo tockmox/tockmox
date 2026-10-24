@@ -950,7 +950,7 @@ preflight() {
   # each read prints "STALE (...)", which was reported as a false claim too.
   # render-counts.sh --verify is the one judge of both.
   local why=""
-  if grep '^test:' "$CLAIMS" | grep -q 'render-counts\.sh' \
+  if grep '^test:' "$CLAIMS" | grep 'render-counts\.sh' >/dev/null \
      && ! why="$("$BASH" tools/render-counts.sh --verify 2>&1)"; then
     nocounts=1
   fi

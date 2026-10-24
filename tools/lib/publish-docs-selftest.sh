@@ -72,10 +72,10 @@ PUB="bash $ROOT/tools/publish-docs.sh"
 # ---- assertion helpers (each is proven to fail at the end) --------------------
 assert_every_call_names_context() {  # log
   [ -s "$1" ] || return 1
-  ! grep -v '^--context selftest-ctx ' "$1" | grep -q .
+  ! grep -v '^--context selftest-ctx ' "$1" | grep . >/dev/null
 }
 assert_no_secret_read() {  # log: a secret is only ever asked for by name
-  ! grep -E ' secret ' "$1" | grep -v -- '-o name' | grep -q .
+  ! grep -E ' secret ' "$1" | grep -v -- '-o name' | grep . >/dev/null
 }
 assert_pod_deleted_last() {  # log: the last call is the pod removal (or the check after it)
   local last; last="$(grep -v ' get pod ' "$1" | tail -n 1)"
@@ -123,7 +123,7 @@ echo "-- refusals happen before the cluster is touched"
 refuse() {  # name, description, expected text, then run args
   local name="$1" what="$2" text="$3"; shift 3
   run "$name" "$@"
-  if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q -- "$text" && assert_no_create "$RUN_DIR/log"; then ok "$what"; else fail "$what (rc=$RC, out: $(printf '%s' "$OUT" | tail -n 3))"; fi
+  if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -- "$text" >/dev/null && assert_no_create "$RUN_DIR/log"; then ok "$what"; else fail "$what (rc=$RC, out: $(printf '%s' "$OUT" | tail -n 3))"; fi
 }
 refuse nocontext "no --context is refused with usage (64)" "--context is required" $PUB --site "$SITE"
 [ "$RC" -eq 64 ] || fail "no --context exited $RC, want 64"
@@ -135,7 +135,7 @@ run sha "${GOOD[@]}" $PUB --context selftest-ctx --site "$SITE" --revision abcde
 [ "$RC" -eq 0 ] && ok "a revision given as a commit prefix matches HEAD" || fail "a commit-prefix revision was refused (rc=$RC)"
 printf 'site:\n  name: x\ntockmox:\n  repoURL: https://example.invalid/t.git\n  revision: v9.9.9   # pinned\n' > "$T/cfg.yaml"
 run cfg "${GOOD[@]}" $PUB --context selftest-ctx --site "$SITE" --config "$T/cfg.yaml"
-[ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'this checkout is v9.9.9' && ok "tockmox.revision is read from --config" || fail "--config revision not honoured (rc=$RC)"
+[ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep 'this checkout is v9.9.9' >/dev/null && ok "tockmox.revision is read from --config" || fail "--config revision not honoured (rc=$RC)"
 NOIDX="$T/noindex"; mk_site "$NOIDX"; rm -f "$NOIDX/index.html"; printf 'x\n' > "$NOIDX/page.html"
 refuse noindex "a site with no index.html is refused" "index.html is missing" env "${GOOD[@]}" $PUB --context selftest-ctx --site "$NOIDX" --revision v9.9.9
 EXT="$T/ext"; mk_site "$EXT"; printf '<link rel="stylesheet" href="https://fonts.googleapis.com/css">' >> "$EXT/index.html"

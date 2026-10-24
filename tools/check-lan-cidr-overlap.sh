@@ -112,7 +112,7 @@ SRC='["10.42.1.0/31"]'
 
 refuses() { # name lan cluster
   render "$2" "$3" "$SRC"
-  if printf '%s' "$R" | grep -q "global.lanCIDR ($2) contains global.clusterCIDR ($3)"; then
+  if printf '%s' "$R" | grep "global.lanCIDR ($2) contains global.clusterCIDR ($3)" >/dev/null; then
     ok "$1: refused, message names both values ($2 and $3)"
   else
     bad "$1: expected the containment refusal naming $2 and $3" "$(printf '%s' "$R" | head -3 | cut -c1-220)"
@@ -121,7 +121,7 @@ refuses() { # name lan cluster
 passes() { # name lan cluster
   render "$2" "$3" "$SRC"
   local got; got="$(node_policy_cidrs)"
-  if printf '%s' "$R" | grep -q 'contains global.clusterCIDR'; then
+  if printf '%s' "$R" | grep 'contains global.clusterCIDR' >/dev/null; then
     bad "$1: must NOT refuse ($2 vs $3)" "$(printf '%s' "$R" | head -2 | cut -c1-200)"
   elif [ "$got" = "$2 10.42.1.0/31 " ]; then
     ok "$1: renders, allow-from-node-network = [$2, 10.42.1.0/31], no clusterCIDR block"
@@ -146,8 +146,8 @@ passes  "lan is a narrower prefix on the same base"      10.42.0.0/17 10.42.0.0/
 for lan in 10.0.0.0/8 192.168.1.0/24; do
   render "$lan" 10.42.0.0/16 '[]'
   got="$(node_policy_cidrs)"
-  if printf '%s' "$R" | grep -q 'nodeOriginSources is empty' \
-     && printf '%s' "$R" | grep -q -- '--print-netpol-node-sources' && [ -z "$got" ]; then
+  if printf '%s' "$R" | grep 'nodeOriginSources is empty' >/dev/null \
+     && printf '%s' "$R" | grep -- '--print-netpol-node-sources' >/dev/null && [ -z "$got" ]; then
     ok "nodeOriginSources empty, lanCIDR $lan: refused, naming the key and the helper, no policy rendered"
   else
     bad "nodeOriginSources empty must refuse (TM-0798), lanCIDR $lan" "got cidrs: '${got:-<none>}'; $(printf '%s' "$R" | head -2 | cut -c1-200)"
@@ -157,7 +157,7 @@ done
 # A value the helper cannot parse is not judged: it renders, and the API server
 # owns the rejection.
 render "fd00::/8" 10.42.0.0/16 "$SRC"
-if printf '%s' "$R" | grep -q 'contains global.clusterCIDR'; then
+if printf '%s' "$R" | grep 'contains global.clusterCIDR' >/dev/null; then
   bad "an IPv6 lanCIDR must not trigger the IPv4 containment refusal" "$(printf '%s' "$R" | head -2 | cut -c1-200)"
 else
   ok "an IPv6 lanCIDR is not judged by the IPv4 check"
@@ -165,7 +165,7 @@ fi
 
 # The pre-existing guard must still be there and still win on its own case.
 render 192.168.1.0/24 10.42.0.0/16 '["10.42.0.0/16"]'
-if printf '%s' "$R" | grep -q 'nodeOriginSources contains 10.42.0.0/16'; then
+if printf '%s' "$R" | grep 'nodeOriginSources contains 10.42.0.0/16' >/dev/null; then
   ok "the older whole-pod-network entry guard still fires"
 else
   bad "the older whole-pod-network entry guard no longer fires" "$(printf '%s' "$R" | head -2 | cut -c1-200)"

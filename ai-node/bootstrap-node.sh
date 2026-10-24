@@ -205,7 +205,7 @@ preflight() {
   version_ge "$v" "$MIN_VERSION" || die "macOS $v is older than $MIN_VERSION. Update it at the console first."
   note "macOS $v on Apple silicon"
   [ "$(id -u)" != 0 ] || die "run this as the human administrator, not as root; it uses sudo where it needs to"
-  if ! id -Gn | tr ' ' '\n' | grep -qx admin; then die "$ADMIN_USER is not in the admin group"; fi
+  if ! id -Gn | tr ' ' '\n' | grep -x admin >/dev/null; then die "$ADMIN_USER is not in the admin group"; fi
   note "administrator: $ADMIN_USER"
   if [ "$DRY_RUN" = 1 ]; then
     note "[dry-run] would ask for your sudo password"

@@ -102,7 +102,7 @@ rm -f "$PAGE_BYTES"
 
 # --- the placeholder substitution --------------------------------------------
 SYNTH="roundtrip-canary-$(openssl rand -hex 16)"
-if ! printf '%s' "$CMD1" | grep -qF "api-key='...'"; then
+if ! printf '%s' "$CMD1" | grep -F "api-key='...'" >/dev/null; then
   _emit "EXCEPTION: expected literal \"api-key='...'\" in block 1 and did not find it."
   _emit "           The page's placeholder shape changed. Handing back rather than guessing."
   exit 3

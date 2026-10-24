@@ -248,7 +248,7 @@ acquire_lock() {
   local old
   old="$(cat "$LOCK_DIR/pid" 2>/dev/null)"
   if [ -n "$old" ] && kill -0 "$old" 2>/dev/null \
-     && ps -p "$old" -o command= 2>/dev/null | grep -q 'tockmox-ai-node-converge'; then
+     && ps -p "$old" -o command= 2>/dev/null | grep 'tockmox-ai-node-converge' >/dev/null; then
     return 1
   fi
   log "removing a stale lock (pid ${old:-unknown} is gone)"
@@ -535,9 +535,9 @@ verify_one() {
       gh="$(make_gnupg_home "$asc")" || { VERIFY_DETAIL="gpg is not installed"; return 1; }
       out="$(GNUPGHOME="$gh" git -C "$repo" -c gpg.format=openpgp verify-commit --raw "$c" 2>&1)"; rc=$?
       rm -rf "$gh"
-      if [ "$rc" = 0 ] && printf '%s\n' "$out" | grep -q '^\[GNUPG:\] GOODSIG' \
-         && printf '%s\n' "$out" | grep -q '^\[GNUPG:\] VALIDSIG' \
-         && ! printf '%s\n' "$out" | grep -qE '^\[GNUPG:\] (BADSIG|ERRSIG|EXPSIG|EXPKEYSIG|REVKEYSIG)'; then
+      if [ "$rc" = 0 ] && printf '%s\n' "$out" | grep '^\[GNUPG:\] GOODSIG' >/dev/null \
+         && printf '%s\n' "$out" | grep '^\[GNUPG:\] VALIDSIG' >/dev/null \
+         && ! printf '%s\n' "$out" | grep -E '^\[GNUPG:\] (BADSIG|ERRSIG|EXPSIG|EXPKEYSIG|REVKEYSIG)' >/dev/null; then
         VERIFY_DETAIL="gpg ok"; return 0
       fi
       VERIFY_DETAIL="gpg signature not accepted by the pinned keys"; return 1 ;;

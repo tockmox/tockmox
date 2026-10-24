@@ -392,7 +392,7 @@ BADBP
     kc -n "$NS" exec "deploy/$WORKER" -i -- ak shell -c "
 from authentik.blueprints.models import BlueprintInstance
 print('TOCKMOX_POISON=' + ('yes' if BlueprintInstance.objects.filter(name='${POISON_BP}').exists() else 'no'))
-" 2>/dev/null | grep -q 'TOCKMOX_POISON=yes'
+" 2>/dev/null | grep 'TOCKMOX_POISON=yes' >/dev/null
   }
 
   deadline=$(( $(date +%s) + ${TOCKMOX_POISON_TIMEOUT:-180} ))
@@ -480,7 +480,7 @@ print('deleted rows:', n)
   if kc -n "$NS" exec "deploy/$WORKER" -i -- ak shell -c "
 from authentik.blueprints.models import BlueprintInstance
 print('TOCKMOX_LEFT=' + str(BlueprintInstance.objects.filter(name='tockmox-poison-test').count()))
-" 2>/dev/null | grep -q 'TOCKMOX_LEFT=0'; then
+" 2>/dev/null | grep 'TOCKMOX_LEFT=0' >/dev/null; then
     echo "  clean ... files removed and the BlueprintInstance row is gone."
     echo "  Re-run without a flag; the gate should return to its pre-poison result."
   else

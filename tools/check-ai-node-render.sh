@@ -58,7 +58,7 @@ check_site() {  # label site-dir -> 0 when the renderer exits 0 and at least one
     echo "check-ai-node-render: FAILED: $label: the renderer exited $rc"
     return 1
   fi
-  if ! printf '%s\n' "$out" | grep -q '^OK '; then
+  if ! printf '%s\n' "$out" | grep '^OK ' >/dev/null; then
     echo "check-ai-node-render: FAILED: $label: no node was checked OK (an empty pass is not a pass)"
     return 1
   fi
@@ -79,13 +79,13 @@ $1
   expect_red() {  # name, expected substring in the output
     local out rc
     out=$(run_check "$tmp/site"); rc=$?
-    if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q -- "$2"; then echo "  selftest ok: red on $1"
+    if [ "$rc" = 1 ] && printf '%s' "$out" | grep -- "$2" >/dev/null; then echo "  selftest ok: red on $1"
     else echo "  SELFTEST FAIL: $1 was not refused with '$2' (exit $rc): $out"; fails=1; fi
   }
 
   fresh
   out=$(run_check "$tmp/site"); rc=$?
-  if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q '^OK '; then echo "  selftest ok: the unmodified fixture is green"
+  if [ "$rc" = 0 ] && printf '%s' "$out" | grep '^OK ' >/dev/null; then echo "  selftest ok: the unmodified fixture is green"
   else echo "  SELFTEST FAIL: the unmodified fixture is not green (exit $rc): $out"; fails=1; fi
 
   fresh; mutate "

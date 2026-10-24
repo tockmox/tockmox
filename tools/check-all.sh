@@ -300,6 +300,11 @@ run_gate "the posture-probe add-on stays observe-only: read-only role, confined 
 run_gate "the posture-probe gate goes red on a write verb, a widened read, a leaked output and a broken contract (TM-0874)" bash tools/check-posture-probe.sh --selftest
 run_gate "the upgrade-wedging shapes from the 0.7.0 lab pass stay fixed" bash tools/check-upgrade-safety.sh
 run_gate "the upgrade-safety gate goes red on a migrations Job that keeps its name or drifts from upstream" bash tools/check-upgrade-safety.sh --selftest
+# A pipe into `grep -q` under pipefail fails at random: grep exits at the first
+# match and the writer dies of SIGPIPE (141). Over a hundred of these made this
+# script go red on pushes whose PR run had passed.
+run_gate "no pipe into grep -q under pipefail (a match must not read as a SIGPIPE)" python3 tools/check-pipe-grep-q.py
+run_gate "the grep -q pipe gate goes red on every shape it names, and green on the fixed form" python3 tools/check-pipe-grep-q.py --selftest
 run_gate "no bare kubectl or helm in the executed-docs harness (TM-0797)" bash tools/check-harness-context.sh
 run_gate "the harness-context gate goes red on a bare call (TM-0797)" bash tools/check-harness-context.sh --selftest
 run_gate "a lanCIDR containing the clusterCIDR is refused when nodeOriginSources is set (TM-0790)" bash tools/check-lan-cidr-overlap.sh

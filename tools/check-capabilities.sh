@@ -305,7 +305,7 @@ for comp in "${!OWNER[@]}"; do
     [ "${OWNER[$c]}" = "$cap" ] && [ "$c" != "$comp" ] && clear+=(--set "apps.$c.enabled=null")
   done
   for l in "${LAYERS[@]}"; do
-    appkeys "$l" | grep -qx "$comp" || continue
+    appkeys "$l" | grep -x "$comp" >/dev/null || continue
     seen=true
     # The render half needs helm and is skipped without it (reported once,
     # below); the manifest half above and after this loop does not.
