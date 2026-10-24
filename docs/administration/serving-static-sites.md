@@ -69,7 +69,7 @@ Turning `apps.docs` on while `apps.garage` is off fails the render.
 ## Publishing the product documentation
 
 ```sh
-git checkout v0.8.1            # the tag your site's tockmox.revision names
+git checkout v0.8.2            # the tag your site's tockmox.revision names
 ./tools/publish-docs.sh --context YOUR_KUBECONTEXT --config tockmox.yaml --wait 600
 ```
 
@@ -324,5 +324,5 @@ disconnected cluster both must work with no request leaving the cluster.
 
 ---
 
-<sub>Tockmox v0.8.1 &middot; &copy; 2026 Tockmox LLC &middot; code Apache-2.0, docs CC BY 4.0 &middot; Tockmox is a trademark</sub>
+<sub>Tockmox v0.8.2 &middot; &copy; 2026 Tockmox LLC &middot; code Apache-2.0, docs CC BY 4.0 &middot; Tockmox is a trademark</sub>
 <!-- tockmox:footer:end -->

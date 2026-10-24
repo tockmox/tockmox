@@ -3,13 +3,13 @@ apiVersion: v2
 name: tockmox-ai
 description: "The local AI plane. Independently adoptable."
 type: application
-version: 0.8.1
+version: 0.8.2
 appVersion: "0.1.0"
 annotations:
   tockmox.com/sync-wave: "5"
 dependencies:
   - name: tockmox-common
-    version: 0.8.1
+    version: 0.8.2
     repository: "file://../tockmox-common"
   - name: open-webui
     version: 17.0.0

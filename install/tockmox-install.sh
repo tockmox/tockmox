@@ -34,7 +34,7 @@ set -euo pipefail
 # version that had never existed, and the revision prompt below offered
 # "v0.1.0" as its default, which no remote could resolve (TM-0269). CI now
 # compares the two, because a checklist is not a mechanism.
-VERSION="0.8.1"
+VERSION="0.8.2"
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SELF/.." && pwd)"
 

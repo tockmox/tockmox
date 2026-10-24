@@ -124,7 +124,7 @@ spec:
     namespace: tockmox-posture
   sources:
     - repoURL: https://github.com/tockmox/tockmox.git
-      targetRevision: v0.8.1
+      targetRevision: v0.8.2
       path: addons/posture-probe/chart
       helm:
         valueFiles:
@@ -294,5 +294,5 @@ namespace when you mean to.
 
 ---
 
-<sub>Tockmox v0.8.1 &middot; &copy; 2026 Tockmox LLC &middot; code Apache-2.0, docs CC BY 4.0 &middot; Tockmox is a trademark</sub>
+<sub>Tockmox v0.8.2 &middot; &copy; 2026 Tockmox LLC &middot; code Apache-2.0, docs CC BY 4.0 &middot; Tockmox is a trademark</sub>
 <!-- tockmox:footer:end -->

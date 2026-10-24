@@ -3,13 +3,13 @@ apiVersion: v2
 name: tockmox-exporters
 description: "Hardware and service exporters. Disable wholesale if your hardware differs."
 type: application
-version: 0.8.1
+version: 0.8.2
 appVersion: "0.1.0"
 annotations:
   tockmox.com/sync-wave: "3"
 dependencies:
   - name: tockmox-common
-    version: 0.8.1
+    version: 0.8.2
     repository: "file://../tockmox-common"
   - name: prometheus-blackbox-exporter
     version: 11.20.0

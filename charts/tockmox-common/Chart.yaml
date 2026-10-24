@@ -3,4 +3,4 @@ apiVersion: v2
 name: tockmox-common
 description: "Shared helpers for Tockmox layer charts. Library chart, not installable."
 type: library
-version: 0.8.1
+version: 0.8.2

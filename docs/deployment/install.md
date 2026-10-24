@@ -266,7 +266,7 @@ describes.
 
 **What it looks like when this precondition is not met.** Nothing fails in
 Phase 1 or Phase 2. The 1b preflight prints
-`! cannot reach https://github.com/tockmox/tockmox.git ... not confirming 'v0.8.1' exists (fine if you are air-gapped or mirroring)`
+`! cannot reach https://github.com/tockmox/tockmox.git ... not confirming 'v0.8.2' exists (fine if you are air-gapped or mirroring)`
 and continues, because it cannot tell a repository it cannot reach from one
 that is deliberately behind a boundary. Then, three phases later, the nine layer
 Applications report the same thing ... nine rather than all of them, because
@@ -292,7 +292,7 @@ revision", and the fix is the revision or the URL, never a credential.
 **WORKSTATION**
 
 ```bash
-git ls-remote https://github.com/tockmox/tockmox.git refs/tags/v0.8.1
+git ls-remote https://github.com/tockmox/tockmox.git refs/tags/v0.8.2
 ```
 
 Prints a SHA and the tag name. Anything else, including a prompt for a
@@ -1947,5 +1947,5 @@ scope to break your next install.
 
 ---
 
-<sub>Tockmox v0.8.1 &middot; &copy; 2026 Tockmox LLC &middot; code Apache-2.0, docs CC BY 4.0 &middot; Tockmox is a trademark</sub>
+<sub>Tockmox v0.8.2 &middot; &copy; 2026 Tockmox LLC &middot; code Apache-2.0, docs CC BY 4.0 &middot; Tockmox is a trademark</sub>
 <!-- tockmox:footer:end -->
