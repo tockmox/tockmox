@@ -252,13 +252,15 @@ morning took; they are the measure of whether the train is paying for itself.
 
 ### Cadence, skips, and security
 
-- **Target, not a commitment:** one train every two weeks, the first a week
-  after `X.Y.0`. The cadence is published, as a target, once three trains have
-  run; until then it is this sentence.
+- **Target, not a commitment:** one train a week, built on Saturday night from
+  what merged to `release-X.Y` by Friday, the first a week after `X.Y.0`. A
+  READY candidate waits for its morning until the next cutoff. The cadence is
+  published, as a target, once three trains have run; until then it is this
+  sentence.
 - **Skip rule.** Churn that is only dependency updates cuts at most monthly. A
   train cuts when it carries a fix, a security-relevant bump, or a fix to a
   published Known Issue. A skip writes a ledger row, never silence. Two
-  candidates in a row left unsigned drop the cadence to monthly.
+  candidates in a row left unsigned drop the cadence to every two weeks.
 - **Security fixes ship out of band**, not on the next train. An embargoed
   vulnerability is worked in the private advisory fork and never on a public
   train branch; SECURITY.md states the support window.
