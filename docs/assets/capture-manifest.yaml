@@ -106,12 +106,19 @@ images:
     shows: Tockmox / Traefik board -- open connections, req/s, 4xx and 5xx ratios
     host: grafana.<internalDomain>
     state: light traffic, 1h window, error ratios at zero
-    version_in_frame: null
-    captured: 2026-08-18
+    version_in_frame: null   # Grafana v13.2.4 on the lab, not visible in this frame
+    captured: 2026-10-23     # reshot: v1 seal and Chakra Petch banner -> v2 medallion and serif banner
     referenced_by:
       - docs/operations/monitoring.md
       - README.md
-    audited: 2026-09-03
+    audited: 2026-10-23      # a lab cluster on 0.8.1, int.example.com hosts; no account name, hostname or personal content
+    # Reshot from headless Chromium (Playwright 1.48, chromium-1140) in a pod on
+    # a lab cluster, signed in as the Grafana admin. Viewport 1266x716 at device
+    # scale 1.15 gives the 1456x823 frame of the original. The banner is the one
+    # shipped in charts/tockmox-observability/dashboards/traefik.json (v2 mark);
+    # its tagline asks for Nunito Sans, which the capture host does not carry, so
+    # it renders in the host's system sans. The Req/s tile includes the capture's
+    # own page loads, as the August frame did.
 
   - path: monitoring/kubernetes-mixin-cluster.jpg
     shows: kubernetes-mixin cluster board, per-namespace CPU and memory
@@ -129,10 +136,21 @@ images:
       greenfield, IMMEDIATELY AFTER an operator completed the first-run setup.
       See the identity note under `gaps` ... a stock install does NOT reach this
       screen on its own.
-    version_in_frame: authentik 2026.8.2
-    captured: 2026-09-12
+    version_in_frame: authentik 2026.8.4   # reshot 2026-10-23 from 2026.8.2; the Version tile reads "Latest version unknown" on the lab (no update check), not "Up-to-date!"
+    captured: 2026-10-23     # reshot: v1 seal and Chakra Petch wordmark -> v2 lockup (steel)
     referenced_by: [charts/tockmox-identity/README.md, README.md]
-    audited: 2026-09-12
+    audited: 2026-10-23      # a lab cluster on 0.8.1; events panel shows only the capture's own akadmin sign-in
+    # 2026-10-23 RESHOOT STATE DIFFERS FROM THE ENTRY ABOVE. This frame was not
+    # taken right after first-run setup: the lab already existed, so the capture
+    # signed in as akadmin with a one-time recovery key (`ak create_recovery_key`,
+    # 10 minutes), which is why the events panel shows Login, Model created/
+    # updated/deleted by akadmin from 10.42.0.1 and not "Password set". Two bars
+    # a real session would not show on this frame were removed from the page
+    # before the shot: the recovery-session "Custom branding is disabled" bar
+    # (this brand sets no custom CSS, so nothing is hidden by it) and the lab's
+    # "base URL has not been configured" bar. A stock install on 2026.8.4 may
+    # show the base-URL bar; check before reusing this note. The events panel
+    # now paginates ("1 - 6 of N") because the lab has a history.
     # The recent-events panel shows the setup that had just been performed
     # (akadmin / "Password set", client 10.42.0.1, a pod address). That is the
     # honest state for this frame rather than a leak, and it is what a reader
