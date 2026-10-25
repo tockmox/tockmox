@@ -8,7 +8,7 @@ the soft state backgrounds over the panel surface, and prints the ratio of every
 components use. Exit 1 if a text pair is under 4.5:1 or a non-text pair (borders, focus) under 3:1.
 Apps keep their own report for the pairs they add; this one covers what every app inherits.
 
-  contrast_report.py [--tokens static/tockmox-tokens.css] [--kit static/kit.css]
+  contrast_report.py [--tokens static/tockmox-tokens.css] [--base static/kit-base.css] [--kit static/kit.css]
 
 Stdlib only.
 """
@@ -32,12 +32,14 @@ def blocks(path: Path, selector_re: str) -> dict[str, str]:
     return out
 
 
-def theme_vars(tokens: Path, kit: Path, light: bool) -> dict[str, str]:
+def theme_vars(tokens: Path, kit: Path, light: bool, base: Path | None = None) -> dict[str, str]:
+    """The custom properties in force: the tokens, then the kit's base (where its :root lives), then kit.css."""
+    files = [f for f in (tokens, base, kit) if f is not None and f.is_file()]
     v: dict[str, str] = {}
-    for f in (tokens, kit):
+    for f in files:
         v.update(blocks(f, r"(?<![\w\]-]):root"))
     if light:
-        for f in (tokens, kit):
+        for f in files:
             v.update(blocks(f, r'\[data-theme="light"\][^{]*'))
     return v
 
@@ -115,10 +117,13 @@ def main(argv) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tokens", type=Path, default=KIT / "static" / "tockmox-tokens.css")
     ap.add_argument("--kit", type=Path, default=KIT / "static" / "kit.css")
+    ap.add_argument("--base", type=Path, default=None,
+                    help="kit-base.css; defaults to the one beside --kit")
     a = ap.parse_args(argv)
+    base = a.base or a.kit.with_name("kit-base.css")
     fails = 0
     for theme in ("dark", "light"):
-        v = theme_vars(a.tokens, a.kit, theme == "light")
+        v = theme_vars(a.tokens, a.kit, theme == "light", base)
         print(f"== {theme}")
         for label, fg, bg, soft, kind in PAIRS:
             b = rgba(resolve(v, f"var({bg})"))
