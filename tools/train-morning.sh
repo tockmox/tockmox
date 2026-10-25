@@ -173,6 +173,20 @@ forbidden_hit() { # path -> 0 if a FORBIDDEN pattern matches
   return 1
 }
 
+# The version bump's `tools/stamp-docs.sh` rewrites the footer of every page under
+# docs/, verify.md included, so every train diff touched a FORBIDDEN path by
+# construction and the first train (0.8.2) could not have been signed by this
+# script. The footer is generated text between the stamp markers and says nothing
+# about verification; a change confined to it is not a change to the page. Only
+# verify.md takes this exemption: the other FORBIDDEN paths carry no footer.
+footer_only_change() { # OLD-SHA NEW-SHA PATH -> 0 if the two versions differ only between the footer markers
+  fo_strip() { sed '/<!-- tockmox:footer:begin -->/,/<!-- tockmox:footer:end -->/d'; }
+  case "$3" in */verify.md|verify.md) ;; *) return 1 ;; esac
+  fo_a=$(g show "$1:$3" 2>/dev/null | fo_strip) || return 1
+  fo_b=$(g show "$2:$3" 2>/dev/null | fo_strip) || return 1
+  [ -n "$fo_a" ] && [ "$fo_a" = "$fo_b" ]
+}
+
 # ---------------------------------------------------------------- 1. verify
 verify() {
   say "1/7 verify"
@@ -198,17 +212,20 @@ verify() {
     say "  origin/$REL_BRANCH $REL_SHA is an ancestor: fast-forward of $(g rev-list --count "$REL_SHA..$SHA") commit(s)"
   fi
 
-  hits=""
+  hits=""; stamped=""
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    if forbidden_hit "$f"; then hits="$hits
+    if forbidden_hit "$f"; then
+      if footer_only_change "$REL_SHA" "$SHA" "$f"; then stamped="$stamped $f"; else hits="$hits
     $f"; fi
+    fi
   done <<EOF
 $(g diff --name-only "$REL_SHA" "$SHA")
 EOF
   [ -z "$hits" ] || stop "the candidate touches a path a train may not change:$hits
   (FORBIDDEN in $SELF). This is not a patch; it needs a reviewed PR, not a morning signature."
   say "  diff $REL_BRANCH..SHA touches none of: ${FORBIDDEN[*]}"
+  [ -z "$stamped" ] || say "  (footer stamp only, allowed:$stamped)"
 
   # the tag: absent, or already on this SHA (resumable)
   TAG_DONE=0
@@ -474,7 +491,8 @@ st_fixture() { # NAME VARIANT -> builds $PT/NAME with origin.git, repo, template
   seed="$d/seed"; git init -q "$seed"; git -C "$seed" symbolic-ref HEAD refs/heads/main
   mkdir -p "$seed/docs/deployment" "$seed/tools"
   printf '%s %s\n' "maintainer@example.com" "$(cut -d' ' -f1,2 < "$PT/key.pub")" > "$seed/.gitsigners"
-  echo "security" > "$seed/SECURITY.md"; echo "verify" > "$seed/docs/deployment/verify.md"
+  echo "security" > "$seed/SECURITY.md"
+  printf 'verify\n\n<!-- tockmox:footer:begin -->\n<sub>Tockmox v0.8.1</sub>\n<!-- tockmox:footer:end -->\n' > "$seed/docs/deployment/verify.md"
   echo "# changelog" > "$seed/CHANGELOG.md"
   # a stand-in for tools/site-pin-at-tag.sh with the same interface (TAG --dir DIR)
   cat > "$seed/tools/site-pin-at-tag.sh" <<'EOS'
@@ -485,7 +503,8 @@ EOS
   git -C "$seed" branch -q release-0.8
   git -C "$seed" checkout -q -b train/0.8.2
   echo "- fix" >> "$seed/CHANGELOG.md"
-  [ "$v" = forbidden ] && echo "changed" >> "$seed/docs/deployment/verify.md"
+  [ "$v" = forbidden ] && printf 'verify, changed\n' >> "$seed/docs/deployment/verify.md"
+  [ "$v" = footer ] && sed -i.bak 's/Tockmox v0.8.1/Tockmox v0.8.2/' "$seed/docs/deployment/verify.md" && rm -f "$seed/docs/deployment/verify.md.bak"
   git -C "$seed" add -A; st_commit "$seed" "B: the candidate"
   B=$(git -C "$seed" rev-parse HEAD)
   if [ "$v" = nonff ]; then
@@ -564,6 +583,7 @@ selftest_main() {
   st_fixture witness witness;     st_run witness;     st_probe "witness head_sha differs from origin/train" witness 1 "witness mismatch"
   st_fixture nonff nonff;         st_run nonff;       st_probe "release branch moved past the train (not fast-forwardable)" nonff 1 "not fast-forwardable"
   st_fixture forbidden forbidden; st_run forbidden;   st_probe "candidate touches docs/deployment/verify.md" forbidden 1 "may not change"
+  st_fixture footer footer;       st_run footer;      st_probe "a footer-stamp-only change to verify.md (the version bump) is allowed" footer 0 "footer stamp only, allowed: docs/deployment/verify.md"
   st_fixture tagexists tagexists; st_run tagexists;   st_probe "tag v0.8.2 already on origin at another commit" tagexists 1 "already exists on origin"
   st_fixture wrongkey good; ssh-keygen -q -t ed25519 -N '' -f "$PT/otherkey"
   sed -i.bak "s|SIGNING_KEY=.*|SIGNING_KEY=\"$PT/otherkey\"|" "$PT/wrongkey/spec"; st_run wrongkey
