@@ -281,7 +281,8 @@ morning took; they are the measure of whether the train is paying for itself.
   - **rollback class**: a revision swap, or a restore of a named application's
     database, in which case the pre-upgrade backup is required and the notes
     say so (`docs/deployment/upgrade.md`, step 2);
-  - **images delta**: what `images.txt` and the SBOM gained, lost or moved;
+  - **images delta**: what `images.txt` and the SBOM gained, lost or moved
+    (the version of each is in the section's Component versions list);
   - **contract delta**: values tiers and immutable fields that moved, or
     "none";
   - **air-gap line, dated**: re-proved on the date, or skipped and stated.
@@ -441,7 +442,18 @@ afterwards, not from memory:
   narrowed or disproved;
 - what was deliberately not tested;
 - for a patch, the "what taking this patch costs" block
-  ([the patch train](#checklist-rows-the-train-adds)).
+  ([the patch train](#checklist-rows-the-train-adds));
+- a **Component versions** list, in every release (minor and patch): one
+  bullet per deployed component whose version changed since the previous final
+  tag, written `name old -> new`. It covers the open-source software Tockmox
+  deploys (every chart dependency in a layer's `Chart.lock` and every image in
+  `images.txt`) and Tockmox's own components (the Tockmox UI, add-ons such as
+  the Security Posture Probe, the AI-node tooling), each at the version or
+  commit the release builds it from. Compute it from
+  `git diff <previous tag> <candidate> -- 'charts/*/Chart.lock' images.txt`
+  and the first-party sources, not from memory or the Renovate PR titles; a
+  component that moved and moved back is not listed. A release that moves
+  nothing says so in one line.
 
 **One text commit, not a series**; each extra commit is another CI run before
 the tag can move. A commit is text-only when
