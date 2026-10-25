@@ -4,14 +4,28 @@
 # installs nothing but remembers the version, so the role's read-then-install logic runs.
 if [ "$1" = -m ] && [ "$2" = venv ]; then
   d="$3"; mkdir -p "$d/bin"
-  printf '#!/bin/sh\nexit 0\n' > "$d/bin/python"
+  # The venv's python answers only what the engine patch helper asks: where site-packages is (asked
+  # for real), and byte-compile a file a patch touched (answered yes: the stand-in release is a fragment
+  # that cannot compile on its own; tests/engine-patch.sh runs the compile check with a real python3).
+  cat > "$d/bin/python" <<'PY'
+#!/bin/bash
+site="$(cd "$(dirname "$0")/.." && pwd)/lib/site-packages"
+case "$1" in
+  -c) case "$2" in *sysconfig*) mkdir -p "$site"; printf '%s\n' "$site" ;; esac ;;
+esac
+exit 0
+PY
   printf '#!/bin/sh\nexit 0\n' > "$d/bin/mlx_lm.server"
   cat > "$d/bin/pip" <<'PIP'
 #!/bin/bash
 v="$(dirname "$0")/.mlx-lm-version"
 case "$1" in
   show) [ -e "$v" ] && printf 'Name: mlx-lm\nVersion: %s\n' "$(cat "$v")" && exit 0; exit 1 ;;
-  install) for a in "$@"; do case "$a" in mlx-lm==*) echo "${a#mlx-lm==}" > "$v" ;; esac; done; echo "Successfully installed mlx-lm"; exit 0 ;;
+  install) for a in "$@"; do case "$a" in mlx-lm==*) echo "${a#mlx-lm==}" > "$v" ;; esac; done
+           # When the run provides a stand-in for the release's files, an install lays them down clean.
+           pre=/var/lib/tockmox-sim/mlx-lm-preimage; site="$(cd "$(dirname "$0")/.." && pwd)/lib/site-packages"
+           if [ -d "$pre/mlx_lm" ]; then mkdir -p "$site"; rm -rf "$site/mlx_lm"; cp -R "$pre/mlx_lm" "$site/mlx_lm"; fi
+           echo "Successfully installed mlx-lm"; exit 0 ;;
 esac
 exit 0
 PIP

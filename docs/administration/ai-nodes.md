@@ -253,6 +253,33 @@ node reads the Hub's record of it at the pinned commit and requires the blob's n
 to be the listed Xet hash and the content to hash to the listed SHA-256. If the Hub
 cannot be reached the model is refused, not trusted.
 
+### Engine patches
+
+A pinned mlx-lm release can carry a defect whose fix is known upstream and not
+yet released. The toolkit ships such fixes as patch files, each vetted against
+one exact release, under
+`ai-node/roles/engine_mlx_lm/files/patches/<version>/<name>.patch`. A node opts
+in by name:
+
+```yaml
+engines:
+  mlx-lm:
+    version: "0.32.2"
+    patches: [batch-decode-eval-cache]
+```
+
+Every change to that list starts from a clean reinstall of the release
+(`pip install --force-reinstall --no-deps`), then applies each patch in order and
+byte-compiles what it touched, then restarts the instances once. A name the
+toolkit has no patch for at the pinned version stops the converge, so bumping
+`version` with a patch still listed is refused until the patch is re-vetted or
+removed. Removing a name puts the release back as published. A patch that does
+not apply or compile leaves the clean release and fails the converge.
+
+| Patch | For | Fixes | Drop it when |
+|---|---|---|---|
+| `batch-decode-eval-cache` | 0.32.2 | The batched decode step never evaluates the prompt cache, so live Metal buffers pile up until the batch drains and the generation thread dies at `[metal::malloc] Resource limit (499000) exceeded`, typically after about 10k decode steps under steady concurrent load. Serial engines (`--decode-concurrency 1 --prompt-concurrency 1`) avoid it as long as one request stays under that length | The pinned release contains ml-explore/mlx-lm pull request 1911 or an equivalent fix |
+
 ## Signatures and the history they cover
 
 On every run the node verifies each commit on the first-parent chain from the
@@ -371,6 +398,7 @@ gated Hugging Face models is the secret named `hf-token`.
 cat /opt/tockmox/textfile/converge.prom
 cat /opt/tockmox/textfile/facts.prom
 cat /opt/tockmox/textfile/engine-watch.prom
+cat /opt/tockmox/textfile/engine-patches.prom
 sudo -u tockmox /opt/tockmox/bin/tockmox-ai-node-converge --check --diff
 ```
 
@@ -386,6 +414,7 @@ The last command changes nothing and shows what a converge would change.
 | `tockmox_ai_node_model_present` | A pinned model revision that is on disk |
 | `tockmox_ai_node_engine_healthy{label=...,port=...}` | 1 when the engine's health path answered 200 at the last check |
 | `tockmox_ai_node_engine_restarts_total{label=...,port=...}` | Restarts the engine watch made because the engine was up but unhealthy |
+| `tockmox_ai_node_engine_patch_info{engine=...,version=...,patch=...}` | A toolkit patch the engine runs with, 1 per patch; absent means the release as published |
 
 The engine watch (`tockmox-ai-node-engine-watch`, root, every 60 s) asks each
 mlx-lm instance for `/health` on 127.0.0.1. Two 503 answers in a row mean the
@@ -478,6 +507,7 @@ the toolkit assumes.
 | macmon serves its metrics and its bind address | `lsof -nP -iTCP:9101 -sTCP:LISTEN` |
 | `iogpu.wired_limit_mb` exists and takes the value on this macOS | `sysctl iogpu.wired_limit_mb` |
 | The engine watch restarts an mlx-lm instance whose `/health` answers 503, and only then | on a node serving mlx-lm 0.32 or later, `sudo /opt/tockmox/bin/tockmox-ai-node-engine-watch` and `cat /opt/tockmox/textfile/engine-watch.prom` (healthy 1, restarts 0); the 503 path itself needs an engine whose generation thread died |
+| A toolkit patch reaches the engine: the reinstall, the patch and the compile work as the service account with the Mac's `patch` and Python | after a converge that lists one, `cat /opt/tockmox/engines/mlx-lm/venv/.tockmox-engine-patches` and `sudo -u inference /opt/tockmox/engines/mlx-lm/venv/bin/python -c 'import mlx_lm.generate'` |
 | A converge can reload its own LaunchDaemon without dying | change the interval in `fleet.yaml`, then `sudo launchctl print system/com.tockmox.ai-node.converge` after the run |
 | The Apple Account check finds a signed-in account | `sudo defaults read /Users/admin/Library/Preferences/MobileMeAccounts Accounts` |
 | The scripts run under macOS's bash 3.2 | `/bin/bash --version` and `/bin/bash -n /opt/tockmox/bin/tockmox-ai-node-converge` |

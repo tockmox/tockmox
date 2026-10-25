@@ -2,6 +2,7 @@
 ---
 engine_mlx_lm_dir: "{{ tn_root }}/engines/mlx-lm"
 engine_mlx_lm_venv: "{{ engine_mlx_lm_dir }}/venv"
+engine_mlx_lm_patch_dir: "{{ engine_mlx_lm_dir }}/patches"
 # The engine watch's list is tab-separated. A YAML double-quoted "\t" is a real tab; a '\t' typed inside
 # the Jinja of a copy content arrives as a backslash and a t.
 engine_mlx_lm_tab: "\t"

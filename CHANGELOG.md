@@ -11,6 +11,13 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **AI nodes can run mlx-lm with a vetted toolkit patch.** `engines.mlx-lm.patches`
+  names patches the toolkit ships for exactly the pinned release; each change
+  starts from a clean reinstall and restarts the instances once, and a name with
+  no patch for the pinned version stops the converge. The first,
+  `batch-decode-eval-cache` for 0.32.2, stops batched engines dying at Metal's
+  resource limit under sustained load. See `docs/administration/ai-nodes.md`,
+  "Engine patches".
 - **Prometheus, Alertmanager, Longhorn and the Traefik dashboard can be routed
   behind Authentik (forward-auth).** Each is still off by default. Turning one on
   takes two values: `sso.forwardAuth.apps.<console>.enabled` in the identity

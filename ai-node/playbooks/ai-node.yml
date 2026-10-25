@@ -61,6 +61,7 @@
     tn_mlx_version: "{{ ((tn_ai_node.engines | default({}))['mlx-lm'] | default({})).version | default('', true) | string }}"
     tn_mlx_python: "{{ ((tn_ai_node.engines | default({}))['mlx-lm'] | default({})).python | default('3.12', true) | string }}"
     tn_mlx_extra_args: "{{ ((tn_ai_node.engines | default({}))['mlx-lm'] | default({})).extraArgs | default([], true) }}"
+    tn_mlx_patches: "{{ ((tn_ai_node.engines | default({}))['mlx-lm'] | default({})).patches | default([], true) | map('string') | list }}"
     tn_llama_formula: "{{ ((tn_ai_node.engines | default({}))['llama-server'] | default({})).brewFormula | default('llama.cpp', true) }}"
     tn_llama_extra_args: "{{ ((tn_ai_node.engines | default({}))['llama-server'] | default({})).extraArgs | default([], true) }}"
     tn_ollama_env: "{{ ((tn_ai_node.engines | default({})).ollama | default({})).env | default({}, true) }}"

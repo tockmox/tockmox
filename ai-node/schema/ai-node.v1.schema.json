@@ -125,7 +125,8 @@
           "properties": {
             "version": {"type": "string", "pattern": "^[0-9][0-9A-Za-z.+-]*$", "description": "mlx-lm release to install, such as \"0.32.2\". A version only: no spaces, slashes or options."},
             "python": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+$", "description": "Python minor version for the engine's virtual environment, such as \"3.12\"."},
-            "extraArgs": {"$ref": "#/$defs/args"}
+            "extraArgs": {"$ref": "#/$defs/args"},
+            "patches": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"}, "description": "Toolkit patches to apply to the pinned release, by name, in order. Each must exist at ai-node/roles/engine_mlx_lm/files/patches/<version>/<name>.patch for exactly this version, or the converge stops. Removing a name reinstalls the release as published."}
           }
         },
         "llama-server": {
