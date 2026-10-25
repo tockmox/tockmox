@@ -190,6 +190,34 @@ costs you, with the reasoning in the documentation rather than here.
 - **The manual Mac setup steps bring up the firewall before the engine
   listens.**
 
+## [0.8.2] ... 2026-10-25
+
+A patch release: two fixes to how the identity layer applies Authentik
+blueprints, one of which closes a 0.8.1 known issue, and documentation that now
+states what a patch on the 0.8 line may contain. It is the first release cut by
+the patch train described in RELEASING.md. To upgrade from 0.8.1, change the
+nine `targetRevision` pins to `v0.8.2` and push. Nothing else is required.
+
+### What taking this patch costs
+
+- **Hand actions:** none beyond the nine `targetRevision` pins.
+- **Rollback:** a revision swap, for every layer. No bundled application and no
+  database schema moved since 0.8.1, so going back needs no database restore.
+  Upgrading directly from 0.8.0 also crosses 0.8.1's application updates
+  (Authentik, LiteLLM, Open WebUI), which roll back only by restoring their
+  databases: take the pre-upgrade backup that
+  [upgrade.md](docs/deployment/upgrade.md) describes.
+- **Images:** no change. `images.txt` lists the same 44 images as 0.8.1, and
+  the SBOM differs only in the Tockmox version it names.
+- **Contract:** no `stable` values key moved, and no immutable field differs
+  between the 0.8.1 and 0.8.2 renders. The identity chart's defaults gain a
+  liveness probe, a `postStart` hook and a rollout strategy for the Authentik
+  worker (under Fixed).
+- **Air-gap:** the static image-redirect check passed on 2026-10-24. An
+  air-gapped install was not exercised for this release.
+
+### Fixed
+
 - **A changed Authentik blueprint is now applied even when Authentik's file
   watcher has died.** The watcher can stop without a trace, after which a
   blueprint synced by Argo CD was mounted in the worker and never applied, with
@@ -208,7 +236,72 @@ costs you, with the reasoning in the documentation rather than here.
   `maxSurge: 0` and `maxUnavailable: 100%`, so the old worker is stopped first.
   The cost is a gap of one worker start, tens of seconds, with no worker: queued
   background work waits and logins are unaffected. It is not `type: Recreate`
-  because Argo CD's ServerSideApply cannot switch a live Deployment to it.
+  because Argo CD's ServerSideApply cannot switch a live Deployment to it. This
+  was a 0.8.1 known issue. On the upgrade from 0.8.0, which adds the ntfy portal
+  tile, every identity blueprint had been applied when read, under five minutes
+  after Argo CD read the new pins; on 0.8.1 the tile took 36 minutes.
+
+### Security
+
+- The documentation build's pinned `certifi` is 2026.10.19, which removes the
+  compromised emSign intermediate certificates
+  ([GHSA-6q48-6c7w-9gw2](https://github.com/advisories/GHSA-6q48-6c7w-9gw2)).
+  It applies to building the documentation site from source. No chart and no
+  image changes.
+
+### Changed
+
+- **SECURITY.md states the support window for a release line**: the current
+  `release-X.Y` line receives patch releases until the next minor's final tag,
+  and a security fix may ship ahead of the normal cadence.
+  [upgrade.md](docs/deployment/upgrade.md) now says that a patch may update
+  bundled applications, and that the pre-upgrade backup is required whenever a
+  patch's notes name an application that migrates its database.
+- The Tockmox UI page gives the sign-in alert's real timing: it fires about six
+  minutes after the first failed sign-in.
+
+### How this release was tested
+
+- **Upgrade from 0.8.1**, on a single-node k3s lab running 0.8.1 with a
+  5,001-row checksum table in each of its two CloudNativePG databases: the nine
+  revision pins and nothing else. Every layer had synced 73 seconds after Argo
+  CD read the new pins, and all were Healthy at the next read, under three
+  minutes after, with no retries and no hand action. Both checksums read
+  byte-identical afterwards, every volume claim stayed bound to the same volume,
+  every sealed secret still decrypted, no Longhorn volume shrank, the identity
+  PostgreSQL did not restart, and every identity blueprint was applied. The
+  Authentik worker rolled with no surge, as the fix above intends.
+- **Upgrade from 0.8.0, skipping 0.8.1**, from a recorded 0.8.0 install with its
+  own checksum tables: every layer had synced 96 seconds after Argo CD read the
+  pins and all were Healthy at the next read, about four minutes after, with no
+  retries and no hand action. Authentik, LiteLLM and Open WebUI moved to their
+  0.8.1 versions with no restarts, the LiteLLM migration Job completed, the
+  identity PostgreSQL stayed up, a
+  secret sealed under 0.8.0 still decrypted, both checksums were unchanged, and
+  every blueprint, including the new ntfy tile's, was applied.
+- **Fresh install** of the candidate, on the same lab holding only k3s, Argo CD
+  and Sealed Secrets: one `root.yaml` applied, every Application Synced and
+  Healthy in under eight minutes with no hand action (Argo CD's own retries
+  only). On that install: an on-demand database backup, a restore drill that
+  restored the database from the object store into a scratch cluster and found
+  99 tables, every identity blueprint applied, and a test alert delivered to the
+  ntfy server.
+- The static checks on the candidate, including the comparison of the 0.8.1 and
+  0.8.2 renders for immutable fields (193 objects, none flagged) and the values
+  contract against 0.8.1 (62 stable keys, none moved).
+
+### Known issues
+
+- LiteLLM's database migration Job still logs a `Read-only file system` error
+  from `prisma generate` after the migrations have applied; the Job completes.
+
+### Not tested for this release
+
+- An air-gapped install.
+- An alert reaching a phone: the test alert was read on the ntfy server, not on
+  a subscribed client.
+- A rollback from 0.8.2 to 0.8.1.
+- Anything multi-node: the lab is a single node.
 
 ## [0.8.1] ... 2026-10-19
 
@@ -358,6 +451,7 @@ on what hardware, and what has not: [project-status.md](docs/project-status.md).
   experimental features (the Tockmox UI aside) beyond confirming they stay off
   by default.
 
-[Unreleased]: https://github.com/tockmox/tockmox/compare/v0.8.1...main
+[Unreleased]: https://github.com/tockmox/tockmox/compare/v0.8.2...main
+[0.8.2]: https://github.com/tockmox/tockmox/releases/tag/v0.8.2
 [0.8.1]: https://github.com/tockmox/tockmox/releases/tag/v0.8.1
 [0.8.0]: https://github.com/tockmox/tockmox/releases/tag/v0.8.0
