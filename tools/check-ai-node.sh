@@ -20,6 +20,9 @@
 #     that fails to load behave as documented, against a real git repository and a fake ansible;
 #   - the engine watch restarts an engine whose health path answers 503 on consecutive checks, once,
 #     and counts it; a single 503, a 200, no answer or a failed kickstart restart or count nothing;
+#   - the mlx-lm request guard refuses a request for another model, adapters or a draft model before
+#     mlx-lm reads it, lists one model, and lowers max_tokens to the ceiling (in the unit tests, against
+#     a stand-in handler, and against the real mlx_lm.server where one is installed);
 #   - the engine patch helper puts the pinned release plus exactly the named toolkit patches in place,
 #     from a clean reinstall, once; a patch that does not apply or compile leaves the clean release;
 #   - the toolkit selection (the repository is pinned on the node, the ref comes only from a verified

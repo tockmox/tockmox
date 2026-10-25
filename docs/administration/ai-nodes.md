@@ -253,6 +253,45 @@ node reads the Hub's record of it at the pinned commit and requires the blob's n
 to be the listed Xet hash and the content to hash to the listed SHA-256. If the Hub
 cannot be reached the model is refused, not trusted.
 
+### The mlx-lm request guard
+
+`mlx_lm.server` treats the `model` field of a request as a name to load. On a
+node whose models share one Hugging Face cache, a request that names a sibling
+model swaps those weights in place of the instance's own, and `adapters` or
+`draft_model` load more weights from a path the client picks. It also lets a
+request's `max_tokens` replace the instance's `--max-tokens`, so one client can
+ask for any length.
+
+The toolkit therefore starts every mlx-lm instance through
+`ai-node/roles/engine_mlx_lm/files/tockmox_mlx_lm_guard.py`, which runs the pinned
+`mlx_lm.server` in the same process with three of its request handlers wrapped
+(the installed package is not changed):
+
+- A completion request whose `model` is neither the instance's repository id
+  nor `default_model` is answered `404` with code `model_not_found`, and one
+  that names `adapters` or a `draft_model` is answered `400`. Nothing is loaded.
+- `GET /v1/models` lists only the instance's repository id.
+- With a ceiling set, no request generates more than it. A `max_tokens` or
+  `max_completion_tokens` above the ceiling is lowered to it, so the answer ends
+  with `finish_reason: length`; a request that asks nothing gets the smaller of
+  the ceiling and `--max-tokens`.
+
+The ceiling is one setting for every mlx-lm instance of the node. Without it
+there is no ceiling, as in mlx-lm itself.
+
+```yaml
+engines:
+  mlx-lm:
+    version: "0.32.2"
+    maxOutputTokens: 8192
+```
+
+The wrapped handlers are internal to mlx-lm, so the guard runs only on a release
+it was tested on (`engine_mlx_lm_guard_vetted` in the role's defaults; 0.32.2
+today). Pinning another `version` stops the converge until a toolkit release
+lists it, and the guard refuses to start if a handler it wraps is missing.
+Gateway routes already send the repository id, so they see no change.
+
 ### Engine patches
 
 A pinned mlx-lm release can carry a defect whose fix is known upstream and not
@@ -507,6 +546,7 @@ the toolkit assumes.
 | macmon serves its metrics and its bind address | `lsof -nP -iTCP:9101 -sTCP:LISTEN` |
 | `iogpu.wired_limit_mb` exists and takes the value on this macOS | `sysctl iogpu.wired_limit_mb` |
 | The engine watch restarts an mlx-lm instance whose `/health` answers 503, and only then | on a node serving mlx-lm 0.32 or later, `sudo /opt/tockmox/bin/tockmox-ai-node-engine-watch` and `cat /opt/tockmox/textfile/engine-watch.prom` (healthy 1, restarts 0); the 503 path itself needs an engine whose generation thread died |
+| The request guard refuses a sibling model before mlx-lm loads it, and the ceiling holds through the gateway | after a converge, `curl -s http://127.0.0.1:8080/v1/models` lists one id; a chat request naming another model on the node answers 404 and the node's memory does not step up; a request with `max_tokens` above the ceiling ends with `finish_reason` `length` |
 | A toolkit patch reaches the engine: the reinstall, the patch and the compile work as the service account with the Mac's `patch` and Python | after a converge that lists one, `cat /opt/tockmox/engines/mlx-lm/venv/.tockmox-engine-patches` and `sudo -u inference /opt/tockmox/engines/mlx-lm/venv/bin/python -c 'import mlx_lm.generate'` |
 | A converge can reload its own LaunchDaemon without dying | change the interval in `fleet.yaml`, then `sudo launchctl print system/com.tockmox.ai-node.converge` after the run |
 | The Apple Account check finds a signed-in account | `sudo defaults read /Users/admin/Library/Preferences/MobileMeAccounts Accounts` |

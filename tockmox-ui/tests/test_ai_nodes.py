@@ -793,6 +793,15 @@ def test_engine_version_is_a_version_only(version):
     assert an.schema_errors(doc, "ai-node.v1.schema.json")
 
 
+def test_mlx_lm_output_ceiling_is_a_positive_integer():
+    doc = yaml.safe_load(an.skeleton_ai_node_yaml("example-mac", "apple-silicon-mac", 64, ["203.0.113.0/24"]))
+    doc["engines"]["mlx-lm"]["maxOutputTokens"] = 8192
+    assert an.schema_errors(doc, "ai-node.v1.schema.json") == []
+    for bad in (0, -1, "8192", 8192.5, True, 2_000_000):
+        doc["engines"]["mlx-lm"]["maxOutputTokens"] = bad
+        assert an.schema_errors(doc, "ai-node.v1.schema.json"), bad
+
+
 @pytest.mark.parametrize("ref", ["../../etc/passwd", "org/../x", "/abs/path", "has space/x", "-oProxyCommand=x"])
 def test_artifact_refs_cannot_walk_paths_or_look_like_options(ref):
     site = an.load_site(FIX)

@@ -11,6 +11,16 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **Every mlx-lm instance on an AI node serves only its own model.** The toolkit
+  now starts `mlx_lm.server` under a request guard: a request naming another
+  model is answered 404 and one naming adapters or a draft model 400, with
+  nothing loaded, and `/v1/models` lists only the instance's id. The new
+  `engines.mlx-lm.maxOutputTokens` caps what one request can generate (mlx-lm
+  otherwise lets a request's `max_tokens` replace `--max-tokens`). The instances
+  restart once on the first converge. The guard wraps internal mlx-lm handlers,
+  so it runs only on a release the toolkit tested it on (0.32.2); pinning
+  another release stops the converge. See `docs/administration/ai-nodes.md`,
+  "The mlx-lm request guard".
 - **AI nodes can run mlx-lm with a vetted toolkit patch.** `engines.mlx-lm.patches`
   names patches the toolkit ships for exactly the pinned release; each change
   starts from a clean reinstall and restarts the instances once, and a name with

@@ -3,6 +3,11 @@
 engine_mlx_lm_dir: "{{ tn_root }}/engines/mlx-lm"
 engine_mlx_lm_venv: "{{ engine_mlx_lm_dir }}/venv"
 engine_mlx_lm_patch_dir: "{{ engine_mlx_lm_dir }}/patches"
+# Every instance runs mlx_lm.server under the request guard (files/tockmox_mlx_lm_guard.py), which wraps three
+# of the server's internal request handlers. It runs only on a release it was tested on: a version bump adds
+# the release here once ai-node/tests/unit/test_mlx_lm_guard.py passes with that release installed.
+engine_mlx_lm_guard: "{{ engine_mlx_lm_dir }}/tockmox_mlx_lm_guard.py"
+engine_mlx_lm_guard_vetted: ["0.32.2"]
 # The engine watch's list is tab-separated. A YAML double-quoted "\t" is a real tab; a '\t' typed inside
 # the Jinja of a copy content arrives as a backslash and a t.
 engine_mlx_lm_tab: "\t"

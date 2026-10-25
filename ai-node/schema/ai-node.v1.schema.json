@@ -126,6 +126,7 @@
             "version": {"type": "string", "pattern": "^[0-9][0-9A-Za-z.+-]*$", "description": "mlx-lm release to install, such as \"0.32.2\". A version only: no spaces, slashes or options."},
             "python": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+$", "description": "Python minor version for the engine's virtual environment, such as \"3.12\"."},
             "extraArgs": {"$ref": "#/$defs/args"},
+            "maxOutputTokens": {"type": "integer", "minimum": 1, "maximum": 1048576, "description": "The most tokens one request may generate on an mlx-lm instance of this node. A request asking more (max_tokens or max_completion_tokens) is lowered to this and ends with finish_reason length; a request asking nothing gets the smaller of this and --max-tokens. Unset: no ceiling, and a request's value replaces --max-tokens."},
             "patches": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"}, "description": "Toolkit patches to apply to the pinned release, by name, in order. Each must exist at ai-node/roles/engine_mlx_lm/files/patches/<version>/<name>.patch for exactly this version, or the converge stops. Removing a name reinstalls the release as published."}
           }
         },

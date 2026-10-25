@@ -138,6 +138,9 @@ if python3 -c 'import huggingface_hub' 2>/dev/null; then
   check "huggingface_hub resolves the id offline to the pinned snapshot" "[ \"\$(HF_HOME=/opt/tockmox/models/hf HF_HUB_OFFLINE=1 python3 -c 'from huggingface_hub import snapshot_download as s; print(s(\"mlx-community/Example-27B-8bit\"))')\" = /opt/tockmox/models/hf/hub/models--mlx-community--Example-27B-8bit/snapshots/0123456789abcdef0123456789abcdef01234567 ]"
 fi
 check "mlx-lm-8080 listens on all interfaces once pf is verified" "plist_get mlx-lm-8080 args | grep -- '--host 0.0.0.0 --port 8080'"
+check "mlx-lm runs under the toolkit's request guard, in the engine's own Python" "plist_get mlx-lm-8080 args | grep -- '/opt/tockmox/engines/mlx-lm/venv/bin/python -I /opt/tockmox/engines/mlx-lm/tockmox_mlx_lm_guard.py --model mlx-community/Example-27B-8bit '"
+check "the guard is the toolkit's file, owned by the service account" "cmp -s $AI/roles/engine_mlx_lm/files/tockmox_mlx_lm_guard.py /opt/tockmox/engines/mlx-lm/tockmox_mlx_lm_guard.py && [ \"\$(stat -c %U /opt/tockmox/engines/mlx-lm/tockmox_mlx_lm_guard.py)\" = inference ]"
+check "with no maxOutputTokens there is no ceiling" "python3 -c 'import plistlib;d=plistlib.load(open(\"/Library/LaunchDaemons/$(label mlx-lm-8080).plist\",\"rb\"));assert d[\"EnvironmentVariables\"][\"TOCKMOX_MLX_MAX_OUTPUT_TOKENS\"]==\"\"'"
 check "mlx-lm runs as the service account" "[ \"\$(plist_get mlx-lm-8080 UserName)\" = inference ]"
 check "mlx-lm is offline" "python3 -c 'import plistlib;d=plistlib.load(open(\"/Library/LaunchDaemons/$(label mlx-lm-8080).plist\",\"rb\"));assert d[\"EnvironmentVariables\"][\"HF_HUB_OFFLINE\"]==\"1\"'"
 check "ollama listens on its port" "python3 -c 'import plistlib;d=plistlib.load(open(\"/Library/LaunchDaemons/$(label ollama).plist\",\"rb\"));assert d[\"EnvironmentVariables\"][\"OLLAMA_HOST\"]==\"0.0.0.0:11434\"'"
@@ -453,6 +456,31 @@ play unpatch "$NODE"; rc=$?
 check "the package is the release again" "cmp -s $GEN $S/mlx-lm-preimage/mlx_lm/generate.py"
 check "the record is gone" "[ ! -e $VENVP/.tockmox-engine-patches ]"
 check "the textfile names no patch" "! grep -q '^tockmox_ai_node_engine_patch_info' /opt/tockmox/textfile/engine-patches.prom"
+
+echo "scenario 14: the mlx-lm request guard: a ceiling reaches the engine, an untested release is refused"
+with_engine() {  # dir, key, YAML value
+  local nd="$1"; mkdir -p "$nd"; cp "$NODE/desired.yaml" "$nd/"
+  python3 - "$NODE/ai-node.yaml" "$nd/ai-node.yaml" "$2" "$3" <<'PY'
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+d["engines"]["mlx-lm"][sys.argv[3]] = yaml.safe_load(sys.argv[4])
+open(sys.argv[2], "w").write(yaml.safe_dump(d, sort_keys=False))
+PY
+}
+mlx_env() { python3 -c 'import plistlib,sys; print(plistlib.load(open(sys.argv[1],"rb"))["EnvironmentVariables"].get("TOCKMOX_MLX_MAX_OUTPUT_TOKENS"))' "/Library/LaunchDaemons/$(label mlx-lm-8080).plist"; }
+with_engine "$WORK/node-ceiling" maxOutputTokens 4096
+play ceiling "$WORK/node-ceiling"; rc=$?
+[ "$rc" = 0 ] && ok "a converge with maxOutputTokens exits 0" || bad "a converge with maxOutputTokens exits 0" "rc=$rc; $(tail -12 "$OUT/ceiling.log" | tr '\n' '|')"
+check "the ceiling reaches every mlx-lm instance" "[ \"\$(mlx_env)\" = 4096 ] && python3 -c 'import plistlib;d=plistlib.load(open(\"/Library/LaunchDaemons/$(label mlx-lm-8082).plist\",\"rb\"));assert d[\"EnvironmentVariables\"][\"TOCKMOX_MLX_MAX_OUTPUT_TOKENS\"]==\"4096\"'"
+with_engine "$WORK/node-ceiling0" maxOutputTokens 0
+play ceiling0 "$WORK/node-ceiling0"; rc=$?
+[ "$rc" != 0 ] && grep -q 'maxOutputTokens' "$OUT/ceiling0.log" && ok "a ceiling of 0 is refused by the schema, by name" || bad "a ceiling of 0 is refused by the schema, by name" "rc=$rc; $(tail -8 "$OUT/ceiling0.log" | tr '\n' '|')"
+with_engine "$WORK/node-untested" version '"0.99.0"'
+play untested "$WORK/node-untested"; rc=$?
+[ "$rc" != 0 ] && grep -q "mlx-lm 0.99.0 is not a release the toolkit's request guard was tested on" "$OUT/untested.log" && ok "an mlx-lm release the guard was not tested on is refused" || bad "an mlx-lm release the guard was not tested on is refused" "rc=$rc; $(tail -8 "$OUT/untested.log" | tr '\n' '|')"
+check "and it was not installed" "[ \"\$(cat /opt/tockmox/engines/mlx-lm/venv/bin/.mlx-lm-version)\" = 0.32.2 ]"
+play unceiling "$NODE"; rc=$?
+[ "$rc" = 0 ] && [ "$(mlx_env)" = "" ] && ok "removing maxOutputTokens takes the ceiling away" || bad "removing maxOutputTokens takes the ceiling away" "rc=$rc env=$(mlx_env)"
 
 cp "$S/calls.log" "$OUT/calls.log" 2>/dev/null; cp "$S/listener.err" "$OUT/listener.err" 2>/dev/null
 echo
