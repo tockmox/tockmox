@@ -39,7 +39,7 @@ def test_the_check_goes_red_on_an_edited_copy(tmp_path):
 
 def test_every_font_face_the_ui_declares_is_shipped_and_none_is_the_display_face():
     static = HERE / "app/static"
-    for css in (static / "kit/kit.css", static / "app.css"):
+    for css in (static / "kit/kit-base.css", static / "kit/kit.css", static / "app.css"):
         text = css.read_text()
         assert "Inknut" not in text, f"{css.name} names the display face; it belongs to the lockup only"
         for url in re.findall(r'url\("([^"]+\.woff2)"\)', text):

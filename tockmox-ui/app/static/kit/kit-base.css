@@ -1,0 +1,115 @@
+/* SPDX-License-Identifier: Apache-2.0
+   tockmox-ui-kit, part 1 of 2: the base. The faces, the kit's custom properties (status colours,
+   focus, field border, the type scale) and every rule whose selector is an element alone (body,
+   headings, links, tables, form fields). Part 2, kit.css, holds the shell and the components.
+   Load order: tockmox-tokens.css, this file, kit.css, then the app's own stylesheet.
+
+   Why two files: an app whose own rules sit in CSS cascade layers (Tailwind's theme, base,
+   components, utilities) imports this file into a layer below its base and kit.css into one
+   between its base and its components, so its element rules win over the kit's and the kit's
+   shell wins over its element rules. An app without layers just links both, in order, and the
+   cascade is the one the single file had. Fonts load relative to this file. */
+
+@font-face { font-family: "Source Sans 3"; src: url("fonts/source-sans-3-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+
+@font-face { font-family: "Source Sans 3"; src: url("fonts/source-sans-3-latin-600-normal.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+
+@font-face { font-family: "Source Sans 3"; src: url("fonts/source-sans-3-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+
+@font-face { font-family: "JetBrains Mono"; src: url("fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+
+
+:root {
+  color-scheme: dark;
+  --tx-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --ui-font: var(--tx-font-ui, "Source Sans 3", "Segoe UI", system-ui, sans-serif);
+  --st-ok: var(--tx-emerald-300);
+  --st-warning: var(--tx-ember-300);
+  --st-critical: var(--tx-error);
+  --st-unknown: var(--tx-steel-300);
+  --st-ok-soft: rgba(78, 211, 106, .14);
+  --st-warning-soft: rgba(240, 131, 63, .16);
+  --st-critical-soft: rgba(240, 113, 110, .16);
+  --st-unknown-soft: rgba(154, 165, 160, .14);
+  --on-state: var(--tx-bg);
+  --focus: #FFFFFF;   /* tokens v2.2: green is for the primary button and the OK state only */
+  --field-border: #6B756F;   /* 3.9:1 on surface; steel-500 is under the 3:1 non-text bar */
+  --fs-0: 12px; --fs-1: 13px; --fs-2: 14px; --fs-3: 16px; --fs-4: 20px; --fs-5: 24px; --fs-6: 30px;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --st-ok: var(--tx-emerald-700);
+  --st-warning: #A8461A;   /* ember-600 is 3.97:1 on its soft pill over white; this is 5.02:1 (kit contrast report) */
+  --st-critical: #B42318;
+  --st-unknown: #4A524E;
+  --st-ok-soft: rgba(30, 122, 51, .10);
+  --st-warning-soft: rgba(194, 81, 31, .12);
+  --st-critical-soft: rgba(180, 35, 24, .10);
+  --st-unknown-soft: rgba(74, 82, 78, .10);
+  --focus: var(--tx-emerald-700);
+  --field-border: #6B756F;
+}
+
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body { margin: 0; background: var(--tx-bg); color: var(--tx-text); font: 400 var(--fs-2)/1.5 var(--ui-font); -webkit-font-smoothing: antialiased; }
+
+/* Links are white and always underlined (tokens v2.2): white and the body grey are too close in luminance
+   to tell apart by colour, so the underline carries it (WCAG 1.4.1). Hover thickens the line. */
+a { color: var(--tx-link, var(--tx-accent-text)); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+a:hover { color: var(--tx-link, var(--tx-accent-text)); text-decoration-thickness: 2px; }
+
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 2px; }
+
+code, pre { font-family: var(--tx-font-mono); font-size: .92em; }
+
+h1, h2, h3 { font-family: var(--ui-font); font-weight: 600; line-height: 1.25; letter-spacing: -0.005em; text-wrap: balance; }
+
+h1 { font-size: var(--fs-5); margin: 0 0 .25rem; }
+
+h2 { font-size: var(--fs-3); margin: 0 0 .5rem; }
+
+h3 { font-size: var(--fs-2); margin: 0 0 .3rem; }
+
+p { margin: 0 0 .5rem; }
+
+
+main { max-width: 1280px; margin: 0 auto; padding: 1.5rem 1rem 3rem; display: flex; flex-direction: column; gap: 1.25rem; }
+
+main:focus { outline: none; }
+
+section { margin: 0; }
+
+input[type=text], input[type=search], input[type=password], select, textarea { min-height: 36px; padding: 0 .7rem; border: 1px solid var(--field-border); border-radius: var(--tx-radius-sm); background: var(--tx-bg); color: var(--tx-text); font: inherit; margin: .35rem .5rem .35rem 0; max-width: 100%; }
+
+label { font-weight: 600; display: block; }
+
+table { border-collapse: collapse; width: 100%; font-size: var(--fs-2); }
+
+caption { text-align: left; color: var(--tx-text-muted); padding: .4rem 1rem; font-size: var(--fs-1); }
+
+th, td { text-align: left; padding: .5rem 1rem; border-bottom: 1px solid var(--tx-border); vertical-align: top; }
+
+thead th { font-weight: 600; color: var(--tx-text-muted); font-size: var(--fs-0); text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+
+tbody th { font-weight: 600; }
+
+tbody tr:last-child td, tbody tr:last-child th { border-bottom: 0; }
+
+tbody tr:hover { background: var(--tx-surface-raised); }
+
+td code, th code { overflow-wrap: anywhere; }
+
+pre { background: var(--tx-bg); border: 1px solid var(--tx-border); border-radius: var(--tx-radius-sm); padding: .75rem; overflow-x: auto; white-space: pre; margin: .4rem 0; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+
+/* reflow (WCAG 1.4.10): code scrolls inside itself */
+pre { max-width: 100%; }
+

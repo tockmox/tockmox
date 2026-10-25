@@ -2,19 +2,26 @@
     main, footer. An app's base template extends this and fills the blocks.
     Context it reads: kit_static (URL prefix the kit's static/ is served under, e.g. "/static/kit"),
     asset_v (cache-busting token, may be empty), site_name (may be empty), home_href (default "/").
-    Blocks: title, head (favicon, the app's own stylesheet), brand, site, nav, who, main, foot. -#}
+    Blocks: title, head (favicon, the app's own stylesheet), brand, site, nav, who, main, foot; and, for
+    apps that need them, title_suffix (default " · Tockmox"), tokens (the palette stylesheet; an
+    unbranded build swaps in its own file that defines the same --tx-* names), kit_css (an app whose own
+    rules live in CSS cascade layers imports kit-base.css below its base layer and kit.css between its
+    base and its components here; unlayered, the kit would outrank every rule the app writes), before_top and
+    after_top (notices that must sit above or below the top bar on every page), main_attrs (extra attributes on <main>). -#}
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}{% endblock %} · Tockmox</title>
-<link rel="stylesheet" href="{{ kit_static }}/tockmox-tokens.css{% if asset_v %}?v={{ asset_v }}{% endif %}">
-<link rel="stylesheet" href="{{ kit_static }}/kit.css{% if asset_v %}?v={{ asset_v }}{% endif %}">
+<title>{% block title %}{% endblock %}{% block title_suffix %} · Tockmox{% endblock %}</title>
+{% block tokens %}<link rel="stylesheet" href="{{ kit_static }}/tockmox-tokens.css{% if asset_v %}?v={{ asset_v }}{% endif %}">{% endblock %}
+{% block kit_css %}<link rel="stylesheet" href="{{ kit_static }}/kit-base.css{% if asset_v %}?v={{ asset_v }}{% endif %}">
+<link rel="stylesheet" href="{{ kit_static }}/kit.css{% if asset_v %}?v={{ asset_v }}{% endif %}">{% endblock %}
 {% block head %}{% endblock %}
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
+{% block before_top %}{% endblock %}
 <header class="top">
   <div class="top-inner">
     {% block brand %}<a class="brand" href="{{ home_href or '/' }}">Tockmox</a>{% endblock %}
@@ -23,7 +30,8 @@
     {% block who %}{% endblock %}
   </div>
 </header>
-<main id="main" tabindex="-1">
+{% block after_top %}{% endblock %}
+<main id="main" tabindex="-1"{% block main_attrs %}{% endblock %}>
 {% block main %}{% endblock %}
 </main>
 {% block foot %}{% endblock %}

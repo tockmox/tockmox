@@ -94,7 +94,7 @@ def _asset_version(static_dir: str) -> str:
     """A short hash of the stylesheets, appended to their URLs as ?v=, so a new image is a new URL."""
     import hashlib
     h = hashlib.sha256()
-    for rel in ("app.css", "kit/kit.css", "kit/tockmox-tokens.css"):
+    for rel in ("app.css", "kit/kit-base.css", "kit/kit.css", "kit/tockmox-tokens.css"):
         try:
             with open(os.path.join(static_dir, rel), "rb") as f:
                 h.update(f.read())
