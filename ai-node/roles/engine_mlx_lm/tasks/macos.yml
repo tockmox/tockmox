@@ -11,6 +11,12 @@
 # no refs/main fails. Started with the id, the default model and a request by id are the same key (no
 # reload), /v1/models lists the id, and the id resolves offline to the pinned snapshot through the refs/main
 # model_sync writes. mlx-lm has no served-name flag, so the route's model must BE the repository id.
+#
+# EVERY INSTANCE RUNS UNDER THE REQUEST GUARD (files/tockmox_mlx_lm_guard.py). mlx_lm.server loads
+# whatever model, adapter or draft model a request names, so one request could swap another model from the
+# shared cache in place of the declared one. The guard answers such a request 404/400 before mlx-lm sees it,
+# lists only the declared id in /v1/models, and with engines.mlx-lm.maxOutputTokens lowers any request's
+# max_tokens to that ceiling (mlx-lm otherwise takes the request's value over --max-tokens).
 
 - name: Make sure the firewall verdict is known
   ansible.builtin.include_role:
@@ -74,6 +80,16 @@
         fail_msg: >-
           An mlx-lm instance is asked for but engines.mlx-lm.version is empty. Pin a release, for example
           "0.32.2": a node that installs whatever is newest is not one that can be rebuilt from git.
+        quiet: true
+
+    - name: The request guard was tested on the pinned mlx-lm release
+      ansible.builtin.assert:
+        that:
+          - tn_mlx_version in engine_mlx_lm_guard_vetted
+        fail_msg: >-
+          mlx-lm {{ tn_mlx_version }} is not a release the toolkit's request guard was tested on
+          ({{ engine_mlx_lm_guard_vetted | join(', ') }}). The guard wraps internal mlx_lm.server handlers that a
+          release can change; pin a tested release, or use a toolkit version that lists this one.
         quiet: true
 
     - name: Install the Python
@@ -195,6 +211,16 @@
           {% for p in tn_mlx_patches %}tockmox_ai_node_engine_patch_info{{ '{' ~ engine_mlx_lm_patch_labels ~ ',patch="' ~ p ~ '"}' }} 1
           {% endfor %}
 
+    - name: Install the request guard
+      become: true
+      ansible.builtin.copy:
+        src: tockmox_mlx_lm_guard.py
+        dest: "{{ engine_mlx_lm_guard }}"
+        owner: "{{ tn_service_user }}"
+        group: staff
+        mode: "0755"
+      register: engine_mlx_lm_guard_copy
+
     - name: Each instance serves its model under the repository id the routes send
       ansible.builtin.assert:
         that:
@@ -238,20 +264,23 @@
         launchd_service_user: "{{ tn_service_user }}"
         launchd_service_firewalled: true
         launchd_service_args: >-
-          {{ [engine_mlx_lm_venv ~ '/bin/mlx_lm.server', '--model', item.repo, '--host',
+          {{ [engine_mlx_lm_venv ~ '/bin/python', '-I', engine_mlx_lm_guard, '--model', item.repo, '--host',
               ('0.0.0.0' if (firewall_anchor_verified | bool) else '127.0.0.1'), '--port', item.port | string]
              + (tn_mlx_extra_args | map('string') | list) }}
         launchd_service_log: "{{ item.log }}"
         launchd_service_hold: "{{ tn_hold_engine_settings | bool }}"
         launchd_service_force_reload: >-
           {{ (engine_mlx_lm_pip is defined and engine_mlx_lm_pip is changed)
-             or (engine_mlx_lm_patch is defined and engine_mlx_lm_patch is changed) }}
+             or (engine_mlx_lm_patch is defined and engine_mlx_lm_patch is changed)
+             or (engine_mlx_lm_guard_copy is defined and engine_mlx_lm_guard_copy is changed) }}
         launchd_service_process_type: Interactive
         launchd_service_env:
           HOME: "{{ tn_root }}/var/service-home"
           HF_HOME: "{{ tn_root }}/models/hf"
           HF_HUB_OFFLINE: "1"
           TRANSFORMERS_OFFLINE: "1"
+          # Empty: no ceiling. The guard reads it; mlx-lm does not.
+          TOCKMOX_MLX_MAX_OUTPUT_TOKENS: "{{ (tn_mlx_max_output_tokens | int > 0) | ternary(tn_mlx_max_output_tokens | string, '') }}"
           PATH: "{{ engine_mlx_lm_venv }}/bin:{{ tn_brew_prefix }}/bin:/usr/bin:/bin:/usr/sbin:/sbin"
       loop: "{{ engine_mlx_lm_resolved }}"
       loop_control:
