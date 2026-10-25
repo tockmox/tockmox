@@ -1,0 +1,37 @@
+SPDX-License-Identifier: MIT
+Toolkit patch for mlx-lm 0.32.2 (MIT, Copyright Apple Inc.), applied by bin/tockmox-ai-node-engine-patch.
+
+batch-decode-eval-cache: evaluate the prompt cache state with every batched decode step.
+
+GenerationBatch._step writes the caches but evaluates only the sampled tokens and logprobs, so the
+cache writes build a lazy graph that keeps live Metal buffers until the whole batch drains. Metal's
+resource limit counts buffers, not bytes: an engine whose batch never empties for about 10k decode
+steps fails with "[metal::malloc] Resource limit (499000) exceeded" and its generation thread dies.
+Prefill already evaluates the cache per chunk; this does the same per decode step.
+
+Upstream: ml-explore/mlx-lm pull request 1911 (open), issues 1662 and 1672.
+Drop this patch when the pinned release contains the fix.
+
+--- a/mlx_lm/generate.py
++++ b/mlx_lm/generate.py
+@@ -1428,10 +1428,18 @@
+             )
+ 
+         # Assign the next step to member variables and start computing it
+-        # asynchronously
++        # asynchronously. The cache state is evaluated with it: the decode
++        # step writes the caches but nothing else materializes them, so the
++        # lazy cache-write graph would pin live Metal buffers each step until
++        # the batch drains, and hit the backend's resource limit.
+         self._next_tokens = sampled
+         self._next_logprobs = list(logprobs)
+-        mx.async_eval(self._next_tokens, self._next_logprobs, token_context)
++        mx.async_eval(
++            self._next_tokens,
++            self._next_logprobs,
++            token_context,
++            [c.state for c in self.prompt_cache],
++        )
+ 
+         # Eval the current tokens and current logprobs. After that also add
+         # them to self.tokens so that it always represents the tokens contained

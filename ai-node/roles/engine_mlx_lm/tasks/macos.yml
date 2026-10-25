@@ -118,6 +118,83 @@
         engine_mlx_lm_installed.stdout is not search('(?m)^Version: ' ~ (tn_mlx_version | regex_escape) ~ '$')
       changed_when: true
 
+    # Toolkit patches (engines.mlx-lm.patches): fixes that exist upstream but are not in the pinned release.
+    # Each is vetted against one exact release and lives at files/patches/<version>/<name>.patch, so a version
+    # bump with a patch still named stops here until the patch is re-vetted or dropped. The helper starts every
+    # change of the patch set from a clean reinstall, so removing a name restores the release as published.
+    - name: Every named patch exists for the pinned mlx-lm release
+      ansible.builtin.stat:
+        path: "{{ role_path }}/files/patches/{{ tn_mlx_version }}/{{ item }}.patch"
+      loop: "{{ tn_mlx_patches }}"
+      register: engine_mlx_lm_patch_stat
+
+    - name: A patch the toolkit does not have for this release is refused
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+        fail_msg: >-
+          engines.mlx-lm.patches names {{ item.item }}, and the toolkit has no {{ item.item }} patch for
+          mlx-lm {{ tn_mlx_version }}. A patch is vetted against one release: remove the name, or pin the
+          release it was written for.
+        quiet: true
+      loop: "{{ engine_mlx_lm_patch_stat.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Stage the patch helper and the named patches
+      become: true
+      block:
+        - name: Create the patch directory
+          ansible.builtin.file:
+            path: "{{ engine_mlx_lm_patch_dir }}"
+            state: directory
+            owner: "{{ tn_service_user }}"
+            group: staff
+            mode: "0755"
+
+        - name: Copy the helper from the toolkit checkout
+          ansible.builtin.copy:
+            src: "{{ tn_toolkit_dir }}/ai-node/bin/tockmox-ai-node-engine-patch"
+            dest: "{{ engine_mlx_lm_patch_dir }}/tockmox-ai-node-engine-patch"
+            owner: "{{ tn_service_user }}"
+            group: staff
+            mode: "0755"
+
+        - name: Copy each named patch
+          ansible.builtin.copy:
+            src: "{{ role_path }}/files/patches/{{ tn_mlx_version }}/{{ item }}.patch"
+            dest: "{{ engine_mlx_lm_patch_dir }}/{{ item }}.patch"
+            owner: "{{ tn_service_user }}"
+            group: staff
+            mode: "0644"
+          loop: "{{ tn_mlx_patches }}"
+
+    - name: Put the release and exactly the named patches in the virtual environment
+      become: true
+      become_user: "{{ tn_service_user }}"
+      when: not ansible_check_mode
+      ansible.builtin.command:
+        argv: "{{ [engine_mlx_lm_patch_dir ~ '/tockmox-ai-node-engine-patch', '--venv', engine_mlx_lm_venv,
+                   '--package', 'mlx-lm', '--version', tn_mlx_version, '--patches', engine_mlx_lm_patch_dir, '--']
+                  + tn_mlx_patches }}"
+      register: engine_mlx_lm_patch
+      changed_when: engine_mlx_lm_patch.stdout is search('^changed')
+
+    - name: Say which patches the engine runs with
+      become: true
+      vars:
+        engine_mlx_lm_patch_labels: 'ai_node="{{ tn_node_id }}",engine="mlx-lm",version="{{ tn_mlx_version }}"'
+      ansible.builtin.copy:
+        dest: "{{ tn_root }}/textfile/engine-patches.prom"
+        owner: "{{ tn_converge_user }}"
+        group: staff
+        mode: "0644"
+        content: |
+          # HELP tockmox_ai_node_engine_patch_info A toolkit patch the engine's package carries (1 per patch).
+          # TYPE tockmox_ai_node_engine_patch_info gauge
+          {% for p in tn_mlx_patches %}tockmox_ai_node_engine_patch_info{{ '{' ~ engine_mlx_lm_patch_labels ~ ',patch="' ~ p ~ '"}' }} 1
+          {% endfor %}
+
     - name: Each instance serves its model under the repository id the routes send
       ansible.builtin.assert:
         that:
@@ -166,7 +243,9 @@
              + (tn_mlx_extra_args | map('string') | list) }}
         launchd_service_log: "{{ item.log }}"
         launchd_service_hold: "{{ tn_hold_engine_settings | bool }}"
-        launchd_service_force_reload: "{{ engine_mlx_lm_pip is defined and engine_mlx_lm_pip is changed }}"
+        launchd_service_force_reload: >-
+          {{ (engine_mlx_lm_pip is defined and engine_mlx_lm_pip is changed)
+             or (engine_mlx_lm_patch is defined and engine_mlx_lm_patch is changed) }}
         launchd_service_process_type: Interactive
         launchd_service_env:
           HOME: "{{ tn_root }}/var/service-home"

@@ -1,0 +1,107 @@
+#!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# tockmox-ai-node-engine-patch: put an engine's Python package into exactly the state ai-node.yaml asks
+# for ... the pinned release, plus the named toolkit patches and nothing else. Run by the engine role at
+# every converge, as the account that owns the engine's virtual environment.
+#
+#   tockmox-ai-node-engine-patch --venv DIR --package NAME --version V --patches DIR [PATCH ...]
+#
+# WHY. A pinned release can carry a defect whose fix exists upstream but is not released yet. The
+# toolkit ships such a fix as a patch file vetted against one exact release
+# (roles/<engine>/files/patches/<version>/<name>.patch), and a site opts in by name. A patch is never
+# laid over an unknown tree: every change of the patch set starts from a clean reinstall of the release.
+#
+# WHAT IT DOES
+#   The wanted state is the package, the version and each named patch with its sha256. It is recorded in
+#   <venv>/.tockmox-engine-patches after a successful apply.
+#   - recorded state equals the wanted state   prints "unchanged", exits 0, touches nothing
+#   - no patch wanted and none recorded        prints "unchanged", exits 0
+#   - anything else                            removes the record, reinstalls the release over itself
+#                                              (pip --force-reinstall --no-deps), applies each patch in
+#                                              order (patch -p1 -N), byte-compiles every file a patch
+#                                              touches, writes the record, prints "changed: ..."
+#   A patch that does not apply, or a file that no longer compiles, reinstalls the clean release and
+#   exits 1 naming the patch: the engine then runs the release as published, never half a patch.
+#
+# Exit: 0 done (changed or unchanged), 1 a step failed (the tree is the clean release), 64 bad usage.
+# Bash 3.2 and BSD userland only.
+
+set -uo pipefail
+
+usage() { echo "usage: tockmox-ai-node-engine-patch --venv DIR --package NAME --version V --patches DIR [PATCH ...]" >&2; exit 64; }
+
+VENV=""; PKG=""; VER=""; PDIR=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --venv) [ $# -ge 2 ] || usage; VENV="$2"; shift 2 ;;
+    --package) [ $# -ge 2 ] || usage; PKG="$2"; shift 2 ;;
+    --version) [ $# -ge 2 ] || usage; VER="$2"; shift 2 ;;
+    --patches) [ $# -ge 2 ] || usage; PDIR="$2"; shift 2 ;;
+    --) shift; break ;;
+    -*) usage ;;
+    *) break ;;
+  esac
+done
+[ -n "$VENV" ] && [ -n "$PKG" ] && [ -n "$VER" ] && [ -n "$PDIR" ] || usage
+# patch -d changes directory before it opens -i, so a relative patch directory must be made absolute.
+PDIR="$(cd "$PDIR" 2>/dev/null && pwd -P)" || { echo "engine-patch: the patch directory does not exist" >&2; exit 1; }
+for n in "$@"; do
+  case "$n" in ''|*[!a-z0-9-]*|-*) echo "engine-patch: '$n' is not a patch name (lower-case letters, digits, dashes)" >&2; exit 64 ;; esac
+done
+
+PY="$VENV/bin/python"
+PIP="$VENV/bin/pip"
+RECORD="$VENV/.tockmox-engine-patches"
+PATCH="${TOCKMOX_PATCH:-patch}"
+
+sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
+
+# The wanted record: one line for the release, one per patch.
+WANT="$(printf '%s %s\n' "$PKG" "$VER")"
+for n in "$@"; do
+  f="$PDIR/$n.patch"
+  [ -f "$f" ] || { echo "engine-patch: $f is missing: the toolkit has no patch named $n for $PKG $VER" >&2; exit 1; }
+  WANT="$(printf '%s\n%s %s' "$WANT" "$n" "$(sha256 "$f")")"
+done
+
+HAVE=""
+[ -f "$RECORD" ] && HAVE="$(cat "$RECORD")"
+if [ "$HAVE" = "$WANT" ] || { [ $# -eq 0 ] && [ -z "$HAVE" ]; }; then
+  echo "unchanged"
+  exit 0
+fi
+
+clean() {
+  "$PIP" install --disable-pip-version-check --force-reinstall --no-deps "$PKG==$VER" >/dev/null 2>&1
+}
+
+rm -f "$RECORD"
+clean || { echo "engine-patch: could not reinstall $PKG $VER" >&2; exit 1; }
+[ $# -eq 0 ] && { echo "changed: $PKG $VER reinstalled without patches"; exit 0; }
+
+SITE="$("$PY" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])' 2>/dev/null)"
+[ -n "$SITE" ] && [ -d "$SITE" ] || { echo "engine-patch: cannot find the site-packages of $VENV" >&2; exit 1; }
+
+for n in "$@"; do
+  f="$PDIR/$n.patch"
+  if ! out="$("$PATCH" -p1 -N -t -s -d "$SITE" -i "$f" 2>&1)"; then
+    echo "engine-patch: $n does not apply to $PKG $VER; the clean release stays installed" >&2
+    printf '%s\n' "$out" | head -n 5 >&2
+    clean
+    exit 1
+  fi
+  # Every file the patch touches must still be valid Python.
+  while IFS= read -r p; do
+    case "$p" in *.py) ;; *) continue ;; esac
+    if ! "$PY" -m py_compile "$SITE/$p" 2>/dev/null; then
+      echo "engine-patch: $n leaves $p unable to compile; the clean release stays installed" >&2
+      clean
+      exit 1
+    fi
+  done < <(sed -n 's|^+++ b/\([^[:space:]]*\).*|\1|p' "$f")
+done
+
+printf '%s\n' "$WANT" > "$RECORD"
+echo "changed: $PKG $VER with $# patch(es): $*"
+exit 0

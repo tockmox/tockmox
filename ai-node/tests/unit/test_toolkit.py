@@ -473,6 +473,50 @@ class Repository(unittest.TestCase):
         self.assertEqual(missing, [])
 
 
+class EnginePatches(unittest.TestCase):
+    """Each patch the toolkit ships is bound to one release, says where it came from and when it goes,
+    is a real unified diff, and is listed on the operator page."""
+
+    ROOT = os.path.join(AI, "roles", "engine_mlx_lm", "files", "patches")
+
+    def shipped(self):
+        found = []
+        for version in sorted(os.listdir(self.ROOT)) if os.path.isdir(self.ROOT) else []:
+            for name in sorted(os.listdir(os.path.join(self.ROOT, version))):
+                found.append((version, name, os.path.join(self.ROOT, version, name)))
+        return found
+
+    def test_every_patch_is_under_a_release_and_named_as_the_schema_allows(self):
+        with open(os.path.join(AI, "schema", "ai-node.v1.schema.json")) as f:
+            mlx = json.load(f)["properties"]["engines"]["properties"]["mlx-lm"]["properties"]
+        version_re, name_re = mlx["version"]["pattern"], mlx["patches"]["items"]["pattern"]
+        for version, name, _ in self.shipped():
+            self.assertRegex(version, version_re)
+            self.assertTrue(name.endswith(".patch"), name)
+            self.assertRegex(name[: -len(".patch")], name_re)
+
+    def test_every_patch_names_its_upstream_and_when_to_drop_it_and_is_a_diff(self):
+        for version, name, path in self.shipped():
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            head = text.split("\n--- a/", 1)[0]
+            self.assertIn("Upstream:", head, name)
+            self.assertIn("Drop this patch when", head, name)
+            self.assertIn(version, head, "%s does not name the release it is for" % name)
+            self.assertRegex(text, r"(?m)^--- a/\S+\n\+\+\+ b/\S+\n@@ ", name)
+
+    def test_every_patch_is_listed_on_the_operator_page(self):
+        with open(os.path.join(os.path.dirname(AI), "docs", "administration", "ai-nodes.md"), encoding="utf-8") as f:
+            page = f.read()
+        for version, name, _ in self.shipped():
+            self.assertIn("| `%s` | %s |" % (name[: -len(".patch")], version), page)
+
+    def test_the_role_restarts_the_instances_when_the_patch_set_changes(self):
+        with open(os.path.join(AI, "roles", "engine_mlx_lm", "tasks", "macos.yml"), encoding="utf-8") as f:
+            role = f.read()
+        self.assertIn("engine_mlx_lm_patch is changed", role)
+
+
 class StartWrapper(unittest.TestCase):
     """Engines and exporters start through the firewall role's wrapper; nothing else does."""
 

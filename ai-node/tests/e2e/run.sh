@@ -408,6 +408,52 @@ play keysonly2 "$NODE"; rc=$?
 r="$(recap keysonly2)"
 case "$r" in *"changed=0"*) ok "and the next converge changes nothing" ;; *) bad "and the next converge changes nothing" "rc=$rc; $r" ;; esac
 
+echo "scenario 13: a toolkit patch for mlx-lm: refused when not vetted for the release, applied once, removed cleanly"
+# The release pip "installs" is the pre-image of the shipped patch (its context and removed lines), so the
+# real patch applies to it and no upstream source lives in this repository.
+PATCHF="$AI/roles/engine_mlx_lm/files/patches/0.32.2/batch-decode-eval-cache.patch"
+mkdir -p "$S/mlx-lm-preimage/mlx_lm"
+python3 - "$PATCHF" "$S/mlx-lm-preimage/mlx_lm/generate.py" <<'PY'
+import sys
+out, body = [], False
+for line in open(sys.argv[1]).read().split("\n"):
+    if line.startswith("@@"):
+        body = True
+    elif body and line[:1] in (" ", "-"):
+        out.append(line[1:])
+open(sys.argv[2], "w").write("\n".join(out) + "\n")
+PY
+VENVP=/opt/tockmox/engines/mlx-lm/venv
+GEN="$VENVP/lib/site-packages/mlx_lm/generate.py"
+with_patches() {  # dir, patch names...
+  local nd="$1"; shift
+  mkdir -p "$nd"; cp "$NODE/desired.yaml" "$nd/"
+  python3 - "$NODE/ai-node.yaml" "$nd/ai-node.yaml" "$@" <<'PY'
+import sys, yaml
+d = yaml.safe_load(open(sys.argv[1]))
+d["engines"]["mlx-lm"]["patches"] = sys.argv[3:]
+open(sys.argv[2], "w").write(yaml.safe_dump(d, sort_keys=False))
+PY
+}
+with_patches "$WORK/node-nopatch" no-such-patch
+play nopatch "$WORK/node-nopatch"; rc=$?
+[ "$rc" != 0 ] && grep -q 'the toolkit has no no-such-patch patch for' "$OUT/nopatch.log" && ok "a patch the toolkit does not have for the pinned release is refused by name" || bad "a patch the toolkit does not have for the pinned release is refused by name" "rc=$rc; $(tail -8 "$OUT/nopatch.log" | tr '\n' '|')"
+with_patches "$WORK/node-patch" batch-decode-eval-cache
+play patch "$WORK/node-patch"; rc=$?
+[ "$rc" = 0 ] && ok "a converge with the shipped patch exits 0" || bad "a converge with the shipped patch exits 0" "rc=$rc; $(tail -12 "$OUT/patch.log" | tr '\n' '|')"
+check "the engine's package carries the patch" "grep -q 'c.state for c in self.prompt_cache\],' $GEN"
+check "the helper recorded the release and the patch" "grep -q '^batch-decode-eval-cache ' $VENVP/.tockmox-engine-patches"
+check "the textfile names the patch" "grep -q 'tockmox_ai_node_engine_patch_info{ai_node=\"example-mac\",engine=\"mlx-lm\",version=\"0.32.2\",patch=\"batch-decode-eval-cache\"} 1' /opt/tockmox/textfile/engine-patches.prom"
+play patch2 "$WORK/node-patch"; rc=$?
+r="$(recap patch2)"
+case "$r" in *"changed=0"*) ok "and the next converge changes nothing" ;; *) bad "and the next converge changes nothing" "rc=$rc; $r" ;; esac
+check "the patch is applied once, not twice" "[ \"\$(grep -c 'c.state for c in self.prompt_cache\],' $GEN)\" = 1 ]"
+play unpatch "$NODE"; rc=$?
+[ "$rc" = 0 ] && ok "a converge without the patch exits 0" || bad "a converge without the patch exits 0" "rc=$rc; $(tail -12 "$OUT/unpatch.log" | tr '\n' '|')"
+check "the package is the release again" "cmp -s $GEN $S/mlx-lm-preimage/mlx_lm/generate.py"
+check "the record is gone" "[ ! -e $VENVP/.tockmox-engine-patches ]"
+check "the textfile names no patch" "! grep -q '^tockmox_ai_node_engine_patch_info' /opt/tockmox/textfile/engine-patches.prom"
+
 cp "$S/calls.log" "$OUT/calls.log" 2>/dev/null; cp "$S/listener.err" "$OUT/listener.err" 2>/dev/null
 echo
 echo "e2e: $pass passed, $fail failed (logs in $OUT)"
