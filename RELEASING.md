@@ -160,6 +160,128 @@ five-edit version bump happens only on `release-X.Y`.
 
 A release bar names **a property to hold, not a number to beat** (TM-0157).
 
+## The patch train
+
+How a patch is cut once `X.Y.0` has shipped and `main` has moved on. It runs
+the patch bar above; it does not lower it. Written before the first train ran
+on the `0.8` line and corrected as trains run.
+
+### What feeds a train
+
+- **Fixes** land on `main` first and are cherry-picked to `release-X.Y` by
+  pull request, as the orientation below says. A fix enters a train only with
+  its own proof: a check that was observed red before the fix and green after.
+- **Dependency updates** are the exception to "main first". Renovate targets
+  the current line by exact name (`baseBranchPatterns` in `renovate.json5`) and
+  opens PRs against it directly, because once `main` is the next minor its
+  dependency commits stop applying to the line. On the line a patch update opens
+  on its own, a minor waits for a dashboard tick (the tick is the nomination),
+  a major is never proposed, workflow pins are off, and everything waits seven
+  days, the AI plane included; `main` keeps the AI plane's no-soak rule for
+  dogfooding. Security alerts jump the queue on both. Read the effective config
+  in the Renovate log once per line: an inherited setting has overridden the
+  file before.
+- **Nomination is the PR.** Approving it at the cutoff puts it on the train.
+  Nothing nominated is dropped by the train on its own; an item that fails is
+  carded and rolls to the next cutoff.
+
+### The night: build and prove a candidate
+
+1. Branch `train/X.Y.Z` from `release-X.Y`, merge the nominated PRs onto it,
+   recording each merged head's SHA, and open it as a PR against `release-X.Y`
+   so `ci` and `policy-gate` run on its head. Per-PR green is admission, not
+   proof. The PR is never merged with the button; step 3 of the morning
+   fast-forwards the line to it.
+2. The five-edit version bump, on the train branch. Idempotent, and the number
+   is reused if the candidate goes unsigned and folds into the next train.
+3. The static gates, on the train head: `check-all.sh`, `ci`, `policy-gate`,
+   `executed-docs` (dispatched with its `ref` input, since it does not run on
+   a train branch push), `tools/release-preflight.sh`, the immutable-field
+   check and the values-tier drift check with `BASELINE_REF` set to the
+   previous final tag (read the `baseline:` line),
+   `tools/site-template-diff.sh` and `tools/check-airgap.sh`. A SKIP is not
+   green; exit code 2 is BLOCKED.
+4. The lab, against that exact SHA:
+   - the **upgrade leg** from the previous final tag, carrying
+     [the standing assertions](#the-upgrade-legs-standing-assertions), on a
+     restore of the lab snapshot taken of the previous release;
+   - the same leg **from `X.Y.0`** when that is a different tag, or the gate
+     report lists "upgrading across a skipped patch" under NOT tested;
+   - the **greenfield** whenever the entry condition above fails, which any
+     image change does, so nearly every dependency-driven patch takes it.
+   A product failure stops the train and the packet names it; an
+   infrastructure error gets one re-run on a fresh restore. Nothing is reverted
+   out of the candidate automatically: a single-item revert would have dropped a
+   good fix on 0.8.1, where the one failure was a memory limit fixed forward.
+5. The paperwork, drafted from the run sheet and left unsigned: the gate report,
+   the CHANGELOG section (see the cost block below), the `tockmox-site-template`
+   re-pin PR, and the lab snapshot of the candidate that the next train's
+   upgrade leg restores. The release text may land as one
+   text-only commit on the train branch under the rule in "The release text is
+   written last", with its own green `ci` run.
+
+The night ends READY or NOT READY. NOT READY costs the morning nothing: the
+cause is carded, the items roll forward, and any decision waits for the next
+cutoff.
+
+### The morning: one script, in this order
+
+1. **Verify.** Your own git derives the head of `train/X.Y.Z`; the script does
+   not take a SHA from the packet. The head is the SHA the lab tested, or
+   differs from it by one text-only commit that `ci` ran green on. It refuses
+   any diff in the train that touches `.gitsigners`, `SECURITY.md`,
+   `docs/deployment/verify.md`, `.github/**`, `renovate.json5` or the release
+   tools.
+2. Merge the `tockmox-site-template` re-pin PR
+   ([the re-pin window](#the-re-pin-window) opens here; the tag closes it).
+3. Fast-forward `release-X.Y` to the train head and push. The line never
+   carries content the lab did not test.
+4. Create and sign the tag on that commit ("The tag" below), and push it.
+5. Sign the gate report and generate `SHA256SUMS` (both sections below).
+6. Publish the drafted Release with `--verify-tag`, so an unsigned tag cannot be
+   created by the Release step.
+
+Then the post-tag steps as for any release: the `CHANGELOG.md` port to `main`,
+the Announcement when there is an operator action or a new Known Issue, and
+"Close the release's own tracking". Note the minutes and hand actions the
+morning took; they are the measure of whether the train is paying for itself.
+
+### Cadence, skips, and security
+
+- **Target, not a commitment:** one train a week, built on Saturday night from
+  what merged to `release-X.Y` by Friday, the first a week after `X.Y.0`. A
+  READY candidate waits for its morning until the next cutoff. The cadence is
+  published, as a target, once three trains have run; until then it is this
+  sentence.
+- **Skip rule.** Churn that is only dependency updates cuts at most monthly. A
+  train cuts when it carries a fix, a security-relevant bump, or a fix to a
+  published Known Issue. A skip writes a ledger row, never silence. Two
+  candidates in a row left unsigned drop the cadence to every two weeks.
+- **Security fixes ship out of band**, not on the next train. An embargoed
+  vulnerability is worked in the private advisory fork and never on a public
+  train branch; SECURITY.md states the support window.
+- **A line ends at the next minor's final tag.** `release-X.Y` receives no train
+  after `vX.(Y+1).0` exists.
+
+### Checklist rows the train adds
+
+- **At the next minor's final tag, flip the Renovate release branch name**: in
+  `renovate.json5`, `baseBranchPatterns` and every `matchBaseBranches` name the
+  new line (`release-X.(Y+1)`), in the same change that tags. A pattern is not
+  a substitute; the exact name is what ends the old line's PRs.
+- **Every patch release's notes carry a "what taking this patch costs" block**,
+  computed from the diff between the previous final tag and the candidate, not
+  written from memory:
+  - **hand actions**: every step an operator must take beyond changing the
+    nine `targetRevision` pins, or "none";
+  - **rollback class**: a revision swap, or a restore of a named application's
+    database, in which case the pre-upgrade backup is required and the notes
+    say so (`docs/deployment/upgrade.md`, step 2);
+  - **images delta**: what `images.txt` and the SBOM gained, lost or moved;
+  - **contract delta**: values tiers and immutable fields that moved, or
+    "none";
+  - **air-gap line, dated**: re-proved on the date, or skipped and stated.
+
 ## Release branching, and the tagging invariant
 
 **The invariant: CI runs green on the exact commit that gets tagged. Not a
@@ -186,7 +308,9 @@ branch (see the orientation below).
 `release-X.Y` is cut from it when a candidate is ready; a patch fix lands on
 `main` first and is cherry-picked back to `release-X.Y`. Skipping the port
 leaves a gap (the old release misses a fix `main` has), visible and
-non-regressive. "The development line" anywhere in this document means `main`.
+non-regressive. Dependency updates are the one exception: Renovate opens them
+against the line directly ([the patch train](#the-patch-train)). "The
+development line" anywhere in this document means `main`.
 
 The 0.6.1 cut did not exercise the branch. A local `release-0.6` was created
 on 2026-09-17 and never pushed; `-rc1` through `-rc5` and the final tag are on
@@ -311,7 +435,9 @@ afterwards, not from memory:
   (a database restart and the layer's `Degraded` window are two numbers);
 - every new Known Issue the run found, and every existing claim it re-verified,
   narrowed or disproved;
-- what was deliberately not tested.
+- what was deliberately not tested;
+- for a patch, the "what taking this patch costs" block
+  ([the patch train](#checklist-rows-the-train-adds)).
 
 **One text commit, not a series**; each extra commit is another CI run before
 the tag can move. A commit is text-only when
@@ -465,7 +591,10 @@ gh release view vX.Y.Z --json url --jq .url
 ```
 
 Post the Announcement (Discussions, Announcements) with a link to the Release
-and a short summary in your own words. Not the changelog again. It carries:
+and a short summary in your own words. Not the changelog again. A patch cut by
+[the patch train](#the-patch-train) posts one when it carries an operator action
+or a new Known Issue; for a dependency-only patch with neither, the Release
+page and its cost block are the announcement. It carries:
 
 - who should upgrade and who should not, in a sentence
 - anything a reader must do by hand, and the Known Issues they will meet
