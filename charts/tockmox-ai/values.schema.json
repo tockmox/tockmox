@@ -1197,6 +1197,11 @@
               "type": "string",
               "minLength": 1,
               "description": "Optional. A Secret (key: token) holding the bearer token for the agent ledger Platform Management reads (config.features.platform.ledgerUrl). Mounted only when config.features.platform.enabled."
+            },
+            "platformSpecialistsToken": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Optional. A Secret (key: token) holding the bearer token Platform Management uses as the caller client/tockmox-ui to read the Service Desk on the specialist host (config.features.platform.specialistsUrl). Mounted only when config.features.platform.enabled."
             }
           }
         },

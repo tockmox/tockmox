@@ -143,6 +143,7 @@ class Transports:
     posture: httpx.BaseTransport | None = None
     probe: httpx.BaseTransport | None = None      # inference-node probe (REQ-0047)
     ledger: httpx.BaseTransport | None = None     # agent ledger (Platform Management)
+    specialists: httpx.BaseTransport | None = None  # the specialist host: Service Desk and index (Platform Management)
     resolver: object = None                       # DNS for the probe; None = socket.getaddrinfo
 
 

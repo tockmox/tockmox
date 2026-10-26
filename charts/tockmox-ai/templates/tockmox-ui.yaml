@@ -123,6 +123,12 @@ its address is the site's to allow (networkPolicy.extraEgress) and its token the
 {{- if and $platOn $ledgerSec -}}
 {{- $_ := set $plat "ledgerTokenFile" "/etc/tockmox-ui/platform-ledger/token" -}}
 {{- end -}}
+{{- /* The specialist host (config.features.platform.specialistsUrl): the Service Desk's cases and the
+specialist index. Its token (caller client/tockmox-ui, reads only) is the site's Secret, key `token`. */ -}}
+{{- $specSec := $sec.platformSpecialistsToken | default "" -}}
+{{- if and $platOn $specSec -}}
+{{- $_ := set $plat "specialistsTokenFile" "/etc/tockmox-ui/platform-specialists/token" -}}
+{{- end -}}
 {{- /* A site's own catalog (its roles, its scheduled work) from a ConfigMap, key catalog.yaml. */ -}}
 {{- $catCm := (($ui.platformCatalog | default dict).configMap) | default "" -}}
 {{- if and $platOn $catCm -}}
@@ -339,6 +345,9 @@ spec:
             {{- if and $platOn $ledgerSec }}
             - { name: platform-ledger, mountPath: /etc/tockmox-ui/platform-ledger, readOnly: true }
             {{- end }}
+            {{- if and $platOn $specSec }}
+            - { name: platform-specialists, mountPath: /etc/tockmox-ui/platform-specialists, readOnly: true }
+            {{- end }}
             {{- if and $platOn $catCm }}
             - { name: platform-catalog, mountPath: /etc/tockmox-ui/platform-catalog, readOnly: true }
             {{- end }}
@@ -380,6 +389,14 @@ spec:
         - name: platform-ledger
           secret:
             secretName: {{ $ledgerSec | quote }}
+            optional: true
+            items: [{ key: token, path: token }]
+        {{- end }}
+        {{- if and $platOn $specSec }}
+        # optional: a missing Secret leaves the desk unauthorised (Cases read Unknown), never a stuck pod
+        - name: platform-specialists
+          secret:
+            secretName: {{ $specSec | quote }}
             optional: true
             items: [{ key: token, path: token }]
         {{- end }}

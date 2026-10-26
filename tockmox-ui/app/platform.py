@@ -9,6 +9,11 @@ What this module shows, and from where:
   practice health each manager's signals: PromQL instant queries with thresholds
   agent runs      the agent ledger (features.platform.ledgerUrl, GET /v1/jobs); unset, every agent
                   reads "Not connected", which is Unknown and never healthy
+  cases           the Service Desk on the specialist host (features.platform.specialistsUrl, caller
+                  client/tockmox-ui, reads only): what the operations agents worked on and what waits on
+                  whom (platform_cases.py)
+  specialists     each role's specialists (the agents that do its work) from the catalog's generated
+                  specialists field, and what the host serves from its /v1/index
   needs you       the ledger's jobs waiting on a person; approving happens in the conversation
                   surface (features.platform.interfaceUrl), never here
 
@@ -36,6 +41,7 @@ import yaml
 from fastapi import Request
 from zoneinfo import ZoneInfo
 
+from . import platform_cases
 from .cronexpr import Cron, describe
 from .sources import CRIT, OK, UNKNOWN, WARN, KubeClient, Reading, Source, _parse_ts, worst
 
@@ -49,6 +55,8 @@ MODES = {
     "act": ("Act", "May run named, reversible actions on its own."),
 }
 PRACTICE_LABEL = "tockmox.com/practice"
+SPECIALIST_STATES = ("built", "specced", "proposed")
+SPECIALIST_WORDS = {"built": "Built", "specced": "Specified, not built", "proposed": "Proposed"}
 
 # Schedule states, after the cron-monitor model (Healthchecks.io): last SUCCESS is a different fact
 # from last RUN, a missed run is its own failure class, and nothing is healthy before it has run.
@@ -100,6 +108,8 @@ class Agent:
     is_lead: bool = False
     team: str = ""
     lead: str = ""          # the id of the lead this role reports to ("" for a lead)
+    agent_role: str = ""    # its id in the specialists' roles file, which the Service Desk uses (generated)
+    specialists: tuple = () # ({id, state}, ...): the agents that do its work, built | specced | proposed (generated)
 
     @property
     def is_manager(self):   # kept for templates: a team lead
@@ -126,6 +136,7 @@ class Team:
 @dataclass(frozen=True)
 class Catalog:
     teams: tuple
+    specialists_source: dict = field(default_factory=dict)   # {file, sha256} the specialists field came from
 
     def all(self):
         out = []
@@ -186,12 +197,22 @@ def _agent(raw: dict, is_lead=False, team="", lead="") -> Agent:
                            warn=lim["warn"], crit=lim["crit"],
                            informational=bool(s.get("informational", False)),
                            optional=bool(s.get("optional", False)), presence=str(s.get("presence") or "")))
+    specs = []
+    for sp in raw.get("specialists") or []:
+        sid, st = str((sp or {}).get("id", "")) if isinstance(sp, dict) else "", (sp or {}).get("state") if isinstance(sp, dict) else None
+        if not re.fullmatch(r"[a-z][a-z0-9-]{1,47}", sid) or st not in SPECIALIST_STATES:
+            raise CatalogError(f"{aid}: each specialist needs an id and a state in {', '.join(SPECIALIST_STATES)}")
+        specs.append({"id": sid, "state": st})
+    agent_role = str(raw.get("agentRole") or "")
+    if agent_role and not re.fullmatch(r"[a-z][a-z0-9-]{1,47}", agent_role):
+        raise CatalogError(f"{aid}: agentRole {agent_role!r} is not a role id")
     return Agent(id=aid, name=str(raw.get("name", aid)), mission=" ".join(str(raw.get("mission", "")).split()),
                  mode=mode, reference=dict(raw.get("reference") or {}),
                  may_read=tuple(raw.get("mayRead") or ()), may_propose=tuple(raw.get("mayPropose") or ()),
                  never=tuple(raw.get("never") or ()), data_class=str(raw.get("dataClass", "internal")),
                  grafana=str(raw.get("grafana", "")), match=tuple(pats), planned=tuple(planned),
-                 external=tuple(external), signals=tuple(sigs), is_lead=is_lead, team=team, lead=lead)
+                 external=tuple(external), signals=tuple(sigs), is_lead=is_lead, team=team, lead=lead,
+                 agent_role=agent_role, specialists=tuple(specs))
 
 
 def load_catalog(path: str | None = None) -> Catalog:
@@ -224,7 +245,10 @@ def _load_catalog(path: str | None = None) -> Catalog:
         teams.append(Team(tid, str(t.get("name", tid)), " ".join(str(t.get("purpose", "")).split()), lead, members))
     if not teams:
         raise CatalogError("the catalog needs at least one team")
-    cat = Catalog(tuple(teams))
+    src = doc.get("specialistsSource") or {}
+    if not isinstance(src, dict):
+        raise CatalogError("specialistsSource must be a mapping with file and sha256")
+    cat = Catalog(tuple(teams), {k: str(v) for k, v in src.items() if k in ("file", "sha256")})
     ids = [a.id for a in cat.all()]
     if len(ids) != len(set(ids)):
         raise CatalogError("role ids must be unique")
@@ -793,7 +817,7 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
         reason = (f"The Platform Management catalog ({opt.get('catalogFile') or 'the product default'}) did not load: {e}"
                   if isinstance(e, CatalogError) else f"Platform Management could not start: a time zone in features.platform: {e!r}")
 
-        def broken(request: Request, aid: str = ""):
+        def broken(request: Request, aid: str = "", rid: str = ""):
             u = user_of(request)
             if not u:
                 return need_login(request)
@@ -801,7 +825,8 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
                 return forbidden(request, u)
             return render(request, "error.html", u, status_code=503, title="Platform Management is unavailable",
                           message=reason)
-        for path in ("/platform", "/platform/schedule", "/platform/agents/{aid}"):
+        for path in ("/platform", "/platform/schedule", "/platform/agents/{aid}", "/platform/cases",
+                     "/platform/cases/{rid}", "/platform/specialists"):
             app.get(path)(broken)
         return None
     tp = transports
@@ -813,6 +838,10 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
         "signals": SignalsSource(s.prometheus_url, s.source_timeout_s, cat, tp.prometheus),
         "ledger": LedgerSource(str(opt.get("ledgerUrl", "")), s.source_timeout_s,
                                str(opt.get("ledgerTokenFile", "")), getattr(tp, "ledger", None)),
+        "desk": platform_cases.DeskSource(str(opt.get("specialistsUrl", "")), s.source_timeout_s,
+                                          str(opt.get("specialistsTokenFile", "")), getattr(tp, "specialists", None)),
+        "index": platform_cases.IndexSource(str(opt.get("specialistsUrl", "")), s.source_timeout_s,
+                                            getattr(tp, "specialists", None)),
     }
     interface_url = str(opt.get("interfaceUrl", "")).rstrip("/")
     tz = str(opt.get("timezone", "UTC"))
@@ -820,14 +849,36 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
     app.state.platform = {"catalog": cat, "sources": srcs}
 
     def snapshot():
-        r = {k: v.read() for k, v in srcs.items()}
+        r = {k: v.read() for k, v in srcs.items() if k not in ("desk", "index")}
         views, unowned = build(cat, r, ledger_configured=srcs["ledger"].configured(), tz=tz)
+        if not srcs["ledger"].configured() and srcs["index"].configured():
+            # No orchestrator ledger, but the specialist host answers: say which of the role's built specialists it
+            # serves instead of a bare Not connected. Served is not healthy (their call health is not read here),
+            # so the state stays Unknown.
+            idx = srcs["index"].read()
+            served = ((idx.data or {}).get("served") or {}) if idx.fetched_at is not None else None
+            for v in views:
+                built = [x["id"] for x in v.agent.specialists if x["state"] == "built"]
+                if not built or served is None:
+                    continue
+                n = sum(1 for x in built if x in served)
+                v.agent_state, v.agent_word = (UNKNOWN, "Served") if n == len(built) else (WARN, f"{n} of {len(built)} served")
+                v.agent_reason = (f"the specialist host serves {n} of its {len(built)} built specialists; "
+                                  "how their calls are going is not read on this page yet")
         return r, views, unowned
 
     def common(u):
         g = grafana if (grafana and grafana.visible_to(set(u.groups))) else None
         return {"interface_url": interface_url, "grafana": g, "modes": MODES, "sched_words": SCHED_WORDS,
-                "tz": tz, "now": time.time()}
+                "tz": tz, "now": time.time(), "spec_words": SPECIALIST_WORDS, "ask_words": platform_cases.ASK_WORDS,
+                "wait_words": platform_cases.WAIT_WORDS, "reason_words": platform_cases.REASON_WORDS,
+                "state_words": platform_cases.STATE_WORDS, "type_words": platform_cases.TYPE_WORDS,
+                "cases_on": srcs["desk"].configured(), "by_agent_role": platform_cases.roles_by_agent_role(cat),
+                "spec_roles": platform_cases.specialist_roles(cat)}
+
+    def desk():
+        r = srcs["desk"].read()
+        return r, ((r.data or {}).get("records") or []) if r.fetched_at is not None else []
 
     def guard(request):
         u = user_of(request)
@@ -848,9 +899,13 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
         verdict, why = org_verdict(cat, views)
         waiting = [(v, j) for v in views for j in v.waiting]
         rail = day_rail([v for v in views if v.schedules], unowned, time.time(), tz)
+        dr, rows = desk()
+        pending, _ = platform_cases.split(rows)
+        yours = [x for x in pending if x["waiting"] and x["waiting"]["on"] in ("jeff", "attention")]
         return render(request, "platform_overview.html", u, readings=r, views=views, teams=teams,
                       org_state=verdict, org_why=why, unowned=unowned, waiting=waiting, rota=rail,
-                      ledger_on=srcs["ledger"].configured(), **common(u))
+                      ledger_on=srcs["ledger"].configured(), desk=dr, case_counts=platform_cases.summarize(rows),
+                      yours=yours, **common(u))
 
     @app.get("/platform/schedule")
     def schedule(request: Request):
@@ -878,7 +933,14 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
         v = by[aid]
         t = cat.team(v.agent.team)
         team = [by[m.id] for m in t.members] if v.agent.is_lead else []
+        dr, rows = desk()
+        mine = platform_cases.role_cases(v.agent, rows) if (v.agent.agent_role or v.agent.specialists) else []
+        pending, done = platform_cases.split(mine)
+        idx = srcs["index"].read()
+        served = ((idx.data or {}).get("served") or {}) if idx.fetched_at is not None else None
         return render(request, "platform_agent.html", u, readings=r, v=v, team=team, team_obj=t,
-                      lead=by[t.lead.id], **common(u))
+                      lead=by[t.lead.id], desk=dr, pending=pending, done=done, served=served, index=idx,
+                      drift=platform_cases.drift(cat, idx), **common(u))
 
+    platform_cases.register(app, cat, srcs, guard, render, common)
     return srcs

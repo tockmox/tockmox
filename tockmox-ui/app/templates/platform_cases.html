@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, state_icon, source_line %}
+{% from "platform_macros.html" import case_table, when %}
+{% block title %}Cases · Platform Management{% endblock %}
+{% block main %}
+<p class="crumb"><a href="/platform">Platform Management</a> / Cases{% if sel %} / <a href="/platform/agents/{{ sel.id }}">{{ sel.name }}</a>{% endif %}</p>
+<h1>{% if sel %}The {{ sel.name }}'s cases{% else %}Cases{% endif %}</h1>
+<p class="lede">What the operations agents worked on and what is still pending: every incident, problem, change and known error the Service Desk holds{% if sel %} that the {{ sel.name }} is accountable for or one of its agents worked{% endif %}. This page reads; an agent's own words stay in the conversation.</p>
+
+{% if not desk_on %}
+<div class="panel quiet">
+  <p>{{ badge("unknown", "Not connected") }} No Service Desk is connected, so this page cannot list cases. That is not the same as there being none.</p>
+  <p class="muted">Set <code>features.platform.specialistsUrl</code> to the specialist host and <code>specialistsTokenFile</code> to a token for the caller <code>client/tockmox-ui</code>.</p>
+</div>
+{% elif desk.fetched_at is none %}
+<div class="panel quiet">
+  <p>{{ badge("unknown", "Unknown") }} The Service Desk did not answer ({{ desk.reason or "no answer" }}), so this page cannot list cases. That is not the same as there being none.</p>
+</div>
+{% else %}
+{% set st = "unknown" if (desk.state != "ok" or counts.unknown) else ("warning" if counts.jeff or counts.stuck else "ok") %}
+<section class="verdict st-{{ st }}" aria-labelledby="cases-verdict">
+  <div class="verdict-ico">{{ state_icon(st) }}</div>
+  <div>
+    <h2 id="cases-verdict" class="verdict-h">{% if counts.jeff %}{{ counts.jeff }} case{{ "s" if counts.jeff != 1 }} wait{{ "" if counts.jeff != 1 else "s" }} on you{% if st == "unknown" %}, and maybe more{% endif %}{% elif st == "unknown" %}Not every case can be read{% elif counts.open %}Nothing waits on you{% else %}No open cases{% endif %}</h2>
+    <p>{{ counts.open }} open{% if counts.stuck %}, {{ counts.stuck }} past their role's budget{% endif %}; {{ counts.closed }} closed in the last 30 days.{% if desk.state == "warning" %} The desk {{ desk.reason }}.{% endif %}</p>
+    <p class="muted">As of <time datetime="{{ now | iso }}">{{ now | local(tz) }}</time>.</p>
+  </div>
+</section>
+
+{% if roles %}
+<nav class="chips" aria-label="Show one role's cases">
+  <a href="/platform/cases"{% if not sel %} aria-current="page"{% endif %}>Every role</a>
+  {% for a in roles %}<a href="/platform/cases?role={{ a.id }}"{% if sel and sel.id == a.id %} aria-current="page"{% endif %}>{{ a.name }}</a>{% endfor %}
+</nav>
+{% endif %}
+
+<section aria-labelledby="pending">
+  <h2 id="pending">Pending</h2>
+  {% if pending %}
+  {{ case_table(pending, "Open cases: anything waiting on you first, then failed hand-offs, then what is past its budget, oldest first.", "pending", tz, state_words, type_words, ask_words, by_agent_role) }}
+  {% else %}
+  <p class="panel quiet">No open case{% if sel %} for the {{ sel.name }}{% endif %}. The desk answered and holds none.</p>
+  {% endif %}
+</section>
+
+<section aria-labelledby="done">
+  <h2 id="done">Worked on in the last 30 days</h2>
+  {% if done %}
+  <details>
+    <summary>{{ done | length }} closed case{{ "s" if done | length != 1 }}, newest first</summary>
+    {{ case_table(done, "Closed cases and when they closed.", "done", tz, state_words, type_words, ask_words, by_agent_role) }}
+  </details>
+  {% else %}
+  <p class="panel quiet">Nothing closed in the last 30 days.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section aria-labelledby="cases-sources">
+  <h2 id="cases-sources">Where this page reads from</h2>
+  <ul class="srcs">{% if desk_on %}<li>{{ source_line(desk) }}</li>{% else %}<li><span class="src">{{ badge("unknown", "Not connected") }} <span class="src-name">Service Desk</span><span class="muted">: not configured</span></span></li>{% endif %}</ul>
+</section>
+{% endblock %}

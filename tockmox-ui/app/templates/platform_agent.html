@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "macros.html" import badge, source_line %}
-{% from "platform_macros.html" import sched_badge, signal_badge, mode_tag, when, practice_badge %}
+{% from "platform_macros.html" import sched_badge, signal_badge, mode_tag, when, practice_badge, case_table, spec_name %}
 {% block title %}{{ v.agent.name }} · Platform Management{% endblock %}
 {% block main %}
 <p class="crumb"><a href="/platform">Platform Management</a> / {{ team_obj.name }}{% if not v.agent.is_lead %} / reports to <a href="/platform/agents/{{ lead.agent.id }}">the {{ lead.agent.name }}</a>{% else %} / leads the team{% endif %}</p>
@@ -30,6 +30,56 @@
   <ul class="reports-list">
   {% for t in team %}<li><a href="/platform/agents/{{ t.agent.id }}">{{ t.agent.name }}</a> {{ practice_badge(t.practice_state) }} <span class="muted">{{ t.practice_reason }}</span></li>{% endfor %}
   </ul>
+</section>
+{% endif %}
+
+{% if v.agent.specialists or v.agent.agent_role %}
+<section aria-labelledby="specialists">
+  <h2 id="specialists">Agents that do its work</h2>
+  {% if drift %}<p class="panel">{{ badge("warning", "Out of date") }} {{ drift }}</p>{% endif %}
+  {% if v.agent.specialists %}
+  <ul class="plain spec-list">
+  {% for sp in v.agent.specialists %}
+  {% set sv = served.get(sp.id) if served is not none else none %}
+  <li><strong>{{ spec_name(sp.id) }}</strong> <code>{{ sp.id }}</code>
+    {% if sp.state == "built" %}{{ badge("ok", spec_words[sp.state]) }}{% else %}<span class="muted">{{ spec_words[sp.state] }}</span>{% endif %}
+    {%- if sp.state == "built" -%}
+      {%- if served is none %} <span class="muted">· whether the host serves it now is unknown</span>
+      {%- elif sv %} <span class="muted">· served, version {{ sv.version }}</span>
+      {%- else %} {{ badge("warning", "Not served") }}{% endif -%}
+    {%- endif %}</li>
+  {% endfor %}
+  </ul>
+  {% else %}
+  <p class="panel quiet">No specialist does this role's work yet, built or planned.</p>
+  {% endif %}
+  <p class="muted"><a href="/platform/specialists">Every specialist and the roles it works for</a></p>
+</section>
+
+<section aria-labelledby="cases">
+  <h2 id="cases">Its cases</h2>
+  {% if not cases_on %}
+  <p class="panel quiet">No Service Desk is connected, so this page cannot show what this role's agents worked on or what is pending. That is not the same as nothing.</p>
+  {% elif desk.fetched_at is none %}
+  <p class="panel quiet">{{ badge("unknown", "Unknown") }} The Service Desk did not answer ({{ desk.reason or "no answer" }}), so this page cannot show this role's cases. That is not the same as none.</p>
+  {% else %}
+  <h3 id="cases-pending">Pending ({{ pending | length }})</h3>
+  {% if pending %}
+  {{ case_table(pending, "Open cases this role is accountable for or one of its agents worked: anything waiting on you first.", "cases-pending", tz, state_words, type_words, ask_words, by_agent_role, show_role=true) }}
+  {% else %}
+  <p class="panel quiet">Nothing pending. The desk answered and holds no open case for this role.</p>
+  {% endif %}
+  <h3 id="cases-done">Worked on in the last 30 days ({{ done | length }})</h3>
+  {% if done %}
+  <details>
+    <summary>{{ done | length }} closed case{{ "s" if done | length != 1 }}, newest first</summary>
+    {{ case_table(done, "Closed cases this role's agents worked.", "cases-done", tz, state_words, type_words, ask_words, by_agent_role, show_role=true) }}
+  </details>
+  {% else %}
+  <p class="panel quiet">Nothing closed in the last 30 days.</p>
+  {% endif %}
+  <p class="muted"><a href="/platform/cases?role={{ v.agent.id }}">Open this list on its own page</a></p>
+  {% endif %}
 </section>
 {% endif %}
 

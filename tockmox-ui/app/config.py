@@ -260,7 +260,7 @@ def parse(doc: dict) -> Settings:
     names = {"posture": "Security posture", "scanning": "Vulnerability scanning", "agents": "Agents", "platform": "Platform Management"}
     for fid, raw in (doc.get("features") or {}).items():
         raw = dict(raw or {})
-        for k in ("url", "rendererUrl", "apiUrl", "ledgerUrl", "interfaceUrl"):
+        for k in ("url", "rendererUrl", "apiUrl", "ledgerUrl", "interfaceUrl", "specialistsUrl"):
             if raw.get(k):
                 raw[k] = _opt_url(raw[k], f"features.{fid}.{k}")
         feats.append(Feature(id=fid, name=raw.get("name", names.get(fid, fid)),

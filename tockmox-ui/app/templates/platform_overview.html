@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "macros.html" import badge, state_icon, source_line %}
-{% from "platform_macros.html" import sched_badge, mode_tag, rail, when, practice_badge %}
+{% from "platform_macros.html" import sched_badge, mode_tag, rail, when, practice_badge, case_table %}
 {% block title %}Platform Management{% endblock %}
 {% block main %}
 <h1>Platform Management</h1>
@@ -17,6 +17,20 @@
 
 <section aria-labelledby="needs-you">
   <h2 id="needs-you">Needs you</h2>
+  {% if cases_on %}
+  <h3 id="needs-you-cases">From the Service Desk</h3>
+  {% if desk.fetched_at is none %}
+  <p class="panel quiet">{{ badge("unknown", "Unknown") }} The Service Desk did not answer ({{ desk.reason or "no answer" }}), so this page cannot list the cases waiting on you. That is not the same as none.</p>
+  {% elif desk.state != "ok" or case_counts.unknown %}
+  {% if yours %}{{ case_table(yours, (yours | length | string) ~ " case" ~ ("s" if yours | length != 1 else "") ~ " waiting on you or on a person, oldest first.", "needs-you-cases", tz, state_words, type_words, ask_words, by_agent_role) }}{% endif %}
+  <p class="panel quiet">{{ badge("unknown", "Unknown") }} The desk's answer is incomplete ({{ desk.reason or "some open cases do not say what they wait on" }}), so this list may not be everything waiting on you. <a href="/platform/cases">See every case</a>.</p>
+  {% elif yours %}
+  {{ case_table(yours, (yours | length | string) ~ " case" ~ ("s" if yours | length != 1 else "") ~ " waiting on you or on a person, oldest first.", "needs-you-cases", tz, state_words, type_words, ask_words, by_agent_role) }}
+  {% else %}
+  <p class="panel quiet">No case waits on you. {{ case_counts.open }} open, {{ case_counts.closed }} closed in the last 30 days: <a href="/platform/cases">see every case</a>.</p>
+  {% endif %}
+  <h3 id="needs-you-ledger">From the agent ledger</h3>
+  {% endif %}
   {% if not ledger_on %}
   <div class="panel quiet">
     <p>No agent ledger is connected, so this page cannot list what the agents are waiting on you for. That is not the same as nothing waiting.</p>
@@ -102,6 +116,7 @@
     </ol>
   </details>
   <p><a href="/platform/schedule">See every scheduled job and the next seven days</a></p>
+  <p><a href="/platform/cases">See every case the agents worked and what is pending</a> · <a href="/platform/specialists">See the specialists behind each role</a></p>
 </section>
 
 {% if unowned %}
@@ -115,6 +130,7 @@
 <section aria-labelledby="pm-sources">
   <h2 id="pm-sources">Where this page reads from</h2>
   <ul class="srcs">{% for k, r in readings.items() %}{% if k != "ledger" or ledger_on %}<li>{{ source_line(r) }}</li>{% endif %}{% endfor %}
+  {% if cases_on %}<li>{{ source_line(desk) }}</li>{% else %}<li><span class="src">{{ badge("unknown", "Not connected") }} <span class="src-name">Service Desk</span><span class="muted">: not configured</span></span></li>{% endif %}
   {% if not ledger_on %}<li><span class="src">{{ badge("unknown", "Not connected") }} <span class="src-name">Agent ledger</span><span class="muted">: not configured</span></span></li>{% endif %}</ul>
 </section>
 {% endblock %}
