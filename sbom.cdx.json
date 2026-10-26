@@ -9,9 +9,9 @@
     },
     {
       "name": "binwiederhier/ntfy",
-      "purl": "pkg:oci/ntfy?repository_url=binwiederhier/ntfy&tag=v2.30.0",
+      "purl": "pkg:oci/ntfy?repository_url=binwiederhier/ntfy&tag=v2.33.1",
       "type": "container",
-      "version": "v2.30.0"
+      "version": "v2.33.1"
     },
     {
       "name": "caronc/apprise",
@@ -27,9 +27,9 @@
     },
     {
       "name": "docker.io/grafana/alloy",
-      "purl": "pkg:oci/alloy?repository_url=docker.io/grafana/alloy&tag=v1.20.1",
+      "purl": "pkg:oci/alloy?repository_url=docker.io/grafana/alloy&tag=v1.21.1",
       "type": "container",
-      "version": "v1.20.1"
+      "version": "v1.21.1"
     },
     {
       "name": "docker.io/grafana/grafana",
@@ -117,15 +117,15 @@
     },
     {
       "name": "ghcr.io/goauthentik/server",
-      "purl": "pkg:oci/server?repository_url=ghcr.io/goauthentik/server&tag=2026.8.4",
+      "purl": "pkg:oci/server?repository_url=ghcr.io/goauthentik/server&tag=2026.8.5",
       "type": "container",
-      "version": "2026.8.4"
+      "version": "2026.8.5"
     },
     {
       "name": "ghcr.io/jkroepke/access-log-exporter",
-      "purl": "pkg:oci/access-log-exporter?repository_url=ghcr.io/jkroepke/access-log-exporter&tag=0.5.0",
+      "purl": "pkg:oci/access-log-exporter?repository_url=ghcr.io/jkroepke/access-log-exporter&tag=0.5.1",
       "type": "container",
-      "version": "0.5.0"
+      "version": "0.5.1"
     },
     {
       "name": "ghcr.io/jkroepke/kube-webhook-certgen",
@@ -159,15 +159,15 @@
     },
     {
       "name": "quay.io/argoproj/argocli",
-      "purl": "pkg:oci/argocli?repository_url=quay.io/argoproj/argocli&tag=v4.1.5",
+      "purl": "pkg:oci/argocli?repository_url=quay.io/argoproj/argocli&tag=v4.1.6",
       "type": "container",
-      "version": "v4.1.5"
+      "version": "v4.1.6"
     },
     {
       "name": "quay.io/argoproj/workflow-controller",
-      "purl": "pkg:oci/workflow-controller?repository_url=quay.io/argoproj/workflow-controller&tag=v4.1.5",
+      "purl": "pkg:oci/workflow-controller?repository_url=quay.io/argoproj/workflow-controller&tag=v4.1.6",
       "type": "container",
-      "version": "v4.1.5"
+      "version": "v4.1.6"
     },
     {
       "name": "quay.io/jetstack/cert-manager-cainjector",
@@ -213,9 +213,9 @@
     },
     {
       "name": "quay.io/prometheus-operator/prometheus-config-reloader",
-      "purl": "pkg:oci/prometheus-config-reloader@sha256:142a1f11df8dd165f00375b0b1826aecb9c9adeb05c39855893138d7c7575ff7?repository_url=quay.io/prometheus-operator/prometheus-config-reloader&tag=v0.94.0",
+      "purl": "pkg:oci/prometheus-config-reloader@sha256:a1897c67478bc23434534e91ad3855280771196b1daf17144db9dbcb655bef71?repository_url=quay.io/prometheus-operator/prometheus-config-reloader&tag=v0.94.2",
       "type": "container",
-      "version": "sha256:142a1f11df8dd165f00375b0b1826aecb9c9adeb05c39855893138d7c7575ff7"
+      "version": "sha256:a1897c67478bc23434534e91ad3855280771196b1daf17144db9dbcb655bef71"
     },
     {
       "name": "quay.io/prometheus-operator/prometheus-operator",
@@ -231,9 +231,9 @@
     },
     {
       "name": "quay.io/prometheus/blackbox-exporter",
-      "purl": "pkg:oci/blackbox-exporter?repository_url=quay.io/prometheus/blackbox-exporter&tag=v0.29.0",
+      "purl": "pkg:oci/blackbox-exporter?repository_url=quay.io/prometheus/blackbox-exporter&tag=v0.29.1",
       "type": "container",
-      "version": "v0.29.0"
+      "version": "v0.29.1"
     },
     {
       "name": "quay.io/prometheus/node-exporter",
@@ -282,30 +282,30 @@
     {
       "description": "Helm chart dependency of tockmox-crds",
       "name": "prometheus-operator-crds",
-      "purl": "pkg:generic/helm/prometheus-operator-crds@32.0.1",
+      "purl": "pkg:generic/helm/prometheus-operator-crds@32.0.2",
       "type": "application",
-      "version": "32.0.1"
+      "version": "32.0.2"
     },
     {
       "description": "Helm chart dependency of tockmox-devops",
       "name": "argo-workflows",
-      "purl": "pkg:generic/helm/argo-workflows@2.0.13",
+      "purl": "pkg:generic/helm/argo-workflows@2.0.14",
       "type": "application",
-      "version": "2.0.13"
+      "version": "2.0.14"
     },
     {
       "description": "Helm chart dependency of tockmox-exporters",
       "name": "prometheus-blackbox-exporter",
-      "purl": "pkg:generic/helm/prometheus-blackbox-exporter@11.20.0",
+      "purl": "pkg:generic/helm/prometheus-blackbox-exporter@11.20.2",
       "type": "application",
-      "version": "11.20.0"
+      "version": "11.20.2"
     },
     {
       "description": "Helm chart dependency of tockmox-exporters",
       "name": "prometheus-snmp-exporter",
-      "purl": "pkg:generic/helm/prometheus-snmp-exporter@9.18.1",
+      "purl": "pkg:generic/helm/prometheus-snmp-exporter@9.18.2",
       "type": "application",
-      "version": "9.18.1"
+      "version": "9.18.2"
     },
     {
       "description": "Helm chart dependency of tockmox-exporters",
@@ -317,30 +317,30 @@
     {
       "description": "Helm chart dependency of tockmox-identity",
       "name": "authentik",
-      "purl": "pkg:generic/helm/authentik@2026.8.4",
+      "purl": "pkg:generic/helm/authentik@2026.8.5",
       "type": "application",
-      "version": "2026.8.4"
+      "version": "2026.8.5"
     },
     {
       "description": "Helm chart dependency of tockmox-observability",
       "name": "kube-prometheus-stack",
-      "purl": "pkg:generic/helm/kube-prometheus-stack@92.8.0",
+      "purl": "pkg:generic/helm/kube-prometheus-stack@92.11.0",
       "type": "application",
-      "version": "92.8.0"
+      "version": "92.11.0"
     },
     {
       "description": "Helm chart dependency of tockmox-observability",
       "name": "loki",
-      "purl": "pkg:generic/helm/loki@18.16.0",
+      "purl": "pkg:generic/helm/loki@18.17.1",
       "type": "application",
-      "version": "18.16.0"
+      "version": "18.17.1"
     },
     {
       "description": "Helm chart dependency of tockmox-observability",
       "name": "alloy",
-      "purl": "pkg:generic/helm/alloy@1.13.1",
+      "purl": "pkg:generic/helm/alloy@1.14.2",
       "type": "application",
-      "version": "1.13.1"
+      "version": "1.14.2"
     },
     {
       "description": "Helm chart dependency of tockmox-platform",
