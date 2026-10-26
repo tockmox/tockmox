@@ -9,7 +9,7 @@
 # dark site mirrors one base image. Alpine for the same reason the other
 # Tockmox-built images use it: a smaller base with fewer unused packages for a
 # scanner to flag.
-FROM python:3.14-alpine
+FROM python:3.15-alpine
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /srv
 COPY posture_probe ./posture_probe

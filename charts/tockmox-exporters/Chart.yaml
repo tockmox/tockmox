@@ -12,11 +12,11 @@ dependencies:
     version: 0.8.0
     repository: "file://../tockmox-common"
   - name: prometheus-blackbox-exporter
-    version: 11.20.0
+    version: 11.20.2
     repository: "https://prometheus-community.github.io/helm-charts"
     condition: apps.blackbox.enabled,capabilities.observability.enabled
   - name: prometheus-snmp-exporter
-    version: 9.18.1
+    version: 9.18.2
     repository: "https://prometheus-community.github.io/helm-charts"
     condition: apps.snmp.enabled,capabilities.hardwareTelemetry.enabled
   - name: prometheus-smartctl-exporter
