@@ -169,11 +169,18 @@ On the host, the token's sha256 goes in its callers file as `client/tockmox-ui`.
 **The specialists field.** Each role in the catalog carries `agentRole` (its id
 in the specialists' roles file, which the desk uses) and `specialists`
 (`[{id, state}]`, state `built`, `specced` or `proposed`), and the catalog
-records the roles file's hash in `specialistsSource`. All three are generated:
+records the roles file's hash in `specialistsSource`. All three are generated.
+To rewrite them from the roles file:
 
 ```bash
-python3 tools/gen-platform-specialists.py path/to/roles/platform-roles.yaml            # rewrite them
-python3 tools/gen-platform-specialists.py --check path/to/roles/platform-roles.yaml    # exit 1 on drift
+python3 tools/gen-platform-specialists.py path/to/roles/platform-roles.yaml
+```
+
+To check for drift instead (exit 1 when the catalog is not what the roles file
+makes it):
+
+```bash
+python3 tools/gen-platform-specialists.py --check path/to/roles/platform-roles.yaml
 ```
 
 The script changes only those keys. When the hash the host publishes differs

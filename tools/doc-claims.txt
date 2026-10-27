@@ -261,11 +261,11 @@ states: [0-9]+ CI gates
 # 2026-10-20: 415 -> 417, identity.md's changed-blueprint section: the liveness-event read and the worker rollout restart.
 # 2026-10-21: 417 -> 421 and 37 -> 38 pages, the new administration/ai-nodes.md (four blocks).
 # 2026-10-23: 421 -> 422 and 38 -> 39 pages, tockmox-ui.md's first block: sealing the Authentik half of the UI client secret for an install minted before 0.9.0 (TM-0956).
-# 2026-10-26: 422 -> 423 and 39 -> 40 pages, platform-management.md's first block: the generator's rewrite and --check commands in its new Cases section.
+# 2026-10-26: 422 -> 424 and 39 -> 40 pages, platform-management.md's first two blocks: the generator's rewrite and --check commands in its new Cases section.
 page:   tests/executed-docs/INVENTORY.md
 claim:  fenced bash blocks across
 test:   grep -rhE '^[ \t]*```bash$' docs/ | wc -l | tr -d ' '
-expect: 423
+expect: 424
 states: [0-9]+ fenced bash blocks
 
 # TM-0469 added the KUBE_CONTEXT export block to fresh-install.md, which moved
