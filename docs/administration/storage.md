@@ -7,7 +7,7 @@ tags: [storage, longhorn, local-path, storageclass, k3s, replication]
 status: stable
 generated:
   by: hand
-  at: 2026-09-01
+  at: 2026-10-27
 tockmox:
   classification: public
   audience: [operator]
@@ -39,7 +39,8 @@ Both answers are correct storage designs. Applying either one everywhere is not.
 | Grafana | replicated | Dashboards and sqlite state, one copy |
 | ntfy | replicated | Message store, one copy |
 | Alertmanager | replicated | Silences and the notification log. Small, and losing them re-fires everything you had already resolved |
-| Authentik's Postgres | replicated | One instance, so nothing else holds a copy. Moves to local if it becomes a CNPG cluster with replicas |
+| Authentik's database, 1 instance | replicated | One instance, so nothing else holds a copy. A CNPG cluster from 0.9.0 (`identity.database`), and the bundled StatefulSet on an install that keeps it |
+| Authentik's database, 3 instances | local | Postgres is already streaming to its own replicas (CNPG only; the class follows `identity.database.instances` the same way as the model gateway's) |
 | The model gateway's database, 1 instance | replicated | Same reason |
 | The model gateway's database, 3 instances | local | Postgres is already streaming to its own replicas |
 | Prometheus TSDB | local | High-churn, append-only, re-derivable, and you restore it from a backup rather than from a replica |

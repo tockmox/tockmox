@@ -64,6 +64,7 @@ Shipped since **0.5.0 (2026-08-19)**:
 | The `ObjectStore` CR for the model gateway | rendered when `modelGateway.database.backup.objectStore.create` is true | which store it points at |
 | **Backups themselves** | `modelGateway.database.backup.enabled` is unset, which **follows `capabilities.dataProtection` (on)** from 0.7.1; it was `false` before | leave it, or set `false` to opt out (an alert then fires until you turn it back on or silence it) |
 | The weekly restore drill | `modelGateway.database.backup.restoreDrill.enabled` is `true`, and takes effect once backups are on | leave it on |
+| **The identity database** (Authentik's), from 0.9.0 | a CNPG cluster, `tockmox-authentik-db` in `tockmox-authentik`, on a fresh install; `identity.database.backup.enabled` is unset and follows `dataProtection`, archiving WAL to `s3://tockmox-backups/cnpg/authentik` with a nightly base backup and 30 days' retention, plus its own weekly drill. An install that keeps the bundled PostgreSQL keeps the nightly `pg_dump` bridge instead ([§ 6](#6-what-else-wants-backing-up)) | leave it; `identity.database.backup.enabled: false` opts out, and `TockmoxIdentityDatabaseUnbacked` then fires until you turn it back on or silence it |
 
 Values and defaults read from `charts/tockmox-ai/values.yaml` and
 `charts/tockmox-platform/values.yaml` at the 0.6.0 tree on 2026-09-01.
@@ -280,6 +281,7 @@ database you added yourself; only the names change.
 | Your database | What you do in this section |
 |---|---|
 | **`tockmox-litellm-db`** (ships with the AI layer) | Set one values key. The chart renders both objects for you ... jump to [3a](#3a-the-shipped-database-one-values-key) |
+| **`tockmox-authentik-db`** (ships with the identity layer from 0.9.0) | Nothing on a fresh install: backups are on by default and the chart renders both objects. The keys are the same as 3a's under `identity.database.backup` in `charts/tockmox-identity/values.yaml`; read every name below with `tockmox-authentik` for the namespace and `tockmox-authentik-db` for the cluster |
 | **A database you added** (a site app) | Write both objects yourself ... [3b](#3b-a-database-you-added-write-both-objects) |
 | **You declined the AI capability** and added no database | There is nothing to back up yet and nothing here to run. Come back when you add one; §6 still applies, and so does the sealed-secrets controller key, which is the row you cannot regenerate |
 
@@ -629,6 +631,23 @@ timestamp, because that metric is deprecated in CloudNativePG since 1.26 and
 reports 0 under the barman-cloud plugin path this platform uses, backup or no
 backup.
 
+**The identity database has a drill of its own** (from 0.9.0, wherever
+Authentik runs on `tockmox-authentik-db`): the same script against the identity
+store, Mondays at 04:45, after the model gateway's, so the two never hold a
+drill cluster at once. It writes to the `tockmox-restore-drill-register`
+ConfigMap in `tockmox-authentik`, and its rows carry one more field before
+`backup=`: `users=<n>`, the row count of Authentik's user table in the restored
+database. A restore whose schema came back with no users is a FAIL, because
+nobody could sign in to it. On by default with the database's backups
+(`identity.database.backup.restoreDrill`).
+
+**WORKSTATION**
+
+```bash
+kubectl -n tockmox-authentik get configmap tockmox-restore-drill-register \
+  -o jsonpath='{.data}{"\n"}'
+```
+
 **This page remains the manual procedure the drill automates. Run it yourself
 once anyway**, because the day you need it is not the day to learn it.
 
@@ -639,10 +658,10 @@ are covered by four different mechanisms:
 
 | Data | Mechanism | Status |
 |---|---|---|
-| CNPG databases | this page | **drilled** 2026-08-15, source cluster destroyed and restored from the store |
+| CNPG databases, including Authentik's from 0.9.0 | this page | **drilled** 2026-08-15, source cluster destroyed and restored from the store. The identity database's own drill is new in 0.9.0 and **has not yet passed on a cluster** ([below](#what-is-not-certified-here)) |
 | Volume snapshots (CSI) | `VolumeSnapshot` with class `longhorn-snapshot` (in-cluster) or `longhorn-backup` (off-volume) | **ships.** The snapshot-controller and its CRDs arrive with `dataProtection`, and the platform layer provides two classes, neither marked default. `longhorn-snapshot` (type `snap`) is seconds, local to the volume's replicas, and gone with the volume: not a backup. `longhorn-backup` (type `bak`, deletion policy `Retain`) is minutes, is uploaded to Longhorn's BackupTarget, and survives losing the volume. For a volume with no application-level backup it is the only protection the chart offers; databases keep using this page's barman path. Longhorn's own `snapshots.longhorn.io` remains a different, storage-internal interface |
 | Longhorn volumes | Longhorn's default BackupTarget: the shipped store (`s3://tockmox-backups@garage/longhorn`) unless the site names another | **ships** (0.5.0, 2026-08-19); **restored once in production** (2026-10-01, every volume of one cluster through the shipped `longhorn-backup` class from an off-cluster target) and **drilled** 2026-10-10 (one volume backed up through `longhorn-backup` to the shipped store, its claim, PV and Longhorn volume deleted, a new claim restored from the VolumeSnapshot and read back byte for byte; see [what is not certified here](#what-is-not-certified-here)): the Garage bootstrap Job mints a Longhorn-format credential and wires the default BackupTarget to the shipped store, unless the site set `longhorn.defaultBackupStore.backupTarget` or an operator already pointed it somewhere, both of which are respected. The shipped store is circular, see [the warning below](#longhorn-backups-into-the-shipped-garage-are-circular) |
-| Authentik's bundled (Bitnami) Postgres | nightly `pg_dump` CronJob to the shipped store, seven-weekday rotation (`authentik-db/authentik-<dow>.sql.gz`), upload byte-verified, freshness-alerted | **ships** (0.5.0, 2026-08-19) as the bridge until the CNPG migration; **drilled** 2026-10-10 (that night's dump restored with the command below into a fresh database, a second Authentik started on it, and a user created before the dump signed in; see [what is not certified here](#what-is-not-certified-here)). Restore: `gunzip < dump \| psql -U authentik -d authentik` against a fresh database, then start Authentik. Seven-day window, stated plainly |
+| Authentik's bundled (Bitnami) Postgres, on an install that keeps it | nightly `pg_dump` CronJob to the shipped store, seven-weekday rotation (`authentik-db/authentik-<dow>.sql.gz`), upload byte-verified, freshness-alerted. Rendered only while `authentik.postgresql.enabled` is true: from 0.9.0 a fresh install runs Authentik on CNPG (row above) and has no bridge | **ships** (0.5.0, 2026-08-19) as the bridge for the bundled server; **drilled** 2026-10-10 (that night's dump restored with the command below into a fresh database, a second Authentik started on it, and a user created before the dump signed in; see [what is not certified here](#what-is-not-certified-here)). Restore: `gunzip < dump \| psql -U authentik -d authentik` against a fresh database, then start Authentik. Seven-day window, stated plainly |
 | Your site repo and the sealed-secrets controller key | git remote plus the key backup in [secrets](../administration/secrets.md#back-up-the-controller-key-now) | do this **today** ... the controller key is the one item that cannot be regenerated |
 
 **Success condition for the last row, and it is the only one you can check
@@ -824,6 +843,18 @@ layers, not the cluster, and the correction is in the changelog. The sequence
 is assembled from parts that were each run separately, which is a weaker
 claim, and this page will say otherwise only when it has been run rather than
 described.
+
+**The identity database on CNPG (0.9.0) is a render, not yet a restore.** Its
+Cluster, ObjectStore, ScheduledBackup, drill and alerts are proved to render,
+and the drill's script is run against a stub `kubectl` by
+`tools/check-notify-and-drill.sh`, by the repository's gates. No base backup of
+it has been taken on a cluster, no drill of it has passed, and no Authentik has
+signed anybody in from a restored copy. A fresh install's first week should
+show a PASS row in the register above; until one does, treat its backups as
+configured, not proven. Moving an existing install's bundled database onto it
+is written in
+[upgrade](../deployment/upgrade.md#move-authentiks-database-to-cloudnativepg)
+and is not proven either.
 
 The Authentik `pg_dump` restore in [§ 6](#6-what-else-wants-backing-up) has
 one drill behind it, the 2026-10-10 run above, on a lab whose Authentik held

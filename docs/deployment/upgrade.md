@@ -7,7 +7,7 @@ tags: [upgrade, release, argocd, rollback, gitops, versioning]
 status: stable
 generated:
   by: hand
-  at: 2026-09-01
+  at: 2026-10-27
 tockmox:
   classification: public
   audience: [operator]
@@ -29,6 +29,30 @@ points at the *Tockmox* repository. Your values, your `apps/` and your
 `secrets/` are yours and stay where they are. That is not the same as saying
 they stay correct: a release can need a value you have not set yet, and the
 release notes say which.
+
+**For 0.9.0, decide where Authentik's database lives before you push the
+revision.** A fresh 0.9.0 install runs Authentik on a CloudNativePG cluster and
+no longer renders the bundled PostgreSQL. An install that runs the bundled
+server keeps it by adding two keys to `site/values/identity.yaml` in the same
+commit as the bump, which renders exactly the 0.8 shape:
+
+```yaml
+# site/values/identity.yaml ... keep the bundled PostgreSQL through the 0.9.0 bump
+identity:
+  database:
+    enabled: false
+authentik:
+  postgresql:
+    enabled: true
+```
+
+Without them the identity layer's sync fails before anything is applied: the
+PreSync Job `tockmox-authentik-db-upgrade-guard` finds the bundled server's
+volume and refuses, naming the two keys, rather than starting Authentik on an
+empty database. Moving the data across is a separate window, and the procedure
+is [below](#move-authentiks-database-to-cloudnativepg). **It has not yet been
+proven on a populated install** (planned for 0.9.1); keeping the bundled server
+until then is the conservative choice.
 
 **For 0.8.0, three values are required before you push the revision (one only on
 a site that backs up a database of its own to the shipped object store, one only
@@ -483,6 +507,175 @@ diff ~/"tockmox-pvc-before-$CURRENT_REVISION.txt" \
 
 **If a StatefulSet pod is stuck on the old revision**, that is a known shape with
 a known fix: [when a broken pod blocks its own fix](#when-a-broken-pod-blocks-its-own-fix).
+
+### Move Authentik's database to CloudNativePG
+
+**NOT YET PROVEN.** This procedure is written from the chart, from
+CloudNativePG's documented behaviour and from the `pg_dump` restore the
+[backup page](../operations/backup-restore.md#what-is-not-certified-here)
+records for the bundled server. It has not been run on a populated install.
+The proof it waits for, a lab install with users, flows, applied blueprints and
+a live session moved across with the same user count and a working sign-in
+after, is planned for 0.9.1. Until it has run, keep the bundled server unless
+you are prepared to restore from the dump in step 2 by hand.
+
+**Only for an install that runs Authentik on the bundled PostgreSQL**, kept
+through the 0.9.0 bump with the two keys at the [top of this
+page](#upgrade-to-a-new-release). A fresh 0.9.0 install is already on
+CloudNativePG.
+
+**It needs a write freeze.** Authentik is stopped from step 1 to step 5, and
+nobody can sign in to any console through it in that window; the consoles'
+[break-glass](../administration/identity.md#break-glass-deliberately) logins
+still work. Estimate, not a measurement: 15 to 30 minutes for a household-sized
+instance, most of it two syncs.
+
+**Before you begin:**
+
+- `tockmox-authentik-db` is sealed and committed
+  ([secrets § an install minted before 0.9.0](../administration/secrets.md#an-install-minted-before-090)).
+- You took [step 2](#2-back-up-what-a-rollback-will-not-bring-back)'s backup
+  of the bundled server's volume. Step 2 below makes a second copy; this one is
+  the copy that does not depend on this procedure being right.
+- `export KUBE_CONTEXT=YOUR_CONTEXT`, as in [Before you begin](#before-you-begin).
+- **If you set `sso.adminUsers`, take it out for the move** and put it back in
+  step 5. Its PostSync Job runs Authentik's own code against the database on
+  every sync, and on step 3's sync that database is the new, empty one; nothing
+  should write to it before step 4 has.
+
+**1. Stop Authentik.** Add the replica counts to the block that keeps the
+bundled server, commit and push.
+
+```yaml
+# site/values/identity.yaml ... added to the two keys that keep the bundled server
+authentik:
+  server:
+    replicas: 0
+  worker:
+    replicas: 0
+```
+
+**Success condition:** after the sync, no Authentik pod is left.
+
+**WORKSTATION**
+
+```bash
+: "${KUBE_CONTEXT:?export KUBE_CONTEXT first, see Before you begin}"
+kubectl --context="$KUBE_CONTEXT" -n tockmox-authentik get pods \
+  -l app.kubernetes.io/name=authentik
+```
+
+prints `No resources found`. The bundled server is still running.
+
+**2. Dump the bundled server to your workstation, and count its users.** Plain
+SQL, the same format as the nightly bridge, whose restore was drilled.
+
+**WORKSTATION**
+
+```bash
+: "${KUBE_CONTEXT:?export KUBE_CONTEXT first, see Before you begin}"
+kubectl --context="$KUBE_CONTEXT" -n tockmox-authentik exec tockmox-identity-postgresql-0 -- \
+  sh -c 'PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")" pg_dump -h 127.0.0.1 -U authentik -d authentik' \
+  > authentik-move.sql
+kubectl --context="$KUBE_CONTEXT" -n tockmox-authentik exec tockmox-identity-postgresql-0 -- \
+  sh -c 'PGPASSWORD="$(cat "$POSTGRES_PASSWORD_FILE")" psql -h 127.0.0.1 -U authentik -d authentik -tAc "SELECT count(*) FROM authentik_core_user"'
+```
+
+**Success condition:** `authentik-move.sql` is megabytes, not bytes (`ls -l
+authentik-move.sql`; the nightly bridge's gzip of a six-user instance was 4.7 MB
+on 2026-10-10, and this file is not compressed), and the second command prints
+a number. **Write the number down**: step 4 must print the same one. The pod name
+assumes the identity Application is named `tockmox-identity`, as a generated
+site repository names it.
+
+**3. Turn the CloudNativePG database on, with Authentik still stopped.** Replace
+the two keys that kept the bundled server with the guard's acknowledgement,
+keep the replica counts, commit and push.
+
+```yaml
+# site/values/identity.yaml ... during the move
+identity:
+  database:
+    upgrade:
+      bundledDataMigrated: true
+authentik:
+  server:
+    replicas: 0
+  worker:
+    replicas: 0
+```
+
+The sync creates `tockmox-authentik-db`, empty, owned by `authentik`, and
+prunes the bundled server's StatefulSet and its `pg_dump` CronJob.
+`bundledDataMigrated: true` is what lets this sync past the upgrade guard: it
+says you hold the data, which after step 2 you do.
+
+**Success condition:** the cluster is healthy and the bundled server's volume
+is still there. Kubernetes keeps a StatefulSet's volume claims when the
+StatefulSet is deleted, and the bundled chart does not ask otherwise; that
+volume is your rollback until step 6.
+
+**WORKSTATION**
+
+```bash
+: "${KUBE_CONTEXT:?export KUBE_CONTEXT first, see Before you begin}"
+kubectl --context="$KUBE_CONTEXT" -n tockmox-authentik get cluster.postgresql.cnpg.io tockmox-authentik-db
+kubectl --context="$KUBE_CONTEXT" -n tockmox-authentik get pvc data-tockmox-identity-postgresql-0
+```
+
+The first reads `Cluster in healthy state`; the second lists the claim `Bound`.
+
+**4. Restore the dump into the new cluster, in one transaction.** PostgreSQL 18
+reads a PostgreSQL 17 dump; `ON_ERROR_STOP` and `--single-transaction` mean an
+error leaves the database as empty as it was, not half restored.
+
+**WORKSTATION**
+
+```bash
+: "${KUBE_CONTEXT:?export KUBE_CONTEXT first, see Before you begin}"
+kubectl --context="$KUBE_CONTEXT" -n tockmox-authentik exec -i tockmox-authentik-db-1 -c postgres -- \
+  psql -U postgres -d authentik -v ON_ERROR_STOP=1 --single-transaction -q < authentik-move.sql
+kubectl --context="$KUBE_CONTEXT" -n tockmox-authentik exec tockmox-authentik-db-1 -c postgres -- \
+  psql -U postgres -d authentik -tAc 'SELECT count(*) FROM authentik_core_user'
+```
+
+**Success condition:** the first command prints no `ERROR`, and the second
+prints the number you wrote down in step 2. If the restore stopped on an error,
+the database is still empty: read the error, and either fix it and run step 4
+again or roll back (below).
+
+**5. Start Authentik on the new database.** Delete the replica counts, keep
+`bundledDataMigrated: true`, commit and push. Authentik connects to
+`tockmox-authentik-db-rw`; the schema is the one it left, so it has no
+migration to run.
+
+**Success condition:** sign in to a console through Authentik as a user that
+existed before step 1. A green pod is not this condition: an Authentik on an
+empty database is healthy too, and only an existing user signing in tells the
+two apart. Then confirm the first base backup and the archive in
+[backup and restore § 4](../operations/backup-restore.md#4-prove-a-backup-now-not-at-0300--required),
+reading `tockmox-authentik` and `tockmox-authentik-db` for the namespace and
+cluster.
+
+**6. After a release on the new database, delete the old volume.** Until then
+it is the rollback. Remove it when you no longer want to go back:
+
+**WORKSTATION**
+
+```bash
+: "${KUBE_CONTEXT:?export KUBE_CONTEXT first, see Before you begin}"
+kubectl --context="$KUBE_CONTEXT" -n tockmox-authentik delete pvc data-tockmox-identity-postgresql-0
+```
+
+`bundledDataMigrated: true` can stay; with no bundled volume left the guard
+passes either way. The bridge's last seven dumps stay in the object store under
+`authentik-db/` until you delete them.
+
+**Rolling back, before step 6.** Put the two keys that keep the bundled server
+back in place of `bundledDataMigrated` and push. The bundled StatefulSet is
+recreated under its old name and binds its old volume, with the data as it was
+at step 1; anything Authentik wrote after step 5 is not in it. The CNPG cluster
+is pruned with its own volume.
 
 ### The LiteLLM migrations Job gets a new name on upgrade to 0.8.0
 

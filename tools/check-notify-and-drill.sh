@@ -27,6 +27,12 @@
 #     It runs the drill cluster on the image the SOURCE cluster runs
 #     (spec.imageName, which CNPG always sets), and on the operator default only
 #     when the source cannot be read (TM-1023).
+# D2  The identity database's restore drill (TM-0788), the same script pointed
+#     at Authentik's database, run against the same stub: it recovers from the
+#     identity store under the identity cluster's server name, in the identity
+#     namespace, pins that cluster's newest completed Backup, and PASSes only
+#     when Authentik's user table came back with rows (users=<n> on the row).
+#     A restore with an empty user table is a FAIL.
 #
 # LIMIT: no cluster. Whether CNPG accepts recoveryTarget.backupID from the
 # barman-cloud plugin path, and that a Backup CR's status.backupId names what
@@ -40,6 +46,7 @@ T=$(mktemp -d); trap 'kill $(jobs -p) 2>/dev/null || true; rm -rf "$T"' EXIT
 
 helm template t charts/tockmox-observability -f ci/values.yaml > "$T/obs.yaml"
 helm template t charts/tockmox-ai -f ci/values.yaml --set modelGateway.database.backup.enabled=true > "$T/ai.yaml"
+helm template t charts/tockmox-identity -f ci/values.yaml > "$T/id.yaml"
 
 python3 - "$T" <<'PY'
 import sys, yaml
@@ -58,11 +65,12 @@ for d in yaml.safe_load_all(open(f"{t}/obs.yaml")):
         ok = (len(mnt) == 1 and "subPath" not in mnt[0] and len(vol) == 1 and vol[0]["secret"].get("optional") is True
               and len(env) == 1 and env[0]["name"] == vol[0]["secret"]["secretName"])
         open(f"{t}/ntfy.wiring", "w").write(("ok " + mnt[0]["mountPath"]) if ok else "bad")
-for d in yaml.safe_load_all(open(f"{t}/ai.yaml")):
-    if d and d["kind"] == "CronJob" and d["metadata"]["name"].endswith("-drill"):
-        open(f"{t}/drill.sh", "w").write(d["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]["args"][0])
+for src, out in (("ai.yaml", "drill.sh"), ("id.yaml", "id-drill.sh")):
+    for d in yaml.safe_load_all(open(f"{t}/{src}")):
+        if d and d["kind"] == "CronJob" and d["metadata"]["name"].endswith("-drill"):
+            open(f"{t}/{out}", "w").write(d["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]["args"][0])
 PY
-[ -s "$T/bridge.py" ] && [ -s "$T/drill.sh" ] || { echo "check-notify-and-drill: bridge or drill not rendered" >&2; exit 1; }
+[ -s "$T/bridge.py" ] && [ -s "$T/drill.sh" ] && [ -s "$T/id-drill.sh" ] || { echo "check-notify-and-drill: bridge, drill or identity drill not rendered" >&2; exit 1; }
 
 # ---- B1 ---------------------------------------------------------------------
 SECRET=tok-SECRET-9f3a
@@ -144,16 +152,17 @@ case "$*" in
   *apply\ -f*) cat > "$STUB_DIR/applied.yaml" ;;
   *" wait "*) exit "${WAIT_RC:-0}" ;;
   *" exec "*) n=$(cat "$STUB_DIR/n" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB_DIR/n"
-              if [ "$n" = 0 ]; then echo f; else echo 86; fi ;;
+              # 1st: pg_is_in_recovery, 2nd: public tables, 3rd (identity only): users.
+              if [ "$n" = 0 ]; then echo f; elif [ "$n" = 1 ]; then echo 86; else echo "${USERS:-6}"; fi ;;
   *" patch "*) printf '%s' "$*" > "$STUB_DIR/patched" ;;
 esac
 exit 0
 SH
 chmod +x "$T/bin/kubectl"
-drill_run() { # script, backups.json, wait_rc, out dir
-  local d="$4"; mkdir -p "$d"; cp "$2" "$d/backups.json"
+drill_run() { # script, backups.json, wait_rc, out dir, [source image], [users]
+  local d="$4"; rm -rf "$d"; mkdir -p "$d"; cp "$2" "$d/backups.json"
   [ -n "${5:-}" ] && printf '%s' "$5" > "$d/image"
-  STUB_DIR="$d" WAIT_RC="$3" PATH="$T/bin:$PATH" sh "$1" > "$d/out" 2>&1 || true
+  STUB_DIR="$d" WAIT_RC="$3" USERS="${6:-6}" PATH="$T/bin:$PATH" sh "$1" > "$d/out" 2>&1 || true
 }
 cat > "$T/two.json" <<'JSON'
 {"items":[
@@ -183,6 +192,32 @@ PY
   grep -q '^register: .* FAIL cluster never became Ready backup=20260929T030000$' "$T/d.fail/out" || return 1
 }
 
+# ---- D2 ---------------------------------------------------------------------
+cat > "$T/id-two.json" <<'JSON'
+{"items":[
+ {"spec":{"cluster":{"name":"tockmox-authentik-db"}},"status":{"phase":"completed","backupId":"20261026T032000","stoppedAt":"2026-10-26T03:21:00Z"}},
+ {"spec":{"cluster":{"name":"tockmox-authentik-db"}},"status":{"phase":"completed","backupId":"20261027T032000","stoppedAt":"2026-10-27T03:21:00Z"}},
+ {"spec":{"cluster":{"name":"tockmox-litellm-db"}},"status":{"phase":"completed","backupId":"LITELLM","stoppedAt":"2026-10-28T03:01:00Z"}}]}
+JSON
+d2() { # script
+  drill_run "$1" "$T/id-two.json" 0 "$T/i.pass" "ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie" 6
+  drill_run "$1" "$T/id-two.json" 0 "$T/i.empty" "ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie" 0
+  python3 - "$T" 2>/dev/null <<'PY' || return 1
+import sys, yaml
+t = sys.argv[1]
+d = yaml.safe_load(open(f"{t}/i.pass/applied.yaml"))
+assert d["metadata"]["namespace"] == "tockmox-authentik", d["metadata"]
+assert d["metadata"]["name"] == "tockmox-authentik-db-drillcheck", d["metadata"]
+assert d["spec"]["bootstrap"]["recovery"]["recoveryTarget"]["backupID"] == "20261027T032000", d
+p = d["spec"]["externalClusters"][0]["plugin"]["parameters"]
+assert p["barmanObjectName"] == "tockmox-authentik-db-store" and p["serverName"] == "tockmox-authentik-db", p
+assert d["spec"]["imageName"] == "ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie", d["spec"].get("imageName")
+PY
+  grep -q 'authentik_core_user' "$1" || return 1
+  grep -q '^register: .* PASS in_recovery=f public_tables=86 users=6 backup=20261027T032000$' "$T/i.pass/out" || return 1
+  grep -q '^register: .* FAIL in_recovery=f public_tables=86 users=0 backup=20261027T032000$' "$T/i.empty/out" || return 1
+}
+
 if [ "${1:-}" = "--selftest" ]; then
   fail=0
   ok() { echo "selftest ok: $1 goes red"; }
@@ -190,6 +225,7 @@ if [ "${1:-}" = "--selftest" ]; then
   b1 "$T/bridge.py" || { echo "selftest FAIL: B1 red on the real bridge"; fail=1; }
   b2 || { echo "selftest FAIL: B2 red on the real tree"; fail=1; }
   d1 "$T/drill.sh" || { echo "selftest FAIL: D1 red on the real drill"; fail=1; }
+  d2 "$T/id-drill.sh" || { echo "selftest FAIL: D2 red on the real identity drill"; fail=1; }
   n1 "$T/ntfy.live" || { echo "selftest FAIL: N1 red on the real ntfy probe"; fail=1; }
   sed 's/for k in NTFY_AUTH_USERS NTFY_AUTH_ACCESS NTFY_AUTH_TOKENS; do/for k in; do/' "$T/ntfy.live" > "$T/m7.sh"
   if n1 "$T/m7.sh"; then no "N1 with the Secret comparison removed"; else ok "N1 with the Secret comparison removed"; fi
@@ -212,6 +248,10 @@ if [ "${1:-}" = "--selftest" ]; then
   if d1 "$T/m6.sh"; then no "D1 pinning the OLDEST backup"; else ok "D1 pinning the OLDEST backup"; fi
   grep -v '^ *\${IMG}$' "$T/drill.sh" > "$T/m9.sh"
   if d1 "$T/m9.sh"; then no "D1 with the source's imageName dropped"; else ok "D1 with the source's imageName dropped"; fi
+  sed 's/ && \[ "\${USERS:-0}" -ge 1 \] 2>\/dev\/null//' "$T/id-drill.sh" > "$T/m10.sh"
+  if d2 "$T/m10.sh"; then no "D2 passing a restore with no users"; else ok "D2 passing a restore with no users"; fi
+  sed 's/tockmox-authentik-db-store/tockmox-litellm-db-store/' "$T/id-drill.sh" > "$T/m11.sh"
+  if d2 "$T/m11.sh"; then no "D2 reading the model gateway's store"; else ok "D2 reading the model gateway's store"; fi
   exit $fail
 fi
 
@@ -219,5 +259,6 @@ rc=0
 b1 "$T/bridge.py" && echo "ok: B1 one delivery line per alert, no secrets" || { echo "FAIL: B1"; rc=1; }
 b2 && echo "ok: B2 ntfy replicas 1, reason and TockmoxNtfyDown written" || { echo "FAIL: B2"; rc=1; }
 d1 "$T/drill.sh" && echo "ok: D1 drill pins and records backup=, on the source's PostgreSQL image" || { echo "FAIL: D1"; rc=1; }
+d2 "$T/id-drill.sh" && echo "ok: D2 identity drill recovers the identity store and PASSes only with Authentik's users back" || { echo "FAIL: D2"; rc=1; }
 n1 "$T/ntfy.live" && echo "ok: N1 ntfy restarts onto its auth Secret when it appears or rotates" || { echo "FAIL: N1"; rc=1; }
 exit $rc

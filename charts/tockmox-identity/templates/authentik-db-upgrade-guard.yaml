@@ -1,0 +1,176 @@
+{{- $db := .Values.identity.database -}}
+{{- if and (include "tockmox-identity.cnpgOn" .) (not (($db.upgrade | default dict).bundledDataMigrated)) }}
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+THE UPGRADE GUARD (TM-0788). A fresh install from 0.9.0 runs Authentik on the
+CNPG cluster in authentik-db.yaml; an install that already runs the bundled
+server must not take that default blind, because Authentik would start on an
+EMPTY database: every user, group, flow and OAuth provider gone from its point
+of view, the consoles' sign-ins broken, and nothing red anywhere, since an empty
+Authentik is a healthy Authentik.
+
+WHY NOT A RENDER-TIME CHECK. Nothing in a render can tell a fresh install from
+an upgrade. Argo CD renders with `helm template`, where `lookup` returns
+nothing, and this repository renders no lookups for that reason (the GREENFIELD
+RULE in sso-blueprints.yaml). The only place the difference exists is the
+cluster: the bundled server leaves a volume behind, and a fresh install has
+none. So this asks the cluster, before anything is applied.
+
+WHY A PRESYNC HOOK. Argo CD runs PreSync hooks before it applies or prunes any
+resource of the sync, and a failed PreSync hook fails the whole operation: the
+bundled StatefulSet is not pruned, the CNPG cluster is not created, Authentik is
+not repointed. The sync shows Failed and this Job's log says why and what to
+set. `helm upgrade` users get the same through the pre-install/pre-upgrade
+annotations. BeforeHookCreation keeps the last run's log readable.
+
+WHAT IT LOOKS FOR. A PersistentVolumeClaim in this namespace carrying the
+labels the bundled (Bitnami) primary's volume claim template gets,
+`app.kubernetes.io/name=postgresql` and `app.kubernetes.io/component=primary`,
+and no `cnpg.io/cluster` label (a CNPG volume is not the bundled server's).
+The StatefulSet is not the test: a prune may already have removed it while the
+volume, and the data, are still there.
+
+FAIL CLOSED. If the API cannot be asked (RBAC, a timeout), the Job fails: a
+guard that passes when it cannot see is not a guard.
+
+THE WAY PAST IT, once the data has been copied into the CNPG cluster or
+deliberately discarded: `identity.database.upgrade.bundledDataMigrated: true`,
+which stops this rendering. The old volume can then stay for a release as the
+rollback without blocking every sync.
+*/ -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-authentik-db-upgrade-guard
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-1"
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-1"
+    helm.sh/hook-delete-policy: before-hook-creation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tockmox-authentik-db-upgrade-guard
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-1"
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-1"
+    helm.sh/hook-delete-policy: before-hook-creation
+rules:
+  # Read-only: it lists volume claims in this namespace and nothing else.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tockmox-authentik-db-upgrade-guard
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-1"
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-1"
+    helm.sh/hook-delete-policy: before-hook-creation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tockmox-authentik-db-upgrade-guard
+subjects:
+  - kind: ServiceAccount
+    name: tockmox-authentik-db-upgrade-guard
+    namespace: {{ .Values.namespaces.identity }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tockmox-authentik-db-upgrade-guard
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 120
+  template:
+    metadata:
+      labels:
+        {{- include "tockmox.labels" . | nindent 8 }}
+        app.kubernetes.io/name: tockmox-authentik-db-upgrade-guard
+    spec:
+      restartPolicy: Never
+      serviceAccountName: tockmox-authentik-db-upgrade-guard
+      # Needs the API: it lists the volume claims in this namespace (the Role
+      # above). Token kept on purpose; allowlisted in tools/check-sa-tokens.sh.
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: guard
+          image: {{ include "tockmox.image" (dict "ctx" $ "repo" ($db.backup.restoreDrill.image | default "alpine/k8s:1.37.1")) }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits:   { memory: 64Mi }
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -u
+              NS={{ .Values.namespaces.identity }}
+              SEL='app.kubernetes.io/name=postgresql,app.kubernetes.io/component=primary,!cnpg.io/cluster'
+              # JSON, not `-o name`: an empty list is then an empty array, never a
+              # "No resources found" line that could be read as a finding. An
+              # answer that is not a list of claims fails, like no answer.
+              fail_blind() {
+                echo "upgrade guard: cannot list volume claims in $NS: $1"
+                echo "Refusing: a guard that cannot see must not pass."
+                exit 1
+              }
+              JSON=$(kubectl -n "$NS" get pvc -l "$SEL" -o json 2>&1) || fail_blind "$(printf '%s' "$JSON" | head -3)"
+              FOUND=$(printf '%s' "$JSON" | jq -r '.items[].metadata.name' 2>&1) || fail_blind "the API answer was not a list ($(printf '%s' "$FOUND" | head -1))"
+              if [ -z "$FOUND" ]; then
+                echo "upgrade guard: no bundled PostgreSQL volume in $NS; Authentik starts on {{ $db.name }}."
+                exit 0
+              fi
+              echo "upgrade guard: REFUSING this sync."
+              echo
+              echo "This release would start Authentik on the CNPG cluster {{ $db.name }}, which"
+              echo "starts EMPTY, while the bundled PostgreSQL's data is still in this namespace:"
+              echo "$FOUND" | sed 's/^/  /'
+              echo
+              echo "Nothing has been applied or pruned. Choose one, in your identity values:"
+              echo "  Keep the bundled server for now (nothing changes):"
+              echo "    identity.database.enabled: false"
+              echo "    authentik.postgresql.enabled: true"
+              echo "  Or move the data across first, then set"
+              echo "    identity.database.upgrade.bundledDataMigrated: true"
+              echo "Both are in docs/deployment/upgrade.md, \"Move Authentik's database to CloudNativePG\"."
+              exit 1
+{{- end }}

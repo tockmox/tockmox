@@ -9,6 +9,31 @@ costs you, with the reasoning in the documentation rather than here.
 
 ## [Unreleased]
 
+### Breaking
+
+- **Breaking: Authentik runs on CloudNativePG on a fresh install, and an
+  install on the bundled PostgreSQL must choose before it upgrades.** The
+  identity layer now renders Authentik's database as a CloudNativePG cluster,
+  `tockmox-authentik-db` (PostgreSQL 18), with WAL archived to the shipped
+  object store under `cnpg/authentik`, a nightly base backup kept 30 days, a
+  weekly restore drill that checks Authentik's users came back, and
+  `TockmoxIdentityDatabaseUnbacked` when its backups are off
+  (`identity.database`, on by default). The vendored chart's bundled
+  PostgreSQL (`authentik.postgresql.enabled`) is now off by default, and the
+  nightly `pg_dump` bridge renders only while it is on. It needs a new Secret,
+  `tockmox-authentik-db`, which `tools/mint-secrets.sh` writes on a fresh
+  install. **Action, for an install that runs the bundled server:** add
+  `identity.database.enabled: false` and `authentik.postgresql.enabled: true` to
+  `site/values/identity.yaml` in the same commit as the bump, which renders the
+  0.8 shape unchanged. Without them the identity sync fails before anything is
+  applied, on a PreSync guard that finds the bundled server's volume, rather
+  than starting Authentik on an empty database. Moving the data across later is
+  `docs/deployment/upgrade.md`, "Move Authentik's database to CloudNativePG",
+  **not yet proven on a populated install** (planned for 0.9.1); the new
+  Secret's command for an install minted before 0.9.0 is in
+  `docs/administration/secrets.md`. A site that brought its own PostgreSQL sets
+  `identity.database.enabled: false` and keeps its host.
+
 ### Added
 
 - **Platform Management shows the agents' cases.** With

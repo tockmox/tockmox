@@ -201,14 +201,19 @@ brand:
 # the blueprint status, nothing crashes.
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
-# THE IDENTITY DATABASE'S BACKUP. Authentik runs on the chart's bundled
-# Postgres, which has no CNPG underneath and therefore no Barman path; until
-# the planned CNPG migration this nightly pg_dump to the shipped object store
-# is the honest bridge. Seven-object weekday rotation ... self-pruning, fixed
-# ceiling, seven-day restore window, stated plainly. Requires the platform
-# layer's Garage bootstrap to have copied `tockmox-garage-credentials` into
-# this namespace (it does by default). Needs dataProtection on; follows it
-# off. Restore: gunzip < dump | psql, per backup-restore.md.
+# THE BUNDLED SERVER'S BACKUP, the pg_dump bridge. Authentik's bundled
+# (Bitnami) Postgres has no CNPG underneath and therefore no Barman path, so
+# this nightly pg_dump to the shipped object store is its backup.
+# Seven-object weekday rotation ... self-pruning, fixed ceiling, seven-day
+# restore window, stated plainly. Requires the platform layer's Garage
+# bootstrap to have copied `tockmox-garage-credentials` into this namespace
+# (it does by default). Needs dataProtection on; follows it off. Restore:
+# gunzip < dump | psql, per backup-restore.md.
+#
+# RENDERED ONLY WHILE THE BUNDLED SERVER IS ON (`authentik.postgresql.enabled`,
+# TM-0788). A fresh 0.9.0 install runs Authentik on the CNPG cluster under
+# `identity` below, which archives WAL and drills its restores, and gets no
+# bridge. An install that keeps the bundled server keeps the bridge with it.
 # ---------------------------------------------------------------------------
 databaseBackup:
   enabled: true
@@ -233,6 +238,172 @@ databaseBackup:
   # differ (TM-1023), and `grep -c postgres: images.txt` reads 1 when they agree.
   postgresImage: docker.io/library/postgres:17.11-bookworm
   uploaderImage: alpine/k8s:1.37.1
+
+# ---------------------------------------------------------------------------
+# THE IDENTITY DATABASE ON CLOUDNATIVEPG (TM-0788). Authentik's database as a
+# CNPG Cluster this chart renders in the release namespace, the same shape as
+# the model gateway's (`modelGateway.database` in tockmox-ai, key for key):
+# WAL archived continuously by the Barman Cloud plugin to the shipped object
+# store, a nightly base backup, and a weekly restore drill that proves the
+# store holds a database somebody could come back from. It replaces the
+# bundled (Bitnami) PostgreSQL and the nightly pg_dump bridge above.
+#
+# ON FOR A FRESH INSTALL from 0.9.0 (ruled 2026-10-27). AN INSTALL THAT ALREADY
+# RUNS THE BUNDLED SERVER MUST NOT TAKE THIS DEFAULT BLIND: it would start
+# Authentik on an empty database. Two things stop that from happening quietly:
+#
+#   1. Keep the bundled server by setting TWO keys in your identity values,
+#      `identity.database.enabled: false` and `authentik.postgresql.enabled:
+#      true`. Both, because the second belongs to the vendored authentik
+#      chart, whose values are static YAML and cannot read the first. The
+#      render guards in templates/authentik-db.yaml refuse every half-set
+#      combination and name the missing key.
+#   2. If you set neither, the upgrade guard (templates/authentik-db-upgrade-
+#      guard.yaml) runs BEFORE anything is applied, finds the bundled server's
+#      volume in the namespace, and fails the sync. Nothing is applied and
+#      nothing is pruned until you choose.
+#
+# Moving the data across is docs/deployment/upgrade.md, "Move Authentik's
+# database to CloudNativePG". That procedure is written and NOT YET PROVEN on a
+# populated install (TM-0788; the proof is planned for 0.9.1).
+# ---------------------------------------------------------------------------
+identity:
+  database:
+    # On: this chart renders the CNPG Cluster below and Authentik connects to
+    # it. Off: no Cluster; Authentik uses whatever `authentik.postgresql`
+    # says (the bundled server, or a server of your own named in
+    # `authentik.authentik.postgresql.host`).
+    enabled: true
+    # Cluster name. `<name>-rw` is the read/write Service Authentik must dial;
+    # the shipped `authentik.authentik.postgresql.host` resolves to
+    # `tockmox-authentik-db-rw`, and a guard fails the render if the two
+    # disagree, because the failure otherwise shows up as a pod retrying DNS.
+    # Rename it and you must set that host to `<name>-rw` as well.
+    name: tockmox-authentik-db
+    # The role that owns the database. MUST equal `authentik.authentik.
+    # postgresql.user` (a guard checks) and the `username` key in the
+    # `tockmox-authentik-db` Secret (docs/administration/secrets.md), because
+    # CNPG bootstraps the owner from that Secret and Authentik logs in as the
+    # user its own values name.
+    owner: authentik
+    # The owner's credentials, a Secret YOU create, type kubernetes.io/basic-auth:
+    # `username` (the owner above) and `password`, the SAME value as
+    # AUTHENTIK_POSTGRESQL__PASSWORD in `tockmox-authentik`. tools/mint-secrets.sh
+    # writes both from one generated value on a fresh install.
+    secretName: tockmox-authentik-db
+    # 1 on a single-node cluster, 3 when you have three nodes to put them on.
+    # This also decides the storage class: see storageClass below.
+    instances: 1
+    # The bundled server's volume was 8Gi; the same here.
+    storage: 8Gi
+    # Empty means "derive it from instances", exactly as for the model
+    # gateway's database: `global.storageClass` at one instance, because
+    # nothing else holds a copy, and `global.localStorageClass` at three or
+    # more, because Postgres is already streaming to its own replicas.
+    storageClass: ""
+    # PINNED, PostgreSQL 18 (ruled 2026-10-27). A CNPG Cluster with no image
+    # takes the operator's default ONCE, at creation, and an operator upgrade
+    # that moves the default major then leaves this cluster on an older major
+    # than a fresh one, which is the drift the restore drill had to learn to
+    # read around (TM-1023). The tag is the minor the reference site's CNPG
+    # databases run. A major-version jump on an existing data directory is a
+    # dump and restore, not an image bump. Mirror it for an air-gapped install:
+    # like the model gateway's, it is not listed in images.txt and
+    # global.imageRegistry does not rewrite it.
+    imageName: ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie
+    # The postgres container's resources (spec.resources on the Cluster). The
+    # bundled server's figures, carried over: request 128Mi from the 0.8.0
+    # greenfield peak; limit 512Mi, raised after Authentik's migrations and
+    # blueprints OOMKilled the bundled server at 224Mi during the 0.8.0 ->
+    # 0.8.1 upgrade on the lab (TM-0903). Not yet re-measured on CNPG.
+    # CHANGING THIS RESTARTS THE DATABASE at instances: 1. `null` leaves it unset.
+    resources:
+      requests:
+        memory: 128Mi
+      limits:
+        memory: 512Mi
+    # Empty omits priorityClassName. Set `tockmox-apps` on a full Tockmox
+    # install; naming a class that does not exist gets the pod REJECTED.
+    priorityClassName: ""
+    # Whether the operator creates a PodMonitor for this cluster's exporter.
+    # Follows the observability capability as well; see the model gateway's
+    # database for why the backup story needs it.
+    monitoring:
+      enablePodMonitor: true
+    # DISASTER RECOVERY INTO THIS CLUSTER. Off: the cluster bootstraps empty
+    # with `initdb`. On: it bootstraps from a base backup and WAL in an
+    # ObjectStore (`bootstrap.recovery`). Use it on a NEW cluster: recovery
+    # runs once, at first bootstrap, and does nothing to a cluster that exists.
+    #   objectStoreName  the ObjectStore holding the backups; empty uses this
+    #                    chart's own store when backups are on
+    #   serverName       the name they were archived under (required)
+    #   sourceName       the externalClusters entry; default <name>-origin
+    # Recovering from your own store needs a NEW backup.serverName; a guard
+    # says so. Not exercised against a live CNPG in this repo's gates.
+    recovery:
+      enabled: false
+      objectStoreName: ""
+      serverName: ""
+      sourceName: ""
+    # The upgrade guard (templates/authentik-db-upgrade-guard.yaml). It runs
+    # before every sync while this database is on and refuses the sync if the
+    # bundled server's volume is still in the namespace. Set
+    # `bundledDataMigrated: true` once you have copied that data into this
+    # cluster (or decided to discard it), so the old volume can be kept for a
+    # release as your rollback without blocking every sync.
+    upgrade:
+      bundledDataMigrated: false
+    # BACKUPS FOLLOW THE dataProtection CAPABILITY: the house tri-state. Unset
+    # (null) follows `capabilities.dataProtection`, which is on; true or false
+    # means what it says. The default assumes the platform layer's Garage and
+    # Barman plugin are on and its bootstrap has copied
+    # `tockmox-garage-credentials` into this namespace (platform
+    # `garage.credentialsNamespaces` lists it by default).
+    backup:
+      enabled: null
+      # With backups OFF and the observability capability on, render
+      # TockmoxIdentityDatabaseUnbacked, which fires for as long as the
+      # identity database has no backup. Set false only if something outside
+      # this chart really covers it.
+      unbackedAlert: true
+      # Name an ObjectStore you created, OR leave it empty and let
+      # `objectStore` below render one against the shipped Garage. Not both:
+      # a guard refuses the pair.
+      objectStoreName: ""
+      objectStore:
+        create: true
+        name: tockmox-authentik-db-store
+        endpoint: http://tockmox-garage.tockmox-platform.svc:3900
+        region: garage
+        bucket: tockmox-backups
+        credentialsSecretName: tockmox-garage-credentials
+        # Its own prefix in the shared bucket, under cnpg/ (the pg_dump bridge
+        # writes authentik-db/, so the two never share a path).
+        destinationPath: s3://tockmox-backups/cnpg/authentik
+        # Base backups, and the WAL between them, older than this are pruned
+        # from the store by the plugin.
+        retentionPolicy: "30d"
+      # The name this cluster archives under. Empty keeps CNPG's default, the
+      # cluster name, and the restore drill reads the same name. Set a NEW one
+      # when a cluster is RECOVERED from a store it will also archive to.
+      serverName: ""
+      # Six fields (CNPG includes seconds). 03:20, after the model gateway's
+      # 03:00 and the pg_dump bridge's 03:10 slot, so one small Garage is not
+      # absorbing every stream at once.
+      schedule: "0 20 3 * * *"
+      # THE SCHEDULED RESTORE DRILL for this database (templates/restore-drill.
+      # yaml): bootstraps a NEW cluster from the store, asserts recovery ended
+      # and Authentik's user table came back with rows, writes a dated
+      # PASS/FAIL row to the tockmox-restore-drill-register ConfigMap in this
+      # namespace, and tears itself down. It never touches the live database.
+      # On when backups are on.
+      restoreDrill:
+        enabled: true
+        # Mondays 04:45, after the model gateway's 04:30 drill, so the two
+        # never hold a drill cluster at the same time. FIVE fields.
+        schedule: "45 4 * * 1"
+        suspend: false
+        image: alpine/k8s:1.37.1
 
 sso:
   enabled: true
@@ -497,6 +668,18 @@ authentik:
   authentik:
     disable_update_check: true
     disable_startup_analytics: true
+    # WHICH DATABASE AUTHENTIK DIALS (TM-0788). A template, evaluated by the
+    # vendored chart against ITS values, so the host follows the bundled
+    # server's own switch: `<release>-postgresql` (upstream's default) while
+    # `authentik.postgresql.enabled` is true, otherwise the read/write Service
+    # of the CNPG cluster under `identity.database`. A parent chart cannot set
+    # a subchart's value from a condition, and this is the one field upstream
+    # runs through `tpl`, so the choice lives here rather than in a third key.
+    # templates/authentik-db.yaml evaluates the same string and fails the
+    # render if it does not land on `<identity.database.name>-rw` while that
+    # database is on. Replace it outright to use a server of your own.
+    postgresql:
+      host: '{{ if .Values.postgresql.enabled }}{{ .Release.Name }}-postgresql{{ else }}tockmox-authentik-db-rw{{ end }}'
   server:
     resources:
       # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
@@ -553,7 +736,12 @@ authentik:
         enabled: true
       enabled: true
   postgresql:
-    enabled: true
+    # THE BUNDLED (Bitnami) SERVER: OFF from 0.9.0 (TM-0788), because a fresh
+    # install runs Authentik on the CNPG cluster under `identity.database`. An
+    # install that already runs it sets this back to true, together with
+    # `identity.database.enabled: false`, until it has moved its data across
+    # (docs/deployment/upgrade.md). Everything below applies only while it is on.
+    enabled: false
     # THE SERVER IMAGE IS PINNED HERE, not left to the subchart. authentik
     # 2026.8.4 moved its bundled default from 17.11-bookworm to 17.11-trixie:
     # same PostgreSQL, new Debian, new glibc, so an existing database reports a

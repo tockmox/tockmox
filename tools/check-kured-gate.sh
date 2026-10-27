@@ -15,7 +15,8 @@
 # is in tools/kured-gate.txt; this gate fails when an alert has none.
 #
 # WHAT IS CHECKED, on `helm template` of every layer that carries a
-# PrometheusRule, with ci/values.yaml and ci/values-all-on.yaml:
+# PrometheusRule, with ci/values.yaml and ci/values-all-on.yaml (and the identity
+# layer once more with the bundled server kept, TM-0788):
 #   - every Tockmox-authored alert has a line in tools/kured-gate.txt or a
 #     `kured_gate: block|pass` annotation, and not both
 #   - every line names an alert that still renders
@@ -55,6 +56,17 @@ for chart in $LAYERS; do
     || { echo "check-kured-gate: REFUSING ... charts/$chart did not render: $(head -c 300 "$T/$chart.err")" >&2; exit 1; }
   RENDERED+=("$T/$chart.yaml")
 done
+# THE BUNDLED-SERVER SHAPE OF THE IDENTITY LAYER (TM-0788). From 0.9.0 Authentik
+# runs on CNPG by default, and an install that keeps the bundled server (two
+# keys, docs/deployment/upgrade.md) renders the pg_dump bridge and its two
+# freshness alerts, which neither overlay above renders any more. Those alerts
+# still fire on real clusters, so they still need a decision here.
+if [ -f "$T/tockmox-identity.yaml" ]; then
+  helm template tockmox-identity charts/tockmox-identity -f ci/values.yaml -f ci/values-all-on.yaml \
+    --set identity.database.enabled=false --set authentik.postgresql.enabled=true > "$T/tockmox-identity-bundled.yaml" 2> "$T/tockmox-identity-bundled.err" \
+    || { echo "check-kured-gate: REFUSING ... charts/tockmox-identity with the bundled server did not render: $(head -c 300 "$T/tockmox-identity-bundled.err")" >&2; exit 1; }
+  RENDERED+=("$T/tockmox-identity-bundled.yaml")
+fi
 
 case "${1:-}" in
   --print-regexp) exec python3 -I "$LIB" regexp "$LEDGER" "${RENDERED[@]}" ;;

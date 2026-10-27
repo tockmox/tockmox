@@ -110,12 +110,16 @@ assert_artifact \
   "bs_out | grep -c '^  .*[0-9]* sealed file(s) in '" \
   "1"
 assert_artifact \
-  "a first run seals exactly the files mint-secrets.sh knows how to make (16)" \
+  "a first run seals exactly the files mint-secrets.sh knows how to make (17)" \
   "diff <(bs_expected) <(bs_actual) >/dev/null && bs_actual | wc -l | tr -d ' '" \
-  "16"
+  "17"
 assert_artifact \
   "authentik/authentik-postgres carry ONE value (sealed hashes equal)" \
   "[ \"\$(bs_hash authentik.sealed.yaml AUTHENTIK_POSTGRESQL__PASSWORD)\" = \"\$(bs_hash authentik-postgres.sealed.yaml password)\" ] && [ -n \"\$(bs_hash authentik.sealed.yaml AUTHENTIK_POSTGRESQL__PASSWORD)\" ] && echo matched" \
+  "matched"
+assert_artifact \
+  "the CNPG identity database's owner Secret carries the SAME value too (TM-0788)" \
+  "[ \"\$(bs_hash authentik.sealed.yaml AUTHENTIK_POSTGRESQL__PASSWORD)\" = \"\$(bs_hash authentik-db.sealed.yaml password)\" ] && echo matched" \
   "matched"
 assert_artifact \
   "sso holds the same three values its three consoles hold" \
@@ -212,6 +216,26 @@ assert_artifact \
   "bs_leaks SECRETMARKER" \
   "0"
 
+# ===================================================================== B2b
+path_begin "B2b" "bootstrap-secrets: an install minted before 0.9.0 has no CNPG owner Secret, and is told so rather than refused (TM-0788)"
+cp "$D/site/secrets/authentik-db.sealed.yaml" "$D/inputs/keep-db-b2b"   # (sealed ciphertext; not a secret)
+rm -f "$D/site/secrets/authentik-db.sealed.yaml"
+bs_run --mode new "${BS_COMMON[@]}" --backup-out "$D/backup/key.enc" --passphrase-file "$D/inputs/pass" \
+  --ntfy-password-file "$D/inputs/ntfy" "${FULL_FLAGS[@]}"
+assert_artifact \
+  "the run is not refused: no REFUSING line" \
+  "bs_err | grep -c 'REFUSING'" \
+  "0"
+assert_artifact \
+  "it reports tockmox-authentik-db as not minted and points at secrets.md" \
+  "bs_out | grep -c 'tockmox-authentik-db ... not minted: authentik.sealed.yaml already exists.*docs/administration/secrets.md'" \
+  "1"
+assert_artifact \
+  "and does not invent one (no authentik-db.sealed.yaml, nothing regenerated)" \
+  "[ ! -e '$D/site/secrets/authentik-db.sealed.yaml' ] && [ \"\$(bs_calls '^openssl rand')\" = 0 ] && echo not-invented" \
+  "not-invented"
+cp "$D/inputs/keep-db-b2b" "$D/site/secrets/authentik-db.sealed.yaml"
+
 # ===================================================================== B3
 path_begin "B3" "bootstrap-secrets: a half-present matched pair is refused, before anything else"
 rm -f "$D/site/secrets/authentik-postgres.sealed.yaml"
@@ -232,7 +256,7 @@ assert_artifact \
   "0"
 assert_artifact \
   "no file was created or changed" \
-  "[ \"\$(bs_sealed_sum)\" = '$BEFORE_SUM' ] && [ \"\$(bs_sealed)\" = 15 ] && echo untouched" \
+  "[ \"\$(bs_sealed_sum)\" = '$BEFORE_SUM' ] && [ \"\$(bs_sealed)\" = 16 ] && echo untouched" \
   "untouched"
 assert_artifact \
   "the cluster was not contacted: no helm, no kubeseal, no get/create/apply" \
@@ -241,6 +265,14 @@ assert_artifact \
 # The other half, deleted from the OTHER side: sso alone missing.
 cp "$D/site/secrets/authentik.sealed.yaml" "$D/inputs/keep"   # (sealed ciphertext; not a secret)
 rm -f "$D/site/secrets/authentik.sealed.yaml"                # now BOTH authentik halves are gone
+cp "$D/site/secrets/authentik-db.sealed.yaml" "$D/inputs/keep-db"
+bs_run --mode new "${BS_COMMON[@]}" --backup-out "$D/backup/key.enc" --passphrase-file "$D/inputs/pass" \
+  --ntfy-password-file "$D/inputs/ntfy" "${FULL_FLAGS[@]}"
+assert_artifact \
+  "the CNPG owner Secret without the authentik Secret it copies is refused (TM-0788)" \
+  "bs_err | grep -c 'REFUSING: authentik-db.sealed.yaml exists and authentik.sealed.yaml does not'" \
+  "1"
+rm -f "$D/site/secrets/authentik-db.sealed.yaml"             # and its third copy, so all three rotate
 rm -f "$D/site/secrets/sso.sealed.yaml"
 bs_run --mode new "${BS_COMMON[@]}" --backup-out "$D/backup/key.enc" --passphrase-file "$D/inputs/pass" \
   --ntfy-password-file "$D/inputs/ntfy" "${FULL_FLAGS[@]}"
@@ -255,9 +287,9 @@ OLD_GRAF_SEALED_BEFORE="$(bs_hash sso-grafana.sealed.yaml client-secret 2>/dev/n
 bs_run --mode new "${BS_COMMON[@]}" --backup-out "$D/backup/key.enc" --passphrase-file "$D/inputs/pass" \
   --ntfy-password-file "$D/inputs/ntfy" "${FULL_FLAGS[@]}"
 assert_artifact \
-  "after deleting a whole pair, the re-run completes all 16 again" \
+  "after deleting a whole pair, the re-run completes all 17 again" \
   "diff <(bs_expected) <(bs_actual) >/dev/null && bs_actual | wc -l | tr -d ' '" \
-  "16"
+  "17"
 assert_artifact \
   "and the re-minted pair is matched again, on a NEW value" \
   "n=\$(bs_hash authentik.sealed.yaml AUTHENTIK_POSTGRESQL__PASSWORD); [ \"\$n\" = \"\$(bs_hash authentik-postgres.sealed.yaml password)\" ] && [ \"\$n\" != '$OLD_AK' ] && [ \"\$(bs_hash sso.sealed.yaml GRAFANA_CLIENT_SECRET)\" = \"\$(bs_hash sso-grafana.sealed.yaml client-secret)\" ] && echo rotated-matched" \
@@ -293,9 +325,9 @@ assert_artifact \
 bs_run --mode new "${BS_COMMON[@]}" --backup-out "$D/backup/key.enc" --passphrase-file "$D/inputs/pass" \
   --ntfy-password-file "$D/inputs/ntfy" "${FULL_FLAGS[@]}"
 assert_artifact \
-  "the identical command, re-run, resumes the controller it installed and completes all 16" \
+  "the identical command, re-run, resumes the controller it installed and completes all 17" \
   "diff <(bs_expected) <(bs_actual) >/dev/null && bs_actual | wc -l | tr -d ' '" \
-  "16"
+  "17"
 assert_artifact \
   "and did not install the controller a second time" \
   "bs_calls '^helm upgrade'" \
@@ -412,9 +444,9 @@ assert_artifact \
   "bs_calls '^helm '" \
   "0"
 assert_artifact \
-  "all 16 credentials were sealed against the reused controller's certificate" \
+  "all 17 credentials were sealed against the reused controller's certificate" \
   "diff <(bs_expected) <(bs_actual) >/dev/null && bs_actual | wc -l | tr -d ' '" \
-  "16"
+  "17"
 assert_artifact \
   "the reused controller's key was exported encrypted (and not readable in the backup)" \
   "[ \"\$(head -c 8 '$D/backup/key.enc')\" = Salted__ ] && grep -c KEYMARKER '$D/backup/key.enc' || true" \
@@ -660,9 +692,9 @@ assert_artifact \
   "bs_out | grep -c 'reusing sealed-secrets/sealed-secrets-controller'" \
   "1"
 assert_artifact \
-  "all 16 credentials were sealed and no key was created, changed or removed" \
+  "all 17 credentials were sealed and no key was created, changed or removed" \
   "bs_actual | wc -l | tr -d ' '; [ \"\$(find '$D/state/cluster/keys' -type f | sort | xargs cksum)\" = '$KEYS_BEFORE' ] && echo keys-unchanged" \
-  "16
+  "17
 keys-unchanged"
 assert_artifact \
   "nothing was installed and nothing was created in the cluster" \
@@ -676,9 +708,9 @@ assert_artifact \
   "[ \"\$(bs_sealed_sum)\" = '$FIRST_SUM' ] && echo identical" \
   "identical"
 assert_artifact \
-  "and lists all 16 as kept existing, by name, rather than reporting success" \
+  "and lists all 17 as kept existing, by name, rather than reporting success" \
   "bs_out | sed -n '/^ALREADY PRESENT/,\$p' | grep -c '\\.sealed\\.yaml'" \
-  "16"
+  "17"
 assert_artifact \
   "no credential was generated or sealed on the second run" \
   "bs_calls '^openssl rand|^kubeseal sealed'" \
@@ -720,6 +752,6 @@ assert_artifact \
 printf '%s\n' lab-test https://192.0.2.10:6443 sealed-secrets/sealed-secrets-controller > "$D/inputs/ans-right"
 bs_pty "$D/inputs/ans-right" "${PTY_ARGS[@]}"
 assert_artifact \
-  "all three typed correctly: the run proceeds and seals all 16 against the adopted controller" \
+  "all three typed correctly: the run proceeds and seals all 17 against the adopted controller" \
   "bs_actual | wc -l | tr -d ' '" \
-  "16"
+  "17"

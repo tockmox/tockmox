@@ -74,7 +74,8 @@ tools/check-harness-context.sh	SC2015	1
 tools/check-harness-context.sh	SC2016	12
 tools/check-harness-context.sh	SC2164	1
 tools/check-identity-seams.sh	SC2012	3
-tools/check-identity-seams.sh	SC2015	27
+tools/check-identity-seams.sh	SC2015	37
+tools/check-identity-seams.sh	SC2016	3
 tools/check-identity-seams.sh	SC2164	1
 tools/check-identity-seams.sh	SC2206	1
 tools/check-immutable-fields.sh	SC2015	2
@@ -94,8 +95,8 @@ tools/check-no-site-specifics.sh	SC1007	1
 tools/check-no-site-specifics.sh	SC2034	1
 tools/check-no-site-specifics.sh	SC2086	1
 tools/check-no-site-specifics.sh	SC2164	1
-tools/check-notify-and-drill.sh	SC2015	4
-tools/check-notify-and-drill.sh	SC2016	7
+tools/check-notify-and-drill.sh	SC2015	5
+tools/check-notify-and-drill.sh	SC2016	8
 tools/check-pasteable-blocks.sh	SC2016	30
 tools/check-pasteable-blocks.sh	SC2059	5
 tools/check-platform-seams.sh	SC2329	22

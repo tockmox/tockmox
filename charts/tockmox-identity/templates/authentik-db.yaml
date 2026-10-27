@@ -1,0 +1,300 @@
+{{- if (include "tockmox.appEnabled" (dict "ctx" $ "app" "authentik")) }}
+{{- /*
+AUTHENTIK'S DATABASE ON CLOUDNATIVEPG (TM-0788).
+
+The same shape as the model gateway's database (charts/tockmox-ai/templates/
+litellm-db.yaml), deliberately: one CR in the release namespace, the owner
+bootstrapped from a basic-auth Secret YOU create, WAL archived by the Barman
+Cloud plugin to the shipped object store, a nightly base backup, and the
+restore drill in restore-drill.yaml. Same operator, same backup story, same
+drill as every other database here. What it replaces is the vendored authentik
+chart's bundled (Bitnami) PostgreSQL, which had no CNPG underneath and so no
+WAL and no point-in-time recovery, only the nightly pg_dump bridge.
+
+WHY NO NAMESPACE FIELD on the Cluster: it keeps a release inside the namespace
+it was installed into, beside the Authentik pods that dial it.
+
+THE GUARDS FIRST, because the database is chosen by THREE values in two charts
+and a vendored chart's values are static YAML that cannot read this chart's:
+`identity.database.enabled` (this chart), `authentik.postgresql.enabled` (the
+bundled server, the authentik chart's own condition) and the host Authentik
+dials (`authentik.authentik.postgresql.host`, evaluated the way the authentik
+chart evaluates it). Each guard below is one way those disagree, and each one
+otherwise renders cleanly and shows up later as an Authentik pod that cannot
+reach a database or, worse, reaches an empty one.
+*/ -}}
+{{- $db := .Values.identity.database -}}
+{{- $cnpgOn := include "tockmox-identity.cnpgOn" . | eq "true" -}}
+{{- $bundledOn := include "tockmox-identity.bundledOn" . | eq "true" -}}
+{{- $host := include "tockmox-identity.dbHost" . -}}
+{{- $expected := printf "%s-rw" $db.name -}}
+{{- $akpg := ((.Values.authentik.authentik | default dict).postgresql | default dict) -}}
+{{- $akUser := $akpg.user | default "authentik" -}}
+{{- $akName := $akpg.name | default "authentik" -}}
+{{- if and $cnpgOn $bundledOn -}}
+{{- fail "identity.database.enabled and authentik.postgresql.enabled are both true. That is two identity databases, and Authentik can use only one of them: the other would sit beside it, empty or stale, looking healthy. A fresh install wants the CNPG one: set authentik.postgresql.enabled to false. An install that already runs the bundled server keeps it with identity.database.enabled: false until it has moved its data (docs/deployment/upgrade.md, \"Move Authentik's database to CloudNativePG\")." -}}
+{{- end -}}
+{{- if and $cnpgOn (ne $host $expected) -}}
+{{- fail (printf "Authentik will dial %q (authentik.authentik.postgresql.host, as the authentik chart evaluates it), but the CNPG cluster this chart renders serves reads and writes at %q. They must match, or Authentik retries a host that does not exist and never says why. Set authentik.authentik.postgresql.host to %q, or rename identity.database.name back to tockmox-authentik-db." $host $expected $expected) -}}
+{{- end -}}
+{{- if and $cnpgOn (ne $db.owner $akUser) -}}
+{{- fail (printf "identity.database.owner is %q but Authentik logs in as %q (authentik.authentik.postgresql.user). CNPG creates the database owned by the first; Authentik would authenticate as a role that does not exist. Make them equal, and make the username key of the %s Secret equal too." $db.owner $akUser $db.secretName) -}}
+{{- end -}}
+{{- if and (not $cnpgOn) (eq $host $expected) -}}
+{{- if $bundledOn -}}
+{{- fail (printf "authentik.postgresql.enabled is true (the bundled server) but Authentik will dial %q, the CNPG cluster that identity.database.enabled: false no longer renders. Set authentik.authentik.postgresql.host back to the shipped template, or remove your override of it, so the host follows the bundled server." $host) -}}
+{{- else -}}
+{{- fail (printf "identity.database.enabled is false and the bundled server is off (authentik.postgresql.enabled), so this release renders no database, and Authentik will dial %q, which nothing serves. To keep the bundled server on an install that already runs it, set authentik.postgresql.enabled: true as well (docs/deployment/upgrade.md). To use a PostgreSQL of your own, set authentik.authentik.postgresql.host to it." $host) -}}
+{{- end -}}
+{{- end -}}
+{{- if $cnpgOn }}
+{{- $backupOn := include "tockmox-identity.dbBackupEnabled" . | eq "true" -}}
+{{- $os := $db.backup.objectStore | default dict -}}
+{{- if and $backupOn $db.backup.objectStoreName $os.create -}}
+{{- fail "identity.database.backup names an objectStoreName AND asks this chart to create one. Both would exist and only one would be used, silently. Either name your own ObjectStore and set backup.objectStore.create to false, or leave objectStoreName empty and let this chart render one against the shipped object store." -}}
+{{- end -}}
+{{- if and $backupOn (not $db.backup.objectStoreName) (not $os.create) -}}
+{{- fail "identity.database backups are on (backup.enabled true, or unset with capabilities.dataProtection on) with no destination: objectStoreName is empty and backup.objectStore.create is false. A backup with no destination is not a backup. Either set create to true, which points it at the object store the platform layer ships, or create your own ObjectStore and name it (docs/operations/backup-restore.md)." -}}
+{{- end -}}
+{{- $storeName := $db.backup.objectStoreName | default $os.name -}}
+{{- /*
+RECOVERY, copied from the model gateway's database with its two guards: a
+recovered cluster that ARCHIVES to the store and server name it recovered from
+finds the archive not empty and its WAL archiver fails, and a recovery with no
+named source has nothing to read.
+*/ -}}
+{{- $rec := $db.recovery | default dict -}}
+{{- $recStore := "" -}}
+{{- $recServer := "" -}}
+{{- $recSource := "" -}}
+{{- if $rec.enabled -}}
+{{- $recStore = $rec.objectStoreName | default (ternary $storeName "" $backupOn) -}}
+{{- $recServer = $rec.serverName | default "" -}}
+{{- $recSource = $rec.sourceName | default (printf "%s-origin" $db.name) -}}
+{{- if or (not $recStore) (not $recServer) -}}
+{{- fail "identity.database.recovery.enabled needs the ObjectStore to read from (recovery.objectStoreName, or backups on with the chart's own store) and recovery.serverName, the server name the backups were archived under. Without both there is nothing to recover from." -}}
+{{- end -}}
+{{- if and $backupOn (eq $recStore $storeName) (eq $recServer ($db.backup.serverName | default $db.name)) -}}
+{{- fail (printf "identity.database.recovery reads store %q under server name %q, and backup would archive the recovered cluster to the same place. CNPG refuses to archive into a non-empty path. Set identity.database.backup.serverName to a NEW name (for example %q) so the recovered cluster writes its own archive." $recStore $recServer (printf "%s-r1" $db.name)) -}}
+{{- end -}}
+{{- end }}
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ $db.name }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $db.name }}
+spec:
+  instances: {{ $db.instances }}
+  {{- with $db.imageName }}
+  imageName: {{ . | quote }}
+  {{- end }}
+  {{- with $db.priorityClassName }}
+  priorityClassName: {{ . | quote }}
+  {{- end }}
+  {{- with $db.resources }}
+  # The postgres container's requests and limits. CNPG rolls the instance pods
+  # when this changes, so at instances: 1 a change is a restart, and a restart
+  # of this database is a sign-in outage for every console.
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  monitoring:
+    # The operator creates the PodMonitor that scrapes cnpg_* from the instance
+    # pods only when this is true, and the WAL-backlog alert below reads it.
+    # The policy layer's allow-prometheus-scrape in this namespace already
+    # admits Prometheus to every pod on every port.
+    enablePodMonitor: {{ and $db.monitoring.enablePodMonitor (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") | not | not) }}
+  storage:
+    # THE CLASS FOLLOWS THE REPLICA COUNT, as for the model gateway's database
+    # (the reasoning is in litellm-db.yaml): replicated class at one instance,
+    # local class at three or more, `storageClass` to override. Omitted, not
+    # emitted as "", when it resolves empty.
+    {{- $class := $db.storageClass | default "" -}}
+    {{- if not $class }}
+      {{- if ge (int $db.instances) 3 }}
+        {{- $class = .Values.global.localStorageClass | default "" }}
+      {{- else }}
+        {{- $class = .Values.global.storageClass | default "" }}
+      {{- end }}
+    {{- end }}
+    {{- with $class }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+    size: {{ $db.storage }}
+  bootstrap:
+    {{- if $rec.enabled }}
+    recovery:
+      source: {{ $recSource | quote }}
+      database: {{ $akName | quote }}
+      owner: {{ $db.owner | quote }}
+      secret:
+        name: {{ $db.secretName | quote }}
+    {{- else }}
+    initdb:
+      database: {{ $akName | quote }}
+      owner: {{ $db.owner | quote }}
+      secret:
+        name: {{ $db.secretName | quote }}
+    {{- end }}
+  {{- if $rec.enabled }}
+  externalClusters:
+    - name: {{ $recSource | quote }}
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: {{ $recStore | quote }}
+          serverName: {{ $recServer | quote }}
+  {{- end }}
+  {{- if $backupOn }}
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      enabled: true
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: {{ $storeName | quote }}
+        {{- with $db.backup.serverName }}
+        serverName: {{ . | quote }}
+        {{- end }}
+  {{- end }}
+{{- if $backupOn }}
+---
+# WAL archives continuously from the moment the plugin is enabled; base
+# backups follow this schedule. backup-restore.md shows the one-off Backup CR
+# that proves one now rather than at 03:20.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ $db.name }}-scheduled
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  schedule: {{ $db.backup.schedule | quote }}
+  backupOwnerReference: self
+  cluster:
+    name: {{ $db.name }}
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+{{- end }}
+{{- if and $backupOn $db.monitoring.enablePodMonitor (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors")) }}
+---
+# THE CONTINUOUS BACKUP SIGNAL for this database: the same rule, threshold and
+# reasoning as the model gateway's (litellm-db.yaml explains why it reads
+# cnpg_collector_pg_wal_archive_status and not the backup-age timestamps,
+# which report 0 under the barman-cloud plugin). Scoped to this namespace, so
+# the two rules never fire for each other's database.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $db.name }}-backup-health
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: tockmox.identity.wal-archive
+      interval: 5m
+      rules:
+        - alert: TockmoxWalArchiveBacklog
+          expr: >-
+            max by (namespace, pod) (
+              cnpg_collector_pg_wal_archive_status{namespace={{ .Values.namespaces.identity | quote }}, value="ready"}
+            ) > 3
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "WAL archiving is backing up on {{ "{{ $labels.pod }}" }} ({{ "{{ $value }}" }} segments waiting)"
+            description: >-
+              {{ "{{ $value }}" }} WAL segments have been waiting in pg_wal/archive_status
+              on {{ "{{ $labels.namespace }}" }}/{{ "{{ $labels.pod }}" }} for over 15 minutes.
+              The archiver is stalled, which means every point-in-time recovery
+              after the last shipped segment is already lost and the next base
+              backup will fail its pre-flight. Check the Cluster's status
+              (`kubectl -n {{ .Values.namespaces.identity }} describe cluster {{ $db.name }}`,
+              the ContinuousArchiving condition), then the ObjectStore
+              credential, endpoint and region.
+{{- end }}
+{{- if and $backupOn $os.create }}
+---
+{{/*
+The backup destination, rendered rather than left as a prerequisite: the
+shipped Garage, under its own prefix in the shared bucket. STILL NOT A SECOND
+SITE: the endpoint is in this cluster, and losing the cluster loses both the
+database and its backups. Point `endpoint` somewhere else the moment you have
+somewhere else.
+*/ -}}
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: {{ $os.name }}
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  {{- with $os.retentionPolicy }}
+  retentionPolicy: {{ . | quote }}
+  {{- end }}
+  configuration:
+    destinationPath: {{ $os.destinationPath | quote }}
+    endpointURL: {{ $os.endpoint | quote }}
+    s3Credentials:
+      accessKeyId:
+        name: {{ $os.credentialsSecretName }}
+        key: ACCESS_KEY_ID
+      secretAccessKey:
+        name: {{ $os.credentialsSecretName }}
+        key: ACCESS_SECRET_KEY
+      # Garage validates the SigV4 region on EVERY operation and its region is
+      # "garage". Without this the pre-flight check signs with the boto default,
+      # gets 400 on HeadBucket, and WAL archiving aborts while restores still
+      # work (found in the 2026-08-19 DR rehearsal; see litellm-db.yaml).
+      region:
+        name: {{ $os.credentialsSecretName }}
+        key: REGION
+    wal:
+      compression: gzip
+    data:
+      compression: gzip
+{{- end }}
+{{- if and (not $backupOn) (ne (toString $db.backup.unbackedAlert) "false") (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors")) }}
+---
+# THE UNBACKED-DATABASE SIGNAL. This database holds every user, group, flow
+# and OAuth provider: losing it signs everybody out of every console for good.
+# With backups off no metric says so, so the absence is rendered as the alert,
+# a constant that fires for exactly as long as this render has backups off.
+# `backup.unbackedAlert: false` removes it for a site whose cover lives
+# outside this chart.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $db.name }}-unbacked
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: tockmox.identity.unbacked-database
+      interval: 5m
+      rules:
+        - alert: TockmoxIdentityDatabaseUnbacked
+          expr: vector(1)
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The identity database ({{ $db.name }}) has no backup configured"
+            description: >-
+              identity.database.backup resolves to off in this release, so
+              {{ .Values.namespaces.identity }}/{{ $db.name }}, which holds every
+              Authentik user, group, flow and OAuth provider, is not archived
+              and not backed up. Turn backups on (leave
+              identity.database.backup.enabled unset with
+              capabilities.dataProtection on, or set it true) or, if something
+              outside this chart covers the database, set
+              identity.database.backup.unbackedAlert to false.
+              See docs/operations/backup-restore.md.
+{{- end }}
+{{- end }}
+{{- end }}
