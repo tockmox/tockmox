@@ -67,7 +67,11 @@ check() {
     echo "  FAIL the enabled render failed: $(tail -1 "$tmp/on.err")"; rm -rf "$tmp"; return 1
   fi
   if command -v kubeconform >/dev/null 2>&1; then
-    if kubeconform -strict -summary -ignore-missing-schemas "$tmp/on.yaml" > "$tmp/kc" 2>&1; then echo "  ok kubeconform -strict: $(tail -1 "$tmp/kc")"
+    # KUBECONFORM_SCHEMA_DIR: the same local schema copy check-kubeconform.sh reads, for a run with no network.
+    kc_loc=""
+    [ -n "${KUBECONFORM_SCHEMA_DIR:-}" ] && kc_loc="-schema-location $KUBECONFORM_SCHEMA_DIR/{{.NormalizedKubernetesVersion}}-standalone{{.StrictSuffix}}/{{.ResourceKind}}{{.KindSuffix}}.json"
+    # shellcheck disable=SC2086
+    if kubeconform -strict -summary -ignore-missing-schemas $kc_loc "$tmp/on.yaml" > "$tmp/kc" 2>&1; then echo "  ok kubeconform -strict: $(tail -1 "$tmp/kc")"
     else echo "  FAIL kubeconform -strict:"; sed 's/^/    /' "$tmp/kc" | head -10; rc=1; fi
   else
     echo "  NOTE kubeconform not on PATH: the strict schema check of this render did NOT run"
