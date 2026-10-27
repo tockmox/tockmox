@@ -201,6 +201,11 @@ run_gate "every tool is executable" bash -c '
   [ "$bad" -eq 0 ] && echo "  ok"
   exit "$bad"'
 
+# The offline path of helm-deps.sh (HL-0675, D5): a tree that carries every
+# upstream subchart never contacts a repository, and anything less goes online.
+run_gate "helm-deps goes offline only when every upstream subchart is vendored at its Chart.lock version (HL-0675)" \
+  bash tools/helm-deps.sh --selftest
+
 # THE TWO GUARDS THAT EXIST BECAUSE SOMETHING SHIPPED, added 2026-09-16. Both
 # run here rather than by hand, because both classes travelled all the way into
 # a cluster with nothing looking, and a self-test nobody invokes is the same as

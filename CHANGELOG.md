@@ -131,6 +131,20 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Changed
 
+- **`tools/helm-deps.sh` works with no network when the tree already carries
+  its subcharts.** When every layer's Chart.lock matches its Chart.yaml and
+  every upstream archive is already in `charts/*/charts` at the locked version,
+  it contacts no repository and only rebuilds `tockmox-common` from source; so
+  `tools/check-all.sh` runs inside an airgap or a sandbox with no egress.
+  Anything less (a missing archive, another version, a stale lock) takes the
+  online path as before, and `HELM_DEPS_ONLINE=1` forces it. Self-test:
+  `tools/helm-deps.sh --selftest`, now a gate in `check-all.sh`.
+- **`tools/check-kubeconform.sh` (and the posture-probe gate's kubeconform
+  step) validate offline against a local schema copy.** `KUBECONFORM_SCHEMA_DIR` names a directory laid out like
+  kubernetes-json-schema (`master-standalone-strict/<kind>[-<group>]-<version>.json`);
+  a kind it does not hold is skipped as an unpublished schema is online, and a
+  run that validates nothing still fails. Without it, every fetch fails offline
+  and reads as an error.
 - **The documentation site's body text is Source Sans 3 as well,** so the
   whole site reads in the UI family; the previous body face's font files are
   removed.

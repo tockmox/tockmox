@@ -28,6 +28,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# --selftest runs tools/test-helm-deps.sh: the offline path below is taken only
+# when it is safe, and never reaches the network when it is.
+if [ "${1:-}" = "--selftest" ]; then
+  exec bash tools/test-helm-deps.sh
+fi
+
 # Attempts per network-touching helm call, including the first.
 HELM_DEPS_RETRIES="${HELM_DEPS_RETRIES:-3}"
 
@@ -70,6 +76,77 @@ retry() {
     delay=$((delay * 2))
   done
 }
+
+# OFFLINE PATH (HL-0675, D5). A tree that already carries every upstream
+# subchart needs no network: a sandbox with no egress (the QA lane's test pod),
+# or an airgapped site that carried the archives inside (docs/deployment/
+# airgap.md, step 3). There `helm repo add` can only fail, and check-all.sh
+# runs this script first, so every gate failed for a reason that was not the
+# tree. The offline path is taken only when, for every layer:
+#   - Chart.lock exists and names the same dependencies as Chart.yaml (a lock
+#     that no longer matches needs the network to re-resolve, so it goes the
+#     online way and says so), and
+#   - every non-file:// dependency's archive, <name>-<version>.tgz exactly as
+#     Chart.lock pins it, is already in the layer's charts/.
+# Then the only work is the local file:// dependencies (tockmox-common), which
+# `helm package` rebuilds from source with no network, so a template edit in
+# tockmox-common is never judged against a stale copy.
+# HELM_DEPS_ONLINE=1 forces the online path (a dependency bump).
+lock_deps() {  # <chart dir> -> "name<TAB>repository<TAB>version" per Chart.lock dependency
+  awk '
+    /^dependencies:/ {d=1; next}
+    d && /^[^ -]/ {d=0}
+    d && /^- name: /        {if (n!="") print n "\t" r "\t" v; n=$3; r=""; v=""; next}
+    d && /^  repository: /  {r=$2; next}
+    d && /^  version: /     {v=$2; next}
+    END {if (n!="") print n "\t" r "\t" v}
+  ' "$1/Chart.lock" | tr -d '"'
+}
+yaml_dep_names() {  # <chart dir> -> sorted dependency names in Chart.yaml
+  awk '
+    /^dependencies:/ {d=1; next}
+    d && /^[^ -]/ {d=0}
+    d && /^[ ]*- name: / {sub(/^[ ]*- name: */, ""); gsub(/"/, ""); print}
+  ' "$1/Chart.yaml" | sort
+}
+offline_ok() {
+  local c why=""
+  for c in charts/tockmox-*; do
+    [ "$c" = "charts/tockmox-common" ] && continue
+    [ -f "$c/Chart.yaml" ] || continue
+    grep -q '^dependencies:' "$c/Chart.yaml" || continue
+    if [ ! -f "$c/Chart.lock" ]; then why="$c has no Chart.lock"; break; fi
+    if [ "$(yaml_dep_names "$c")" != "$(lock_deps "$c" | cut -f1 | sort)" ]; then
+      why="$c: Chart.lock does not name the dependencies Chart.yaml does"; break
+    fi
+    while IFS="$(printf '\t')" read -r n r v; do
+      case "$r" in file://*) continue ;; esac
+      [ -f "$c/charts/$n-$v.tgz" ] || { why="$c/charts/$n-$v.tgz is not in the tree"; break; }
+    done <<LOCK
+$(lock_deps "$c")
+LOCK
+    [ -z "$why" ] || break
+  done
+  [ -z "$why" ] && return 0
+  echo "online: $why" >&2
+  return 1
+}
+if [ "${HELM_DEPS_ONLINE:-0}" != 1 ] && offline_ok; then
+  echo "offline: every upstream subchart is already in charts/*/charts (Chart.lock versions); no repository is contacted"
+  for c in charts/tockmox-*; do
+    [ -f "$c/Chart.lock" ] || continue
+    while IFS="$(printf '\t')" read -r n r v; do
+      case "$r" in file://*) ;; *) continue ;; esac
+      helm package "$c/${r#file://}" -d "$c/charts" >/dev/null \
+        || { echo "  $c: could not package its local dependency $n from ${r#file://}" >&2; exit 1; }
+    done <<LOCK
+$(lock_deps "$c")
+LOCK
+    printf '  %-34s %s\n' "$c" "ok (offline)"
+  done
+  echo "done"
+  exit 0
+fi
 
 # bash 3.2 clean: `mapfile -t repos < <(...)` would be the modern spelling and
 # does not exist before bash 4.0. IFS/newline discipline here is what keeps a

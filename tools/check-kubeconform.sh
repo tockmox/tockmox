@@ -30,6 +30,17 @@ cd "$(dirname "$0")/.." || exit 1
 . tools/lib/tool-runs.sh
 
 KC_FLAGS="-strict -summary -ignore-missing-schemas"
+# KUBECONFORM_SCHEMA_DIR (HL-0675): validate against a local copy of the
+# schemas instead of fetching them, for a run with no network (an airgap, the
+# QA lane's test pod). The directory mirrors kubernetes-json-schema's layout,
+# <dir>/master-standalone-strict/<kind>[-<group>]-<version>.json; a schema it
+# does not hold (a CRD) is skipped exactly as an unpublished one is online, and
+# the vacuous-green refusal still fails a run that validated nothing.
+# Without it, every fetch fails offline and is an error, not a skip.
+if [ -n "${KUBECONFORM_SCHEMA_DIR:-}" ]; then
+  [ -d "$KUBECONFORM_SCHEMA_DIR" ] || { echo "  SKIPPED: KUBECONFORM_SCHEMA_DIR=$KUBECONFORM_SCHEMA_DIR is not a directory, so nothing can be validated"; exit 2; }
+  KC_FLAGS="$KC_FLAGS -schema-location $KUBECONFORM_SCHEMA_DIR/{{.NormalizedKubernetesVersion}}-standalone{{.StrictSuffix}}/{{.ResourceKind}}{{.KindSuffix}}.json"
+fi
 
 # Reads manifests on stdin; prints kubeconform's output; returns kubeconform's
 # status. Sets VALID to the summary's Valid count (empty when there is no summary).
