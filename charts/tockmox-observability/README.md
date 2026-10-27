@@ -37,6 +37,23 @@ a UID replaces one of ours. See
 
 ![The ntfy console subscribed to the alerts topic, showing three alerts this layer actually delivered ... a Watchdog heartbeat and two Tockmox warning alerts ... which is what makes it evidence of the notification path rather than a picture of an empty inbox](../../docs/assets/monitoring/ntfy-alert-delivered.jpg)
 
+## Alert inhibition
+
+This layer keeps kube-prometheus-stack's default inhibition rules. A critical alert mutes the warning and info
+alerts with the same `alertname` in the same `namespace`, a warning mutes the info alert with the same
+`alertname` in the same `namespace`, and `InfoInhibitor` holds back info alerts in a namespace while any warning
+fires there. The rules match on `[namespace, alertname]`, not on the object, so a critical alert on one volume
+or node also mutes the same-named warning on another one in that namespace.
+
+That scope is a decision, not an omission (2026-10-23). On the reference site, 30 days of alert history,
+inhibited alerts included, held no `(alertname, namespace)` pair that fired at both critical and warning, at
+any time or at the same moment at five-minute resolution; 102 warning, 15 critical and 9 info pairs fired in
+that window. That is one site over one month. Adding object labels such as `persistentvolumeclaim` or
+`instance` to `equal:` only ever narrows inhibition, so its failure direction is more notifications, never
+fewer. If your site sees a critical alert hiding a warning on a different object, set
+`kube-prometheus-stack.alertmanager.config.inhibit_rules` in your observability values; a site value replaces
+the whole list, so carry the rules you want to keep.
+
 ## Values
 
 Globals are documented once in
