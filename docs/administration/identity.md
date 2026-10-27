@@ -558,6 +558,57 @@ Nothing in this section was measured on a cluster. No sign-out was performed aga
 - **Read in upstream source, not run.** What Open WebUI 0.12.3 does on Sign out (`backend/open_webui/routers/auths.py`), and its 4 week token default.
 - **Nothing has tested** that an Open WebUI sign-out leaves the Authentik session alive under the shipped flow, that Grafana's SSO button signs back in without a prompt, what Argo's own Logout does in the shipped version, what signing out of Authentik does to a forward-auth session, or whether Open WebUI revokes a signed-out token without Redis.
 
+## Authentik's database
+
+**From 0.9.0 a fresh install runs Authentik on CloudNativePG**: a `Cluster`
+named `tockmox-authentik-db` in `tockmox-authentik`, PostgreSQL 18, rendered by
+the identity layer the same way the AI layer renders the model gateway's
+database. Its WAL archives continuously to the shipped object store, a base
+backup runs nightly, and a weekly drill restores it into a throwaway cluster
+and checks that Authentik's users came back
+([backup and restore](../operations/backup-restore.md#the-scheduled-drill-repeats-this-weekly)).
+Through 0.8 Authentik ran on the authentik chart's bundled (Bitnami)
+PostgreSQL, whose only backup was a nightly `pg_dump`.
+
+Three values decide which database Authentik uses, in two charts:
+
+| Value | Chart | Default from 0.9.0 | What it does |
+|---|---|---|---|
+| `identity.database.enabled` | tockmox-identity | `true` | Renders the CloudNativePG cluster, its backups and its drill |
+| `authentik.postgresql.enabled` | the vendored authentik chart | `false` | Renders the bundled server and, with it, the `pg_dump` bridge |
+| `authentik.authentik.postgresql.host` | the vendored authentik chart | a template | The host Authentik dials: `<release>-postgresql` while the bundled server is on, `tockmox-authentik-db-rw` otherwise |
+
+**At most one of the first two may be true.** A vendored chart's values cannot
+read this chart's, so the bundled server cannot simply follow the first key, and the
+identity layer refuses to render every combination that would leave Authentik
+on no database, on two, or dialling a host nothing serves. Each refusal names
+the key to change. A PostgreSQL of your own is the third case: both keys
+`false` and the host set to your server.
+
+**An install that already runs the bundled server keeps it until it moves its
+data**, by setting `identity.database.enabled: false` and
+`authentik.postgresql.enabled: true` in `site/values/identity.yaml`. That
+renders exactly the 0.8 shape. Pushing the 0.9.0 revision without them does
+not start Authentik on an empty database: a PreSync hook,
+`tockmox-authentik-db-upgrade-guard`, finds the bundled server's volume and
+fails the sync before anything is applied or pruned, and its log names both
+keys. The move itself is
+[upgrade § move Authentik's database to CloudNativePG](../deployment/upgrade.md#move-authentiks-database-to-cloudnativepg).
+
+The owner's password lives in a new Secret, `tockmox-authentik-db`, holding the
+same value as `AUTHENTIK_POSTGRESQL__PASSWORD`
+([secrets](secrets.md#secrets-the-platform-expects-you-to-create)).
+
+**A restart of this database is a sign-in outage.** At one instance a change to
+`identity.database.resources`, an operator upgrade or a node drain stops
+PostgreSQL, and every console's sign-in waits for it. On the maintainer's
+homelab, which has run Authentik on CloudNativePG since 2026-06, a planned
+switchover once left Authentik restarting for about five minutes after
+PostgreSQL was healthy again, because its startup gives up on a database that
+refuses connections. Three instances (`identity.database.instances: 3`, on three
+nodes) remove the single point; a mitigation for the restart delay is planned
+and not shipped.
+
 ## Break-glass, deliberately
 
 Local logins stay enabled alongside SSO:
@@ -695,6 +746,15 @@ Authentik on a fresh install, proves they bind. The
 
 The dates in the greenfield section come from the commit history of this
 repository and are checkable there.
+
+**Authentik on CloudNativePG (0.9.0) is a render, not yet a running install.**
+The cluster, its backups, its drill, the render guards and the upgrade guard
+are proved by `tools/check-identity-seams.sh`, and the drill's and the guard's
+scripts are run against a stub `kubectl`; no fresh install has yet signed a
+user in through Authentik on this database, no drill of it has passed, and the
+move from the bundled server has not been run on a populated install (planned
+for 0.9.1). The bundled server's last measurements (its memory limit, the
+`pg_dump` restore) do not transfer to it.
 
 **Forward-auth (added for 0.9.0) is a render, not a login.** The proxy
 providers, bindings, Middleware and callback Ingresses are proved to render by

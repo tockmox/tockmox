@@ -53,7 +53,40 @@
 #       comes from authentik's vendored subchart, the client is
 #       databaseBackup.postgresImage. pg_dump refuses a server newer than itself,
 #       and in a CronJob that refusal is a log line, so the nightly dump stops
-#       and only the freshness alert says so.
+#       and only the freshness alert says so. Rendered with the bundled server
+#       kept (BUNDLED below), because from 0.9.0 a default render has neither.
+#   S13 Authentik's database is a CNPG Cluster by default (TM-0788): the
+#       Cluster pins PostgreSQL 18, bootstraps database and owner `authentik`
+#       from the `tockmox-authentik-db` Secret, archives WAL through the
+#       barman-cloud plugin to its own ObjectStore under cnpg/authentik with a
+#       30-day retention, and has a ScheduledBackup; Authentik's generated
+#       config dials `tockmox-authentik-db-rw`; there is NO bundled
+#       StatefulSet and NO pg_dump bridge CronJob.
+#   S14 keeping the bundled server (identity.database.enabled=false plus
+#       authentik.postgresql.enabled=true, the two keys an existing install
+#       sets) renders the 0.8 shape: the StatefulSet, Authentik dialling
+#       `<release>-postgresql`, the pg_dump bridge, and no Cluster, no
+#       ObjectStore, no drill and no upgrade guard.
+#   S15 every half-set combination of the three values that choose the
+#       database fails the render and names the fix: both servers on; the
+#       CNPG cluster renamed without the host; an owner Authentik does not log
+#       in as; the bundled server kept with the host still on the cluster; no
+#       database at all. Plus the backup and recovery guards copied from the
+#       model gateway's database, and recovery rendering bootstrap.recovery.
+#   S16 identity.database.backup.enabled is the capability tri-state: false,
+#       or dataProtection declined, drops the ObjectStore, the plugin wiring,
+#       the ScheduledBackup and the drill and renders
+#       TockmoxIdentityDatabaseUnbacked; unbackedAlert=false silences it.
+#   S17 the identity restore drill renders beside its database: a CronJob in
+#       the identity namespace with its own ServiceAccount, reading Authentik's
+#       user table, and the three drill alerts scoped to that CronJob. (Its
+#       script is RUN by tools/check-notify-and-drill.sh D2.)
+#   S18 the upgrade guard (TM-0788): at the default it is an Argo PreSync hook
+#       (and a Helm pre-install/pre-upgrade hook) with a list-only Role on
+#       persistentvolumeclaims; bundledDataMigrated=true or the bundled server
+#       kept renders none of it. Its script is EXTRACTED and RUN against a stub
+#       kubectl: an empty list passes; a bundled volume refuses and names both
+#       ways out; an API error and an answer that is not a list both refuse.
 #   S5  tools/mint-secrets.sh --only sso mints the four sso files and nothing
 #       else, and refuses an unknown group.
 #   S11 the Authentik worker restarts onto a changed blueprint (TM-1058). The
@@ -221,10 +254,82 @@ sys.exit(0 if s.get("type") == "RollingUpdate" and str(ru.get("maxSurge")) == "0
 ' 2>/dev/null
 }
 
+
+# S13-S18 (TM-0788): Authentik's database. $1 is a FULL identity render.
+docs_of() { # <file> <kind> <name>: that object's YAML document
+  awk -v k="$2" -v n="$3" 'BEGIN{RS="\n---\n"} index($0, "kind: " k "\n") && index($0, "\n  name: " n "\n") {print}' "$1"; }
+bridge_cj() { grep -qx '  name: tockmox-authentik-db-backup' "$1"; }   # the pg_dump CronJob, by exact name
+akhost() { # the AUTHENTIK_POSTGRESQL__HOST Authentik's generated config Secret carries, decoded
+  grep -o 'AUTHENTIK_POSTGRESQL__HOST: "[^"]*"' "$1" | head -1 | sed 's/.*: "//; s/"$//' | base64 -d 2>/dev/null; }
+s13_cnpg() { local c o; c=$(docs_of "$1" Cluster tockmox-authentik-db); o=$(docs_of "$1" ObjectStore tockmox-authentik-db-store)
+  [ -n "$c" ] && [ -n "$o" ] \
+  && has <(echo "$c") 'imageName: "ghcr.io/cloudnative-pg/postgresql:18.' \
+  && has <(echo "$c") 'initdb:' && has <(echo "$c") 'database: "authentik"' && has <(echo "$c") 'owner: "authentik"' \
+  && has <(echo "$c") 'name: "tockmox-authentik-db"' && has <(echo "$c") 'isWALArchiver: true' \
+  && has <(echo "$c") 'barmanObjectName: "tockmox-authentik-db-store"' \
+  && has <(echo "$o") 'destinationPath: "s3://tockmox-backups/cnpg/authentik"' && has <(echo "$o") 'retentionPolicy: "30d"' \
+  && [ -n "$(docs_of "$1" ScheduledBackup tockmox-authentik-db-scheduled)" ] \
+  && [ "$(akhost "$1")" = "tockmox-authentik-db-rw" ] \
+  && lacks "$1" 'kind: StatefulSet' && ! bridge_cj "$1"; }
+s14_bundled() { has "$1" 'kind: StatefulSet' && [ "$(akhost "$1")" = "t-postgresql" ] \
+  && bridge_cj "$1" \
+  && ! grep -qx 'kind: Cluster' "$1" && lacks "$1" 'kind: ObjectStore' && lacks "$1" 'tockmox-authentik-db-drill' \
+  && lacks "$1" 'tockmox-authentik-db-upgrade-guard'; }
+s16_unbacked() { lacks "$1" 'kind: ObjectStore' && lacks "$1" 'kind: ScheduledBackup' && lacks "$1" 'isWALArchiver' \
+  && lacks "$1" 'tockmox-authentik-db-drill' && has "$1" 'alert: TockmoxIdentityDatabaseUnbacked' \
+  && [ -n "$(docs_of "$1" Cluster tockmox-authentik-db)" ]; }
+s16_quiet() { lacks "$1" 'TockmoxIdentityDatabaseUnbacked' && lacks "$1" 'kind: ScheduledBackup'; }
+s15_recovery() { local c; c=$(docs_of "$1" Cluster tockmox-authentik-db)
+  has <(echo "$c") 'recovery:' && lacks <(echo "$c") 'initdb:' && has <(echo "$c") 'externalClusters:' \
+  && has <(echo "$c") 'source: "tockmox-authentik-db-origin"' && has <(echo "$c") 'serverName: "tockmox-authentik-db"' \
+  && has <(echo "$c") 'serverName: "r1"'; }
+s17_drill() { local j r; j=$(docs_of "$1" CronJob tockmox-authentik-db-drill); r=$(docs_of "$1" PrometheusRule tockmox-authentik-db-drill-freshness)
+  [ -n "$j" ] && [ -n "$r" ] && has <(echo "$j") 'namespace: tockmox-authentik' \
+  && has <(echo "$j") 'serviceAccountName: tockmox-restore-drill' && has <(echo "$j") 'authentik_core_user' \
+  && has <(echo "$j") 'barmanObjectName: "tockmox-authentik-db-store"' \
+  && [ -n "$(docs_of "$1" Role tockmox-restore-drill)" ] \
+  && [ "$(grep -c 'job_name=~"tockmox-authentik-db-drill-.*"' <<<"$r")" -ge 3 ] \
+  && has <(echo "$r") 'alert: TockmoxRestoreDrillFailed' && has <(echo "$r") 'alert: TockmoxRestoreDrillNeverRan'; }
+s18_hooks() { local j r; j=$(docs_of "$1" Job tockmox-authentik-db-upgrade-guard); r=$(docs_of "$1" Role tockmox-authentik-db-upgrade-guard)
+  [ -n "$j" ] && [ -n "$r" ] \
+  && has <(echo "$j") 'argocd.argoproj.io/hook: PreSync' && has <(echo "$j") 'helm.sh/hook: pre-install,pre-upgrade' \
+  && has <(echo "$j") 'argocd.argoproj.io/hook-delete-policy: BeforeHookCreation' \
+  && has <(echo "$r") 'argocd.argoproj.io/hook: PreSync' && has <(echo "$r") 'resources: ["persistentvolumeclaims"]' \
+  && has <(echo "$r") 'verbs: ["list"]' && [ "$(grep -c 'verbs:' <<<"$r")" = 1 ]; }
+s18_none() { lacks "$1" 'tockmox-authentik-db-upgrade-guard'; }
+# The guard's script, run. Stub kubectl answers from $STUB (a file) or fails with KRC.
+s18_run() {
+  local d t rc=0; d=$(docs_of "$1" Job tockmox-authentik-db-upgrade-guard); [ -n "$d" ] || return 1
+  t=$(mktemp -d)
+  printf '%s\n' "$d" | python3 -c '
+import sys, yaml
+d = yaml.safe_load(sys.stdin)
+c = d["spec"]["template"]["spec"]["containers"][0]
+assert c["command"] == ["sh", "-c"]
+open(sys.argv[1], "w").write(c["args"][0])
+' "$t/guard.sh" 2>/dev/null || { rm -rf "$t"; return 1; }
+  mkdir -p "$t/bin"
+  printf '#!/bin/sh\necho "$*" > "%s/args"\n[ "${KRC:-0}" = 0 ] || { echo "Error from server (Forbidden): nope" >&2; exit 1; }\ncat "$STUB"\n' "$t" > "$t/bin/kubectl"; chmod +x "$t/bin/kubectl"
+  echo '{"apiVersion":"v1","items":[],"kind":"List"}' > "$t/none.json"
+  echo '{"apiVersion":"v1","items":[{"metadata":{"name":"data-t-postgresql-0"}}],"kind":"List"}' > "$t/one.json"
+  echo 'No resources found in tockmox-authentik namespace.' > "$t/text"
+  g() { STUB="$t/$1" KRC="${2:-0}" PATH="$t/bin:$PATH" sh "$t/guard.sh" > "$t/out" 2>&1; }
+  g none.json                    || rc=1                                   # fresh install: passes
+  grep -q -- '-l app.kubernetes.io/name=postgresql,app.kubernetes.io/component=primary,!cnpg.io/cluster' "$t/args" || rc=1
+  g one.json && rc=1                                                       # bundled data present: refuses
+  grep -q 'data-t-postgresql-0' "$t/out" && grep -q 'identity.database.enabled: false' "$t/out" \
+    && grep -q 'authentik.postgresql.enabled: true' "$t/out" && grep -q 'bundledDataMigrated: true' "$t/out" || rc=1
+  g none.json 1 && rc=1                                                    # API refused: refuses
+  g text && rc=1                                                           # not a list: refuses
+  rm -rf "$t"; return $rc
+}
 # --- the render ---------------------------------------------------------------
 render() { helm template t "$@" 2>&1; }
 
 DB=(-f $CI --set apps.litellm.enabled=true --set modelGateway.database.backup.enabled=true)
+# The two keys an existing install sets to keep the bundled server (TM-0788).
+BUNDLED=(--set identity.database.enabled=false --set authentik.postgresql.enabled=true)
+IDREC=(--set identity.database.backup.serverName=r1 --set identity.database.recovery.enabled=true --set identity.database.recovery.serverName=tockmox-authentik-db)
 REC=(--set modelGateway.database.backup.serverName=r1 --set modelGateway.database.recovery.enabled=true --set modelGateway.database.recovery.serverName=tockmox-litellm-db)
 
 # S5: --only sso. Prints the file names minted, one per line, or the rc line.
@@ -260,10 +365,35 @@ run_checks() {
   render $IDC -f $CI --set 'sso.adminUsers={alice,bob}' > "$t/s8-on"
   render $IDC -f $CI --set 'sso.adminUsers={alice,bob}' --set sso.adminGroup=site-admins > "$t/s8-group"
   render $IDC -f $CI --set 'sso.adminUsers={alice,bob}' --set sso.enabled=false > "$t/s8-off"
+  render $IDC -f $CI "${BUNDLED[@]}" > "$t/id-bundled"
+  render $IDC -f $CI "${IDREC[@]}" > "$t/id-rec"
+  render $IDC -f $CI --set identity.database.backup.enabled=false > "$t/id-bk-false"
+  render $IDC -f $CI --set capabilities.dataProtection.enabled=false > "$t/id-cap-off"
+  render $IDC -f $CI --set identity.database.backup.enabled=false --set identity.database.backup.unbackedAlert=false > "$t/id-quiet"
+  render $IDC -f $CI --set identity.database.upgrade.bundledDataMigrated=true > "$t/id-migrated"
+  s13_cnpg "$t/s8-default"    && ok "S13 a default render puts Authentik on CNPG: PostgreSQL 18 pinned, owner from tockmox-authentik-db, WAL to cnpg/authentik (30d), ScheduledBackup, host tockmox-authentik-db-rw, no bundled server, no pg_dump bridge" || fail "S13 the default identity database is not the CNPG cluster"
+  s14_bundled "$t/id-bundled" && ok "S14 the two keep-the-bundled-server keys render the 0.8 shape: StatefulSet, host t-postgresql, pg_dump bridge, no Cluster, store, drill or guard" || fail "S14 keeping the bundled server does not render the 0.8 shape"
+  if render_says "are both true" $IDC -f $CI --set authentik.postgresql.enabled=true; then ok "S15 both servers on fails the render"; else fail "S15 both servers on rendered"; fi
+  if render_says 'serves reads and writes at "foo-rw"' $IDC -f $CI --set identity.database.name=foo; then ok "S15 a renamed cluster without the host fails the render"; else fail "S15 cluster renamed, host left behind, rendered"; fi
+  if render_says "Authentik logs in as" $IDC -f $CI --set identity.database.owner=bob; then ok "S15 an owner Authentik does not log in as fails the render"; else fail "S15 owner mismatch rendered"; fi
+  if render_says "the CNPG cluster that identity.database.enabled: false no longer renders" $IDC -f $CI "${BUNDLED[@]}" --set authentik.authentik.postgresql.host=tockmox-authentik-db-rw; then ok "S15 the bundled server kept with the host still on the cluster fails the render"; else fail "S15 bundled kept, host on the cluster, rendered"; fi
+  if render_says "renders no database" $IDC -f $CI --set identity.database.enabled=false; then ok "S15 no database at all fails the render and names authentik.postgresql.enabled"; else fail "S15 a release with no identity database rendered"; fi
+  if render_says "nothing to recover from" $IDC -f $CI --set identity.database.recovery.enabled=true; then ok "S15 recovery with no source fails the render"; else fail "S15 recovery with no source rendered"; fi
+  if render_says "refuses to archive" $IDC -f $CI --set identity.database.recovery.enabled=true --set identity.database.recovery.serverName=tockmox-authentik-db; then ok "S15 recovery into its own archive path fails the render"; else fail "S15 same-archive guard missing"; fi
+  if render_says "AND asks this chart to create one" $IDC -f $CI --set identity.database.backup.objectStoreName=x; then ok "S15 a named store plus a created one fails the render"; else fail "S15 two stores rendered"; fi
+  if render_says "A backup with no destination" $IDC -f $CI --set identity.database.backup.objectStore.create=false; then ok "S15 backups with no destination fail the render"; else fail "S15 backups with no destination rendered"; fi
+  s15_recovery "$t/id-rec"    && ok "S15 recovery renders bootstrap.recovery + externalClusters + both server names" || fail "S15 identity recovery render wrong"
+  s16_unbacked "$t/id-bk-false" && ok "S16 backup.enabled=false drops store, plugin, ScheduledBackup and drill and renders TockmoxIdentityDatabaseUnbacked" || fail "S16 explicit false wrong"
+  s16_unbacked "$t/id-cap-off" && ok "S16 declining dataProtection turns the unset default off, with the alert" || fail "S16 capability decline not followed"
+  s16_quiet "$t/id-quiet"     && ok "S16 backup.unbackedAlert=false silences the alert" || fail "S16 unbackedAlert=false not followed"
+  s17_drill "$t/s8-default"   && ok "S17 the identity restore drill renders in the identity namespace, reads authentik_core_user, with its three alerts" || fail "S17 identity restore drill missing or wrong"
+  s18_hooks "$t/s8-default"   && ok "S18 the upgrade guard is a PreSync (and pre-install/pre-upgrade) hook with a list-only PVC Role" || fail "S18 upgrade guard hooks wrong"
+  s18_none "$t/id-migrated"   && s18_none "$t/id-bundled" && ok "S18 bundledDataMigrated=true, or the bundled server kept, renders no guard" || fail "S18 guard rendered where it must not"
+  s18_run "$t/s8-default"     && ok "S18 the guard's script passes an empty namespace, refuses a bundled volume naming both ways out, and refuses when it cannot see" || fail "S18 the guard's script does not refuse what it must"
   s11_probe "$t/s8-default"   && ok "S11 the worker's postStart and liveness scripts restart it onto a changed or new blueprint in any mounted directory, and still fail on a failing healthcheck" || fail "S11 the worker does not restart onto a changed blueprint"
   s12_strategy "$t/s8-default" && ok "S12 the worker rolls with maxSurge 0 and maxUnavailable 100%, so an old worker never takes the new pod's blueprint discovery" || fail "S12 the worker can run beside its replacement during a rollout"
   s8_default "$t/s8-default"  && ok "S8 sso.adminUsers empty renders no admin-membership Job" || fail "S8 Job rendered at the default"
-  s10_majors "$t/s8-default"  && ok "S10 the bundled PostgreSQL server and the pg_dump client run one major ($(grep -Eo 'image: *"?[^ "]*/postgres(ql)?:[0-9.]+' "$t/s8-default" | sed -E 's/.*://' | sort -u | tr '\n' ' '))" || fail "S10 server and pg_dump client majors differ, or one of them is missing: $(grep -Eo 'image: *"?[^ "]*/postgres(ql)?:[^ "]+' "$t/s8-default" | sort -u | tr '\n' ' ')"
+  s10_majors "$t/id-bundled"  && ok "S10 the bundled PostgreSQL server and the pg_dump client run one major ($(grep -Eo 'image: *"?[^ "]*/postgres(ql)?:[0-9.]+' "$t/id-bundled" | sed -E 's/.*://' | sort -u | tr '\n' ' '))" || fail "S10 server and pg_dump client majors differ, or one of them is missing: $(grep -Eo 'image: *"?[^ "]*/postgres(ql)?:[^ "]+' "$t/id-bundled" | sort -u | tr '\n' ' ')"
   s8_on "$t/s8-on"            && ok "S8 sso.adminUsers renders one PostSync Job: usernames, server image and Secret, restricted securityContext" || fail "S8 Job shape wrong"
   s8_group "$t/s8-group"      && ok "S8 sso.adminGroup is the group the Job targets" || fail "S8 adminGroup not followed"
   s8_default "$t/s8-off"      && ok "S8 sso.enabled=false renders no Job" || fail "S8 Job rendered with sso off"
@@ -318,9 +448,14 @@ selftest() {
   render $IDC -f $CI > "$t/s8d"
   render $IDC -f $CI --set 'sso.adminUsers={alice,bob}' > "$t/s8"
   render $IDC -f $CI --set 'sso.adminUsers={alice,bob}' --set sso.adminGroup=site-admins > "$t/s8g"
+  render $IDC -f $CI "${BUNDLED[@]}" > "$t/idb"
+  render $IDC -f $CI "${IDREC[@]}" > "$t/idr"
+  render $IDC -f $CI --set identity.database.backup.enabled=false > "$t/idoff"
+  render $IDC -f $CI --set identity.database.backup.enabled=false --set identity.database.backup.unbackedAlert=false > "$t/idq"
   # The unmutated inputs must pass, or "red" below proves nothing.
   s1_default "$t/id" && s1_override "$t/idh" && s2_default "$t/id" && s2_values "$t/ids" && s3_default "$t/ai" \
-    && s8_default "$t/s8d" && s11_probe "$t/s8d" && s12_strategy "$t/s8d" && s10_majors "$t/s8d" && s8_on "$t/s8" && s8_group "$t/s8g" && s9_default "$t/s8d" && s9_on "$t/s8" \
+    && s8_default "$t/s8d" && s11_probe "$t/s8d" && s12_strategy "$t/s8d" && s10_majors "$t/idb" \
+    && s13_cnpg "$t/s8d" && s14_bundled "$t/idb" && s15_recovery "$t/idr" && s16_unbacked "$t/idoff" && s16_quiet "$t/idq" && s17_drill "$t/s8d" && s18_hooks "$t/s8d" && s18_run "$t/s8d" && s18_none "$t/idb" && s8_on "$t/s8" && s8_group "$t/s8g" && s9_default "$t/s8d" && s9_on "$t/s8" \
     && s4_default "$t/db" && s4_recovery "$t/dbr" && s6_default "$t/ob" && s6_group "$t/obg" && s7_backed "$t/ai7" && s7_unbacked "$t/ai7off" && s7_quiet "$t/ai7q" || { echo "selftest: the unmutated renders do not pass; fix the tree first"; rm -rf "$t"; return 1; }
   # S1: the old behaviour, host ignored.
   sed 's#https://llm.int.example.com#https://chat.int.example.com#g' "$t/idh" > "$t/m"; red "S1 host override ignored" s1_override "$t/m"
@@ -380,8 +515,8 @@ selftest() {
   red "S9 a list change that does not reach the ConfigMap" s9_moves "$t/s8" "$t/s8"
   { cat "$t/s8d"; echo "name: $CMN"; } > "$t/m"; red "S9 ConfigMap at default" s9_default "$t/m"
   # S10: the client moved a major alone (the Renovate PR the hold exists to stop); the client gone.
-  render $IDC -f $CI --set databaseBackup.postgresImage=docker.io/library/postgres:18.6-bookworm > "$t/m"; red "S10 pg_dump client on 18, server on 17" s10_majors "$t/m"
-  awk '/image: .*\/postgres:/ && !d {d=1; next} {print}' "$t/s8d" > "$t/m"; red "S10 only one postgres image left to compare" s10_majors "$t/m"
+  render $IDC -f $CI "${BUNDLED[@]}" --set databaseBackup.postgresImage=docker.io/library/postgres:18.6-bookworm > "$t/m"; red "S10 pg_dump client on 18, server on 17" s10_majors "$t/m"
+  awk '/image: .*\/postgres:/ && !d {d=1; next} {print}' "$t/idb" > "$t/m"; red "S10 only one postgres image left to compare" s10_majors "$t/m"
   # S11 (TM-1058): the comparison made unable to fail; the glob narrowed to one
   # directory; the content replaced by a listing; the healthcheck dropped; the
   # probe removed. Each is a plausible edit, each must leave the probe unable to
@@ -396,6 +531,27 @@ selftest() {
   sed '/component: "*worker"*/,$ s/maxSurge: 0/maxSurge: 1/' "$t/s8d" > "$t/m"; red "S12 worker surges a new pod beside the old one" s12_strategy "$t/m"
   sed '/component: "*worker"*/,$ s/maxUnavailable: 100%/maxUnavailable: 0/' "$t/s8d" > "$t/m"; red "S12 worker never lets the old pod go first" s12_strategy "$t/m"
   sed '/component: "*worker"*/,$ s/type: RollingUpdate/type: Recreate/' "$t/s8d" > "$t/m"; red "S12 worker strategy switched to Recreate" s12_strategy "$t/m"
+  # S13-S18 (TM-0788): each a plausible regression, each must go red.
+  sed 's#postgresql:18\.#postgresql:17.#' "$t/s8d" > "$t/m"; red "S13 the cluster on PostgreSQL 17" s13_cnpg "$t/m"
+  sed 's#cnpg/authentik#authentik-db#' "$t/s8d" > "$t/m"; red "S13 WAL written into the pg_dump bridge's prefix" s13_cnpg "$t/m"
+  grep -v 'retentionPolicy' "$t/s8d" > "$t/m"; red "S13 no retention on the store" s13_cnpg "$t/m"
+  grep -v 'isWALArchiver' "$t/s8d" > "$t/m"; red "S13 WAL archiving dropped" s13_cnpg "$t/m"
+  sed "s#AUTHENTIK_POSTGRESQL__HOST: \"[^\"]*\"#AUTHENTIK_POSTGRESQL__HOST: \"$(printf t-postgresql | base64)\"#" "$t/s8d" > "$t/m"; red "S13 Authentik still dialling the bundled server" s13_cnpg "$t/m"
+  cat "$t/s8d" "$t/idb" > "$t/m"; red "S13 the bundled server rendered beside the cluster" s13_cnpg "$t/m"
+  { cat "$t/idb"; echo "---"; echo "kind: Cluster"; } > "$t/m"; red "S14 a Cluster rendered beside the kept bundled server" s14_bundled "$t/m"
+  grep -vx '  name: tockmox-authentik-db-backup' "$t/idb" > "$t/m"; red "S14 the kept bundled server without its bridge" s14_bundled "$t/m"
+  grep -v 'externalClusters:' "$t/idr" > "$t/m"; red "S15 externalClusters dropped" s15_recovery "$t/m"
+  sed 's/serverName: "r1"/serverName: "x"/' "$t/idr" > "$t/m"; red "S15 backup serverName dropped" s15_recovery "$t/m"
+  grep -v 'alert: TockmoxIdentityDatabaseUnbacked' "$t/idoff" > "$t/m"; red "S16 off renders no alert" s16_unbacked "$t/m"
+  { cat "$t/idoff"; echo "kind: ScheduledBackup"; } > "$t/m"; red "S16 off still schedules a backup" s16_unbacked "$t/m"
+  { cat "$t/idq"; echo "alert: TockmoxIdentityDatabaseUnbacked"; } > "$t/m"; red "S16 unbackedAlert=false still alerts" s16_quiet "$t/m"
+  sed 's/authentik_core_user/information_schema.tables/g' "$t/s8d" > "$t/m"; red "S17 the drill no longer reads Authentik's users" s17_drill "$t/m"
+  sed 's/job_name=~"tockmox-authentik-db-drill-\.\*"/job_name=~"tockmox-litellm-db-drill-.*"/g' "$t/s8d" > "$t/m"; red "S17 the drill alerts watching the model gateway's drill" s17_drill "$t/m"
+  sed 's#argocd.argoproj.io/hook: PreSync#argocd.argoproj.io/hook: Sync#' "$t/s8d" > "$t/m"; red "S18 the guard runs in the Sync phase, beside what it guards" s18_hooks "$t/m"
+  sed 's#verbs: \["list"\]#verbs: ["list", "delete"]#' "$t/s8d" > "$t/m"; red "S18 the guard's Role can delete" s18_hooks "$t/m"
+  sed 's/^\( *\)exit 1$/\1exit 0/' "$t/s8d" > "$t/m"; red "S18 the guard never refuses" s18_run "$t/m"
+  python3 -c 'import sys; s = open(sys.argv[1]).read(); a = "|| fail_blind \"$(printf '"'"'%s'"'"' \"$JSON\" | head -3)\""; assert a in s; print(s.replace(a, "|| JSON='"'"'{\"items\":[]}'"'"'"), end="")' "$t/s8d" > "$t/m"; red "S18 the guard reads an API refusal as an empty namespace" s18_run "$t/m"
+  sed 's/,!cnpg.io\/cluster//' "$t/s8d" > "$t/m"; red "S18 the guard counts CNPG's own volumes" s18_run "$t/m"
   # S5: the mint script with --only neutered must mint extra files. Run a mutated copy.
   mkdir -p "$t/tools"; sed 's/^want() {.*$/want() { return 0; }/' tools/mint-secrets.sh > "$t/tools/mint-secrets.sh"
   local bin; bin=$(mktemp -d); echo x > "$bin/cert.pem"

@@ -18,6 +18,9 @@
 # THE FOUR PAIRS, generated once each and written to both sides:
 #   AK_PG      tockmox-authentik.AUTHENTIK_POSTGRESQL__PASSWORD
 #              tockmox-authentik-postgres.password
+#              tockmox-authentik-db.password (the CNPG identity database's
+#              owner, TM-0788; minted only alongside a NEW tockmox-authentik,
+#              see the note at the authentik block)
 #   SSO_GRAF   tockmox-sso.GRAFANA_CLIENT_SECRET   tockmox-sso-grafana.client-secret
 #   SSO_OWUI   tockmox-sso.OPENWEBUI_CLIENT_SECRET tockmox-sso-openwebui.client-secret
 #   SSO_ARGO   tockmox-sso.ARGO_CLIENT_SECRET      tockmox-sso-argo.client-secret
@@ -303,8 +306,25 @@ want sso && PAIRS="$PAIRS $PAIRS_SSO"
 # The Tockmox UI's client secret, on both sides (TM-0956): the UI reads it in the
 # AI namespace, the identity layer's blueprint reads it in the Authentik one.
 $WITH_UI && PAIRS="$PAIRS sso-tockmox-ui.sealed.yaml:sso-tockmox-ui-authentik.sealed.yaml"
+# ONE-WAY PAIRS (TM-0788): b holds a's value, and a b WITHOUT its a is refused
+# like any half pair (minting a would generate a value b does not hold). An a
+# without its b is NOT refused: b is new in 0.9.0, an install minted before it
+# has a and no b, and refusing would stop that install minting anything else.
+# That case is reported under NOT MINTED instead (the authentik block).
+ONEWAY=""
+want authentik && ONEWAY="authentik.sealed.yaml:authentik-db.sealed.yaml"
 check_pairs() {
   local p a b bad=0
+  for p in $ONEWAY; do
+    a="${p%%:*}"; b="${p##*:}"
+    if [ ! -e "$OUT/$a" ] && [ -e "$OUT/$b" ]; then
+      echo "REFUSING: $b exists and $a does not." >&2; bad=1
+      echo "  $b holds the value generated for $a. Minting $a now would" >&2
+      echo "  generate a new value that does not match the one sealed in $b." >&2
+      echo "  Either restore $a (from git), or delete $b too and re-run, which" >&2
+      echo "  ROTATES the pair: safe only if $b was never deployed." >&2
+    fi
+  done
   for p in $PAIRS; do
     a="${p%%:*}"; b="${p##*:}"
     if [ -e "$OUT/$a" ] && [ ! -e "$OUT/$b" ]; then
@@ -531,6 +551,24 @@ have authentik-postgres.sealed.yaml tockmox-authentik-postgres || \
 mk authentik-postgres.sealed.yaml tockmox-authentik tockmox-authentik-postgres \
   --from-literal=password="$AK_PG" \
   --from-literal=postgres-password="$(openssl rand -base64 24)"
+
+# THE IDENTITY DATABASE'S OWNER (TM-0788). From 0.9.0 Authentik runs on a CNPG
+# cluster that bootstraps its owner from this basic-auth Secret, so it carries
+# the SAME value as AUTHENTIK_POSTGRESQL__PASSWORD: a third copy of AK_PG.
+# Minted only together with a new tockmox-authentik, because that is the only
+# run that knows the value. An install minted before 0.9.0 has
+# authentik.sealed.yaml and not this, and this script cannot read a sealed
+# value back, so it says so rather than inventing a password that would not
+# match; docs/administration/secrets.md writes it from the live Secret.
+if [ -n "$AK_PG" ]; then
+  have authentik-db.sealed.yaml tockmox-authentik-db || \
+  mk authentik-db.sealed.yaml tockmox-authentik tockmox-authentik-db \
+    --type=kubernetes.io/basic-auth \
+    --from-literal=username=authentik \
+    --from-literal=password="$AK_PG"
+elif ! have authentik-db.sealed.yaml tockmox-authentik-db; then
+  NOTMADE="${NOTMADE}tockmox-authentik-db ... not minted: authentik.sealed.yaml already exists and this Secret must hold the password sealed in it, which cannot be read back from a sealed file. An install that keeps the bundled PostgreSQL does not need it yet; before moving Authentik to CloudNativePG, write it from the live Secret (docs/administration/secrets.md, \"An install minted before 0.9.0\").\n"
+fi
 fi
 
 if want sso; then

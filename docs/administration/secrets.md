@@ -7,7 +7,7 @@ tags: [secrets, sealed-secrets, bitnami, rotation, backup]
 status: stable
 generated:
   by: hand
-  at: 2026-09-01
+  at: 2026-10-27
 tockmox:
   classification: public
   audience: [operator]
@@ -225,7 +225,8 @@ values file points:
 | `tockmox-grafana-admin` | `tockmox-monitoring` | `admin-user`, `admin-password` | Grafana local login (break-glass) |
 | `tockmox-openwebui-bootstrap-admin` | `tockmox-ai` | `WEBUI_ADMIN_EMAIL`, `WEBUI_ADMIN_PASSWORD`, `WEBUI_ADMIN_NAME` | Open WebUI's bootstrap administrator, created at startup only while it has no accounts, so the first SSO login cannot become the console's admin (TM-0859). Optional; `mint-secrets.sh` mints it with an address under `.invalid` that no Authentik user can hold. The console's break-glass login: read the password with `kubectl -n tockmox-ai get secret tockmox-openwebui-bootstrap-admin -o jsonpath='{.data.WEBUI_ADMIN_PASSWORD}'` and decode it |
 | `tockmox-authentik` | `tockmox-authentik` | `AUTHENTIK_SECRET_KEY`, `AUTHENTIK_POSTGRESQL__PASSWORD` | Authentik server + worker |
-| `tockmox-authentik-postgres` | `tockmox-authentik` | `password`, `postgres-password` | Authentik's bundled PostgreSQL. `password` must EQUAL `AUTHENTIK_POSTGRESQL__PASSWORD` above ... the database and the server must agree |
+| `tockmox-authentik-db` | `tockmox-authentik` | `username`, `password` (type `kubernetes.io/basic-auth`) | Authentik's database on CloudNativePG, the default for a fresh install from 0.9.0 (`identity.database`). CloudNativePG bootstraps the owner from this Secret. `username` must EQUAL `identity.database.owner` (`authentik`) and `password` must EQUAL `AUTHENTIK_POSTGRESQL__PASSWORD` above. An install minted before 0.9.0 writes it from the live Secret: [below](#an-install-minted-before-090) |
+| `tockmox-authentik-postgres` | `tockmox-authentik` | `password`, `postgres-password` | Authentik's bundled PostgreSQL, used only while `authentik.postgresql.enabled` is true (the default through 0.8, kept by an install that has not moved its database). `password` must EQUAL `AUTHENTIK_POSTGRESQL__PASSWORD` above ... the database and the server must agree. Still minted on a fresh install, so turning the bundled server back on needs no new Secret |
 | `tockmox-sso` | `tockmox-authentik` | `GRAFANA_CLIENT_SECRET`, `OPENWEBUI_CLIENT_SECRET`, `ARGO_CLIENT_SECRET` | The shipped SSO blueprints (via `!Env`) |
 | `tockmox-sso-grafana` | `tockmox-monitoring` | `client-secret` | Grafana OIDC. Same value as `GRAFANA_CLIENT_SECRET` |
 | `tockmox-sso-openwebui` | `tockmox-ai` | `client-secret` | Open WebUI OIDC. Same value as `OPENWEBUI_CLIENT_SECRET` |
@@ -280,6 +281,12 @@ kubectl -n tockmox-authentik create secret generic tockmox-authentik-postgres \
   --from-literal=postgres-password="$(openssl rand -base64 24)" \
   --dry-run=client -o yaml | seal > secrets/authentik-postgres.sealed.yaml
 
+kubectl -n tockmox-authentik create secret generic tockmox-authentik-db \
+  --type=kubernetes.io/basic-auth \
+  --from-literal=username=authentik \
+  --from-literal=password="$AK_PG" \
+  --dry-run=client -o yaml | seal > secrets/authentik-db.sealed.yaml
+
 kubectl -n tockmox-authentik create secret generic tockmox-sso \
   --from-literal=GRAFANA_CLIENT_SECRET="$SSO_GRAF" \
   --from-literal=OPENWEBUI_CLIENT_SECRET="$SSO_OWUI" \
@@ -303,8 +310,44 @@ kubectl -n tockmox-devops create secret generic tockmox-sso-argo \
 **Success condition:** `grep -c '^kind: SealedSecret' secrets/*.sealed.yaml`
 prints `1` for every file. A zero-byte file here is the failure described under
 [Sealing one](#sealing-one) ... `kubeseal` could not reach the controller, and
-the shell reported success anyway. Check before you commit, because these nine
+the shell reported success anyway. Check before you commit, because these ten
 files are the credentials the whole platform starts against.
+
+### An install minted before 0.9.0
+
+`tockmox-authentik-db` is new in 0.9.0, and it holds the password already sealed
+in `tockmox-authentik`. `tools/mint-secrets.sh` writes it only in the same run
+that generates a new `tockmox-authentik`, because that is the only run that
+knows the value; on a site minted earlier it lists `tockmox-authentik-db` under
+**NOT MINTED** and changes nothing. A sealed file cannot be read back, so the
+value comes from the live Secret instead.
+
+**You need this only to move Authentik onto CloudNativePG**
+([upgrade § move Authentik's database to CloudNativePG](../deployment/upgrade.md#move-authentiks-database-to-cloudnativepg)).
+An install that keeps the bundled server does not read it.
+
+**WORKSTATION.** From the root of your site repository, with `kubectl` and
+`kubeseal` pointed at the cluster that runs Authentik, as for every other block
+on this page.
+
+```bash
+AK_PG=$(kubectl -n tockmox-authentik get secret tockmox-authentik \
+  -o jsonpath='{.data.AUTHENTIK_POSTGRESQL__PASSWORD}' | base64 -d)
+kubectl -n tockmox-authentik create secret generic tockmox-authentik-db \
+  --type=kubernetes.io/basic-auth \
+  --from-literal=username=authentik \
+  --from-literal=password="$AK_PG" \
+  --dry-run=client -o yaml \
+  | kubeseal --format yaml \
+      --controller-name sealed-secrets --controller-namespace kube-system \
+  > secrets/authentik-db.sealed.yaml
+unset AK_PG
+grep -c '^kind: SealedSecret' secrets/authentik-db.sealed.yaml
+```
+
+**Success condition:** the last command prints `1`. Commit the file before the
+step of the upgrade procedure that turns the CloudNativePG database on: the
+cluster waits for this Secret and does not bootstrap without it.
 
 ### Notifications
 

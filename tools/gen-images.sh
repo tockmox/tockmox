@@ -62,6 +62,18 @@ trap 'rm -f "$OUT"' EXIT
       -f ci/values.yaml \
       --skip-tests \
       || { echo "RENDER FAILED for $c" >&2; exit 1; }
+    # THE IDENTITY LAYER ONCE MORE WITH THE BUNDLED SERVER KEPT (TM-0788). From
+    # 0.9.0 a default render runs Authentik on CNPG, so the bundled PostgreSQL
+    # server and the pg_dump client drop out of it; an install that keeps the
+    # bundled server (docs/deployment/upgrade.md) still pulls both, and an
+    # air-gapped one can only pull what this list told it to mirror.
+    if [ "$c" = "charts/tockmox-identity" ]; then
+      helm template t "$c" \
+        -f ci/values.yaml \
+        --set identity.database.enabled=false --set authentik.postgresql.enabled=true \
+        --skip-tests \
+        || { echo "RENDER FAILED for $c with the bundled server kept" >&2; exit 1; }
+    fi
   # ONE extractor, shared with check-airgap.sh (tools/lib/extract-images.sh,
   # TM-0646). It used to be a copy of that pipeline, and the copies had drifted:
   # this one used `\s`, which is a GNU extension that BSD `grep -E` ... the grep

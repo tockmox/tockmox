@@ -1,0 +1,405 @@
+{{- $db := .Values.identity.database -}}
+{{- $backupOn := include "tockmox-identity.dbBackupEnabled" . | eq "true" -}}
+{{- $drill := $db.backup.restoreDrill | default dict -}}
+{{- $os := $db.backup.objectStore | default dict -}}
+{{- /* The drill follows the database it drills: no CNPG identity database (the bundled server kept, or Authentik off), nothing to restore. */ -}}
+{{- if and $backupOn ($drill.enabled | default false) (include "tockmox-identity.cnpgOn" .) }}
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE IDENTITY DATABASE'S SCHEDULED RESTORE DRILL (TM-0788), the model
+# gateway's drill (charts/tockmox-ai/templates/restore-drill.yaml) pointed at
+# Authentik's database. A green backup job proves an upload happened;
+# it does not prove the store contains a database anyone can come back from.
+# This drill proves that, on a schedule, with the register to show for it:
+#
+#   1. bootstraps a NEW CNPG cluster from the object store, exactly the
+#      recovery in docs/operations/backup-restore.md section 5
+#   2. asserts on the artifact: recovery finished (pg_is_in_recovery = f),
+#      the schema is populated (a table count with a floor), and Authentik's
+#      user table came back with rows (authentik_core_user, at least one: the
+#      bootstrap blueprint always creates akadmin), not an exit code
+#   3. writes a dated PASS/FAIL row into the drill register ConfigMap, ending
+#      in backup=<backupId> so the row says WHICH backup it proved (TM-0794)
+#   4. tears the drill cluster down, PASS or FAIL, via trap
+#
+# Tockmox proves restorability; humans perform recovery. The drill never
+# touches the live database or its Services ... it reads the object store and
+# writes only objects named *-drill and the register.
+#
+# It lives HERE, beside the database it drills, for the reason the model
+# gateway's does: barman recovery resolves the ObjectStore CR and its S3
+# credential IN THIS NAMESPACE. The register is this namespace's own
+# tockmox-restore-drill-register ConfigMap, the same name and row format as
+# the model gateway's, so one reader reads both.
+{{- $storeName := $db.backup.objectStoreName | default $os.name }}
+{{- $drillName := printf "%s-drill" $db.name }}
+{{- $akName := (((.Values.authentik.authentik | default dict).postgresql | default dict).name | default "authentik") }}
+{{- /* The recovery CLUSTER gets a name that is not a prefix-sibling of
+the CronJob: CNPG names its recovery Job <cluster>-1-full-recovery, and
+when that shares the CronJob's name prefix the CronJob controller logs
+UnexpectedJob warnings for a Job that was never its business. Cosmetic,
+but warnings that mean nothing teach people to skip warnings. */ -}}
+{{- $clusterName := printf "%s-drillcheck" $db.name }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-restore-drill
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tockmox-restore-drill
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+rules:
+  # The drill creates and deletes ONLY its own recovery cluster; Kubernetes
+  # RBAC cannot scope create by name, so the guardrail on the live database
+  # is the script refusing to name anything but {{ $clusterName }} ... and the
+  # register showing what it did.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "watch", "create", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  # Read-only, to name the backup the drill pins and records (TM-0794).
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["backups"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    resourceNames: ["tockmox-restore-drill-register"]
+    verbs: ["get", "patch"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tockmox-restore-drill
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tockmox-restore-drill
+subjects:
+  - kind: ServiceAccount
+    name: tockmox-restore-drill
+    namespace: {{ .Values.namespaces.identity }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $drillName }}
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  schedule: {{ $drill.schedule | default "30 4 * * 1" | quote }}
+  timeZone: {{ .Values.global.timezone | quote }}
+  suspend: {{ $drill.suspend | default false }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            {{- include "tockmox.labels" . | nindent 12 }}
+            app.kubernetes.io/name: tockmox-restore-drill
+        spec:
+          restartPolicy: Never
+          serviceAccountName: tockmox-restore-drill
+          # Needs the API: kubectl creates and deletes the drill Cluster and reads the register
+          # ConfigMap (the Role below). Token kept on purpose (TM-0759); gate allowlist in
+          # tools/check-sa-tokens.sh.
+          automountServiceAccountToken: true
+          {{- with $db.priorityClassName }}
+          priorityClassName: {{ . }}
+          {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: drill
+              image: {{ include "tockmox.image" (dict "ctx" $ "repo" ($drill.image | default "alpine/k8s:1.37.1")) }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              resources:
+                requests: { cpu: 20m, memory: 64Mi }
+                limits:   { memory: 128Mi }
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -u
+                  NS={{ .Values.namespaces.identity }}
+                  CLUSTER={{ $clusterName }}
+                  VERDICT=FAIL
+                  DETAIL=""
+                  BACKUP_ID=""
+
+                  record() {
+                    STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+                    # Register row: "<stamp> <PASS|FAIL> <detail...> backup=<id>".
+                    # Read it as: field 1 is the time, field 2 the verdict, and
+                    # every later field that contains "=" is key=value. The
+                    # detail before backup= is free text on a FAIL row, so
+                    # match on the key, never on a position. Rows written
+                    # before TM-0794 have no backup= field; "none" below means
+                    # the drill found no completed Backup to pin, and the
+                    # recovery then took the newest base backup in the store.
+                    ROW="${STAMP} ${VERDICT} ${DETAIL} backup=${BACKUP_ID:-none}"
+                    echo "register: ${ROW}"
+                    kubectl -n "$NS" get configmap tockmox-restore-drill-register >/dev/null 2>&1 \
+                      || kubectl -n "$NS" create configmap tockmox-restore-drill-register >/dev/null 2>&1 || true
+                    PREV=$(kubectl -n "$NS" get configmap tockmox-restore-drill-register \
+                      -o jsonpath='{.data.register}' 2>/dev/null || true)
+                    NEWREG=$(printf '%s\n%s\n' "$PREV" "$ROW" | grep -v '^$' | tail -24)
+                    kubectl -n "$NS" patch configmap tockmox-restore-drill-register --type=merge \
+                      -p "{\"data\":{\"register\":$(printf '%s' "$NEWREG" | sed 's/"/\\"/g; s/$/\\n/' | tr -d '\n' | sed 's/^/"/; s/$/"/')}}" || true
+                  }
+
+                  teardown() {
+                    kubectl -n "$NS" delete cluster.postgresql.cnpg.io "$CLUSTER" --ignore-not-found --timeout=120s || true
+                  }
+                  finish() { teardown; record; }
+                  trap finish EXIT
+
+                  # A leftover drill cluster means the last run died mid-flight;
+                  # start clean rather than asserting against stale state.
+                  teardown
+
+                  # WHICH backup is being proved (TM-0794). Without a pin the
+                  # recovery takes the newest base backup in the store and
+                  # nothing records which that was. Pin the newest COMPLETED
+                  # Backup of the live cluster by its backupId, so the row
+                  # names exactly what was restored. Recovery still replays WAL
+                  # to the end of the archive; only the base backup is chosen.
+                  # No completed Backup visible: no pin, and the row says none.
+                  BACKUP_ID=$(kubectl -n "$NS" get backups.postgresql.cnpg.io -o json 2>/dev/null \
+                    | jq -r --arg c {{ $db.name | quote }} '[.items[]
+                        | select(.spec.cluster.name == $c and .status.phase == "completed" and ((.status.backupId // "") != ""))
+                        | {id: .status.backupId, t: (.status.stoppedAt // "")}]
+                        | sort_by(.t) | last | .id // empty' 2>/dev/null || true)
+                  PIN=""
+                  if [ -n "$BACKUP_ID" ]; then
+                    PIN=$(printf '      recoveryTarget:\n        backupID: "%s"' "$BACKUP_ID")
+                  fi
+                  echo "backup: ${BACKUP_ID:-none}"
+
+                  # THE SAME POSTGRES AS THE SOURCE (TM-1023). With no imageName
+                  # the drill cluster gets the operator's CURRENT default, which
+                  # is not what the source runs: CNPG writes its default into a
+                  # Cluster once, at creation, and never moves it. Once an
+                  # operator upgrade changes the default major, a drill on the
+                  # new default restores an older major's backup and fails for a
+                  # reason that says nothing about the backup. Read the image the
+                  # source actually runs and use it.
+                  SRC_IMAGE=$(kubectl -n "$NS" get cluster.postgresql.cnpg.io {{ $db.name | quote }} \
+                    -o jsonpath='{.spec.imageName}' 2>/dev/null || true)
+                  IMG=""
+                  if [ -n "$SRC_IMAGE" ]; then
+                    IMG=$(printf '  imageName: "%s"' "$SRC_IMAGE")
+                  fi
+                  echo "image: ${SRC_IMAGE:-the operator default}"
+
+                  cat <<EOF | kubectl apply -f -
+                  apiVersion: postgresql.cnpg.io/v1
+                  kind: Cluster
+                  metadata:
+                    name: ${CLUSTER}
+                    namespace: ${NS}
+                  spec:
+                  ${IMG}
+                    instances: 1
+                    storage:
+                      size: {{ $db.storage }}
+                      {{- if .Values.global.localStorageClass }}
+                      storageClass: {{ .Values.global.localStorageClass }}
+                      {{- end }}
+                    bootstrap:
+                      recovery:
+                        source: origin
+                  ${PIN}
+                    externalClusters:
+                      - name: origin
+                        plugin:
+                          name: barman-cloud.cloudnative-pg.io
+                          parameters:
+                            barmanObjectName: {{ $storeName | quote }}
+                            serverName: {{ $db.backup.serverName | default $db.name | quote }}
+                  EOF
+                  [ $? -eq 0 ] || { DETAIL="apply refused"; exit 1; }
+
+                  # Readiness, bounded. The Job's activeDeadlineSeconds is the
+                  # hard stop; this is the polite one.
+                  if ! kubectl -n "$NS" wait cluster.postgresql.cnpg.io/"$CLUSTER" \
+                      --for=condition=Ready --timeout=900s; then
+                    DETAIL="cluster never became Ready"
+                    exit 1
+                  fi
+
+                  # Assert on the artifact, not the exit code: recovery has
+                  # ENDED (a cluster stuck replaying reports Ready=false long
+                  # before this, but say it explicitly) and the schema came
+                  # back with substance. The floor is deliberately low ... it
+                  # catches "empty database restored cleanly", which is the
+                  # failure a green restore job hides.
+                  INREC=$(kubectl -n "$NS" exec "${CLUSTER}-1" -c postgres -- \
+                    psql -U postgres -d {{ $akName | quote }} -tAc 'SELECT pg_is_in_recovery();' 2>/dev/null || echo err)
+                  TABLES=$(kubectl -n "$NS" exec "${CLUSTER}-1" -c postgres -- \
+                    psql -U postgres -d {{ $akName | quote }} -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';" 2>/dev/null || echo 0)
+                  # And the row that matters: Authentik's users came back. A schema
+                  # with no users is the restore of a database nobody could sign
+                  # in to; akadmin is always there on a real one.
+                  USERS=$(kubectl -n "$NS" exec "${CLUSTER}-1" -c postgres -- \
+                    psql -U postgres -d {{ $akName | quote }} -tAc 'SELECT count(*) FROM authentik_core_user;' 2>/dev/null || echo err)
+                  DETAIL="in_recovery=${INREC} public_tables=${TABLES} users=${USERS}"
+                  echo "verify: ${DETAIL}"
+                  if [ "$INREC" = "f" ] && [ "${TABLES:-0}" -ge 5 ] 2>/dev/null && [ "${USERS:-0}" -ge 1 ] 2>/dev/null; then
+                    VERDICT=PASS
+                    exit 0
+                  fi
+                  exit 1
+{{- if (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors")) }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $drillName }}-freshness
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: tockmox.identity.restore-drill
+      interval: 5m
+      rules:
+        - alert: TockmoxRestoreDrillStale
+          # 15 days against a weekly schedule is the platform's freshness
+          # convention: at least twice the cadence, so one slot missed to a
+          # maintenance window or a power event does not page anybody, and
+          # two in a row always does. A tighter threshold here false-fired
+          # on the reference site the first week it was tried.
+          expr: >-
+            time() - max(
+              kube_job_status_completion_time{namespace={{ .Values.namespaces.identity | quote }}, job_name=~"{{ $drillName }}-.*"}
+              and on (namespace, job_name)
+              kube_job_status_succeeded{namespace={{ .Values.namespaces.identity | quote }}, job_name=~"{{ $drillName }}-.*"} > 0
+            ) > (15 * 86400)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "No successful restore drill of the identity database in 15 days"
+            description: >-
+              The scheduled restore drill has not PASSED in over two of its
+              weekly cycles. The backups may still be fine; the point is
+              nobody has proof. Check the drill register ConfigMap and the
+              last drill Job's log.
+        - alert: TockmoxRestoreDrillNeverRan
+          # A freshness rule computed over series that do not exist returns
+          # nothing and looks healthy ... the unconnected-wire shape. This
+          # names that case instead.
+          #
+          # KEYED ON THE SCHEDULE, NOT ON A FIXED `for:` (TM-0851). This used
+          # to be the absent() arm alone with `for: 26h`, written as if the
+          # drill ran daily. It runs weekly, so any install made after a
+          # Monday 04:30 fired for up to six days before the first drill could
+          # possibly have run: noise on every fresh install, and on the
+          # reference site for 32 hours before anyone looked.
+          #
+          # Now it fires only when the CronJob has had its chance and missed it,
+          # in either of two ways, and works for any schedule without parsing
+          # one:
+          #   - it WAS scheduled more than 26h ago and no drill Job has ever
+          #     completed (a Job that hangs, crash-loops or is deleted), or
+          #   - its next scheduled time is more than an hour in the past, which
+          #     kube-state-metrics computes from the spec, so a suspended
+          #     CronJob or one that is never picked up still fires.
+          # Before the first slot comes round, neither is true.
+          expr: >-
+            absent(kube_job_status_completion_time{namespace={{ .Values.namespaces.identity | quote }}, job_name=~"{{ $drillName }}-.*"})
+            and on ()
+            (
+              (time() - max(kube_cronjob_status_last_schedule_time{namespace={{ .Values.namespaces.identity | quote }}, cronjob="{{ $drillName }}"}) > 26 * 3600)
+              or
+              (time() - max(kube_cronjob_next_schedule_time{namespace={{ .Values.namespaces.identity | quote }}, cronjob="{{ $drillName }}"}) > 3600)
+            )
+          for: 15m
+          labels:
+            severity: info
+          annotations:
+            summary: "The identity database's restore drill has never run on this cluster"
+            description: >-
+              The drill CronJob has passed a scheduled time and no drill Job
+              has ever completed: either it was scheduled more than a day ago
+              and the Job never finished, or the slot passed without the
+              CronJob being scheduled at all. Check that the CronJob is not
+              suspended, that its schedule is sane, and the drill Job's events
+              and log.
+        - alert: TockmoxRestoreDrillFailed
+          # The third case. Stale sees a drill that stopped PASSING; NeverRan
+          # sees one that never happened. Neither sees a drill that RAN and
+          # FAILED, and that is the worse silence: the register keeps a dated
+          # FAIL row, the CronJob is healthy, and nothing pages. A drill that
+          # fails quietly is worse than no drill.
+          #
+          # "The most recent drill failed", not "a failed drill Job exists".
+          # failedJobsHistoryLimit keeps three failed Jobs around, so a plain
+          # `kube_job_status_failed > 0` would keep firing for weeks after
+          # the next PASS. Comparing the newest failure's start time against
+          # the newest success's completion time clears the alert the moment
+          # a later drill passes, and `or on () vector(0)` makes a failure
+          # with no success on record ever count, rather than vanish because
+          # the right-hand side was empty. Proven with `promtool test rules`
+          # across five cases on 2026-09-03: fail-only fires, fail-then-pass is
+          # silent, pass-then-fail fires, a foreign Job's failure is ignored,
+          # a running Job is silent.
+          expr: >-
+            max(
+              kube_job_status_start_time{namespace={{ .Values.namespaces.identity | quote }}, job_name=~"{{ $drillName }}-.*"}
+              and on (namespace, job_name)
+              kube_job_status_failed{namespace={{ .Values.namespaces.identity | quote }}, job_name=~"{{ $drillName }}-.*"} > 0
+            )
+            >
+            (
+              max(
+                kube_job_status_completion_time{namespace={{ .Values.namespaces.identity | quote }}, job_name=~"{{ $drillName }}-.*"}
+                and on (namespace, job_name)
+                kube_job_status_succeeded{namespace={{ .Values.namespaces.identity | quote }}, job_name=~"{{ $drillName }}-.*"} > 0
+              )
+              or on () vector(0)
+            )
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The most recent restore drill of the identity database FAILED"
+            description: >-
+              The latest scheduled restore drill of the identity database ran
+              and did not PASS. The
+              live database is untouched; what is in question is whether the
+              object store holds a database anyone can come back from. Read
+              the FAIL row in the drill register ConfigMap and the failed drill
+              Job's log (`kubectl -n {{ .Values.namespaces.identity }} logs job/<name>`),
+              then run the manual recovery in
+              docs/operations/backup-restore.md section 5 to find out.
+{{- end }}
+{{- end }}

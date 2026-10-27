@@ -42,6 +42,8 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 # ALLOW LIST: <Kind> <name glob> # why this pod keeps a token. One per line.
 cat > "$tmp/allow.txt" <<'ALLOW'
 CronJob tockmox-litellm-db-drill   # restore drill: kubectl creates and deletes the drill Cluster, reads and patches the register ConfigMap (Role in restore-drill.yaml)
+CronJob tockmox-authentik-db-drill # identity restore drill (TM-0788): the same script and Role as the model gateway's, in the identity namespace (charts/tockmox-identity/templates/restore-drill.yaml)
+Job     tockmox-authentik-db-upgrade-guard # identity upgrade guard (TM-0788): lists PersistentVolumeClaims in its namespace before a sync and nothing else (list-only Role in authentik-db-upgrade-guard.yaml)
 Job     tockmox-garage-bootstrap   # bootstrap Job: kubectl reads and creates Secrets, patches the Longhorn BackupTarget, starts sync Jobs from CronJobs
 Deployment tockmox-ui              # the Tockmox UI: get/list nodes, and Argo CD applications in their namespace (ClusterRole tockmox-ui-read, Role tockmox-ui-read-applications in tockmox-ui.yaml); first rendered here when the all-on overlay turned it on (TM-1013)
 Job     t-gateway-key-*            # console-key Job (TM-0460): kubectl gets, creates or replaces the console's virtual-key Secret and restarts the console's pods on a replaced key (Role in gateway-key.yaml); named after its pod template like the migrations Job

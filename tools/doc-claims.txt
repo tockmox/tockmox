@@ -262,10 +262,11 @@ states: [0-9]+ CI gates
 # 2026-10-21: 417 -> 421 and 37 -> 38 pages, the new administration/ai-nodes.md (four blocks).
 # 2026-10-23: 421 -> 422 and 38 -> 39 pages, tockmox-ui.md's first block: sealing the Authentik half of the UI client secret for an install minted before 0.9.0 (TM-0956).
 # 2026-10-26: 422 -> 424 and 39 -> 40 pages, platform-management.md's first two blocks: the generator's rewrite and --check commands in its new Cases section.
+# 2026-10-27: 424 -> 431, Authentik on CloudNativePG (TM-0788): upgrade.md's five-block move procedure, secrets.md's block sealing tockmox-authentik-db for an install minted before 0.9.0, and backup-restore.md's read of the identity drill register.
 page:   tests/executed-docs/INVENTORY.md
 claim:  fenced bash blocks across
 test:   grep -rhE '^[ \t]*```bash$' docs/ | wc -l | tr -d ' '
-expect: 424
+expect: 431
 states: [0-9]+ fenced bash blocks
 
 # TM-0469 added the KUBE_CONTEXT export block to fresh-install.md, which moved
@@ -685,13 +686,13 @@ states: [0-9]+ exemptions
 page:   docs/usage/what-you-get.md
 claim:  rendered resources
 test:   tools/render-counts.sh --read total
-expect: 602
+expect: 604
 states: [0-9]+ rendered resources
 
 page:   docs/architecture.md
 claim:  resources** render with the CI values
 test:   tools/render-counts.sh --read total
-expect: 602
+expect: 604
 states: [0-9]+ resources\*\* render
 
 page:   docs/usage/what-you-get.md
@@ -725,9 +726,9 @@ expect: 7
 states: [0-9]+ \| blackbox / SNMP
 
 page:   docs/usage/what-you-get.md
-claim:  | identity | 32 | Authentik. Its
+claim:  | identity | 34 | Authentik. Its
 test:   tools/render-counts.sh --read identity
-expect: 32
+expect: 34
 states: [0-9]+ \| Authentik. Its
 
 page:   docs/usage/what-you-get.md

@@ -1,18 +1,21 @@
 {{- $db := .Values.databaseBackup | default dict -}}
-{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "authentik")) .Values.capabilities.dataProtection.enabled ($db.enabled | default false) }}
+{{- /* Only while the bundled server runs (TM-0788): a CNPG identity database archives its own WAL and has its own drill, and a dump CronJob dialling a server that is not there fails every night into a log nobody reads. */ -}}
+{{- if and (include "tockmox-identity.bundledOn" .) .Values.capabilities.dataProtection.enabled ($db.enabled | default false) }}
 # SPDX-License-Identifier: Apache-2.0
 #
-# THE IDENTITY DATABASE'S BACKUP, closing the one row of the backup table
-# that had none: Authentik runs on the chart's bundled (Bitnami) Postgres,
-# which has no CNPG operator underneath and therefore no Barman path. Until
-# the planned CNPG migration, this is the honest bridge: a nightly pg_dump
-# shipped to the same object store everything else backs up to.
+# THE BUNDLED SERVER'S BACKUP: Authentik's bundled (Bitnami) Postgres has no
+# CNPG operator underneath and therefore no Barman path, so this is its
+# bridge, a nightly pg_dump shipped to the same object store everything else
+# backs up to. It renders only while that server is on
+# (`authentik.postgresql.enabled`); from 0.9.0 a fresh install runs Authentik
+# on the CNPG cluster in authentik-db.yaml instead (TM-0788), and an install
+# that keeps the bundled server keeps this with it until it moves.
 #
 # SEVEN-OBJECT ROTATION, NOT A RETENTION POLICY. The dump lands at
 # authentik-db/authentik-<weekday>.sql.gz, so day eight overwrites day one.
 # Self-pruning with no ListObjects/DeleteObjects machinery, a fixed storage
 # ceiling, and a seven-day restore window ... stated plainly rather than
-# implied. Need more than seven days? That is the CNPG migration talking.
+# implied. Need more than seven days? That is the CNPG database talking (authentik-db.yaml).
 #
 # THE UPLOADER IS curl, NOT an AWS SDK. curl >= 7.75 signs SigV4 natively
 # (--aws-sigv4), Garage accepts it, and it means no new image and no
