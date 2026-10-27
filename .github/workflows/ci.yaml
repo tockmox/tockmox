@@ -18,14 +18,14 @@ env:
   HELM_VERSION: "v4.3.1"
   KUBECONFORM_VERSION: "0.8.0"
   GITLEAKS_VERSION: "8.30.1"
-  PROMTOOL_VERSION: "3.14.0"
+  PROMTOOL_VERSION: "3.15.1"
   # SHA-256 of the exact release asset each download step fetches (TM-0592),
   # copied from the project's own published checksum file for that version and
   # confirmed against the downloaded bytes. A Renovate bump of a version above
   # fails its step on a checksum mismatch until the matching hash here is
   # updated in the same PR: that failure is the prompt, not a defect.
   # tools/check-action-pins.sh refuses a download with no check after it.
-  PROMTOOL_SHA256: "f665c6da19eb7ba399c915d30c7d9793c9b417bf8a749b504bc470678631478d"  # prometheus-${PROMTOOL_VERSION}.linux-amd64.tar.gz
+  PROMTOOL_SHA256: "6a726885328ad9efebbf36e876ce2fb6225468a71fd1e7ce3ba666d5f4d97a84"  # prometheus-${PROMTOOL_VERSION}.linux-amd64.tar.gz
   KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883"  # kubeconform-linux-amd64.tar.gz
   GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"  # gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz
 
