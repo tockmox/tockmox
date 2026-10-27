@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="640" viewBox="0 0 1040 640" role="img" aria-labelledby="t d" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title id="t">Where a chat request goes in Tockmox</title>
+<desc id="d">Inside your network and your cluster, the browser reaches the chat console through ingress and single sign-on. The console holds only a scoped key; its egress is limited to DNS, the AI namespace and the ingress controller, so it cannot reach a model host or the internet directly. Every request goes through the model gateway, which holds the provider credentials and whose model list ships empty. From the gateway: an optional in-cluster Ollama, off by default; a model host on your network, reachable once you add an egress entry for it; or, crossing the boundary on HTTPS port 443, a frontier provider, only if you add one to the model list.</desc>
+<defs><marker id="ah-neutral" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#5E6963"/></marker><marker id="ah-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2F8F45"/></marker><marker id="ah-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#B7790F"/></marker><marker id="ah-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#C62828"/></marker><marker id="ah-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2F67B0"/></marker><marker id="ah-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1F2A24"/></marker></defs>
+<rect x="1" y="1" width="1038" height="638" rx="14" fill="#FBFBF8" stroke="#D3D8D2" stroke-width="1.5"/>
+<text x="32" y="42" font-size="21" font-weight="700" text-anchor="start" fill="#1F2A24">Where a request goes</text>
+<text x="32" y="64" font-size="13" font-weight="400" text-anchor="start" fill="#6B756F">The route you configure decides where the conversation goes. Nothing routes until you name a model.</text>
+<rect x="30" y="100" width="770" height="510" rx="16" fill="none" stroke="#1F2A24" stroke-width="2.4"/>
+<rect x="48" y="89" width="130.8" height="22" rx="4" fill="#FBFBF8"/>
+<text x="58" y="105" font-size="12.5" font-weight="700" text-anchor="start" fill="#1F2A24" letter-spacing="1.2">YOUR NETWORK</text>
+<rect x="170" y="150" width="600" height="310" rx="16" fill="none" stroke="#1F2A24" stroke-width="2.4"/>
+<rect x="188" y="139" width="130.8" height="22" rx="4" fill="#FBFBF8"/>
+<text x="198" y="155" font-size="12.5" font-weight="700" text-anchor="start" fill="#1F2A24" letter-spacing="1.2">YOUR CLUSTER</text>
+<text x="198" y="174" font-size="11.5" font-weight="400" text-anchor="start" fill="#6B756F">AI namespace: egress denied by default</text>
+<circle cx="90" cy="246" r="9" fill="none" stroke="#1F2A24" stroke-width="2"/>
+<path d="M 75 276 Q 75 258 90 258 Q 105 258 105 276" fill="none" stroke="#1F2A24" stroke-width="2"/>
+<text x="90" y="294" font-size="12.5" font-weight="600" text-anchor="middle" fill="#1F2A24">Browser</text>
+<rect x="196" y="220" width="150" height="86" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="271.0" y="259.96250000000003" font-size="13.5" font-weight="700" text-anchor="middle" fill="#1F2A24">Ingress + SSO</text>
+<text x="271.0" y="279.46250000000003" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">Traefik · Authentik</text>
+<rect x="372" y="210" width="170" height="106" rx="10" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1.6"/>
+<text x="457.0" y="244.6125" font-size="14" font-weight="700" text-anchor="middle" fill="#17572A">Chat console</text>
+<text x="457.0" y="264.3875" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">Open WebUI</text>
+<text x="457.0" y="279.91249999999997" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">holds a scoped key</text>
+<text x="457.0" y="295.4375" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">only</text>
+<rect x="580" y="210" width="170" height="106" rx="10" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1.6"/>
+<text x="665.0" y="244.6125" font-size="14" font-weight="700" text-anchor="middle" fill="#17572A">Model gateway</text>
+<text x="665.0" y="264.3875" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">LiteLLM</text>
+<text x="665.0" y="279.91249999999997" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">holds provider keys</text>
+<text x="665.0" y="295.4375" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">model list ships empty</text>
+<path d="M 114 262 L 192 262" fill="none" stroke="#5E6963" stroke-width="1.8" marker-end="url(#ah-neutral)"/>
+<path d="M 346 262 L 368 262" fill="none" stroke="#5E6963" stroke-width="1.8" marker-end="url(#ah-neutral)"/>
+<path d="M 542 262 L 576 262" fill="none" stroke="#2F8F45" stroke-width="1.8" marker-end="url(#ah-green)"/>
+<path d="M 420 316 L 420 372" stroke="#C62828" stroke-width="1.8" stroke-dasharray="3 4" fill="none"/>
+<path d="M 414 366 L 426 378" stroke="#C62828" stroke-width="2.6" stroke-linecap="round"/>
+<path d="M 414 378 L 426 366" stroke="#C62828" stroke-width="2.6" stroke-linecap="round"/>
+<text x="406" y="368.0" font-size="11.5" font-weight="600" text-anchor="end" fill="#8E1B1B">the console cannot reach a model</text>
+<text x="406" y="383.525" font-size="11.5" font-weight="600" text-anchor="end" fill="#8E1B1B">host or the internet directly</text>
+<rect x="580" y="360" width="170" height="76" rx="10" fill="#FFF5E0" stroke="#B7790F" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text x="665.0" y="387.20000000000005" font-size="13.5" font-weight="700" text-anchor="middle" fill="#6E4A06">Ollama</text>
+<text x="665.0" y="406.70000000000005" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">in the cluster</text>
+<text x="665.0" y="422.225" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">optional, off by default</text>
+<path d="M 665 316 L 665 356" fill="none" stroke="#B7790F" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#ah-amber)"/>
+<rect x="400" y="500" width="230" height="82" rx="10" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1.6"/>
+<text x="515.0" y="530.2" font-size="13.5" font-weight="700" text-anchor="middle" fill="#17572A">Model host on your network</text>
+<text x="515.0" y="549.7" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">a Mac, a GPU box, any</text>
+<text x="515.0" y="565.225" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">OpenAI-compatible endpoint</text>
+<path d="M 750 300 L 786 300 L 786 540 L 634 540" fill="none" stroke="#2F8F45" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#ah-green)"/>
+<text x="650" y="488.0" font-size="11.5" font-weight="500" text-anchor="start" fill="#17572A">one egress entry for</text>
+<text x="650" y="503.525" font-size="11.5" font-weight="500" text-anchor="start" fill="#17572A">its address and port</text>
+<path d="M 880.0 300 A 40.0 40.0 0 0 1 868.0 239.68 A 42.0 42.0 0 0 1 915.6 208.48 A 44.0 44.0 0 0 1 988.0 233.44 A 38.0 38.0 0 0 1 996.0 300 Z" fill="#FFF5E0" stroke="#B7790F" stroke-width="1.8" stroke-dasharray="7 5"/>
+<text x="930" y="248" font-size="13.5" font-weight="700" text-anchor="middle" fill="#6E4A06">Frontier provider</text>
+<text x="930" y="267" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">outside your control</text>
+<path d="M 750 236 L 836 236" fill="none" stroke="#B7790F" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#ah-amber)"/>
+<circle cx="800" cy="236" r="7" fill="#FFFFFF" stroke="#C62828" stroke-width="2.6"/>
+<circle cx="800" cy="236" r="2.6" fill="#C62828"/>
+<text x="840" y="328.0" font-size="11.5" font-weight="600" text-anchor="start" fill="#8E1B1B">HTTPS 443, only if you add a</text>
+<text x="840" y="343.525" font-size="11.5" font-weight="600" text-anchor="start" fill="#8E1B1B">provider to the model list.</text>
+<text x="840" y="359.05" font-size="11.5" font-weight="600" text-anchor="start" fill="#8E1B1B">The conversation goes with it.</text>
+<rect x="830" y="420" width="196" height="144" rx="8" fill="#FFFFFF" stroke="#D3D8D2" stroke-width="1.2"/>
+<text x="842" y="440" font-size="11.5" font-weight="700" text-anchor="start" fill="#4A5550" letter-spacing="1">Legend</text>
+<rect x="842" y="448" width="26" height="14" rx="3" fill="none" stroke="#1F2A24" stroke-width="2.2"/>
+<text x="876" y="459" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">trust boundary</text>
+<path d="M 842 477 L 864 477" stroke="#2F8F45" stroke-width="1.8" marker-end="url(#ah-green)"/>
+<text x="876" y="481" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">local path</text>
+<path d="M 842 499 L 864 499" stroke="#B7790F" stroke-width="1.8" stroke-dasharray="5 3" marker-end="url(#ah-amber)"/>
+<text x="876" y="503" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">only once you configure it</text>
+<circle cx="855" cy="521" r="6" fill="#FFFFFF" stroke="#C62828" stroke-width="2.4"/>
+<circle cx="855" cy="521" r="2.2" fill="#C62828"/>
+<text x="876" y="525" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">data leaves your network</text>
+<path d="M 849 537 L 861 549 M 849 549 L 861 537" stroke="#C62828" stroke-width="2.4" stroke-linecap="round"/>
+<text x="876" y="547" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">blocked by policy</text>
+</svg>

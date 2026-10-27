@@ -7,7 +7,7 @@ tags: [getting-started, first-hour, authentik, sso, open-webui, private-ca]
 status: stable
 generated:
   by: hand
-  at: 2026-09-01
+  at: 2026-10-27
 tockmox:
   classification: public
   audience: [operator]
@@ -93,6 +93,8 @@ first.
 
 ## 1. Trust the CA ... Required
 
+You are here: Install ✓ → **Trust CA** → Create admin → Create user → Sign in → Connect model → First chat
+
 Tockmox issues its own certificates from a private CA. Until that CA is in your
 trust store every console shows a browser warning, and worse, **some clients
 fail silently rather than warning.**
@@ -131,6 +133,8 @@ Prints `200 0`. A `curl` exit code of 60 means the CA is not in the store `curl`
 consulted, which is usually a different store from the one you installed into.
 
 ## 2. Bootstrap Authentik ... Required
+
+You are here: Install ✓ → Trust CA ✓ → **Create admin** → Create user → Sign in → Connect model → First chat
 
 **This is the step people miss.** A fresh Authentik has no administrator, and
 the consoles wired to it (Grafana, Open WebUI and Argo Workflows) federate to
@@ -175,6 +179,8 @@ password. The Secret inventory is in
 [secrets](../administration/secrets.md#secrets-the-platform-expects-you-to-create).
 
 ## 3. Make yourself a real user ... Required
+
+You are here: Install ✓ → Trust CA ✓ → Create admin ✓ → **Create user** → Sign in → Connect model → First chat
 
 **Do not use `akadmin` day to day.** It is the break-glass account, and an
 emergency account you log in with every morning is not an emergency account.
@@ -252,6 +258,8 @@ two names above, and you have set its password.
 
 ## 4. Sign in to the chat console ... Required
 
+You are here: Install ✓ → Trust CA ✓ → Create admin ✓ → Create user ✓ → **Sign in** → Connect model → First chat
+
 **Be the first person to sign in here, as a `tockmox-admins` member.** Open
 WebUI makes the first account it ever creates an administrator, whatever that
 person's groups say, and it keeps that account an administrator for as long as
@@ -295,6 +303,8 @@ than yours:
 [troubleshooting](../operations/troubleshooting.md#sso-login-dies-at-the-token-step-with-a-certificate-verify-failure).
 
 ## 5. Send a message ... Required
+
+You are here: Install ✓ → Trust CA ✓ → Create admin ✓ → Create user ✓ → Sign in ✓ → **Connect model** → **First chat**
 
 Pick a model from the selector and send anything.
 

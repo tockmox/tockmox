@@ -7,7 +7,7 @@ tags: [status, pre-1.0, releases, readme, rationale]
 status: stable
 generated:
   by: hand
-  at: 2026-10-03
+  at: 2026-10-27
 tockmox:
   classification: public
   audience: [operator, contributor]
@@ -71,16 +71,16 @@ Anything not yet built says so rather than being implied.
 **It installs** nine layers on a cluster you already have: namespaces and
 network policy, ingress and TLS and storage, replicated block storage and
 Postgres, single sign-on, metrics and logs and dashboards and alerting, a chat
-console and a model gateway (bundled, and off by default — the console ships
-pointed at nothing on purpose), and a heartbeat that proves the alerting is
-alive.
+console and a model gateway (the gateway on by default since 0.8.0 with the
+console routed through it, and its model list empty on purpose), and a
+heartbeat that proves the alerting is alive.
 [What you get](usage/what-you-get.md) itemises all of it.
 
 **It does not install** Kubernetes, ArgoCD, sealed-secrets, or a model. The
 first three are prerequisites and
 [there is a reason the list is that short](deployment/prerequisites.md).
-The fourth is deliberate: the chat console ships pointed at nothing, and you
-aim it at hardware you own, a frontier API, or both.
+The fourth is deliberate: the gateway's model list ships empty, and you aim it
+at hardware you own, a frontier API, or both.
 
 **You operate it.** Tockmox assumes an operator who is comfortable with
 Kubernetes, Helm and GitOps. That operator can be one person with a mini PC
@@ -141,8 +141,9 @@ the nine in the hash scope matching a whole-tree hash taken before the move.
 what that does and does not make true.
 
 **What's thin.** The glue, not the platform — site-specific alert rules beyond
-the self-check set, and a few dashboards that wait on their scrapes (nine
-Tockmox-authored boards ship; ArgoCD's follows when its metrics config lands).
+the self-check set, and a few dashboards that wait on their scrapes (ten
+Tockmox-authored boards ship, and ArgoCD's as an eleventh once its metrics are
+on).
 All additive, none of it blocking an install.
 
 **What you're signing up for.** One maintainer, best-effort response, no SLA.
@@ -158,49 +159,75 @@ close permanently. See [CONTRIBUTING.md](../CONTRIBUTING.md).
 ## What you get
 
 A working stack, not a parts list. One sign-on reaches the three consoles wired
-to it ... Grafana, Open WebUI and Argo Workflows ... with local logins kept as
-break-glass. The model-gateway database proves it restores on a schedule
-instead of sitting there untested (a weekly restore into a scratch copy; the
-chat console's data volume has no scheduled drill); Longhorn volumes have been
-restored from backup once, in production, and Authentik's bundled database has
-been restored from its nightly dump once, on a lab, with a login after, which
-[backup and restore](operations/backup-restore.md) sets out row by row. No
-whole-cluster rebuild and restore has been run as one exercise.
-Silent failures page you, and a heartbeat proves the alerting itself is alive.
-Default-deny **ingress** covers every namespace the platform creates, with no
-exceptions left to discover in production ... and the word "ingress" is doing
-real work there: egress is contained for the chat console and (after 0.6.2) the AI namespace, and open elsewhere,
-which [what you get](usage/what-you-get.md#network-containment) states in
-full rather than leaving you to read the policies. Every application turns off
-individually, every UI hostname derives from one value, and TLS follows
-another.
+to it (Grafana, Open WebUI, Argo Workflows), with local logins kept as
+break-glass. Silent failures page you, and a heartbeat proves the alerting is
+alive. Default-deny **ingress** covers every namespace the platform creates;
+egress is contained for the whole AI namespace (the chat console included) and
+the diagnostic one, and open elsewhere ([stated in full](usage/what-you-get.md#network-containment)).
+The model-gateway database proves it restores on a schedule, into a scratch
+copy every week; the chat console's data volume has no scheduled drill.
+Longhorn volumes have been restored from backup once, in production;
+Authentik's bundled database has been restored from its nightly dump once, on
+a lab, with a login after ([row by row](operations/backup-restore.md)).
+Rebuilding a cluster and restoring all of it has not been run as one exercise.
+Every application turns off individually, every UI hostname derives from one
+value, and TLS follows another.
 
-**The AI plane needs one decision from you: which models.** Open WebUI ships
-pointed at nothing, with no cloud backend wired in and a CI check that keeps it
-that way — that is a promise about what Tockmox ships, not a limit on what you
-configure. Point it at a model host on your own hardware, at any
-OpenAI-compatible endpoint including the frontier providers, or at the bundled
-LiteLLM gateway and route to both: local for the work that fits, frontier for
-the work that earns it, with one place to set policy and read the audit trail.
-Two values, in [the AI plane](usage/ai-plane.md).
+Read those headlines with their edges. Single sign-on fronts the three consoles
+wired to it, with local break-glass logins beside it, and the UIs that ship no
+login of their own (Prometheus, Alertmanager, Longhorn) are off by default.
+Default-deny is complete for ingress, while egress is contained only for the AI
+namespace and the diagnostic one. The scheduled restore drill covers the
+model-gateway database, not your chat history or a whole-cluster rebuild.
 
-Sending a request outside your network means the conversation goes with it, and
-the egress rules have to be opened to allow it. That is a deliberate decision
+**The AI plane needs one decision from you: which models.** The chat console
+(Open WebUI) ships pointed at the bundled model gateway (LiteLLM), on a key the
+AI layer mints for it, and the gateway ships with an empty model list: no model
+host and no cloud backend wired in, and a CI check that keeps the console on the
+gateway. Name a model host on your hardware, any OpenAI-compatible endpoint
+including frontier providers, or both, in the gateway's model list
+([the AI plane](usage/ai-plane.md)). A request sent outside your network
+takes the conversation with it. The console cannot reach the internet; the
+gateway may reach public HTTPS on port 443 so it can call a provider you
+configure, and nothing on your LAN until you open it
+([the AI plane](usage/ai-plane.md) has the exact rule and how to narrow
+it). Either way, Tockmox makes you make that decision.
+
+Local for the work that fits, frontier for the work that earns it, with one
+place to set policy and read the audit trail. That is a deliberate decision
 with a different compliance shape from keeping inference local, and Tockmox
 makes you make it rather than making it for you.
 
-The gateway is on by default since 0.8.0 and the console goes through it
-(TM-0460, REQ-0004): its master key is minted with the other credentials, and
-the console's own key is minted by a Job once the gateway answers. The model
-list still ships empty, because a model endpoint is an address on your
-network.
-
-Underneath, nine charts deploy on six sync waves — `crds`, then `policy`, then
+Underneath, nine charts deploy on six sync waves: `crds`, then `policy`, then
 `platform`, then `observability` with `exporters`, then `identity`, and finally
-`devops`, `ai` and `selfcheck` together. The full layer-by-layer inventory —
-what ships in each, what's deliberately off by default, and how the guards fail
-loudly rather than starting insecure — is in
+`devops`, `ai` and `selfcheck` together. The full layer-by-layer inventory
+(what ships in each, what's deliberately off by default, and how the guards
+fail loudly rather than starting insecure) is in
 [Architecture: the nine layers](architecture.md#the-nine-layers).
+
+### What a minimal install takes, and how long
+
+**What it requires.** The smallest shape with single sign-on is the
+[`household-sso` profile](deployment/profiles.md): one node, a cluster with
+ArgoCD and sealed-secrets already on it, and a model host the cluster can reach,
+because Tockmox does not ship one. It was measured on one 8-core, 24 GB VM
+([sizing](deployment/sizing.md)). A person still does three things by
+hand after the apply: DNS, naming a model host in the gateway, and granting a
+model to users. The console's gateway key is minted and wired by the AI layer.
+
+**How long.** On 2026-10-06 a scripted run, not a person following these
+pages, took 11m22s from a cluster with nothing on it to the first chat reply
+and 15m02s from creating the VM. The script did the hand steps too, so
+they are inside the number. It leaves out reading time, it started with the model
+host already running, and one harness retry of about 40 seconds is not counted.
+This is one run, so it is a point and not a range. Expect a person reading as they
+go to take longer; the range will widen when people other than the author time it
+(TM-0280\*). The run log is kept with the maintainer's lab evidence for TM-0284\*.
+
+<sub>\* Internal task-tracker references. They don't resolve publicly, and every
+sentence that carries one is written to stand without it; one that doesn't is a
+documentation defect worth an issue
+([the convention](../CONTRIBUTING.md#tm--and-hl--identifiers)).</sub>
 
 ## Opinionated, not closed
 
@@ -279,6 +306,9 @@ from them; [CHANGELOG.md](../CHANGELOG.md) starts at 0.8.0.
 Supporting exactly one release is a deliberate limit of a one-maintainer
 project, not an oversight ... see the boundary above. Until 1.0, treat every tag as capable of moving the values
 interface, and read [CHANGELOG.md](../CHANGELOG.md) before upgrading.
+
+[RELEASING.md](../RELEASING.md) is the maintainer's release checklist, public
+because the release gate is part of what a tag means.
 
 ## README badges
 

@@ -23,6 +23,16 @@ stays hand-written:
      order comes from tools/docs-index-order.txt. A page in the section that the
      order file does not list, or a listed page that does not exist, is an error.
 
+     GROUPS (2026-10-27). A section may split its pages into groups, so an index
+     routes by what the reader is doing rather than implying one long reading
+     order. In the order file, a line `group: Title :: blurb` starts a group
+     whose pages are a set (no step numbers), and `steps: Title :: blurb` starts
+     one whose pages are read in order (numbered from 1 within the group). The
+     blurb is optional. Each group renders as a `### Title` heading, the blurb,
+     and its own table. A section with no group lines renders exactly as before:
+     one numbered table. A section that uses groups must put every page in one,
+     and a group with no pages is an error.
+
 Modes: (none) write; --check fail when a committed surface differs from a fresh
 render; --selftest prove the checks can fail. --root DIR points at another tree
 (the red-proof runs against a copy of the charts).
@@ -147,8 +157,14 @@ def page_info(path):
     return title, desc.strip()
 
 
+GROUP = re.compile(r"^(group|steps):\s*(.+?)\s*(?:::\s*(.*?)\s*)?$")
+
+
 def read_order(root):
-    order, cur = {}, None
+    """Return (order, groups). order: section -> [stem, ...] in file order.
+    groups: section -> [(kind, title, blurb, [stem, ...]), ...], empty when the
+    section uses no group lines."""
+    order, groups, cur = {}, {}, None
     for n, line in enumerate((root / "tools/docs-index-order.txt").read_text().split("\n"), 1):
         line = line.strip()
         if not line or line.startswith("#"):
@@ -156,14 +172,31 @@ def read_order(root):
         if line.startswith("[") and line.endswith("]"):
             cur = line[1:-1]
             order.setdefault(cur, [])
-        elif cur is None:
-            raise Fail(f"docs-index-order.txt:{n}: page before any [section]")
-        else:
-            order[cur].append(line)
-    return order
+            groups.setdefault(cur, [])
+            continue
+        if cur is None:
+            raise Fail(f"docs-index-order.txt:{n}: page or group before any [section]")
+        g = GROUP.match(line)
+        if g:
+            groups[cur].append((g.group(1), g.group(2), g.group(3) or "", []))
+            continue
+        if groups[cur]:
+            groups[cur][-1][3].append(line)
+        order[cur].append(line)
+    for sec, gs in groups.items():
+        if not gs:
+            continue
+        ungrouped = len(order[sec]) - sum(len(g[3]) for g in gs)
+        if ungrouped:
+            raise Fail(f"docs-index-order.txt [{sec}] uses groups, and {ungrouped} "
+                       f"page(s) come before the first group line")
+        for kind, title, _, stems in gs:
+            if not stems:
+                raise Fail(f"docs-index-order.txt [{sec}] group \"{title}\" lists no pages")
+    return order, groups
 
 
-def section_table(root, section, order):
+def section_table(root, section, order, groups=None):
     d = root / "docs" / section
     pages = sorted(p.stem for p in d.glob("*.md") if p.name != "README.md")
     listed = order.get(section, [])
@@ -173,12 +206,30 @@ def section_table(root, section, order):
         raise Fail(f"docs/{section}/ and docs-index-order.txt disagree: not in the "
                    f"order file {sorted(set(pages) - set(listed))}, in the order "
                    f"file but no such page {sorted(set(listed) - set(pages))}")
-    rows = ["| Read | Page | What it covers |", "|---|---|---|"]
-    for i, stem in enumerate(listed, 1):
-        title, desc = page_info(d / f"{stem}.md")
-        rows.append(f"| {i} | [{title}]({stem}.md) | {desc} |")
     src = f"each page's frontmatter, ordered by tools/docs-index-order.txt"
-    return "\n".join([SB, NOTE.format(src=src), ""] + rows + ["", SE])
+    gs = (groups or {}).get(section) or []
+    if not gs:
+        rows = ["| Read | Page | What it covers |", "|---|---|---|"]
+        for i, stem in enumerate(listed, 1):
+            title, desc = page_info(d / f"{stem}.md")
+            rows.append(f"| {i} | [{title}]({stem}.md) | {desc} |")
+        return "\n".join([SB, NOTE.format(src=src), ""] + rows + ["", SE])
+    out = [SB, NOTE.format(src=src)]
+    for kind, gtitle, blurb, stems in gs:
+        out += ["", f"### {gtitle}", ""]
+        if blurb:
+            out += [blurb, ""]
+        if kind == "steps":
+            out += ["| Step | Page | What it covers |", "|---|---|---|"]
+        else:
+            out += ["| Page | What it covers |", "|---|---|"]
+        for i, stem in enumerate(stems, 1):
+            title, desc = page_info(d / f"{stem}.md")
+            if kind == "steps":
+                out.append(f"| {i} | [{title}]({stem}.md) | {desc} |")
+            else:
+                out.append(f"| [{title}]({stem}.md) | {desc} |")
+    return "\n".join(out + ["", SE])
 
 
 def splice(text, begin, end, block, where):
@@ -193,7 +244,7 @@ def surfaces(root):
     out = {}
     arch = root / "docs/architecture.md"
     out[arch] = splice(arch.read_text(), LB, LE, layer_table(root), str(arch))
-    order = read_order(root)
+    order, groups = read_order(root)
     extra = set(order) - set(SECTIONS)
     if extra:
         raise Fail(f"docs-index-order.txt has unknown sections {sorted(extra)}")
@@ -201,7 +252,7 @@ def surfaces(root):
         rd = root / "docs" / s / "README.md"
         if not rd.exists():
             raise Fail(f"{rd} missing: create it with a {SB} ... {SE} pair")
-        out[rd] = splice(rd.read_text(), SB, SE, section_table(root, s, order), str(rd))
+        out[rd] = splice(rd.read_text(), SB, SE, section_table(root, s, order, groups), str(rd))
     return out
 
 
@@ -284,6 +335,26 @@ def selftest(root):
             (t / "docs/usage/extra.md").write_text("# Extra\n")
 
         expect_red("page missing from the order file", add_unlisted_page, "not in the")
+
+        def empty_group(t):
+            f = t / "tools/docs-index-order.txt"
+            f.write_text(f.read_text().replace("[usage]\n", "[usage]\ngroup: Nothing here\n", 1))
+
+        expect_red("a group that lists no pages", empty_group, "lists no pages")
+
+        def page_before_group(t):
+            # A section with a page listed ahead of its first group line. The
+            # usage section is rewritten whole so the case does not depend on
+            # how the committed order file groups it.
+            f = t / "tools/docs-index-order.txt"
+            head, _, tail = f.read_text().partition("[usage]\n")
+            pages = [l for l in tail.split("\n")
+                     if l.strip() and not l.startswith("#") and not GROUP.match(l.strip())]
+            f.write_text(head + "[usage]\n" + pages[0] + "\ngroup: Rest\n"
+                         + "\n".join(pages[1:]) + "\n")
+
+        expect_red("a page before the first group line of a grouped section", page_before_group,
+                   "before the first group line")
     bad = [c for c in cases if not c[1]]
     for label, ok, why in cases:
         print(f"selftest: {'red as required' if ok else 'NOT RED'}: {label} ({why})")

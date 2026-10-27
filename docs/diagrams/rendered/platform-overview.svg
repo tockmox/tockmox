@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="660" viewBox="0 0 1040 660" role="img" aria-labelledby="t d" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title id="t">Tockmox at a glance</title>
+<desc id="d">Inside a solid boundary for your hardware and your network: a person signs in through single sign-on to the chat console, which sends every request through the model gateway to a model host you run, in the cluster or on your network. Around the AI plane sit identity, policy, storage and certificates, observability with alerts to a phone, backups with a weekly restore drill for the gateway database, and a self-check heartbeat. Underneath is the foundation you provide: Kubernetes, Argo CD and sealed-secrets, reconciling everything from your site repository. Outside the boundary, a frontier provider is reachable only through the gateway and only if you configure it; a request sent there takes the conversation with it.</desc>
+<defs><marker id="ah-neutral" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#5E6963"/></marker><marker id="ah-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2F8F45"/></marker><marker id="ah-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#B7790F"/></marker><marker id="ah-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#C62828"/></marker><marker id="ah-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2F67B0"/></marker><marker id="ah-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1F2A24"/></marker></defs>
+<rect x="1" y="1" width="1038" height="658" rx="14" fill="#FBFBF8" stroke="#D3D8D2" stroke-width="1.5"/>
+<text x="32" y="42" font-size="21" font-weight="700" text-anchor="start" fill="#1F2A24">Tockmox at a glance</text>
+<text x="32" y="64" font-size="13" font-weight="400" text-anchor="start" fill="#6B756F">Local first. A frontier model is a route you add, not a default.</text>
+<rect x="30" y="96" width="760" height="534" rx="16" fill="none" stroke="#1F2A24" stroke-width="2.4"/>
+<rect x="48" y="85" width="273.20000000000005" height="22" rx="4" fill="#FBFBF8"/>
+<text x="58" y="101" font-size="12.5" font-weight="700" text-anchor="start" fill="#1F2A24" letter-spacing="1.2">YOUR HARDWARE / YOUR CONTROL</text>
+<text x="58" y="120" font-size="11.5" font-weight="400" text-anchor="start" fill="#6B756F">Everything inside this line runs on machines you control</text>
+<text x="56" y="150" font-size="11.5" font-weight="700" text-anchor="start" fill="#17572A" letter-spacing="1.2">THE AI PLANE</text>
+<circle cx="84" cy="182" r="9" fill="none" stroke="#1F2A24" stroke-width="2"/>
+<path d="M 69 212 Q 69 194 84 194 Q 99 194 99 212" fill="none" stroke="#1F2A24" stroke-width="2"/>
+<text x="84" y="230" font-size="12.5" font-weight="600" text-anchor="middle" fill="#1F2A24">You</text>
+<rect x="140" y="160" width="170" height="74" rx="10" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1.6"/>
+<text x="225.0" y="193.8" font-size="14" font-weight="700" text-anchor="middle" fill="#17572A">Private chat</text>
+<text x="225.0" y="214.1" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">Open WebUI</text>
+<rect x="360" y="160" width="180" height="74" rx="10" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1.6"/>
+<text x="450.0" y="193.8" font-size="14" font-weight="700" text-anchor="middle" fill="#17572A">Model gateway</text>
+<text x="450.0" y="214.1" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">LiteLLM · holds the keys</text>
+<rect x="590" y="160" width="176" height="74" rx="10" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1.6"/>
+<text x="678.0" y="186.375" font-size="14" font-weight="700" text-anchor="middle" fill="#17572A">Local models</text>
+<text x="678.0" y="206.14999999999998" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">in the cluster, or on</text>
+<text x="678.0" y="221.67499999999998" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">your network</text>
+<path d="M 106 197 L 136 197" fill="none" stroke="#2F8F45" stroke-width="1.8" marker-end="url(#ah-green)"/>
+<path d="M 310 197 L 356 197" fill="none" stroke="#2F8F45" stroke-width="1.8" marker-end="url(#ah-green)"/>
+<path d="M 540 197 L 586 197" fill="none" stroke="#2F8F45" stroke-width="1.8" marker-end="url(#ah-green)"/>
+<text x="333" y="254" font-size="11.5" font-weight="500" text-anchor="middle" fill="#17572A">every request goes through the gateway</text>
+<text x="56" y="296" font-size="11.5" font-weight="700" text-anchor="start" fill="#4A5550" letter-spacing="1.2">PLATFORM</text>
+<rect x="56" y="310" width="224" height="78" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="168.0" y="338.20000000000005" font-size="13.5" font-weight="700" text-anchor="middle" fill="#1F2A24">Identity</text>
+<text x="168.0" y="357.70000000000005" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">single sign-on</text>
+<text x="168.0" y="373.225" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">Authentik</text>
+<rect x="296" y="310" width="224" height="78" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="408.0" y="338.20000000000005" font-size="13.5" font-weight="700" text-anchor="middle" fill="#1F2A24">Policy</text>
+<text x="408.0" y="357.70000000000005" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">network policy</text>
+<text x="408.0" y="373.225" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">admission guardrails</text>
+<rect x="536" y="310" width="224" height="78" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="648.0" y="338.20000000000005" font-size="13.5" font-weight="700" text-anchor="middle" fill="#1F2A24">Storage</text>
+<text x="648.0" y="357.70000000000005" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">Longhorn · CloudNativePG</text>
+<text x="648.0" y="373.225" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">certificates · ingress</text>
+<rect x="56" y="402" width="224" height="78" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="168.0" y="430.20000000000005" font-size="13.5" font-weight="700" text-anchor="middle" fill="#1F2A24">Observability</text>
+<text x="168.0" y="449.70000000000005" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">Grafana · Prometheus · Loki</text>
+<text x="168.0" y="465.225" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">alerts to your phone</text>
+<rect x="296" y="402" width="224" height="78" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="408.0" y="430.20000000000005" font-size="13.5" font-weight="700" text-anchor="middle" fill="#1F2A24">Recovery</text>
+<text x="408.0" y="449.70000000000005" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">backups, and a weekly restore</text>
+<text x="408.0" y="465.225" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">drill for the gateway database</text>
+<rect x="536" y="402" width="224" height="78" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="648.0" y="430.20000000000005" font-size="13.5" font-weight="700" text-anchor="middle" fill="#1F2A24">Self-check</text>
+<text x="648.0" y="449.70000000000005" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">a heartbeat that proves</text>
+<text x="648.0" y="465.225" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">the alerting is alive</text>
+<rect x="56" y="508" width="708" height="92" rx="10" fill="#E8F0FB" stroke="#2F67B0" stroke-width="1.6"/>
+<text x="410" y="540" font-size="16" font-weight="700" text-anchor="middle" fill="#1B417A">Kubernetes + GitOps</text>
+<text x="410" y="562" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">Argo CD reconciles all nine layers from your own site repository</text>
+<text x="410" y="584" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">You provide Kubernetes, Argo CD and sealed-secrets; Tockmox installs the nine layers</text>
+<path d="M 870.0 262 A 40.0 40.0 0 0 1 858.0 201.68 A 42.0 42.0 0 0 1 908.12 170.48 A 44.0 44.0 0 0 1 984.0 195.44 A 38.0 38.0 0 0 1 992.0 262 Z" fill="#FFF5E0" stroke="#B7790F" stroke-width="1.8" stroke-dasharray="7 5"/>
+<text x="923" y="210" font-size="13.5" font-weight="700" text-anchor="middle" fill="#6E4A06">Frontier models</text>
+<text x="923" y="229" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">explicit choice</text>
+<path d="M 540 178 L 566 178 L 566 128 L 790 128 L 900 128 L 900 162" fill="none" stroke="#B7790F" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#ah-amber)"/>
+<circle cx="790" cy="128" r="7" fill="#FFFFFF" stroke="#C62828" stroke-width="2.6"/>
+<circle cx="790" cy="128" r="2.6" fill="#C62828"/>
+<text x="804" y="116.0" font-size="11.5" font-weight="600" text-anchor="start" fill="#8E1B1B">data leaves your network</text>
+<text x="830" y="286.0" font-size="11.5" font-weight="500" text-anchor="start" fill="#6E4A06">Only through the gateway,</text>
+<text x="830" y="301.525" font-size="11.5" font-weight="500" text-anchor="start" fill="#6E4A06">only if you add one to the</text>
+<text x="830" y="317.05" font-size="11.5" font-weight="500" text-anchor="start" fill="#6E4A06">model list. HTTPS 443.</text>
+<rect x="812" y="352" width="210" height="166" rx="8" fill="#FFFFFF" stroke="#D3D8D2" stroke-width="1.2"/>
+<text x="824" y="372" font-size="11.5" font-weight="700" text-anchor="start" fill="#4A5550" letter-spacing="1">Legend</text>
+<rect x="824" y="380" width="26" height="14" rx="3" fill="none" stroke="#1F2A24" stroke-width="2.2"/>
+<text x="858" y="391" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">your control boundary</text>
+<rect x="824" y="402" width="26" height="14" rx="3" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1.4"/>
+<text x="858" y="413" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">local: runs on your hardware</text>
+<rect x="824" y="424" width="26" height="14" rx="3" fill="#FFF5E0" stroke="#B7790F" stroke-width="1.4" stroke-dasharray="4 3"/>
+<text x="858" y="435" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">optional, your explicit choice</text>
+<circle cx="837" cy="453" r="6" fill="#FFFFFF" stroke="#C62828" stroke-width="2.4"/>
+<circle cx="837" cy="453" r="2.2" fill="#C62828"/>
+<text x="858" y="457" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">data crosses the boundary</text>
+<rect x="824" y="468" width="26" height="14" rx="3" fill="#E8F0FB" stroke="#2F67B0" stroke-width="1.4"/>
+<text x="858" y="479" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">GitOps and control</text>
+<rect x="824" y="490" width="26" height="14" rx="3" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.4"/>
+<text x="858" y="501" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">platform capability</text>
+</svg>

@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="640" viewBox="0 0 1040 640" role="img" aria-labelledby="t d" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title id="t">The Tockmox installation journey</title>
+<desc id="d">Six stages. Prepare: the prerequisites (Kubernetes, Argo CD 2.6 or newer, sealed-secrets with your own key, four values decided) on a fresh cluster or one you already have. Generate: the installer writes your site repository and values. Bootstrap: publish it to git, mint your credentials, apply the root Application. Reconcile: Argo CD brings the nine layers up in six waves until they are healthy. Configure: trust the CA, bootstrap Authentik, make your own user, and name a model route. Use: the first chat. Virtual machines, a registry of your own, and air-gap with time sync are side branches for the sites that need them.</desc>
+<defs><marker id="ah-neutral" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#5E6963"/></marker><marker id="ah-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2F8F45"/></marker><marker id="ah-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#B7790F"/></marker><marker id="ah-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#C62828"/></marker><marker id="ah-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2F67B0"/></marker><marker id="ah-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1F2A24"/></marker></defs>
+<rect x="1" y="1" width="1038" height="638" rx="14" fill="#FBFBF8" stroke="#D3D8D2" stroke-width="1.5"/>
+<text x="32" y="42" font-size="21" font-weight="700" text-anchor="start" fill="#1F2A24">From nothing to a first chat</text>
+<text x="32" y="64" font-size="13" font-weight="400" text-anchor="start" fill="#6B756F">Each stage is a page, or a phase of one. Dashed boxes apply only to some sites.</text>
+<text x="40" y="112" font-size="12" font-weight="700" text-anchor="start" fill="#1B417A" letter-spacing="1.4">PREPARE</text>
+<rect x="40" y="124" width="290" height="132" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="185.0" y="169.9375" font-size="15" font-weight="700" text-anchor="middle" fill="#1F2A24">Your cluster</text>
+<text x="185.0" y="191.3125" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">Kubernetes · Argo CD 2.6+</text>
+<text x="185.0" y="208.1875" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">sealed-secrets, your own key</text>
+<text x="185.0" y="225.0625" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">fresh, or one you already have</text>
+<text x="185.0" y="274" font-size="11" font-weight="400" text-anchor="middle" fill="#6B756F">prerequisites.md · fresh-install.md · existing-cluster.md</text>
+<text x="375" y="112" font-size="12" font-weight="700" text-anchor="start" fill="#1B417A" letter-spacing="1.4">GENERATE</text>
+<rect x="375" y="124" width="290" height="132" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="520.0" y="169.9375" font-size="15" font-weight="700" text-anchor="middle" fill="#1F2A24">Your site repository</text>
+<text x="520.0" y="191.3125" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">tockmox-install.sh writes it</text>
+<text x="520.0" y="208.1875" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">your values, from your answers</text>
+<text x="520.0" y="225.0625" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">it applies nothing</text>
+<text x="520.0" y="274" font-size="11" font-weight="400" text-anchor="middle" fill="#6B756F">install.md · phase 1</text>
+<text x="710" y="112" font-size="12" font-weight="700" text-anchor="start" fill="#1B417A" letter-spacing="1.4">BOOTSTRAP</text>
+<rect x="710" y="124" width="290" height="132" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="855.0" y="169.9375" font-size="15" font-weight="700" text-anchor="middle" fill="#1F2A24">Publish and apply</text>
+<text x="855.0" y="191.3125" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">push it to git</text>
+<text x="855.0" y="208.1875" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">mint your credentials</text>
+<text x="855.0" y="225.0625" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">apply the root Application</text>
+<text x="855.0" y="274" font-size="11" font-weight="400" text-anchor="middle" fill="#6B756F">install.md · phases 2, 2.5 and 3</text>
+<text x="710" y="318" font-size="12" font-weight="700" text-anchor="start" fill="#1B417A" letter-spacing="1.4">RECONCILE</text>
+<rect x="710" y="330" width="290" height="132" rx="10" fill="#E8F0FB" stroke="#2F67B0" stroke-width="1.6"/>
+<text x="855.0" y="375.9375" font-size="15" font-weight="700" text-anchor="middle" fill="#1B417A">Argo CD syncs</text>
+<text x="855.0" y="397.3125" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">nine layers in six waves</text>
+<text x="855.0" y="414.1875" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">until every one is healthy</text>
+<text x="855.0" y="431.0625" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">then settle: readiness, DNS</text>
+<text x="855.0" y="480" font-size="11" font-weight="400" text-anchor="middle" fill="#6B756F">install.md · after the first sync</text>
+<text x="375" y="318" font-size="12" font-weight="700" text-anchor="start" fill="#1B417A" letter-spacing="1.4">CONFIGURE</text>
+<rect x="375" y="330" width="290" height="132" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="520.0" y="375.9375" font-size="15" font-weight="700" text-anchor="middle" fill="#1F2A24">Identity and a model</text>
+<text x="520.0" y="397.3125" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">trust the CA · Authentik</text>
+<text x="520.0" y="414.1875" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">make your own user</text>
+<text x="520.0" y="431.0625" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">name a model route</text>
+<text x="520.0" y="480" font-size="11" font-weight="400" text-anchor="middle" fill="#6B756F">getting-started.md · ai-plane.md</text>
+<text x="40" y="318" font-size="12" font-weight="700" text-anchor="start" fill="#1B417A" letter-spacing="1.4">USE</text>
+<rect x="40" y="330" width="290" height="132" rx="10" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1.6"/>
+<text x="185.0" y="384.375" font-size="15" font-weight="700" text-anchor="middle" fill="#17572A">First chat</text>
+<text x="185.0" y="405.75" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">sign in through SSO</text>
+<text x="185.0" y="422.625" font-size="12.5" font-weight="400" text-anchor="middle" fill="#4A5550">send a message</text>
+<text x="185.0" y="480" font-size="11" font-weight="400" text-anchor="middle" fill="#6B756F">getting-started.md</text>
+<path d="M 330 190.0 L 371 190.0" fill="none" stroke="#5E6963" stroke-width="1.8" marker-end="url(#ah-neutral)"/>
+<path d="M 665 190.0 L 706 190.0" fill="none" stroke="#5E6963" stroke-width="1.8" marker-end="url(#ah-neutral)"/>
+<path d="M 855.0 282 L 855.0 308" fill="none" stroke="#2F67B0" stroke-width="1.8" marker-end="url(#ah-blue)"/>
+<path d="M 710 396.0 L 669 396.0" fill="none" stroke="#5E6963" stroke-width="1.8" marker-end="url(#ah-neutral)"/>
+<path d="M 375 396.0 L 334 396.0" fill="none" stroke="#2F8F45" stroke-width="1.8" marker-end="url(#ah-green)"/>
+<text x="40" y="528" font-size="12" font-weight="700" text-anchor="start" fill="#1B417A" letter-spacing="1.4">ONLY IF YOUR SITE NEEDS THEM</text>
+<rect x="40" y="540" width="210" height="70" rx="10" fill="#FFF5E0" stroke="#B7790F" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text x="145.0" y="571.625" font-size="13.5" font-weight="700" text-anchor="middle" fill="#6E4A06">Virtual machines</text>
+<text x="145.0" y="591.65" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">hypervisor settings</text>
+<rect x="266" y="540" width="210" height="70" rx="10" fill="#FFF5E0" stroke="#B7790F" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text x="371.0" y="571.625" font-size="13.5" font-weight="700" text-anchor="middle" fill="#6E4A06">A registry of your own</text>
+<text x="371.0" y="591.65" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">mirror the images</text>
+<rect x="492" y="540" width="210" height="70" rx="10" fill="#FFF5E0" stroke="#B7790F" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text x="597.0" y="571.625" font-size="13.5" font-weight="700" text-anchor="middle" fill="#6E4A06">No internet access</text>
+<text x="597.0" y="591.65" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">air-gap · time sync</text>
+<rect x="760" y="506" width="240" height="122" rx="8" fill="#FFFFFF" stroke="#D3D8D2" stroke-width="1.2"/>
+<text x="772" y="526" font-size="11.5" font-weight="700" text-anchor="start" fill="#4A5550" letter-spacing="1">Legend</text>
+<rect x="772" y="534" width="26" height="14" rx="3" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.4"/>
+<text x="806" y="545" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">a page or a phase</text>
+<rect x="772" y="556" width="26" height="14" rx="3" fill="#FFF5E0" stroke="#B7790F" stroke-width="1.4" stroke-dasharray="4 3"/>
+<text x="806" y="567" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">only for some sites</text>
+<rect x="772" y="578" width="26" height="14" rx="3" fill="#E8F0FB" stroke="#2F67B0" stroke-width="1.4"/>
+<text x="806" y="589" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">GitOps does this part</text>
+<rect x="772" y="600" width="26" height="14" rx="3" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1.4"/>
+<text x="806" y="611" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">the goal</text>
+</svg>

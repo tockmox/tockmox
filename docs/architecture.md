@@ -7,7 +7,7 @@ tags: [architecture, layers, gitops, sync-waves, trust-boundaries, repositories]
 status: stable
 generated:
   by: hand
-  at: 2026-09-01
+  at: 2026-10-27
 tockmox:
   classification: public
   audience: [operator, contributor]
@@ -18,7 +18,307 @@ tockmox:
 How Tockmox is put together, and the reasoning behind the parts that look
 unusual.
 
-## The whole system, including what Kubernetes cannot see
+## Architecture in one picture
+
+![Tockmox at a glance. A solid boundary marks your hardware and your network. Inside it, a person signs in through single sign-on to the chat console, which sends every request through the model gateway to a model host you run, in the cluster or on your network. Around that AI plane sit the platform capabilities the other layers provide: identity, policy, storage and certificates, observability with alerts to a phone, backups with a weekly restore drill for the gateway database, and a self-check heartbeat. Underneath is the foundation you provide: a Kubernetes cluster, Argo CD and sealed-secrets, reconciling everything from your own site repository. Outside the boundary, drawn dashed, a frontier provider is reachable only through the gateway and only once you configure it.](diagrams/rendered/platform-overview.svg)
+
+**Text equivalent.** Everything Tockmox installs runs on hardware you control:
+nine layers on a Kubernetes cluster you provide, reconciled by Argo CD from a
+site repository you own. A person signs in once, through Authentik, to the chat
+console (Open WebUI); the console reaches models only through the model gateway
+(LiteLLM), and the gateway reaches the model hosts you name. The other layers
+surround that AI plane: policy (namespaces, default-deny networking, admission
+guardrails), platform (storage, load balancing, ingress, certificates,
+databases), observability (metrics, logs, dashboards, alerts to a phone), and a
+self-check heartbeat. A frontier provider is outside the boundary and is
+reached only if you add one to the gateway's model list. Tockmox installs none
+of Kubernetes, Argo CD, sealed-secrets or a model.
+
+The rest of this page goes from that picture down: the principles, how the
+repositories and the cluster relate, the nine layers, the trust boundaries, the
+equipment around the cluster, how reconciliation behaves, the limits worth
+knowing, and the deep dives.
+
+## The design principles
+
+Each of these is a claim the rest of the page backs, and each links to where
+its boundary is stated.
+
+- **Your files are never ours to overwrite.** The product and your
+  configuration live in different repositories
+  ([three repositories](#three-repositories-not-one)).
+- **The repository is the truth**, for every field it names. An edit made in
+  the cluster is reverted ([why](#why-an-edit-made-in-the-cluster-does-not-stick));
+  a field added in the cluster is not ([the limit](#an-edit-that-adds-a-field-is-not-reverted)).
+- **Dependencies deploy in order.** Nine charts, six waves, each wave healthy
+  before the next ([sync waves](#sync-waves)).
+- **Guards fail loudly rather than starting insecure**
+  ([guards](#guards-fail-loudly-rather-than-starting-insecure)), and a policy
+  that would guard nothing does not render
+  ([deliberately off](#deliberately-not-shipped-deliberately-off)).
+- **Every application can be declined**, individually, and capabilities group
+  them by decision ([the nine layers](#the-nine-layers)).
+- **Health checks never call a model**
+  ([deterministic self-monitoring](#why-deterministic-self-monitoring)).
+- **Containment is stated, not implied.** Default-deny ingress everywhere the
+  policy layer creates a namespace, egress contained where it is listed, and
+  nothing claimed beyond that ([trust boundaries](#trust-boundaries)).
+- **Local first, frontier by configuration.** No cloud backend ships, and a
+  route to a hosted provider exists only once you name one
+  ([the AI plane](usage/ai-plane.md)).
+
+## Product repo + site repo + cluster
+
+### Three repositories, not one
+
+![The GitOps model. Two repositories feed Argo CD. The Tockmox product repository, public, owned by Tockmox, supplies the charts, defaults, values schema and docs at a pinned release tag. Your site repository, private, owned by you, supplies your values, sealed secrets and your own applications, and names the release tag it tracks. You start it with the installer or the site template. Argo CD composes the two in a multi-source Application and syncs the result into your cluster. An upgrade changes the tag your site repository points at; a configuration change is a commit to your site repository. A kubectl edit to a field the repository declares is reverted at the next reconcile.](diagrams/rendered/gitops-model.svg)
+
+**Text equivalent.** Two repositories are public and one is yours. The product
+repository, `tockmox/tockmox`, supplies the charts, the values interface and the
+docs. `tockmox/tockmox-site-template` is a scaffold you start your own
+repository from with **Use this template**; the installer generates the same
+thing from your answers. Your site repository, private, holds your values,
+sealed secrets and your own applications, and its Argo CD Applications name the
+product release they track (`targetRevision`). Argo CD reads the chart from the
+product repository and the values from yours, as one multi-source Application,
+and syncs the result into your cluster.
+
+The product and your configuration live in **different repositories**, and
+ArgoCD composes them at sync time via a multi-source Application. The product
+repository supplies the chart; yours supplies the values file it reads.
+
+There are two ways to start your site repo, same result either way: run
+[`tockmox-install.sh`](../install/tockmox-install.sh), which generates it from
+your answers, or click **Use this template** on
+[`tockmox-site-template`](https://github.com/tockmox/tockmox-site-template)
+and fill in the values by hand.
+
+**This is the decision that makes an upgrade safe.** Because your files are not in our
+repository, an upgrade cannot overwrite them. Not "should not" ... cannot. It is
+the same guarantee a Linux distribution gives you by keeping packages in `/usr`
+and your configuration in `/etc`, and it is why Tockmox does not ask you to fork
+anything. The guarantee is about your files. Before 1.0 it does not extend to
+the names and endpoints an application of yours depends on, which are promised
+only through keys tiered `stable`
+([no downstream ABI](administration/values-contract.md#before-10-there-is-no-downstream-abi)).
+
+Forking creates a permanent merge burden and drifts further from upstream every
+month. We would rather you never fork.
+
+## The nine layers
+
+What each layer delivers, in the order it deploys. Every application in every
+layer can be turned off individually, and eight
+[capabilities](administration/capabilities.md) group them by the decision you
+are actually making.
+
+**Declinable** answers "can I decline this layer and still have a working
+Tockmox": `No` means the rest depends on it, `Partly` means some of its
+components can be declined through a [capability](administration/capabilities.md)
+and the rest cannot. `policy` is `No` even though one policy bundle has an off
+switch, because an escape hatch is not the same as declining the layer.
+
+<!-- tockmox:layers:begin -->
+<!-- Generated by tools/gen-docs-index.sh from charts/*/Chart.yaml (sync-wave), checked against install/tockmox-install.sh. Edit that, not this block. -->
+
+| Layer | Wave | What it gives you | Declinable |
+|---|---|---|---|
+| `crds` | 0 | Every CRD, first: the prometheus-operator CRDs the other layers need | No |
+| `policy` | 1 | Namespaces, default-deny networking, RBAC admission guardrails, PriorityClasses, a read-only diagnostic identity | No |
+| `platform` | 2 | Storage, load balancing, ingress, certificates: cert-manager with a private CA, MetalLB with an address pool, Traefik, Longhorn, CloudNativePG, the shipped object store, kured | Partly |
+| `observability` | 3 | Metrics, logs, dashboards, alerting: kube-prometheus-stack, Loki, Alloy, Grafana at `grafana.<yourdomain>`, and alerts that reach a phone through ntfy at `ntfy.<yourdomain>`, behind an Alertmanager bridge that alerts on its own delivery failures | Yes |
+| `exporters` | 3 | Hardware and network telemetry: blackbox on; SNMP and smartctl are the `hardwareTelemetry` [capability](administration/capabilities.md) (a Capability, not an Add-on), off by default | Yes |
+| `identity` | 4 | Single sign-on across every console: Authentik at `auth.<yourdomain>`. Credentials come from operator-created Secrets; the pods wait with a config error naming any that is missing | Yes |
+| `devops` | 5 | Workflows: Argo Workflows at `workflows.<yourdomain>`, with client auth rather than the upstream authenticate-nobody default. Off by default | Yes |
+| `ai` | 5 | Chat interface and model gateway: Open WebUI at `chat.<yourdomain>`, GitOps-authoritative config, no cloud backend, shipped pointed at no model. A LiteLLM model gateway at `llm.<yourdomain>` with a proven backup-and-restore-drill path, on by default since 0.8.0 with the console routed through it; naming a model host is [the one decision a default install leaves you](usage/what-you-get.md#the-one-decision-a-default-install-leaves-you) | Yes |
+| `selfcheck` | 5 | Proves the platform's own guarantees: a heartbeat CronJob and the alerts that fire when monitoring itself goes quiet. Never invokes a model | Yes |
+
+<!-- tockmox:layers:end -->
+
+**602 resources** render with the CI values. Every UI hostname derives from one
+`internalDomain` value, and TLS follows a single `certIssuer` value.
+
+### Sync waves
+
+Nine charts, six waves. ArgoCD waits for each wave to report healthy before
+starting the next.
+
+![The nine layers in six sync waves, bottom to top. Wave 0: crds, every CRD first. Wave 1: policy, namespaces, default-deny networking and RBAC guardrails. Wave 2: platform, storage, load balancing, ingress, certificates and databases. Wave 3: observability, metrics, logs, dashboards and alerting, beside exporters, hardware and network telemetry. Wave 4: identity, single sign-on through Authentik. Wave 5: devops, workflows, off by default; ai, the chat console and model gateway; and selfcheck, the heartbeat. Argo CD waits for each wave to report healthy before it starts the next. crds and policy cannot be declined, platform partly, and the rest can.](diagrams/rendered/layer-stack.svg)
+
+**Text equivalent.** Wave 0 is `tockmox-crds`; wave 1 `tockmox-policy`;
+wave 2 `tockmox-platform`; wave 3 `tockmox-observability` and
+`tockmox-exporters` together; wave 4 `tockmox-identity`; wave 5
+`tockmox-devops`, `tockmox-ai` and `tockmox-selfcheck` together. The table in
+[the nine layers](#the-nine-layers) is generated from the same charts and says
+which layers can be declined.
+
+Two orderings are deliberate and were both learned the hard way on a clean
+cluster:
+
+**CRDs are a separate wave-0 chart** rather than living beside the things that
+use them. Helm's own guidance, and it eliminates the entire class of
+"custom resource applied before its definition existed" race rather than
+patching individual instances of it.
+
+**Policy precedes platform.** Policy creates the namespaces every other layer
+deploys into. On an existing cluster this ordering does not matter because the
+namespaces are already there; on a fresh one, getting it backwards fails the
+sync. That is the argument for testing against clean clusters.
+
+### Guards fail loudly rather than starting insecure
+
+`tockmox-platform`'s MetalLB refuses to render without an address pool, and the
+policy layer refuses to render a NetworkPolicy bundle aimed at a namespace you
+haven't named. Missing credentials fail one step later, at the pod: they live
+in operator-created Secrets referenced by name, so a render can't prove they're
+there, and the workload waits with a config error naming the Secret it wants.
+Expected Secrets are tabulated in
+[secrets.md](administration/secrets.md).
+
+### Deliberately not shipped, deliberately off
+
+**Not shipped: a container registry.** It's a prerequisite rather than a
+component, and [registry.md](deployment/registry.md) explains why.
+
+**Off by default:** Ollama (pulling multi-gigabyte model images unasked is
+rude), the SNMP and smartctl exporters (meaningless without your device list,
+or on virtual disks), and four NetworkPolicy bundles that guard nothing on a
+stock install (Forgejo, a Tailscale router, a syslog receiver, and a standalone
+Harbor). A policy that selects no pod is scaffolding, and it reads as
+protection to whoever audits the cluster next, so those render only when you
+say you run the workload. `tools/check-no-ghost-policies.sh` fails CI if that
+ever stops being true.
+
+### Labels, and the reserved namespace prefix
+
+Everything Tockmox *authors* ... namespaces, NetworkPolicies, guardrails,
+Ingress ... carries consistent labels, so "ours" and "yours" stay
+machine-distinguishable on a cluster running both:
+`app.kubernetes.io/part-of=tockmox`, and `tockmox.com/layer=<layer>`
+naming which of the nine put it there. That is what makes an inventory, a
+targeted delete, and an upgrade audit possible without a hand-kept list.
+
+**Authors, not ships.** Resources rendered by the upstream charts each layer
+wraps carry their own chart's labels instead, so a label selector alone does not
+enumerate a Tockmox install. Those resources are identifiable by the reserved
+`tockmox-` namespace prefix below.
+
+**The `tockmox-` namespace prefix is reserved for the same reason.** Your own
+workloads belong in namespaces that do not start with it. Nothing enforces this
+today ... it is a convention rather than a guardrail ... and breaking it mostly
+hurts you: an uninstall, a layer disable, or any operation scoped by prefix
+stops being able to tell your namespace from a shipped one.
+
+The commands that use these labels are in
+[day-2 § find what Tockmox manages](operations/day-2.md#find-what-tockmox-manages).
+
+## Trust/network boundaries
+
+### Trust boundaries
+
+```mermaid
+flowchart TB
+    subgraph cluster["your cluster"]
+        subgraph diag["diagnostic identity"]
+            D["read-only everywhere<br/>no write verbs at all<br/>egress: DNS, API, telemetry only"]
+        end
+        subgraph plane["the platform"]
+            P["workloads"]
+        end
+        VAP["admission guardrails<br/><i>deny cluster-admin bindings</i>"]
+    end
+    EXT(["internet"])
+    D -.->|"BLOCKED"| EXT
+    VAP --> plane
+```
+
+The diagnostic identity is read-only by construction: its ClusterRole grants
+`get`, `list`, and `watch` and nothing else, so an attempted write fails at
+admission rather than relying on the caller behaving. Its NetworkPolicies allow
+egress to DNS, the API server, and local telemetry, and nothing else ... so an
+agent running under it has no path to the internet, provided
+`diagnosticIdentity.apiServerCIDRs` is set. Unset, the "API server" rule is the
+whole service and LAN ranges on 443/6443 and a forwarder on the LAN is a path
+out.
+
+That envelope ships in the open. What plugs into it is your choice; Tockmox
+provides the cage, not the occupant. If you came here asking whether you can
+run an agent against this cluster without handing it the keys, the fuller
+answer is in
+[what you get](usage/what-you-get.md#the-diagnostic-identity-since-it-is-the-interesting-one).
+
+### Network containment, in one paragraph
+
+Every namespace the policy layer creates carries a default-deny ingress policy.
+Egress is default-deny in the AI namespace, where the model gateway may reach
+TCP 443 outside the cluster, service and LAN ranges, and in the diagnostic
+namespace; it is open in the other five. Namespaces you create get no policy
+from Tockmox, and the three `hostNetwork` workloads are outside NetworkPolicy
+altogether. The exact rules, and what has been measured, are in
+[what you get § network containment](usage/what-you-get.md#network-containment).
+
+### The cluster-admin guardrail denies without saying so
+
+The admission guardrail in that diagram is a ValidatingAdmissionPolicy,
+`deny-privileged-rbac`, shipped by the policy layer. It denies any
+ClusterRoleBinding to `cluster-admin` that is not on an allowlist. The intent is
+that **every cluster-admin grant is a decision someone made on purpose**, rather
+than something a chart did on the way past.
+
+The cost is an ergonomics defect worth stating plainly, because it lands three
+layers from its cause. k3s's HelmChart controller creates exactly such a
+binding, named `helm-<chart>`. The binding is denied, the ServiceAccount
+therefore gets no permissions, and the failure surfaces later as an unrelated
+RBAC error naming a resource the ServiceAccount cannot list. **Nothing in that
+message mentions the policy.** A reader who does not already know the policy
+exists has no path from the error to the cause.
+
+Adding a name to `rbacGuardrails.clusterAdminAllowlist` is the fix and is meant
+to feel deliberate. The symptom, the diagnosis and the exact values edit are in
+[troubleshooting § cannot list resource "secrets" is forbidden](operations/troubleshooting.md#cannot-list-resource-secrets-is-forbidden).
+
+### Pod Security: which namespaces refuse a pod, and why the others cannot
+
+Every namespace the policy layer creates carries the Pod Security labels
+`warn` and `audit` at `restricted`. Those two observe without blocking. From
+0.7.0 five of the seven also carry `enforce`, which refuses a pod that fails
+the level. `["Deny"]` enforces; `["Audit","Warn"]` observes ... the same
+distinction the admission policies draw, applied to Pod Security.
+
+**Measured 2026-09-29** by `tools/check-pod-security.sh`, which renders every
+layer with the CI values and again with the all-on overlay, evaluates every pod
+template against the Pod Security Standards, and groups the result by the
+namespace each pod lands in. The level is the lowest any pod in the namespace
+reaches:
+
+| Namespace | Highest level all rendered pods pass | `enforce` label | Why |
+|---|---|---|---|
+| `tockmox-authentik` | restricted | restricted | Server and worker set the four fields upstream leaves unset |
+| `tockmox-selfcheck` | restricted | restricted | One shipped pod |
+| `tockmox-devops` | restricted | baseline | Argo Workflows builds pods from Workflow objects at run time, and those are yours |
+| `tockmox-diagnostic` | no pod ships here | baseline | Where a site's diagnostic agents run |
+| `tockmox-ai` | restricted | baseline | The model gateway and its migrations Job run as uid 1000 on a read-only root (TM-0596); the `enforce` label moves with TM-0487 |
+| `tockmox-monitoring` | privileged | none | node-exporter, Alloy and the SMART exporter need host namespaces or `hostPath` |
+| `tockmox-platform` | privileged | none | Longhorn is privileged by necessity; kured needs `hostPID`, the MetalLB speaker `hostNetwork` |
+
+The gate fails if any `enforce` label is stricter than the level in the second
+column, because a label stricter than its pods is an install that cannot
+schedule. It does **not** prove admission: no API server sees these labels
+during the gate, so "the API server refuses a violating pod here" is rendered
+and evaluated, not observed. It also cannot see pods an operator creates from a
+custom resource (the database pods, Prometheus, Alertmanager, Longhorn's
+instance managers) or anything you add. The levels are set per namespace under
+`podSecurity.enforce` in the policy layer's values, and an empty string removes
+the label; the reasoning for each namespace is beside the key in
+`charts/tockmox-policy/values.yaml`. What to do when a pod of yours is refused
+is in [troubleshooting](operations/troubleshooting.md#a-pod-is-refused-with-violates-podsecurity).
+
+## External dependencies
+
+Tockmox depends on things it does not install and cannot see: the equipment
+around the cluster, and the clock beneath it.
+
+### The whole system, including what Kubernetes cannot see
 
 Tockmox the software runs inside the cluster; Tockmox the *deployment*
 includes the equipment around it. These externals are part of the deployment
@@ -87,44 +387,10 @@ of them one artifact. It is not automatic.
 Any claim from us about air-gap operation means the first. If you find
 documentation implying the second, it is a bug.
 
-## Three repositories, not one
+## GitOps and reconciliation
 
-```mermaid
-flowchart LR
-    subgraph pub["PUBLIC"]
-        T["tockmox/tockmox<br/><i>the product</i><br/>charts, values interface, docs"]
-        S["tockmox/tockmox-site-template<br/><i>scaffold</i>"]
-    end
-    subgraph priv["PRIVATE ... yours"]
-        M["your-site-repo<br/><i>values, secrets,<br/>your own apps</i>"]
-    end
-    S -.->|"Use this template"| M
-    T -->|"chart"| A["ArgoCD<br/>multi-source Application"]
-    M -->|"$values"| A
-    A -->|"sync"| K[("your cluster")]
-```
-
-The product and your configuration live in **different repositories**, and
-ArgoCD composes them at sync time via a multi-source Application. The product
-repository supplies the chart; yours supplies the values file it reads.
-
-There are two ways to start your site repo, same result either way: run
-[`tockmox-install.sh`](../install/tockmox-install.sh), which generates it from
-your answers, or click **Use this template** on
-[`tockmox-site-template`](https://github.com/tockmox/tockmox-site-template)
-and fill in the values by hand.
-
-**This is the decision that makes an upgrade safe.** Because your files are not in our
-repository, an upgrade cannot overwrite them. Not "should not" ... cannot. It is
-the same guarantee a Linux distribution gives you by keeping packages in `/usr`
-and your configuration in `/etc`, and it is why Tockmox does not ask you to fork
-anything. The guarantee is about your files. Before 1.0 it does not extend to
-the names and endpoints an application of yours depends on, which are promised
-only through keys tiered `stable`
-([no downstream ABI](administration/values-contract.md#before-10-there-is-no-downstream-abi)).
-
-Forking creates a permanent merge burden and drifts further from upstream every
-month. We would rather you never fork.
+How a change reaches the cluster, why one made anywhere else does not last, and
+which revision each cluster runs.
 
 ### Why an edit made in the cluster does not stick
 
@@ -140,20 +406,9 @@ questions. The cost is one commit per change; what you buy is that a cluster
 rebuild, a node rebuild and a disaster recovery all reduce to pointing ArgoCD at
 the same repository again.
 
-**`selfHeal` reverts what you CHANGE. It does not revert what you ADD, and that
-is a real limit rather than a detail.** ArgoCD compares the fields its manifests
-declare. A field added by a different field manager ... a volume, a mount, an
-environment variable, a sidecar ... is declared nowhere in the desired state, so
-there is nothing to diff it against and the Application keeps reporting `Synced`
-and `Healthy`. Measured on 2026-09-10: a `poison` volume and volumeMount patched
-onto a Tockmox Deployment with `kubectl patch`, present in no chart, referencing
-a ConfigMap that had since been deleted, survived **more than twenty minutes**
-with the layer green and nothing reported.
-
-So read "the repository is the truth" as: **the repository decides the value of
-every field it names, and says nothing about fields it does not.** If you need
-additive tampering detected, that is an admission-control or drift-detection job
-and Tockmox does not do it for you today. It is tracked and it is not in 0.6.0.
+**`selfHeal` reverts what you change, not what you add.** A field added in the
+cluster, such as a volume or a sidecar, is declared nowhere and is not reverted;
+the measurement is under [known limits](#an-edit-that-adds-a-field-is-not-reverted).
 
 The exception is anything ArgoCD does not manage, which on a Tockmox cluster is
 ArgoCD itself and the operator-created Secrets. Those you do edit by hand, and
@@ -163,7 +418,7 @@ Editing is [day-2 § change a configuration value](operations/day-2.md#change-a-
 the ladder of *how much* you are allowed to change is
 [customising](administration/customising.md).
 
-## Revision channels
+### Revision channels
 
 ```mermaid
 flowchart TD
@@ -213,85 +468,38 @@ running cluster from the previous tag to this one, which is why
 [upgrading](deployment/upgrade.md) is a procedure with a backup step rather than
 a one-line edit.
 
-## The nine layers
+## Known architectural limits
 
-What each layer delivers, in the order it deploys. Every application in every
-layer can be turned off individually, and eight
-[capabilities](administration/capabilities.md) group them by the decision you
-are actually making.
+These are properties of the design rather than bugs waiting for a fix, and each
+is stated where it applies. Collected here so that nobody has to find them by
+reading the whole page.
 
-**Declinable** answers "can I decline this layer and still have a working
-Tockmox": `No` means the rest depends on it, `Partly` means some of its
-components can be declined through a [capability](administration/capabilities.md)
-and the rest cannot. `policy` is `No` even though one policy bundle has an off
-switch, because an escape hatch is not the same as declining the layer.
+| Limit | Where it is stated |
+|---|---|
+| An in-cluster edit that ADDS a field is not reverted | [Below](#an-edit-that-adds-a-field-is-not-reverted) |
+| Cluster-scoped objects outlive the layer that installed them, and break the next install | [Below](#cluster-scoped-state-outlives-the-layer-that-installed-it) |
+| The cluster-admin guardrail denies with an error that does not name it | [Trust boundaries](#the-cluster-admin-guardrail-denies-without-saying-so) |
+| The Pod Security gate is rendered and evaluated, not observed at admission | [Pod Security](#pod-security-which-namespaces-refuse-a-pod-and-why-the-others-cannot) |
+| The release gate proves a fresh install, not the move from the previous tag | [Revision channels](#revision-channels) |
+| Egress is contained only for the AI namespace and the diagnostic one; namespaces you create get no policy | [What you get § network containment](usage/what-you-get.md#network-containment) |
+| Time comes from below Kubernetes, and drift surfaces as errors that never name the clock | [Time](#time-is-the-external-with-no-diagram-box-and-the-worst-symptoms) |
 
-<!-- tockmox:layers:begin -->
-<!-- Generated by tools/gen-docs-index.sh from charts/*/Chart.yaml (sync-wave), checked against install/tockmox-install.sh. Edit that, not this block. -->
+### An edit that adds a field is not reverted
 
-| Layer | Wave | What it gives you | Declinable |
-|---|---|---|---|
-| `crds` | 0 | Every CRD, first: the prometheus-operator CRDs the other layers need | No |
-| `policy` | 1 | Namespaces, default-deny networking, RBAC admission guardrails, PriorityClasses, a read-only diagnostic identity | No |
-| `platform` | 2 | Storage, load balancing, ingress, certificates: cert-manager with a private CA, MetalLB with an address pool, Traefik, Longhorn, CloudNativePG, the shipped object store, kured | Partly |
-| `observability` | 3 | Metrics, logs, dashboards, alerting: kube-prometheus-stack, Loki, Alloy, Grafana at `grafana.<yourdomain>`, and alerts that reach a phone through ntfy at `ntfy.<yourdomain>`, behind an Alertmanager bridge that alerts on its own delivery failures | Yes |
-| `exporters` | 3 | Hardware and network telemetry: blackbox on; SNMP and smartctl are the `hardwareTelemetry` [capability](administration/capabilities.md) (a Capability, not an Add-on), off by default | Yes |
-| `identity` | 4 | Single sign-on across every console: Authentik at `auth.<yourdomain>`. Credentials come from operator-created Secrets; the pods wait with a config error naming any that is missing | Yes |
-| `devops` | 5 | Workflows: Argo Workflows at `workflows.<yourdomain>`, with client auth rather than the upstream authenticate-nobody default. Off by default | Yes |
-| `ai` | 5 | Chat interface and model gateway: Open WebUI at `chat.<yourdomain>`, GitOps-authoritative config, no cloud backend, shipped pointed at no model. A LiteLLM model gateway at `llm.<yourdomain>` with a proven backup-and-restore-drill path, on by default since 0.8.0 with the console routed through it; naming a model host is [the one decision a default install leaves you](usage/what-you-get.md#the-one-decision-a-default-install-leaves-you) | Yes |
-| `selfcheck` | 5 | Proves the platform's own guarantees: a heartbeat CronJob and the alerts that fire when monitoring itself goes quiet. Never invokes a model | Yes |
+**`selfHeal` reverts what you CHANGE. It does not revert what you ADD, and that
+is a real limit rather than a detail.** ArgoCD compares the fields its manifests
+declare. A field added by a different field manager ... a volume, a mount, an
+environment variable, a sidecar ... is declared nowhere in the desired state, so
+there is nothing to diff it against and the Application keeps reporting `Synced`
+and `Healthy`. Measured on 2026-09-10: a `poison` volume and volumeMount patched
+onto a Tockmox Deployment with `kubectl patch`, present in no chart, referencing
+a ConfigMap that had since been deleted, survived **more than twenty minutes**
+with the layer green and nothing reported.
 
-<!-- tockmox:layers:end -->
-
-**602 resources** render with the CI values. Every UI hostname derives from one
-`internalDomain` value, and TLS follows a single `certIssuer` value.
-
-### Guards fail loudly rather than starting insecure
-
-`tockmox-platform`'s MetalLB refuses to render without an address pool, and the
-policy layer refuses to render a NetworkPolicy bundle aimed at a namespace you
-haven't named. Missing credentials fail one step later, at the pod: they live
-in operator-created Secrets referenced by name, so a render can't prove they're
-there, and the workload waits with a config error naming the Secret it wants.
-Expected Secrets are tabulated in
-[secrets.md](administration/secrets.md).
-
-### Deliberately not shipped, deliberately off
-
-**Not shipped: a container registry.** It's a prerequisite rather than a
-component, and [registry.md](deployment/registry.md) explains why.
-
-**Off by default:** Ollama (pulling multi-gigabyte model images unasked is
-rude), the SNMP and smartctl exporters (meaningless without your device list,
-or on virtual disks), and four NetworkPolicy bundles that guard nothing on a
-stock install (Forgejo, a Tailscale router, a syslog receiver, and a standalone
-Harbor). A policy that selects no pod is scaffolding, and it reads as
-protection to whoever audits the cluster next, so those render only when you
-say you run the workload. `tools/check-no-ghost-policies.sh` fails CI if that
-ever stops being true.
-
-### Labels, and the reserved namespace prefix
-
-Everything Tockmox *authors* ... namespaces, NetworkPolicies, guardrails,
-Ingress ... carries consistent labels, so "ours" and "yours" stay
-machine-distinguishable on a cluster running both:
-`app.kubernetes.io/part-of=tockmox`, and `tockmox.com/layer=<layer>`
-naming which of the nine put it there. That is what makes an inventory, a
-targeted delete, and an upgrade audit possible without a hand-kept list.
-
-**Authors, not ships.** Resources rendered by the upstream charts each layer
-wraps carry their own chart's labels instead, so a label selector alone does not
-enumerate a Tockmox install. Those resources are identifiable by the reserved
-`tockmox-` namespace prefix below.
-
-**The `tockmox-` namespace prefix is reserved for the same reason.** Your own
-workloads belong in namespaces that do not start with it. Nothing enforces this
-today ... it is a convention rather than a guardrail ... and breaking it mostly
-hurts you: an uninstall, a layer disable, or any operation scoped by prefix
-stops being able to tell your namespace from a shipped one.
-
-The commands that use these labels are in
-[day-2 § find what Tockmox manages](operations/day-2.md#find-what-tockmox-manages).
+So read "the repository is the truth" as: **the repository decides the value of
+every field it names, and says nothing about fields it does not.** If you need
+additive tampering detected, that is an admission-control or drift-detection job
+and Tockmox does not do it for you today. It is tracked and it is not in 0.6.0.
 
 ### Cluster-scoped state outlives the layer that installed it
 
@@ -317,151 +525,9 @@ tries to create, and the error names the new install rather than the old one.
 The sweep is
 [uninstalling](operations/uninstall.md#7-sweep-the-cluster-scoped-leftovers).
 
-## Sync waves
+## Deep dives
 
-Nine charts, six waves. ArgoCD waits for each wave to report healthy before
-starting the next.
-
-```mermaid
-flowchart TD
-    W0["wave 0 · tockmox-crds<br/><i>every CRD, first</i>"]
-    W1["wave 1 · tockmox-policy<br/><i>namespaces, netpols, RBAC</i>"]
-    W2["wave 2 · tockmox-platform<br/><i>storage, network, ingress, certs</i>"]
-    W3["wave 3 · observability + exporters"]
-    W4["wave 4 · tockmox-identity"]
-    W5["wave 5 · devops · ai · selfcheck"]
-    W0 --> W1 --> W2 --> W3 --> W4 --> W5
-```
-
-Two orderings are deliberate and were both learned the hard way on a clean
-cluster:
-
-**CRDs are a separate wave-0 chart** rather than living beside the things that
-use them. Helm's own guidance, and it eliminates the entire class of
-"custom resource applied before its definition existed" race rather than
-patching individual instances of it.
-
-**Policy precedes platform.** Policy creates the namespaces every other layer
-deploys into. On an existing cluster this ordering does not matter because the
-namespaces are already there; on a fresh one, getting it backwards fails the
-sync. That is the argument for testing against clean clusters.
-
-## The customisation ladder
-
-```mermaid
-flowchart TD
-    Q{"What do you<br/>need to change?"}
-    Q -->|"something a chart exposes"| V["1 · Values<br/><i>free upgrades</i>"]
-    Q -->|"add a dashboard,<br/>alert, or policy"| E["2 · Extension points<br/><i>drop a file in your repo</i>"]
-    Q -->|"modify a shipped resource"| K["3 · Kustomize patch<br/><i>fails loudly on conflict</i>"]
-    Q -->|"replace it entirely"| D["4 · Disable and ship your own"]
-    K -.->|"if you do this often"| BUG["that is a values gap ...<br/>please report it"]
-    D -.-> BUG
-```
-
-Rung 3 is deliberately designed to break noisily. A patch that silently stops
-applying because the base moved underneath it is worse than one that fails the
-sync, because you find out at the wrong time.
-
-## Why deterministic self-monitoring
-
-`tockmox-selfcheck` runs scheduled checks that **never invoke a model**. Checks
-fan in to a deterministic healthy-or-not decision; only an exception escalates
-to anything intelligent.
-
-Two reasons. A platform whose health monitoring depends on an AI being up has a
-circular dependency at exactly the worst moment. And a status that can lie green
-because a check silently stopped running is worse than no status at all, so
-absence and staleness both render not-green, never green.
-
-## Trust boundaries
-
-```mermaid
-flowchart TB
-    subgraph cluster["your cluster"]
-        subgraph diag["diagnostic identity"]
-            D["read-only everywhere<br/>no write verbs at all<br/>egress: DNS, API, telemetry only"]
-        end
-        subgraph plane["the platform"]
-            P["workloads"]
-        end
-        VAP["admission guardrails<br/><i>deny cluster-admin bindings</i>"]
-    end
-    EXT(["internet"])
-    D -.->|"BLOCKED"| EXT
-    VAP --> plane
-```
-
-The diagnostic identity is read-only by construction: its ClusterRole grants
-`get`, `list`, and `watch` and nothing else, so an attempted write fails at
-admission rather than relying on the caller behaving. Its NetworkPolicies allow
-egress to DNS, the API server, and local telemetry, and nothing else ... so an
-agent running under it has no path to the internet, provided
-`diagnosticIdentity.apiServerCIDRs` is set. Unset, the "API server" rule is the
-whole service and LAN ranges on 443/6443 and a forwarder on the LAN is a path
-out.
-
-That envelope ships in the open. What plugs into it is your choice; Tockmox
-provides the cage, not the occupant. If you came here asking whether you can
-run an agent against this cluster without handing it the keys, the fuller
-answer is in
-[what you get](usage/what-you-get.md#the-diagnostic-identity-since-it-is-the-interesting-one).
-
-### The cluster-admin guardrail denies without saying so
-
-The admission guardrail in that diagram is a ValidatingAdmissionPolicy,
-`deny-privileged-rbac`, shipped by the policy layer. It denies any
-ClusterRoleBinding to `cluster-admin` that is not on an allowlist. The intent is
-that **every cluster-admin grant is a decision someone made on purpose**, rather
-than something a chart did on the way past.
-
-The cost is an ergonomics defect worth stating plainly, because it lands three
-layers from its cause. k3s's HelmChart controller creates exactly such a
-binding, named `helm-<chart>`. The binding is denied, the ServiceAccount
-therefore gets no permissions, and the failure surfaces later as an unrelated
-RBAC error naming a resource the ServiceAccount cannot list. **Nothing in that
-message mentions the policy.** A reader who does not already know the policy
-exists has no path from the error to the cause.
-
-Adding a name to `rbacGuardrails.clusterAdminAllowlist` is the fix and is meant
-to feel deliberate. The symptom, the diagnosis and the exact values edit are in
-[troubleshooting § cannot list resource "secrets" is forbidden](operations/troubleshooting.md#cannot-list-resource-secrets-is-forbidden).
-
-### Pod Security: which namespaces refuse a pod, and why the others cannot
-
-Every namespace the policy layer creates carries the Pod Security labels
-`warn` and `audit` at `restricted`. Those two observe without blocking. From
-0.7.0 five of the seven also carry `enforce`, which refuses a pod that fails
-the level. `["Deny"]` enforces; `["Audit","Warn"]` observes ... the same
-distinction the admission policies draw, applied to Pod Security.
-
-**Measured 2026-09-29** by `tools/check-pod-security.sh`, which renders every
-layer with the CI values and again with the all-on overlay, evaluates every pod
-template against the Pod Security Standards, and groups the result by the
-namespace each pod lands in. The level is the lowest any pod in the namespace
-reaches:
-
-| Namespace | Highest level all rendered pods pass | `enforce` label | Why |
-|---|---|---|---|
-| `tockmox-authentik` | restricted | restricted | Server and worker set the four fields upstream leaves unset |
-| `tockmox-selfcheck` | restricted | restricted | One shipped pod |
-| `tockmox-devops` | restricted | baseline | Argo Workflows builds pods from Workflow objects at run time, and those are yours |
-| `tockmox-diagnostic` | no pod ships here | baseline | Where a site's diagnostic agents run |
-| `tockmox-ai` | restricted | baseline | The model gateway and its migrations Job run as uid 1000 on a read-only root (TM-0596); the `enforce` label moves with TM-0487 |
-| `tockmox-monitoring` | privileged | none | node-exporter, Alloy and the SMART exporter need host namespaces or `hostPath` |
-| `tockmox-platform` | privileged | none | Longhorn is privileged by necessity; kured needs `hostPID`, the MetalLB speaker `hostNetwork` |
-
-The gate fails if any `enforce` label is stricter than the level in the second
-column, because a label stricter than its pods is an install that cannot
-schedule. It does **not** prove admission: no API server sees these labels
-during the gate, so "the API server refuses a violating pod here" is rendered
-and evaluated, not observed. It also cannot see pods an operator creates from a
-custom resource (the database pods, Prometheus, Alertmanager, Longhorn's
-instance managers) or anything you add. The levels are set per namespace under
-`podSecurity.enforce` in the policy layer's values, and an empty string removes
-the label; the reasoning for each namespace is beside the key in
-`charts/tockmox-policy/values.yaml`. What to do when a pod of yours is refused
-is in [troubleshooting](operations/troubleshooting.md#a-pod-is-refused-with-violates-podsecurity).
+The measurements and mechanisms behind sections above, for when you need them.
 
 ### In-cluster trust, and why the mechanism differs by runtime
 
@@ -550,6 +616,34 @@ and Tockmox has not measured it, so treat it as a belief and run the test below.
 If you are unsure which family your workload is in, test it rather than assume:
 point it at the CA alone and check that a PUBLIC TLS endpoint still verifies.
 That single check is what distinguishes the two.
+
+### The customisation ladder
+
+```mermaid
+flowchart TD
+    Q{"What do you<br/>need to change?"}
+    Q -->|"something a chart exposes"| V["1 · Values<br/><i>free upgrades</i>"]
+    Q -->|"add a dashboard,<br/>alert, or policy"| E["2 · Extension points<br/><i>drop a file in your repo</i>"]
+    Q -->|"modify a shipped resource"| K["3 · Kustomize patch<br/><i>fails loudly on conflict</i>"]
+    Q -->|"replace it entirely"| D["4 · Disable and ship your own"]
+    K -.->|"if you do this often"| BUG["that is a values gap ...<br/>please report it"]
+    D -.-> BUG
+```
+
+Rung 3 is deliberately designed to break noisily. A patch that silently stops
+applying because the base moved underneath it is worse than one that fails the
+sync, because you find out at the wrong time.
+
+### Why deterministic self-monitoring
+
+`tockmox-selfcheck` runs scheduled checks that **never invoke a model**. Checks
+fan in to a deterministic healthy-or-not decision; only an exception escalates
+to anything intelligent.
+
+Two reasons. A platform whose health monitoring depends on an AI being up has a
+circular dependency at exactly the worst moment. And a status that can lie green
+because a check silently stopped running is worse than no status at all, so
+absence and staleness both render not-green, never green.
 
 ## Further reading
 

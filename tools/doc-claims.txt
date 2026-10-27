@@ -502,10 +502,6 @@ waive:  docs/administration/values-contract.md
 match:  ^seven layers$
 why:    the layers whose schema prints 41 in the measured 2026-09-01 jq run, with two printing 42; a measured subset, not the layer count
 
-waive:  README.md
-match:  ^six layers$
-why:    "wired through six layers" describes how far a stable key reaches, measured 2026-09-03; the same sentence is quoted in values-contract.md
-
 waive:  docs/administration/values-contract.md
 match:  ^six layers$
 why:    same sentence as the README waiver above: reach of a stable key, not the layer count
@@ -767,12 +763,12 @@ expect: 0.12.3
 # number is no longer what it says it is. Replace the figure only from a new
 # recorded run; the evidence for this one is the 2026-10-06 wave-080 lab log.
 page:   README.md
-claim:  **11m22s from a cluster with nothing on it to the first chat reply**
+claim:  reached its first chat reply 11m22s after starting from an empty cluster
 test:   test -f profiles/household-sso.yaml && echo present
 expect: present
 
 page:   README.md
-claim:  a **scripted** run, not a person following these
+claim:  A scripted greenfield test on 2026-10-06
 test:   test -f profiles/household-sso.yaml && echo present
 expect: present
 
