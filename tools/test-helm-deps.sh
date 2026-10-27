@@ -106,7 +106,11 @@ if tar -xzf "$T/r1/charts/tockmox-x/charts/tockmox-common-0.1.0.tgz" -O 2>/dev/n
 else
   no "tockmox-common-0.1.0.tgz is still the stale copy"
 fi
-echo "$out" | grep -q '^offline:' && ok "it says it took the offline path" || no "no 'offline:' line: $out"
+if echo "$out" | grep -q '^offline:'; then
+  ok "it says it took the offline path"
+else
+  no "no 'offline:' line: $out"
+fi
 
 # 2. an upstream archive missing
 fresh "$T/r2" new
