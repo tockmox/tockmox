@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="640" viewBox="0 0 1040 640" role="img" aria-labelledby="t d" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title id="t">Tockmox's GitOps model: product repository, site repository, cluster</title>
+<desc id="d">Tockmox owns the product repository, tockmox/tockmox, which holds the charts, defaults, values schema and docs, and the site template you start from once. You own your site repository, holding your values, sealed secrets and your own applications, and naming the release it tracks in targetRevision. Argo CD, which you also own and run, composes the chart from the product repository with the values from yours as one multi-source Application and syncs the result into your cluster. An upgrade changes targetRevision; a configuration change is a commit. A kubectl edit to a field the repository declares is reverted at the next reconcile; a field the repository does not declare is not.</desc>
+<defs><marker id="ah-neutral" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#5E6963"/></marker><marker id="ah-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2F8F45"/></marker><marker id="ah-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#B7790F"/></marker><marker id="ah-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#C62828"/></marker><marker id="ah-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2F67B0"/></marker><marker id="ah-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1F2A24"/></marker></defs>
+<rect x="1" y="1" width="1038" height="638" rx="14" fill="#FBFBF8" stroke="#D3D8D2" stroke-width="1.5"/>
+<text x="32" y="42" font-size="21" font-weight="700" text-anchor="start" fill="#1F2A24">Three repositories, one cluster</text>
+<text x="32" y="64" font-size="13" font-weight="400" text-anchor="start" fill="#6B756F">Tockmox supplies the charts. You supply the values. Argo CD composes them at sync time.</text>
+<rect x="30" y="100" width="330" height="300" rx="16" fill="none" stroke="#1F2A24" stroke-width="2.4"/>
+<rect x="48" y="89" width="175.3" height="22" rx="4" fill="#FBFBF8"/>
+<text x="58" y="105" font-size="12.5" font-weight="700" text-anchor="start" fill="#1F2A24" letter-spacing="1.2">TOCKMOX OWNS THIS</text>
+<rect x="54" y="256" width="282" height="112" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="195.0" y="292.59999999999997" font-size="14" font-weight="700" text-anchor="middle" fill="#1F2A24">Tockmox product repo</text>
+<text x="195.0" y="312.9" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">tockmox/tockmox · public</text>
+<text x="195.0" y="329.09999999999997" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">charts · defaults · templates</text>
+<text x="195.0" y="345.29999999999995" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">versions, released as tags</text>
+<rect x="54" y="132" width="282" height="100" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text x="195.0" y="162.6" font-size="14" font-weight="700" text-anchor="middle" fill="#1F2A24">Site template</text>
+<text x="195.0" y="182.89999999999998" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">tockmox/tockmox-site-template</text>
+<text x="195.0" y="199.09999999999997" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">a scaffold, used once</text>
+<text x="195.0" y="215.29999999999998" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">or: tockmox-install.sh</text>
+<rect x="400" y="100" width="610" height="510" rx="16" fill="none" stroke="#1F2A24" stroke-width="2.4"/>
+<rect x="418" y="89" width="130.8" height="22" rx="4" fill="#FBFBF8"/>
+<text x="428" y="105" font-size="12.5" font-weight="700" text-anchor="start" fill="#1F2A24" letter-spacing="1.2">YOU OWN THIS</text>
+<rect x="430" y="132" width="300" height="132" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="580.0" y="170.5" font-size="14" font-weight="700" text-anchor="middle" fill="#1F2A24">Your site repo</text>
+<text x="580.0" y="190.79999999999998" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">private · yours</text>
+<text x="580.0" y="207.0" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">values · sealed secrets</text>
+<text x="580.0" y="223.2" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">applications · site config</text>
+<text x="580.0" y="239.39999999999998" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">targetRevision: the tag you track</text>
+<rect x="560" y="330" width="300" height="86" rx="10" fill="#E8F0FB" stroke="#2F67B0" stroke-width="1.6"/>
+<text x="710.0" y="361.7" font-size="14" font-weight="700" text-anchor="middle" fill="#1B417A">Argo CD</text>
+<text x="710.0" y="382.0" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">one multi-source Application</text>
+<text x="710.0" y="398.2" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">per layer</text>
+<rect x="560" y="480" width="300" height="100" rx="10" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1.6"/>
+<text x="710.0" y="518.7" font-size="14" font-weight="700" text-anchor="middle" fill="#17572A">Your cluster</text>
+<text x="710.0" y="539.0000000000001" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">the nine Tockmox layers</text>
+<text x="710.0" y="555.2000000000002" font-size="12" font-weight="400" text-anchor="middle" fill="#4A5550">and your own applications</text>
+<path d="M 336 182 L 426 182" fill="none" stroke="#5E6963" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#ah-neutral)"/>
+<path d="M 336 312 L 610 312 L 610 326" fill="none" stroke="#2F67B0" stroke-width="1.8" marker-end="url(#ah-blue)"/>
+<text x="470" y="302.0" font-size="11.5" font-weight="500" text-anchor="middle" fill="#1B417A">chart, at the tag you pin</text>
+<path d="M 730 198 L 790 198 L 790 326" fill="none" stroke="#2F67B0" stroke-width="1.8" marker-end="url(#ah-blue)"/>
+<text x="800" y="250.0" font-size="11.5" font-weight="500" text-anchor="start" fill="#1B417A">values, secrets,</text>
+<text x="800" y="264.95" font-size="11.5" font-weight="500" text-anchor="start" fill="#1B417A">your apps</text>
+<path d="M 710 416 L 710 476" fill="none" stroke="#2F67B0" stroke-width="1.8" marker-end="url(#ah-blue)"/>
+<text x="722" y="452.0" font-size="11.5" font-weight="500" text-anchor="start" fill="#1B417A">sync</text>
+<text x="54" y="448" font-size="11.5" font-weight="700" text-anchor="start" fill="#4A5550" letter-spacing="1.2">TWO CHANGES, ONE PLACE</text>
+<text x="54" y="472.0" font-size="12.5" font-weight="400" text-anchor="start" fill="#1F2A24">Upgrade: change targetRevision</text>
+<text x="54" y="488.875" font-size="12.5" font-weight="400" text-anchor="start" fill="#1F2A24">in your site repository.</text>
+<text x="54" y="520.0" font-size="12.5" font-weight="400" text-anchor="start" fill="#1F2A24">Configure: commit to your</text>
+<text x="54" y="536.875" font-size="12.5" font-weight="400" text-anchor="start" fill="#1F2A24">site repository.</text>
+<text x="54" y="568.0" font-size="12.5" font-weight="600" text-anchor="start" fill="#17572A">An upgrade cannot edit a file</text>
+<text x="54" y="584.875" font-size="12.5" font-weight="600" text-anchor="start" fill="#17572A">Tockmox does not own.</text>
+<rect x="886" y="448" width="108" height="132" rx="8" fill="#FFF5E0" stroke="#B7790F" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text x="940" y="470.0" font-size="12" font-weight="700" text-anchor="middle" fill="#6E4A06">kubectl edit</text>
+<text x="940" y="486.2" font-size="12" font-weight="700" text-anchor="middle" fill="#6E4A06">temporary state</text>
+<text x="940" y="512.0" font-size="10.5" font-weight="400" text-anchor="middle" fill="#4A5550">declared state</text>
+<text x="940" y="526.175" font-size="10.5" font-weight="400" text-anchor="middle" fill="#4A5550">wins at the next</text>
+<text x="940" y="540.35" font-size="10.5" font-weight="400" text-anchor="middle" fill="#4A5550">reconcile; an added</text>
+<text x="940" y="554.525" font-size="10.5" font-weight="400" text-anchor="middle" fill="#4A5550">field is not reverted</text>
+<path d="M 886 514 L 864 514" fill="none" stroke="#B7790F" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#ah-amber)"/>
+</svg>

@@ -7,7 +7,7 @@ tags: [rationale, positioning, control, sovereignty, argument]
 status: stable
 generated:
   by: hand
-  at: 2026-09-01
+  at: 2026-10-27
 tockmox:
   classification: public
   audience: [operator]
@@ -17,6 +17,14 @@ tockmox:
 
 *The argument, made to a skeptic. If it survives you, it will survive the
 market.*
+
+## This is a bad fit when…
+
+- you want a one-click desktop AI application;
+- you do not want to operate infrastructure;
+- you need a bundled model or turnkey GPU appliance;
+- you need a commercial 24×7 support organization or SLA;
+- Kubernetes and GitOps are costs you specifically want to avoid.
 
 ## The case, in six parts
 

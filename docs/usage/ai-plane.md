@@ -7,7 +7,7 @@ tags: [ai-plane, open-webui, litellm, model-gateway, egress, network-policy]
 status: stable
 generated:
   by: hand
-  at: 2026-09-01
+  at: 2026-10-27
 tockmox:
   classification: public
   audience: [operator]
@@ -27,6 +27,21 @@ that using AI does not have to mean sending your data somewhere else.
 | Add a hosted provider without opening the console up | [The egress question](#the-egress-question-if-you-add-a-hosted-provider) |
 | Know what has been proven and what has not | [Verification status](#verification-status) |
 | Understand where local models stop being enough | [The honest boundary](#the-honest-boundary) |
+
+## Where a request goes
+
+![The AI request path. Inside your network and your cluster, the browser reaches the chat console through ingress and single sign-on. The console holds only a scoped key and cannot reach a model host or the internet directly, so every request goes through the model gateway, which holds the provider credentials and whose model list ships empty. From the gateway: an optional in-cluster Ollama, off by default; a model host on your network, reachable once you add an egress entry for it; or, crossing the boundary on HTTPS port 443, a frontier provider, only if you add one to the model list.](../diagrams/rendered/ai-request-path.svg)
+
+**Text equivalent.** The browser reaches Open WebUI through the ingress
+controller and Authentik. The console's egress allows DNS, the AI namespace and
+the ingress controller and nothing else, so it reaches models only through the
+gateway, on a scoped virtual key. The gateway, LiteLLM, holds the provider
+credentials and routes to the model hosts in its model list, which ships empty:
+an in-cluster Ollama if you enable it, a model host on your LAN once it is
+listed in `aiEgress.litellm.extraEgress`, or a hosted provider on TCP 443
+outside the cluster, service and LAN ranges. A request sent to a hosted provider
+leaves your network with the conversation in it. The rules are in
+[containing the console](#containing-the-console).
 
 ## What it is for
 

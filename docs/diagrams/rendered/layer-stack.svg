@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="650" viewBox="0 0 1040 650" role="img" aria-labelledby="t d" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title id="t">The nine Tockmox layers in six sync waves</title>
+<desc id="d">Bottom to top. Wave 0: crds, every CRD first, required. Wave 1: policy, namespaces, default-deny networking and RBAC admission guardrails, required. Wave 2: platform, storage, load balancing, ingress, certificates and databases, partly declinable. Wave 3: observability, metrics, logs, dashboards and alerting, beside exporters, hardware and network telemetry. Wave 4: identity, single sign-on through Authentik. Wave 5: devops, workflows, off by default; ai, the chat console and model gateway; selfcheck, the heartbeat. Argo CD waits for each wave to report healthy before starting the next. Every layer from wave 3 up can be declined.</desc>
+<defs><marker id="ah-neutral" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#5E6963"/></marker><marker id="ah-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2F8F45"/></marker><marker id="ah-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#B7790F"/></marker><marker id="ah-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#C62828"/></marker><marker id="ah-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2F67B0"/></marker><marker id="ah-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1F2A24"/></marker></defs>
+<rect x="1" y="1" width="1038" height="648" rx="14" fill="#FBFBF8" stroke="#D3D8D2" stroke-width="1.5"/>
+<text x="32" y="42" font-size="21" font-weight="700" text-anchor="start" fill="#1F2A24">Nine layers, six waves</text>
+<text x="32" y="64" font-size="13" font-weight="400" text-anchor="start" fill="#6B756F">Argo CD deploys a wave only after the one below it reports healthy.</text>
+<text x="40" y="550" font-size="13" font-weight="700" text-anchor="start" fill="#1B417A" letter-spacing="1">WAVE 0</text>
+<path d="M 70 514 L 70 500" fill="none" stroke="#2F67B0" stroke-width="1.6" marker-end="url(#ah-blue)"/>
+<rect x="150.0" y="516" width="860.0" height="74" rx="10" fill="#F1F3F0" stroke="#1F2A24" stroke-width="1.6"/>
+<text x="164.0" y="542" font-size="15" font-weight="700" text-anchor="start" fill="#1F2A24">crds</text>
+<text x="164.0" y="562.0" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">every CRD, first</text>
+<rect x="937.6" y="524" width="64.4" height="18" rx="9" fill="#F1F3F0" stroke="#1F2A24" stroke-width="1"/>
+<text x="969.8" y="537" font-size="10.5" font-weight="600" text-anchor="middle" fill="#1F2A24">required</text>
+<text x="40" y="466" font-size="13" font-weight="700" text-anchor="start" fill="#1B417A" letter-spacing="1">WAVE 1</text>
+<path d="M 70 430 L 70 416" fill="none" stroke="#2F67B0" stroke-width="1.6" marker-end="url(#ah-blue)"/>
+<rect x="150.0" y="432" width="860.0" height="74" rx="10" fill="#F1F3F0" stroke="#1F2A24" stroke-width="1.6"/>
+<text x="164.0" y="458" font-size="15" font-weight="700" text-anchor="start" fill="#1F2A24">policy</text>
+<text x="164.0" y="478.0" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">namespaces · default-deny networking</text>
+<text x="164.0" y="493.525" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">RBAC admission guardrails</text>
+<rect x="937.6" y="440" width="64.4" height="18" rx="9" fill="#F1F3F0" stroke="#1F2A24" stroke-width="1"/>
+<text x="969.8" y="453" font-size="10.5" font-weight="600" text-anchor="middle" fill="#1F2A24">required</text>
+<text x="40" y="382" font-size="13" font-weight="700" text-anchor="start" fill="#1B417A" letter-spacing="1">WAVE 2</text>
+<path d="M 70 346 L 70 332" fill="none" stroke="#2F67B0" stroke-width="1.6" marker-end="url(#ah-blue)"/>
+<rect x="150.0" y="348" width="860.0" height="74" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="164.0" y="374" font-size="15" font-weight="700" text-anchor="start" fill="#1F2A24">platform</text>
+<text x="164.0" y="394.0" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">storage · load balancing · ingress</text>
+<text x="164.0" y="409.525" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">certificates · databases</text>
+<rect x="880.9" y="356" width="121.1" height="18" rx="9" fill="#FFF5E0" stroke="#B7790F" stroke-width="1"/>
+<text x="941.45" y="369" font-size="10.5" font-weight="600" text-anchor="middle" fill="#6E4A06">partly declinable</text>
+<text x="40" y="298" font-size="13" font-weight="700" text-anchor="start" fill="#1B417A" letter-spacing="1">WAVE 3</text>
+<path d="M 70 262 L 70 248" fill="none" stroke="#2F67B0" stroke-width="1.6" marker-end="url(#ah-blue)"/>
+<rect x="150.0" y="264" width="423.0" height="74" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="164.0" y="290" font-size="15" font-weight="700" text-anchor="start" fill="#1F2A24">observability</text>
+<text x="164.0" y="310.0" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">metrics · logs · dashboards</text>
+<text x="164.0" y="325.525" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">alerting to a phone</text>
+<rect x="488.0" y="272" width="77.0" height="18" rx="9" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1"/>
+<text x="526.5" y="285" font-size="10.5" font-weight="600" text-anchor="middle" fill="#17572A">declinable</text>
+<rect x="587.0" y="264" width="423.0" height="74" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="601.0" y="290" font-size="15" font-weight="700" text-anchor="start" fill="#1F2A24">exporters</text>
+<text x="601.0" y="310.0" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">hardware and network</text>
+<text x="601.0" y="325.525" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">telemetry</text>
+<rect x="925.0" y="272" width="77.0" height="18" rx="9" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1"/>
+<text x="963.5" y="285" font-size="10.5" font-weight="600" text-anchor="middle" fill="#17572A">declinable</text>
+<text x="40" y="214" font-size="13" font-weight="700" text-anchor="start" fill="#1B417A" letter-spacing="1">WAVE 4</text>
+<path d="M 70 178 L 70 164" fill="none" stroke="#2F67B0" stroke-width="1.6" marker-end="url(#ah-blue)"/>
+<rect x="150.0" y="180" width="860.0" height="74" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="164.0" y="206" font-size="15" font-weight="700" text-anchor="start" fill="#1F2A24">identity</text>
+<text x="164.0" y="226.0" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">single sign-on</text>
+<text x="164.0" y="241.525" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">Authentik</text>
+<rect x="925.0" y="188" width="77.0" height="18" rx="9" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1"/>
+<text x="963.5" y="201" font-size="10.5" font-weight="600" text-anchor="middle" fill="#17572A">declinable</text>
+<text x="40" y="130" font-size="13" font-weight="700" text-anchor="start" fill="#1B417A" letter-spacing="1">WAVE 5</text>
+<rect x="150.0" y="96" width="277.3333333333333" height="74" rx="10" fill="#FFF5E0" stroke="#B7790F" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text x="164.0" y="122" font-size="15" font-weight="700" text-anchor="start" fill="#6E4A06">devops</text>
+<text x="164.0" y="142.0" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">workflows</text>
+<text x="164.0" y="157.525" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">off by default</text>
+<rect x="342.3333333333333" y="104" width="77.0" height="18" rx="9" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1"/>
+<text x="380.8333333333333" y="117" font-size="10.5" font-weight="600" text-anchor="middle" fill="#17572A">declinable</text>
+<rect x="441.3333333333333" y="96" width="277.3333333333333" height="74" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="455.3333333333333" y="122" font-size="15" font-weight="700" text-anchor="start" fill="#1F2A24">ai</text>
+<text x="455.3333333333333" y="142.0" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">chat console</text>
+<text x="455.3333333333333" y="157.525" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">and model gateway</text>
+<rect x="633.6666666666666" y="104" width="77.0" height="18" rx="9" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1"/>
+<text x="672.1666666666666" y="117" font-size="10.5" font-weight="600" text-anchor="middle" fill="#17572A">declinable</text>
+<rect x="732.6666666666666" y="96" width="277.3333333333333" height="74" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="746.6666666666666" y="122" font-size="15" font-weight="700" text-anchor="start" fill="#1F2A24">selfcheck</text>
+<text x="746.6666666666666" y="142.0" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">heartbeat · alerts when</text>
+<text x="746.6666666666666" y="157.525" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">monitoring goes quiet</text>
+<rect x="925.0" y="104" width="77.0" height="18" rx="9" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1"/>
+<text x="963.5" y="117" font-size="10.5" font-weight="600" text-anchor="middle" fill="#17572A">declinable</text>
+<text x="40" y="626" font-size="11.5" font-weight="400" text-anchor="start" fill="#6B756F">Wave numbers are read from each chart's Chart.yaml when this diagram is generated.</text>
+</svg>

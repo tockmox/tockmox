@@ -2,44 +2,60 @@
 # One page stem per line, first to read at the top. A page in docs/<section>/
 # that is not listed here fails the docs-index gate, so a new page has to be
 # given a place in the order when it is added.
+#
+# Groups: `steps: Title :: blurb` starts a group read in order (numbered),
+# `group: Title :: blurb` starts a set of pages with no implied order. The
+# blurb is optional. A section that uses groups puts every page in one; a
+# section with none renders one numbered table, as operations does.
+
 
 [deployment]
+steps: Before installation
 prerequisites
 hardware-platforms
 sizing
-virtual-machines
 fresh-install
 existing-cluster
 profiles
-registry
-time-sync
-airgap
+steps: Install :: Then [sign in for the first time](../usage/getting-started.md).
 verify
 install
+group: Special environments
+virtual-machines
+registry
+airgap
+time-sync
+group: Already running
 upgrade
 upgrade-foundations
 
 [administration]
+steps: Start here
 configuration
 capabilities
 values-contract
 secrets
+group: Identity & trust
 identity
 tls-and-trust
+api-endpoint
+audit-logging
+group: Infrastructure
 argocd
 load-balancing
 storage
-api-endpoint
-audit-logging
 external-integrations
+group: Customize the platform
 customising
 adding-an-application
 removing-an-application
 serving-static-sites
+group: AI & inference — experimental
 inference-nodes
 ai-nodes
 model-lifecycle
 tockmox-ui
+group: Platform assurance — experimental
 platform-management
 posture-probe
 
@@ -53,7 +69,11 @@ kube-bench
 uninstall
 
 [usage]
+group: First-time operator setup
 getting-started
-what-you-get
+group: Everyday user
 ai-plane
+group: Know what is included
+what-you-get
+group: Using a coding agent
 working-with-an-agent
