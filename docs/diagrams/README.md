@@ -40,6 +40,11 @@ wired into CI yet.
 | `layer-stack.svg` | The nine layers in their six sync waves, and which can be declined | [architecture](../architecture.md) |
 | `ai-request-path.svg` | Where a chat request goes, what is blocked, and where data leaves your network | [README](../../README.md), [the AI plane](../usage/ai-plane.md) |
 | `install-journey.svg` | Prepare, generate, bootstrap, reconcile, configure, use, and the side branches only some sites need | [deployment index](../deployment/README.md) |
+| `identity-flow.svg` | The CA on your machine, ingress, Authentik and its two groups, the OIDC consoles, forward-auth, break-glass | [identity](../administration/identity.md) |
+| `network-containment.svg` | Which namespaces deny ingress and egress, what is open, and what NetworkPolicy does not reach | [what you get](../usage/what-you-get.md), [architecture](../architecture.md) |
+| `alert-path.svg` | Metrics and logs to Grafana, alerts to a phone, the heartbeat, and the watcher's own alerts | [monitoring](../operations/monitoring.md) |
+| `recovery-evidence.svg` | What is backed up, what has a dated restore, what is drilled on a schedule, and what is not claimed | [backup and restore](../operations/backup-restore.md) |
+| `customisation-ladder.svg` | The four rungs for changing what ships, and what each costs at upgrade | [customising](../administration/customising.md) |
 
 ## Visual vocabulary
 

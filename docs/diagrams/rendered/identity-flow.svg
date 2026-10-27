@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="660" viewBox="0 0 1040 660" role="img" aria-labelledby="t d" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title id="t">Identity and trust in Tockmox</title>
+<desc id="d">Your browser runs on a machine whose trust store holds the Tockmox private CA. It reaches the consoles over HTTPS through the Traefik ingress, with certificates cert-manager issues from that CA. Authentik is the OIDC provider for three shipped consoles, Grafana, Open WebUI and Argo Workflows, which exchange the token from inside their own containers and so need the CA in the cluster too. Two groups, tockmox-admins and tockmox-users, decide who reaches each console and in which role; a user in neither group is refused by Authentik. Prometheus, Alertmanager, Longhorn and the Traefik dashboard have no sign-in of their own and can be put behind Authentik's forward-auth, off by default. Each OIDC console keeps a local break-glass login outside the group model. Forgejo is planned, not shipped, and ntfy is a portal link with no single sign-on.</desc>
+<defs><marker id="ah-neutral" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#5E6963"/></marker><marker id="ah-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2F8F45"/></marker><marker id="ah-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#B7790F"/></marker><marker id="ah-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#C62828"/></marker><marker id="ah-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2F67B0"/></marker><marker id="ah-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1F2A24"/></marker></defs>
+<rect x="1" y="1" width="1038" height="658" rx="14" fill="#FBFBF8" stroke="#D3D8D2" stroke-width="1.5"/>
+<text x="32" y="42" font-size="21" font-weight="700" text-anchor="start" fill="#1F2A24">Who gets in, and how</text>
+<text x="32" y="64" font-size="13" font-weight="400" text-anchor="start" fill="#6B756F">One identity provider, two groups, and a break-glass door on every console.</text>
+<rect x="140" y="100" width="870" height="530" rx="16" fill="none" stroke="#1F2A24" stroke-width="2.4"/>
+<rect x="158" y="89" width="130.8" height="22" rx="4" fill="#FBFBF8"/>
+<text x="168" y="105" font-size="12.5" font-weight="700" text-anchor="start" fill="#1F2A24" letter-spacing="1.2">YOUR CLUSTER</text>
+<circle cx="70" cy="286" r="9" fill="none" stroke="#1F2A24" stroke-width="2"/>
+<path d="M 55 316 Q 55 298 70 298 Q 85 298 85 316" fill="none" stroke="#1F2A24" stroke-width="2"/>
+<text x="70" y="334" font-size="12.5" font-weight="600" text-anchor="middle" fill="#1F2A24">You</text>
+<text x="70" y="362.0" font-size="11" font-weight="600" text-anchor="middle" fill="#17572A">the Tockmox CA</text>
+<text x="70" y="376.85" font-size="11" font-weight="600" text-anchor="middle" fill="#17572A">in this machine's</text>
+<text x="70" y="391.7" font-size="11" font-weight="600" text-anchor="middle" fill="#17572A">trust store</text>
+<rect x="166" y="256" width="150" height="92" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="241.0" y="291.875" font-size="13.5" font-weight="700" text-anchor="middle" fill="#1F2A24">Ingress</text>
+<text x="241.0" y="310.85" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">Traefik · HTTPS</text>
+<text x="241.0" y="325.70000000000005" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">private-CA certificates</text>
+<path d="M 94 302 L 162 302" fill="none" stroke="#2F8F45" stroke-width="1.8" marker-end="url(#ah-green)"/>
+<text x="114" y="292.0" font-size="11" font-weight="500" text-anchor="middle" fill="#17572A">https://</text>
+<rect x="352" y="236" width="196" height="132" rx="10" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1.6"/>
+<text x="450.0" y="276.2" font-size="15" font-weight="700" text-anchor="middle" fill="#17572A">Authentik</text>
+<text x="450.0" y="296.525" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">OIDC provider</text>
+<text x="450.0" y="312.04999999999995" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">groups:</text>
+<text x="450.0" y="327.575" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">tockmox-admins</text>
+<text x="450.0" y="343.09999999999997" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">tockmox-users</text>
+<path d="M 316 302 L 348 302" fill="none" stroke="#2F8F45" stroke-width="1.8" marker-end="url(#ah-green)"/>
+<path d="M 500 368 L 500 404" stroke="#C62828" stroke-width="1.8" stroke-dasharray="3 4" fill="none"/>
+<path d="M 494 398 L 506 410" stroke="#C62828" stroke-width="2.6" stroke-linecap="round"/>
+<path d="M 494 410 L 506 398" stroke="#C62828" stroke-width="2.6" stroke-linecap="round"/>
+<text x="500" y="430.0" font-size="11.5" font-weight="600" text-anchor="middle" fill="#8E1B1B">a user in neither group</text>
+<text x="500" y="445.525" font-size="11.5" font-weight="600" text-anchor="middle" fill="#8E1B1B">is refused here</text>
+<rect x="612" y="150" width="200" height="72" rx="10" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1.6"/>
+<text x="712.0" y="182.9625" font-size="13.5" font-weight="700" text-anchor="middle" fill="#17572A">Grafana</text>
+<text x="712.0" y="202.4625" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">Admin or Viewer</text>
+<path d="M 548 302 L 580 302 L 580 186 L 608 186" fill="none" stroke="#2F8F45" stroke-width="1.8" marker-end="url(#ah-green)"/>
+<rect x="612" y="242" width="200" height="72" rx="10" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1.6"/>
+<text x="712.0" y="274.96250000000003" font-size="13.5" font-weight="700" text-anchor="middle" fill="#17572A">Open WebUI</text>
+<text x="712.0" y="294.46250000000003" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">admin or user</text>
+<path d="M 548 302 L 580 302 L 580 278 L 608 278" fill="none" stroke="#2F8F45" stroke-width="1.8" marker-end="url(#ah-green)"/>
+<rect x="612" y="334" width="200" height="72" rx="10" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1.6"/>
+<text x="712.0" y="366.96250000000003" font-size="13.5" font-weight="700" text-anchor="middle" fill="#17572A">Argo Workflows</text>
+<text x="712.0" y="386.46250000000003" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">full or read-only</text>
+<path d="M 548 302 L 580 302 L 580 370 L 608 370" fill="none" stroke="#2F8F45" stroke-width="1.8" marker-end="url(#ah-green)"/>
+<text x="580" y="140" font-size="11.5" font-weight="600" text-anchor="middle" fill="#17572A">OIDC</text>
+<rect x="842" y="150" width="152" height="236" rx="10" fill="#FFF5E0" stroke="#B7790F" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text x="918" y="176.0" font-size="13" font-weight="700" text-anchor="middle" fill="#6E4A06">Break-glass</text>
+<text x="918" y="193.55" font-size="13" font-weight="700" text-anchor="middle" fill="#6E4A06">local logins</text>
+<text x="918" y="222.0" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">Grafana local admin</text>
+<text x="918" y="236.85" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">Open WebUI email</text>
+<text x="918" y="251.7" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">Argo client token</text>
+<text x="918" y="266.55" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550"></text>
+<text x="918" y="281.4" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">outside the group</text>
+<text x="918" y="296.25" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">model: no review</text>
+<text x="918" y="311.1" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">of who holds one</text>
+<path d="M 838 186 L 816 186" fill="none" stroke="#B7790F" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#ah-amber)"/>
+<path d="M 838 278 L 816 278" fill="none" stroke="#B7790F" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#ah-amber)"/>
+<path d="M 838 370 L 816 370" fill="none" stroke="#B7790F" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#ah-amber)"/>
+<rect x="612" y="430" width="200" height="76" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="712" y="454.0" font-size="13" font-weight="700" text-anchor="middle" fill="#1F2A24">In-cluster trust</text>
+<text x="712" y="474.0" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">each console exchanges the token</text>
+<text x="712" y="488.85" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">from inside its container: CA again</text>
+<path d="M 712 426 L 712 410" fill="none" stroke="#5E6963" stroke-width="1.8" marker-end="url(#ah-neutral)"/>
+<rect x="352" y="470" width="230" height="96" rx="10" fill="#FFF5E0" stroke="#B7790F" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text x="467.0" y="500.45000000000005" font-size="13.5" font-weight="700" text-anchor="middle" fill="#6E4A06">Forward-auth</text>
+<text x="467.0" y="519.4250000000001" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">Prometheus · Alertmanager</text>
+<text x="467.0" y="534.2750000000001" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">Longhorn · Traefik dashboard</text>
+<text x="467.0" y="549.1250000000001" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">off by default</text>
+<path d="M 400 368 L 400 466" fill="none" stroke="#B7790F" stroke-width="1.8" stroke-dasharray="7 5" marker-end="url(#ah-amber)"/>
+<rect x="842" y="430" width="152" height="60" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text x="918.0" y="457.125" font-size="13" font-weight="700" text-anchor="middle" fill="#1F2A24">Forgejo</text>
+<text x="918.0" y="475.825" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">planned, not shipped</text>
+<rect x="842" y="506" width="152" height="60" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text x="918.0" y="533.125" font-size="13" font-weight="700" text-anchor="middle" fill="#1F2A24">ntfy</text>
+<text x="918.0" y="551.8249999999999" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">a portal link, no SSO</text>
+<rect x="156" y="470" width="190" height="122" rx="8" fill="#FFFFFF" stroke="#D3D8D2" stroke-width="1.2"/>
+<text x="168" y="490" font-size="11.5" font-weight="700" text-anchor="start" fill="#4A5550" letter-spacing="1">Legend</text>
+<rect x="168" y="498" width="26" height="14" rx="3" fill="none" stroke="#1F2A24" stroke-width="2.2"/>
+<text x="202" y="509" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">trust boundary</text>
+<path d="M 168 527 L 190 527" stroke="#2F8F45" stroke-width="1.8" marker-end="url(#ah-green)"/>
+<text x="202" y="531" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">single sign-on path</text>
+<path d="M 168 549 L 190 549" stroke="#B7790F" stroke-width="1.8" stroke-dasharray="5 3" marker-end="url(#ah-amber)"/>
+<text x="202" y="553" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">optional or break-glass</text>
+<path d="M 175 565 L 187 577 M 175 577 L 187 565" stroke="#C62828" stroke-width="2.4" stroke-linecap="round"/>
+<text x="202" y="575" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">refused</text>
+</svg>

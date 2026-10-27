@@ -30,7 +30,7 @@ that using AI does not have to mean sending your data somewhere else.
 
 ## Where a request goes
 
-![The AI request path. Inside your network and your cluster, the browser reaches the chat console through ingress and single sign-on. The console holds only a scoped key and cannot reach a model host or the internet directly, so every request goes through the model gateway, which holds the provider credentials and whose model list ships empty. From the gateway: an optional in-cluster Ollama, off by default; a model host on your network, reachable once you add an egress entry for it; or, crossing the boundary on HTTPS port 443, a frontier provider, only if you add one to the model list.](../diagrams/rendered/ai-request-path.svg)
+![The AI request path. Inside your network and your cluster, the browser reaches the chat console through ingress and single sign-on. The console holds only a scoped key and cannot reach a model host or the internet directly, so every request goes through the model gateway, which holds the provider credentials and whose model list ships empty. From the gateway: an optional in-cluster Ollama, off by default; a model host on your network, reachable once you add an egress entry for it; or, crossing the boundary on HTTPS port 443, a frontier provider, only if you add one to the model list. Local inference does not by itself make an installation air-gapped.](../diagrams/rendered/ai-request-path.svg)
 
 **Text equivalent.** The browser reaches Open WebUI through the ingress
 controller and Authentik. The console's egress allows DNS, the AI namespace and

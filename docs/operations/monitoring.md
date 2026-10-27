@@ -7,7 +7,7 @@ tags: [monitoring, prometheus, grafana, alertmanager, dashboards, alerts]
 status: stable
 generated:
   by: hand
-  at: 2026-09-01
+  at: 2026-10-27
 tockmox:
   classification: public
   audience: [operator]
@@ -178,6 +178,15 @@ separate hop, and it is the one that is usually missing:
 Prometheus ──▶ Alertmanager ──▶ alert bridge ──▶ ntfy ──▶ your phone
                                       └────────▶ Apprise ──▶ email, Slack, …
 ```
+
+![The alert path. Workloads expose metrics that Prometheus scrapes, and pod logs go through Alloy to Loki; Grafana shows both. Prometheus sends firing alerts to Alertmanager, which posts them to the alert bridge, which publishes them to ntfy, where a subscribed phone receives them. Apprise, off by default, fans out to email or chat. On iOS an optional relay through ntfy.sh, off by default, lets a wakeup and the topic name leave your network. Every 15 minutes the self-check heartbeat posts an alert to Alertmanager that travels the same path, and TockmoxSelfCheckStale fires if it stops succeeding. The bridge publishes its own delivery health as metrics, and Alertmanager's Watchdog goes to a null receiver rather than the phone.](../diagrams/rendered/alert-path.svg)
+
+**Text equivalent.** The block above is the delivery path. The heartbeat is the
+`tockmox-heartbeat` CronJob in the selfcheck layer, every 15 minutes by
+default; it posts to Alertmanager's API, so it proves the path from
+Alertmanager onwards, and `TockmoxSelfCheckStale` fires when its last success
+goes stale. [Watching the watcher](#watching-the-watcher) covers the bridge's own
+metrics; the iOS relay and Apprise are below.
 
 The bridge exists because neither sink speaks Alertmanager's webhook envelope.
 Alertmanager posts `{"alerts":[…],"status":…}`; ntfy wants the text in the body

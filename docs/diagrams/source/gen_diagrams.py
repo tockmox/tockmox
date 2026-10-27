@@ -219,7 +219,8 @@ def platform_overview():
             "a self-check heartbeat. Underneath is the foundation you provide: Kubernetes, Argo CD "
             "and sealed-secrets, reconciling everything from your site repository. Outside the "
             "boundary, a frontier provider is reachable only through the gateway and only if you "
-            "configure it; a request sent there takes the conversation with it.")
+            "configure it; a request sent there takes the conversation with it. The boundary "
+            "describes ownership, not an air-gap guarantee.")
     header(s, "Tockmox at a glance",
            "Local first. A frontier model is a route you add, not a default.")
     s.boundary(30, 96, 760, 534, "YOUR HARDWARE / YOUR CONTROL",
@@ -367,7 +368,8 @@ def layer_stack():
             "hardware and network telemetry. Wave 4: identity, single sign-on through Authentik. "
             "Wave 5: devops, workflows, off by default; ai, the chat console and model gateway; "
             "selfcheck, the heartbeat. Argo CD waits for each wave to report healthy before "
-            "starting the next. Every layer from wave 3 up can be declined.")
+            "starting the next. Every layer from wave 3 up can be declined. The arrows show the order "
+            "of the waves; they do not enumerate every component dependency.")
     header(s, "Nine layers, six waves",
            "Argo CD deploys a wave only after the one below it reports healthy.")
     rows = {}
@@ -410,7 +412,8 @@ def ai_request_path():
             "the provider credentials and whose model list ships empty. From the gateway: an "
             "optional in-cluster Ollama, off by default; a model host on your network, reachable "
             "once you add an egress entry for it; or, crossing the boundary on HTTPS port 443, a "
-            "frontier provider, only if you add one to the model list.")
+            "frontier provider, only if you add one to the model list. Local inference does not by "
+            "itself make an installation air-gapped.")
     header(s, "Where a request goes",
            "The route you configure decides where the conversation goes. Nothing routes until you name a model.")
     s.boundary(30, 100, 770, 510, "YOUR NETWORK")
@@ -465,7 +468,8 @@ def install_journey():
             "the nine layers up in six waves until they are healthy. Configure: trust the CA, "
             "bootstrap Authentik, make your own user, and name a model route. Use: the first chat. "
             "Virtual machines, a registry of your own, and air-gap with time sync are side "
-            "branches for the sites that need them.")
+            "branches for the sites that need them. This is a navigation overview, not the "
+            "installation procedure.")
     header(s, "From nothing to a first chat",
            "Each stage is a page, or a phase of one. Dashed boxes apply only to some sites.")
 
@@ -517,6 +521,282 @@ def install_journey():
     ], w=240)
     return s
 
+# ---------------------------------------------------------------------------
+# 6. Identity and trust ... docs/administration/identity.md § the shape
+#    Sources: identity.md (the shape, groups, forward-auth, break-glass, tiles),
+#    tls-and-trust.md, usage/getting-started.md steps 1 to 4.
+# ---------------------------------------------------------------------------
+def identity_flow():
+    s = Svg(1040, 660, "Identity and trust in Tockmox",
+            "Your browser runs on a machine whose trust store holds the Tockmox private CA. It "
+            "reaches the consoles over HTTPS through the Traefik ingress, with certificates "
+            "cert-manager issues from that CA. Authentik is the OIDC provider for three shipped "
+            "consoles, Grafana, Open WebUI and Argo Workflows, which exchange the token from "
+            "inside their own containers and so need the CA in the cluster too. Two groups, "
+            "tockmox-admins and tockmox-users, decide who reaches each console and in which role; "
+            "a user in neither group is refused by Authentik. Prometheus, Alertmanager, Longhorn "
+            "and the Traefik dashboard have no sign-in of their own and can be put behind "
+            "Authentik's forward-auth, off by default. Each OIDC console keeps a local break-glass "
+            "login outside the group model. Forgejo is planned, not shipped, and ntfy is a "
+            "portal link with no single sign-on.")
+    header(s, "Who gets in, and how",
+           "One identity provider, two groups, and a break-glass door on every console.")
+    s.boundary(140, 100, 870, 530, "YOUR CLUSTER")
+    s.person(70, 300, "You")
+    s.lines(70, 362, ["the Tockmox CA", "in this machine's", "trust store"], 11, anchor="middle",
+            color=PAL["green"][2], weight="600")
+    s.box(166, 256, 150, 92, "Ingress", ["Traefik · HTTPS", "private-CA certificates"], "neutral",
+          tsize=13.5, rsize=11)
+    s.arrow([(94, 302), (162, 302)], "green", label="https://", lpos=(114, 292), lsize=11)
+    s.box(352, 236, 196, 132, "Authentik", ["OIDC provider", "groups:", "tockmox-admins", "tockmox-users"],
+          "green", tsize=15, rsize=11.5)
+    s.arrow([(316, 302), (348, 302)], "green")
+    s.blocked(500, 368, 500, 404, ["a user in neither group", "is refused here"], 500, 430, anchor="middle")
+    consoles = [("Grafana", "Admin or Viewer"), ("Open WebUI", "admin or user"),
+                ("Argo Workflows", "full or read-only")]
+    for i, (n, r) in enumerate(consoles):
+        y = 150 + i * 92
+        s.box(612, y, 200, 72, n, [r], "green", tsize=13.5, rsize=11.5)
+        s.arrow([(548, 302), (580, 302), (580, y + 36), (608, y + 36)], "green")
+    s.text(580, 140, "OIDC", 11.5, "600", "middle", PAL["green"][2])
+    s.rect(842, 150, 152, 236, "amber", dashed=True, rx=10)
+    s.lines(918, 176, ["Break-glass", "local logins"], 13, anchor="middle", color=PAL["amber"][2], weight="700")
+    s.lines(918, 222, ["Grafana local admin", "Open WebUI email", "Argo client token", "",
+                       "outside the group", "model: no review", "of who holds one"], 11, anchor="middle",
+            color=INK2)
+    for i in range(3):
+        y = 186 + i * 92
+        s.arrow([(838, y), (816, y)], "amber", dashed=True)
+    s.rect(612, 430, 200, 76, "neutral", rx=10)
+    s.lines(712, 454, ["In-cluster trust"], 13, anchor="middle", color=INK, weight="700")
+    s.lines(712, 474, ["each console exchanges the token", "from inside its container: CA again"], 11,
+            anchor="middle", color=INK2)
+    s.arrow([(712, 426), (712, 410)], "neutral", head=True)
+    s.box(352, 470, 230, 96, "Forward-auth", ["Prometheus · Alertmanager", "Longhorn · Traefik dashboard",
+          "off by default"], "amber", dashed=True, tsize=13.5, rsize=11)
+    s.arrow([(400, 368), (400, 466)], "amber", dashed=True)
+    s.box(842, 430, 152, 60, "Forgejo", ["planned, not shipped"], "neutral", dashed=True, tsize=13, rsize=11)
+    s.box(842, 506, 152, 60, "ntfy", ["a portal link, no SSO"], "neutral", dashed=True, tsize=13, rsize=11)
+    s.legend(156, 470, [
+        ("bound", "ink", "trust boundary"),
+        ("arrow", "green", "single sign-on path"),
+        ("darrow", "amber", "optional or break-glass"),
+        ("block", "red", "refused"),
+    ], w=190)
+    return s
+
+
+# ---------------------------------------------------------------------------
+# 7. Network containment ... docs/usage/what-you-get.md § network containment
+#    Every boundary below is stated on that page; nothing beyond it is drawn.
+# ---------------------------------------------------------------------------
+def network_containment():
+    s = Svg(1040, 640, "Tockmox network containment: what is denied, and where",
+            "All seven namespaces the policy layer creates deny ingress by default. Egress is "
+            "default-deny in two of them: the AI namespace, where the model gateway may reach DNS, "
+            "its own namespace, its database and TCP 443 outside the cluster, service and LAN "
+            "ranges, and a LAN model host only once it is listed; and the diagnostic namespace, "
+            "which may reach DNS, the API server and local telemetry. Egress is open in the other "
+            "five: platform, monitoring, Authentik, devops and selfcheck. Namespaces you create "
+            "get no policy from Tockmox. Three hostNetwork workloads, the MetalLB speaker, kured "
+            "and node-exporter, are outside NetworkPolicy altogether. Measured on one single-node "
+            "lab with kube-router; not measured on another CNI or a multi-node cluster.")
+    header(s, "What the network policy covers, and what it does not",
+           "Ingress is denied everywhere Tockmox creates a namespace. Egress, in two places.")
+    s.boundary(30, 100, 980, 380, "NAMESPACES THE POLICY LAYER CREATES",
+               sub="Every one denies ingress by default; only rules that name a path open it")
+    s.text(56, 160, "EGRESS DENIED BY DEFAULT", 11.5, "700", color=PAL["green"][2], spacing=1.2)
+    s.box(56, 172, 300, 132, "tockmox-ai", ["the gateway may reach DNS, its", "namespace, its database, and",
+          "TCP 443 outside cluster and LAN", "a LAN model host once listed"], "green", tsize=14, rsize=11.5)
+    s.box(376, 172, 250, 132, "tockmox-diagnostic", ["the read-only identity may", "reach DNS, the API server",
+          "and local telemetry"], "green", tsize=14, rsize=11.5)
+    s.text(56, 342, "EGRESS OPEN", 11.5, "700", color=INK2, spacing=1.2)
+    open_ns = ["tockmox-platform", "tockmox-monitoring", "tockmox-authentik", "tockmox-devops",
+               "tockmox-selfcheck"]
+    for i, n in enumerate(open_ns):
+        s.box(56 + i * 188, 354, 172, 60, n, ["ingress denied"], "neutral", tsize=12.5, rsize=11)
+    s.lines(56, 440, ["A compromised pod here can reach the network: containment is a smaller claim than isolation."],
+            11.5, color=INK2)
+    s.rect(660, 172, 326, 132, "neutral", rx=10, fill="#FFFFFF")
+    s.lines(676, 196, ["Edges the page states"], 12.5, color=INK, weight="700")
+    s.lines(676, 216, ["· a new pod is unpoliced for about its first", "  second (measured on kube-router)",
+                       "· the platform namespace admits your LAN", "· diagnostic's API rule is the service and LAN",
+                       "  ranges on 443/6443 until apiServerCIDRs is set", "· AI egress measured on one single-node lab"],
+            10.5, color=INK2, lh=14.5)
+    # outside the boundary
+    s.rect(30, 506, 470, 104, "neutral", dashed=True, rx=14)
+    s.lines(50, 532, ["NAMESPACES YOU CREATE"], 11.5, color=INK2, weight="700")
+    s.lines(50, 560, ["No policy from Tockmox. adding-an-application.md", "gives the recipe; nothing applies it for you."],
+            12.5, color=INK)
+    s.rect(530, 506, 480, 104, "red", rx=14, fill="#FFF8F8")
+    s.lines(550, 532, ["OUTSIDE NETWORKPOLICY ENTIRELY"], 11.5, color=PAL["red"][2], weight="700")
+    s.lines(550, 560, ["hostNetwork workloads: the MetalLB speaker,", "kured and node-exporter. That is the API's",
+                       "behaviour, not an oversight."], 12.5, color=INK)
+    return s
+
+
+# ---------------------------------------------------------------------------
+# 8. The alert path ... docs/operations/monitoring.md § how an alert reaches you
+#    Sources: monitoring.md, charts/tockmox-selfcheck (heartbeat, TockmoxSelfCheckStale),
+#    charts/tockmox-observability values (Watchdog to a null receiver).
+# ---------------------------------------------------------------------------
+def alert_path():
+    s = Svg(1040, 660, "How a Tockmox alert reaches a person, and how the path watches itself",
+            "Workloads expose metrics that Prometheus scrapes, and pod logs go through Alloy to "
+            "Loki; Grafana shows both. Prometheus evaluates the alert rules and sends firing "
+            "alerts to Alertmanager, which posts them to the alert bridge, which publishes them to "
+            "ntfy, where a subscribed phone receives them. Apprise, off by default, can fan out to "
+            "email or chat. On iOS, lock-screen notifications need an optional relay through "
+            "ntfy.sh, off by default, through which a wakeup and the topic name leave your network. "
+            "Every 15 minutes the self-check heartbeat posts an alert to Alertmanager that travels "
+            "the same path; if it stops succeeding, TockmoxSelfCheckStale fires. The bridge "
+            "publishes its own delivery health as metrics, and three alerts render a dead "
+            "notification path on a dashboard. Alertmanager's always-firing Watchdog goes to a "
+            "null receiver, not to the phone.")
+    header(s, "How an alert reaches a person",
+           "And how the path proves it still works when nothing is wrong.")
+    s.boundary(30, 100, 820, 530, "YOUR CLUSTER")
+    s.box(56, 140, 150, 64, "Workloads", ["metrics endpoints"], "neutral", tsize=13.5, rsize=11)
+    s.box(56, 230, 150, 64, "Pod logs", ["every node"], "neutral", tsize=13.5, rsize=11)
+    s.box(250, 140, 150, 64, "Prometheus", ["rules evaluated"], "neutral", tsize=13.5, rsize=11)
+    s.box(250, 230, 150, 64, "Alloy → Loki", ["logs stored"], "neutral", tsize=13.5, rsize=11)
+    s.box(250, 320, 150, 64, "Grafana", ["dashboards"], "neutral", tsize=13.5, rsize=11)
+    s.arrow([(206, 172), (246, 172)], "neutral")
+    s.arrow([(206, 262), (246, 262)], "neutral")
+    s.arrow([(325, 294), (325, 316)], "neutral")
+    s.arrow([(400, 172), (420, 172), (420, 352), (404, 352)], "neutral")
+    s.box(450, 140, 150, 64, "Alertmanager", ["routes alerts"], "green", tsize=13.5, rsize=11)
+    s.box(450, 240, 150, 64, "Alert bridge", ["two replicas"], "green", tsize=13.5, rsize=11)
+    s.box(650, 240, 170, 64, "ntfy", ["one replica · deny-all", "until you add its Secret"], "green",
+          tsize=13.5, rsize=11)
+    s.arrow([(400, 160), (446, 160)], "green", label="firing", lpos=(423, 152), lsize=10.5)
+    s.arrow([(525, 204), (525, 236)], "green")
+    s.arrow([(600, 272), (646, 272)], "green")
+    s.person(940, 266, "Your phone")
+    s.arrow([(820, 272), (914, 272)], "green", label="subscribed", lpos=(885, 262), lsize=11)
+    s.box(450, 336, 150, 60, "Apprise", ["email, chat · off"], "amber", dashed=True, tsize=13, rsize=11)
+    s.arrow([(525, 304), (525, 332)], "amber", dashed=True)
+    s.cloud(872, 336, 150, 84, "amber")
+    s.text(947, 380, "ntfy.sh relay", 12.5, "700", "middle", PAL["amber"][2])
+    s.text(947, 398, "iOS only · off", 11, "400", "middle", INK2)
+    s.arrow([(760, 304), (760, 372), (874, 372)], "amber", dashed=True)
+    s.crossing(850, 372, [], side="right")
+    s.lines(947, 436, ["a wakeup and the topic", "name leave your network"], 11, anchor="middle",
+            color=PAL["red"][2], weight="600")
+    # heartbeat
+    s.rect(56, 430, 360, 170, "green", rx=10, fill="#F4FBF5")
+    s.lines(74, 456, ["THE SELF-CHECK"], 11.5, color=PAL["green"][2], weight="700")
+    s.lines(74, 480, ["A heartbeat CronJob posts an alert to", "Alertmanager every 15 minutes. It",
+                      "travels the whole path to the phone.", "",
+                      "If it stops succeeding, Prometheus", "fires TockmoxSelfCheckStale: the",
+                      "monitoring plane itself is down."], 11.5, color=INK)
+    s.arrow([(416, 470), (436, 470), (436, 190), (446, 190)], "green", dashed=False)
+    s.rect(450, 430, 370, 170, "blue", rx=10, fill="#F3F7FD")
+    s.lines(468, 456, ["WATCHING THE WATCHER"], 11.5, color=PAL["blue"][2], weight="700")
+    s.lines(468, 480, ["The bridge publishes its own delivery", "health as metrics. Three alerts render",
+                       "a dead notification path on a", "dashboard, which survives it.", "",
+                       "Alertmanager's Watchdog goes to a null", "receiver, never to the phone."], 11.5,
+            color=INK)
+    s.legend(866, 480, [
+        ("arrow", "green", "the delivery path"),
+        ("darrow", "amber", "off by default"),
+        ("cross", "red", "leaves your network"),
+    ], w=166)
+    return s
+
+
+# ---------------------------------------------------------------------------
+# 9. Recovery evidence ... docs/operations/backup-restore.md § what is not certified here
+#    Every filled dot is a dated run that page (or the escrow page) records.
+# ---------------------------------------------------------------------------
+RECOVERY_ROWS = [
+    ("Model-gateway database", "CloudNativePG to S3",
+     ("●", "on by default from 0.7.1"), ("●", "2026-08-19 rehearsal, 2026-10-01 in prod"), ("●", "weekly drill, alerted")),
+    ("Longhorn volumes", "incl. the chat console's",
+     ("●", "to the BackupTarget"), ("●", "2026-10-01 all 19 in prod, 2026-10-10 lab"), ("○", "not scheduled")),
+    ("Authentik's bundled Postgres", "nightly pg_dump",
+     ("●", "byte-verified upload"), ("●", "2026-10-10, lab, login after"), ("○", "not scheduled")),
+    ("Sealed-secrets controller key", "escrow, off the cluster",
+     ("●", "you export it"), ("●", "2026-10-04, fresh controller, lab"), ("○", "drill not yet run")),
+    ("The whole cluster", "rebuild and restore, as one",
+     ("○", "assembled from the rows"), ("○", "never run as one exercise"), ("○", "not claimed")),
+]
+
+
+def recovery_evidence():
+    s = Svg(1040, 600, "Tockmox recovery evidence, row by row",
+            "Model-gateway database: backed up by default from 0.7.1, restored on dated runs on "
+            "2026-08-19 and in production on 2026-10-01, and drilled weekly. Longhorn volumes, including the chat "
+            "console's: backed up to the BackupTarget, restored in production on 2026-10-01 and "
+            "drilled once on a lab on 2026-10-10, with no scheduled drill. Authentik's bundled "
+            "Postgres: a nightly dump, restored once on a lab on 2026-10-10 with a login "
+            "afterwards, with no scheduled drill. The sealed-secrets controller key: exported by "
+            "you, restored onto a fresh controller on a lab on 2026-10-04, its drill not yet run. "
+            "The whole cluster: never rebuilt and restored as one exercise. Filled dots are what the "
+            "backup pages record as shipped or as a dated run; hollow dots are not claimed.")
+    header(s, "What has actually been restored",
+           "A filled dot is something the backup pages record as shipped or as a dated run. A hollow dot is not claimed.")
+    cols = [("BACKED UP", 380), ("RESTORED, DATED", 580), ("DRILLED ON A SCHEDULE", 820)]
+    for label, x in cols:
+        s.text(x, 112, label, 11.5, "700", color=INK2, spacing=1.2)
+    for i, (name, sub, *cells) in enumerate(RECOVERY_ROWS):
+        y = 128 + i * 82
+        last = i == len(RECOVERY_ROWS) - 1
+        s.rect(30, y, 980, 70, "red" if last else "neutral", rx=10, fill="#FFF8F8" if last else "#FFFFFF")
+        s.text(50, y + 30, name, 14, "700", color=INK)
+        s.text(50, y + 50, sub, 11.5, color=INK2)
+        for (sym, note), (_, x) in zip(cells, cols):
+            filled = sym == "●"
+            st = PAL["green"][1] if filled else "#8A938E"
+            s.add(f'<circle cx="{x + 8}" cy="{y + 26}" r="8" fill="{st if filled else "#FFFFFF"}" '
+                  f'stroke="{st}" stroke-width="2"/>')
+            s.text(x + 24, y + 31, "yes" if filled else "no", 12.5, "700",
+                   color=PAL["green"][2] if filled else INK2)
+            s.text(x, y + 54, note, 11, color=INK2)
+    s.lines(30, 556, ["The shipped object store runs inside the cluster it protects, so a backup kept only there",
+                      "does not survive losing the cluster. Point backups off the cluster for data you care about."],
+            11.5, color=INK2)
+    return s
+
+
+# ---------------------------------------------------------------------------
+# 10. The customisation ladder ... docs/administration/customising.md
+# ---------------------------------------------------------------------------
+def customisation_ladder():
+    s = Svg(1040, 600, "The Tockmox customisation ladder",
+            "Four rungs, from the bottom. Rung 1, values: anything a chart exposes, no upgrade cost "
+            "on a key tiered stable. Rung 2, extension points: a dashboard, an alert rule or a "
+            "NetworkPolicy dropped into your repository, no upgrade cost. Rung 3, a Kustomize "
+            "patch: a shipped resource that is not exposed; it fails loudly when the base moves "
+            "and you fix it at upgrade time. Rung 4, disable and replace: you own the replacement. "
+            "Reach for the lowest rung that works. Needing rung 3 or 4 repeatedly is a values gap "
+            "worth an issue. Editing resources in the cluster by hand is not a rung: it is reverted.")
+    header(s, "Change what Tockmox ships",
+           "Start at the bottom. Move up only when the rung below cannot express what you need.")
+    rungs = [
+        ("1  Values", "anything a chart already exposes", "none on a key tiered stable", "green"),
+        ("2  Extension points", "a dashboard, an alert rule, a NetworkPolicy in your repo", "none: a separate object of yours", "green"),
+        ("3  Kustomize patch", "a shipped resource that is not exposed", "fails loudly when the base moves", "amber"),
+        ("4  Disable and replace", "replacing a component outright", "you own the replacement", "amber"),
+    ]
+    for i, (t, use, cost, kind) in enumerate(rungs):
+        y = 470 - i * 96
+        x = 120 + i * 40
+        w = 620 - i * 40
+        s.rect(x, y, w, 76, kind, rx=10)
+        s.text(x + 18, y + 30, t, 15, "700", color=PAL[kind][2])
+        s.text(x + 18, y + 54, use, 12, color=INK2)
+        s.text(x + w + 16, y + 34, "Upgrade cost", 11, "700", color=MUTED)
+        s.text(x + w + 16, y + 52, cost, 12, color=INK)
+    s.arrow([(70, 540), (70, 196)], "blue", sw=2)
+    s.add(f'<text x="58" y="370" font-size="11.5" font-weight="700" fill="{PAL["blue"][2]}" '
+          f'text-anchor="middle" transform="rotate(-90 58 370)" letter-spacing="1.2">MORE OF IT IS YOURS AT UPGRADE</text>')
+    s.lines(320, 150, ["On rung 3 or 4 repeatedly? That is a values gap, and an issue worth opening."],
+            12, color=PAL["amber"][2], weight="600")
+    s.blocked(860, 120, 860, 160, ["kubectl edit in the cluster", "is not a rung: it is reverted"], 846, 112,
+              anchor="end")
+    return s
+
 
 DIAGRAMS = {
     "platform-overview": platform_overview,
@@ -524,6 +804,11 @@ DIAGRAMS = {
     "layer-stack": layer_stack,
     "ai-request-path": ai_request_path,
     "install-journey": install_journey,
+    "identity-flow": identity_flow,
+    "network-containment": network_containment,
+    "alert-path": alert_path,
+    "recovery-evidence": recovery_evidence,
+    "customisation-ladder": customisation_ladder,
 }
 
 

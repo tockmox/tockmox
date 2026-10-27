@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="600" viewBox="0 0 1040 600" role="img" aria-labelledby="t d" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title id="t">Tockmox recovery evidence, row by row</title>
+<desc id="d">Model-gateway database: backed up by default from 0.7.1, restored on dated runs on 2026-08-19 and in production on 2026-10-01, and drilled weekly. Longhorn volumes, including the chat console's: backed up to the BackupTarget, restored in production on 2026-10-01 and drilled once on a lab on 2026-10-10, with no scheduled drill. Authentik's bundled Postgres: a nightly dump, restored once on a lab on 2026-10-10 with a login afterwards, with no scheduled drill. The sealed-secrets controller key: exported by you, restored onto a fresh controller on a lab on 2026-10-04, its drill not yet run. The whole cluster: never rebuilt and restored as one exercise. Filled dots are what the backup pages record as shipped or as a dated run; hollow dots are not claimed.</desc>
+<defs><marker id="ah-neutral" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#5E6963"/></marker><marker id="ah-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2F8F45"/></marker><marker id="ah-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#B7790F"/></marker><marker id="ah-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#C62828"/></marker><marker id="ah-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2F67B0"/></marker><marker id="ah-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1F2A24"/></marker></defs>
+<rect x="1" y="1" width="1038" height="598" rx="14" fill="#FBFBF8" stroke="#D3D8D2" stroke-width="1.5"/>
+<text x="32" y="42" font-size="21" font-weight="700" text-anchor="start" fill="#1F2A24">What has actually been restored</text>
+<text x="32" y="64" font-size="13" font-weight="400" text-anchor="start" fill="#6B756F">A filled dot is something the backup pages record as shipped or as a dated run. A hollow dot is not claimed.</text>
+<text x="380" y="112" font-size="11.5" font-weight="700" text-anchor="start" fill="#4A5550" letter-spacing="1.2">BACKED UP</text>
+<text x="580" y="112" font-size="11.5" font-weight="700" text-anchor="start" fill="#4A5550" letter-spacing="1.2">RESTORED, DATED</text>
+<text x="820" y="112" font-size="11.5" font-weight="700" text-anchor="start" fill="#4A5550" letter-spacing="1.2">DRILLED ON A SCHEDULE</text>
+<rect x="30" y="128" width="980" height="70" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="50" y="158" font-size="14" font-weight="700" text-anchor="start" fill="#1F2A24">Model-gateway database</text>
+<text x="50" y="178" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">CloudNativePG to S3</text>
+<circle cx="388" cy="154" r="8" fill="#2F8F45" stroke="#2F8F45" stroke-width="2"/>
+<text x="404" y="159" font-size="12.5" font-weight="700" text-anchor="start" fill="#17572A">yes</text>
+<text x="380" y="182" font-size="11" font-weight="400" text-anchor="start" fill="#4A5550">on by default from 0.7.1</text>
+<circle cx="588" cy="154" r="8" fill="#2F8F45" stroke="#2F8F45" stroke-width="2"/>
+<text x="604" y="159" font-size="12.5" font-weight="700" text-anchor="start" fill="#17572A">yes</text>
+<text x="580" y="182" font-size="11" font-weight="400" text-anchor="start" fill="#4A5550">2026-08-19 rehearsal, 2026-10-01 in prod</text>
+<circle cx="828" cy="154" r="8" fill="#2F8F45" stroke="#2F8F45" stroke-width="2"/>
+<text x="844" y="159" font-size="12.5" font-weight="700" text-anchor="start" fill="#17572A">yes</text>
+<text x="820" y="182" font-size="11" font-weight="400" text-anchor="start" fill="#4A5550">weekly drill, alerted</text>
+<rect x="30" y="210" width="980" height="70" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="50" y="240" font-size="14" font-weight="700" text-anchor="start" fill="#1F2A24">Longhorn volumes</text>
+<text x="50" y="260" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">incl. the chat console's</text>
+<circle cx="388" cy="236" r="8" fill="#2F8F45" stroke="#2F8F45" stroke-width="2"/>
+<text x="404" y="241" font-size="12.5" font-weight="700" text-anchor="start" fill="#17572A">yes</text>
+<text x="380" y="264" font-size="11" font-weight="400" text-anchor="start" fill="#4A5550">to the BackupTarget</text>
+<circle cx="588" cy="236" r="8" fill="#2F8F45" stroke="#2F8F45" stroke-width="2"/>
+<text x="604" y="241" font-size="12.5" font-weight="700" text-anchor="start" fill="#17572A">yes</text>
+<text x="580" y="264" font-size="11" font-weight="400" text-anchor="start" fill="#4A5550">2026-10-01 all 19 in prod, 2026-10-10 lab</text>
+<circle cx="828" cy="236" r="8" fill="#FFFFFF" stroke="#8A938E" stroke-width="2"/>
+<text x="844" y="241" font-size="12.5" font-weight="700" text-anchor="start" fill="#4A5550">no</text>
+<text x="820" y="264" font-size="11" font-weight="400" text-anchor="start" fill="#4A5550">not scheduled</text>
+<rect x="30" y="292" width="980" height="70" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="50" y="322" font-size="14" font-weight="700" text-anchor="start" fill="#1F2A24">Authentik's bundled Postgres</text>
+<text x="50" y="342" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">nightly pg_dump</text>
+<circle cx="388" cy="318" r="8" fill="#2F8F45" stroke="#2F8F45" stroke-width="2"/>
+<text x="404" y="323" font-size="12.5" font-weight="700" text-anchor="start" fill="#17572A">yes</text>
+<text x="380" y="346" font-size="11" font-weight="400" text-anchor="start" fill="#4A5550">byte-verified upload</text>
+<circle cx="588" cy="318" r="8" fill="#2F8F45" stroke="#2F8F45" stroke-width="2"/>
+<text x="604" y="323" font-size="12.5" font-weight="700" text-anchor="start" fill="#17572A">yes</text>
+<text x="580" y="346" font-size="11" font-weight="400" text-anchor="start" fill="#4A5550">2026-10-10, lab, login after</text>
+<circle cx="828" cy="318" r="8" fill="#FFFFFF" stroke="#8A938E" stroke-width="2"/>
+<text x="844" y="323" font-size="12.5" font-weight="700" text-anchor="start" fill="#4A5550">no</text>
+<text x="820" y="346" font-size="11" font-weight="400" text-anchor="start" fill="#4A5550">not scheduled</text>
+<rect x="30" y="374" width="980" height="70" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="50" y="404" font-size="14" font-weight="700" text-anchor="start" fill="#1F2A24">Sealed-secrets controller key</text>
+<text x="50" y="424" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">escrow, off the cluster</text>
+<circle cx="388" cy="400" r="8" fill="#2F8F45" stroke="#2F8F45" stroke-width="2"/>
+<text x="404" y="405" font-size="12.5" font-weight="700" text-anchor="start" fill="#17572A">yes</text>
+<text x="380" y="428" font-size="11" font-weight="400" text-anchor="start" fill="#4A5550">you export it</text>
+<circle cx="588" cy="400" r="8" fill="#2F8F45" stroke="#2F8F45" stroke-width="2"/>
+<text x="604" y="405" font-size="12.5" font-weight="700" text-anchor="start" fill="#17572A">yes</text>
+<text x="580" y="428" font-size="11" font-weight="400" text-anchor="start" fill="#4A5550">2026-10-04, fresh controller, lab</text>
+<circle cx="828" cy="400" r="8" fill="#FFFFFF" stroke="#8A938E" stroke-width="2"/>
+<text x="844" y="405" font-size="12.5" font-weight="700" text-anchor="start" fill="#4A5550">no</text>
+<text x="820" y="428" font-size="11" font-weight="400" text-anchor="start" fill="#4A5550">drill not yet run</text>
+<rect x="30" y="456" width="980" height="70" rx="10" fill="#FFF8F8" stroke="#C62828" stroke-width="1.6"/>
+<text x="50" y="486" font-size="14" font-weight="700" text-anchor="start" fill="#1F2A24">The whole cluster</text>
+<text x="50" y="506" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">rebuild and restore, as one</text>
+<circle cx="388" cy="482" r="8" fill="#FFFFFF" stroke="#8A938E" stroke-width="2"/>
+<text x="404" y="487" font-size="12.5" font-weight="700" text-anchor="start" fill="#4A5550">no</text>
+<text x="380" y="510" font-size="11" font-weight="400" text-anchor="start" fill="#4A5550">assembled from the rows</text>
+<circle cx="588" cy="482" r="8" fill="#FFFFFF" stroke="#8A938E" stroke-width="2"/>
+<text x="604" y="487" font-size="12.5" font-weight="700" text-anchor="start" fill="#4A5550">no</text>
+<text x="580" y="510" font-size="11" font-weight="400" text-anchor="start" fill="#4A5550">never run as one exercise</text>
+<circle cx="828" cy="482" r="8" fill="#FFFFFF" stroke="#8A938E" stroke-width="2"/>
+<text x="844" y="487" font-size="12.5" font-weight="700" text-anchor="start" fill="#4A5550">no</text>
+<text x="820" y="510" font-size="11" font-weight="400" text-anchor="start" fill="#4A5550">not claimed</text>
+<text x="30" y="556.0" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">The shipped object store runs inside the cluster it protects, so a backup kept only there</text>
+<text x="30" y="571.525" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">does not survive losing the cluster. Point backups off the cluster for data you care about.</text>
+</svg>

@@ -7,7 +7,7 @@ tags: [backup, restore, cloudnativepg, barman, s3, garage, drills]
 status: stable
 generated:
   by: hand
-  at: 2026-09-01
+  at: 2026-10-27
 tockmox:
   classification: public
   audience: [operator]
@@ -748,6 +748,12 @@ Changing `garage.dbEngine` on a store that already holds data is that same conve
 Upgrading to a release with the guard restarts the Garage pod once, because the pod gains the init container; the config checksum is unchanged at the default engine.
 
 ## What is not certified here
+
+![Recovery evidence, row by row. Model-gateway database: backed up by default from 0.7.1, restored on 2026-08-19 and in production on 2026-10-01, drilled weekly. Longhorn volumes, including the chat console's: backed up to the BackupTarget, restored in production on 2026-10-01 and on a lab on 2026-10-10, no scheduled drill. Authentik's bundled Postgres: nightly dump, restored on a lab on 2026-10-10 with a login after, no scheduled drill. Sealed-secrets controller key: exported by you, restored onto a fresh controller on a lab on 2026-10-04, its drill not yet run. The whole cluster: never rebuilt and restored as one exercise.](../diagrams/rendered/recovery-evidence.svg)
+
+The list below is the text equivalent, with the detail of each run; the
+sealed-secrets row comes from
+[escrow the sealed-secrets key](sealed-secrets-key-escrow.md#what-is-not-certified-here).
 
 The dated results on this page are measurements of specific runs, not of this
 page:
