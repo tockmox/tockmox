@@ -20,7 +20,7 @@ unusual.
 
 ## Architecture in one picture
 
-![Tockmox at a glance. A solid boundary marks your hardware and your network. Inside it, a person signs in through single sign-on to the chat console, which sends every request through the model gateway to a model host you run, in the cluster or on your network. Around that AI plane sit the platform capabilities the other layers provide: identity, policy, storage and certificates, observability with alerts to a phone, backups with a weekly restore drill for the gateway database, and a self-check heartbeat. Underneath is the foundation you provide: a Kubernetes cluster, Argo CD and sealed-secrets, reconciling everything from your own site repository. Outside the boundary, drawn dashed, a frontier provider is reachable only through the gateway and only once you configure it.](diagrams/rendered/platform-overview.svg)
+![Tockmox at a glance. A solid boundary marks your hardware and your network. Inside it, a person signs in through single sign-on to the chat console, which sends every request through the model gateway to a model host you run, in the cluster or on your network. Around that AI plane sit the platform capabilities the other layers provide: identity, policy, storage and certificates, observability with alerts to a phone, backups with a weekly restore drill for the gateway database, and a self-check heartbeat. Underneath is the foundation you provide: a Kubernetes cluster, Argo CD and sealed-secrets, reconciling everything from your own site repository. Outside the boundary, drawn dashed, a frontier provider is reachable only through the gateway and only once you configure it. The boundary describes ownership, not an air-gap guarantee.](diagrams/rendered/platform-overview.svg)
 
 **Text equivalent.** Everything Tockmox installs runs on hardware you control:
 nine layers on a Kubernetes cluster you provide, reconciled by Argo CD from a
@@ -143,7 +143,7 @@ switch, because an escape hatch is not the same as declining the layer.
 Nine charts, six waves. ArgoCD waits for each wave to report healthy before
 starting the next.
 
-![The nine layers in six sync waves, bottom to top. Wave 0: crds, every CRD first. Wave 1: policy, namespaces, default-deny networking and RBAC guardrails. Wave 2: platform, storage, load balancing, ingress, certificates and databases. Wave 3: observability, metrics, logs, dashboards and alerting, beside exporters, hardware and network telemetry. Wave 4: identity, single sign-on through Authentik. Wave 5: devops, workflows, off by default; ai, the chat console and model gateway; and selfcheck, the heartbeat. Argo CD waits for each wave to report healthy before it starts the next. crds and policy cannot be declined, platform partly, and the rest can.](diagrams/rendered/layer-stack.svg)
+![The nine layers in six sync waves, bottom to top. Wave 0: crds, every CRD first. Wave 1: policy, namespaces, default-deny networking and RBAC guardrails. Wave 2: platform, storage, load balancing, ingress, certificates and databases. Wave 3: observability, metrics, logs, dashboards and alerting, beside exporters, hardware and network telemetry. Wave 4: identity, single sign-on through Authentik. Wave 5: devops, workflows, off by default; ai, the chat console and model gateway; and selfcheck, the heartbeat. Argo CD waits for each wave to report healthy before it starts the next. crds and policy cannot be declined, platform partly, and the rest can. The arrows show the order of the waves; they do not enumerate every component dependency.](diagrams/rendered/layer-stack.svg)
 
 **Text equivalent.** Wave 0 is `tockmox-crds`; wave 1 `tockmox-policy`;
 wave 2 `tockmox-platform`; wave 3 `tockmox-observability` and
@@ -248,6 +248,8 @@ answer is in
 [what you get](usage/what-you-get.md#the-diagnostic-identity-since-it-is-the-interesting-one).
 
 ### Network containment, in one paragraph
+
+![Network containment: ingress denied in all seven namespaces the policy layer creates; egress denied in the AI and diagnostic namespaces only; no policy in namespaces you create; hostNetwork workloads outside NetworkPolicy. The paragraph below is the text equivalent.](diagrams/rendered/network-containment.svg)
 
 Every namespace the policy layer creates carries a default-deny ingress policy.
 Egress is default-deny in the AI namespace, where the model gateway may reach

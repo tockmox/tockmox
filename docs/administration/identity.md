@@ -7,7 +7,7 @@ tags: [identity, sso, oidc, authentik, rbac, groups, blueprints, dns]
 status: stable
 generated:
   by: hand
-  at: 2026-09-01
+  at: 2026-10-27
 tockmox:
   classification: public
   audience: [operator]
@@ -27,23 +27,18 @@ Single sign-on across the shipped consoles, backed by Authentik, with OIDC as
 the protocol. The identity layer ships the wiring as blueprints; you supply the
 client secrets (see [secrets](secrets.md)).
 
-```mermaid
-flowchart LR
-    U["you"] --> T["ingress"]
-    T --> A["Authentik<br/><i>SSO</i>"]
-    A -.->|"OIDC"| G["Grafana"]
-    A -.->|"OIDC"| W["Open WebUI"]
-    A -.->|"OIDC"| AR["Argo Workflows"]
-    A -.->|"planned"| F["Forgejo"]
-```
+![Identity and trust. Your browser runs on a machine whose trust store holds the Tockmox private CA, and reaches the consoles over HTTPS through the Traefik ingress. Authentik is the OIDC provider for Grafana, Open WebUI and Argo Workflows; the groups tockmox-admins and tockmox-users decide who reaches each console and in which role, and a user in neither group is refused by Authentik. Each console exchanges the token from inside its own container, so it needs the CA in the cluster too. Prometheus, Alertmanager, Longhorn and the Traefik dashboard can be put behind Authentik's forward-auth, off by default. Each console keeps a local break-glass login outside the group model. Forgejo is planned, not shipped; ntfy is a portal link with no single sign-on.](../diagrams/rendered/identity-flow.svg)
 
-**Text equivalent.** You reach the ingress, which sends you to Authentik.
+**Text equivalent.** You reach the ingress over HTTPS from a machine that trusts the Tockmox CA ([TLS and trust](tls-and-trust.md)), and the ingress sends you to Authentik.
 Authentik is the OIDC provider for three shipped consoles: Grafana, Open WebUI
 and Argo Workflows. Forgejo is drawn as planned rather than wired ... Tockmox
 does not ship Forgejo, and the policy layer's Forgejo bundle is for one you
 installed yourself. ntfy has a tile on the portal too, but only as a link: it
 has no OIDC, so Authentik signs nobody in to it
-([below](#tiles-for-consoles-that-have-no-sso)).
+([below](#tiles-for-consoles-that-have-no-sso)). The two groups decide who reaches each
+console ([below](#two-groups-drive-every-role-mapping)), consoles with no sign-in of
+their own can sit behind [forward-auth](#consoles-behind-forward-auth), and every
+OIDC console keeps a [break-glass](#break-glass-deliberately) login.
 
 ## Two groups drive every role mapping
 

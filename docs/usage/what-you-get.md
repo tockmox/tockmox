@@ -7,7 +7,7 @@ tags: [inventory, layers, scope, network-containment, diagnostic-identity]
 status: stable
 generated:
   by: hand
-  at: 2026-09-01
+  at: 2026-10-27
 tockmox:
   classification: public
   audience: [operator]
@@ -128,6 +128,13 @@ for exactly that. See [registry](../deployment/registry.md).
 
 Say the whole shape of it, because "default-deny networking" is two claims and
 only one of them is finished.
+
+![Network containment. All seven namespaces the policy layer creates deny ingress by default. Egress is denied by default in two of them: tockmox-ai, where the model gateway may reach DNS, its namespace, its database and TCP 443 outside the cluster and LAN, and a LAN model host only once listed; and tockmox-diagnostic, where the read-only identity may reach DNS, the API server and local telemetry. Egress is open in tockmox-platform, tockmox-monitoring, tockmox-authentik, tockmox-devops and tockmox-selfcheck. Namespaces you create get no policy from Tockmox, and the hostNetwork workloads are outside NetworkPolicy entirely.](../diagrams/rendered/network-containment.svg)
+
+**Text equivalent.** The diagram restates the two paragraphs and the list below:
+ingress denied in all seven namespaces the policy layer creates, egress denied
+in the AI and diagnostic namespaces only, nothing applied to namespaces you
+create, and the three `hostNetwork` workloads outside NetworkPolicy.
 
 **Ingress: default-deny, complete.** All seven namespaces the policy layer
 creates carry a `default-deny-ingress` policy. Nothing reaches a pod here

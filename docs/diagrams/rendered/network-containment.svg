@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="640" viewBox="0 0 1040 640" role="img" aria-labelledby="t d" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+<title id="t">Tockmox network containment: what is denied, and where</title>
+<desc id="d">All seven namespaces the policy layer creates deny ingress by default. Egress is default-deny in two of them: the AI namespace, where the model gateway may reach DNS, its own namespace, its database and TCP 443 outside the cluster, service and LAN ranges, and a LAN model host only once it is listed; and the diagnostic namespace, which may reach DNS, the API server and local telemetry. Egress is open in the other five: platform, monitoring, Authentik, devops and selfcheck. Namespaces you create get no policy from Tockmox. Three hostNetwork workloads, the MetalLB speaker, kured and node-exporter, are outside NetworkPolicy altogether. Measured on one single-node lab with kube-router; not measured on another CNI or a multi-node cluster.</desc>
+<defs><marker id="ah-neutral" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#5E6963"/></marker><marker id="ah-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2F8F45"/></marker><marker id="ah-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#B7790F"/></marker><marker id="ah-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#C62828"/></marker><marker id="ah-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2F67B0"/></marker><marker id="ah-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1F2A24"/></marker></defs>
+<rect x="1" y="1" width="1038" height="638" rx="14" fill="#FBFBF8" stroke="#D3D8D2" stroke-width="1.5"/>
+<text x="32" y="42" font-size="21" font-weight="700" text-anchor="start" fill="#1F2A24">What the network policy covers, and what it does not</text>
+<text x="32" y="64" font-size="13" font-weight="400" text-anchor="start" fill="#6B756F">Ingress is denied everywhere Tockmox creates a namespace. Egress, in two places.</text>
+<rect x="30" y="100" width="980" height="380" rx="16" fill="none" stroke="#1F2A24" stroke-width="2.4"/>
+<rect x="48" y="89" width="335.5" height="22" rx="4" fill="#FBFBF8"/>
+<text x="58" y="105" font-size="12.5" font-weight="700" text-anchor="start" fill="#1F2A24" letter-spacing="1.2">NAMESPACES THE POLICY LAYER CREATES</text>
+<text x="58" y="124" font-size="11.5" font-weight="400" text-anchor="start" fill="#6B756F">Every one denies ingress by default; only rules that name a path open it</text>
+<text x="56" y="160" font-size="11.5" font-weight="700" text-anchor="start" fill="#17572A" letter-spacing="1.2">EGRESS DENIED BY DEFAULT</text>
+<rect x="56" y="172" width="300" height="132" rx="10" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1.6"/>
+<text x="206.0" y="211.85" font-size="14" font-weight="700" text-anchor="middle" fill="#17572A">tockmox-ai</text>
+<text x="206.0" y="231.62499999999997" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">the gateway may reach DNS, its</text>
+<text x="206.0" y="247.14999999999998" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">namespace, its database, and</text>
+<text x="206.0" y="262.67499999999995" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">TCP 443 outside cluster and LAN</text>
+<text x="206.0" y="278.2" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">a LAN model host once listed</text>
+<rect x="376" y="172" width="250" height="132" rx="10" fill="#E9F6EC" stroke="#2F8F45" stroke-width="1.6"/>
+<text x="501.0" y="219.6125" font-size="14" font-weight="700" text-anchor="middle" fill="#17572A">tockmox-diagnostic</text>
+<text x="501.0" y="239.3875" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">the read-only identity may</text>
+<text x="501.0" y="254.9125" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">reach DNS, the API server</text>
+<text x="501.0" y="270.4375" font-size="11.5" font-weight="400" text-anchor="middle" fill="#4A5550">and local telemetry</text>
+<text x="56" y="342" font-size="11.5" font-weight="700" text-anchor="start" fill="#4A5550" letter-spacing="1.2">EGRESS OPEN</text>
+<rect x="56" y="354" width="172" height="60" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="142.0" y="380.95" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1F2A24">tockmox-platform</text>
+<text x="142.0" y="399.375" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">ingress denied</text>
+<rect x="244" y="354" width="172" height="60" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="330.0" y="380.95" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1F2A24">tockmox-monitoring</text>
+<text x="330.0" y="399.375" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">ingress denied</text>
+<rect x="432" y="354" width="172" height="60" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="518.0" y="380.95" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1F2A24">tockmox-authentik</text>
+<text x="518.0" y="399.375" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">ingress denied</text>
+<rect x="620" y="354" width="172" height="60" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="706.0" y="380.95" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1F2A24">tockmox-devops</text>
+<text x="706.0" y="399.375" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">ingress denied</text>
+<rect x="808" y="354" width="172" height="60" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="894.0" y="380.95" font-size="12.5" font-weight="700" text-anchor="middle" fill="#1F2A24">tockmox-selfcheck</text>
+<text x="894.0" y="399.375" font-size="11" font-weight="400" text-anchor="middle" fill="#4A5550">ingress denied</text>
+<text x="56" y="440.0" font-size="11.5" font-weight="400" text-anchor="start" fill="#4A5550">A compromised pod here can reach the network: containment is a smaller claim than isolation.</text>
+<rect x="660" y="172" width="326" height="132" rx="10" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6"/>
+<text x="676" y="196.0" font-size="12.5" font-weight="700" text-anchor="start" fill="#1F2A24">Edges the page states</text>
+<text x="676" y="216.0" font-size="10.5" font-weight="400" text-anchor="start" fill="#4A5550">· a new pod is unpoliced for about its first</text>
+<text x="676" y="230.5" font-size="10.5" font-weight="400" text-anchor="start" fill="#4A5550">  second (measured on kube-router)</text>
+<text x="676" y="245.0" font-size="10.5" font-weight="400" text-anchor="start" fill="#4A5550">· the platform namespace admits your LAN</text>
+<text x="676" y="259.5" font-size="10.5" font-weight="400" text-anchor="start" fill="#4A5550">· diagnostic's API rule is the service and LAN</text>
+<text x="676" y="274.0" font-size="10.5" font-weight="400" text-anchor="start" fill="#4A5550">  ranges on 443/6443 until apiServerCIDRs is set</text>
+<text x="676" y="288.5" font-size="10.5" font-weight="400" text-anchor="start" fill="#4A5550">· AI egress measured on one single-node lab</text>
+<rect x="30" y="506" width="470" height="104" rx="14" fill="#FFFFFF" stroke="#7C8781" stroke-width="1.6" stroke-dasharray="7 5"/>
+<text x="50" y="532.0" font-size="11.5" font-weight="700" text-anchor="start" fill="#4A5550">NAMESPACES YOU CREATE</text>
+<text x="50" y="560.0" font-size="12.5" font-weight="400" text-anchor="start" fill="#1F2A24">No policy from Tockmox. adding-an-application.md</text>
+<text x="50" y="576.875" font-size="12.5" font-weight="400" text-anchor="start" fill="#1F2A24">gives the recipe; nothing applies it for you.</text>
+<rect x="530" y="506" width="480" height="104" rx="14" fill="#FFF8F8" stroke="#C62828" stroke-width="1.6"/>
+<text x="550" y="532.0" font-size="11.5" font-weight="700" text-anchor="start" fill="#8E1B1B">OUTSIDE NETWORKPOLICY ENTIRELY</text>
+<text x="550" y="560.0" font-size="12.5" font-weight="400" text-anchor="start" fill="#1F2A24">hostNetwork workloads: the MetalLB speaker,</text>
+<text x="550" y="576.875" font-size="12.5" font-weight="400" text-anchor="start" fill="#1F2A24">kured and node-exporter. That is the API's</text>
+<text x="550" y="593.75" font-size="12.5" font-weight="400" text-anchor="start" fill="#1F2A24">behaviour, not an oversight.</text>
+</svg>

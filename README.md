@@ -41,7 +41,7 @@ It gives you private chat and model routing surrounded by the infrastructure tha
 
 Your models can be local, hosted, or both. Tockmox makes reaching a hosted model an explicit routing decision rather than the default.
 
-![Tockmox at a glance. A solid boundary marks your hardware and your control. Inside it, your browser reaches private chat (Open WebUI), which sends every request through the model gateway (LiteLLM) to local models. Around the AI plane sit the platform capabilities: identity (Authentik), policy (network policy and admission guardrails), storage (Longhorn), observability (Grafana and its stack) and recovery (backups), all on Kubernetes reconciled by GitOps. Outside the boundary, drawn dashed, frontier models are reachable over HTTPS only through the gateway and only as an explicit choice.](docs/diagrams/rendered/platform-overview.svg)
+![Tockmox at a glance. A solid boundary marks your hardware and your control. Inside it, your browser reaches private chat (Open WebUI), which sends every request through the model gateway (LiteLLM) to local models. Around the AI plane sit the platform capabilities: identity (Authentik), policy (network policy and admission guardrails), storage (Longhorn), observability (Grafana and its stack) and recovery (backups), all on Kubernetes reconciled by GitOps. Outside the boundary, drawn dashed, frontier models are reachable over HTTPS only through the gateway and only as an explicit choice. The boundary describes ownership, not an air-gap guarantee.](docs/diagrams/rendered/platform-overview.svg)
 
 ### Tockmox is probably a good fit if
 
@@ -168,7 +168,7 @@ The chat console is routed through the bundled model gateway, which starts with 
 
 A request routed to a hosted provider takes its conversation outside your network. Tockmox makes that boundary explicit.
 
-![The AI request path. Inside your network and your cluster, the browser reaches the chat console through ingress and single sign-on. The console holds only a scoped key and cannot reach a model host or the internet directly, so every request goes through the model gateway, which holds the provider credentials and whose model list ships empty. From the gateway: an optional in-cluster Ollama, off by default; a model host on your network, reachable once you add an egress entry for it; or, crossing the boundary on HTTPS port 443, a frontier provider, only if you add one to the model list.](docs/diagrams/rendered/ai-request-path.svg)
+![The AI request path. Inside your network and your cluster, the browser reaches the chat console through ingress and single sign-on. The console holds only a scoped key and cannot reach a model host or the internet directly, so every request goes through the model gateway, which holds the provider credentials and whose model list ships empty. From the gateway: an optional in-cluster Ollama, off by default; a model host on your network, reachable once you add an egress entry for it; or, crossing the boundary on HTTPS port 443, a frontier provider, only if you add one to the model list. Local inference does not by itself make an installation air-gapped.](docs/diagrams/rendered/ai-request-path.svg)
 
 [Configure the AI plane →](docs/usage/ai-plane.md)
 

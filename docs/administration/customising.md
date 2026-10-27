@@ -7,7 +7,7 @@ tags: [customising, values, extension-points, kustomize, argocd, upgrades]
 status: stable
 generated:
   by: hand
-  at: 2026-09-01
+  at: 2026-10-27
 tockmox:
   classification: public
   audience: [operator]
@@ -25,6 +25,8 @@ than the change is made.
 | [2. Extension points](#rung-2--extension-points) | Adding a dashboard, an alert rule, a NetworkPolicy | None. Your file lives in your repository |
 | [3. Kustomize patch](#rung-3--kustomize-patch) | Modifying a shipped resource that is not exposed | Fails loudly when the base moves. You fix it at upgrade time |
 | [4. Disable and replace](#rung-4--disable-and-replace) | Replacing a component entirely | You now own the replacement |
+
+![The customisation ladder, from the bottom. Rung 1, values: anything a chart already exposes, no upgrade cost on a key tiered stable. Rung 2, extension points: a dashboard, an alert rule or a NetworkPolicy in your repository, no upgrade cost. Rung 3, a Kustomize patch on a shipped resource that is not exposed: it fails loudly when the base moves. Rung 4, disable and replace: you own the replacement. On rung 3 or 4 repeatedly is a values gap worth an issue. Editing in the cluster is not a rung: it is reverted. The table above is the text equivalent.](../diagrams/rendered/customisation-ladder.svg)
 
 The shape of the same decision as a diagram, plus why rung 3 is designed to
 break noisily, is in
