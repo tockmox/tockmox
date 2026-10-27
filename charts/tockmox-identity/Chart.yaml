@@ -12,6 +12,6 @@ dependencies:
     version: 0.8.0
     repository: "file://../tockmox-common"
   - name: authentik
-    version: 2026.8.4
+    version: 2026.8.5
     repository: "https://charts.goauthentik.io"
     condition: apps.authentik.enabled,capabilities.identity.enabled

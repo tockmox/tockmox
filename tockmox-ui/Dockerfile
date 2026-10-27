@@ -12,7 +12,7 @@
 # fixable), and a registry that blocks pulls at High (Harbor's prevent_vul, a common setting) refuses the image.
 # The UI's wheels (cryptography, pydantic-core) ship musllinux builds, so nothing
 # compiles. /etc/ssl/certs/ca-certificates.crt, which the chart's trust-bundle initContainer reads, is present.
-FROM python:3.14-alpine
+FROM python:3.15-alpine
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /srv
 COPY tockmox-ui/requirements.txt .
