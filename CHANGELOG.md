@@ -11,6 +11,17 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **Platform Management shows the agents' cases.** With
+  `features.platform.specialistsUrl` set to a specialist host (and
+  `secrets.platformSpecialistsToken` for its read-only caller), `/platform/cases`
+  lists every incident, problem, change and known error the Service Desk holds:
+  what each waits on (you, an agent, a linked record), since when, and which
+  agents worked it; each role's page lists its pending and recently closed
+  cases, and a case page shows every step with no model-written text. The role
+  catalog gains a generated `specialists` field
+  (`tools/gen-platform-specialists.py`) and `/platform/specialists` shows which
+  are built and which the host serves. Off unless the URL is set. See
+  `docs/administration/platform-management.md`, "Cases".
 - **Every mlx-lm instance on an AI node serves only its own model.** The toolkit
   now starts `mlx_lm.server` under a request guard: a request naming another
   model is answered 404 and one naming adapters or a draft model 400, with

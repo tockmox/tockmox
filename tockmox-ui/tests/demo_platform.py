@@ -2,7 +2,8 @@
 """A demo server for looking at the Platform Management pages: mock upstreams shaped like a real
 reference site (its CronJobs, CronWorkflows and signal values as read 2026-10-23), no network.
 
-    python3 tests/demo_platform.py [port]     then sign in with GET /__demo_login
+    python3 tests/demo_platform.py [port] [--ledger] [--desk]   then sign in with GET /__demo_login
+    --desk serves the Service Desk and the specialist index from tests/fixtures/desk-case.json
 Not part of the product; a design aid and the screenshot source for the design doc.
 """
 import os
@@ -94,13 +95,34 @@ def cronworkflows():
     return out
 
 
-def make_app(ledger_jobs=None):
+def specialists_host():
+    """The specialist host, from the desk-case fixture (a whole case run through the real Service Desk handler)."""
+    import json
+    fix = json.load(open(os.path.join(ROOT, "tests", "fixtures", "desk-case.json")))
+    cat = pm.load_catalog()
+    idx = {"version": 1, "roles": {"sha256": cat.specialists_source.get("sha256", "")}, "specialists": [
+        {"id": s["id"], "version": "1.2.0", "status": "propose"} for a in cat.all() for s in a.specialists if s["state"] == "built"]}
+
+    def h(req):
+        import json as j
+        if req.method == "GET":
+            return httpx.Response(200, json=idx)
+        op = req.url.path.rsplit("/", 1)[-1]
+        if op == "list":
+            return httpx.Response(200, json=fix["list"])
+        got = fix["get"].get(j.loads(req.content or b"{}").get("id"))
+        return httpx.Response(200, json=got or {"outcome": "not_found"})
+    return h
+
+
+def make_app(ledger_jobs=None, desk=False):
     w = build_world()
     doc = base_doc()
     doc["site"]["name"] = "Maaks Home"
     doc["apps"][1]["url"] = "https://grafana.int.example.com"
     doc["features"] = dict(doc["features"], platform={"enabled": True, "timezone": CT,
                                                       **({"ledgerUrl": "http://ledger.test", "interfaceUrl": "https://chat.int.example.com"} if ledger_jobs is not None else {}),
+                                                      **({"specialistsUrl": "https://specialists.int.example.com"} if desk else {}),
                                                       "workflowSuccessQuery": "demo_cronworkflow_last_success"})
     cws = cronworkflows()
     for cw in cws:
@@ -118,7 +140,8 @@ def make_app(ledger_jobs=None):
     def ledger(req):
         return httpx.Response(200, json={"jobs": ledger_jobs or []})
     tp = Transports(kube=httpx.MockTransport(kube), prometheus=httpx.MockTransport(w.handler("prometheus")),
-                    alertmanager=httpx.MockTransport(w.handler("alertmanager")), ledger=httpx.MockTransport(ledger))
+                    alertmanager=httpx.MockTransport(w.handler("alertmanager")), ledger=httpx.MockTransport(ledger),
+                    specialists=httpx.MockTransport(specialists_host()) if desk else None)
     app = create_app(s, tp, notes_path=os.path.join(ROOT, "tests", "fixtures", "none.md"))
     ses = Sessions(s.session_secret, s.session_max_age_s, s.admin_group, s.secure_cookies)
 
@@ -141,4 +164,4 @@ if __name__ == "__main__":
                 {"id": "j-7e88", "profile": "incident", "status": "completed", "created": NOW - 20 * 3600, "cost_usd": 0.04},
                 {"id": "j-7e02", "profile": "platform-manager", "status": "completed", "created": NOW - 18 * 3600, "cost_usd": 0.11},
                 {"id": "j-7d55", "profile": "security", "status": "failed", "created": NOW - 26 * 3600, "cost_usd": 0.02}]
-    uvicorn.run(make_app(jobs), host="127.0.0.1", port=port, log_level="warning")
+    uvicorn.run(make_app(jobs, desk="--desk" in sys.argv), host="127.0.0.1", port=port, log_level="warning")

@@ -146,3 +146,10 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .flow li::before { content: counter(step); position: absolute; left: .65rem; top: .5rem; font: 700 1rem var(--ui-font); color: var(--tx-trim); }
 .flow li span { display: block; color: var(--tx-text); font-weight: 700; }
 .badge.st-planned { background: rgba(111, 179, 221, .14); } .badge.st-info { background: var(--st-unknown-soft); }
+/* Platform Management: Cases. A row of role filters, and the closed-record badge. */
+.chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .75rem 0 1rem; }
+.chips a { padding: .25rem .7rem; border: 1px solid var(--tx-border); border-radius: 999px; font-size: .9rem; text-decoration: none; color: var(--tx-text-muted); }
+.chips a:hover, .chips a:focus-visible { color: var(--tx-text); border-color: var(--tx-trim); }
+.chips a[aria-current="page"] { color: var(--tx-text); border-color: var(--tx-trim); background: var(--tx-surface); }
+.badge.st-closed { background: var(--st-unknown-soft); }
+table.timeline td:first-child { white-space: nowrap; }

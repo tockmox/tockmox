@@ -57,3 +57,50 @@
 {% macro practice_badge(state) -%}
 {%- if state == "planned" -%}{{ sched_badge("planned", {"planned": ("Not started", "unknown")}) }}{%- else -%}{{ badge(state) }}{%- endif -%}
 {%- endmacro %}
+
+{# ---- Cases: who a record waits on, as shape + word, and the plain sentence that goes with it. #}
+{% macro wait_badge(r) -%}
+{%- set w = r.waiting -%}
+{%- if not w -%}<span class="badge st-closed"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="3" y="3" width="14" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M6.5 10.3l2.3 2.3 4.7-4.9" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Closed</span></span>
+{%- elif w.on == "jeff" -%}{{ badge("warning", "Waiting on you") }}
+{%- elif w.on == "attention" -%}{{ badge("critical", "Hand-off failed") }}
+{%- elif w.on == "unknown" -%}{{ badge("unknown", "Unknown") }}
+{%- elif r.stuck -%}{{ badge("warning", "Stuck") }}
+{%- else -%}{{ badge("ok", "With the agents") }}{%- endif -%}
+{%- endmacro %}
+
+{% macro spec_name(sid) -%}{{ sid | replace("-", " ") | title }}{%- endmacro %}
+
+{% macro wait_text(r, ask_words, by_agent_role) -%}
+{%- set w = r.waiting -%}
+{%- if not w -%}
+{%- elif w.on == "jeff" and w.reason == "decision" -%}{{ ask_words.get(w.ask, "A decision") }}
+{%- elif w.on == "jeff" and w.reason == "approval" -%}Your approval of its pull request{% if r.facts.pr_url %} (<a href="{{ r.facts.pr_url }}" rel="noopener noreferrer">open it</a>){% endif %}
+{%- elif w.on == "jeff" and w.reason == "paged" -%}It paged you: still open past the escalation window
+{%- elif w.on == "attention" -%}The hand-off to {{ spec_name(w.specialist) }} ({{ w.op }}) failed three times; the desk needs a person to look
+{%- elif w.on == "agent" -%}Handed on to {{ spec_name(w.specialist) }} ({{ w.op }})
+{%- elif w.on == "record" -%}The next move is on <a href="/platform/cases/{{ w.record }}"><code>{{ w.record }}</code></a>{% if w.rel == "caused_by" %}, the problem behind it{% elif w.rel == "fixed_by" %}, the change that fixes it{% endif %}
+  {%- if r.end and r.end.waiting %}{% set ew = r.end.waiting %}{% if r.end.id != w.record %}, then <a href="/platform/cases/{{ r.end.id }}"><code>{{ r.end.id }}</code></a>{% endif %}{% if ew.on == "jeff" %}, which waits on you{% elif ew.on == "attention" %}, whose hand-off failed{% endif %}{% endif %}
+{%- elif w.on == "role" -%}{% set a = by_agent_role.get(w.role) %}{% if a %}The {{ a.name }} is working it{% else %}Its role is working it{% endif %}{% if r.stuck %}, past the budget its role has for {{ r.state | replace("_", " ") }}{% endif %}
+{%- else -%}The desk did not say{%- endif -%}
+{%- endmacro %}
+
+{% macro case_table(rows, caption, id, tz, state_words, type_words, ask_words, by_agent_role, show_role=true) -%}
+<div class="table-wrap" tabindex="0" role="region" aria-labelledby="{{ id }}">
+<table class="cases">
+  <caption>{{ caption }}</caption>
+  <thead><tr><th scope="col">Case</th><th scope="col">State</th><th scope="col">Waiting on</th><th scope="col">Since</th>{% if show_role %}<th scope="col">Accountable</th>{% endif %}<th scope="col">Worked by</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr><th scope="row"><a href="/platform/cases/{{ r.id }}"><code>{{ r.id }}</code></a> <span class="muted">{{ type_words.get(r.type, "Record") }}</span>
+        <span class="ref">{% if r.title %}{{ r.title }}{% else %}<span class="muted">title written by {{ "a model" if r.title_src == "model" else "a client" }}: read it in the conversation</span>{% endif %}{% if r.service %} · {{ r.service }}{% endif %}</span></th>
+      <td>{{ state_words.get(r.state, r.state | replace("_", " ")) }}</td>
+      <td>{{ wait_badge(r) }}<span class="why">{{ wait_text(r, ask_words, by_agent_role) }}</span></td>
+      <td>{% if r.closed %}{{ when(r.updated_ts, tz) }}{% else %}{{ when((r.waiting.since_ts if r.waiting and r.waiting.since_ts else r.state_since_ts), tz) }}{% endif %}</td>
+      {% if show_role %}<td>{% set a = by_agent_role.get(r.role) %}{% if a %}<a href="/platform/agents/{{ a.id }}">{{ a.name }}</a>{% else %}<span class="muted">{{ r.role or "none named" }}</span>{% endif %}</td>{% endif %}
+      <td>{% if r.worked_by %}{% for s in r.worked_by %}{{ spec_name(s) }}{{ ", " if not loop.last }}{% endfor %}{% else %}<span class="muted">no agent yet</span>{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{%- endmacro %}

@@ -729,6 +729,7 @@ tockmoxUi:
     session: tockmox-ui-session          # key: secret
     oidcClient: tockmox-sso-tockmox-ui   # key: client-secret (when config.oidc.issuer is set)
     # platformLedgerToken: ""            # key: token; the agent ledger's bearer token for Platform Management
+    # platformSpecialistsToken: ""       # key: token; the specialist host's token for the caller client/tockmox-ui (Cases)
   ingress:
     enabled: true
     host: ""                             # empty: tockmox.<global.internalDomain>

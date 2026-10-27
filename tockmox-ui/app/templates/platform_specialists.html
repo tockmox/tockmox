@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, source_line %}
+{% from "platform_macros.html" import spec_name %}
+{% block title %}Specialists · Platform Management{% endblock %}
+{% block main %}
+<p class="crumb"><a href="/platform">Platform Management</a> / Specialists</p>
+<h1>Specialists</h1>
+<p class="lede">The agents that do each role's work. A role is accountable; its specialists hold the credentials and run the steps. Two facts per specialist, never merged: how far it is built (from the catalog, generated from the roles file) and whether the specialist host serves it now.</p>
+
+{% if drift %}<p class="panel">{{ badge("warning", "Out of date") }} {{ drift }}</p>{% endif %}
+
+<div class="table-wrap" tabindex="0" role="region" aria-labelledby="spec-table">
+<table>
+  <caption id="spec-table">{{ rows | length }} specialists named by the roles, {{ rows | selectattr("state", "equalto", "built") | list | length }} built.</caption>
+  <thead><tr><th scope="col">Specialist</th><th scope="col">Built</th><th scope="col">Served now</th><th scope="col">Works for</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr><th scope="row">{{ spec_name(r.id) }}<span class="ref"><code>{{ r.id }}</code></span></th>
+      <td>{% if r.state == "built" %}{{ badge("ok", spec_words[r.state]) }}{% else %}<span class="muted">{{ spec_words[r.state] }}</span>{% endif %}</td>
+      <td>{% if not index_on %}<span class="muted">host not connected</span>
+          {%- elif index.fetched_at is none %}{{ badge("unknown", "Unknown") }}
+          {%- elif r.served %}{{ badge("ok", "Served") }}<span class="why">version {{ r.served.version }}, {{ r.served.status }}</span>
+          {%- elif r.state == "built" %}{{ badge("warning", "Not served") }}<span class="why">built, but the host does not serve it</span>
+          {%- else %}<span class="muted">not served</span>{% endif %}</td>
+      <td>{% for o in r.owners %}<a href="/platform/agents/{{ o[0] }}">{{ o[1] }}</a>{{ ", " if not loop.last }}{% endfor %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<section aria-labelledby="spec-sources">
+  <h2 id="spec-sources">Where this page reads from</h2>
+  <ul class="srcs">
+    <li><span class="src">{{ badge("ok", "Catalog") }} <span class="src-name">The role catalog</span><span class="muted">: specialists field generated from {{ (catalog_source.file if catalog_source else "") or "the roles file" }}</span></span></li>
+    {% if index_on %}<li>{{ source_line(index) }}</li>{% else %}<li><span class="src">{{ badge("unknown", "Not connected") }} <span class="src-name">Specialist host</span><span class="muted">: not configured</span></span></li>{% endif %}
+  </ul>
+</section>
+{% endblock %}

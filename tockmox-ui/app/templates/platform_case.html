@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, source_line %}
+{% from "platform_macros.html" import wait_badge, wait_text, spec_name, when %}
+{% block title %}{{ row.id }} · Cases · Platform Management{% endblock %}
+{% block main %}
+<p class="crumb"><a href="/platform">Platform Management</a> / <a href="/platform/cases">Cases</a> / {{ row.id }}</p>
+<h1><code>{{ row.id }}</code> {% if row.title %}{{ row.title }}{% else %}<span class="muted">(its title was written by {{ "a model" if row.title_src == "model" else "a client" }})</span>{% endif %}</h1>
+<p class="ref-line">{{ type_words.get(row.type, "Record") }}{% if row.service %} · {{ row.service }}{% endif %}{% if row.severity %} · severity {{ row.severity }}{% endif %}{% if row.trace_id and row.trace_id != row.id %} · part of case <a href="/platform/cases/{{ row.trace_id }}"><code>{{ row.trace_id }}</code></a>{% endif %}</p>
+
+<section class="facts-band" aria-label="Status">
+  <div><h2 class="kicker">State</h2><p><strong>{{ state_words.get(row.state, row.state | replace("_", " ")) }}</strong></p><p class="why">since {{ when(row.state_since_ts, tz) }}</p></div>
+  <div><h2 class="kicker">Waiting on</h2>{{ wait_badge(row) }}<p class="why">{{ wait_text(row, ask_words, by_agent_role) }}</p></div>
+  <div><h2 class="kicker">Accountable</h2>{% set a = by_agent_role.get(row.role) %}{% if a %}<p><a href="/platform/agents/{{ a.id }}">{{ a.name }}</a></p>{% else %}<p class="muted">{{ row.role or "none named" }}</p>{% endif %}
+    <p class="why">Opened {{ when(row.created_ts, tz) }}</p></div>
+</section>
+
+{% if row.facts %}
+<section aria-labelledby="facts">
+  <h2 id="facts">Facts</h2>
+  <dl class="facts">
+  {% set fw = {"alertname": "Alert", "cause": "Cause (from the runbook's list)", "label_namespace": "Namespace", "label_deployment": "Deployment", "label_pod": "Pod", "label_service": "Service label", "label_job": "Job", "label_severity": "Alert severity", "standing": "Standing condition", "escalated_at": "Paged you at", "alert_firing": "Alert still firing", "pr_url": "Pull request", "repo": "Repository", "path": "Path", "venue": "Cluster", "approved_by": "Approved by", "approval_ref": "Approval", "submission": "Submission", "known_error": "Known error", "incident": "Incident", "kind": "Change kind"} %}
+  {% for k, v in row.facts.items() %}
+  <div><dt>{{ fw.get(k, k) }}</dt><dd>{% if k.endswith("_url") %}<a href="{{ v }}" rel="noopener noreferrer">{{ v }}</a>{% elif v is sameas true %}Yes{% elif v is sameas false %}No{% else %}<code>{{ v }}</code>{% endif %}</dd></div>
+  {% endfor %}
+  </dl>
+</section>
+{% endif %}
+
+{% if family %}
+<section aria-labelledby="family">
+  <h2 id="family">The rest of this case</h2>
+  <ul class="plain">{% for f in family %}<li>{{ wait_badge(f) }} <a href="/platform/cases/{{ f.id }}"><code>{{ f.id }}</code></a> {{ type_words.get(f.type, "Record") }}{% if f.title %}: {{ f.title }}{% endif %} <span class="muted">· {{ state_words.get(f.state, f.state) }}</span></li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+<section aria-labelledby="timeline">
+  <h2 id="timeline">What happened</h2>
+  <div class="table-wrap" tabindex="0" role="region" aria-labelledby="timeline">
+  <table class="timeline">
+    <caption>Every step the desk recorded, oldest first. Words a model, an assistant or a person's client wrote are not shown here: the step, who did it and its links are, and the words are in the conversation.</caption>
+    <thead><tr><th scope="col">When</th><th scope="col">Who</th><th scope="col">Step</th><th scope="col">What</th></tr></thead>
+    <tbody>
+    {% for s in steps %}
+    <tr class="step-{{ s.kind }}">
+      <td>{% if s.t %}<time datetime="{{ s.t | iso }}">{{ s.t | local(tz) }}</time>{% else %}<span class="muted">unknown</span>{% endif %}</td>
+      <td>{% if s.specialist %}{{ spec_name(s.specialist) }}{% set owners = spec_roles.get(s.specialist) %}{% if owners %}<span class="ref">for the <a href="/platform/agents/{{ owners[0][0] }}">{{ owners[0][1] }}</a></span>{% endif %}
+          {%- elif s.actor == "schedule" %}The desk<span class="ref">on its schedule</span>
+          {%- elif s.actor.startswith("event/") %}The desk<span class="ref">from {{ s.actor[6:] }}</span>
+          {%- else %}<code>{{ s.actor }}</code>{% endif %}</td>
+      <td>{{ s.kind_word }}{% if s.kind == "state" and s.from and s.to %}<span class="ref">{{ state_words.get(s.from, s.from) }} → {{ state_words.get(s.to, s.to) }}</span>{% endif %}{% if s.ask %}<span class="ref">{{ ask_words.get(s.ask, "A decision") }}</span>{% endif %}</td>
+      <td>{% if s.text %}{{ s.text }}{% elif s.hidden %}<span class="muted">{{ "Worded with a model's help" if s.src == "model" else "Written by a client" if s.src == "client" else "Written before the desk recorded who worded it" }}: read it in the conversation.</span>{% endif %}
+          {%- for ref in s.refs %}<span class="ref">{% if ref.id and ref.url %}<a href="{{ ref.url }}"><code>{{ ref.id }}</code></a>{% elif ref.id %}<code>{{ ref.id }}</code>{% else %}<a href="{{ ref.url }}" rel="noopener noreferrer">{{ ref.url }}</a>{% endif %}</span>{% endfor %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section aria-labelledby="case-sources">
+  <h2 id="case-sources">Where this page reads from</h2>
+  <ul class="srcs"><li>{{ source_line(desk) }}</li></ul>
+  <p class="muted">The worklist row comes from the desk's list, the steps from the record itself, read when this page loaded.</p>
+</section>
+{% endblock %}

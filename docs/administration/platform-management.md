@@ -57,6 +57,7 @@ Optional keys under `config.features.platform`:
 | `ledgerUrl` | Your agent orchestrator's read API (`GET <ledgerUrl>/v1/jobs`). Unset, every role's agent reads **Not connected**, which is Unknown and never healthy. Must be an absolute `http(s)` URL; with a token, prefer `https`, because over `http` the token crosses the network in clear. |
 | `interfaceUrl` | Where a person answers an agent's question. The page links there; approving never happens on this page. |
 | `clusterTimezone` | The zone your cluster's controller manager runs in, default UTC. A CronJob that sets no `timeZone` fires in that zone, and kube-state-metrics reports it only as `local`, so the page needs telling. |
+| `specialistsUrl` | A specialist host (its base URL). Turns on the **Cases** pages and the specialists' served state: see "Cases" below. Unset, every Cases view reads **Not connected**, never an empty list. Must be an absolute `http(s)` URL. |
 | `workflowSuccessQuery` | A PromQL query returning each Argo CronWorkflow's last success time, labelled `namespace` and `cronworkflow`. Unset, a CronWorkflow's last run shows but not whether it passed, and it reads Unknown. |
 
 The ledger is yours, so the chart does not know its address or its token:
@@ -79,6 +80,7 @@ tockmoxUi:
 | Argo CronWorkflows | the Kubernetes API, `list` on `cronworkflows`, every namespace | **One new permission.** The UI's ServiceAccount can read every CronWorkflow's spec, including inline scripts and parameters. | The rule is rendered only when the switch is on. `list` only: no `get` on Secrets, no `watch`, no writes. The page shows names, schedules, suspend state and last run, never a spec body. Admins only. |
 | CronJobs and their Jobs | kube-state-metrics, through Prometheus | Nothing: the UI already reads Prometheus. | |
 | Each role's numbers | PromQL instant queries named in the catalog | A site catalog can query any series Prometheus holds and show the value to admins. | The catalog is a ConfigMap your site commits, so a new query is a reviewed change. Instant, read-only queries. |
+| Cases | the specialist host: `POST /s/service-desk/v1/list` and `/get` as the caller `client/tockmox-ui`, and `GET /v1/index` | Record metadata (ids, titles, states, who worked them, links) and timeline steps leave the host for the UI. | The token is a Secret you name (`secrets.platformSpecialistsToken`), mounted read-only only when the switch is on; the desk admits that caller to `list`, `get` and `timeline` only. Egress is yours to add. Words a model wrote never render. |
 | Agent runs | the ledger, `GET /v1/jobs` with a bearer token | Job metadata (role, status, cost, times) leaves the orchestrator for the UI. | The token is a Secret you name, mounted read-only only when the switch is on. The UI can reach the ledger only through egress you add. The page shows job fields, never an answer's text. |
 
 If the catalog does not load (a site catalog with any mistake in it, or a
@@ -119,6 +121,70 @@ Nothing on it reads healthy.
 - **Planned and external.** Work a role will own but that is not deployed shows
   as **Planned**. Work that runs somewhere this page cannot see (another tool)
   can be listed as external; it is never shown healthy.
+
+## Cases
+
+With `specialistsUrl` set, Platform Management reads the **Service Desk** on a
+specialist host: the register where the operations agents keep every incident,
+problem, change and known error, with an enforced lifecycle and a timeline.
+
+- `/platform/cases` answers "what waits on me, and what did the agents do":
+  open cases first (anything waiting on you, then failed hand-offs, then what is
+  past its role's time budget), then the cases closed in the last 30 days. Each
+  row says who it waits on (you, an agent, the accountable role, or the open
+  record it links to, followed down the chain), since when, and which agents
+  worked it. `?role=<role id>` narrows it to one role.
+- Each role's page gains **Its cases** (the ones it is accountable for, plus the
+  ones one of its agents worked) and **Agents that do its work**.
+- `/platform/cases/<id>` shows the record's facts, the rest of its case, and every
+  step: when, which agent (and for which role), what kind of step, and its links.
+- `/platform/specialists` lists every specialist the roles name, with two facts
+  kept apart: how far it is built, and whether the host serves it now.
+
+The page renders a step's words only when the desk says the desk itself or a
+rule wrote them. A step a model may have worded (the desk marks every entry, from
+the host's record of which calls had a model answer), or one an assistant or a
+client wrote, shows that it happened, who did it and its links, and leaves the
+words to the conversation. A link renders only as an `https` URL or a record id.
+A desk that does not answer reads Unknown, never "nothing pending".
+
+```yaml
+tockmoxUi:
+  secrets:
+    platformSpecialistsToken: tockmox-ui-specialists   # a Secret you create, key: token
+  networkPolicy:
+    extraEgress:
+      - to:
+          - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: my-specialists}}
+        ports: [{port: 8080, protocol: TCP}]
+  config:
+    features:
+      platform:
+        enabled: true
+        specialistsUrl: http://specialist-host.my-specialists:8080
+```
+
+On the host, the token's sha256 goes in its callers file as `client/tockmox-ui`.
+
+**The specialists field.** Each role in the catalog carries `agentRole` (its id
+in the specialists' roles file, which the desk uses) and `specialists`
+(`[{id, state}]`, state `built`, `specced` or `proposed`), and the catalog
+records the roles file's hash in `specialistsSource`. All three are generated.
+To rewrite them from the roles file:
+
+```bash
+python3 tools/gen-platform-specialists.py path/to/roles/platform-roles.yaml
+```
+
+To check for drift instead (exit 1 when the catalog is not what the roles file
+makes it):
+
+```bash
+python3 tools/gen-platform-specialists.py --check path/to/roles/platform-roles.yaml
+```
+
+The script changes only those keys. When the hash the host publishes differs
+from the catalog's, the role and specialist pages say the list is out of date.
 
 ## Replacing the catalog
 
@@ -187,8 +253,10 @@ approve; **Act** (no role has it) would run named, reversible actions.
 ## What is not in this version
 
 Agents themselves. This page shows roles, their work and their numbers today,
-and reads an agent ledger if you have one; Tockmox does not ship an agent or an
-orchestrator. No approvals, no actions and no Act mode.
+and reads an agent ledger and a specialist host if you have them; Tockmox does
+not ship an agent or an orchestrator. No approvals, no actions and no Act mode:
+a case waiting on you links to where you decide (the pull request), never to a
+button here.
 
 <!-- tockmox:footer:begin -->
 
