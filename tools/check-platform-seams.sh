@@ -53,6 +53,7 @@
 # LIMIT: render only. No API server sees these objects, so admission of the
 # labels, the CRDs for PodMonitor and ScrapeConfig, and Prometheus actually
 # scraping are the live window's to prove.
+# shellcheck disable=SC2329  # each s_N check is called by name, through must_hold and must_refuse and the run list
 set -euo pipefail
 cd "$(dirname "$0")/.."
 command -v helm >/dev/null 2>&1 || { echo "check-platform-seams: helm missing" >&2; exit 2; }

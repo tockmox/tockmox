@@ -29,6 +29,7 @@
 #     that happens to equal the application's is accepted.
 # S4  Moving only Open WebUI's application tag is still refused (the existing
 #     guard stays), so the two lines the product moves together cannot drift.
+# shellcheck disable=SC2016  # the mutations' sed patterns match Helm template text literally, not shell variables
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
