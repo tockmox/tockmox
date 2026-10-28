@@ -41,14 +41,17 @@ tests:
         exp_alerts: []
 
   # CASE 2 (arm 1): Loki is up and the counter stops moving at minute 60. The
-  # rate is 0 from about minute 71, and the 15m `for` elapses by minute 86.
-  # Silent at 80m, firing at 95m. The alert carries no pod label: it aggregates.
+  # 10m rate is 0 from minute 65 under promtool 3.x (left-open windows: the
+  # samples at 60 and 65 are equal) and from minute 70 under 2.x, so the 15m
+  # `for` elapses at 80 or 85. Silent at 75m, firing at 95m, true under both.
+  # (80m was the 2.x edge and fired under 3.15.1, the version CI pins.)
+  # The alert carries no pod label: it aggregates.
   - interval: 5m
     input_series:
       - series: 'loki_distributor_lines_received_total{namespace="tockmox-monitoring", pod="loki-0"}'
         values: '0+3000x12 36000x36'
     alert_rule_test:
-      - eval_time: 80m
+      - eval_time: 75m
         alertname: TockmoxLokiNotIngesting
         exp_alerts: []
       - eval_time: 95m
