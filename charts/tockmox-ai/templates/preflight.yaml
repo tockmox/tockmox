@@ -289,3 +289,41 @@ tockmox-hooks entry first when a site replaced both. */ -}}
 {{- fail "litellm.envVars.TMPDIR is /scratch, but litellm.volumeMounts does not mount `tockmox-scratch` at /scratch. With the read-only root filesystem the migrations Job then has nowhere to write. litellm.volumeMounts is a list, and a site that sets it replaces the shipped entries; restate it: {name: tockmox-scratch, mountPath: /scratch}." -}}
 {{- end -}}
 {{- end -}}
+{{- /* THE MIGRATIONS JOB IS THE SUBCHART'S, AS AN ARGO SYNC HOOK (TM-1196). Four
+settings turn that shape into a wedge or into no migration at all, and each
+renders cleanly:
+  migrationJob.enabled false         nothing migrates the schema; the gateway
+                                     runs against an empty database.
+  hooks.argocd.enabled true          the subchart makes the Job a PreSync hook,
+                                     which deadlocks against the CNPG Cluster
+                                     this Application creates (the Cluster is
+                                     in the sync phase, after PreSync), and it
+                                     writes a second argocd hook key beside the
+                                     one in jobAnnotations.
+  hooks.helm.enabled true            a Helm hook Argo maps to PreSync: the same
+                                     deadlock by another door.
+  jobAnnotations hook not Sync       PreSync deadlocks as above; PostSync runs
+                                     after the Application is Healthy, which
+                                     the gateway cannot be before its schema is
+                                     in; no hook is an ordinary Job that wedges
+                                     on `field is immutable` at the first image
+                                     bump.
+The delete policy must stay BeforeHookCreation for the same reason: the old
+Job is what the new one's template is immutable against. */ -}}
+{{- if $litellmOn -}}
+{{- $mj := $lit.migrationJob | default dict -}}
+{{- $mja := $mj.jobAnnotations | default dict -}}
+{{- $mjh := $mj.hooks | default dict -}}
+{{- if not $mj.enabled -}}
+{{- fail "litellm.migrationJob.enabled is false, so nothing runs LiteLLM's schema migrations and the gateway starts against an empty database. Since 0.9.0 tockmox-ai renders no migrations Job of its own (TM-1196); the subchart's Job is the only one, as an Argo Sync hook. Leave it true." -}}
+{{- end -}}
+{{- if or (dig "argocd" "enabled" false $mjh) (dig "helm" "enabled" false $mjh) -}}
+{{- fail "litellm.migrationJob.hooks.argocd.enabled or hooks.helm.enabled is true. Both make the subchart's migrations Job run BEFORE the sync phase, and the database it needs is a CNPG Cluster that this same Application creates in the sync phase: the sync deadlocks with the Job retrying against a Service that does not exist yet. The Sync hook in litellm.migrationJob.jobAnnotations is what runs the Job; leave both switches false." -}}
+{{- end -}}
+{{- if ne (toString (index $mja "argocd.argoproj.io/hook" | default "")) "Sync" -}}
+{{- fail (printf "litellm.migrationJob.jobAnnotations[argocd.argoproj.io/hook] is %q, not Sync. PreSync deadlocks against the CNPG Cluster this Application creates, PostSync waits for a Healthy Application the gateway cannot be before its schema is in, and no hook leaves an ordinary Job that fails on `field is immutable` at the next LiteLLM image bump. Keep it Sync." (index $mja "argocd.argoproj.io/hook" | default "")) -}}
+{{- end -}}
+{{- if ne (toString (index $mja "argocd.argoproj.io/hook-delete-policy" | default "")) "BeforeHookCreation" -}}
+{{- fail (printf "litellm.migrationJob.jobAnnotations[argocd.argoproj.io/hook-delete-policy] is %q, not BeforeHookCreation. The previous Job has to go before the next is created, or the new Job's pod template is a patch of an immutable field and the sync fails with `field is immutable`." (index $mja "argocd.argoproj.io/hook-delete-policy" | default "")) -}}
+{{- end -}}
+{{- end -}}

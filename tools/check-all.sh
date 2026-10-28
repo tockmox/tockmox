@@ -304,7 +304,7 @@ fi
 run_gate "the posture-probe add-on stays observe-only: read-only role, confined policy, versioned report (TM-0874)" bash tools/check-posture-probe.sh
 run_gate "the posture-probe gate goes red on a write verb, a widened read, a leaked output and a broken contract (TM-0874)" bash tools/check-posture-probe.sh --selftest
 run_gate "the upgrade-wedging shapes from the 0.7.0 lab pass stay fixed" bash tools/check-upgrade-safety.sh
-run_gate "the upgrade-safety gate goes red on a migrations Job that keeps its name or drifts from upstream" bash tools/check-upgrade-safety.sh --selftest
+run_gate "the upgrade-safety gate goes red on a migrations Job that is not a Sync hook, a pre-upgrade backup that does not wait, or a drift from upstream (TM-1196, TM-1054)" bash tools/check-upgrade-safety.sh --selftest
 # A pipe into `grep -q` under pipefail fails at random: grep exits at the first
 # match and the writer dies of SIGPIPE (141). Over a hundred of these made this
 # script go red on pushes whose PR run had passed.

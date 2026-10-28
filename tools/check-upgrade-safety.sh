@@ -11,20 +11,48 @@
 # F1  The LiteLLM migrations Job cannot wedge an upgrade. A Job's pod template
 #     is immutable once the Job exists, so a Job that keeps its name across a
 #     template change fails with 'field is immutable' and Argo stops retrying
-#     (0.7.0 lab pass). Since TM-0596 (2026-10-06) tockmox-ai owns the Job and
-#     names it after a hash of its pod template. Asserted on the render:
-#     exactly one migrations Job, named <release>-litellm-migrations-<10 hex>;
-#     its name MOVES when the pod template moves (a pod label, a LiteLLM image
-#     tag) and does NOT move on a value that does not reach the Job (the proxy's
-#     replica count), so it neither wedges nor reruns the migration needlessly;
-#     and turning the subchart's own Job back on refuses to render.
-#     `--selftest` proves it goes red on a static name.
-# F1b The owned Job's pod spec is the vendored subchart's, value for value. The
-#     vendored litellm-helm chart is rendered on its own with the same values
-#     and its own Job switched on, and the two pod specs are compared. An
-#     upstream change to its Job on a LiteLLM bump goes red here and is ported
-#     into charts/tockmox-ai/templates/_litellm-migrations.tpl.
-#     `--selftest` proves it goes red on a drifted template.
+#     (0.7.0 lab pass). Since TM-1196 (0.9.0) the Job is litellm-helm's own,
+#     run as an Argo CD Sync hook with delete policy BeforeHookCreation, which
+#     deletes the previous Job before creating the next, so the template is
+#     never patched. Asserted on the render: exactly one migrations Job, named
+#     <release>-litellm-migrations (no hash: Tockmox renders no Job of its
+#     own, and neither template file is back in the chart); its OWN metadata
+#     carries argocd.argoproj.io/hook: Sync and hook-delete-policy:
+#     BeforeHookCreation, no Helm hook, and its pod template carries neither;
+#     the CNPG Cluster it waits on is in the same sync wave; a LiteLLM image
+#     bump keeps the name and the hook and changes the image (the migration
+#     reruns with no operator step); and each setting that would turn this into
+#     a PreSync deadlock, an ordinary Job or no migration at all refuses to
+#     render (migrationJob.enabled false, either subchart hook switch on, a
+#     hook annotation that is not Sync, a delete policy that is not
+#     BeforeHookCreation). `--selftest` proves it goes red on a PreSync hook, a
+#     hash-named Job, a missing hook, split sync waves and a guard that no
+#     longer refuses.
+# F1b The seam F1 relies on is still upstream's. The vendored litellm-helm chart
+#     is rendered on its own with the same values: migrationJob.jobAnnotations
+#     must land on the Job's own metadata and not on its pod template. A
+#     litellm-helm bump that moves or drops the seam goes red here, instead of
+#     rendering a Job with no hook that wedges the next image bump.
+#     `--selftest` proves it goes red on a subchart that drops the seam.
+# F7  A LiteLLM or Open WebUI version change is preceded by a backup of its
+#     database, and a failed backup stops the upgrade (TM-1054). Asserted on the
+#     render: the hook is a PreSync hook (and a Helm pre-install/pre-upgrade
+#     hook), its ServiceAccount, Role and RoleBinding are PreSync hooks in an
+#     earlier wave, the Role can read the named Clusters and workloads and
+#     create and read Backups and nothing else, and the migrations Job is a
+#     Sync hook, which Argo runs AFTER every PreSync hook: that is the ordering
+#     the card asks for. The script is then EXTRACTED AND RUN against a stub
+#     kubectl: no Cluster or no workload yet (a first install) passes with no
+#     Backup; the same version passes with no Backup; a changed version creates
+#     one Backup of the right Cluster and exits 0 only after the phase reaches
+#     completed; a failed Backup, a Backup that never completes, a refused
+#     create, an API that cannot be asked and a running image that cannot be
+#     read each exit 1; with Open WebUI's Cluster named, only the application
+#     whose version changed is backed up. `--selftest` proves each leg goes red.
+#     LIMIT: no cluster. That CNPG's barman-cloud plugin completes a Backup
+#     created this way, and that a failed PreSync hook stops an Argo sync before
+#     anything is applied, are the lab's to prove (the run sheet's forced-failure
+#     leg of TM-1054).
 # F2  The Loki gateway must be able to roll on ONE node AND apply over a live
 #     0.6.2 Deployment: it must not surge (maxSurge 0, or strategy Recreate),
 #     must carry no REQUIRED podAntiAffinity, and must not be a strategy TYPE
@@ -113,36 +141,88 @@ UPGRADE=docs/deployment/upgrade.md
 AI_CHART=charts/tockmox-ai
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
-# F1/F1b mutations run against a mutated COPY of the ai chart.
+# F1/F1b mutations. The render ones edit the RENDERED text (BSD sed has no
+# portable -i, so they go through a temp file); the guard one edits a COPY of the
+# ai chart; the seam one swaps in a vendored subchart that drops jobAnnotations.
+MUT=""
+SUB_TGZ_OVERRIDE=""
 case "${1:-}" in
-  --mutate-static-name|--mutate-drift)
+  --mutate-presync|--mutate-hashname|--mutate-nohook|--mutate-wave|--mutate-ub-*)
+    MUT="${1#--mutate-}" ;;
+  --mutate-guard)
     cp -R "$AI_CHART" "$tmp/ai-chart"; AI_CHART="$tmp/ai-chart"
-    if [ "$1" = "--mutate-static-name" ]; then
-      sed -i.bak 's/-migrations-{{ $pod | sha256sum | trunc 10 }}/-migrations/' "$AI_CHART/templates/litellm-migrations-job.yaml"
-    else
-      sed -i.bak 's/^        - name: DISABLE_SCHEMA_UPDATE$/        - name: SELFTEST_DRIFT\n          value: "x"\n        - name: DISABLE_SCHEMA_UPDATE/' "$AI_CHART/templates/_litellm-migrations.tpl"
-    fi
+    # Remove the migrationJob.enabled refusal: the F1 refusal assertion must then go red.
+    sed -i.bak '/^{{- if not \$mj.enabled -}}$/,/^{{- end -}}$/d' "$AI_CHART/templates/preflight.yaml"
     rm -f "$AI_CHART"/templates/*.bak ;;
+  --mutate-seam)
+    mkdir -p "$tmp/seam"
+    tar xzf "$AI_CHART"/charts/litellm-helm-*.tgz -C "$tmp/seam"
+    # The subchart drops jobAnnotations from the Job's metadata.
+    sed -i.bak '/with .Values.migrationJob.jobAnnotations/,/^    {{- end }}$/d' "$tmp/seam/litellm-helm/templates/migrations-job.yaml"
+    rm -f "$tmp/seam/litellm-helm/templates/"*.bak
+    # Rendered as a directory, not re-packed: macOS tar adds AppleDouble ._ entries that helm refuses to load.
+    SUB_TGZ_OVERRIDE="$tmp/seam/litellm-helm" ;;
 esac
 
-# Print the migrations Job names in the ai render (one per line), or NOJOB.
-job_names() {
+# Render the ai layer to $tmp/ai.yaml, with the F1 render mutation applied when one is asked for.
+render_ai() {
   helm template t "$AI_CHART" -f ci/values.yaml "$@" > "$tmp/ai.yaml"
+  case "$MUT" in
+    presync)  sed 's#argocd.argoproj.io/hook: Sync#argocd.argoproj.io/hook: PreSync#' "$tmp/ai.yaml" > "$tmp/ai.mut" ;;
+    hashname) sed 's#name: t-litellm-migrations$#name: t-litellm-migrations-0123456789#' "$tmp/ai.yaml" > "$tmp/ai.mut" ;;
+    nohook)   grep -v 'argocd.argoproj.io/hook' "$tmp/ai.yaml" > "$tmp/ai.mut" || true ;;
+    wave)     sed 's#^  name: tockmox-litellm-db$#  name: tockmox-litellm-db\n  annotations: {argocd.argoproj.io/sync-wave: "-1"}#' "$tmp/ai.yaml" > "$tmp/ai.mut" ;;
+    *) return 0 ;;
+  esac
+  mv "$tmp/ai.mut" "$tmp/ai.yaml"
+}
+
+# One line per migrations Job in the render: "<name> <hook> <delete-policy> <helm-hook> <pod-template-argocd-annotations> <image>".
+migration_jobs() {
+  render_ai "$@"
   python3 - "$tmp/ai.yaml" <<'PY'
 import sys, yaml
-n = [d["metadata"]["name"] for d in yaml.safe_load_all(open(sys.argv[1]))
-     if d and d.get("kind") == "Job" and "-litellm-migrations" in d["metadata"]["name"]]
-print("\n".join(n) if n else "NOJOB")
+out = []
+for d in yaml.safe_load_all(open(sys.argv[1])):
+    if d and d.get("kind") == "Job" and "-litellm-migrations" in d["metadata"]["name"]:
+        a = d["metadata"].get("annotations") or {}
+        pa = (d["spec"]["template"]["metadata"].get("annotations") or {})
+        helm = ",".join(sorted(k for k in a if k.startswith("helm.sh/"))) or "-"
+        podarg = ",".join(sorted(k for k in pa if k.startswith("argocd.argoproj.io/"))) or "-"
+        img = d["spec"]["template"]["spec"]["containers"][0]["image"]
+        out.append("%s %s %s %s %s %s" % (d["metadata"]["name"], a.get("argocd.argoproj.io/hook", "-"),
+                   a.get("argocd.argoproj.io/hook-delete-policy", "-"), helm, podarg, img))
+print("\n".join(out) if out else "NOJOB")
 PY
 }
 
 if [ "${1:-}" = "--selftest" ]; then
-  out=$(bash tools/check-upgrade-safety.sh --mutate-static-name 2>&1) && { echo "selftest FAIL: F1 passed with a migrations Job name that ignores its pod template"; exit 1; }
-  printf '%s' "$out" | grep 'FAIL F1: ' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
-  echo "selftest ok: the F1 assertion goes red when the migrations Job keeps one name across template changes"
-  out=$(bash tools/check-upgrade-safety.sh --mutate-drift 2>&1) && { echo "selftest FAIL: F1b passed with a pod spec that differs from the subchart's"; exit 1; }
+  out=$(bash tools/check-upgrade-safety.sh --mutate-presync 2>&1) && { echo "selftest FAIL: F1 passed with the migrations Job as a PreSync hook"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F1: .*not a Sync hook' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  echo "selftest ok: the F1 assertion goes red when the migrations Job is a PreSync hook (the CNPG deadlock)"
+  out=$(bash tools/check-upgrade-safety.sh --mutate-hashname 2>&1) && { echo "selftest FAIL: F1 passed with a hash-named Job"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F1: .*named after a hash' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  echo "selftest ok: the F1 assertion goes red when the migrations Job is hash-named again"
+  out=$(bash tools/check-upgrade-safety.sh --mutate-nohook 2>&1) && { echo "selftest FAIL: F1 passed with the hook annotations gone"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F1: .*not a Sync hook' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  echo "selftest ok: the F1 assertion goes red when the Job carries no hook (it would wedge on the next image bump)"
+  out=$(bash tools/check-upgrade-safety.sh --mutate-wave 2>&1) && { echo "selftest FAIL: F1 passed with the CNPG Cluster in an earlier wave than the Job"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F1: .*sync wave' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  echo "selftest ok: the F1 assertion goes red when the Cluster and the Job are not in one wave"
+  out=$(bash tools/check-upgrade-safety.sh --mutate-guard 2>&1) && { echo "selftest FAIL: F1 passed with the migrationJob.enabled refusal removed"; exit 1; }
+  printf '%s' "$out" | grep 'FAIL F1: .*enabled=false (no migration at all) renders' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
+  echo "selftest ok: the F1 assertion goes red when a render with no migrations Job is accepted"
+  out=$(bash tools/check-upgrade-safety.sh --mutate-seam 2>&1) && { echo "selftest FAIL: F1b passed with a subchart that drops jobAnnotations"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F1b: ' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
-  echo "selftest ok: the F1b assertion goes red when the owned Job drifts from the subchart's"
+  echo "selftest ok: the F1b assertion goes red when the subchart no longer puts jobAnnotations on the Job"
+  for ub in "ub-hooksync:F7: .*is not a PreSync hook" "ub-rolesecrets:F7: .*Role" "ub-nowait:F7: .*completed" "ub-failok:F7: .*failed Backup" \
+            "ub-alwaysbackup:F7: .*no version change" "ub-failopen-cluster:F7: .*cannot be asked" "ub-failopen-workload:F7: .*cannot be asked" \
+            "ub-unknownimage:F7: .*cannot be read" "ub-wrongcluster:F7: .*wrong Cluster" "ub-createfail:F7: .*refused"; do
+    name="${ub%%:*}"; want="${ub#*:}"
+    out=$(bash tools/check-upgrade-safety.sh "--mutate-$name" 2>&1) && { echo "selftest FAIL: F7 passed on the $name mutant"; exit 1; }
+    printf '%s' "$out" | grep -E "FAIL $want" >/dev/null || { echo "selftest FAIL: $name: wrong message: $out"; exit 1; }
+    echo "selftest ok: the F7 assertions go red on the $name mutant"
+  done
   out=$(bash tools/check-upgrade-safety.sh --mutate-sync 2>&1) && { echo "selftest FAIL: F3b passed with garage.web.syncAtInstall off"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F3b' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F3b assertion goes red when the install-time sync is off"
@@ -184,34 +264,82 @@ bad() { echo "FAIL $*"; rc=1; }
 good() { echo "  ok $*"; }
 
 # ---------------------------------------------------------------- F1
-base=$(job_names)
+for f in templates/litellm-migrations-job.yaml templates/_litellm-migrations.tpl; do
+  [ ! -e "$AI_CHART/$f" ] || bad "F1: $AI_CHART/$f is back. Since TM-1196 the migrations Job is the subchart's own, as a Sync hook; a Tockmox-owned Job beside it would migrate one database twice"
+done
+base=$(migration_jobs)
 if [ "$base" = "NOJOB" ]; then
   bad "F1: no litellm migrations Job in the render of $AI_CHART with ci/values.yaml"
 elif [ "$(printf '%s\n' "$base" | wc -l | tr -d ' ')" != "1" ]; then
-  bad "F1: more than one migrations Job renders ($(echo $base)); two Jobs would migrate one database"
-elif ! printf '%s' "$base" | grep -Ex 't-litellm-migrations-[0-9a-f]{10}' >/dev/null; then
-  bad "F1: the migrations Job is '$base', not named after its pod template (t-litellm-migrations-<10 hex>). A Job keeping one name across a template change fails with 'field is immutable' on every existing site"
+  bad "F1: more than one migrations Job renders ($(echo "$base" | tr '\n' ';')); two Jobs would migrate one database"
 else
-  good "F1: one migrations Job, named after its pod template ($base)"
-  for m in 'litellm.podLabels.selftest=x' 'litellm.image.tag=9.9.9'; do
-    got=$(job_names --set "$m")
-    if [ "$got" = "$base" ]; then bad "F1: --set $m changes the Job's pod template but not its name; that upgrade would wedge on 'field is immutable'"
-    else good "F1: a pod-template change ($m) gives a new Job ($got)"; fi
-  done
-  got=$(job_names --set 'litellm.replicaCount=3')
-  if [ "$got" != "$base" ]; then bad "F1: --set litellm.replicaCount=3 does not reach the Job, yet renamed it ($got); the migration would rerun on unrelated changes"
-  else good "F1: a value that does not reach the Job leaves its name alone"; fi
+  # read, not `set --`: the positional parameters carry the --mutate-* switch the later checks read.
+  read -r name hook policy helmhook podarg _ <<<"$base"
+  if printf '%s' "$name" | grep -E -- '-migrations-[0-9a-f]{6,}$' >/dev/null; then
+    bad "F1: the migrations Job is '$name', named after a hash. Tockmox no longer renders its own Job; the subchart's is t-litellm-migrations and the hook, not a name, is what keeps it from wedging"
+  elif [ "$name" != "t-litellm-migrations" ]; then
+    bad "F1: the migrations Job is '$name', want t-litellm-migrations (the subchart's own)"
+  elif [ "$hook" != "Sync" ]; then
+    bad "F1: the migrations Job's hook is '$hook', not a Sync hook. PreSync deadlocks against the CNPG Cluster this Application creates in the sync phase; no hook is an ordinary Job that fails on 'field is immutable' at the next LiteLLM image bump"
+  elif [ "$policy" != "BeforeHookCreation" ]; then
+    bad "F1: the migrations Job's hook-delete-policy is '$policy', want BeforeHookCreation (the previous Job must be deleted before the next is created)"
+  elif [ "$helmhook" != "-" ]; then
+    bad "F1: the migrations Job carries Helm hook annotations ($helmhook); Argo would map them to PreSync"
+  elif [ "$podarg" != "-" ]; then
+    bad "F1: the hook annotations are on the Job's pod template ($podarg), not on the Job's own metadata"
+  else
+    good "F1: one migrations Job, the subchart's own ($name), a Sync hook with BeforeHookCreation on its own metadata"
+    # The Job and the Cluster it waits on are one wave, so the Job's retry budget covers the bootstrap.
+    python3 - "$tmp/ai.yaml" <<'PY' || rc=1
+import sys, yaml
+w = {}
+for d in yaml.safe_load_all(open(sys.argv[1])):
+    if not d: continue
+    k = d.get("kind"); n = d["metadata"]["name"]
+    if (k == "Job" and n == "t-litellm-migrations") or (k == "Cluster" and n == "tockmox-litellm-db"):
+        w[k] = str((d["metadata"].get("annotations") or {}).get("argocd.argoproj.io/sync-wave", "0"))
+if set(w) != {"Job", "Cluster"}:
+    print("FAIL F1: could not find both the migrations Job and the CNPG Cluster (%s)" % sorted(w)); sys.exit(1)
+if w["Job"] != w["Cluster"]:
+    print("FAIL F1: the migrations Job is in sync wave %s and the CNPG Cluster in sync wave %s; the Job's retry budget only covers the database's bootstrap when they are applied together" % (w["Job"], w["Cluster"])); sys.exit(1)
+print("  ok F1: the migrations Job and the CNPG Cluster share sync wave %s" % w["Job"])
+PY
+    # A LiteLLM image bump mid-life: same Job name, same hook, the new image. The hook reruns the migration.
+    got=$(migration_jobs --set litellm.image.tag=9.9.9)
+    read -r gname ghook gpolicy _ _ gimage <<<"$got"
+    if [ "$gname" = "$name" ] && [ "$ghook" = "Sync" ] && [ "$gpolicy" = "BeforeHookCreation" ] && [ "${gimage##*:}" = "9.9.9" ]; then
+      good "F1: a LiteLLM image bump keeps the Job's name and hook and moves its image to 9.9.9 (BeforeHookCreation reruns it)"
+    else
+      bad "F1: --set litellm.image.tag=9.9.9 gives '$got'; want $name, Sync, BeforeHookCreation and the 9.9.9 image"
+    fi
+  fi
 fi
-if helm template t "$AI_CHART" -f ci/values.yaml --set litellm.migrationJob.enabled=true >/dev/null 2>"$tmp/guard.err"; then
-  bad "F1: litellm.migrationJob.enabled=true renders; it must refuse (the subchart's own Job would run beside the owned one)"
-elif grep -q 'two Jobs would migrate one database' "$tmp/guard.err"; then
-  good "F1: the subchart's own Job refuses to render beside the owned one"
+# Each setting that would turn the hook into a deadlock, an ordinary Job or no migration refuses to render.
+refuses() { # label, expected message fragment, helm args...
+  local label="$1" frag="$2"; shift 2
+  if helm template t "$AI_CHART" -f ci/values.yaml "$@" >/dev/null 2>"$tmp/guard.err"; then
+    bad "F1: $label renders; it must refuse"
+  elif grep -F -- "$frag" "$tmp/guard.err" >/dev/null; then
+    good "F1: $label refuses to render"
+  else
+    bad "F1: $label failed, but not with the guard's message: $(head -3 "$tmp/guard.err")"
+  fi
+}
+refuses "litellm.migrationJob.enabled=false (no migration at all)" "nothing runs LiteLLM's schema migrations" --set litellm.migrationJob.enabled=false
+refuses "litellm.migrationJob.hooks.argocd.enabled=true (PreSync deadlock)" "deadlocks with the Job retrying" --set litellm.migrationJob.hooks.argocd.enabled=true
+refuses "litellm.migrationJob.hooks.helm.enabled=true (mapped to PreSync)" "deadlocks with the Job retrying" --set litellm.migrationJob.hooks.helm.enabled=true
+refuses "a PreSync hook annotation" 'is "PreSync", not Sync' --set-string 'litellm.migrationJob.jobAnnotations.argocd\.argoproj\.io/hook=PreSync'
+refuses "a delete policy other than BeforeHookCreation" "not BeforeHookCreation" --set-string 'litellm.migrationJob.jobAnnotations.argocd\.argoproj\.io/hook-delete-policy=HookSucceeded'
+# And the other direction: turning the whole gateway off renders no migrations Job and does not trip the guards.
+if render_ai --set apps.litellm.enabled=false --set capabilities.aiPlane.enabled=false 2>"$tmp/off.err"; then
+  if grep -q -- 'litellm-migrations' "$tmp/ai.yaml"; then bad "F1: with the gateway off a migrations Job still renders"
+  else good "F1: with the gateway off no migrations Job renders and no guard trips"; fi
 else
-  bad "F1: litellm.migrationJob.enabled=true failed, but not with the guard's message: $(head -3 "$tmp/guard.err")"
+  bad "F1: the gateway off fails to render: $(head -3 "$tmp/off.err")"
 fi
 
 # ---------------------------------------------------------------- F1b
-sub_tgz=$(ls "$AI_CHART"/charts/litellm-helm-*.tgz 2>/dev/null | head -1)
+sub_tgz="${SUB_TGZ_OVERRIDE:-$(ls "$AI_CHART"/charts/litellm-helm-*.tgz 2>/dev/null | head -1)}"
 if [ -z "$sub_tgz" ]; then
   bad "F1b: no vendored litellm-helm tarball under $AI_CHART/charts (run tools/helm-deps.sh)"
 else
@@ -223,32 +351,227 @@ def merge(a, b):
     return a
 v = merge(yaml.safe_load(open(sys.argv[1])).get("litellm", {}) or {},
           (yaml.safe_load(open(sys.argv[2])) or {}).get("litellm", {}))
-v.setdefault("migrationJob", {})["enabled"] = True
 yaml.safe_dump(v, open(sys.argv[3], "w"))
 PY
   helm template t "$sub_tgz" -f "$tmp/sub-values.yaml" > "$tmp/sub.yaml"
-  helm template t "$AI_CHART" -f ci/values.yaml > "$tmp/ai.yaml"
-  python3 - "$tmp/sub.yaml" "$tmp/ai.yaml" <<'PY' || rc=1
-import sys, yaml, difflib, json
-def job(f, owned):
-    for d in yaml.safe_load_all(open(f)):
-        if d and d.get("kind") == "Job":
-            n = d["metadata"]["name"]
-            if (owned and n.startswith("t-litellm-migrations-")) or (not owned and n == "t-litellm-migrations"):
-                return d["spec"]["template"]
-up, own = job(sys.argv[1], False), job(sys.argv[2], True)
-if up is None or own is None:
-    print("FAIL F1b: could not find both Jobs (upstream %s, owned %s)" % (up is not None, own is not None)); sys.exit(1)
-for t in (up, own):
-    t.get("metadata", {}).pop("annotations", None)   # upstream emits an empty map as null
-    t.get("metadata", {}).get("labels", {}).pop("helm.sh/chart", None)   # the alias renames the chart: litellm vs litellm-helm
-if up != own:
-    a = json.dumps(up, indent=1, sort_keys=True).splitlines(); b = json.dumps(own, indent=1, sort_keys=True).splitlines()
-    print("FAIL F1b: the owned migrations Job's pod template differs from the vendored subchart's; port the upstream change into charts/tockmox-ai/templates/_litellm-migrations.tpl")
-    print("\n".join(list(difflib.unified_diff(a, b, "subchart", "owned", lineterm=""))[:40])); sys.exit(1)
-print("  ok F1b: the owned migrations Job's pod template equals the vendored subchart's")
+  python3 - "$tmp/sub.yaml" <<'PY' || rc=1
+import sys, yaml
+jobs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind") == "Job" and d["metadata"]["name"] == "t-litellm-migrations"]
+if len(jobs) != 1:
+    print("FAIL F1b: the vendored subchart renders %d migrations Jobs with the shipped values, want 1" % len(jobs)); sys.exit(1)
+j = jobs[0]
+a = j["metadata"].get("annotations") or {}
+pa = j["spec"]["template"]["metadata"].get("annotations") or {}
+for k, v in (("argocd.argoproj.io/hook", "Sync"), ("argocd.argoproj.io/hook-delete-policy", "BeforeHookCreation")):
+    if a.get(k) != v:
+        print("FAIL F1b: the vendored litellm-helm does not put migrationJob.jobAnnotations[%s]=%s on the Job's own metadata (got %r). Upstream moved or dropped the seam TM-1196 relies on (BerriAI/litellm#42242); a Job with no hook wedges on 'field is immutable' at the next image bump" % (k, v, a.get(k))); sys.exit(1)
+    if k in pa:
+        print("FAIL F1b: %s is on the Job's pod template as well as its metadata" % k); sys.exit(1)
+print("  ok F1b: the vendored litellm-helm puts migrationJob.jobAnnotations on the Job's own metadata, not its pod template")
 PY
 fi
+
+# The F1/F1b mutants have nothing to say about the rest; stop here instead of rendering every layer again.
+case "$MUT" in presync|hashname|nohook|wave) exit "$rc" ;; esac
+[ "${1:-}" != "--mutate-seam" ] && [ "${1:-}" != "--mutate-guard" ] || exit "$rc"
+
+# ---------------------------------------------------------------- F7
+# The pre-upgrade backup hook (TM-1054): its render, then its script run against a stub kubectl.
+helm template t "$AI_CHART" -f ci/values.yaml --set modelGateway.upgradeBackup.openWebuiClusterName=open-webui-db > "$tmp/ub.yaml"
+case "$MUT" in
+  ub-hooksync)   sed 's#argocd.argoproj.io/hook: PreSync#argocd.argoproj.io/hook: Sync#' "$tmp/ub.yaml" > "$tmp/ub.mut" && mv "$tmp/ub.mut" "$tmp/ub.yaml" ;;
+  ub-rolesecrets) sed 's#resources: \["backups"\]#resources: ["backups", "secrets"]#' "$tmp/ub.yaml" > "$tmp/ub.mut" && mv "$tmp/ub.mut" "$tmp/ub.yaml" ;;
+esac
+python3 - "$tmp/ub.yaml" "$tmp/ub.sh" <<'PY' || rc=1
+import sys, yaml
+docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
+by = {(d["kind"], d["metadata"]["name"]): d for d in docs}
+names = "tockmox-pre-upgrade-backup"
+bad = 0
+def fail(msg):
+    global bad
+    print("FAIL F7: " + msg); bad += 1
+for kind in ("ServiceAccount", "Role", "RoleBinding", "Job"):
+    d = by.get((kind, names))
+    if d is None:
+        fail("%s %s is not rendered" % (kind, names)); continue
+    a = d["metadata"].get("annotations") or {}
+    if a.get("argocd.argoproj.io/hook") != "PreSync":
+        fail("%s %s is not a PreSync hook (%r): the backup would be taken in the sync phase, beside the migration it is meant to precede" % (kind, names, a.get("argocd.argoproj.io/hook")))
+    if a.get("helm.sh/hook") != "pre-install,pre-upgrade":
+        fail("%s %s is not a Helm pre-install/pre-upgrade hook (%r)" % (kind, names, a.get("helm.sh/hook")))
+    if a.get("argocd.argoproj.io/hook-delete-policy") != "BeforeHookCreation":
+        fail("%s %s does not delete its previous run before creating the next" % (kind, names))
+    want_wave = "0" if kind == "Job" else "-1"
+    if a.get("argocd.argoproj.io/sync-wave") != want_wave:
+        fail("%s %s is in sync wave %r, want %s (identity before the Job that runs as it)" % (kind, names, a.get("argocd.argoproj.io/sync-wave"), want_wave))
+role = by.get(("Role", names))
+if role:
+    rules = {}
+    for r in role["rules"]:
+        for g in r["apiGroups"]:
+            for res in r["resources"]:
+                rules.setdefault((g, res), set()).update(r["verbs"])
+    allowed = {("postgresql.cnpg.io", "clusters"): {"get"}, ("postgresql.cnpg.io", "backups"): {"get", "create"},
+               ("apps", "deployments"): {"get"}, ("apps", "statefulsets"): {"get"}}
+    for k, v in rules.items():
+        if k not in allowed or not v <= allowed[k]:
+            fail("Role %s grants %s on %s/%s; it may only read the named Clusters and workloads and create and read Backups" % (names, sorted(v), k[0], k[1]))
+    for k in (("postgresql.cnpg.io", "clusters"), ("postgresql.cnpg.io", "backups"), ("apps", "deployments"), ("apps", "statefulsets")):
+        if k not in rules:
+            fail("Role %s grants nothing on %s/%s" % (names, k[0], k[1]))
+    for r in role["rules"]:
+        if r["resources"] in (["clusters"], ["deployments"], ["statefulsets"]) and not r.get("resourceNames"):
+            fail("Role %s reads %s without resourceNames; scope it to the named objects" % (names, r["resources"][0]))
+job = by.get(("Job", names))
+if job:
+    pod = job["spec"]["template"]
+    if (pod["metadata"]["labels"].get("app.kubernetes.io/name")) != "tockmox-restore-drill":
+        fail("the pod lacks the label the policy layer's allow-egress-restore-drill selects, so it cannot reach the API")
+    c = pod["spec"]["containers"][0]
+    open(sys.argv[2], "w").write(c["args"][0])
+    if (c.get("resources") or {}).get("limits", {}).get("memory") is None:
+        fail("the container has no memory limit")
+mig = by.get(("Job", "t-litellm-migrations"))
+if mig is None or (mig["metadata"].get("annotations") or {}).get("argocd.argoproj.io/hook") != "Sync":
+    fail("the LiteLLM migrations Job is not a Sync hook, so Argo does not order it after the PreSync backup")
+if not bad:
+    print("  ok F7: the backup Job, its ServiceAccount, Role (read the named Clusters and workloads, create and read Backups, nothing else) and RoleBinding are PreSync hooks, ahead of the migrations Job, which is a Sync hook")
+sys.exit(1 if bad else 0)
+PY
+# Off, and refusing, in the places it must be.
+if helm template t "$AI_CHART" -f ci/values.yaml --set modelGateway.upgradeBackup.enabled=false | grep 'tockmox-pre-upgrade-backup' >/dev/null; then bad "F7: modelGateway.upgradeBackup.enabled=false still renders the hook"; else good "F7: modelGateway.upgradeBackup.enabled=false removes the hook"; fi
+if helm template t "$AI_CHART" -f ci/values.yaml --set capabilities.dataProtection.enabled=false | grep 'tockmox-pre-upgrade-backup' >/dev/null; then bad "F7: with data protection declined (no backups to take) the hook still renders"; else good "F7: with data protection declined there is no hook (and no Backup it could take)"; fi
+if helm template t "$AI_CHART" -f ci/values.yaml --set capabilities.dataProtection.enabled=false --set modelGateway.upgradeBackup.enabled=true >/dev/null 2>"$tmp/ub.err"; then bad "F7: upgradeBackup.enabled=true with nothing to back up renders; it must refuse"
+elif grep -F 'there is no database to back up' "$tmp/ub.err" >/dev/null; then good "F7: upgradeBackup.enabled=true with nothing to back up refuses to render"
+else bad "F7: upgradeBackup.enabled=true with nothing to back up failed, but not with the guard's message: $(head -3 "$tmp/ub.err")"; fi
+
+# The script, run. Each scenario gets its own directory, a kubectl stub, and a clock that jumps.
+if [ -s "$tmp/ub.sh" ]; then
+  # Ablate the script for the mutants that test it. Written without sed -i (BSD).
+  case "$MUT" in
+    ub-nowait)             sed 's#case "\$PHASE" in#case "completed" in#' "$tmp/ub.sh" > "$tmp/ub.mut" ;;
+    ub-failok)             sed 's#^ *failed)#failedX)#' "$tmp/ub.sh" > "$tmp/ub.mut" ;;
+    ub-alwaysbackup)       sed 's#if \[ "\$HAVE" = "\$WANT" \]; then#if false; then#' "$tmp/ub.sh" > "$tmp/ub.mut" ;;
+    ub-failopen-cluster)   sed 's#|| fail_blind "\$LABEL: cannot read Cluster#|| echo "$LABEL: cannot read Cluster#' "$tmp/ub.sh" > "$tmp/ub.mut" ;;
+    ub-failopen-workload)  sed 's#|| fail_blind "\$LABEL: cannot read \$KIND#|| echo "$LABEL: cannot read $KIND#' "$tmp/ub.sh" > "$tmp/ub.mut" ;;
+    ub-unknownimage)       grep -v 'none of its containers runs an image named' "$tmp/ub.sh" > "$tmp/ub.mut" || true ;;
+    ub-wrongcluster)       sed 's#name: \$cluster#name: "tockmox-authentik-db"#; s#cluster: {name: \$cluster}#cluster: {name: "tockmox-authentik-db"}#' "$tmp/ub.sh" > "$tmp/ub.mut" ;;
+    ub-createfail)         sed '/the Backup was refused/s#exit 1; }$#:; }#' "$tmp/ub.sh" > "$tmp/ub.mut" ;;
+    *) cp "$tmp/ub.sh" "$tmp/ub.mut" ;;
+  esac
+  mkdir -p "$tmp/ubbin"
+  cat > "$tmp/ubbin/kubectl" <<'SH'
+#!/bin/sh
+# Stub for F7. Files in $STUB_DIR steer it: cluster.<name> (the Cluster exists), workload.<name>.json (the
+# Deployment or StatefulSet), phases (one Backup phase per line, the last repeats), fail.cluster, fail.workload,
+# refuse.create. It records the Backup the script creates in created.json and counts phase reads in polls.
+a="$*"; prev=""; name=""
+for x in "$@"; do
+  case "$prev" in cluster.postgresql.cnpg.io|backup.postgresql.cnpg.io|Deployment|StatefulSet) name="$x" ;; esac
+  prev="$x"
+done
+case "$a" in
+  *" create -f -"*)
+    if [ -e "$STUB_DIR/refuse.create" ]; then cat > /dev/null; echo 'Error from server (Forbidden): backups.postgresql.cnpg.io is forbidden' >&2; exit 1; fi
+    cat > "$STUB_DIR/created.json"
+    echo "backup.postgresql.cnpg.io/created" ;;
+  *"get cluster.postgresql.cnpg.io"*)
+    if [ -e "$STUB_DIR/fail.cluster" ]; then echo 'The connection to the server was refused' >&2; exit 1; fi
+    [ ! -e "$STUB_DIR/cluster.$name" ] || echo "cluster.postgresql.cnpg.io/$name" ;;
+  *"get Deployment"*|*"get StatefulSet"*)
+    if [ -e "$STUB_DIR/fail.workload" ]; then echo 'The connection to the server was refused' >&2; exit 1; fi
+    [ ! -e "$STUB_DIR/workload.$name.json" ] || cat "$STUB_DIR/workload.$name.json" ;;
+  *"get backup.postgresql.cnpg.io"*"status.phase"*)
+    n=$(cat "$STUB_DIR/polls" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$STUB_DIR/polls"
+    l=$(wc -l < "$STUB_DIR/phases"); [ "$n" -le "$l" ] || n=$l
+    sed -n "${n}p" "$STUB_DIR/phases" ;;
+  *"status.backupId"*) echo 20261027T000000 ;;
+  *"status.error"*) echo 'barman-cloud: the object store is unreachable' ;;
+esac
+exit 0
+SH
+  cat > "$tmp/ubbin/sleep" <<'SH'
+#!/bin/sh
+exit 0
+SH
+  cat > "$tmp/ubbin/date" <<'SH'
+#!/bin/sh
+# The wall clock jumps 100 seconds per read: a Backup that never completes meets the 900s timeout after nine polls, and a slow one still gets its third poll.
+case "$*" in
+  *"+%s"*) n=$(cat "$STUB_DIR/clock" 2>/dev/null || echo 1000); echo $((n + 100)) > "$STUB_DIR/clock"; echo "$n" ;;
+  *) exec /bin/date "$@" ;;
+esac
+SH
+  chmod +x "$tmp/ubbin/kubectl" "$tmp/ubbin/sleep" "$tmp/ubbin/date"
+  # scenario <name> <phases> [files to create: cluster.X workload=NAME:IMAGE ...]
+  ubrun() {
+    local d="$tmp/ub.$1" phases="$2"; shift 2
+    rm -rf "$d"; mkdir -p "$d"
+    # shellcheck disable=SC2086  # $phases is a space-separated list; each word is one line of the file
+    printf '%s\n' $phases > "$d/phases"
+    for f in "$@"; do
+      case "$f" in
+        workload=*) w="${f#workload=}"; wname="${w%%=*}"; wimg="${w#*=}"
+                    jq -n --arg i "$wimg" '{spec:{template:{spec:{containers:[{name:"x",image:"busybox:1"},{name:"app",image:$i}]}}}}' > "$d/workload.$wname.json" ;;
+        *) : > "$d/$f" ;;
+      esac
+    done
+    # The exit status is the datum; errexit must not end the gate on a script that rightly exits 1.
+    STUB_DIR="$d" PATH="$tmp/ubbin:$PATH" sh "$tmp/ub.mut" > "$d/out" 2>&1 && echo 0 > "$d/rc" || echo $? > "$d/rc"
+  }
+  ubcheck() { # name, expected rc, text that must be in the output, "created" or "none" (is a Backup created)
+    local d="$tmp/ub.$1" rcw="$2" text="$3" made="$4" label="$5" ok=1
+    [ "$(cat "$d/rc")" = "$rcw" ] || { bad "F7: $label: exit $(cat "$d/rc"), want $rcw: $(tail -3 "$d/out" | tr '\n' ' ')"; ok=0; }
+    grep -F -- "$text" "$d/out" >/dev/null || { bad "F7: $label: the output lacks '$text': $(tail -3 "$d/out" | tr '\n' ' ')"; ok=0; }
+    if [ "$made" = created ] && [ ! -s "$d/created.json" ]; then bad "F7: $label: no Backup was created"; ok=0; fi
+    if [ "$made" = none ] && [ -e "$d/created.json" ]; then bad "F7: $label: a Backup was created that must not be"; ok=0; fi
+    [ "$ok" = 1 ] || return 1
+  }
+  C=tockmox-litellm-db; WL=t-litellm; OW=open-webui-db; OWL=t-open-webui
+  LITNEW=$(grep "^backup_if_changing 'litellm'" "$tmp/ub.sh" | sed "s/.* '\([^']*\)'\$/\1/")
+  OWNEW=$(grep "^backup_if_changing 'open-webui'" "$tmp/ub.sh" | sed "s/.* '\([^']*\)'\$/\1/")
+  if [ -z "$LITNEW" ] || [ -z "$OWNEW" ]; then bad "F7: could not read the versions this render runs from the script"; fi
+  LITIMG="ghcr.io/berriai/litellm-database:$LITNEW"; LITOLD="ghcr.io/berriai/litellm-database:0.0.1"
+  OWIMG="ghcr.io/open-webui/open-webui:$OWNEW";     OWOLD="ghcr.io/open-webui/open-webui:0.0.1"
+  ubrun s1 "completed" ;                                                 ubcheck s1 0 "no Cluster $C yet" none "a first install (no Cluster)"
+  ubrun s2 "completed" "cluster.$C" ;                                    ubcheck s2 0 "no Deployment $WL yet" none "a Cluster but no workload yet"
+  ubrun s3 "completed" "cluster.$C" "workload=$WL=$LITIMG" "cluster.$OW" "workload=$OWL=$OWIMG" ; ubcheck s3 0 "no version change, no backup" none "the same versions"
+  ubrun s4 "running running completed" "cluster.$C" "workload=$WL=$LITOLD" "cluster.$OW" "workload=$OWL=$OWIMG"
+  ubcheck s4 0 "completed (backupId 20261027T000000)" created "a changed LiteLLM version"
+  if [ -s "$tmp/ub.s4/created.json" ]; then
+    python3 - "$tmp/ub.s4/created.json" "$C" "$LITNEW" <<'PY' || bad "F7: the Backup created for a changed LiteLLM version is not a plugin Backup of $C (the wrong Cluster, or no barman-cloud plugin)"
+import sys, json
+b = json.load(open(sys.argv[1]))
+assert b["kind"] == "Backup" and b["spec"]["cluster"]["name"] == sys.argv[2], b
+assert b["spec"]["method"] == "plugin" and b["spec"]["pluginConfiguration"]["name"] == "barman-cloud.cloudnative-pg.io", b
+assert b["metadata"]["annotations"]["tockmox.com/to-version"] == sys.argv[3] and b["metadata"]["annotations"]["tockmox.com/from-version"] == "0.0.1", b
+assert len(b["metadata"]["name"]) <= 63 and b["metadata"]["name"].startswith(sys.argv[2] + "-pre-"), b["metadata"]["name"]
+PY
+    [ "$(cat "$tmp/ub.s4/polls")" = 3 ] || bad "F7: the script read the Backup's phase $(cat "$tmp/ub.s4/polls") times, want 3 (running, running, completed): it did not wait for completed"
+  fi
+  ubrun s5 "running failed" "cluster.$C" "workload=$WL=$LITOLD" ;        ubcheck s5 1 "FAILED: barman-cloud: the object store is unreachable" created "a failed Backup"
+  grep -F 'keeps running' "$tmp/ub.s5/out" >/dev/null || bad "F7: a failed Backup does not say the old version keeps running"
+  ubrun s6 "running" "cluster.$C" "workload=$WL=$LITOLD" ;               ubcheck s6 1 "still 'running' after 900s" created "a Backup that never completes"
+  ubrun s7 "completed" "cluster.$C" "workload=$WL=$LITOLD" "refuse.create" ; ubcheck s7 1 "the Backup was refused" none "a refused create"
+  ubrun s8 "completed" "cluster.$C" "workload=$WL=$LITOLD" "fail.cluster" ; ubcheck s8 1 "cannot read Cluster" none "an API that cannot be asked about the Cluster"
+  ubrun s9 "completed" "cluster.$C" "workload=$WL=$LITOLD" "fail.workload" ; ubcheck s9 1 "cannot read Deployment" none "an API that cannot be asked about the workload"
+  ubrun s10 "completed" "cluster.$C" "workload=$WL=registry.example.com/team/other-image:1" ; ubcheck s10 1 "cannot be read" none "a running image that cannot be read"
+  # Open WebUI named: only the application whose version changed is backed up, and it is backed up in ITS Cluster.
+  ubrun s11 "completed" "cluster.$C" "workload=$WL=$LITIMG" "cluster.$OW" "workload=$OWL=$OWOLD" ; ubcheck s11 0 "open-webui: 0.0.1 -> $OWNEW" created "a changed Open WebUI version"
+  if [ -s "$tmp/ub.s11/created.json" ]; then
+    python3 - "$tmp/ub.s11/created.json" "$OW" <<'PY' || bad "F7: a changed Open WebUI version did not back up Open WebUI's Cluster ($OW), the wrong Cluster was backed up"
+import sys, json
+b = json.load(open(sys.argv[1]))
+assert b["spec"]["cluster"]["name"] == sys.argv[2], b
+PY
+  fi
+  grep -F 'litellm: ' "$tmp/ub.s11/out" | grep -F 'no version change' >/dev/null || bad "F7: with only Open WebUI changed the output does not show LiteLLM left alone"
+else
+  bad "F7: the backup Job's script could not be extracted from the render"
+fi
+case "$MUT" in ub-*) exit "$rc" ;; esac
+[ "$rc" != 0 ] || good "F7: the backup script, run against a stub kubectl, backs up only on a version change, waits for completed, and refuses on a failed Backup, a timeout, a refused create and an API it cannot read"
 
 # ---------------------------------------------------------------- F2
 helm template t charts/tockmox-observability -f ci/values.yaml > "$tmp/obs.yaml"

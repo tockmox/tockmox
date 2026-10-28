@@ -682,6 +682,75 @@ recreated under its old name and binds its old volume, with the data as it was
 at step 1; anything Authentik wrote after step 5 is not in it. The CNPG cluster
 is pruned with its own volume.
 
+### The LiteLLM migrations Job becomes an Argo CD hook, and a backup runs first, on upgrade to 0.9.0
+
+**Only if you run the model gateway (`apps.litellm`).** Two things change in
+`tockmox-ai`, and neither needs an edit in your site repo.
+
+**1. The migrations Job is LiteLLM's own, as a `Sync` hook.** Until 0.9.0
+`tockmox-ai` rendered its own copy, named after its pod template
+(`tockmox-ai-litellm-migrations-<10 hex>`, see the 0.8.0 section below). From
+0.9.0 the vendored `litellm-helm` renders it, under the fixed name
+`tockmox-ai-litellm-migrations`, with the annotations
+`argocd.argoproj.io/hook: Sync` and
+`argocd.argoproj.io/hook-delete-policy: BeforeHookCreation`. Argo CD deletes the
+previous Job and creates a new one on every sync, so a LiteLLM image bump re-runs
+the migrations without the `field is immutable` failure. It is a `Sync` hook, not
+`PreSync`, because a `PreSync` Job would run before the sync phase creates the
+CNPG Cluster it needs, which deadlocked on the 2026-08-15 install.
+`tools/check-upgrade-safety.sh` F1 asserts the shape on every render, and the
+chart refuses `litellm.migrationJob.enabled: false` and the subchart's own hook
+switches.
+
+On this upgrade ArgoCD creates the new Job and prunes the old hash-named one. If
+you sync without prune the old one stays, `Completed` and inert; delete it:
+
+**WORKSTATION**
+
+```bash
+: "${KUBE_CONTEXT:?export KUBE_CONTEXT first, see Before you begin}"
+kubectl --context="$KUBE_CONTEXT" -n tockmox-ai get jobs -o name \
+  | grep -E '^job\.batch/tockmox-ai-litellm-migrations-[0-9a-f]{10}$' \
+  | xargs -r kubectl --context="$KUBE_CONTEXT" -n tockmox-ai delete
+```
+
+If you install with plain `helm upgrade` and not Argo CD, the Job is an ordinary
+object with a fixed name, and a LiteLLM image bump fails on `field is immutable`
+until you delete it (`kubectl -n tockmox-ai delete job tockmox-ai-litellm-migrations`).
+The hash name protected that path; the hook annotations are what protect the
+Argo CD path, and Tockmox's supported install is Argo CD.
+
+**2. A version change takes a database backup before it is applied.** A
+`PreSync` hook Job, `tockmox-pre-upgrade-backup`, compares the version running in
+the cluster with the version the new render is about to run. If LiteLLM's differs
+it creates a CloudNativePG `Backup` of the gateway's database
+(`tockmox-litellm-db-pre-<version>-<timestamp>`), waits until it is `completed`,
+and only then lets the sync go on. If the Backup fails or has not completed in
+`modelGateway.upgradeBackup.timeoutSeconds` (900), the Job fails, the sync fails,
+and nothing of the new version is applied: the old pods keep running. On a first
+install, or when the version has not changed, the Job logs that and does nothing.
+
+Read what it did:
+
+**WORKSTATION**
+
+```bash
+: "${KUBE_CONTEXT:?export KUBE_CONTEXT first, see Before you begin}"
+kubectl --context="$KUBE_CONTEXT" -n tockmox-ai get backups.postgresql.cnpg.io \
+  -l tockmox.com/pre-upgrade-backup=true
+```
+
+**Success condition.** One `Backup` per upgraded database, `completed`. The hook
+Job's own log (`kubectl -n tockmox-ai logs job/tockmox-pre-upgrade-backup` while it
+runs) ends `pre-upgrade backup: done.`
+
+Open WebUI's shipped database is SQLite on its volume, which a CNPG `Backup`
+cannot capture; its own volume backup covers it (`docs/operations/backup-restore.md`,
+section 6). A site that moved Open WebUI's database to CNPG names the Cluster in
+`modelGateway.upgradeBackup.openWebuiClusterName` and gets the same step. To
+upgrade without the hook, for a database covered some other way or while the
+object store is down, set `modelGateway.upgradeBackup.enabled: false`.
+
 ### The LiteLLM migrations Job gets a new name on upgrade to 0.8.0
 
 **Only if you run the model gateway (`apps.litellm`). Nothing to do if your

@@ -500,8 +500,9 @@ modelGateway:
   # a patch on the StatefulSet could). Nothing here can list, read or delete
   # another Secret. templates/gateway-key.yaml.
   #
-  # ORDERING. An ordinary synced resource, like the migrations Job and for the
-  # same reason: a PostSync hook would wait for the Application to be Healthy,
+  # ORDERING. An ordinary synced resource, not a hook (the migrations Job is a
+  # Sync hook, see litellm.migrationJob below): a PostSync hook would wait for
+  # the Application to be Healthy,
   # and the console cannot be Healthy until this Job has run, which is a
   # deadlock. So the Job polls the gateway's readiness endpoint itself, with
   # the migrations Job's retry budget (the gateway is not up until its
@@ -556,6 +557,40 @@ modelGateway:
       enabled: true
       schedule: "*/15 * * * *"
       suspend: false
+
+  # ------------------------------------------------------------------------
+  # THE PRE-UPGRADE BACKUP (TM-1054). Open WebUI and LiteLLM migrate their
+  # database forward when a new version starts and never back, so a rollback is
+  # a restore, and a restore needs a backup taken before the new version ran.
+  # A PreSync hook Job compares the version each application runs now with the
+  # version this render runs; on a difference it creates a CNPG Backup of that
+  # application's database, waits for it to complete, and fails the sync if it
+  # does not, with nothing of the new version applied. It runs before the
+  # LiteLLM migrations Job (a Sync hook, litellm.migrationJob) by Argo's phase
+  # order. templates/upgrade-backup.yaml has the reasoning.
+  #
+  # Unset follows what there is to back up: the gateway's database when its
+  # backups are on (capabilities.dataProtection), and Open WebUI's when
+  # openWebuiClusterName names one. false removes the hook (a site whose
+  # database is covered some other way, or one that must upgrade while its
+  # object store is down). true refuses to render when there is nothing to back
+  # up. A first install has no old version and passes through.
+  # ------------------------------------------------------------------------
+  upgradeBackup:
+    enabled: null
+    # How long to wait for ONE Backup to reach `completed`. The 2026-10-18
+    # hand-run backup of the gateway's database took about five seconds; 900
+    # leaves room for a large database and a slow object store.
+    timeoutSeconds: 900
+    # The CloudNativePG Cluster that holds Open WebUI's database, if the site
+    # runs it on CNPG. Empty by default: Open WebUI's shipped database is SQLite
+    # on its volume, which a CNPG Backup cannot capture (the volume's own backup
+    # covers it, docs/operations/backup-restore.md section 6). The Cluster must
+    # already back up through the barman-cloud plugin.
+    openWebuiClusterName: ""
+    # The image the hook runs kubectl and jq from. Empty is alpine/k8s:1.37.1,
+    # the one the restore drill and the console-key Job already use.
+    image: ""
 
 # ---------------------------------------------------------------------------
 # Single sign-on (consumes the identity layer's Authentik). On by default and
@@ -1459,65 +1494,94 @@ litellm:
     # now that the root filesystem is read-only. See litellm.volumes above.
     TMPDIR: /scratch
 
-  # Schema migrations run in their own Job rather than racing on proxy startup.
+  # Schema migrations run in their own Job rather than racing on proxy startup,
+  # and the Job is the SUBCHART'S OWN (TM-1196). Since 0.9.0 Tockmox renders no
+  # migrations Job of its own: litellm-helm's `migrationJob` is on and carries an
+  # Argo CD SYNC hook through `jobAnnotations`, which upstream added for this
+  # (BerriAI/litellm#42242, every litellm-helm tag from v1.106.0).
   #
-  # THE ARGO PreSync HOOK IS TURNED OFF, AND TURNING IT BACK ON DEADLOCKS
-  # THE SYNC. It is
-  # upstream's default and it is correct for upstream, where the database is a
-  # subchart Helm installs first. It deadlocks here.
+  # WHY A SYNC HOOK, AND NOT THE THREE OTHER WAYS TO RUN THIS JOB.
   #
-  # Argo runs PreSync hooks to completion BEFORE applying any of the
-  # Application's normal resources. The database in this layer is a CNPG
-  # Cluster that this same Application creates, so a PreSync migration Job
-  # waits on a Service that the sync phase has not been allowed to create yet:
+  #   PreSync (upstream's default)   DEADLOCKS HERE, see below.
+  #   An ordinary synced resource    The Job keeps one name whatever its pod
+  #                                  template holds, and a Job's template is
+  #                                  immutable: any change to it, a LiteLLM image
+  #                                  bump included, failed the sync with `field
+  #                                  is immutable` and stopped after five tries.
+  #                                  That is why 0.8.0 shipped a hash-named Job
+  #                                  of its own (TM-0596).
+  #   A Job named after its template That worked, and cost a copy of upstream's
+  #                                  pod template to keep in step by hand, a
+  #                                  gate to prove the copy still matched, and a
+  #                                  fail guard on this very switch.
+  #   Sync hook, BeforeHookCreation  Argo deletes the previous Job and creates a
+  #                                  new one on every sync, so the immutable
+  #                                  field is never patched, a LiteLLM image
+  #                                  bump reruns the migration with no operator
+  #                                  step, and an unchanged schema applies
+  #                                  nothing (`prisma migrate deploy` is
+  #                                  idempotent). This is what is rendered.
+  #
+  # A Sync hook is applied in the sync phase beside the CNPG Cluster, in the
+  # same wave (none is set on either), so the retry budget below still covers
+  # the database's bootstrap. Argo does not compare a hook against the live
+  # cluster, so it should never show OutOfSync and `selfHeal` should never
+  # recreate it (read from Argo's hook documentation, NOT YET MEASURED on a
+  # cluster: TM-1196's lab test is the proof). The last Job stays after a sync
+  # (no TTL, below) until the next sync replaces it, which is the "green Job
+  # you can still read" the empty TTL is for.
+  #
+  # WHAT THE SUBCHART'S OWN HOOK SWITCHES DO, AND WHY BOTH STAY OFF. Its
+  # `hooks.argocd` switch makes the Job a PreSync hook. Argo runs PreSync hooks
+  # to completion BEFORE applying any of the Application's normal resources.
+  # The database in this layer is a CNPG Cluster that this same Application
+  # creates, so a PreSync migration Job waits on a Service that the sync phase
+  # has not been allowed to create yet:
   #
   #   PreSync   migrations Job -> tockmox-litellm-db-rw   (does not exist)
   #   Sync      the Cluster that would create it          (never starts)
   #
   # Observed exactly that on 2026-08-15: the Job ran, the Cluster was never
   # created, and the Application sat there. Nothing failed loudly, because a
-  # Job retrying is not an error.
+  # Job retrying is not an error. With that switch on the subchart would also
+  # write a second `argocd.argoproj.io/hook` key beside the one below.
+  # templates/preflight.yaml refuses both switches, a `migrationJob.enabled`
+  # of false (no Job would migrate anything) and a hook annotation that is not
+  # Sync.
   #
-  # With the hook off the Job is an ordinary synced resource applied alongside
-  # the Cluster. Its own backoffLimit and restartPolicy: OnFailure cover the
-  # seconds while CNPG bootstraps, which is what those settings are for.
+  # THE UPGRADE FROM 0.8.x. The hash-named Job (`tockmox-ai-litellm-migrations-
+  # <10 hex>`) is no longer rendered, so Argo prunes it, and the hook Job
+  # `tockmox-ai-litellm-migrations` is created in its place. docs/deployment/
+  # upgrade.md has the procedure and what to look for.
   #
-  # Adopting a chart means adopting its assumptions about what else exists.
-  # This is the seam where wrapping the database changed one of them.
-  # AND THE TTL IS REMOVED, for the same reason the hook is off: this Job is
-  # managed by ArgoCD, and a GitOps-managed Job with a TTL churns forever.
-  #
-  # Upstream defaults `ttlSecondsAfterFinished: 120`. Measured on a throwaway
+  # AND THE TTL IS STILL REMOVED. Upstream defaults `ttlSecondsAfterFinished:
+  # 120`. On the old ordinary-resource Job that was measured on a throwaway
   # single-node install 2026-09-11 (TM-0495): the Job completes, the TTL
   # deletes it two minutes later, ArgoCD sees an object in desired state and
   # absent from the cluster, `selfHeal` recreates it, it runs again. Twelve
-  # recreations in fifty-five minutes on an exact 300-second period ... the TTL
-  # plus the reconcile interval.
-  #
-  # A LARGER TTL DOES NOT FIX THIS, it only slows the cycle. Any finite TTL
-  # eventually deletes an object the reconciler is holding in desired state,
-  # and the reconciler puts it back. The only value that does not churn is no
-  # TTL at all.
-  #
-  # What it costs: one completed Job object stays in the namespace. That is
-  # cheap, and it is the same evidence `ENFORCE_PRISMA_MIGRATION_CHECK` above
-  # exists to make meaningful ... a green migrations Job you can still read is
-  # the record that the migration ran.
-  #
-  # What the churn cost instead: `tockmox-ai` sat `OutOfSync` roughly ninety
-  # per cent of the time, because the Job exists for ~30s out of every 300. Any
-  # readiness bar that forbids OutOfSync fails against this layer almost always,
-  # and passes in the ten per cent window ... which is how a release gate read
-  # it green once.
+  # recreations in fifty-five minutes on an exact 300-second period, and
+  # `tockmox-ai` OutOfSync about ninety per cent of the time. A hook Job is
+  # not compared against the cluster, so that loop should not recur (unmeasured,
+  # as above); the empty TTL is kept because what it buys now is the record:
+  # one completed Job you can read until the next sync replaces it, and the
+  # evidence that `ENFORCE_PRISMA_MIGRATION_CHECK` above exists to make
+  # meaningful. A larger TTL would only move the record's expiry.
   migrationJob:
-    # FALSE, AND THE MIGRATION STILL RUNS. This switch is the SUBCHART's own
-    # Job, which is named the same whatever its pod template holds, so any
-    # template change (including a LiteLLM image bump) wedges an existing site
-    # on `field is immutable`. tockmox-ai renders the Job itself instead
-    # (templates/litellm-migrations-job.yaml), named after a hash of its pod
-    # template, and it reads every other setting in this block. Setting this
-    # true refuses to render. TM-0596, 2026-10-06.
-    enabled: false
+    # TRUE, AND IT MUST STAY TRUE. This switch is the SUBCHART'S Job; with it
+    # false nothing migrates the schema and the gateway runs against an empty
+    # database. templates/preflight.yaml refuses false.
+    enabled: true
+    # THE HOOK, on the Job's OWN metadata (not its pod template, which is
+    # `annotations` below). Helm merges maps, so a site may add keys here, for
+    # example a sync wave; it may not change the two below.
+    jobAnnotations:
+      argocd.argoproj.io/hook: Sync
+      argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    # The label `kubectl get jobs -l app.kubernetes.io/component=migrations`
+    # (docs/deployment/upgrade.md, docs/usage/ai-plane.md) has always found the
+    # Job by. The subchart puts jobLabels on the Job's own metadata only.
+    jobLabels:
+      app.kubernetes.io/component: migrations
     # THE JOB MUST OUTLAST THE DATABASE'S BOOTSTRAP, and upstream's default of 4
     # does not. Measured on a cold single-node install 2026-09-12:
     #
@@ -1549,9 +1613,8 @@ litellm:
     # measured on a 0.8.0 greenfield, 2026-10-08. limit = peak x 1.5 = 1931.6,
     # rounded up to 2048Mi. The 1536Mi limit TM-0595 tried from a 953.1 MiB
     # sample was OOMKilled on 2026-10-06 (1309Mi read ten seconds before the
-    # kill), which is why this is sized from the full run. Setting it changes
-    # the pod template, so the Job gets a new name (TM-0596) and the old one is
-    # pruned. Request = the peak rounded down to a 128Mi step.
+    # kill), which is why this is sized from the full run. Request = the peak
+    # rounded down to a 128Mi step.
     resources:
       requests:
         memory: 1280Mi
@@ -1597,6 +1660,9 @@ litellm:
     # helm tried, and the next divergence will arrive the same way this one
     # did ... silently, in a version nobody was comparing.
     ttlSecondsAfterFinished: ""
+    # BOTH OFF, see the note above the block: the subchart's switches describe a
+    # PreSync (Argo) or pre-install/pre-upgrade (Helm) Job, and the hook this
+    # chart wants is the Sync one in `jobAnnotations`.
     hooks:
       argocd:
         enabled: false
