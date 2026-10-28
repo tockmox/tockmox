@@ -300,9 +300,10 @@ prefix-clean and Tockmox-managed objects are trivially distinguishable.
 ```yaml
 namespaces:
   create: [ai, monitoring, platform, authentik,
-           diagnostic_identity, selfcheck, devops]
+           diagnostic_identity, selfcheck, devops, node_agents]
   ai: tockmox-ai
   monitoring: tockmox-monitoring
+  node_agents: tockmox-node-agents   # node-exporter, Alloy, the SMART exporter
   platform: tockmox-platform    # the whole platform layer: one release, one namespace
   # ...
 ```

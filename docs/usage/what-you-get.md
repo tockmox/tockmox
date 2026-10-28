@@ -19,7 +19,7 @@ Honest inventory. Anything not built says so. Counts are from
 `helm template` with the CI values and are re-checked whenever this page
 changes.
 
-## Today ... nine layers, 609 rendered resources
+## Today ... nine layers, 614 rendered resources
 
 Counts describe the revision you are reading, not the last tag. The release
 this page ships with is stamped in the footer.
@@ -27,7 +27,7 @@ this page ships with is stamped in the footer.
 | Layer | Resources | The headline |
 |---|---|---|
 | crds | 10 | Cross-layer CRDs (prometheus-operator), wave 0 so nothing races its definitions |
-| policy | 75 | Namespaces, 43 NetworkPolicies (default-deny in every namespace this layer creates), RBAC admission guardrails, PriorityClasses, the diagnostic identity |
+| policy | 80 | Namespaces, 46 NetworkPolicies (default-deny in every namespace this layer creates), RBAC admission guardrails, PriorityClasses, the diagnostic identity |
 | platform | 234 | Traefik, MetalLB, cert-manager, Longhorn, CloudNativePG, kured, snapshot-controller |
 | observability | 173 | kube-prometheus-stack, Loki, Alloy ... persisted, bounded retention, resource requests |
 | exporters | 7 | blackbox / SNMP / smartctl, separate so wrong-for-your-hardware is one flag |
@@ -113,9 +113,9 @@ when you install the workload yourself; see
 **The default-deny rollout is complete.** Earlier, unpublished versions of this
 page named the platform and selfcheck namespaces as honest gaps carrying no
 NetworkPolicies at all. Both
-now have bundles: every one of the seven namespaces the policy layer creates
-carries a default-deny policy, and 33 more open the paths that have to be open,
-plus the AI namespace's egress default-deny ... 43 NetworkPolicies in total. Six of the seven deny ingress; the one in
+now have bundles: every one of the eight namespaces the policy layer creates
+carries a default-deny policy, and 35 more open the paths that have to be open,
+plus the AI namespace's egress default-deny ... 46 NetworkPolicies in total. Seven of the eight deny ingress; the one in
 `tockmox-diagnostic` denies egress as well, because a read-only identity has
 nothing it needs to call out to. A gap this page confessed and then closed is worth saying out loud
 rather than quietly deleting.
@@ -129,14 +129,14 @@ for exactly that. See [registry](../deployment/registry.md).
 Say the whole shape of it, because "default-deny networking" is two claims and
 only one of them is finished.
 
-![Network containment. All seven namespaces the policy layer creates deny ingress by default. Egress is denied by default in two of them: tockmox-ai, where the model gateway may reach DNS, its namespace, its database and TCP 443 outside the cluster and LAN, and a LAN model host only once listed; and tockmox-diagnostic, where the read-only identity may reach DNS, the API server and local telemetry. Egress is open in tockmox-platform, tockmox-monitoring, tockmox-authentik, tockmox-devops and tockmox-selfcheck. Namespaces you create get no policy from Tockmox, and the hostNetwork workloads are outside NetworkPolicy entirely.](../diagrams/rendered/network-containment.svg)
+![Network containment. All eight namespaces the policy layer creates deny ingress by default. Egress is denied by default in two of them: tockmox-ai, where the model gateway may reach DNS, its namespace, its database and TCP 443 outside the cluster and LAN, and a LAN model host only once listed; and tockmox-diagnostic, where the read-only identity may reach DNS, the API server and local telemetry. Egress is open in tockmox-platform, tockmox-monitoring, tockmox-node-agents, tockmox-authentik, tockmox-devops and tockmox-selfcheck. Namespaces you create get no policy from Tockmox, and the hostNetwork workloads are outside NetworkPolicy entirely.](../diagrams/rendered/network-containment.svg)
 
 **Text equivalent.** The diagram restates the two paragraphs and the list below:
-ingress denied in all seven namespaces the policy layer creates, egress denied
+ingress denied in all eight namespaces the policy layer creates, egress denied
 in the AI and diagnostic namespaces only, nothing applied to namespaces you
 create, and the three `hostNetwork` workloads outside NetworkPolicy.
 
-**Ingress: default-deny, complete.** All seven namespaces the policy layer
+**Ingress: default-deny, complete.** All eight namespaces the policy layer
 creates carry a `default-deny-ingress` policy. Nothing reaches a pod here
 unless a rule opens the path.
 

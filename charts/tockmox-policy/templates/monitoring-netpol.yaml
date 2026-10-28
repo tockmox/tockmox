@@ -316,6 +316,91 @@ spec:
           port: 9090
         - protocol: TCP
           port: 9093
+{{- if .Values.namespaces.node_agents }}
+---
+# THE NODE-AGENTS NAMESPACE (TM-0799). node-exporter, Alloy's log DaemonSet and the
+# SMART exporter run in `namespaces.node_agents` so that the monitoring namespace can
+# enforce a Pod Security level its own pods pass. Everything that crosses between the
+# two namespaces is listed here, in both directions of the cross:
+#
+#   Prometheus -> SMART exporter :9633 and Alloy :12345    allow-from-prometheus below.
+#   Alloy -> Loki gateway :8080                            allow-from-node-agents, in the
+#                                                          monitoring namespace, further down.
+#   Prometheus -> node-exporter :9100                      nothing to allow: node-exporter is
+#                                                          hostNetwork, which NetworkPolicy
+#                                                          does not reach.
+#
+# Default-deny INGRESS only, as in the monitoring namespace: egress stays open so the
+# agents reach Loki, the API server and the node itself.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: default-deny-ingress
+  namespace: {{ .Values.namespaces.node_agents }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Prometheus -> the node agents' metrics ports. Scoped to the Prometheus pod and to the
+# two ports that serve metrics: 9633 (SMART exporter) and 12345 (Alloy's own metrics).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-from-prometheus
+  namespace: {{ .Values.namespaces.node_agents }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.monitoring }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - protocol: TCP
+          port: 9633
+        - protocol: TCP
+          port: 12345
+---
+# Alloy (node-agents namespace) -> the Loki gateway (monitoring namespace) :8080. Before
+# TM-0799 this was same-namespace traffic and allow-intra-namespace covered it; Alloy now
+# pushes across namespaces, and without this rule the push dies against the default-deny
+# above and no container log reaches Loki. Scoped to the gateway pod and the Alloy pod.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-from-node-agents
+  namespace: {{ .Values.namespaces.monitoring }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: loki
+      app.kubernetes.io/component: gateway
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.node_agents }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: alloy
+      ports:
+        - protocol: TCP
+          port: 8080
+{{- end }}
 {{- with ($.Values.platformNetpol | default dict).extraMonitoringClientNamespaces }}
 ---
 # Site clients of the monitoring namespace (TM-0820, observability-cutover A1):

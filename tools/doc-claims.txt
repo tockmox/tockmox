@@ -158,9 +158,9 @@ states: [0-9]+ repositories
 # Same table row, the other half of the sentence. Counts every dependency that
 # is fetched rather than sourced from file://../tockmox-common.
 page:   docs/deployment/airgap.md
-claim:  19 dependencies across 14 repositories
+claim:  18 dependencies across 14 repositories
 test:   grep -h 'repository:' charts/*/Chart.yaml | grep -vc 'file://'
-expect: 19
+expect: 18
 states: [0-9]+ dependencies
 
 # THE IMAGE COUNT, phrased the ways the `images` class cannot match. Added
@@ -609,7 +609,7 @@ expect: 14
 class:  chart dependencies (digits)
 match:  [0-9]+ dependencies\b
 test:   grep -h 'repository:' charts/*/Chart.yaml | grep -vc 'file://'
-expect: 19
+expect: 18
 
 class:  CI gates (digits)
 match:  [0-9]+ (CI |static )?gates\b
@@ -644,7 +644,9 @@ states: [0-9]+ blocks run on your workstation
 #
 # The policy layer's own counts, pinned 2026-09-12 (33), moved to 40 on 2026-09-29
 # by TM-0273: six AI-namespace egress policies and the platform S3 allow; 42 -> 43
-# on 2026-10-09 by TM-0982, the console-key check's egress rule.
+# on 2026-10-09 by TM-0982, the console-key check's egress rule; 43 -> 46 by TM-0799
+# (the node-agents namespace's default-deny and Prometheus allow, and the Alloy-to-Loki
+# allow in the monitoring namespace).
 # The NetworkPolicy number
 # read 24 over five namespaces while the chart rendered 33 over seven, under
 # BOTH ci/values.yaml and ci/values-all-on.yaml ... a stale count on a security
@@ -652,10 +654,10 @@ states: [0-9]+ blocks run on your workstation
 # as the node/workstation split above and the thirty-second-gate ordinal before
 # it: a number in prose that nothing re-measured.
 page:   charts/tockmox-policy/README.md
-claim:  over seven namespaces
+claim:  over eight namespaces
 test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c '^kind: NetworkPolicy' | tr -d ' '
-expect: 43
-states: [0-9]+ over seven namespaces
+expect: 46
+states: [0-9]+ over eight namespaces
 
 # The same number, on the two pages that RESTATE it. Added hours after the entry
 # above, because correcting the layer README did not correct the two pages that
@@ -671,7 +673,7 @@ states: [0-9]+ over seven namespaces
 page:   docs/usage/what-you-get.md
 claim:  NetworkPolicies in total
 test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c '^kind: NetworkPolicy' | tr -d ' '
-expect: 43
+expect: 46
 states: [A-Za-z0-9]+ NetworkPolicies
 
 # A FOURTH restating page, found 2026-09-14 by executing install.md's own
@@ -681,24 +683,25 @@ states: [A-Za-z0-9]+ NetworkPolicies
 page:   docs/deployment/install.md
 claim:  NetworkPolicy
 test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c '^kind: NetworkPolicy' | tr -d ' '
-expect: 43
+expect: 46
 states: [0-9]+ NetworkPolicy$
 
-# Pod Security: the label says `restricted` on all seven namespaces and, from
-# 0.7.0, `enforce` is set on five. The two numbers make the distinction
+# Pod Security: the label says `restricted` on all eight namespaces and, from
+# 0.7.0, `enforce` is set on seven (five at 0.7.0; monitoring joined and the node
+# agents' namespace was added by TM-0799). The two numbers make the distinction
 # checkable: an enforce label added or removed without the prose moving goes red
 # rather than the prose quietly becoming wrong. The enforce pin counts the
 # `enforce:` label only, not `enforce-version:`, which renders beside it.
 page:   charts/tockmox-policy/README.md
 claim:  namespaces carry the
 test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c 'pod-security.kubernetes.io/warn:' | tr -d ' '
-expect: 7
+expect: 8
 states: [0-9]+ namespaces carry the
 
 page:   charts/tockmox-policy/README.md
 claim:  namespaces carry an enforce label
 test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c 'pod-security.kubernetes.io/enforce:' | tr -d ' '
-expect: 5
+expect: 7
 states: [0-9]+ namespaces carry an enforce label
 
 # The policy README's own header count, pinned 2026-09-12. It read 54 against a
@@ -707,7 +710,7 @@ states: [0-9]+ namespaces carry an enforce label
 page:   charts/tockmox-policy/README.md
 claim:  resources
 test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c '^kind: ' | tr -d ' '
-expect: 72
+expect: 77
 states: [0-9]+ resources
 
 # NOT PINNED, deliberately, and the reason is worth keeping: the placeholder
@@ -741,13 +744,13 @@ states: [0-9]+ exemptions
 page:   docs/usage/what-you-get.md
 claim:  rendered resources
 test:   tools/render-counts.sh --read total
-expect: 609
+expect: 614
 states: [0-9]+ rendered resources
 
 page:   docs/architecture.md
 claim:  resources** render with the CI values
 test:   tools/render-counts.sh --read total
-expect: 609
+expect: 614
 states: [0-9]+ resources\*\* render
 
 page:   docs/usage/what-you-get.md
@@ -757,10 +760,10 @@ expect: 10
 states: [0-9]+ \| Cross-layer CRDs
 
 page:   docs/usage/what-you-get.md
-claim:  | policy | 75 | Namespaces, 43 NetworkPolicies
+claim:  | policy | 80 | Namespaces, 46 NetworkPolicies
 test:   tools/render-counts.sh --read policy
-expect: 75
-states: [0-9]+ \| Namespaces, 43 NetworkPolicies
+expect: 80
+states: [0-9]+ \| Namespaces, 46 NetworkPolicies
 
 page:   docs/usage/what-you-get.md
 claim:  | platform | 234 | Traefik, MetalLB

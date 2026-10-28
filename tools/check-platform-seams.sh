@@ -40,6 +40,12 @@
 #     PriorityClass, and tockmox-policy renders a PriorityClass of that name
 #     (TM-0820; default change).
 #
+# S18 The node agents (node-exporter, Alloy's log DaemonSet, the SMART exporter) render in
+#     the node-agents namespace and no pod that reads the host is left in the monitoring
+#     namespace; the policy layer labels the first privileged and the second baseline, and
+#     the two crossings (Alloy to the Loki gateway, Prometheus to the SMART exporter) have
+#     allow rules (TM-0799).
+#
 # `--selftest` feeds each assertion the render it must refuse (the same chart
 # with the seam left unset, or the value reverted) and requires a non-zero
 # answer, so a check that could never fail is found here and not in review.
@@ -205,6 +211,52 @@ sys.exit(0 if ok else 1)
 PY
 }
 
+# S18 (TM-0799): the privileged node agents live in their own namespace. Arguments: the
+# observability render, the exporters render (both with -n tockmox-monitoring, so an object
+# without a namespace lands there as it does under Argo CD), the policy render.
+s18() { python3 - "$1" "$2" "$3" <<'PY'
+import sys, yaml
+MON, NODE = "tockmox-monitoring", "tockmox-node-agents"
+def docs(f): return [x for x in yaml.safe_load_all(open(f)) if x]
+obs, exp, pol = (docs(a) for a in sys.argv[1:4])
+def ns(d): return d["metadata"].get("namespace") or MON
+def podspec(d):
+    if d.get("kind") in ("Deployment", "StatefulSet", "DaemonSet", "Job"): return d["spec"]["template"]["spec"]
+    if d.get("kind") == "CronJob": return d["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+    return None
+def reads_host(sp):
+    if sp.get("hostNetwork") or sp.get("hostPID") or sp.get("hostIPC"): return True
+    if any("hostPath" in v for v in sp.get("volumes") or []): return True
+    return any((c.get("securityContext") or {}).get("privileged") for c in (sp.get("containers") or []) + (sp.get("initContainers") or []))
+bad = []
+for d in obs + exp:
+    sp = podspec(d)
+    if sp and reads_host(sp) and ns(d) == MON:
+        bad.append("%s/%s reads the host and is in %s" % (d["kind"], d["metadata"]["name"], MON))
+agents = {"node-exporter": False, "alloy": False, "smartctl-exporter": False}
+for d in obs + exp:
+    if d.get("kind") == "DaemonSet":
+        for a in agents:
+            if a in d["metadata"]["name"]:
+                agents[a] = (ns(d) == NODE)
+bad += ["%s DaemonSet is not rendered in %s" % (a, NODE) for a, ok in agents.items() if not ok]
+for d in obs:
+    if d.get("kind") == "ConfigMap" and d["metadata"]["name"].endswith("-alloy"):
+        txt = "".join(d.get("data", {}).values())
+        if "loki-gateway.%s.svc" % MON not in txt:
+            bad.append("Alloy pushes to a Loki gateway address that does not name %s" % MON)
+names = {d["metadata"]["name"]: d for d in pol if d.get("kind") == "Namespace"}
+lab = lambda n: ((names.get(n) or {}).get("metadata", {}).get("labels") or {}).get("pod-security.kubernetes.io/enforce")
+if lab(NODE) != "privileged": bad.append("%s is not labelled enforce privileged (%r)" % (NODE, lab(NODE)))
+if lab(MON) not in ("baseline", "restricted"): bad.append("%s does not enforce baseline or restricted (%r)" % (MON, lab(MON)))
+np = {(d["metadata"]["namespace"], d["metadata"]["name"]) for d in pol if d.get("kind") == "NetworkPolicy"}
+for want in ((NODE, "default-deny-ingress"), (NODE, "allow-from-prometheus"), (MON, "allow-from-node-agents")):
+    if want not in np: bad.append("NetworkPolicy %s/%s is not rendered" % want)
+for b in bad: print("   ", b, file=sys.stderr)
+sys.exit(1 if bad else 0)
+PY
+}
+
 # Renders. "good" has the seam in use; "bad" is what the assertion must refuse.
 LAB=(--set 'global.namespaceLabels.zarf\.dev/agent=ignore')
 r pol.good policy "${LAB[@]}"
@@ -237,6 +289,16 @@ r argo.bad devops --api-versions monitoring.coreos.com/v1 --set argo-workflows.c
   --set argo-workflows.controller.metricsConfig.honorLabels=false \
   --set argo-workflows.controller.priorityClassName= --set argo-workflows.server.priorityClassName=
 r mc.good policy -f ci/values-all-on.yaml --set 'platformNetpol.extraMonitoringClientNamespaces={site-ai}'
+# S18 (TM-0799): rendered into the monitoring namespace, as Argo CD does, with every shipped app on.
+rn() { local out="$1" chart="$2"; shift 2; helm template t "charts/tockmox-$chart" -n tockmox-monitoring -f ci/values.yaml -f ci/values-all-on.yaml "$@" > "$T/$out" 2>"$T/$out.err" || { cat "$T/$out.err" >&2; return 1; }; }
+rn na.obs observability
+rn na.exp exporters
+rn na.pol policy
+{ cat "$T/na.obs"; printf '%s\n' '---' 'apiVersion: apps/v1' 'kind: Deployment' 'metadata:' '  name: planted' 'spec:' '  template:' '    spec:' '      containers: [{name: x, image: x}]' '      volumes: [{name: h, hostPath: {path: /}}]'; } > "$T/na.planted"
+# The old layout restored: the two overrides emptied, so both DaemonSets land in the monitoring namespace.
+rn na.obs.bad observability --set kube-prometheus-stack.prometheus-node-exporter.namespaceOverride= --set alloy.namespaceOverride=
+# The policy layer without the namespace: no label, no allow rules.
+rn na.pol.bad policy --set namespaces.node_agents= --set podSecurity.enforce.monitoring=
 
 if [ "${1:-}" = "--selftest" ]; then
   fail=0
@@ -259,6 +321,7 @@ if [ "${1:-}" = "--selftest" ]; then
   must_hold s14 "$T/argo.good"
   must_hold s15 "$T/argo.good" "$T/pol.bad"
   must_hold s16 "$T/probe.allon"
+  must_hold s18 "$T/na.obs" "$T/na.exp" "$T/na.pol" 2>/dev/null
   must_refuse S1 s1 "$T/pol.bad" "$T/plat.bad"
   must_refuse S2 s2 "$T/plat.bad"
   must_refuse S3 s3 "$T/probe.bad"
@@ -279,11 +342,16 @@ if [ "${1:-}" = "--selftest" ]; then
   must_refuse S14 s14 "$T/argo.bad"
   must_refuse S15 s15 "$T/argo.bad" "$T/pol.bad"
   sed 's#/-/health/ready/##' "$T/probe.allon" > "$T/probe.rootauth"; must_refuse S16 s16 "$T/probe.rootauth"
+  must_refuse "S18 (the agents back in the monitoring namespace)" s18 "$T/na.obs.bad" "$T/na.exp" "$T/na.pol" 2>/dev/null
+  must_refuse "S18 (no node-agents namespace in the policy layer)" s18 "$T/na.obs" "$T/na.exp" "$T/na.pol.bad" 2>/dev/null
+  must_refuse "S18 (a hostPath pod planted in the monitoring namespace)" s18 "$T/na.planted" "$T/na.exp" "$T/na.pol" 2>/dev/null
   must_refuse "S17 (default probes the gateway)" s17 "$T/probe.llmoff"
   must_refuse "S17 (apps.litellm.enabled false drops the probe)" s17_off "$T/probe.nollm"
   # The refusals (a chart-owned label; an empty etcd target list) must be errors.
   if r x policy --set 'global.namespaceLabels.tockmox\.com/layer=evil' 2>/dev/null; then echo "selftest FAIL: owned label accepted"; fail=1; else echo "selftest ok: an owned namespace label is refused"; fi
   if r x observability --set apps.etcdScrapeConfig.enabled=true 2>/dev/null; then echo "selftest FAIL: empty etcd targets accepted"; fail=1; else echo "selftest ok: empty etcd targets are refused"; fi
+  if rn x exporters --set namespaces.nodeAgents= 2>/dev/null; then echo "selftest FAIL: an empty namespaces.nodeAgents rendered the SMART exporter"; fail=1; else echo "selftest ok: an empty namespaces.nodeAgents is refused when the SMART exporter is on"; fi
+  if rn x observability --set namespaces.nodeAgents=elsewhere 2>/dev/null; then echo "selftest FAIL: a node agents namespace that differs from the subcharts' override was accepted"; fail=1; else echo "selftest ok: a node agents namespace that differs from the subcharts' override is refused"; fi
   [ "$fail" -eq 0 ] || exit 1
   exit 0
 fi
@@ -309,6 +377,7 @@ chk "S15 workflow controller and server use the infrastructure PriorityClass" s1
 chk "S16 Authentik's console probe targets its readiness endpoint, not its onboarding redirect" s16 "$T/probe.allon"
 chk "S17 the smallest real site probes the gateway (it follows the capability since 0.8.0)" s17 "$T/probe.nollm"
 chk "S17 apps.litellm.enabled false in a file this layer reads drops the gateway probe" s17_off "$T/probe.llmoff"
+chk "S18 the node agents run in the node-agents namespace; nothing that reads the host is left in the monitoring namespace; the crossings are allowed" s18 "$T/na.obs" "$T/na.exp" "$T/na.pol"
 # Owned labels and empty targets must fail the render, not pass quietly.
 if r x policy --set 'global.namespaceLabels.tockmox\.com/layer=evil' 2>/dev/null; then echo "FAIL S1 owned label accepted"; rc=1; else echo "  ok S1 an owned namespace label is refused"; fi
 if r x observability --set apps.etcdScrapeConfig.enabled=true 2>/dev/null; then echo "FAIL S6 empty targets accepted"; rc=1; else echo "  ok S6 empty etcd targets are refused"; fi

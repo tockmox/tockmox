@@ -308,13 +308,6 @@
       "version": "9.18.2"
     },
     {
-      "description": "Helm chart dependency of tockmox-exporters",
-      "name": "prometheus-smartctl-exporter",
-      "purl": "pkg:generic/helm/prometheus-smartctl-exporter@0.17.1",
-      "type": "application",
-      "version": "0.17.1"
-    },
-    {
       "description": "Helm chart dependency of tockmox-identity",
       "name": "authentik",
       "purl": "pkg:generic/helm/authentik@2026.8.5",

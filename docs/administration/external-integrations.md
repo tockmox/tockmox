@@ -477,14 +477,14 @@ runs all of them. That reasoning lives in the template comments.
 1. **Required.** Point the namespace key at where your workload actually runs.
 2. **Conditional. If** you want Tockmox to create that namespace rather than
    adopting one you made, add the key to `namespaces.create`. The shipped list
-   is seven entries; this adds an eighth.
+   is eight entries; this adds a ninth.
 3. **Required.** Set the flag.
 
 ```yaml
 # site/values/policy.yaml
 namespaces:
   create: [ai, monitoring, platform, authentik,
-           diagnostic_identity, selfcheck, devops, tailscale]
+           diagnostic_identity, selfcheck, devops, node_agents, tailscale]
   tailscale: tailscale          # YOU SUPPLY: your workload's real namespace
 apps:
   tailscale_netpol: { enabled: true }

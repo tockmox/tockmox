@@ -8,8 +8,5 @@ dependencies:
 - name: prometheus-snmp-exporter
   repository: https://prometheus-community.github.io/helm-charts
   version: 9.18.2
-- name: prometheus-smartctl-exporter
-  repository: https://prometheus-community.github.io/helm-charts
-  version: 0.17.1
-digest: sha256:dcaa5f582f82bfab3df3e32e8579cf73c9618abf4effcd6c307cdf8ec4322c2a
-generated: "2026-10-26T08:45:53.952505332Z"
+digest: sha256:5f0b83e13bb2fd345a63c320fa5ab553254901b7422cfe0acc242219162530d3
+generated: "2026-10-27T19:41:46.184148308-05:00"

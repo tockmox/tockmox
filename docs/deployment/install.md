@@ -1145,7 +1145,7 @@ SYNC=Synced HEALTH=Healthy
 --- operation ---
 Succeeded: successfully synced (all tasks run)
 --- resources ---
-     43 NetworkPolicy
+     46 NetworkPolicy
       7 Namespace
       4 ValidatingAdmissionPolicy
       4 ValidatingAdmissionPolicyBinding
