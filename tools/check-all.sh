@@ -77,6 +77,46 @@ cpu_count() {
 }
 JOBS="${CHECK_ALL_JOBS:-$(cpu_count)}"
 case "$JOBS" in ''|*[!0-9]*|0) JOBS=1 ;; esac
+
+# A GATE THAT NEVER RETURNS IS NAMED, NOT SWALLOWED (2026-10-27). In parallel mode a gate's output is
+# held until the end, so one gate that loops forever used to hold the whole run until something
+# outside killed it, and the report named nothing. Now each gate runs under a time limit,
+# CHECK_ALL_GATE_TIMEOUT seconds (default 1200; 0 = no limit). A gate past it is stopped with
+# everything it started (its own process group, so a python child spinning under a bash gate goes
+# too) and counted as a failure named "TIMEOUT after N s". Serial mode (CHECK_ALL_JOBS=1) streams
+# each gate's name before it runs, so a hang there is already named, and it is left unwrapped so a
+# gate keeps the terminal. A caller with its own budget for the whole run (a CI job's timeout, a QA
+# harness) should give it more than this limit, so a hang ends here, with a name, first.
+GATE_TIMEOUT="${CHECK_ALL_GATE_TIMEOUT:-1200}"
+case "$GATE_TIMEOUT" in ''|*[!0-9]*) GATE_TIMEOUT=1200 ;; esac
+GATE_TIMEOUT_PY='
+import os, signal, subprocess, sys
+secs = int(sys.argv[1])
+p = subprocess.Popen(sys.argv[2:], start_new_session=True)
+def stop(*_):
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(p.pid, sig)
+        except ProcessLookupError:
+            return
+        try:
+            p.wait(timeout=5)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+def on_signal(signum, _):
+    stop()
+    sys.exit(128 + signum)
+signal.signal(signal.SIGTERM, on_signal)
+signal.signal(signal.SIGINT, on_signal)
+try:
+    rc = p.wait(timeout=secs)
+except subprocess.TimeoutExpired:
+    stop()
+    print("  TIMEOUT: still running after %d s; the gate and everything it started were stopped" % secs, flush=True)
+    sys.exit(124)
+sys.exit(128 - rc if rc < 0 else rc)
+'
 SLOTS="$(mktemp -d)"
 trap 'rm -rf "$SLOTS"' EXIT
 nslot=0
@@ -116,7 +156,11 @@ run_gate() {
   while [ "$(jobs -rp | wc -l | tr -d ' ')" -ge "$JOBS" ]; do sleep 0.2; done
   (
     t0=$(date +%s)
-    "$@" > "$slot.log" 2>&1 < /dev/null
+    if [ "$GATE_TIMEOUT" -gt 0 ]; then
+      python3 -c "$GATE_TIMEOUT_PY" "$GATE_TIMEOUT" "$@" > "$slot.log" 2>&1 < /dev/null
+    else
+      "$@" > "$slot.log" 2>&1 < /dev/null
+    fi
     echo "$?" > "$slot.rc.tmp"
     echo $(( $(date +%s) - t0 )) > "$slot.secs"
     mv "$slot.rc.tmp" "$slot.rc"
@@ -480,6 +524,7 @@ if [ "$JOBS" -gt 1 ]; then
     printf '\n=== %s === (%ss)\n' "$n" "$(cat "$b.secs" 2>/dev/null || echo '?')"
     cat "$b.log" 2>/dev/null
     [ -e "$b.rc" ] || echo "  (no exit status recorded: the gate's runner died)"
+    [ "$rc" = 124 ] && [ "$GATE_TIMEOUT" -gt 0 ] && n="$n (TIMEOUT after ${GATE_TIMEOUT} s)"
     tally "$n" "$rc"
   done
   printf '\nSlowest gates:\n'

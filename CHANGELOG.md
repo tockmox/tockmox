@@ -395,6 +395,16 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **`tools/check-all.sh` names a gate that never returns instead of hanging
+  with it.** A tree that already lacked Grafana's memory limit sent the
+  memory-limit gate's selftest into a regular expression that backtracked
+  without end, so a parallel run sat at 100% of one CPU until something outside
+  killed it, and the report named no gate. The expression now matches each
+  indented line one way only, and in parallel mode every gate runs under
+  `CHECK_ALL_GATE_TIMEOUT` (seconds, default 1200, 0 for no limit). A gate past
+  it is stopped with everything it started and reported as a failure marked
+  `TIMEOUT after N s`.
+
 - **The Argo CD sign-in recipe works on a site that uses the shipped private CA.**
   `docs/administration/argocd.md` ("A hostname and a portal tile") left out two
   things a lab run of it needed or Argo CD documents: `rootCA` in `oidc.config`,

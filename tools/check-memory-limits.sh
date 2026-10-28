@@ -135,7 +135,11 @@ PY
   if grep -q "$4" <<<"$out"; then echo "selftest ok    $1: RED on '$4'"; else echo "selftest FAIL  $1: red, but not for the expected reason"; echo "$out" | grep error | head -3 || true; fail=1; fi
 }
 # A limited container loses its limit (the TM-0553 container itself).
-mutate "grafana loses its memory limit" observability.yaml "re.sub(r'(\n +- name: grafana\n(?: {10,}.*\n)*? +limits:\n +memory: )1536Mi', r'\1null', s, 1)" "t-grafana container grafana has no memory limit"
+# `\S` after the indent makes each line's indentation one unambiguous run. With `.*` alone the
+# spaces could be split between ` {10,}` and `.*` in many ways, so on a render that already lacks
+# the limit Python's regex engine tried every split of every line of the Grafana block (about 100
+# lines) and never finished: one process at 100% of a CPU until check-all was killed (2026-10-27).
+mutate "grafana loses its memory limit" observability.yaml "re.sub(r'(\n +- name: grafana\n(?: {10,}\S.*\n)*? +limits:\n +memory: )1536Mi', r'\1null', s, 1)" "t-grafana container grafana has no memory limit"
 # A new subchart container arrives with no limit.
 mutate "a new unlimited container appears" ai.yaml "s + '---\napiVersion: apps/v1\nkind: Deployment\nmetadata: {name: t-new}\nspec:\n  template:\n    spec:\n      containers: [{name: c, image: x}]\n'" "t-new container c has no memory limit"
 # A residue container gains a limit, and the entry stays: the ratchet must ask for its removal.
