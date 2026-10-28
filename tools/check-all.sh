@@ -305,6 +305,11 @@ fi
 # gate moves the counts doc-claims.txt pins, and that is its own change.
 run_gate "the posture-probe add-on stays observe-only: read-only role, confined policy, versioned report (TM-0874)" bash tools/check-posture-probe.sh
 run_gate "the posture-probe gate goes red on a write verb, a widened read, a leaked output and a broken contract (TM-0874)" bash tools/check-posture-probe.sh --selftest
+# The first-party add-on manifest (TM-1115): the manifest, the settings schema, no code in the admin origin
+# and the operations contract, held against each add-on's render. Not in ci.yaml yet, for the same reason
+# as the posture-probe gate above; the add-on's values keys ARE in ci.yaml, through check-values-tiers.
+run_gate "every add-on keeps its manifest: settings schema, no code in the admin origin, operations contract (TM-1115)" bash tools/check-addon-manifest.sh
+run_gate "the add-on manifest gate goes red on a missing manifest, browser code, a route, a write verb and an undeclared claim (TM-1115)" bash tools/check-addon-manifest.sh --selftest
 run_gate "the upgrade-wedging shapes from the 0.7.0 lab pass stay fixed" bash tools/check-upgrade-safety.sh
 run_gate "the upgrade-safety gate goes red on a migrations Job that is not a Sync hook, a pre-upgrade backup that does not wait, or a drift from upstream (TM-1196, TM-1054)" bash tools/check-upgrade-safety.sh --selftest
 # A pipe into `grep -q` under pipefail fails at random: grep exits at the first

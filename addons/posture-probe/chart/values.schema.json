@@ -7,16 +7,22 @@
   "properties": {
     "enabled": {
       "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "boolean",
       "description": "Render anything at all. Off by default."
     },
     "image": {
       "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "string",
       "description": "The site-built image (addons/posture-probe/Dockerfile). Required when enabled."
     },
     "imagePullPolicy": {
       "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
       "enum": [
         "Always",
         "IfNotPresent",
@@ -25,19 +31,27 @@
     },
     "schedule": {
       "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "string",
       "minLength": 9
     },
     "suspend": {
       "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "boolean"
     },
     "clusterIdentifier": {
       "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "string"
     },
     "namespaces": {
       "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
@@ -49,6 +63,8 @@
     },
     "identityVantages": {
       "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "array",
       "items": {
         "type": "object",
@@ -75,6 +91,8 @@
     },
     "intent": {
       "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -122,6 +140,8 @@
     },
     "targets": {
       "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -171,6 +191,8 @@
     },
     "standins": {
       "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -181,6 +203,8 @@
     },
     "settle": {
       "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "object",
       "additionalProperties": false,
       "description": "Wait out the window in which a new pod is not yet policed (the settling window).",
@@ -237,6 +261,8 @@
     },
     "timeouts": {
       "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -254,6 +280,8 @@
     },
     "store": {
       "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -272,6 +300,8 @@
     },
     "networkPolicy": {
       "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "object",
       "additionalProperties": false,
       "properties": {
@@ -300,10 +330,14 @@
     },
     "resources": {
       "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "object"
     },
     "global": {
       "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "object",
       "description": "Open, so a shared site values file is accepted; only global.lanCIDR is read."
     }

@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The first-party add-on manifest of the Security Posture Probe (TM-1115).
+# The format is defined in addons/README.md and enforced by
+# tools/check-addon-manifest.sh; a field the gate does not know is refused.
+manifestVersion: 1
+
+name: posture-probe
+title: Security Posture Probe
+summary: >-
+  Measures whether what the cluster enforces matches what you declared, and
+  gates on the difference. Observe-and-report only.
+owner: first-party
+stability: experimental       # equals the chart's tockmox.com/stability annotation
+docs: docs/administration/posture-probe.md
+
+chart:
+  path: chart
+  version: 0.1.0              # equals Chart.yaml; an add-on is versioned on its own
+
+# THE SETTINGS SCHEMA. The chart's values.schema.json is the add-on's whole
+# settings surface. Every top-level key carries x-tockmox-stability and a dated
+# ruling, exactly as a layer's keys do, and tools/check-values-tiers.sh reads it.
+settings:
+  schema: chart/values.schema.json
+  defaultEnabled: false       # `enabled: false` in values.yaml and an empty default render
+
+# NO CODE IN THE ADMIN ORIGIN. The add-on contributes data (its settings schema
+# and its report), never code the admin console would load or run. No script, no
+# page, no stylesheet in the tree; no object that exposes a route to the cluster.
+adminUi:
+  code: none
+  exposes: none
+
+# THE OPERATIONS CONTRACT: what the operator can rely on, written as facts the
+# gate and the docs can both be held to.
+operations:
+  install:
+    mode: standalone-application      # its own Argo CD Application or `helm install`; never a layer
+    namespace: tockmox-posture        # its own; the add-on refuses to render into a namespace it measures
+    needs: []                         # no layer, capability or component must be present first
+  access:
+    kubernetesApi: read-only          # get/list/watch, plus create on the two self-review oracles
+    safetyGate: tools/check-posture-probe.sh
+  containment:
+    touchesRunningServices: false     # a failed or red run never changes a service
+    egress: declared-endpoints-only   # its NetworkPolicy allows DNS and the named API addresses
+  data:
+    - name: posture-probe-reports
+      kind: persistentvolumeclaim
+      sensitive: true                 # a map of what can reach what
+      backedUp: false                 # reproducible by running again; evidence you keep is yours to copy
+  observability:
+    metrics: none
+    alerts: none
+    logs: counts-only                 # the Job log carries counts, never findings
+  upgrade:
+    versioning: own-chart-version     # RELEASING.md's version bump does not touch it
+    path: replace-chart-version       # no migration; the report contract is versioned in its own schema
+  removal:
+    doc: docs/administration/posture-probe.md
+    leaves:
+      - posture-probe-reports         # kept on purpose: deleting evidence is the operator's decision
+  support: experimental
+
+# How CI renders the add-on switched on: the values the gate passes with --set.
+render:
+  set:
+    enabled: "true"
+    image: registry.example.com/tockmox/posture-probe:0.1.0
+    networkPolicy.apiServer[0].cidr: 192.0.2.10/32

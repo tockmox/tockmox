@@ -405,11 +405,20 @@ jq -r '.properties | to_entries[]
        | [.key, .value["x-tockmox-stability"],
           .value["x-tockmox-stability-ruled"], .value["x-tockmox-stability-rerule"]]
        | @tsv' \
-  charts/*/values.schema.json | sort -u
+  charts/*/values.schema.json addons/*/chart/values.schema.json | sort -u
 ```
 
 The gate reads top-level keys only. A non-stable key nested inside a block
 (`modelGateway.policyGate`) carries its parent's ruling.
+
+**Add-on keys are ruled the same way.** An add-on's settings are a published
+values surface like a layer's, so the gate reads
+`addons/*/chart/values.schema.json` beside `charts/*/values.schema.json`: a key
+there with no tier, no ruling or an overdue re-rule is refused, and a `stable`
+add-on key does not move unannounced. Until 0.9.0 the gate read `charts/*` only,
+which left the posture probe's keys outside the contract the rest of this page
+describes. The add-on contract itself is in
+[addons/README.md](https://github.com/tockmox/tockmox/blob/main/addons/README.md).
 
 ### Exclusions that apply wherever they appear
 

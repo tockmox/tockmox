@@ -37,6 +37,13 @@ see). The run's exit code is a gate you can wire into change control.
 > of the nine layers, nothing in the platform depends on it, and its values keys
 > may change before they are marked stable.
 
+Its promises are written as data in `addons/posture-probe/addon.yaml` (the
+first-party add-on manifest: its settings schema, that it ships no code the admin
+console runs, and its operations contract) and held by
+`tools/check-addon-manifest.sh`. Every values key carries a stability tier and a
+dated ruling, held by `tools/check-values-tiers.sh`. The format is in
+[addons/README.md](https://github.com/tockmox/tockmox/blob/main/addons/README.md).
+
 ## What it may do, by construction
 
 The probe observes and reports. Its safety is the role it runs under, not a
