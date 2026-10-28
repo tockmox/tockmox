@@ -238,7 +238,10 @@ layer only attaches the Middleware, by reference, with the annotation below.
 
 The reference is provider-qualified (`<namespace>-<name>@kubernetescrd`), which
 is how Traefik resolves a Middleware in another namespace from an Ingress
-annotation or an IngressRoute. The default matches a stock install (identity in
+annotation. An IngressRoute cannot use it: Traefik refuses `@kubernetescrd`
+references and cross-namespace Middlewares from the CRD provider unless its
+`allowCrossNamespace` is on, so the platform layer's Traefik dashboard route
+carries a Middleware of its own (TM-0217). The default matches a stock install (identity in
 `tockmox-authentik`); `ingress.forwardAuth.middleware` overrides it for a site
 that moved the identity layer.
 

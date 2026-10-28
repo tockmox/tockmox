@@ -6,11 +6,15 @@
 # the per-console proxy providers:
 #
 # 1. ONE Traefik Middleware, `tockmox-forward-auth`, asking Authentik's embedded
-#    outpost whether the request may pass. Every forward-auth console attaches
-#    it by its provider-qualified name (tockmox.forwardAuthRef in
-#    tockmox-common), so it is the same object for Prometheus, Alertmanager,
-#    Longhorn and the Traefik dashboard, and for any route of your own you put
-#    behind it. The outpost decides PER HOST which provider applies, so sharing
+#    outpost whether the request may pass. Every forward-auth console that is
+#    an Ingress attaches it by its provider-qualified name
+#    (tockmox.forwardAuthRef in tockmox-common), so it is the same object for
+#    Prometheus, Alertmanager and Longhorn, and for any Ingress of your own you
+#    put behind it. The Traefik dashboard is an IngressRoute, which cannot
+#    attach another namespace's Middleware (TM-0217): the platform layer
+#    renders a copy of this one's spec beside it, and
+#    tools/check-forward-auth.sh holds the two equal.
+#    The outpost decides PER HOST which provider applies, so sharing
 #    the Middleware does not share the access decision. Rendered only when at
 #    least one console is on (`sso.forwardAuth.apps`), so an install that runs
 #    its own ingress controller without Traefik's CRDs never meets the kind.

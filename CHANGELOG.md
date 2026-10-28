@@ -250,6 +250,26 @@ costs you, with the reasoning in the documentation rather than here.
 - **The manual Mac setup steps bring up the firewall before the engine
   listens.**
 
+- **Forward-auth consoles send a signed-out browser to the Authentik login, and
+  the Traefik dashboard answers.** Both defects were found on the 0.9.0
+  clean-install lab leg (the maintainers' lab, 2026-10-28) and passed every render gate.
+  An unauthenticated request to Prometheus, Alertmanager or Longhorn was refused
+  and then redirected to `http://localhost/application/o/authorize/...`, because
+  the embedded outpost is created with a blank `authentik_host` and nothing set
+  it. The identity layer's outpost entry now sets `authentik_host` to the auth
+  host's origin (`https://auth.<internalDomain>/`). It replaces the field whole,
+  like the provider list, so a value you set by hand on the embedded outpost is
+  replaced at the next apply. `https://traefik.<internalDomain>/dashboard/`
+  answered `404`: an IngressRoute cannot attach the identity layer's Middleware
+  by its `@kubernetescrd` name while Traefik's `allowCrossNamespace` is off,
+  which is its default and the platform layer's. The platform layer now renders
+  `traefik-dashboard-forward-auth` beside the route, with the same spec;
+  `ingress.forwardAuth.address` overrides where it asks, for a site that moved
+  the identity layer. `tools/check-forward-auth.sh` now fails on a blank or
+  wrong outpost host (F6) and on any IngressRoute in any chart that reaches
+  across a namespace while `allowCrossNamespace` is off (F7). Nothing to change
+  on upgrade.
+
 ## [0.8.2] ... 2026-10-25
 
 A patch release: two fixes to how the identity layer applies Authentik

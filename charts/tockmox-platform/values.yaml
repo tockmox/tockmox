@@ -69,6 +69,14 @@ ingress:
   # (tockmox-authentik-tockmox-forward-auth@kubernetescrd).
   forwardAuth:
     middleware: ""
+    # Where the Traefik dashboard's own forward-auth Middleware asks "may this
+    # request pass". An IngressRoute cannot attach the identity layer's
+    # Middleware (a cross-namespace reference, which Traefik refuses while
+    # providers.kubernetesCRD.allowCrossNamespace is false), so the dashboard
+    # gets one in this namespace. Empty is the identity layer's Authentik
+    # server on a stock install; set it only if you moved that layer. Not read
+    # by the Ingress consoles, which use `middleware` above.
+    address: ""
   # Longhorn and the Traefik dashboard ship no sign-in. Turning a route on puts
   # Authentik's forward-auth in front of it (TM-0425), which needs the SAME
   # console on in the identity layer (`sso.forwardAuth.apps.<app>.enabled`), and
@@ -580,11 +588,10 @@ traefik:
   # Service, so reaching it needs pod-network access or a port-forward, and the
   # policy layer's NetworkPolicies constrain the former.
   #
-  # The routed, authenticated dashboard is the real answer and is NOT here yet:
-  # it needs a forward-auth middleware the platform chart does not ship. See
-  # TM-0425. Until then this is a break-glass path, which is the right shape
-  # anyway ... a console that tells you WHY routing is broken should not be
-  # reachable only through the routing you are trying to debug.
+  # The routed, authenticated dashboard is `ingress.apps.traefik` above
+  # (TM-0425, TM-0217). This is the break-glass path beside it, which is the
+  # right shape anyway ... a console that tells you WHY routing is broken
+  # should not be reachable only through the routing you are trying to debug.
   # ---------------------------------------------------------------------------
   ingressRoute:
     dashboard:
