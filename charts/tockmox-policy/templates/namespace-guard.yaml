@@ -1,0 +1,111 @@
+{{- if .Values.apps.namespace_guard.enabled }}
+{{- /*
+Namespace squat prevention: Tockmox-owned namespaces take objects only from GitOps
+or the platform.
+
+The namespaces this chart creates carry tockmox.com/managed-by=tockmox. Without
+a guard, anyone with `create` in one of them (a person with a RoleBinding, a
+site workload's ServiceAccount) can put an object next to the platform's own:
+a Secret an operator will read, a Service that shadows a platform one, a
+ConfigMap a controller trusts. This policy refuses that CREATE unless the
+requester is GitOps or the platform itself.
+
+WHAT IT ADMITS (the matchCondition below is the whole list, nothing else is
+exempt):
+  - ServiceAccounts of the trusted namespaces, derived from this chart's own
+    `namespaces` values so a renamed namespace moves the exemption with it:
+    every namespace in `namespaces.create`, the namespaces the platform's
+    controllers run in (traefik, cnpg_system, longhorn_system, kured), the Argo
+    CD namespace (namespaces.argocd), kube-system (built-in controllers, the
+    k3s Helm controller, sealed-secrets as fresh-install.md installs it), the
+    kube-bench namespace when apps.kube_bench is on, and
+    namespaceGuard.extraExemptServiceAccountNamespaces for a site's own
+    controllers. A namespace that merely LOOKS like ours (tockmox-evil) is not
+    on the list: the exemption is by derived name, not by prefix.
+  - system: identities that are not ServiceAccounts (kubelets, the scheduler,
+    the controller manager, the API server), except system:anonymous.
+  - group system:masters (break-glass administration) and
+    namespaceGuard.extraExemptGroups.
+  - namespaceGuard.extraExemptUsers: exact usernames, for one controller that
+    needs to write into a Tockmox namespace and lives nowhere above (a
+    vulnerability scanner writing reports next to every workload is the case
+    that surfaced in the reference homelab's Warn soak).
+
+WHAT IT DOES NOT COVER, deliberately: subresources (pods/exec, serviceaccounts/token
+are not CREATE of the object), UPDATE and DELETE (the guard is about squatting, not
+tampering; RBAC owns those), cluster-scoped objects, and namespaces without the
+label (a namespace you create yourself and a site's own site-* namespaces).
+
+OFF BY DEFAULT, and Warn when on. The first thing it teaches is which identities
+your cluster has that this list does not name, and a Deny that guessed wrong
+blocks a sync. Read the warnings, add what is legitimate, then raise
+namespaceGuard.validationActions to ["Deny"]. failurePolicy Ignore: an
+evaluation error never blocks a request.
+*/ -}}
+{{- $ns := .Values.namespaces }}
+{{- $ng := .Values.namespaceGuard }}
+{{- $trusted := list "kube-system" }}
+{{- range $key := $ns.create }}
+{{- $name := index $ns $key }}
+{{- if $name }}{{- $trusted = append $trusted $name }}{{- end }}
+{{- end }}
+{{- range $key := list "traefik" "cnpg_system" "longhorn_system" "kured" "argocd" }}
+{{- $name := index $ns $key }}
+{{- if $name }}{{- $trusted = append $trusted $name }}{{- end }}
+{{- end }}
+{{- if .Values.apps.kube_bench.enabled }}
+{{- if $ns.kube_bench }}{{- $trusted = append $trusted $ns.kube_bench }}{{- end }}
+{{- end }}
+{{- range $ng.extraExemptServiceAccountNamespaces }}{{- $trusted = append $trusted . }}{{- end }}
+{{- $trusted = $trusted | uniq | sortAlpha }}
+{{- $groups := prepend ($ng.extraExemptGroups | default list) "system:masters" | uniq }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: tockmox-namespace-guard
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  failurePolicy: {{ $ng.failurePolicy }}
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["*"]
+        apiVersions: ["*"]
+        operations: ["CREATE"]
+        resources: ["*"]
+        scope: Namespaced
+    # Only namespaces this chart manages. Nothing else on the cluster is the
+    # guard's business.
+    namespaceSelector:
+      matchLabels:
+        tockmox.com/managed-by: tockmox
+  matchConditions:
+    - name: not-gitops-or-platform
+      expression: >-
+        !({{ $trusted | toJson }}.exists(n, request.userInfo.username.startsWith('system:serviceaccount:' + n + ':')) ||
+          {{- if $ng.extraExemptUsers }}
+          {{ $ng.extraExemptUsers | toJson }}.exists(u, request.userInfo.username == u) ||
+          {{- end }}
+          (request.userInfo.username.startsWith('system:') &&
+           !request.userInfo.username.startsWith('system:serviceaccount:') &&
+           request.userInfo.username != 'system:anonymous') ||
+          (has(request.userInfo.groups) && {{ $groups | toJson }}.exists(g, g in request.userInfo.groups)))
+  validations:
+    - expression: "false"
+      messageExpression: >-
+        'Namespaces managed by Tockmox take objects only from GitOps or the platform: ' +
+        request.userInfo.username + ' may not create ' + request.kind.kind + ' in ' +
+        request.namespace + '. Put it in Git, or in a namespace of your own.'
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: tockmox-namespace-guard
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  policyName: tockmox-namespace-guard
+  validationActions: {{ $ng.validationActions | toJson }}
+{{- end }}

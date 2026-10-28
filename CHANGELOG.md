@@ -248,6 +248,20 @@ costs you, with the reasoning in the documentation rather than here.
   the mirror's fallback) is unchanged, byte for byte, and supports "pulls are
   cached" and nothing more. No provision has been run in the new mode yet.
 
+- **A namespace guard, off by default (experimental).** `apps.namespace_guard.enabled`
+  adds one `ValidatingAdmissionPolicy`, `tockmox-namespace-guard`, that refuses a
+  `CREATE` in a namespace the policy layer manages unless the requester is Argo
+  CD, `kube-system`, a ServiceAccount of a namespace the chart itself creates or
+  names (derived from `namespaces`, so a renamed namespace moves with it), a
+  `system:` identity that is not a ServiceAccount (not `system:anonymous`), or
+  `system:masters`. A site adds a legitimate caller under `namespaceGuard`
+  (`extraExemptServiceAccountNamespaces`, `extraExemptUsers`,
+  `extraExemptGroups`). It ships in Warn (`["Audit", "Warn"]`, `failurePolicy:
+  Ignore`): nothing is refused until a site reads what it would have refused and
+  sets `namespaceGuard.validationActions` to `["Deny"]`. `tools/check-namespace-guard.sh`
+  evaluates the expression against every ServiceAccount the nine layers ship.
+  See `docs/administration/namespace-guard.md`.
+
 ### Changed
 
 - **The LiteLLM migrations Job is LiteLLM's own, as an Argo CD `Sync` hook, and

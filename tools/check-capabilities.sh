@@ -131,6 +131,11 @@ CORE=(certManager metallb traefik longhorn cnpg kured addressPool
       # "declared" means to check 4, and because a capability would be the wrong
       # promise (declining nothing removes nothing).
       kube_bench
+      # namespace_guard is an admission policy, not a story: OFF by default and
+      # Warn when on, it refuses nothing a capability decision could remove, and
+      # declining a capability must not switch a safety control on or off. Same
+      # reasoning as kube_bench for sitting here.
+      namespace_guard
       # etcdScrapeConfig is a site seam, not a story: OFF by default,
       # because its targets are the site's own control-plane addresses, and
       # declining observability already removes it (it renders only with the

@@ -544,6 +544,33 @@ platformNetpol:
   extraMonitoringClientNamespaces: []
 
 # ---------------------------------------------------------------------------
+# NAMESPACE GUARD (apps.namespace_guard, off by default). Only matters when it is
+# turned on; read templates/namespace-guard.yaml for what it admits and what it
+# does not cover.
+#
+# WHY IT SHIPS IN WARN. The exemption list is derived from `namespaces` above and
+# names the product's own controllers, Argo CD, kube-system and system:masters.
+# It cannot know the controllers YOUR cluster adds (a scanner that writes reports
+# beside every workload, a backup operator, a service mesh injector). Run in
+# Warn, read what the API server says it would have refused
+#   sum by (policy, enforcement_action)
+#     (increase(apiserver_validating_admission_policy_check_total{policy="tockmox-namespace-guard"}[7d]))
+# and the Argo sync messages, exempt each legitimate caller below with a reason,
+# and only then set validationActions to ["Deny"]. Rollback is the same key.
+namespaceGuard:
+  # ["Audit","Warn"] observes without blocking. ["Deny"] refuses. Set
+  # failurePolicy to Fail only if a policy evaluation error should also refuse.
+  validationActions: ["Audit", "Warn"]
+  failurePolicy: Ignore
+  # Whole namespaces whose ServiceAccounts may create here, beyond the ones the
+  # chart derives. Example: [trivy-system].
+  extraExemptServiceAccountNamespaces: []
+  # Exact usernames. Example: [system:serviceaccount:restore-drill:drill].
+  extraExemptUsers: []
+  # Groups, beyond system:masters.
+  extraExemptGroups: []
+
+# ---------------------------------------------------------------------------
 # RBAC admission guardrails
 #
 # deny-privileged-rbac denies any ClusterRoleBinding to cluster-admin whose
@@ -695,6 +722,10 @@ apps:
   platform_policies: { enabled: true }
   traefik_headers:   { enabled: false }
   rbac_guardrails:   { enabled: true }
+  # Refuses a CREATE in a namespace this chart manages unless GitOps or the
+  # platform itself made it. OFF by default, and Warn
+  # when on: see `namespaceGuard` below and templates/namespace-guard.yaml.
+  namespace_guard:   { enabled: false }
   # The CIS benchmark scanner's namespace (labelled `enforce: privileged`) and its
   # default-deny NetworkPolicy. OFF by default and NOT tied to a capability,
   # because the thing it prepares a home for is an opt-in scan that needs host

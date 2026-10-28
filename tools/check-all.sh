@@ -329,6 +329,11 @@ run_gate "identity and AI seams: host, sub_mode, merge-by-email, DB recovery and
 run_gate "the identity-seams gate goes red on every assertion (TM-0820)" bash tools/check-identity-seams.sh --selftest
 run_gate "platform seams: namespace labels, probe hosts, dashboard keys, CNPG PodMonitor, etcd, Retain (TM-0820)" bash tools/check-platform-seams.sh
 run_gate "the platform-seams gate goes red on every assertion (TM-0820)" bash tools/check-platform-seams.sh --selftest
+# The namespace guard (apps.namespace_guard, off by default). Evaluates its exemption
+# expression with cel-python against every ServiceAccount the layers ship; skips (exit 2)
+# without cel-python, which check-all.yaml installs.
+run_gate "the namespace guard admits every identity the product runs as and refuses the rest" bash tools/check-namespace-guard.sh
+run_gate "the namespace-guard gate goes red on each planted exemption, selector, operation and default" bash tools/check-namespace-guard.sh --selftest
 run_gate "no immutable field changes between the baseline tag and the tree (TM-0754)" bash tools/check-immutable-fields.sh
 run_gate "no Job keeps its name when its image changes inside one version (TM-1022)" bash tools/check-immutable-fields.sh --perturb-images
 run_gate "every ServiceMonitor and PodMonitor selects something the layers render (TM-1025)" bash tools/check-monitor-targets.sh
