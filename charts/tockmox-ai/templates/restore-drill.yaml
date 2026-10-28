@@ -151,6 +151,12 @@ spec:
                   DETAIL=""
                   BACKUP_ID=""
 
+                  # The failing step's own words on one line, for the register row (HL-0863): a pod that dies in
+                  # seconds is gone before Alloy tails it, so the row is the only record of why. No newline, no
+                  # "=" (later key=value fields are evidence), no double quote and no backslash (the register
+                  # patch is built by sed, and a stray one breaks its JSON), at most 240 characters.
+                  why() { printf '%s' "$1" | tr '\n\r\t"=\\' "   ': " | tr -s ' ' | cut -c1-240; }
+
                   record() {
                     STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
                     # Register row: "<stamp> <PASS|FAIL> <detail...> backup=<id>".
@@ -216,7 +222,7 @@ spec:
                   fi
                   echo "image: ${SRC_IMAGE:-the operator default}"
 
-                  cat <<EOF | kubectl apply -f -
+                  APPLY_OUT=$(cat <<EOF | kubectl apply -f - 2>&1
                   apiVersion: postgresql.cnpg.io/v1
                   kind: Cluster
                   metadata:
@@ -242,15 +248,20 @@ spec:
                             barmanObjectName: {{ $storeName | quote }}
                             serverName: {{ $db.backup.serverName | default $db.name | quote }}
                   EOF
-                  [ $? -eq 0 ] || { DETAIL="apply refused"; exit 1; }
+                  )
+                  APPLY_RC=$?
+                  echo "apply: ${APPLY_OUT}"
+                  [ "$APPLY_RC" -eq 0 ] || { DETAIL="apply refused: $(why "$APPLY_OUT")"; exit 1; }
 
                   # Readiness, bounded. The Job's activeDeadlineSeconds is the
                   # hard stop; this is the polite one.
-                  if ! kubectl -n "$NS" wait cluster.postgresql.cnpg.io/"$CLUSTER" \
-                      --for=condition=Ready --timeout=900s; then
-                    DETAIL="cluster never became Ready"
+                  if ! WAIT_OUT=$(kubectl -n "$NS" wait cluster.postgresql.cnpg.io/"$CLUSTER" \
+                      --for=condition=Ready --timeout=900s 2>&1); then
+                    PHASE=$(kubectl -n "$NS" get cluster.postgresql.cnpg.io "$CLUSTER" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+                    DETAIL="cluster never became Ready (phase: $(why "${PHASE:-unknown}")): $(why "$WAIT_OUT")"
                     exit 1
                   fi
+                  echo "wait: ${WAIT_OUT}"
 
                   # Assert on the artifact, not the exit code: recovery has
                   # ENDED (a cluster stuck replaying reports Ready=false long

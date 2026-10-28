@@ -34,6 +34,12 @@
 #     when Authentik's user table came back with rows (users=<n> on the row).
 #     A restore with an empty user table is a FAIL.
 #
+# D3  A drill that FAILS says why on its register row (HL-0863). A pod that dies in seconds is gone before
+#     Alloy tails it, so the row is the only record: the Kubernetes API's own refusal text after `apply
+#     refused:`, the readiness wait's output and the cluster's phase after `cluster never became Ready`,
+#     on one line (no newline, no `=`, no double quote, no backslash, 240 characters), and the register
+#     patch the row travels in stays valid JSON. Both drills (model gateway, identity), run against the stub.
+#
 # LIMIT: no cluster. Whether CNPG accepts recoveryTarget.backupID from the
 # barman-cloud plugin path, and that a Backup CR's status.backupId names what
 # the store holds, are the lab's to prove.
@@ -143,18 +149,20 @@ n1() { # liveness script
 mkdir -p "$T/bin"
 cat > "$T/bin/kubectl" <<'SH'
 #!/bin/sh
-# Stub: records what the drill does. WAIT_RC and BACKUPS_JSON steer it.
+# Stub: records what the drill does. WAIT_RC, WAIT_MSG, CLUSTER_PHASE, APPLY_RC and APPLY_MSG steer it;
+# the register patch's JSON body lands in patched.json.
 case "$*" in
   *"get backups.postgresql.cnpg.io"*) cat "$STUB_DIR/backups.json" ;;
   *"get cluster.postgresql.cnpg.io"*imageName*) cat "$STUB_DIR/image" 2>/dev/null || exit 1 ;;
+  *"get cluster.postgresql.cnpg.io"*phase*) printf '%s' "${CLUSTER_PHASE:-}" ;;
   *"get configmap"*jsonpath*) cat "$STUB_DIR/register" 2>/dev/null || true ;;
   *"get configmap"*) exit 0 ;;
-  *apply\ -f*) cat > "$STUB_DIR/applied.yaml" ;;
-  *" wait "*) exit "${WAIT_RC:-0}" ;;
+  *apply\ -f*) cat > "$STUB_DIR/applied.yaml"; [ -z "${APPLY_MSG:-}" ] || printf '%s\n' "$APPLY_MSG" >&2; exit "${APPLY_RC:-0}" ;;
+  *" wait "*) [ -z "${WAIT_MSG:-}" ] || printf '%s\n' "$WAIT_MSG" >&2; exit "${WAIT_RC:-0}" ;;
   *" exec "*) n=$(cat "$STUB_DIR/n" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB_DIR/n"
               # 1st: pg_is_in_recovery, 2nd: public tables, 3rd (identity only): users.
               if [ "$n" = 0 ]; then echo f; elif [ "$n" = 1 ]; then echo 86; else echo "${USERS:-6}"; fi ;;
-  *" patch "*) printf '%s' "$*" > "$STUB_DIR/patched" ;;
+  *" patch "*) for last in "$@"; do :; done; printf '%s' "$last" > "$STUB_DIR/patched.json" ;;
 esac
 exit 0
 SH
@@ -189,7 +197,49 @@ assert "imageName" not in n["spec"], n
 PY
   grep -q '^register: .* PASS in_recovery=f public_tables=86 backup=20260929T030000$' "$T/d.pass/out" || return 1
   grep -q '^register: .* PASS in_recovery=f public_tables=86 backup=none$' "$T/d.none/out" || return 1
-  grep -q '^register: .* FAIL cluster never became Ready backup=20260929T030000$' "$T/d.fail/out" || return 1
+  grep -q '^register: .* FAIL cluster never became Ready (phase: unknown): *backup=20260929T030000$' "$T/d.fail/out" || return 1
+}
+
+# ---- D3 ---------------------------------------------------------------------
+# A planted failure per step. The messages carry every character the row must not: a double quote, an equals
+# sign, a backslash, a newline and a tab, and one is longer than the 240 characters the row keeps.
+REFUSAL=$(printf 'Error from server (Forbidden): clusters.postgresql.cnpg.io is forbidden: User "system:serviceaccount:a:b" cannot create resource "clusters" in API group "postgresql.cnpg.io" in the namespace x=y\\z\nsecond\tline')
+LONG=$(python3 -c 'print("e" * 400)')
+d3() { # script, expected apply-refusal prefix check mode (gateway|identity)
+  local s="$1" d
+  d="$T/d3.apply"; rm -rf "$d"; mkdir -p "$d"; cp "$T/two.json" "$d/backups.json"
+  [ "$2" = identity ] && cp "$T/id-two.json" "$d/backups.json"
+  STUB_DIR="$d" APPLY_RC=1 APPLY_MSG="$REFUSAL" PATH="$T/bin:$PATH" sh "$s" > "$d/out" 2>&1 || true
+  d="$T/d3.wait"; rm -rf "$d"; mkdir -p "$d"; cp "$T/two.json" "$d/backups.json"
+  [ "$2" = identity ] && cp "$T/id-two.json" "$d/backups.json"
+  STUB_DIR="$d" WAIT_RC=1 CLUSTER_PHASE="Setting up primary" WAIT_MSG="error: timed out waiting for the condition on clusters/x" PATH="$T/bin:$PATH" sh "$s" > "$d/out" 2>&1 || true
+  d="$T/d3.long"; rm -rf "$d"; mkdir -p "$d"; cp "$T/two.json" "$d/backups.json"
+  [ "$2" = identity ] && cp "$T/id-two.json" "$d/backups.json"
+  STUB_DIR="$d" APPLY_RC=1 APPLY_MSG="$LONG" PATH="$T/bin:$PATH" sh "$s" > "$d/out" 2>&1 || true
+  python3 - "$T" 2>/dev/null <<'PY' || return 1
+import sys, json, re
+t = sys.argv[1]
+def row(sub):
+    r = [l for l in open(f"{t}/{sub}/out").read().splitlines() if l.startswith("register: ")]
+    assert len(r) == 1, (sub, r)
+    return r[0][len("register: "):]
+def patched(sub):
+    return json.loads(open(f"{t}/{sub}/patched.json").read())["data"]["register"]
+a = row("d3.apply")
+m = re.match(r"^\S+ FAIL apply refused: (.*) backup=\S+$", a)
+assert m, a
+msg = m.group(1)
+assert "Forbidden" in msg and "cannot create resource" in msg and "clusters" in msg, msg
+assert '"' not in msg and "=" not in msg and "\\" not in msg and "\t" not in msg, msg
+assert a.count("=") == 1, a                      # only backup=<id>: no later key=value field is forged
+assert a in patched("d3.apply"), "the register patch lost the row"
+w = row("d3.wait")
+assert re.match(r"^\S+ FAIL cluster never became Ready \(phase: Setting up primary\): error: timed out waiting for the condition on clusters/x backup=\S+$", w), w
+assert w in patched("d3.wait"), "the register patch lost the row"
+l = row("d3.long")
+m = re.match(r"^\S+ FAIL apply refused: (.*) backup=\S+$", l)
+assert m and 1 <= len(m.group(1)) <= 240, (len(m.group(1)) if m else l)
+PY
 }
 
 # ---- D2 ---------------------------------------------------------------------
@@ -226,6 +276,8 @@ if [ "${1:-}" = "--selftest" ]; then
   b2 || { echo "selftest FAIL: B2 red on the real tree"; fail=1; }
   d1 "$T/drill.sh" || { echo "selftest FAIL: D1 red on the real drill"; fail=1; }
   d2 "$T/id-drill.sh" || { echo "selftest FAIL: D2 red on the real identity drill"; fail=1; }
+  d3 "$T/drill.sh" gateway || { echo "selftest FAIL: D3 red on the real drill"; fail=1; }
+  d3 "$T/id-drill.sh" identity || { echo "selftest FAIL: D3 red on the real identity drill"; fail=1; }
   n1 "$T/ntfy.live" || { echo "selftest FAIL: N1 red on the real ntfy probe"; fail=1; }
   sed 's/for k in NTFY_AUTH_USERS NTFY_AUTH_ACCESS NTFY_AUTH_TOKENS; do/for k in; do/' "$T/ntfy.live" > "$T/m7.sh"
   if n1 "$T/m7.sh"; then no "N1 with the Secret comparison removed"; else ok "N1 with the Secret comparison removed"; fi
@@ -250,6 +302,17 @@ if [ "${1:-}" = "--selftest" ]; then
   if d1 "$T/m9.sh"; then no "D1 with the source's imageName dropped"; else ok "D1 with the source's imageName dropped"; fi
   sed 's/ && \[ "\${USERS:-0}" -ge 1 \] 2>\/dev\/null//' "$T/id-drill.sh" > "$T/m10.sh"
   if d2 "$T/m10.sh"; then no "D2 passing a restore with no users"; else ok "D2 passing a restore with no users"; fi
+  for which in drill id-drill; do
+    kind=gateway; [ "$which" = id-drill ] && kind=identity
+    sed 's/DETAIL="apply refused: \$(why "\$APPLY_OUT")"/DETAIL="apply refused"/' "$T/$which.sh" > "$T/m12.sh"
+    if d3 "$T/m12.sh" $kind; then no "D3 ($kind) with the apply refusal text dropped"; else ok "D3 ($kind) with the apply refusal text dropped"; fi
+    sed 's/: \$(why "\$WAIT_OUT"))"/)"/; s/ (phase: \$(why "\${PHASE:-unknown}"))//' "$T/$which.sh" > "$T/m13.sh"
+    if d3 "$T/m13.sh" $kind; then no "D3 ($kind) with the readiness wait text dropped"; else ok "D3 ($kind) with the readiness wait text dropped"; fi
+    sed "s/ | tr -s ' ' | cut -c1-240; }/ | tr -s ' '; }/" "$T/$which.sh" > "$T/m14.sh"
+    if d3 "$T/m14.sh" $kind; then no "D3 ($kind) with the 240 character cap removed"; else ok "D3 ($kind) with the 240 character cap removed"; fi
+    sed "s/tr '\\\\n\\\\r\\\\t\"=\\\\\\\\' \"   ': \"/tr '\\\\n\\\\r\\\\t\"' \"   '\"/" "$T/$which.sh" > "$T/m15.sh"
+    if d3 "$T/m15.sh" $kind; then no "D3 ($kind) letting = and a backslash through"; else ok "D3 ($kind) letting = and a backslash through"; fi
+  done
   sed 's/tockmox-authentik-db-store/tockmox-litellm-db-store/' "$T/id-drill.sh" > "$T/m11.sh"
   if d2 "$T/m11.sh"; then no "D2 reading the model gateway's store"; else ok "D2 reading the model gateway's store"; fi
   exit $fail
@@ -260,5 +323,7 @@ b1 "$T/bridge.py" && echo "ok: B1 one delivery line per alert, no secrets" || { 
 b2 && echo "ok: B2 ntfy replicas 1, reason and TockmoxNtfyDown written" || { echo "FAIL: B2"; rc=1; }
 d1 "$T/drill.sh" && echo "ok: D1 drill pins and records backup=, on the source's PostgreSQL image" || { echo "FAIL: D1"; rc=1; }
 d2 "$T/id-drill.sh" && echo "ok: D2 identity drill recovers the identity store and PASSes only with Authentik's users back" || { echo "FAIL: D2"; rc=1; }
+d3 "$T/drill.sh" gateway && echo "ok: D3 a failed drill names its cause on the register row (model gateway)" || { echo "FAIL: D3 (model gateway)"; rc=1; }
+d3 "$T/id-drill.sh" identity && echo "ok: D3 a failed drill names its cause on the register row (identity)" || { echo "FAIL: D3 (identity)"; rc=1; }
 n1 "$T/ntfy.live" && echo "ok: N1 ntfy restarts onto its auth Secret when it appears or rotates" || { echo "FAIL: N1"; rc=1; }
 exit $rc

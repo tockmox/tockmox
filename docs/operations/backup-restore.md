@@ -590,7 +590,12 @@ argument for drills that run on a schedule and complain.
 **Reading a row.** A row is `<UTC time> <PASS|FAIL> <detail> backup=<backupId>`.
 Read the first field as the time and the second as the verdict, then pick the
 rest out by key: on a PASS the detail is `in_recovery=f public_tables=<n>`, on a
-FAIL it is a short sentence, so never match on position. `backup=` names the
+FAIL it is the failing step's own words, so never match on position. From 0.9.0
+a refusal reads `apply refused: <the API server's message>` and a cluster that
+did not come up reads `cluster never became Ready (phase: <phase>): <the wait's
+message>`, each on one line and cut at 240 characters, because a drill that
+fails in seconds is gone before the log collector reads its pod and the row is
+then the only record of why. `backup=` names the
 base backup the drill restored: it pins the newest completed `Backup` of the
 live cluster, so the row says exactly what was proved. `backup=none` means no
 completed `Backup` was visible to the drill and the recovery took the newest
