@@ -4,7 +4,11 @@
 # A STABILITY TIER NOBODY CHECKS IS A COMMENT.
 #
 # Every Tockmox top-level key carries `x-tockmox-stability` in its layer's
-# values.schema.json: `stable`, `provisional` or `experimental`.
+# values.schema.json: `stable`, `provisional` or `experimental`. THE SAME HOLDS
+# FOR AN ADD-ON (TM-1115): addons/<name>/chart/values.schema.json is read beside
+# charts/*/values.schema.json, under the name `addon:<name>`. Until then add-on
+# keys were a published values surface outside this gate (TM-0329 log,
+# 2026-10-08), so a key could be added to one with no tier and no ruling.
 # docs/administration/values-contract.md tells an operator that a `stable` key
 # does not move without a minor bump and a migration note at the top of the
 # release notes. That sentence is a promise about future commits, and until this
@@ -137,6 +141,27 @@ schema_tiers() {
 }
 
 # ---------------------------------------------------------------------------
+# layer_name FILE   the name a schema is reported under: the layer for
+#                   charts/<layer>/values.schema.json, `addon:<name>` for
+#                   addons/<name>/chart/values.schema.json.
+# schema_path DIR NAME   the inverse: where NAME's schema lives under DIR.
+# ---------------------------------------------------------------------------
+layer_name() {
+  ln_dir=$(dirname "$1")
+  if [ "$(basename "$ln_dir")" = "chart" ]; then
+    printf 'addon:%s' "$(basename "$(dirname "$ln_dir")")"
+  else
+    basename "$ln_dir"
+  fi
+}
+schema_path() {
+  case "$2" in
+    addon:*) printf '%s/addons/%s/chart/values.schema.json' "$1" "${2#addon:}" ;;
+    *)       printf '%s/charts/%s/values.schema.json' "$1" "$2" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # valid_date S      true when S is YYYY-MM-DD and a real calendar date
 # valid_release S   true when S is X.Y or X.Y.Z
 # released_version CHANGELOG
@@ -186,9 +211,9 @@ check_coverage() {
   cov_n=0
   cov_ruled=0
   cov_released=$(released_version "$cov_log")
-  for cov_f in "$cov_dir"/charts/*/values.schema.json; do
+  for cov_f in "$cov_dir"/charts/*/values.schema.json "$cov_dir"/addons/*/chart/values.schema.json; do
     [ -f "$cov_f" ] || continue
-    cov_layer=$(basename "$(dirname "$cov_f")")
+    cov_layer=$(layer_name "$cov_f")
     while IFS="$(printf '\t')" read -r cov_key cov_tier cov_type cov_on cov_at; do
       [ -n "$cov_key" ] || continue
       cov_n=$((cov_n + 1))
@@ -232,7 +257,7 @@ EOF
     return 1
   fi
   if [ "$cov_bad" -eq 0 ]; then
-    echo "  $cov_n Tockmox key entries across the layers, all tiered;"
+    echo "  $cov_n Tockmox key entries across the layers and add-ons, all tiered;"
     echo "  $cov_ruled not stable, each with a dated ruling and a re-rule release${cov_released:+ after $cov_released}."
   fi
   [ -n "$cov_released" ] || echo "  (no version heading in $cov_log: re-rule releases not checked for being overdue)"
@@ -245,9 +270,9 @@ EOF
 # Prints "layer<TAB>key<TAB>type" for every key marked stable in DIR, sorted.
 # ---------------------------------------------------------------------------
 stable_set() {
-  for ss_f in "$1"/charts/*/values.schema.json; do
+  for ss_f in "$1"/charts/*/values.schema.json "$1"/addons/*/chart/values.schema.json; do
     [ -f "$ss_f" ] || continue
-    ss_layer=$(basename "$(dirname "$ss_f")")
+    ss_layer=$(layer_name "$ss_f")
     while IFS="$(printf '\t')" read -r ss_key ss_tier ss_type _ss_on _ss_at; do
       [ "$ss_tier" = "stable" ] || continue
       printf '%s\t%s\t%s\n' "$ss_layer" "$ss_key" "$ss_type"
@@ -330,7 +355,7 @@ check_drift() {
     if [ -z "$cd_now" ]; then
       # Present at HEAD at all, or gone entirely? The distinction is the whole
       # of what an operator has to do about it, so report which.
-      cd_any=$(schema_tiers "$cd_head/charts/$cd_layer/values.schema.json" \
+      cd_any=$(schema_tiers "$(schema_path "$cd_head" "$cd_layer")" \
                  | awk -F'\t' -v k="$cd_key" '$1==k {print $2}')
       if [ -z "$cd_any" ]; then
         cd_reason="removed from $cd_layer"
@@ -478,6 +503,39 @@ JSON
   ruling_fixture stableonly stable "" ""
   probe "a stable key needs no ruling" pass check_coverage "$tmp/stableonly"
 
+  # TM-1115: an add-on's keys are ruled like a chart key's. Fixtures live under
+  # addons/<name>/chart/, the layout the real tree uses.
+  mkaddon() { # mkaddon DIR NAME   (schema on stdin)
+    mkdir -p "$1/addons/$2/chart"
+    cat > "$1/addons/$2/chart/values.schema.json"
+  }
+  addon_tree() { # addon_tree NAME TIERFIELDS   a chart layer plus one add-on key
+    mkschema "$tmp/$1" tockmox-demo <<'JSON'
+{ "properties": {
+  "namespaces": { "type": "object", "description": "Tockmox-owned block.", "x-tockmox-stability": "stable" }
+} }
+JSON
+    mkaddon "$tmp/$1" demo-probe <<JSON
+{ "properties": {
+  "enabled": { "type": "boolean", "x-tockmox-stability": "experimental", "x-tockmox-stability-ruled": "2026-10-27", "x-tockmox-stability-rerule": "0.10.0" }$2
+} }
+JSON
+  }
+  addon_tree addon-ok ""
+  probe "an add-on whose keys are all ruled is accepted" pass check_coverage "$tmp/addon-ok"
+  addon_tree addon-planted ', "plantedKey": { "type": "string", "x-tockmox-stability": "experimental" }'
+  probe "a planted experimental key with no ruling under an add-on is refused" fail check_coverage "$tmp/addon-planted"
+  addon_tree addon-untiered ', "plantedKey": { "type": "string" }'
+  probe "a planted key with no tier under an add-on is refused" fail check_coverage "$tmp/addon-untiered"
+  addon_tree addon-overdue ', "plantedKey": { "type": "string", "x-tockmox-stability": "experimental", "x-tockmox-stability-ruled": "2026-10-27", "x-tockmox-stability-rerule": "0.7" }'
+  probe "an add-on key whose re-rule is overdue is refused" fail check_coverage "$tmp/addon-overdue" "$tmp/CHANGELOG.at080.md"
+  addon_tree addon-passthrough ', "global": { "type": "object", "description": "Not this layer'"'"'s key." }'
+  probe "a key an add-on declares as not its own is not asked for a tier" pass check_coverage "$tmp/addon-passthrough"
+  # An add-on in the tree whose chart dir has no schema is not a silent pass for
+  # the tree: a tree of only add-ons is read, and an empty one is refused.
+  mkdir -p "$tmp/addon-empty/addons/demo-probe/chart"
+  probe "a tree whose add-on has no schema reads no keys and is refused" fail check_coverage "$tmp/addon-empty"
+
   echo "selftest: drift"
   probe "an unchanged tree is accepted" pass \
         check_drift "$base" "$head" "$tmp/CHANGELOG.clean.md"
@@ -512,6 +570,23 @@ JSON
 JSON
   probe "a stable key demoted with no signal is refused" fail \
         check_drift "$base" "$demoted" "$tmp/CHANGELOG.clean.md"
+
+  # A stable add-on key is held to the same promise as a stable chart key.
+  mkaddon "$tmp/abase" demo-probe <<'JSON'
+{ "properties": {
+  "enabled": { "type": "boolean", "x-tockmox-stability": "stable" }
+} }
+JSON
+  mkaddon "$tmp/ahead" demo-probe <<'JSON'
+{ "properties": {
+  "active": { "type": "boolean", "x-tockmox-stability": "stable" }
+} }
+JSON
+  printf '## [Unreleased]\n\n**Breaking: \140enabled\140 is renamed \140active\140.** Action required: rename it.\n\n## [0.1.0]\n' > "$tmp/CHANGELOG.addon-signalled.md"
+  probe "a stable add-on key removed with no signal is refused" fail \
+        check_drift "$tmp/abase" "$tmp/ahead" "$tmp/CHANGELOG.clean.md"
+  probe "the same add-on removal announced as Breaking is accepted" pass \
+        check_drift "$tmp/abase" "$tmp/ahead" "$tmp/CHANGELOG.addon-signalled.md"
 
   retyped="$tmp/retyped"; mkschema "$retyped" tockmox-demo <<'JSON'
 { "properties": {
@@ -662,14 +737,14 @@ else
       basedir=$(mktemp -d)
       trap 'rm -rf "$basedir"' EXIT
       recovered=0
-      for f in charts/*/values.schema.json; do
-        layer=$(basename "$(dirname "$f")")
-        mkdir -p "$basedir/charts/$layer"
+      for f in charts/*/values.schema.json addons/*/chart/values.schema.json; do
+        [ -f "$f" ] || continue
+        mkdir -p "$basedir/$(dirname "$f")"
         if git --no-optional-locks show "$BASE_REF:$f" \
-             > "$basedir/charts/$layer/values.schema.json" 2>/dev/null; then
+             > "$basedir/$f" 2>/dev/null; then
           recovered=$((recovered + 1))
         else
-          rm -f "$basedir/charts/$layer/values.schema.json"
+          rm -f "$basedir/$f"
         fi
       done
 

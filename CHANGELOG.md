@@ -209,6 +209,22 @@ costs you, with the reasoning in the documentation rather than here.
   the rules sitting quiet. Every rule is classified in `tools/kured-gate.txt`
   and has a both-directions case under `tests/rules/`.
 
+- **The Security Posture Probe's promises are written as data, and a gate holds
+  them.** `addons/posture-probe/addon.yaml` is the first-party add-on manifest:
+  that the add-on is off by default, ships no code the admin console would run
+  and adds no route to the cluster, what its Kubernetes access is (read-only,
+  and the safety gate that proves it), what it leaves behind when removed, and
+  what it gives the platform (nothing to scrape or alert on). The format is in
+  `addons/README.md`; it is a first-party contract, not an interface for writing
+  your own. `tools/check-addon-manifest.sh` checks the manifest against the
+  chart and its render, and refuses a field the format does not name.
+- **Add-on settings keys carry a stability tier and a dated ruling, like a
+  layer's.** `tools/check-values-tiers.sh` now reads
+  `addons/*/chart/values.schema.json` beside the layers' schemas, so a posture
+  probe key with no tier, no ruling or an overdue re-rule is refused, and a
+  `stable` one does not move unannounced. All the probe's keys are marked
+  `experimental`, which they already were in prose.
+
 ### Changed
 
 - **The LiteLLM migrations Job is LiteLLM's own, as an Argo CD `Sync` hook, and
