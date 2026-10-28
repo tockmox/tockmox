@@ -203,6 +203,20 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **The Argo CD sign-in recipe works on a site that uses the shipped private CA.**
+  `docs/administration/argocd.md` ("A hostname and a portal tile") left out two
+  things a lab run of it needed or Argo CD documents: `rootCA` in `oidc.config`,
+  without which Argo CD's server refuses the Authentik provider with
+  `x509: certificate signed by unknown authority`, and the
+  `app.kubernetes.io/part-of: argocd` label on the client-secret Secret. The
+  section now has a success condition naming the URL a reader should reach, and
+  its "What is not certified here" says what was executed (lab, 2026-10-28).
+- **The macOS per-user CA trust command is verified.** `tls-and-trust.md`'s
+  verification table now records the 2026-10-28 run (keychain, `verify-cert`,
+  Chrome with no warning) and says the EV and Certificate Transparency lines
+  `verify-cert` prints are expected for a private CA. The machine-wide macOS,
+  Linux and Windows commands stay "Not executed".
+
 - **An mlx-lm engine that stops generating is noticed and restarted.** When
   mlx-lm's generation thread dies the process stays up, `/v1/models` keeps
   answering 200 and every completion fails until someone restarts it. The
