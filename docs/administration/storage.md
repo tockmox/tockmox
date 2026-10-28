@@ -120,7 +120,8 @@ accident of timestamp rather than by anything you configured. Recreate the
 
 The durable fix is a `.skip` file during cluster preparation
 ([fresh cluster](../deployment/fresh-install.md#5-stop-k3s-re-asserting-its-storageclass-default),
-[existing cluster](../deployment/existing-cluster.md#check-3-the-default-storageclass)),
+[existing cluster](../deployment/existing-cluster.md#check-3-the-default-storageclass);
+the shape rows are in [deployment shapes](../deployment/deployment-shapes.md)),
 plus the patch at
 [install § Phase 3](../deployment/install.md#then-un-default-k3ss-storageclass).
 The rest of this section is what that patch does and does not buy you. **On a

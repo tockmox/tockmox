@@ -355,7 +355,7 @@ spec:
 On the `Cluster`, enable the plugin as WAL archiver and add a schedule:
 
 ```yaml
-# SITE REPO ... on the existing Cluster
+# SITE REPO ... on the Cluster resource that is already there
 spec:
   plugins:
     - name: barman-cloud.cloudnative-pg.io

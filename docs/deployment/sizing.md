@@ -40,6 +40,12 @@ other components that carry non-OSI or source-available terms, is in
 | **Resilient** | 1 + offsite backups | 8 cores | 32 GB | 500 GB SSD | losing the box, with a restore you have rehearsed |
 | **HA** | 3 | 8 cores each | 32 GB each | 500 GB SSD each | losing a node, live |
 
+**Which tiers a release gate runs.** The Reference tier on one MicroOS node as a
+Harvester virtual machine is the gated shape. The other single-node tiers are
+the same software on other hardware, and the HA tier is three nodes that no
+release gate installs: both are **documented, not gated**, per
+[deployment shapes](deployment-shapes.md).
+
 CPU is rarely the constraint. The reference deployment idles at **1.07 of 8
 cores, about 13%**, observed. Memory and disk are what run out.
 
@@ -111,6 +117,11 @@ A box you can rebuild in an afternoon from backups you have tested beats a
 second box you have never failed over to.
 
 ## HA
+
+**Documented, not gated.** No release gate installs or upgrades three nodes
+([deployment shapes](deployment-shapes.md)). Everything below is written from the
+procedure and from a production cluster, and a three-node release test would move
+this row.
 
 | | |
 |---|---|

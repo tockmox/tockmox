@@ -68,7 +68,8 @@ Anything not yet built says so rather than being implied.
 
 ### The boundary, before the argument
 
-**It installs** nine layers on a cluster you already have: namespaces and
+**It installs** nine layers on a cluster you already have (a shape that is
+[documented, not gated](deployment/deployment-shapes.md)): namespaces and
 network policy, ingress and TLS and storage, replicated block storage and
 Postgres, single sign-on, metrics and logs and dashboards and alerting, a chat
 console and a model gateway (the gateway on by default since 0.8.0 with the

@@ -35,6 +35,11 @@ rather than discovering the constraint after you have deployed.
 | **documented** | The substitution is written down and expected to work. It is not exercised by the gate. Defects in the alternative are yours, but the instructions are not. |
 | **unsupported** | Known to work for somebody. No instructions, no gate coverage, no help. Listed so you know it exists and what it costs. |
 
+These tiers describe one component at a time. The same three-way split applied to a
+whole deployment (where it runs, how many nodes, which hypervisor) is the table
+in [deployment shapes](deployment/deployment-shapes.md): its *gated* row is this
+page's *tested*, and its *documented, not gated* row is this page's *documented*.
+
 **Licence class** is a screen, not legal advice, and it is the reason several
 otherwise-good options are absent:
 

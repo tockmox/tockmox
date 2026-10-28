@@ -29,6 +29,7 @@ If this is your first visit, use the task table below. If you already know the p
 | Decide whether Tockmox is for me | [Why Tockmox?](why-tockmox.md) |
 | Understand how the system works | [Architecture](architecture.md) |
 | Install Tockmox | [Prerequisites](deployment/prerequisites.md) |
+| See which deployment shapes a release gate runs | [Deployment shapes](deployment/deployment-shapes.md) |
 | Build a new cluster for it | [Prepare a fresh cluster](deployment/fresh-install.md) |
 | Install it on an existing cluster | [Prepare a cluster you already have](deployment/existing-cluster.md) |
 | Finish a new installation | [Install Tockmox](deployment/install.md) |
@@ -54,6 +55,7 @@ For most people, the shortest path through the documentation is:
 ↓
 
 [Prepare a fresh cluster](deployment/fresh-install.md) or [prepare your existing cluster](deployment/existing-cluster.md)
+(only [one deployment shape](deployment/deployment-shapes.md) is run by a release gate)
 
 ↓
 

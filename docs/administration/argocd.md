@@ -21,7 +21,8 @@ therefore own.
 
 The install procedure is in
 [prepare a fresh cluster § install ArgoCD](../deployment/fresh-install.md#6-install-argocd),
-or, for a cluster you already run,
+or, for a cluster you already run (**documented, not gated**: see
+[deployment shapes](../deployment/deployment-shapes.md)),
 [prepare a cluster you already have § check 5](../deployment/existing-cluster.md#check-5-argocd).
 
 ## Why it is a prerequisite

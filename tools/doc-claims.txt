@@ -783,3 +783,34 @@ page:   docs/administration/tockmox-ui.md
 claim:  never later than 6 minutes 30 seconds
 test:   echo "$(awk '/- port: metrics/{f=1} f&&/interval:/{print $2; exit}' charts/tockmox-ai/templates/tockmox-ui.yaml) $(awk '/name: tockmox.ai.tockmox-ui/{f=1} f&&/interval:/{print $2; exit}' charts/tockmox-ai/templates/tockmox-ui.yaml) $(awk '/alert: TockmoxUISignInFailing/{f=1} f&&/for:/{print $2; exit}' charts/tockmox-ai/templates/tockmox-ui.yaml)"
 expect: 30s 1m 5m
+
+# ---------------------------------------------------------------------------
+# DEPLOYMENT SHAPES (TM-1116, TM-1117). docs/deployment/deployment-shapes.md is
+# the one table that says which shape a release gate runs. Two things are
+# pinned, because both rot by editing a sentence rather than by the tree
+# changing.
+#
+# 1. The Gated row count. The page says one shape is gated. A second line in
+#    that row is a claim that a release gate installs it, and the people who
+#    can make that claim true are the ones who write the gate report. Adding a
+#    second row therefore means editing `expect` here in the same commit as the
+#    gate that runs it, which is the speed bump this entry exists to be.
+#
+# 2. The link. Any page that names Proxmox or KVM-based platforms, OpenShift,
+#    an existing cluster, the HA tier or three nodes has to link the table, and
+#    so does every install page that names a shape at all (the explicit list).
+#    The scan is page-level: it proves a page carries the link, not that the
+#    passage beside it names the right row. That half is a review judgement and
+#    the page says so. Poison test, 2026-10-27: removing the link from
+#    sizing.md (an explicit-list page), from why-tockmox.md (a scanned page) and
+#    adding the word Proxmox to a page with no link each turned this red.
+# ---------------------------------------------------------------------------
+page:   docs/deployment/deployment-shapes.md
+claim:  One shape is gated
+test:   grep -c '^| \*\*Gated\*\* | \*\*' docs/deployment/deployment-shapes.md | tr -d ' '
+expect: 1
+
+page:   docs/deployment/deployment-shapes.md
+claim:  Every install page that
+test:   for f in $( { grep -rliE --include='*.md' 'proxmox|openshift|kvm[ -]based|existing[ -]cluster|cluster you already|HA tier|HA cluster|HA build|three-node|3-node' docs README.md charts/*/README.md; for p in prerequisites fresh-install existing-cluster install virtual-machines hardware-platforms sizing README; do echo docs/deployment/$p.md; done; } | sort -u | grep -v '^docs/deployment/deployment-shapes.md$' ); do grep -q 'deployment-shapes.md' "$f" || echo "$f"; done | wc -l | tr -d ' '
+expect: 0

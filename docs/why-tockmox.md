@@ -230,7 +230,9 @@ changing the model. One pattern, one set of open runbooks, sized from a
 closet to a campus.
 
 That is a claim about the **architecture**, and it should not be read as a
-claim about the support model. The pattern scales; a project with one
+claim about the support model. The HA cluster and the multi-site shapes are
+**documented, not gated** or not documented at all, and
+[deployment shapes](deployment/deployment-shapes.md) says which. The pattern scales; a project with one
 maintainer and one reference deployment does not yet, and pretending otherwise
 would be the kind of thing this page exists to avoid.
 

@@ -122,6 +122,9 @@ SELinux enforcing, Longhorn on iSCSI, `transactional-update` plus kured for
 node updates. That is a claim about the platform, not about this page ... see
 [what is not certified here](#what-is-not-certified-here).
 
+A conventional distribution is **documented, not gated**, and bare metal is the
+same: see [deployment shapes](deployment-shapes.md).
+
 ## 2. Install the storage packages, on every node
 
 Longhorn needs an iSCSI initiator and an NFS client present **before** it
@@ -266,6 +269,12 @@ command below is labelled for one shape or both.
 |---|---|---|
 | **Three** (recommended) | 3 servers | You intend to run this. Survives losing one node, and it is the point where replicated storage stops being decorative |
 | **One** | 1 server | You are evaluating. Everything works; nothing survives the node |
+
+**Which shape is gated.** One node on openSUSE MicroOS, as a Harvester virtual
+machine, is the shape a release gate runs. Three nodes is the recommended shape
+and it is **documented, not gated**: nothing at a release installs or upgrades
+more than one node. [Deployment shapes](deployment-shapes.md) has both rows and
+says what "not gated" costs you.
 
 **Two nodes is never right, and three is the floor for surviving anything.**
 etcd holds quorum on a majority, so 3 members tolerate 1 loss and 2 members
@@ -863,7 +872,9 @@ has to have its `machine-id` regenerated before it joins, and vSphere's
 ### 4f. Prove the cluster survives a node loss ... MULTI-NODE ONLY
 
 A three-server cluster that has never lost a server is an untested one, and the
-cheapest moment to find out is now, while nothing is running on it.
+cheapest moment to find out is now, while nothing is running on it. No release
+gate runs this proof: the three-node shape is **documented, not gated**
+([deployment shapes](deployment-shapes.md)), so your run is the evidence there is.
 
 **Two rules about which node you kill, and both change what the test proves:**
 
@@ -1298,6 +1309,11 @@ in-cluster, or leave it unset and evaluate everything else first.
 **Success condition:** you can write all four down. That is the whole test.
 
 ## What is not certified here
+
+**Shapes.** Only one node on MicroOS as a Harvester virtual machine is run by a
+release gate. The three-node shape, every other node OS and bare metal are
+documented here and not gated; the row for each is in
+[deployment shapes](deployment-shapes.md).
 
 The platform claim above is about openSUSE MicroOS and k3s running Tockmox in
 production. **It is not a claim that this page has been executed start to finish
