@@ -36,6 +36,9 @@ on a fresh one, getting it backwards fails the sync.
 
 ## Adopting into an existing cluster
 
+An existing cluster is a **documented, not gated** shape: see
+[deployment shapes](../../docs/deployment/deployment-shapes.md).
+
 Namespace defaults carry the reserved `tockmox-` prefix. Override them to your
 existing names rather than renaming your namespaces ... a namespace rename
 deletes and recreates everything inside it.

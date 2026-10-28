@@ -118,7 +118,7 @@ You do not need to preinstall cert-manager, MetalLB, ingress or storage. Tockmox
 
 No cluster yet? Start with [Prepare a fresh cluster](docs/deployment/fresh-install.md).
 
-Already have Kubernetes? Start with [Prerequisites](docs/deployment/prerequisites.md) and follow the [existing-cluster path](docs/deployment/existing-cluster.md).
+Already have Kubernetes? Start with [Prerequisites](docs/deployment/prerequisites.md) and follow the [existing-cluster path](docs/deployment/existing-cluster.md). A release gate installs one shape only, a single MicroOS node as a Harvester virtual machine; [deployment shapes](docs/deployment/deployment-shapes.md) says where your plan sits.
 
 ### Generate your site repository
 

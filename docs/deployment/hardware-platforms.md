@@ -19,7 +19,9 @@ tockmox:
 which hardware people run it on: the classes of machine, what each is good
 for, and where the edges are.
 
-**There is no compatibility list and no certification program.** The floor is
+**There is no compatibility list and no certification program.** What a release
+gate does run is one shape, and [deployment shapes](deployment-shapes.md) is the
+table that says which. The floor is
 a spec, not a device: an x86_64 machine that meets a tier in
 [sizing](sizing.md) and runs a conformant Kubernetes. Everything named below
 is an example of a class, not a promise about a model.
@@ -52,7 +54,8 @@ hypervisor tax, NVMe on board, and current models take 64 GB of RAM or more.
 
 A recent mini PC with 32 GB clears the reference tier with headroom; 64 GB
 covers the resilient tier. This is the shape the platform is happiest on,
-and three of them are the smallest sensible HA build.
+and three of them are the smallest sensible HA build. Bare metal and the HA tier
+are both **documented, not gated**: see [deployment shapes](deployment-shapes.md).
 
 The bottom of the category is a different machine. N-series and Celeron
 models with soldered 8 or 16 GB are minimal-tier hardware: they run the
@@ -79,8 +82,9 @@ three of them the cheapest sensible path to HA.
 x86 NAS models from Synology (the Plus, XS and RS lines), QNAP, Asustor and
 similar can host Tockmox in a Linux VM under the vendor's hypervisor:
 Virtual Machine Manager on Synology, Virtualization Station on QNAP. The VM
-lane is the supported shape ... do not attempt k3s inside the vendor's
-container layer. Per-hypervisor settings are in
+lane is the documented shape (**documented, not gated**, per
+[deployment shapes](deployment-shapes.md)) ... do not attempt k3s inside the
+vendor's container layer. Per-hypervisor settings are in
 [virtual machines](virtual-machines.md#synology-virtual-machine-manager).
 
 Set expectations by the hardware, not the badge:
@@ -107,14 +111,20 @@ can host the platform or hold its backups, not both.
 
 Harvester, OpenShift Virtualization and vSphere have full walkthroughs in
 [virtual machines](virtual-machines.md), including the four hypervisor
-defaults that break the install. Proxmox and other KVM-based platforms are
-not separately documented, but the same four settings decide the outcome
-and the walkthroughs transfer.
+defaults that break the install. Of those, only Harvester carries a gated
+shape (one MicroOS node); the other two are **documented, not gated**.
+
+Proxmox and other KVM-based platforms are in the **Neither** row of
+[deployment shapes](deployment-shapes.md): not separately documented, and no
+install on them is recorded. The same four settings are expected to decide the
+outcome there, which is a belief and not a result, so the walkthroughs may
+transfer and nothing says they do.
 
 ## What this page leaves out, on purpose
 
-- **Cloud VMs.** Tockmox installs on any cloud instance that meets the
-  floor, and nothing checks where the machine is. It is not documented as a
+- **Cloud VMs.** A cloud instance that meets the floor may work, and nothing
+  checks where the machine is. This is the **Neither** row of
+  [deployment shapes](deployment-shapes.md). It is not documented as a
   platform because the point of the project is AI on hardware you control;
   renting that hardware from a hyperscaler is a different decision than the
   one this project serves. If you do it anyway, know that MetalLB's L2 mode

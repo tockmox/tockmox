@@ -27,6 +27,10 @@ other half: when and how to move them.
 and no Tockmox chart renders a k3s or ArgoCD upgrade. Nothing here changes on
 its own schedule. Whoever owns the cluster owns the calendar.
 
+**Shapes.** Everything here was run, where it was run, on a single-node lab. A
+cluster you already run is **documented, not gated**
+([deployment shapes](deployment-shapes.md)).
+
 **What has been run.** The connected Helm route for ArgoCD (sections 1 to 4)
 was executed as printed on 2026-10-10 against a single-node lab cluster running
 all nine layers: argo-cd chart 10.9.1 (ArgoCD v3.5.3) to 10.10.2 (v3.5.4), every

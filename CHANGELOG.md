@@ -154,6 +154,20 @@ costs you, with the reasoning in the documentation rather than here.
   it. No lab run has shown it surviving a node loss yet. See
   `docs/operations/monitoring.md`.
 
+- **A deployment-shape table says which shape a release gate runs.**
+  [`docs/deployment/deployment-shapes.md`](docs/deployment/deployment-shapes.md)
+  sorts every way of running Tockmox into three rows: **gated** (one shape, a
+  single node on openSUSE MicroOS with k3s as a virtual machine on SUSE
+  Harvester, x86_64), **documented, not gated** (the three-node HA tier, a
+  single conventional Linux node, an existing cluster, the other hypervisors)
+  and **neither** (Proxmox/KVM, Tockmox on OpenShift itself, managed cloud,
+  arm64). Every install page that names a shape now links to it, and
+  `tools/doc-claims.txt` fails when a page that names one does not. Pages that
+  called Proxmox or a cloud "supported" or "tested" no longer do. The platform
+  chart's README listed components it does not contain (kube-vip, CoreDNS
+  tuning) and omitted ones it does; it now lists what the chart renders.
+  Nothing to do on upgrade.
+
 ### Changed
 
 - **`tools/helm-deps.sh` works with no network when the tree already carries

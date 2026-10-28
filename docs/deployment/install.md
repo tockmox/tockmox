@@ -21,6 +21,11 @@ took.** Whether you built a cluster our way with
 [prepare a cluster you already have](existing-cluster.md), you arrive holding
 the same four things, and nothing below re-does work either path already did.
 
+**Which shape you are installing onto decides how far the release gate vouches
+for this page.** A release gate runs one node on openSUSE MicroOS as a Harvester
+virtual machine. Every other shape, including a cluster you already run and
+three nodes, is documented and not gated: [deployment shapes](deployment-shapes.md).
+
 Three phases, in order, with no branch between them: **generate** your site
 repository, **publish** it, **apply** it. Everything else on this page hangs off
 one of those three.
@@ -204,7 +209,8 @@ rather than sealing to a controller the flags in Phase 2.5 will not find.
 defaults break Tockmox in ways whose errors name the wrong component, and
 neither the installer nor this page can check for them because they are outside
 the cluster. It has where each one lives on Harvester, OpenShift
-Virtualization, vSphere and Synology VMM. The one that costs the most time: a
+Virtualization, vSphere and Synology VMM; of those, only Harvester with one
+MicroOS node is a gated shape ([deployment shapes](deployment-shapes.md)). The one that costs the most time: a
 cloned VM keeps its template's `machine-id` and disk UUIDs, and Longhorn
 identifies disks by UUID.
 

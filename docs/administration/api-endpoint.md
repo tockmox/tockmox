@@ -21,6 +21,9 @@ Tockmox exists on the cluster. This page is here because a multi-node cluster
 that never answers the question keeps a single point of failure it paid three
 machines to remove.
 
+**This page is about the HA tier, which is documented, not gated.** No release
+gate installs three nodes ([deployment shapes](../deployment/deployment-shapes.md)).
+
 **Single-node clusters can stop reading.** There is nothing to fail over to,
 the node's own name is the honest answer, and
 [sizing](../deployment/sizing.md) is clear that one box is not high

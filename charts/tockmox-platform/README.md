@@ -16,8 +16,13 @@
 
 Storage, networking, ingress, certificates, node lifecycle, database operators.
 
-Will contain: cert-manager, MetalLB, Traefik, Longhorn, kube-vip, CoreDNS
-tuning, CNPG operator, kured, and the brand asset service.
+Contains: cert-manager (and the chart's own CA, `tockmox-ca`), MetalLB (and the
+address pool built from your range), Traefik, Longhorn, the CloudNativePG operator
+and its Barman Cloud plugin, kured, the CSI snapshot controller, and a Garage
+object store. Each upstream chart sits behind an `apps.<name>.enabled` switch in
+`values.yaml`. It does not contain kube-vip (the API endpoint is yours to supply,
+see [the API endpoint](../../docs/administration/api-endpoint.md)) or a CoreDNS
+change, and the brand asset service is in the identity layer.
 
 ![The Longhorn UI on a greenfield install of this layer, listing the eight volumes the other layers claimed, every one Healthy and Bound, with the claiming namespace shown against each](../../docs/assets/monitoring/longhorn-volumes.jpg)
 

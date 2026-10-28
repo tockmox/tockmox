@@ -245,17 +245,23 @@ yours to build, see [time synchronisation](time-sync.md).
 
 ## Find your hypervisor
 
-| Platform | Section | The setting most often missed |
-|---|---|---|
-| SUSE Harvester | [below](#suse-harvester) | CPU model left emulated |
-| Red Hat OpenShift Virtualization | [below](#red-hat-openshift-virtualization) | `masquerade` network binding |
-| VMware vSphere and ESXi | [below](#vmware-vsphere-and-esxi) | Port group security, all three fields |
-| Synology VMM | [below](#synology-virtual-machine-manager) | VM disk not on an SSD pool |
-| QNAP, Asustor and similar | [with Synology](#synology-virtual-machine-manager) | Same shape, none documented from a clean install |
+The **Shape row** column is the row of the [deployment-shape table](deployment-shapes.md)
+that platform sits in. Only Harvester carries a gated shape, and only for one
+MicroOS node.
+
+| Platform | Shape row | Section | The setting most often missed |
+|---|---|---|---|
+| SUSE Harvester | Gated for one MicroOS node. Documented, not gated for any other node count or OS | [below](#suse-harvester) | CPU model left emulated |
+| Red Hat OpenShift Virtualization | Documented, not gated | [below](#red-hat-openshift-virtualization) | `masquerade` network binding |
+| VMware vSphere and ESXi | Documented, not gated | [below](#vmware-vsphere-and-esxi) | Port group security, all three fields |
+| Synology VMM | Documented, not gated | [below](#synology-virtual-machine-manager) | VM disk not on an SSD pool |
+| QNAP, Asustor and similar | Documented, not gated | [with Synology](#synology-virtual-machine-manager) | Same shape, none documented from a clean install |
+| Proxmox and other KVM-based platforms | Neither: not separately documented | none | The same four settings decide the outcome; no install is recorded |
 
 OpenShift Virtualization appears here as the hypervisor under your VMs. Tockmox
-installed onto an OpenShift cluster itself is not covered: no
-security-context-constraints profile ships and no such install is documented.
+installed onto an OpenShift cluster itself is not covered, and sits in the
+**Neither** row of the shape table: no security-context-constraints profile
+ships and no such install is documented.
 
 ## SUSE Harvester
 
@@ -505,6 +511,10 @@ is three documentation defects with precise reproduction steps, which is worth
 more than a green run.
 
 ## What is not certified here
+
+**Gated or not.** Only one MicroOS node on Harvester is run by a release gate.
+Every other platform and node count on this page is **documented, not gated**,
+and Proxmox is in neither row: [deployment shapes](deployment-shapes.md).
 
 **No hypervisor on this page has a recorded clean install of Tockmox from an
 empty VM to a working console.** The four settings are causes that have been met

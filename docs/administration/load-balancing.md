@@ -24,7 +24,9 @@ anything on the cluster is reachable at all.
 The procedures are in
 [prepare a fresh cluster](../deployment/fresh-install.md) and
 [prepare a cluster you already have](../deployment/existing-cluster.md). This
-page is the reasoning behind them.
+page is the reasoning behind them. Only one deployment shape is gated; the
+others, including a cluster you already run, are **documented, not gated** per
+[deployment shapes](../deployment/deployment-shapes.md).
 
 ## Exactly one controller may own LoadBalancer Services
 

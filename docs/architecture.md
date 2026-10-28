@@ -161,7 +161,8 @@ use them. Helm's own guidance, and it eliminates the entire class of
 patching individual instances of it.
 
 **Policy precedes platform.** Policy creates the namespaces every other layer
-deploys into. On an existing cluster this ordering does not matter because the
+deploys into. On an existing cluster (a [documented, not gated](deployment/deployment-shapes.md)
+shape) this ordering does not matter because the
 namespaces are already there; on a fresh one, getting it backwards fails the
 sync. That is the argument for testing against clean clusters.
 
@@ -446,6 +447,10 @@ qualifications: that cluster also runs site applications of its own beside the
 platform, which no release ships; and while a release is in candidate testing
 it follows that release's branch rather than a tag, so it runs every candidate
 before you can.
+
+That cluster is use, not a gate. The shape a release gate runs is a single
+node, and [deployment shapes](deployment/deployment-shapes.md) lists what is
+gated and what is only documented.
 
 Getting it there was a migration of a running cluster, not a fresh install,
 and it was rehearsed on throwaway clusters before it touched production.

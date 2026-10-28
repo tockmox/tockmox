@@ -21,6 +21,8 @@ These pages take you from "what do I need" to a running install, and then to the
 
 **Which preparation path is yours.** Start at [prerequisites](prerequisites.md). It sends you to [a fresh cluster](fresh-install.md) if you are building one for Tockmox, or to [a cluster you already have](existing-cluster.md) if not. Both paths converge on [install](install.md), and the page after that is [sign in for the first time](../usage/getting-started.md).
 
+**Which shape is gated.** A release gate runs one shape: a single node on openSUSE MicroOS as a Harvester virtual machine. [Deployment shapes](deployment-shapes.md) is the table of what is gated, what is documented without a gate, and what is neither.
+
 **Special environments are not steps.** Virtual machines, a registry, air-gap and time synchronisation apply only to the sites that have them. A connected install does not need to read them first. [Upgrading](upgrade.md) and [air-gapped installs](airgap.md) are the two pages people come back to.
 
 <!-- tockmox:section-index:begin -->
@@ -31,11 +33,12 @@ These pages take you from "what do I need" to a running install, and then to the
 | Step | Page | What it covers |
 |---|---|---|
 | 1 | [Prerequisites](prerequisites.md) | Signpost: what Tockmox needs before installing, and which of the two preparation paths applies to you |
-| 2 | [Hardware platforms](hardware-platforms.md) | Which classes of machine people run Tockmox on, what each is good for, and where the edges are |
-| 3 | [Hardware sizing](sizing.md) | Four tiers with measured numbers, from one small box to a cluster you can lose a node from |
-| 4 | [Prepare a fresh cluster](fresh-install.md) | The recommended path: build a three-node or single-node k3s cluster with the settings Tockmox expects, install ArgoCD and sealed-secrets, and decide the four values |
-| 5 | [Prepare a cluster you already have](existing-cluster.md) | Six checks to run against an existing Kubernetes cluster before installing Tockmox, each with the condition that triggers it and how to tell it passed |
-| 6 | [Install a profile](profiles.md) | Deploy less than the full stack: pick one of the shipped profiles, pass it to every layer, and prove it removed what you expected |
+| 2 | [Deployment shapes](deployment-shapes.md) | Which ways of deploying Tockmox a release gate runs, which are documented but never run by one, and which are neither, in one table |
+| 3 | [Hardware platforms](hardware-platforms.md) | Which classes of machine people run Tockmox on, what each is good for, and where the edges are |
+| 4 | [Hardware sizing](sizing.md) | Four tiers with measured numbers, from one small box to a cluster you can lose a node from |
+| 5 | [Prepare a fresh cluster](fresh-install.md) | The recommended path: build a three-node or single-node k3s cluster with the settings Tockmox expects, install ArgoCD and sealed-secrets, and decide the four values |
+| 6 | [Prepare a cluster you already have](existing-cluster.md) | Six checks to run against an existing Kubernetes cluster before installing Tockmox, each with the condition that triggers it and how to tell it passed |
+| 7 | [Install a profile](profiles.md) | Deploy less than the full stack: pick one of the shipped profiles, pass it to every layer, and prove it removed what you expected |
 
 ### Install
 

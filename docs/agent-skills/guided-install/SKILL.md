@@ -48,7 +48,7 @@ default for the four values ... a wrong guess is worse than a question.
 
 | Ask | Why it changes what you do |
 |---|---|
-| Do you have a Kubernetes cluster already, or machines with no cluster | Picks the preparation page: [fresh-install](../../deployment/fresh-install.md) or [existing-cluster](../../deployment/existing-cluster.md) |
+| Do you have a Kubernetes cluster already, or machines with no cluster | Picks the preparation page: [fresh-install](../../deployment/fresh-install.md) or [existing-cluster](../../deployment/existing-cluster.md). Say which row of [deployment shapes](../../deployment/deployment-shapes.md) the answer lands in: only one node on MicroOS as a Harvester VM is gated, and an existing cluster is documented, not gated |
 | How many nodes | At three or more, the Longhorn replica counts must be raised and soft anti-affinity turned off, in the same change. At one or two the shipped defaults are right |
 | Physical or virtual | Virtual means reading [virtual machines](../../deployment/virtual-machines.md) **before** phase 1. Four hypervisor defaults break Tockmox with errors naming the wrong component |
 | Will the site repository be private | Decides whether a read-only token and the ArgoCD repository Secret are needed |

@@ -25,6 +25,11 @@ path if you have the option.
 
 Both paths finish in the same place: [installation](install.md).
 
+**Shape: documented, not gated.** A cluster you already run is not the shape a
+release gate installs onto. The gate builds its own single-node MicroOS cluster,
+so these checks stand in for knowledge of your cluster that the project does not
+have. [Deployment shapes](deployment-shapes.md) has the row.
+
 ## Before you begin
 
 | What you need | Why | How to check |
@@ -276,6 +281,10 @@ The exhaustive reference for every key is
 [configuration](../administration/configuration.md).
 
 ## What is not certified here
+
+**Shape.** An existing cluster is **documented, not gated** ([deployment
+shapes](deployment-shapes.md)): no release gate installs Tockmox onto a cluster it
+did not build.
 
 These checks are written from the failures this project has hit. **They have not
 been executed as written against a cluster this project does not control**,

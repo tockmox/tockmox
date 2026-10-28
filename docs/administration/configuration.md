@@ -307,7 +307,8 @@ namespaces:
   # ...
 ```
 
-**Adopting into an existing cluster?** Override the names; do not rename your
+**Adopting into an existing cluster?** That shape is **documented, not gated**
+([deployment shapes](../deployment/deployment-shapes.md)). Override the names; do not rename your
 namespaces to match. Renaming a namespace in Kubernetes means deleting and
 recreating everything inside it.
 

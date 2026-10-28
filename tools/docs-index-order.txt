@@ -12,6 +12,7 @@
 [deployment]
 steps: Before installation
 prerequisites
+deployment-shapes
 hardware-platforms
 sizing
 fresh-install

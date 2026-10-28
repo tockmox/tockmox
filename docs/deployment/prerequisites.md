@@ -38,6 +38,13 @@ them and the first two fail the render.
 
 Both finish at [installation](install.md).
 
+**Which shape is yours.** One deployment shape is gated: a single node running
+openSUSE MicroOS and k3s as a SUSE Harvester virtual machine. Every other shape
+on these pages is either documented without a release gate behind it, or not
+documented at all. [Deployment shapes](deployment-shapes.md) is the one table
+that says which row your plan is in, and it is worth reading before you buy or
+build anything.
+
 ## What you do NOT need
 
 - **cert-manager, MetalLB, storage, ingress** ... Tockmox installs these.
@@ -51,6 +58,7 @@ Both finish at [installation](install.md).
 
 | If you are | Read |
 |---|---|
+| Checking which deployment shapes a release gate runs | [deployment shapes](deployment-shapes.md) |
 | Sizing all four tiers with measured numbers | [sizing](sizing.md) |
 | Deciding what machine to buy or reuse | [hardware platforms](hardware-platforms.md) |
 | Installing into VMs on any hypervisor | [virtual machines](virtual-machines.md) |
