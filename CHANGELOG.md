@@ -387,6 +387,12 @@ costs you, with the reasoning in the documentation rather than here.
   subchart let the common block overwrite it. The cost is that Renovate no longer
   tracks the subchart and an upstream template change must be carried by hand.
 
+- **Open WebUI 0.12.4 and LiteLLM (litellm-helm) 1.106.5.** Open WebUI 0.12.4 carries
+  security fixes upstream says it will publish advisories for after CVE assignment; update
+  promptly. Open WebUI's `LICENSE` at `v0.12.4` is byte-identical to `v0.12.3`, so the
+  licence terms in `docs/frontend-posture.md` stand. The image pin moved to the `v0.12.4`
+  tag, which upstream publishes as the same digest as `0.12.4`.
+
 ### Fixed
 
 - **The Argo CD sign-in recipe works on a site that uses the shipped private CA.**
