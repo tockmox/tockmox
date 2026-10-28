@@ -810,10 +810,12 @@ states: [0-9]+ \| Alert rules for
 # frontend-posture.md states the shipped Open WebUI version because its licence
 # paragraph was checked against LICENSE at that tag (TM-0908). A bump makes this
 # go red ON PURPOSE: re-read LICENSE at the new tag before changing `expect`.
+# The test drops a leading `v`: upstream publishes 0.12.4 and v0.12.4 as one
+# digest, and Renovate moved the pin to the v-prefixed tag at 0.12.4.
 page:   docs/frontend-posture.md
-claim:  The Open WebUI version this release ships is `0.12.3`
-test:   grep -E '^\s+image: ghcr.io/open-webui/open-webui:' charts/tockmox-ai/values.yaml | head -1 | sed 's/.*://'
-expect: 0.12.3
+claim:  The Open WebUI version this release ships is `0.12.4`
+test:   grep -E '^\s+image: ghcr.io/open-webui/open-webui:' charts/tockmox-ai/values.yaml | head -1 | sed 's/.*://; s/^v//'
+expect: 0.12.4
 
 # THE MEASURED INSTALL TIME (TM-0284). A wall-clock time cannot be decided from
 # the tree, so this entry guards the two things that can rot: the profile the
