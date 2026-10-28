@@ -266,10 +266,11 @@ states: [0-9]+ CI gates
 # 2026-10-27: 431 -> 439, airgap.md step 8, the update path for a disconnected install (TM-0120): eight blocks.
 # 2026-10-27: 439 -> 462 and 40 -> 42 pages, the new administration/bring-your-own-ca.md (TM-0784, ten blocks) and operations/second-site-dr.md (TM-0842, thirteen blocks).
 # 2026-10-28: 462 -> 464, upgrade.md's two blocks in the 0.9.0 section on the LiteLLM migrations hook and the pre-upgrade backup (TM-1196, TM-1054).
+# 2026-10-28: 464 -> 465 and 42 -> 43 pages, administration/namespace-guard.md's one block: the read that the policy and its binding exist (TM-1223).
 page:   tests/executed-docs/INVENTORY.md
 claim:  fenced bash blocks across
 test:   grep -rhE '^[ \t]*```bash$' docs/ | wc -l | tr -d ' '
-expect: 464
+expect: 465
 states: [0-9]+ fenced bash blocks
 
 # TM-0970, TM-0120 (2026-10-27): two sentences pinned so they cannot be edited
@@ -308,9 +309,9 @@ states: [0-9]+ bash blocks
 # sufficient protection when the collision is on the VALUE rather than on a
 # substring. Edit entries one at a time, or match on the `test:` line.
 page:   tests/executed-docs/INVENTORY.md
-claim:  fenced bash blocks across 42 pages
+claim:  fenced bash blocks across 43 pages
 test:   grep -rlE '^[ \t]*```bash$' docs/ | wc -l | tr -d ' '
-expect: 42
+expect: 43
 states: [0-9]+ pages
 
 # THE CHART FACTS THE TWO 0.9.0 DR PAGES STAND ON (TM-0784, TM-0842). The

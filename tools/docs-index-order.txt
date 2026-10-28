@@ -60,6 +60,7 @@ tockmox-ui
 group: Platform assurance — experimental
 platform-management
 posture-probe
+namespace-guard
 
 [operations]
 day-2

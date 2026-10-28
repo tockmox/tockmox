@@ -96,6 +96,7 @@
           "longhorn",
           "metallb",
           "monitoring_netpol",
+          "namespace_guard",
           "openWebui",
           "platform_netpol",
           "platform_policies",
@@ -228,6 +229,9 @@
     },
     "prometheus-operator-crds": {
       "description": "Not this layer's key. Owned by the crds layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "namespaceGuard": {
+      "description": "Not this layer's key. Owned by the policy layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
     },
     "rbacGuardrails": {
       "description": "Not this layer's key. Owned by the policy layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."

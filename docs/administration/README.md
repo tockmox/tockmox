@@ -74,6 +74,7 @@ The two experimental groups at the end are not covered by the stable values cont
 |---|---|
 | [Platform Management](platform-management.md) | Turn on the Tockmox UI's read-only operations view: the platform's operations roles, the scheduled work each one owns, the numbers each one watches, what the page may read, and how a site replaces the catalog |
 | [Security Posture Probe](posture-probe.md) | Install the experimental posture-probe add-on, read what it found, and know exactly what its read-only role and its network policy allow it to do |
+| [Guard the Tockmox namespaces](namespace-guard.md) | Turn on the admission policy that refuses anything but GitOps and the platform creating objects in the namespaces Tockmox manages, read what it would have refused, and promote it from Warn to Deny |
 
 <!-- tockmox:section-index:end -->
 

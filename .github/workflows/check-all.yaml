@@ -80,6 +80,8 @@ jobs:
           tar -xzf kubeconform.tar.gz kubeconform && sudo install -m755 kubeconform /usr/local/bin/
           rm -f kubeconform kubeconform.tar.gz
           python3 -c 'import yaml' 2>/dev/null || python3 -m pip install -q pyyaml
+          # tools/check-namespace-guard.sh evaluates the guard's CEL expression; without this it exits 2 (skipped).
+          python3 -c 'import celpy' 2>/dev/null || python3 -m pip install -q cel-python==0.1.5
           command -v jq >/dev/null || sudo apt-get install -y -q jq
           echo "bash:        $(bash --version | head -1)"
           echo "helm:        $(helm version --short)"

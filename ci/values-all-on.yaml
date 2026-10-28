@@ -27,6 +27,14 @@ capabilities:
   hardwareTelemetry:
     enabled: true
 
+# tockmox-policy: the namespace guard, off by default. On here so
+# the ValidatingAdmissionPolicy and its binding render and tools/check-namespace-guard.sh
+# has an expression to evaluate. In the overlay and not ci/values.yaml, so the
+# per-layer resource counts the docs pin (tools/render-counts.sh) do not move.
+apps:
+  namespace_guard:
+    enabled: true
+
 modelGateway:
   database:
     backup:
