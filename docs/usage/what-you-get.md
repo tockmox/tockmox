@@ -19,7 +19,7 @@ Honest inventory. Anything not built says so. Counts are from
 `helm template` with the CI values and are re-checked whenever this page
 changes.
 
-## Today ... nine layers, 604 rendered resources
+## Today ... nine layers, 608 rendered resources
 
 Counts describe the revision you are reading, not the last tag. The release
 this page ships with is stamped in the footer.
@@ -33,7 +33,7 @@ this page ships with is stamped in the footer.
 | exporters | 7 | blackbox / SNMP / smartctl, separate so wrong-for-your-hardware is one flag |
 | identity | 34 | Authentik. Its credentials come from operator-created Secrets, so the pods wait with a config error until you supply them |
 | devops | 35 | Argo Workflows (client auth, not authenticate-nobody). No registry: see [registry](../deployment/registry.md) |
-| ai | 31 | Open WebUI with **no cloud backend**, enforced by a CI check, routed through the LiteLLM model gateway on a key the chart mints and a CronJob checks (since 0.8.0). The gateway's model list ships empty: see "the one decision" below |
+| ai | 35 | Open WebUI with **no cloud backend**, enforced by a CI check, routed through the LiteLLM model gateway on a key the chart mints and a CronJob checks (since 0.8.0). The gateway's model list ships empty: see "the one decision" below |
 | selfcheck | 5 | Alert rules for silent failures, plus a heartbeat that proves alerting works |
 
 Deployed end to end on a wiped single-node k3s cluster. The nine layers above

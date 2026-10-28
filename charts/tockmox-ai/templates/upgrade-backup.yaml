@@ -1,0 +1,326 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+THE PRE-UPGRADE BACKUP (TM-1054). Open WebUI and LiteLLM both migrate their
+database FORWARD when a new version starts (Open WebUI's alembic at startup,
+LiteLLM's migrations Job), and neither migrates back. A rollback after a bad
+version is therefore a restore, and a restore needs a backup taken BEFORE the new
+version touched the schema. Until 0.9.0 that backup was a script someone ran by
+hand ahead of each version PR; with automatic apply that someone is gone, so the
+step moves here.
+
+WHAT IT DOES. Before any resource of the sync is applied, a PreSync hook Job asks
+the cluster which version each database's application runs now and compares it
+with the version this render is about to run. If they differ it creates a CNPG
+Backup of that application's database, waits for it to be `completed`, and only
+then exits 0. If the Backup fails or does not complete within
+modelGateway.upgradeBackup.timeoutSeconds the Job exits 1, a failed PreSync hook
+fails the whole sync, and NOTHING of the new version is applied: the old pods
+keep running on the old schema. That refusal is the point.
+
+WHY A PRESYNC HOOK AND NOT A RENDER-TIME DECISION. Nothing in a render can tell an
+upgrade from a resync. Argo CD renders with `helm template`, where `lookup`
+returns nothing (the GREENFIELD RULE in the identity layer's sso-blueprints.yaml
+says the same), so "the version changed" exists only in the cluster, and only
+before the sync replaces it.
+
+ORDERING AGAINST THE MIGRATION. The LiteLLM migrations Job is an Argo Sync hook
+(litellm.migrationJob.jobAnnotations, TM-1196). PreSync hooks run to completion
+before the sync phase starts, so the backup precedes the migration by Argo's own
+phase order and no sync wave is needed. tools/check-upgrade-safety.sh F7 asserts
+both annotations on the render. Open WebUI's alembic runs when its new pod
+starts, which is also after the sync phase begins.
+
+WHAT IT DOES NOT BACK UP. Only a database in a CloudNativePG Cluster. LiteLLM's
+is one, rendered by this chart (litellm-db.yaml), and is covered whenever its
+backups are on. Open WebUI's default database is SQLite on its volume, which a
+CNPG Backup cannot capture; a site that moved it to CNPG names the Cluster in
+modelGateway.upgradeBackup.openWebuiClusterName and gets the same step. A site
+on the SQLite default is covered by the volume's own backup
+(docs/operations/backup-restore.md, section 6), not by this.
+
+FIRST INSTALL, AND A SITE WITH NOTHING TO COMPARE. No Cluster, or no Deployment
+or StatefulSet yet, means there is no old version to protect: the Job logs that
+and exits 0, so a greenfield sync is not blocked. FAIL CLOSED the other way: if the
+API cannot be asked, or the running image cannot be read although the workload
+exists, the Job fails. A guard that passes when it cannot see is not a guard.
+
+ESCAPE HATCH. modelGateway.upgradeBackup.enabled: false removes the hook for a
+site whose database is covered some other way, or one that has to upgrade while
+its object store is down.
+
+THE POD CARRIES THE restore drill's NAME LABEL on purpose: the policy layer's
+allow-egress-restore-drill selects that label and grants the Kubernetes API,
+which is all this pod needs beyond DNS. A dedicated policy is the platform
+layer's to add.
+*/ -}}
+{{- $ub := .Values.modelGateway.upgradeBackup | default dict -}}
+{{- $ns := .Values.namespaces.ai -}}
+{{- $db := .Values.modelGateway.database -}}
+{{- $litOn := include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm") -}}
+{{- $owuiOn := include "tockmox.appEnabled" (dict "ctx" $ "app" "openWebui") -}}
+{{- $backupOn := include "tockmox-ai.dbBackupEnabled" . | eq "true" -}}
+{{- $targets := list -}}
+{{- if and $litOn $backupOn (hasKey .Subcharts "litellm") -}}
+{{- $sub := index .Subcharts "litellm" -}}
+{{- $img := $sub.Values.image | default dict -}}
+{{- $targets = append $targets (dict
+      "name" "litellm"
+      "cluster" $db.name
+      "kind" "Deployment"
+      "workload" (include "litellm.fullname" $sub)
+      "image" (regexReplaceAll "^.*/" ($img.repository | default "") "")
+      "want" ($img.tag | default $sub.Chart.AppVersion | toString)) -}}
+{{- end -}}
+{{- if and $owuiOn ($ub.openWebuiClusterName | default "") (hasKey .Subcharts "open-webui") -}}
+{{- $sub := index .Subcharts "open-webui" -}}
+{{- $img := $sub.Values.image | default dict -}}
+{{- $targets = append $targets (dict
+      "name" "open-webui"
+      "cluster" $ub.openWebuiClusterName
+      "kind" "StatefulSet"
+      "workload" (include "open-webui.fullname" $sub)
+      "image" (regexReplaceAll "^.*/" ($img.repository | default "") "")
+      "want" (include "open-webui.tag" $sub)) -}}
+{{- end -}}
+{{- /* Unset follows the targets; false is off; true refuses unless there is a target, so a site that asks for the step is never left believing it has one. */ -}}
+{{- if and (kindIs "bool" $ub.enabled) $ub.enabled (not $targets) -}}
+{{- fail "modelGateway.upgradeBackup.enabled is true but there is no database to back up: the model gateway's backups are off or the gateway is not rendered, and modelGateway.upgradeBackup.openWebuiClusterName is empty. Turn the gateway database's backups on (capabilities.dataProtection, or modelGateway.database.backup.enabled), name Open WebUI's CNPG Cluster, or leave enabled unset." -}}
+{{- end -}}
+{{- if and $targets (not (and (kindIs "bool" $ub.enabled) (not $ub.enabled))) }}
+{{- $timeout := int ($ub.timeoutSeconds | default 900) }}
+{{- $image := include "tockmox.image" (dict "ctx" $ "repo" ($ub.image | default "alpine/k8s:1.37.1")) }}
+{{- $workloads := list -}}
+{{- $clusters := list -}}
+{{- range $targets }}{{ $workloads = append $workloads .workload }}{{ $clusters = append $clusters .cluster }}{{ end }}
+{{- $kinds := dict "Deployment" (list) "StatefulSet" (list) -}}
+{{- range $targets }}{{ $_ := set $kinds .kind (append (index $kinds .kind) .workload) }}{{ end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-pre-upgrade-backup
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-1"
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-1"
+    helm.sh/hook-delete-policy: before-hook-creation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tockmox-pre-upgrade-backup
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-1"
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-1"
+    helm.sh/hook-delete-policy: before-hook-creation
+rules:
+  # Read the database Cluster(s), by name: does one exist yet.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    resourceNames: {{ $clusters | uniq | toJson }}
+    verbs: ["get"]
+  # Create the Backup and read its phase. RBAC cannot scope a create by name, so
+  # the guardrail is the script, which creates one Backup per changing
+  # application and nothing else. No update, patch or delete: a Backup this Job
+  # made stays, as the record of what was taken before which version.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["backups"]
+    verbs: ["get", "create"]
+  # Read which version runs now: the named workloads, read-only.
+  {{- if index $kinds "Deployment" }}
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: {{ index $kinds "Deployment" | toJson }}
+    verbs: ["get"]
+  {{- end }}
+  {{- if index $kinds "StatefulSet" }}
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    resourceNames: {{ index $kinds "StatefulSet" | toJson }}
+    verbs: ["get"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tockmox-pre-upgrade-backup
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "-1"
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-1"
+    helm.sh/hook-delete-policy: before-hook-creation
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tockmox-pre-upgrade-backup
+subjects:
+  - kind: ServiceAccount
+    name: tockmox-pre-upgrade-backup
+    namespace: {{ $ns }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: tockmox-pre-upgrade-backup
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PreSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "0"
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 0
+  # One wait per application, plus a margin for the reads. The Job's own
+  # deadline is the hard stop; the script's timeout is the polite one.
+  activeDeadlineSeconds: {{ add (mul $timeout (len $targets)) 120 }}
+  template:
+    metadata:
+      labels:
+        {{- include "tockmox.labels" . | nindent 8 }}
+        app.kubernetes.io/name: tockmox-restore-drill
+        app.kubernetes.io/component: pre-upgrade-backup
+    spec:
+      restartPolicy: Never
+      serviceAccountName: tockmox-pre-upgrade-backup
+      # Needs the API: it reads the Cluster and the workload, and creates and reads
+      # a Backup (the Role above). Token kept on purpose; allowlisted in
+      # tools/check-sa-tokens.sh.
+      automountServiceAccountToken: true
+      {{- with $db.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: backup
+          image: {{ $image }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits:   { memory: 64Mi }
+          # kubectl keeps a discovery cache under $HOME; a read-only root has no HOME to
+          # write, so give it an emptyDir rather than let it warn on every call.
+          env:
+            - { name: HOME, value: /tmp }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -u
+              NS={{ $ns }}
+              TIMEOUT={{ $timeout }}
+              STAMP=$(date -u +%Y%m%d%H%M%S)
+
+              fail_blind() {
+                echo "pre-upgrade backup: $1"
+                echo "Refusing: a guard that cannot see must not pass. Nothing of the new version has been applied."
+                exit 1
+              }
+
+              # backup_if_changing <label> <cluster> <kind> <workload> <image name> <version this render runs>
+              backup_if_changing() {
+                LABEL=$1; CLUSTER=$2; KIND=$3; WORKLOAD=$4; IMG=$5; WANT=$6
+
+                # Data on stdout only: a kubectl warning on stderr must not read as an answer. The
+                # message is fetched by asking again, and only when the first ask failed.
+                CL=$(kubectl -n "$NS" get cluster.postgresql.cnpg.io "$CLUSTER" --ignore-not-found -o name 2>/dev/null) \
+                  || fail_blind "$LABEL: cannot read Cluster $CLUSTER: $(kubectl -n "$NS" get cluster.postgresql.cnpg.io "$CLUSTER" -o name 2>&1 | head -3)"
+                if [ -z "$CL" ]; then
+                  echo "$LABEL: no Cluster $CLUSTER yet (a first install); nothing to back up."
+                  return 0
+                fi
+
+                W=$(kubectl -n "$NS" get "$KIND" "$WORKLOAD" --ignore-not-found -o json 2>/dev/null) \
+                  || fail_blind "$LABEL: cannot read $KIND $WORKLOAD: $(kubectl -n "$NS" get "$KIND" "$WORKLOAD" -o name 2>&1 | head -3)"
+                if [ -z "$W" ]; then
+                  echo "$LABEL: no $KIND $WORKLOAD yet; no old version to protect."
+                  return 0
+                fi
+
+                # The tag of the running container whose image is <IMG>:<tag>, digest and registry
+                # prefix ignored (global.imageRegistry changes the prefix, never the tag).
+                HAVE=$(printf '%s' "$W" | jq -r --arg img "$IMG" '
+                  [.spec.template.spec.containers[].image
+                   | sub("@.*$"; "")
+                   | select((split("/") | last) | startswith($img + ":"))
+                   | split(":") | last] | first // empty' 2>&1) \
+                  || fail_blind "$LABEL: the answer for $KIND $WORKLOAD was not a workload ($(printf '%s' "$HAVE" | head -1))"
+                [ -n "$HAVE" ] || fail_blind "$LABEL: $KIND $WORKLOAD exists but none of its containers runs an image named $IMG, so the running version cannot be read."
+
+                if [ "$HAVE" = "$WANT" ]; then
+                  echo "$LABEL: $HAVE is already running; no version change, no backup."
+                  return 0
+                fi
+
+                echo "$LABEL: $HAVE -> $WANT. Backing up $CLUSTER before the new version starts."
+                SAFE=$(printf '%s' "$WANT" | tr 'A-Z' 'a-z' | sed 's/[^a-z0-9.-]/-/g')
+                BASE=$(printf '%s-pre-%s' "$CLUSTER" "$SAFE" | cut -c1-48 | sed 's/[.-]*$//')
+                BNAME="${BASE}-${STAMP}"
+                # JSON through jq, not a heredoc: a heredoc inside a YAML block scalar needs its body
+                # and terminator at the scalar's own indentation, which reads as a mistake.
+                CREATED=$(jq -n --arg name "$BNAME" --arg ns "$NS" --arg cluster "$CLUSTER" --arg from "$HAVE" --arg to "$WANT" '
+                  {apiVersion: "postgresql.cnpg.io/v1", kind: "Backup",
+                   metadata: {name: $name, namespace: $ns,
+                              labels: {"tockmox.com/pre-upgrade-backup": "true"},
+                              annotations: {"tockmox.com/from-version": $from, "tockmox.com/to-version": $to}},
+                   spec: {cluster: {name: $cluster}, method: "plugin",
+                          pluginConfiguration: {name: "barman-cloud.cloudnative-pg.io"}}}' \
+                  | kubectl -n "$NS" create -f - 2>&1) \
+                  || { echo "$LABEL: the Backup was refused: $(printf '%s' "$CREATED" | head -3)"; echo "Nothing of $WANT has been applied; $HAVE keeps running."; exit 1; }
+                echo "$CREATED"
+
+                END=$(( $(date +%s) + TIMEOUT ))
+                while :; do
+                  PHASE=$(kubectl -n "$NS" get backup.postgresql.cnpg.io "$BNAME" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+                  case "$PHASE" in
+                    completed)
+                      echo "$LABEL: backup $BNAME completed (backupId $(kubectl -n "$NS" get backup.postgresql.cnpg.io "$BNAME" -o jsonpath='{.status.backupId}' 2>/dev/null || true))."
+                      return 0 ;;
+                    failed)
+                      echo "$LABEL: backup $BNAME FAILED: $(kubectl -n "$NS" get backup.postgresql.cnpg.io "$BNAME" -o jsonpath='{.status.error}' 2>/dev/null || true)"
+                      echo "Nothing of $WANT has been applied; $HAVE keeps running. Fix the backup (kubectl -n $NS describe cluster.postgresql.cnpg.io $CLUSTER), or set modelGateway.upgradeBackup.enabled: false to upgrade without one."
+                      exit 1 ;;
+                  esac
+                  if [ "$(date +%s)" -ge "$END" ]; then
+                    echo "$LABEL: backup $BNAME is still '${PHASE:-unknown}' after ${TIMEOUT}s."
+                    echo "Nothing of $WANT has been applied; $HAVE keeps running. Look at the Backup (kubectl -n $NS describe backup.postgresql.cnpg.io $BNAME), or raise modelGateway.upgradeBackup.timeoutSeconds."
+                    exit 1
+                  fi
+                  sleep 5
+                done
+              }
+
+              {{- range $targets }}
+              backup_if_changing {{ .name | squote }} {{ .cluster | squote }} {{ .kind | squote }} {{ .workload | squote }} {{ .image | squote }} {{ .want | squote }}
+              {{- end }}
+              echo "pre-upgrade backup: done."
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 16Mi }
+{{- end }}

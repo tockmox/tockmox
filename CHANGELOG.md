@@ -192,6 +192,25 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Changed
 
+- **The LiteLLM migrations Job is LiteLLM's own, as an Argo CD `Sync` hook, and
+  a version change takes a database backup first.** `tockmox-ai` no longer
+  renders its own hash-named copy of the Job: the vendored `litellm-helm` renders
+  `tockmox-ai-litellm-migrations` with `argocd.argoproj.io/hook: Sync` and
+  `hook-delete-policy: BeforeHookCreation`, so a LiteLLM image bump re-runs the
+  migrations without `field is immutable`, and the render refuses
+  `litellm.migrationJob.enabled: false` and the subchart's own hook switches.
+  A new `PreSync` hook, `tockmox-pre-upgrade-backup`, compares the running
+  LiteLLM version (and Open WebUI's, when `modelGateway.upgradeBackup.openWebuiClusterName`
+  names a CNPG Cluster) with the version being applied; if it differs it creates a
+  CloudNativePG `Backup`, waits for `completed`, and fails the sync with nothing of
+  the new version applied if it does not. A first install and an unchanged version
+  do nothing. `modelGateway.upgradeBackup.enabled: false` removes it. **Action:**
+  none with Argo CD, which prunes the old hash-named Job; with a sync that does not
+  prune, delete it (`docs/deployment/upgrade.md`, "The LiteLLM migrations Job
+  becomes an Argo CD hook"). A plain `helm upgrade` has no hook machinery: the Job
+  is an ordinary fixed-name object there and must be deleted before a LiteLLM
+  image bump.
+
 - **`tools/helm-deps.sh` works with no network when the tree already carries
   its subcharts.** When every layer's Chart.lock matches its Chart.yaml and
   every upstream archive is already in `charts/*/charts` at the locked version,

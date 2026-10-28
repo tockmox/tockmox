@@ -407,6 +407,33 @@
               }
             }
           }
+        },
+        "upgradeBackup": {
+          "type": "object",
+          "description": "The pre-upgrade backup hook (TM-1054): a PreSync Job that takes a CNPG Backup of an application's database when that application's version changes, and fails the sync if the Backup does not complete.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "null follows whether the gateway database has backups on (capabilities.dataProtection); false removes the hook."
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 30,
+              "description": "How long to wait for one Backup to reach completed."
+            },
+            "openWebuiClusterName": {
+              "type": "string",
+              "description": "The CNPG Cluster holding Open WebUI's database, if the site runs it on CNPG. Empty: Open WebUI is not backed up by this hook."
+            },
+            "image": {
+              "type": "string",
+              "description": "Image the hook runs kubectl and jq from. Empty is the restore drill's image."
+            }
+          }
         }
       },
       "x-tockmox-stability": "provisional",

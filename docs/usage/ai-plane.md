@@ -656,7 +656,7 @@ uid 1000 with a read-only root, ready with no restarts.
 
 **The migrations Job log ends with a Prisma traceback, and it is expected and
 harmless.** After `LiteLLM: Setup complete. Skipping server startup as
-requested.` the log of `tockmox-ai-litellm-migrations-<10 hex>` can carry a
+requested.` the log of the `tockmox-ai-litellm-migrations` pod can carry a
 traceback ending `OSError: [Errno 30] Read-only file system` on a `schema.prisma`
 path under the image's `site-packages`. The Job runs with the read-only root
 filesystem described above, and after the migration LiteLLM runs `prisma

@@ -265,10 +265,11 @@ states: [0-9]+ CI gates
 # 2026-10-27: 424 -> 431, Authentik on CloudNativePG (TM-0788): upgrade.md's five-block move procedure, secrets.md's block sealing tockmox-authentik-db for an install minted before 0.9.0, and backup-restore.md's read of the identity drill register.
 # 2026-10-27: 431 -> 439, airgap.md step 8, the update path for a disconnected install (TM-0120): eight blocks.
 # 2026-10-27: 439 -> 462 and 40 -> 42 pages, the new administration/bring-your-own-ca.md (TM-0784, ten blocks) and operations/second-site-dr.md (TM-0842, thirteen blocks).
+# 2026-10-28: 462 -> 464, upgrade.md's two blocks in the 0.9.0 section on the LiteLLM migrations hook and the pre-upgrade backup (TM-1196, TM-1054).
 page:   tests/executed-docs/INVENTORY.md
 claim:  fenced bash blocks across
 test:   grep -rhE '^[ \t]*```bash$' docs/ | wc -l | tr -d ' '
-expect: 462
+expect: 464
 states: [0-9]+ fenced bash blocks
 
 # TM-0970, TM-0120 (2026-10-27): two sentences pinned so they cannot be edited
@@ -740,13 +741,13 @@ states: [0-9]+ exemptions
 page:   docs/usage/what-you-get.md
 claim:  rendered resources
 test:   tools/render-counts.sh --read total
-expect: 604
+expect: 608
 states: [0-9]+ rendered resources
 
 page:   docs/architecture.md
 claim:  resources** render with the CI values
 test:   tools/render-counts.sh --read total
-expect: 604
+expect: 608
 states: [0-9]+ resources\*\* render
 
 page:   docs/usage/what-you-get.md
@@ -792,9 +793,9 @@ expect: 35
 states: [0-9]+ \| Argo Workflows \(client
 
 page:   docs/usage/what-you-get.md
-claim:  | ai | 31 | Open WebUI with
+claim:  | ai | 35 | Open WebUI with
 test:   tools/render-counts.sh --read ai
-expect: 31
+expect: 35
 states: [0-9]+ \| Open WebUI with
 
 page:   docs/usage/what-you-get.md

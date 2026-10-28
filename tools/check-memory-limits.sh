@@ -95,10 +95,7 @@ for f in sorted(glob.glob(d + '/*.yaml')):
         for c in (spec.get('initContainers') or []) + (spec.get('containers') or []):
             total += 1
             if not ((c.get('resources') or {}).get('limits') or {}).get('memory'):
-                # The LiteLLM migrations Job is named after its pod template
-                # (TM-0596), so its hash suffix is not a stable key here.
-                name = re.sub(r'-litellm-migrations-[0-9a-f]{10}$', '-litellm-migrations-<hash>', o['metadata']['name'])
-                unlimited.add((layer, o['kind'], name, c['name']))
+                unlimited.add((layer, o['kind'], o['metadata']['name'], c['name']))
 for k in sorted(unlimited - set(res)):
     errs.append('%s %s %s container %s has no memory limit and is not in the residue: set one from a measurement, or list it with a `# no-limit:` reason' % k)
 for k in sorted(set(res) - unlimited):
