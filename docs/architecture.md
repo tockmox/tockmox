@@ -135,7 +135,7 @@ switch, because an escape hatch is not the same as declining the layer.
 
 <!-- tockmox:layers:end -->
 
-**609 resources** render with the CI values. Every UI hostname derives from one
+**614 resources** render with the CI values. Every UI hostname derives from one
 `internalDomain` value, and TLS follows a single `certIssuer` value.
 
 ### Sync waves
@@ -250,7 +250,7 @@ answer is in
 
 ### Network containment, in one paragraph
 
-![Network containment: ingress denied in all seven namespaces the policy layer creates; egress denied in the AI and diagnostic namespaces only; no policy in namespaces you create; hostNetwork workloads outside NetworkPolicy. The paragraph below is the text equivalent.](diagrams/rendered/network-containment.svg)
+![Network containment: ingress denied in all eight namespaces the policy layer creates; egress denied in the AI and diagnostic namespaces only; no policy in namespaces you create; hostNetwork workloads outside NetworkPolicy. The paragraph below is the text equivalent.](diagrams/rendered/network-containment.svg)
 
 Every namespace the policy layer creates carries a default-deny ingress policy.
 Egress is default-deny in the AI namespace, where the model gateway may reach
@@ -284,7 +284,7 @@ to feel deliberate. The symptom, the diagnosis and the exact values edit are in
 
 Every namespace the policy layer creates carries the Pod Security labels
 `warn` and `audit` at `restricted`. Those two observe without blocking. From
-0.7.0 five of the seven also carry `enforce`, which refuses a pod that fails
+0.7.0 seven of the eight also carry `enforce`, which refuses a pod that fails
 the level. `["Deny"]` enforces; `["Audit","Warn"]` observes ... the same
 distinction the admission policies draw, applied to Pod Security.
 
@@ -301,7 +301,8 @@ reaches:
 | `tockmox-devops` | restricted | baseline | Argo Workflows builds pods from Workflow objects at run time, and those are yours |
 | `tockmox-diagnostic` | no pod ships here | baseline | Where a site's diagnostic agents run |
 | `tockmox-ai` | restricted | baseline | The model gateway and its migrations Job run as uid 1000 on a read-only root (TM-0596); the `enforce` label moves with TM-0487 |
-| `tockmox-monitoring` | privileged | none | node-exporter, Alloy and the SMART exporter need host namespaces or `hostPath` |
+| `tockmox-monitoring` | baseline | baseline | What remains after the node agents moved out: Grafana, Loki, the blackbox and SNMP exporters (TM-0799) |
+| `tockmox-node-agents` | privileged | privileged | node-exporter, Alloy's log DaemonSet and the SMART exporter need host namespaces, `hostPath` or a privileged container; nothing else runs here |
 | `tockmox-platform` | privileged | none | Longhorn is privileged by necessity; kured needs `hostPID`, the MetalLB speaker `hostNetwork` |
 
 The gate fails if any `enforce` label is stricter than the level in the second

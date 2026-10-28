@@ -135,6 +135,13 @@ capabilities:
 
 namespaces:
   monitoring: tockmox-monitoring
+  # Where the SMART exporter runs (TM-0799): the namespace the policy layer
+  # labels `enforce: privileged`. It reads every disk through a privileged
+  # container with the host's /dev, which no Pod Security level below
+  # privileged admits, so it cannot share a namespace with pods held to
+  # baseline. Must equal `namespaces.node_agents` in tockmox-policy and
+  # `namespaces.nodeAgents` in tockmox-observability.
+  nodeAgents: tockmox-node-agents
 
 # ---------------------------------------------------------------------------
 # These are the components most likely to be wrong for YOUR hardware, which is
@@ -350,9 +357,142 @@ prometheus-snmp-exporter:
   serviceMonitor:
     enabled: true
 
+# THE SMART EXPORTER (templates/smartctl.yaml, TM-0799). Rendered by this chart
+# rather than vendored, so that it can run in `namespaces.nodeAgents`; the keys
+# below are the upstream chart's (prometheus-smartctl-exporter 0.17.1), so a
+# site's overrides keep their meaning. Dropped from upstream: `rbac` (bound the
+# ServiceAccount to a PodSecurityPolicy ClusterRole, which no supported
+# Kubernetes has), `nameOverride`, `fullnameOverride`. Changed: an instance's
+# own `config` wins over `common.config`; upstream let the common block
+# overwrite it. `global.imageRegistry` redirects the image.
 prometheus-smartctl-exporter:
+  # One entry per disk-bearing node class: the DaemonSet renders once with the
+  # keys below, and once more per `extraInstances` item, which inherits what it
+  # does not set.
+  config: {}
+  #  devices:
+  #  - /dev/sda
+  #  device_include: /dev/sd.*
+  #  device_exclude: /dev/sr.*
+  extraInstances: []
+  # - config:
+  #     devices:
+  #     - /dev/nvme0n1
+  #   nodeSelector:
+  #     type: other
+  common:
+    config:
+      bind_to: "0.0.0.0:9633"
+      url_path: "/metrics"
+      smartctl_location: /usr/sbin/smartctl
+      collect_not_more_than_period: 120s
+  extraArgs: {}
+  # smartctl.powermode-check: never
+  image:
+    repository: quay.io/prometheuscommunity/smartctl-exporter
+    tag: v0.14.0
+    pullPolicy: IfNotPresent
+    pullSecrets: []
+  updateStrategy:
+    rollingUpdate:
+      maxUnavailable: 1
+    type: RollingUpdate
+  serviceAccount:
+    create: true
+    annotations: {}
+    name: ""
+  resources: {}
+  hostNetwork: false
+  priorityClassName: ""
+  annotations: {}
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations:
+    - effect: NoSchedule
+      operator: Exists
+  affinity: {}
+  service:
+    type: ClusterIP
+    port: 80
+    ipDualStack:
+      enabled: false
+      ipFamilies: ["IPv6", "IPv4"]
+      ipFamilyPolicy: "PreferDualStack"
   serviceMonitor:
     enabled: true
+    # namespace: where to put the monitor if not beside the exporter
+    extraLabels: {}
+    interval: 60s
+    scrapeTimeout: 30s
+    relabelings: []
+    metricRelabelings: []
+    attachMetadata:
+      node: false
+  prometheusRules:
+    enabled: false
+    extraLabels: {}
+  rules:
+    smartCTLDeviceMediaErrors:
+      enabled: true
+      alert: SmartCTLDeviceMediaErrors
+      expr: smartctl_device_media_errors != 0
+      for: 1m
+      annotations:
+        summary: Device has media errors
+        description: Device {{ $labels.device }} on instance {{ $labels.instance }} has media errors
+      labels:
+        severity: critical
+    smartCTLDeviceCriticalWarning:
+      enabled: true
+      alert: SmartCTLDeviceCriticalWarning
+      expr: smartctl_device_critical_warning != 0
+      for: 1m
+      annotations:
+        summary: Device has critical controller warnings
+        description: Device {{ $labels.device }} on instance {{ $labels.instance }} has critical controller warnings
+      labels:
+        severity: critical
+    smartCTLDeviceAvailableSpareUnderThreshold:
+      enabled: true
+      alert: SmartCTLDeviceAvailableSpareUnderThreshold
+      expr: smartctl_device_available_spare_threshold > smartctl_device_available_spare
+      for: 1m
+      annotations:
+        summary: Device is under available spare threshold
+        description: Device {{ $labels.device }} on instance {{ $labels.instance }} is under available spare threshold
+      labels:
+        severity: warning
+    smartCTLDeviceStatus:
+      enabled: true
+      alert: SmartCTLDeviceStatus
+      expr: smartctl_device_smart_status != 1
+      for: 1m
+      annotations:
+        summary: Device has bad status
+        description: Device {{ $labels.device }} on instance {{ $labels.instance }} has bad status
+      labels:
+        severity: critical
+    smartCTLDInterfaceSlow:
+      enabled: true
+      alert: SmartCTLDInterfaceSlow
+      expr: smartctl_device_interface_speed{speed_type="current"} != on(device, instance, namespace, pod) smartctl_device_interface_speed{speed_type="max"}
+      for: 1m
+      annotations:
+        summary: Device interface is slower then it should be
+        description: Device {{ $labels.device }} on instance {{ $labels.instance }} interface is slower then it should be
+      labels:
+        severity: warning
+    smartCTLDDeviceTemperature:
+      enabled: true
+      alert: SmartCTLDDeviceTemperature
+      expr: smartctl_device_temperature{temperature_type="current"} > 60
+      for: 1m
+      annotations:
+        summary: Device has temperature higher than 60°C
+        description: Device {{ $labels.device }} on instance {{ $labels.instance }} has temperature higher than 60°C
+      labels:
+        severity: warning
 probes:
   enabled: true
   interval: 30s

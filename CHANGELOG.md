@@ -286,6 +286,35 @@ costs you, with the reasoning in the documentation rather than here.
   expression above and drop `litellm.image.tag`
   (`docs/administration/tls-and-trust.md`, "Trust inside the cluster").
 
+- **The node agents run in a namespace of their own, and the monitoring namespace
+  now enforces Pod Security `baseline`.** node-exporter, Alloy's log DaemonSet and
+  the SMART exporter read the host (host network, host PID, `hostPath`, a
+  privileged container), which no `securityContext` can make acceptable to a
+  stricter level, so they moved out of `tockmox-monitoring` into
+  `tockmox-node-agents` (new, `enforce: privileged`, ingress default-deny,
+  `allow-from-prometheus`). What stays in `tockmox-monitoring` (Grafana, Loki, the
+  blackbox and SNMP exporters) is checked against `baseline` and enforced there.
+  Alloy pushes to Loki across namespaces, so a NetworkPolicy
+  (`allow-from-node-agents`) admits exactly that and the push URL now names the
+  Loki gateway's namespace. The name is `namespaces.node_agents` (policy layer),
+  `namespaces.nodeAgents` (observability and exporters layers) and a literal
+  `namespaceOverride` handed to node-exporter and Alloy; the observability
+  preflight refuses a mismatch by name. **Action:** the first sync replaces the
+  three DaemonSets (a few minutes without node metrics and logs). A dashboard or
+  rule that selects these pods by `namespace="tockmox-monitoring"` needs the new
+  name. A site that keeps its own layout sets the two `namespaceOverride` values to
+  `""` and `podSecurity.enforce.monitoring: ""` in the policy layer, and sets
+  `namespaces.nodeAgents: tockmox-monitoring` in the exporters layer, which
+  restores the 0.8 placement. Not yet observed on a live cluster.
+- **The SMART exporter is rendered by `tockmox-exporters` instead of vendored.**
+  The `prometheus-smartctl-exporter` subchart (0.17.1) could not take a namespace
+  of its own and bound its ServiceAccount to a PodSecurityPolicy role, which no
+  supported Kubernetes has. The template keeps the subchart's value keys
+  (`prometheus-smartctl-exporter.*`), so a site's overrides keep their meaning; an
+  `extraInstances` item's own `config` now wins over `common.config`, where the
+  subchart let the common block overwrite it. The cost is that Renovate no longer
+  tracks the subchart and an upstream template change must be carried by hand.
+
 ### Fixed
 
 - **The Argo CD sign-in recipe works on a site that uses the shipped private CA.**

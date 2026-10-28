@@ -40,6 +40,14 @@ global:
   localStorageClass: "local-path"
 namespaces:
   monitoring: tockmox-monitoring
+  # Where node-exporter and Alloy's log DaemonSet run (TM-0799): a namespace the
+  # policy layer labels `enforce: privileged`, so this one can enforce what the
+  # rest of its pods pass. The two subcharts take the name as a LITERAL
+  # `namespaceOverride` below (a subchart value cannot be templated), so this key
+  # is read by the preflight, which refuses a value that differs from them. To
+  # rename the namespace, change all three together with
+  # `namespaces.node_agents` in tockmox-policy.
+  nodeAgents: tockmox-node-agents
 
 # Where your ArgoCD lives. Only read when apps.argocdMonitoring.enabled is
 # true; Tockmox does not install or manage ArgoCD (prerequisites.md §2).
@@ -416,6 +424,11 @@ grafanaDatabase:
 
 kube-prometheus-stack:
   prometheus-node-exporter:
+    # TM-0799: the privileged node agent runs in its own namespace, not beside
+    # Grafana and Prometheus. Must equal `namespaces.nodeAgents` (preflight).
+    # The chart's ServiceMonitor follows it, and Prometheus selects monitors in
+    # every namespace, so the scrape needs nothing else.
+    namespaceOverride: tockmox-node-agents
     resources:
       # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
       # peak 32.9 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 33.4 MiB in the pre-migration namespace (30 days); average 26.9 MiB.
@@ -1314,6 +1327,9 @@ loki:
     serviceMonitor:
       enabled: true
 alloy:
+  # TM-0799: the log DaemonSet reads the node's /var/log, so it runs in the node
+  # agents' namespace. Must equal `namespaces.nodeAgents` (preflight).
+  namespaceOverride: tockmox-node-agents
   alloy:
     # No usage reporting to stats.grafana.org (TM-0671): enableReporting
     # defaults true and adds nothing we need. Sovereignty: no unrequested
@@ -1342,7 +1358,7 @@ alloy:
       content: |
         loki.write "default" {
           endpoint {
-            url = "http://tockmox-observability-loki-gateway/loki/api/v1/push"
+            url = "http://tockmox-observability-loki-gateway.{{ .Release.Namespace }}.svc/loki/api/v1/push"
           }
         }
 

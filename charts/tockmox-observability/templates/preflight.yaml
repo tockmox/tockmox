@@ -155,3 +155,26 @@ cluster). That is not SQLite, so it satisfies the same need as grafanaDatabase
 {{- end -}}
 {{- end -}}
 {{- end -}}
+{{- /*
+THE NODE AGENTS' NAMESPACE (TM-0799). node-exporter and Alloy's log DaemonSet are
+subcharts, and a subchart's namespace is its `namespaceOverride`, a value Helm does not
+run through `tpl`: it is a literal in values.yaml, not a reference to
+`namespaces.nodeAgents`. The policy layer labels `namespaces.node_agents` privileged and
+guards it with NetworkPolicies, so an override that names any other namespace would put
+a hostPID pod where nothing was prepared for it, and the failure would read as a
+healthy sync with no node metrics or logs. Refuse the mismatch by name.
+
+An EMPTY override is allowed and means "leave the agent in the release namespace", the
+layout before 0.9.0: the way for a site that adopts into a cluster with its own layout
+to keep it. That site also sets `podSecurity.enforce.monitoring: ""` in the policy layer,
+because the monitoring namespace now enforces baseline, which node-exporter fails.
+*/ -}}
+{{- $want := .Values.namespaces.nodeAgents | default "" -}}
+{{- $nodeExporterNs := (index ((index $kps "prometheus-node-exporter") | default dict) "namespaceOverride") | default "" -}}
+{{- $alloyNs := (index (index .Values "alloy" | default dict) "namespaceOverride") | default "" -}}
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "kubePrometheusStack")) $nodeExporterNs (ne $nodeExporterNs $want) -}}
+{{- fail (printf "kube-prometheus-stack.prometheus-node-exporter.namespaceOverride is %q but namespaces.nodeAgents is %q. They name the node agents' namespace and must be equal: the policy layer labels and guards namespaces.node_agents, and node-exporter would run in a namespace nothing prepared for it. Set both to the same name, together with namespaces.node_agents in tockmox-policy, or set the override to \"\" to keep node-exporter in the monitoring namespace (and set podSecurity.enforce.monitoring: \"\" in tockmox-policy)." $nodeExporterNs $want) -}}
+{{- end -}}
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "alloy")) $alloyNs (ne $alloyNs $want) -}}
+{{- fail (printf "alloy.namespaceOverride is %q but namespaces.nodeAgents is %q. They name the node agents' namespace and must be equal: the policy layer labels and guards namespaces.node_agents, and Alloy would run in a namespace nothing prepared for it. Set both to the same name, together with namespaces.node_agents in tockmox-policy, or set the override to \"\" to keep Alloy in the monitoring namespace (and set podSecurity.enforce.monitoring: \"\" in tockmox-policy)." $alloyNs $want) -}}
+{{- end -}}

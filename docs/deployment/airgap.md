@@ -125,7 +125,7 @@ has a tool shipped with it.
 | # | Dependency | Size | What Tockmox ships for it | Step |
 |---|---|---|---|---|
 | 1 | Tockmox's own workload images | 44 | `images.txt` and `tools/mirror-images.sh` | [2](#2-mirror-the-images--required) |
-| 2 | Upstream Helm subcharts | 19 dependencies across 14 repositories | `tools/helm-deps.sh` | [3](#3-vendor-the-upstream-helm-subcharts--required) |
+| 2 | Upstream Helm subcharts | 18 dependencies across 14 repositories | `tools/helm-deps.sh` | [3](#3-vendor-the-upstream-helm-subcharts--required) |
 | 3 | Prerequisites: ArgoCD, sealed-secrets, `kubeseal` | 2 charts and 1 binary | nothing | [4](#4-carry-in-the-three-prerequisites--required) |
 | 4 | The Tockmox charts git repository | 1 repository | `tockmox.repoURL` points at your copy | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |
 | 5 | Your site git repository | 1 repository | [install](install.md) states the requirement | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |

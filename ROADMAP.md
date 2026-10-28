@@ -103,11 +103,12 @@ controllers pull on their own and no template names ... published beside the
 image list and checked against it in CI. Regenerated at each release and not
 between, because the lock is a statement about a tag.
 
-**Pod Security enforced where a namespace can take it.** Five of the seven
+**Pod Security enforced where a namespace can take it.** Seven of the eight
 namespaces the policy layer creates carry `enforce` (a values key,
 `podSecurity.enforce`, with a per-namespace escape), set no higher than a gate
-measures the rendered pods to pass. `tockmox-monitoring` and `tockmox-platform`
-do not, because node agents and Longhorn need host access by design. The model
+measures the rendered pods to pass. `tockmox-platform`
+does not, because Longhorn needs host access by design, and the node agents run
+in a namespace of their own that enforces `privileged` (0.9.0). The model
 gateway runs non-root on a read-only root filesystem since 0.8.0. Still ahead:
 observing a violating pod actually refused on a live cluster.
 
@@ -118,7 +119,7 @@ it answers the question a reviewer actually asks ... which bytes ran ... so that
 each pin can be checked against it rather than trusted.
 
 **Egress containment beyond the AI namespace.**
-Ingress default-deny is complete across all seven namespaces the policy layer
+Ingress default-deny is complete across all eight namespaces the policy layer
 creates. Egress is contained for the whole AI namespace (the chat console, the
 model gateway, its database and anything else there) and for the read-only
 diagnostic identity, and open for identity, monitoring, the platform

@@ -188,9 +188,21 @@ namespaces:
     - diagnostic_identity
     - selfcheck
     - devops
+    - node_agents
 
   ai: tockmox-ai
   monitoring: tockmox-monitoring
+  # The node agents (TM-0799): node-exporter and Alloy's log DaemonSet from the
+  # observability layer, and the SMART exporter from the exporters layer. They
+  # read the host (hostNetwork, hostPID, hostPath, privileged), which no
+  # securityContext can make acceptable to a stricter level, so they live in a
+  # namespace of their own labelled `enforce: privileged` and the monitoring
+  # namespace above can enforce what ITS pods pass. Three places must agree on
+  # this name: this key, `namespaces.nodeAgents` in the observability and
+  # exporters layers, and the literal `namespaceOverride` the observability
+  # layer hands to node-exporter and Alloy (a subchart value cannot be
+  # templated). The observability layer's preflight refuses a mismatch.
+  node_agents: tockmox-node-agents
   # ONE namespace for the whole platform layer. Helm subcharts install into
   # their release's namespace, so Traefik, cert-manager, MetalLB, Longhorn,
   # CNPG and kured all land together ... see the NAMESPACE MODEL note in
@@ -261,13 +273,21 @@ namespaces:
 #                                   at run time and those are the site's. Baseline
 #                                   still refuses privileged, host namespaces and
 #                                   hostPath.
-#   monitoring          (none)      node-exporter, Alloy and the smartctl
-#                                   exporter need hostNetwork, hostPID or
-#                                   hostPath by design, so the namespace measures
-#                                   privileged. Not fixable by a securityContext;
-#                                   the way out is a separate namespace for the
-#                                   node agents, which is a layout change, not a
-#                                   label.
+#   monitoring          baseline    what remains after the node agents moved out
+#                                   (TM-0799): Grafana (its chown init container
+#                                   runs as root), the Loki pods, the blackbox
+#                                   and SNMP exporters. Baseline, not
+#                                   restricted, because those set no seccomp
+#                                   profile. The Prometheus, Alertmanager and
+#                                   Grafana database pods an operator creates
+#                                   from custom resources are not measured here.
+#   node_agents         privileged  node-exporter (hostNetwork, hostPID, hostPath
+#                                   /, /proc, /sys), Alloy's log DaemonSet
+#                                   (hostPath /var/log) and the SMART exporter
+#                                   (privileged, hostPath /dev). Not fixable by
+#                                   a securityContext; the namespace is the
+#                                   smallest place the loosening can live, and
+#                                   nothing else is meant to run there.
 #   platform            (none)      Longhorn's manager and CSI plugins are
 #                                   privileged by necessity, kured needs hostPID
 #                                   and the MetalLB speaker needs hostNetwork and
@@ -307,7 +327,8 @@ podSecurity:
   # enforceDefault.
   enforce:
     ai: baseline
-    monitoring: ""
+    monitoring: baseline
+    node_agents: privileged
     platform: ""
     authentik: restricted
     diagnostic_identity: baseline

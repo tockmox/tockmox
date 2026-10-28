@@ -118,13 +118,27 @@ grep -hE '^[[:space:]]*(- name|alias):' charts/*/Chart.yaml | \
 That prints dependency names and aliases together, so an aliased dependency
 appears twice. The **block** is always the alias.
 
-Twenty blocks, measured 2026-09-01 on the 0.6.0 tree:
+Nineteen blocks (twenty on the 0.6.0 tree, where this was measured on
+2026-09-01; `prometheus-smartctl-exporter` left the list in 0.9.0, see below):
 
 `open-webui`, `litellm`, `kube-prometheus-stack`, `loki`, `alloy`, `authentik`,
 `argo-workflows`, `cert-manager`, `metallb`, `traefik`, `longhorn`,
 `cloudnative-pg`, `plugin-barman-cloud`, `snapshot-controller`, `kured`,
 `prometheus-operator-crds`, `prometheus-blackbox-exporter`,
-`prometheus-snmp-exporter`, `prometheus-smartctl-exporter`, `tockmox-common`.
+`prometheus-snmp-exporter`, `tockmox-common`.
+
+**One block keeps a dependency's name and is not one.** From 0.9.0 the exporters
+layer renders the SMART exporter from its own template
+(`charts/tockmox-exporters/templates/smartctl.yaml`) instead of vendoring the
+upstream `prometheus-smartctl-exporter` chart, because a subchart cannot be placed
+in a namespace of its own and the exporter has to run in the privileged
+node-agents namespace. The `prometheus-smartctl-exporter` block keeps the
+upstream chart's keys and their meaning, so a site's overrides still apply; the
+keys are now this repository's to keep stable rather than a pass-through. What
+changed: `rbac`, `nameOverride` and `fullnameOverride` are gone (the first bound
+the ServiceAccount to a PodSecurityPolicy role that no supported Kubernetes
+has), an instance's own `config` wins over `common.config`, and
+`global.imageRegistry` now redirects the image.
 
 `litellm` is an alias: the dependency is `litellm-helm` and the block is
 `litellm`. `tockmox-common` is the library chart and has no values interface at

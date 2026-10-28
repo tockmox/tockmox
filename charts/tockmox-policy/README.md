@@ -12,7 +12,7 @@
 
 # tockmox-policy
 
-**Sync wave 1** · **Implemented** ... 72 resources
+**Sync wave 1** · **Implemented** ... 77 resources
 
 Namespaces, NetworkPolicies, RBAC admission guardrails, PriorityClasses, and the read-only diagnostic identity.
 
@@ -26,9 +26,9 @@ on a fresh one, getting it backwards fails the sync.
 
 | | |
 |---|---|
-| Namespaces | Seven, created from `namespaces.create` |
-| NetworkPolicies | 43 over seven namespaces |
-| Pod Security | `warn` and `audit` at `restricted` on all seven namespaces, and **`enforce` on five** (`ai` and `devops` and `diagnostic_identity` at `baseline`, `authentik` and `selfcheck` at `restricted`). `monitoring` and `platform` carry no enforce label because pods in them need host access by design. Levels are values: `podSecurity`. See the note below |
+| Namespaces | Eight, created from `namespaces.create` |
+| NetworkPolicies | 46 over eight namespaces |
+| Pod Security | `warn` and `audit` at `restricted` on all eight namespaces, and **`enforce` on seven** (`ai`, `devops`, `diagnostic_identity` and `monitoring` at `baseline`, `authentik` and `selfcheck` at `restricted`, `node_agents` at `privileged`). `platform` carries no enforce label because pods in it need host access by design; the node agents that used to share `monitoring` with Grafana moved to `node_agents` (TM-0799). Levels are values: `podSecurity`. See the note below |
 | ValidatingAdmissionPolicies | 4, plus 4 bindings. One refuses on a stock install (cluster-admin ClusterRoleBindings); the other three audit and warn |
 | PriorityClasses | 3 |
 | Diagnostic identity | Read-only ServiceAccount and ClusterRole, network-isolated |
@@ -54,7 +54,7 @@ namespaces:
 | Flag | Namespace | Default | Covers |
 |---|---|---|---|
 | `apps.ai_namespace` | `namespaces.ai` | on | Open WebUI and its backing store |
-| `apps.monitoring_netpol` | `namespaces.monitoring` | on | The observability and exporters layers |
+| `apps.monitoring_netpol` | `namespaces.monitoring` and `namespaces.node_agents` | on | The observability and exporters layers, and the node agents (node-exporter, Alloy, the SMART exporter) in their own namespace |
 | `apps.authentik_netpol` | `namespaces.authentik` | on | Authentik and its database |
 | `apps.devops_netpol` | `namespaces.devops` | **on** | Argo Workflows ... see below |
 | `apps.diagnostic_identity` | `namespaces.diagnostic_identity` | on | The read-only agent identity |
@@ -62,7 +62,7 @@ namespaces:
 | `apps.selfcheck_netpol` | `namespaces.selfcheck` | on | The heartbeat and its alert rules |
 | `apps.kube_bench` | `namespaces.kube_bench` | off | The opt-in CIS scan's namespace (`enforce: privileged`) and its default-deny policy. Pair with `apps.kube_bench` in `tockmox-selfcheck`, which owns the CronJob |
 
-### Pod Security: enforced on five namespaces, not on two
+### Pod Security: enforced on seven namespaces, not on one
 
 Until 0.7.0 this layer labelled every namespace `restricted` for `warn` and
 `audit` and set no `enforce`, so a violating pod printed a warning and ran. From
@@ -70,12 +70,13 @@ Until 0.7.0 this layer labelled every namespace `restricted` for `warn` and
 namespace key in `namespaces.create`. `["Deny"]` enforces; `["Audit","Warn"]`
 observes without blocking ... the same distinction as the admission policies.
 
-Measured against this chart: 7 namespaces carry the warn label, and
-5 namespaces carry an enforce label. Which five, and the level each was measured to pass, is
+Measured against this chart: 8 namespaces carry the warn label, and
+7 namespaces carry an enforce label. Which seven, and the level each was measured to pass, is
 in [architecture § Pod Security](../../docs/architecture.md#pod-security-which-namespaces-refuse-a-pod-and-why-the-others-cannot).
-The reason for each namespace's level, including the two that carry none
-(Longhorn is privileged by necessity; node agents need `hostPath` and host
-namespaces), sits beside the key in `values.yaml`.
+The reason for each namespace's level, including the one that carries none
+(Longhorn is privileged by necessity) and the one that enforces `privileged`
+(the node agents need `hostPath` and host namespaces), sits beside the key in
+`values.yaml`.
 
 `tools/check-pod-security.sh` renders every layer, evaluates every pod template
 against the Pod Security Standards, and fails if an enforce label is stricter

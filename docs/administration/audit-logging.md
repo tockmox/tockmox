@@ -179,8 +179,8 @@ collector is the problem rather than the api-server:
 **WORKSTATION**
 
 ```bash
-kubectl -n tockmox-monitoring get pods -l app.kubernetes.io/name=alloy
-kubectl -n tockmox-monitoring logs -l app.kubernetes.io/name=alloy --tail=50
+kubectl -n tockmox-node-agents get pods -l app.kubernetes.io/name=alloy
+kubectl -n tockmox-node-agents logs -l app.kubernetes.io/name=alloy --tail=50
 ```
 
 **A silent difference worth knowing:** an empty result and a result you have no
