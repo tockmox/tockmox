@@ -502,11 +502,27 @@ configs:
       clientID: argocd
       clientSecret: $argocd-oidc:client-secret     # a Secret you create in the argocd namespace
       requestedScopes: ["openid", "profile", "email"]
+      rootCA: |                                    # only with the shipped private CA, see below
+        -----BEGIN CERTIFICATE-----
+        (the contents of tockmox-ca.crt)
+        -----END CERTIFICATE-----
   rbac:
     policy.csv: |
       g, tockmox-admins, role:admin
     scopes: "[groups]"
 ```
+
+**With the shipped private CA** (`global.certIssuer: tockmox-ca`), Argo CD's
+server does not trust `auth.<internalDomain>` and refuses the provider with
+`x509: certificate signed by unknown authority`. `rootCA` gives it the CA's
+public half: paste the same `tockmox-ca.crt` that
+[TLS and trust, step 2](tls-and-trust.md#2-get-the-ca-out-of-the-cluster--conditional) extracts, indented under `rootCA: |`.
+With a publicly trusted issuer, leave `rootCA` out.
+
+**The client-secret Secret needs one label.** Argo CD resolves
+`$argocd-oidc:client-secret` only from a Secret labelled
+`app.kubernetes.io/part-of: argocd`, so create it with that label, or label it
+after creating it.
 
 Authentik puts the user's groups in the `groups` claim, which is what the
 `g, tockmox-admins, role:admin` line matches. Keep the local `admin` account as
@@ -526,11 +542,21 @@ sso:
 The tile is a link (no provider of its own); the sign-in behind it is step 2's.
 `access` is `admin` by default.
 
-**What is not certified here.** None of this section has been executed on a
-Tockmox install; it is assembled from the Argo CD chart's documented values and
-Authentik's OIDC provider settings, and the tile's render is the only part a
-Tockmox gate checks. The Argo CD values keys move between chart majors: read
-your chart version's `values.yaml` before applying them.
+**Success condition:** on the Authentik portal, the **Argo CD** tile opens a new
+tab at `https://argocd.<internalDomain>` with no certificate warning, and **Log
+in via Authentik** returns to Argo CD signed in, with the applications of every
+layer visible to a member of the admin group.
+
+**What is not certified here.** This section was executed once, on a lab
+install of a 0.9.0 development build with the Argo CD chart at 10.9.1
+(2026-10-28): steps 1 to 3 as written here, step 2 through the admin UI route.
+Without the `rootCA` paragraph above, which the first version of this page did
+not have, that run failed at the provider query. The Secret label is Argo CD's
+documented requirement; the run applied it and did not test without it. Not
+executed: the blueprint route for
+step 2, the `argocd login --sso` CLI path, and any Argo CD chart major other
+than 10. The values keys move between chart majors: read your chart version's
+`values.yaml` before applying them.
 
 ## Related
 
