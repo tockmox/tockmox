@@ -1,0 +1,326 @@
+{{- /*
+THE ALERT PACK: rules for components this product ships, ported from the rules a
+running site had already proven. One PrometheusRule, three groups, each rendering
+only when the component it watches does.
+
+  Loki ingest liveness     follows apps.loki (the observability capability)
+  Prometheus TSDB trough   follows apps.kubePrometheusStack
+  LiteLLM                  needs capabilities.aiPlane AND alertPack.litellm.enabled
+
+WHY THE LITELLM GROUP HAS ITS OWN SWITCH. A rule on a metric nothing scrapes is
+the exact shape of failure this repository keeps finding in itself: it applies
+cleanly, lints clean, and can never fire. The gateway's /metrics needs two
+things the AI layer does not turn on by default (the `prometheus` callback in
+litellm_settings, and a scrape target for the Service), so these rules are
+opt-in. The group carries its own existence alarm, TockmoxLiteLLMMetricsAbsent,
+so that turning the switch on without the scrape reads as not-green rather than
+as quiet. The rules live here and not in tockmox-ai because they read Prometheus,
+and the layer that owns Prometheus owns what it evaluates.
+
+A PrometheusRule needs an operator to evaluate it AND the CRD to exist, so the
+whole object follows serviceMonitors, as the layer's other rules do.
+
+Every alert is classified for the kured reboot gate in tools/kured-gate.txt and
+has a both-directions case in tests/rules/alert-pack-*.yaml.
+*/ -}}
+{{- $monitors := include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") }}
+{{- $ns := .Values.namespaces.monitoring -}}
+{{- $loki := include "tockmox.appEnabled" (dict "ctx" $ "app" "loki") -}}
+{{- $prom := include "tockmox.appEnabled" (dict "ctx" $ "app" "kubePrometheusStack") -}}
+{{- $pack := .Values.alertPack | default dict -}}
+{{- $ll := $pack.litellm | default dict -}}
+{{- $llOn := and (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm")) $ll.enabled -}}
+{{- if and $monitors (or $loki $prom $llOn) }}
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tockmox-alert-pack
+  namespace: {{ $ns }}
+  annotations:
+    # Sync wave 1 of the sync phase, so ArgoCD applies this rule only after the
+    # operator Deployment (wave 0) that serves the admission webhook is healthy.
+    # check-upgrade-safety.sh F4 asserts it.
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  groups:
+{{- if $loki }}
+    - name: tockmox.loki.ingestion
+      interval: 30s
+      rules:
+        - alert: TockmoxLokiNotIngesting
+          # THE ALERT THAT MEASURES THE PIPELINE, NOT THE POD.
+          #
+          # Ported from a site that lost 26.5 hours of logs to a Loki pod wedged
+          # in a failed volume-attach loop. KubePodNotReady and the StatefulSet
+          # replica alert both fired near-continuously for the whole window, and
+          # neither held: the volume layer's auto-recovery and GitOps self-heal
+          # kept deleting and recreating the pod, which reset every `for:` clock,
+          # so the alerts resolved and re-fired instead of escalating. Every
+          # alert was a proxy for "Loki is down". Nothing asserted the fact that
+          # mattered, which is that logs are not arriving.
+          #
+          # This rule never looks at a pod. If the pod churns every two minutes
+          # forever the ingest rate stays 0 and this stays firing. DO NOT ADD A
+          # POD OR STATEFULSET SELECTOR TO IT: being blind to pod identity is
+          # the design.
+          #
+          # Two arms, because the failure has two shapes:
+          #   1. Loki is up and receiving nothing (a dead log shipper, a full
+          #      disk, ring trouble): the rate is 0.
+          #   2. Loki is gone, so the series does not exist, rate() returns no
+          #      data and arm 1 cannot match: absent_over_time. It needs the
+          #      series gone for the whole 15m window, so an ordinary pod
+          #      restart does not even start the `for` clock; bare absent()
+          #      would start it after the 5m staleness lookback and fire ten
+          #      minutes sooner.
+          #
+          # A cluster with no workload logging at all reads as arm 1. That is not
+          # a realistic cluster: the platform's own pods log continuously.
+          # Both arms are exercised in tests/rules/alert-pack-loki.yaml.
+          expr: |
+            (sum(rate(loki_distributor_lines_received_total{namespace="{{ $ns }}"}[10m])) == 0)
+            or
+            absent_over_time(loki_distributor_lines_received_total{namespace="{{ $ns }}"}[15m])
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Loki is not ingesting logs"
+            description: >-
+              Loki has received no log lines for 15 minutes or more. The logging
+              pipeline is down and a permanent hole is growing: the log shipper
+              does not backfill, so every minute here is lost for good, the
+              logs of the incident itself included. This alert is deliberately
+              immune to pod churn, because it measures ingestion and not pod
+              readiness; if it is firing, logs are not arriving whatever the
+              Loki pod's status says. Check in this order: the Loki volume is
+              attached (`kubectl -n {{ $ns }} get pvc`, then the volume
+              object in the storage layer); the Loki pod's log
+              (`kubectl -n {{ $ns }} logs <loki pod> --tail=50`); and, if Loki
+              is healthy, the senders (`kubectl get pods -A -l
+              app.kubernetes.io/name=alloy`).
+        - alert: TockmoxLokiIngestionCollapsed
+          # A PARTIAL BREAK THAT TockmoxLokiNotIngesting CANNOT SEE: some lines
+          # still arrive, so the rate is not 0. The current 15m rate is compared
+          # with the rate of the 6h window that ended an hour ago, and fires
+          # below 10% of it. A relative threshold, so it follows the cluster as
+          # it grows; the 6h baseline keeps a quiet night from tripping it; the
+          # `> 1` line/s floor keeps a cluster that is always quiet from
+          # tripping on noise. Warning, not critical: this one says look, not
+          # get up.
+          expr: |
+            (
+              sum(rate(loki_distributor_lines_received_total{namespace="{{ $ns }}"}[15m]))
+              <
+              0.1 * sum(rate(loki_distributor_lines_received_total{namespace="{{ $ns }}"}[6h] offset 1h))
+            )
+            and
+            sum(rate(loki_distributor_lines_received_total{namespace="{{ $ns }}"}[6h] offset 1h)) > 1
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Loki ingestion has dropped by more than 90% against its 6h baseline"
+            description: >-
+              Loki is still receiving some logs, but the rate has collapsed to
+              under 10% of its own 6-hour baseline for 30 minutes or more.
+              Something stopped shipping: usually a log shipper pod down on one
+              node, or a namespace whose logs no longer match the collection
+              config. The shipper is a DaemonSet, so a missing pod means that
+              node's logs are silently gone. Compare
+              `kubectl get pods -A -l app.kubernetes.io/name=alloy -o wide`
+              against `kubectl get nodes`.
+{{- end }}
+{{- if $prom }}
+    - name: tockmox.prometheus.tsdb
+      rules:
+        - alert: TockmoxPrometheusTSDBVolumeTroughRising
+          # ALERT ON THE TROUGH OF THE COMPACTION SAWTOOTH, NOT ON THE FILL LEVEL.
+          #
+          # A metrics volume does not fill; it ramps. Usage climbs for a couple
+          # of days, then a retention cut drops it several points, and the cycle
+          # repeats. The fullness that trips a fixed "X% full" line is the
+          # fullness that triggers the cut, so the condition is true for minutes
+          # at the apex and a `for:` clock never elapses. Measured on a running
+          # site: the stock 15%-free arm of KubePersistentVolumeFillingUp, with
+          # its 1h `for:`, produced one pending sample and no firing in ten days
+          # on volumes that peaked at 84%. A real leak shows up as the TROUGH
+          # rising, which an instantaneous rule never looks at.
+          #
+          # This takes the minimum fill over a window longer than one full cycle
+          # (3d, against a measured 2.25d period) and fires when THAT is above
+          # the threshold. Normal cycles leave the 3d minimum at a trough, so the
+          # rule is silent through normal operation and rises only when retention
+          # has stopped reclaiming.
+          #
+          # THE THRESHOLD IS A FUNCTION OF YOUR RETENTION. With the shipped
+          # prometheusSpec (`retentionSize: 40GiB` on a 50Gi volume) retention
+          # bounds the blocks near 80% of the volume, so a 3-day minimum above
+          # 82% means something retention does not control (WAL, head chunks,
+          # snapshots, orphaned blocks) is holding space. If you raise
+          # retentionSize or shrink the volume, raise `alertPack.prometheusTsdb.
+          # troughThreshold` with it, to a little above the new apex ratio's
+          # normal trough.
+          #
+          # SHAPE, each point learned the hard way:
+          #   - `max by (namespace, persistentvolumeclaim)` is INSIDE the
+          #     subquery. A Prometheus pod that moves node mints a fresh series
+          #     (the instance label changes); aggregating after min_over_time
+          #     would let a post-move series that has only seen a ramp report a
+          #     false trough. Both shapes are in tests/rules/alert-pack-tsdb.yaml.
+          #   - `[3d:5m]` keeps the subquery cheap; kubelet volume stats move
+          #     about once a minute and a 5m grid cannot miss a multi-day trough.
+          #   - `for: 1h` is safe because the subject, a 3-day minimum, is smooth
+          #     by construction; the clock cannot be outrun by the signal.
+          #
+          # NOT A REPLACEMENT for TockmoxPersistentVolumeFillingUp (tockmox-
+          # selfcheck, under 10% free). That rule covers every other volume and
+          # is harmless on these: with retention bounding the apex near 80% it
+          # cannot fire here, which is why this one exists. Dropping it would
+          # lose every other volume to cover a gap this rule already covers.
+          expr: |
+            min_over_time(
+              (
+                max by (namespace, persistentvolumeclaim) (
+                  1 - kubelet_volume_stats_available_bytes{job="kubelet", namespace="{{ $ns }}", persistentvolumeclaim=~"prometheus-.*-db-.*"}
+                    / kubelet_volume_stats_capacity_bytes{job="kubelet", namespace="{{ $ns }}", persistentvolumeclaim=~"prometheus-.*-db-.*"}
+                )
+              )[3d:5m]
+            ) > {{ ($pack.prometheusTsdb | default dict).troughThreshold | default 0.82 }}
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "The Prometheus metrics volume floor is rising: retention is no longer reclaiming space"
+            description: >-
+              The 3-day minimum fill of {{ `{{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }}` }}
+              is {{ `{{ $value | humanizePercentage }}` }}, above the
+              {{ ($pack.prometheusTsdb | default dict).troughThreshold | default 0.82 }} line. Normal compaction cycles hold the
+              trough well below it; a trough this high means the retention cut
+              no longer brings usage down and the volume will fill on the next
+              ramp. Look at WAL size, head chunks, TSDB snapshots and orphaned
+              blocks on the volume before growing it. TockmoxPersistentVolumeFillingUp
+              cannot fire on this volume while retention holds the apex below 90%;
+              this is the instrument that can.
+{{- end }}
+{{- if $llOn }}
+{{- $nsRe := $ll.namespaceRegex | default "ai|tockmox-ai" }}
+{{- $svcRe := $ll.serviceRegex | default "litellm|tockmox-ai-litellm" }}
+{{- $sel := printf `namespace=~"%s", service=~"%s"` $nsRe $svcRe }}
+    - name: tockmox.litellm
+      interval: 30s
+      rules:
+        - alert: TockmoxLiteLLMDown
+          # The scrape target exists and fails. A target that does not exist is
+          # TockmoxLiteLLMMetricsAbsent below: when the Service has no endpoints
+          # the target disappears and `up` has no series at all, so `== 0` alone
+          # would stay silent exactly when the Deployment is gone. `namespace`
+          # and `service` are carried by the scrape relabelling, which is more
+          # reliable than `job`.
+          expr: up{ {{- $sel -}} } == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "The model gateway cannot be scraped"
+            description: >-
+              Prometheus has failed to scrape the gateway's /metrics for 2
+              minutes or more. Chat and API traffic depend on it. Check
+              `kubectl -n {{ `{{ $labels.namespace }}` }} get pods` and the gateway's log.
+        - alert: TockmoxLiteLLMMetricsAbsent
+          # THE EXISTENCE ALARM FOR THIS GROUP. Either the gateway is gone, or
+          # alertPack.litellm.enabled was switched on without the scrape that
+          # feeds it: the `prometheus` callback in litellm_settings.callbacks
+          # and a ServiceMonitor for the gateway's Service. Both read as quiet
+          # on every rule below, which is the failure this alert exists to refuse.
+          expr: absent(up{ {{- $sel -}} })
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "No metrics from the model gateway: it is gone or was never scraped"
+            description: >-
+              No `up` series exists for the model gateway (namespace matching
+              `{{ $nsRe }}`, service matching `{{ $svcRe }}`), so the
+              availability, error-rate and latency alerts for it are blind, not
+              quiet. If the gateway is deployed, enable the `prometheus`
+              callback in litellm.proxy_config.litellm_settings.callbacks and
+              scrape its Service (litellm.serviceMonitor.enabled, plus a
+              NetworkPolicy path from Prometheus). If it is not deployed,
+              switch alertPack.litellm.enabled off.
+        - alert: TockmoxLiteLLMHighErrorRate
+          # The gateway has no failed-requests counter; failures are the non-2xx
+          # status codes on the total-requests counter, per requested model. The
+          # second term is a traffic floor (0.01 req/s, about 3 requests in 5
+          # minutes) so one failure on a quiet gateway does not fire it.
+          expr: |
+            (
+              sum by (requested_model) (rate(litellm_proxy_total_requests_metric_total{status_code!~"2.."}[5m]))
+              /
+              clamp_min(
+                sum by (requested_model) (rate(litellm_proxy_total_requests_metric_total[5m])),
+                1e-9
+              )
+            ) > {{ $ll.errorRatio | default 0.05 }}
+            and
+            sum by (requested_model) (rate(litellm_proxy_total_requests_metric_total[5m])) > 0.01
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Model gateway error rate is above {{ mulf ($ll.errorRatio | default 0.05) 100 }}% on {{ `{{ $labels.requested_model }}` }}"
+            description: >-
+              More than {{ mulf ($ll.errorRatio | default 0.05) 100 }}% of requests routed to
+              {{ `{{ $labels.requested_model }}` }} have failed over the last 5
+              minutes. Usual causes: a provider or a local model host that is
+              degraded or down, an exhausted quota or budget, a bad route
+              configuration. The status code label on the requests counter
+              says which.
+        - alert: TockmoxLiteLLMHighLatencyP95
+          # SUSTAINED slowness at the 95th percentile, not one big completion.
+          #
+          # WHY A SAMPLE FLOOR, AND WHY AN EXEMPTION IS A VALUE. Measured on the
+          # site this was ported from: a model that sees a handful of requests
+          # a fortnight has a p95 that is one or two requests, the series is
+          # empty most of the time, and no threshold separates a legitimate cold
+          # load of a large local model from a broken backend. For that tier p95
+          # is simply not a valid indicator at that volume. The rule therefore
+          # (1) requires more than 3 requests in the window, and (2) can exempt
+          # whole aliases with alertPack.litellm.latency.exemptModelRegex, which
+          # is empty by default because alias names are the site's. A local model
+          # that hangs hits the gateway's request_timeout and shows up as a
+          # non-2xx on TockmoxLiteLLMHighErrorRate instead.
+          #
+          # If it fires on healthy traffic, RAISE THE THRESHOLD; do not lengthen
+          # `for:`, which only delays the same false positive.
+          #
+          # `instance` (the pod IP) is aggregated away by `sum by (le, model)`,
+          # so a pod reschedule does not mint a new series and reset the `for:`
+          # clock. `requested_model` is a matcher only, never a grouping label.
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le, model) (
+                rate(litellm_request_total_latency_metric_bucket{ {{- if ($ll.latency | default dict).exemptModelRegex -}}requested_model!~"{{ $ll.latency.exemptModelRegex }}"{{- end -}} }[10m])
+              )
+            ) > {{ ($ll.latency | default dict).p95Seconds | default 30 }}
+            and
+            sum by (model) (
+              rate(litellm_request_total_latency_metric_bucket{ {{- if ($ll.latency | default dict).exemptModelRegex -}}requested_model!~"{{ $ll.latency.exemptModelRegex }}", {{ end -}}le="+Inf"}[10m])
+            ) > 0.005
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Model gateway p95 latency is above {{ ($ll.latency | default dict).p95Seconds | default 30 }}s on {{ `{{ $labels.model }}` }}"
+            description: >-
+              The 95th-percentile request latency on {{ `{{ $labels.model }}` }}
+              has been over {{ ($ll.latency | default dict).p95Seconds | default 30 }} seconds for 10 minutes or more, across
+              more than 3 requests in the window. Check the upstream provider's
+              status, or an oversized completion. Models matching
+              alertPack.litellm.latency.exemptModelRegex are excluded by design.
+{{- end }}
+{{- end }}

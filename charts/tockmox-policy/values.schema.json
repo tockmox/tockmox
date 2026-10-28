@@ -594,6 +594,9 @@
     "addressPool": {
       "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
     },
+    "alertPack": {
+      "description": "Not this layer's key. Owned by the observability layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
     "alertmanagerURL": {
       "description": "Not this layer's key. Owned by the selfcheck layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
     },

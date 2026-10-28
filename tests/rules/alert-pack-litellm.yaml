@@ -1,0 +1,220 @@
+# The model-gateway group of the alert pack: TockmoxLiteLLMDown,
+# TockmoxLiteLLMMetricsAbsent, TockmoxLiteLLMHighErrorRate and
+# TockmoxLiteLLMHighLatencyP95.
+#
+# DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
+# The group renders only with alertPack.litellm.enabled; ci/values-all-on.yaml
+# turns it on and sets the latency exemption to `(local|ops)-.*`, which cases 8
+# and 9 depend on.
+#
+# EVERY CASE ASSERTS ONE DIRECTION AND THE FILE ASSERTS BOTH:
+#
+#   1  scrape healthy                            Down silent
+#   2  scrape failing, either name convention    Down fires (both selectors)
+#   3  an unrelated Service in the namespace is  Down silent
+#      down
+#   4  the gateway is gone (no series at all)    MetricsAbsent fires, Down cannot
+#   5  gateway present                           MetricsAbsent silent
+#   6  9.5% of requests failing                  ErrorRate fires
+#   7  1% failing, and a trickle that is all     ErrorRate silent (threshold, and
+#      errors                                    the 0.01 req/s traffic floor)
+#   8  a slow frontier model, a slow local model ONLY the frontier model fires
+#   9  fast, and slow-but-three-a-fortnight      silent (p95 and the sample floor)
+#
+# Case 4 is the reason the group has an existence alarm: when the Service has no
+# endpoints the scrape target disappears and `up` has NO series, so `== 0` stays
+# silent exactly when the Deployment is gone.
+evaluation_interval: 1m
+
+tests:
+  # CASE 1: healthy. Silent.
+  - interval: 1m
+    input_series:
+      - series: 'up{namespace="tockmox-ai", service="tockmox-ai-litellm", job="tockmox-ai-litellm", instance="10.0.0.5:4000"}'
+        values: '1x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxLiteLLMDown
+        exp_alerts: []
+
+  # CASE 2: the scrape fails from minute 10, under the chart's own Service name
+  # and under the shorter one a pre-chart install used. Silent at 11m (inside the
+  # 2m `for`), firing at 20m, for both.
+  - interval: 1m
+    input_series:
+      - series: 'up{namespace="tockmox-ai", service="tockmox-ai-litellm", job="tockmox-ai-litellm", instance="10.0.0.5:4000"}'
+        values: '1x10 0x50'
+      - series: 'up{namespace="ai", service="litellm", job="litellm", instance="10.0.0.6:4000"}'
+        values: '1x10 0x50'
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: TockmoxLiteLLMDown
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: TockmoxLiteLLMDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: tockmox-ai
+              service: tockmox-ai-litellm
+              job: tockmox-ai-litellm
+              instance: "10.0.0.5:4000"
+            exp_annotations: {"summary": "The model gateway cannot be scraped", "description": "Prometheus has failed to scrape the gateway's /metrics for 2 minutes or more. Chat and API traffic depend on it. Check `kubectl -n tockmox-ai get pods` and the gateway's log."}
+          - exp_labels:
+              severity: critical
+              namespace: ai
+              service: litellm
+              job: litellm
+              instance: "10.0.0.6:4000"
+            exp_annotations: {"summary": "The model gateway cannot be scraped", "description": "Prometheus has failed to scrape the gateway's /metrics for 2 minutes or more. Chat and API traffic depend on it. Check `kubectl -n ai get pods` and the gateway's log."}
+
+  # CASE 3: a different Service in the same namespace is down; the gateway is up.
+  - interval: 1m
+    input_series:
+      - series: 'up{namespace="tockmox-ai", service="tockmox-ai-litellm", job="tockmox-ai-litellm", instance="10.0.0.5:4000"}'
+        values: '1x60'
+      - series: 'up{namespace="tockmox-ai", service="tockmox-ai-open-webui", job="open-webui", instance="10.0.0.7:8080"}'
+        values: '0x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxLiteLLMDown
+        exp_alerts: []
+
+  # CASE 4: the gateway is gone. Only an unrelated target exists. Silent at 10m
+  # (inside the 15m `for`), firing at 20m, carrying no labels but severity.
+  - interval: 1m
+    input_series:
+      - series: 'up{namespace="tockmox-monitoring", service="prometheus", job="prometheus", instance="10.0.0.8:9090"}'
+        values: '1x60'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TockmoxLiteLLMMetricsAbsent
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: TockmoxLiteLLMMetricsAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations: {"summary": "No metrics from the model gateway: it is gone or was never scraped", "description": "No `up` series exists for the model gateway (namespace matching `ai|tockmox-ai`, service matching `litellm|tockmox-ai-litellm`), so the availability, error-rate and latency alerts for it are blind, not quiet. If the gateway is deployed, enable the `prometheus` callback in litellm.proxy_config.litellm_settings.callbacks and scrape its Service (litellm.serviceMonitor.enabled, plus a NetworkPolicy path from Prometheus). If it is not deployed, switch alertPack.litellm.enabled off."}
+      - eval_time: 20m
+        alertname: TockmoxLiteLLMDown
+        exp_alerts: []
+
+  # CASE 5: the gateway is present, up or down. MetricsAbsent is silent either way.
+  - interval: 1m
+    input_series:
+      - series: 'up{namespace="tockmox-ai", service="tockmox-ai-litellm", job="tockmox-ai-litellm", instance="10.0.0.5:4000"}'
+        values: '1x20 0x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxLiteLLMMetricsAbsent
+        exp_alerts: []
+      - eval_time: 55m
+        alertname: TockmoxLiteLLMMetricsAbsent
+        exp_alerts: []
+
+  # CASE 6: 98 successes, 3 server errors and 4 rate-limit refusals a minute: 6.7%
+  # failing (1.75 req/s), of which only 2.9% are 5xx. Every non-2xx counts, so a
+  # 429 is a failure and the rule fires; a rule that counted only 5xx would sit
+  # under the line. Silent at 3m, firing at 15m.
+  - interval: 1m
+    input_series:
+      - series: 'litellm_proxy_total_requests_metric_total{requested_model="claude-x", status_code="200", instance="10.0.0.5:4000"}'
+        values: '0+98x60'
+      - series: 'litellm_proxy_total_requests_metric_total{requested_model="claude-x", status_code="500", instance="10.0.0.5:4000"}'
+        values: '0+3x60'
+      - series: 'litellm_proxy_total_requests_metric_total{requested_model="claude-x", status_code="429", instance="10.0.0.5:4000"}'
+        values: '0+4x60'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: TockmoxLiteLLMHighErrorRate
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: TockmoxLiteLLMHighErrorRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              requested_model: claude-x
+            exp_annotations: {"summary": "Model gateway error rate is above 5% on claude-x", "description": "More than 5% of requests routed to claude-x have failed over the last 5 minutes. Usual causes: a provider or a local model host that is degraded or down, an exhausted quota or budget, a bad route configuration. The status code label on the requests counter says which."}
+
+  # CASE 7: one model fails 1% of 100 requests a minute (under the 5% line), and
+  # a second model gets 0.3 requests a minute, every one of them an error: 100%
+  # failing, but 0.005 req/s is under the 0.01 traffic floor. Both silent.
+  - interval: 1m
+    input_series:
+      - series: 'litellm_proxy_total_requests_metric_total{requested_model="claude-y", status_code="200", instance="10.0.0.5:4000"}'
+        values: '0+99x60'
+      - series: 'litellm_proxy_total_requests_metric_total{requested_model="claude-y", status_code="500", instance="10.0.0.5:4000"}'
+        values: '0+1x60'
+      - series: 'litellm_proxy_total_requests_metric_total{requested_model="claude-z", status_code="500", instance="10.0.0.5:4000"}'
+        values: '0+0.3x60'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TockmoxLiteLLMHighErrorRate
+        exp_alerts: []
+      - eval_time: 55m
+        alertname: TockmoxLiteLLMHighErrorRate
+        exp_alerts: []
+
+  # CASE 8: two models, both slow (8 of every 10 requests under 10s, the other 2
+  # between 30s and 60s, so p95 is about 52s). `claude-x` fires; `local-llama` is
+  # excluded by the alias exemption `(local|ops)-.*` set in ci/values-all-on.yaml
+  # and stays silent. Silent at 8m (inside the 10m `for`), firing at 25m.
+  - interval: 1m
+    input_series:
+      - series: 'litellm_request_total_latency_metric_bucket{le="10", model="claude-x", requested_model="claude-x", instance="10.0.0.5:4000"}'
+        values: '0+8x60'
+      - series: 'litellm_request_total_latency_metric_bucket{le="30", model="claude-x", requested_model="claude-x", instance="10.0.0.5:4000"}'
+        values: '0+8x60'
+      - series: 'litellm_request_total_latency_metric_bucket{le="60", model="claude-x", requested_model="claude-x", instance="10.0.0.5:4000"}'
+        values: '0+10x60'
+      - series: 'litellm_request_total_latency_metric_bucket{le="+Inf", model="claude-x", requested_model="claude-x", instance="10.0.0.5:4000"}'
+        values: '0+10x60'
+      - series: 'litellm_request_total_latency_metric_bucket{le="10", model="local-llama", requested_model="local-llama", instance="10.0.0.5:4000"}'
+        values: '0+8x60'
+      - series: 'litellm_request_total_latency_metric_bucket{le="30", model="local-llama", requested_model="local-llama", instance="10.0.0.5:4000"}'
+        values: '0+8x60'
+      - series: 'litellm_request_total_latency_metric_bucket{le="60", model="local-llama", requested_model="local-llama", instance="10.0.0.5:4000"}'
+        values: '0+10x60'
+      - series: 'litellm_request_total_latency_metric_bucket{le="+Inf", model="local-llama", requested_model="local-llama", instance="10.0.0.5:4000"}'
+        values: '0+10x60'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: TockmoxLiteLLMHighLatencyP95
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: TockmoxLiteLLMHighLatencyP95
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              model: claude-x
+            exp_annotations: {"summary": "Model gateway p95 latency is above 30s on claude-x", "description": "The 95th-percentile request latency on claude-x has been over 30 seconds for 10 minutes or more, across more than 3 requests in the window. Check the upstream provider's status, or an oversized completion. Models matching alertPack.litellm.latency.exemptModelRegex are excluded by design."}
+
+  # CASE 9: a fast model (every request under 10s), and a slow one that gets 0.2
+  # requests a minute (0.0033 req/s, under the 0.005 sample floor): its p95 is
+  # over the line and nothing fires. Both silent.
+  - interval: 1m
+    input_series:
+      - series: 'litellm_request_total_latency_metric_bucket{le="10", model="claude-fast", requested_model="claude-fast", instance="10.0.0.5:4000"}'
+        values: '0+10x60'
+      - series: 'litellm_request_total_latency_metric_bucket{le="30", model="claude-fast", requested_model="claude-fast", instance="10.0.0.5:4000"}'
+        values: '0+10x60'
+      - series: 'litellm_request_total_latency_metric_bucket{le="60", model="claude-fast", requested_model="claude-fast", instance="10.0.0.5:4000"}'
+        values: '0+10x60'
+      - series: 'litellm_request_total_latency_metric_bucket{le="+Inf", model="claude-fast", requested_model="claude-fast", instance="10.0.0.5:4000"}'
+        values: '0+10x60'
+      - series: 'litellm_request_total_latency_metric_bucket{le="10", model="claude-rare", requested_model="claude-rare", instance="10.0.0.5:4000"}'
+        values: '0x60'
+      - series: 'litellm_request_total_latency_metric_bucket{le="30", model="claude-rare", requested_model="claude-rare", instance="10.0.0.5:4000"}'
+        values: '0x60'
+      - series: 'litellm_request_total_latency_metric_bucket{le="60", model="claude-rare", requested_model="claude-rare", instance="10.0.0.5:4000"}'
+        values: '0+0.2x60'
+      - series: 'litellm_request_total_latency_metric_bucket{le="+Inf", model="claude-rare", requested_model="claude-rare", instance="10.0.0.5:4000"}'
+        values: '0+0.2x60'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: TockmoxLiteLLMHighLatencyP95
+        exp_alerts: []
+      - eval_time: 55m
+        alertname: TockmoxLiteLLMHighLatencyP95
+        exp_alerts: []

@@ -190,6 +190,25 @@ costs you, with the reasoning in the documentation rather than here.
   end.
   Nothing to do on upgrade.
 
+- **An alert pack for components the product ships: logs, the metrics volume,
+  and (opt-in) the model gateway.** One `PrometheusRule`,
+  `tockmox-alert-pack`, in the observability layer, ported from rules a running
+  site had already proven. `TockmoxLokiNotIngesting` fires when no log line has
+  reached Loki for 15 minutes, by rate or by the series being gone; it measures
+  the pipeline and not a pod, so a Loki pod restarting cannot reset it.
+  `TockmoxLokiIngestionCollapsed` catches the partial break (under a tenth of
+  the 6-hour baseline for 30 minutes). `TockmoxPrometheusTSDBVolumeTroughRising`
+  fires when the 3-day minimum fill of the Prometheus volume is above 82%
+  (`alertPack.prometheusTsdb.troughThreshold`): a metrics volume ramps and is cut
+  back by retention, so an instantaneous "90% full" never fires and a rising
+  trough is the leak. The model-gateway group (`TockmoxLiteLLMDown`,
+  `TockmoxLiteLLMMetricsAbsent`, `TockmoxLiteLLMHighErrorRate`,
+  `TockmoxLiteLLMHighLatencyP95`) is off until `alertPack.litellm.enabled`,
+  because it reads the gateway's `/metrics`, which nothing scrapes by default;
+  switched on without the scrape, `TockmoxLiteLLMMetricsAbsent` fires instead of
+  the rules sitting quiet. Every rule is classified in `tools/kured-gate.txt`
+  and has a both-directions case under `tests/rules/`.
+
 ### Changed
 
 - **The LiteLLM migrations Job is LiteLLM's own, as an Argo CD `Sync` hook, and

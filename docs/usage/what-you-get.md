@@ -19,7 +19,7 @@ Honest inventory. Anything not built says so. Counts are from
 `helm template` with the CI values and are re-checked whenever this page
 changes.
 
-## Today ... nine layers, 614 rendered resources
+## Today ... nine layers, 615 rendered resources
 
 Counts describe the revision you are reading, not the last tag. The release
 this page ships with is stamped in the footer.
@@ -29,7 +29,7 @@ this page ships with is stamped in the footer.
 | crds | 10 | Cross-layer CRDs (prometheus-operator), wave 0 so nothing races its definitions |
 | policy | 80 | Namespaces, 46 NetworkPolicies (default-deny in every namespace this layer creates), RBAC admission guardrails, PriorityClasses, the diagnostic identity |
 | platform | 234 | Traefik, MetalLB, cert-manager, Longhorn, CloudNativePG, kured, snapshot-controller |
-| observability | 173 | kube-prometheus-stack, Loki, Alloy ... persisted, bounded retention, resource requests |
+| observability | 174 | kube-prometheus-stack, Loki, Alloy ... persisted, bounded retention, resource requests |
 | exporters | 7 | blackbox / SNMP / smartctl, separate so wrong-for-your-hardware is one flag |
 | identity | 34 | Authentik. Its credentials come from operator-created Secrets, so the pods wait with a config error until you supply them |
 | devops | 35 | Argo Workflows (client auth, not authenticate-nobody). No registry: see [registry](../deployment/registry.md) |

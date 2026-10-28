@@ -744,13 +744,13 @@ states: [0-9]+ exemptions
 page:   docs/usage/what-you-get.md
 claim:  rendered resources
 test:   tools/render-counts.sh --read total
-expect: 614
+expect: 615
 states: [0-9]+ rendered resources
 
 page:   docs/architecture.md
 claim:  resources** render with the CI values
 test:   tools/render-counts.sh --read total
-expect: 614
+expect: 615
 states: [0-9]+ resources\*\* render
 
 page:   docs/usage/what-you-get.md
@@ -772,9 +772,9 @@ expect: 234
 states: [0-9]+ \| Traefik, MetalLB
 
 page:   docs/usage/what-you-get.md
-claim:  | observability | 173 | kube-prometheus-stack, Loki
+claim:  | observability | 174 | kube-prometheus-stack, Loki
 test:   tools/render-counts.sh --read observability
-expect: 173
+expect: 174
 states: [0-9]+ \| kube-prometheus-stack, Loki
 
 page:   docs/usage/what-you-get.md

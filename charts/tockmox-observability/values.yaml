@@ -265,6 +265,45 @@ ingress:
       host: ""            # override the derived ntfy.<internalDomain>
 
 # ---------------------------------------------------------------------------
+# THE ALERT PACK ... rules for components this product ships (templates/
+# alert-pack.yaml), ported from rules a running site had already proven.
+#
+#   Loki ingest liveness        always, with apps.loki
+#   Prometheus TSDB trough      always, with apps.kubePrometheusStack
+#   Model gateway (LiteLLM)     OFF until you switch it on, because it reads
+#                               metrics nothing scrapes by default
+#
+# The gateway group is opt-in on purpose. A rule on a metric that is never
+# scraped applies cleanly, lints clean and can never fire. Turn it on together
+# with the two things that feed it: `prometheus` in
+# litellm.proxy_config.litellm_settings.callbacks, and a scrape of the gateway's
+# Service (litellm.serviceMonitor.enabled in the AI layer, and a NetworkPolicy
+# path from Prometheus). With the switch on and the scrape missing,
+# TockmoxLiteLLMMetricsAbsent fires, so the gap is visible and not quiet.
+# ---------------------------------------------------------------------------
+alertPack:
+  prometheusTsdb:
+    # The 3-day minimum fill ratio of the Prometheus volume above which the
+    # trough alert fires. 0.82 suits the shipped retentionSize (40GiB on a 50Gi
+    # volume, an apex near 80%). Raise it with retentionSize, lower it if you
+    # shrink the retention; see the comment on the rule.
+    troughThreshold: 0.82
+  litellm:
+    enabled: false
+    # Where the gateway's Service lives and what it is called, as regexes, so
+    # that a site that renamed its namespace or release needs no template edit.
+    namespaceRegex: "ai|tockmox-ai"
+    serviceRegex: "litellm|tockmox-ai-litellm"
+    # Share of requests (0 to 1) failing over 5 minutes before the error alert.
+    errorRatio: 0.05
+    latency:
+      p95Seconds: 30
+      # Aliases excluded from the latency alert, as a regex. Empty: none. Set it
+      # for models that see only a few requests a week, where a p95 is one or
+      # two requests and no threshold separates a cold load from a fault.
+      exemptModelRegex: ""
+
+# ---------------------------------------------------------------------------
 # NOTIFICATIONS ... how an alert reaches a person.
 #
 # Alertmanager decides WHEN to tell you. This decides HOW. Without it the

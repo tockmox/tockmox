@@ -1,0 +1,145 @@
+# TockmoxPrometheusTSDBVolumeTroughRising (the alert pack).
+#
+# DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
+#
+# THE SHAPE UNDER TEST. A metrics volume ramps and is cut back by retention,
+# over and over. The rule alerts on the 3-DAY MINIMUM of the fill ratio, which
+# sits at a trough through any number of normal cycles and rises only when
+# retention has stopped reclaiming. Instantaneous fill cannot tell the two
+# apart, which is the whole reason the rule exists.
+#
+# THE SAWTOOTH here is the one measured on a running site: usage ramps from a
+# trough to an apex over 108 half-hour steps (54 hours) and is cut back to the
+# trough on the next sample, a period of 54.5 hours, shorter than the 3 day
+# window. Available bytes are 50e9 minus fill, so a fill of 0.78 is 11e9.
+#
+# EVERY CASE ASSERTS ONE DIRECTION AND THE FILE ASSERTS BOTH:
+#
+#   1  normal sawtooth, trough 78%, apex 84%        silent throughout
+#   2  the trough climbs to 83% from day 4.5        silent until the window
+#                                                   clears the old troughs, then fires
+#   3  a band that shifts up but whose trough       silent (a shift is not a leak)
+#      stays under the line (80% to 85%)
+#   4  the pod moves node on the ramp: two series   silent. A second series
+#      (new instance label) holds only the high     that has only seen the top of
+#      part of the ramp. THE CASE THAT FAILS IF     the ramp must not report a
+#      max by(...) MOVES OUTSIDE min_over_time      false trough of its own.
+#   5  a second, fuller volume that is not          silent (the selector is
+#      Prometheus's                                  the Prometheus claim only)
+#
+# Interval 30m: kubelet volume stats move about once a minute, but the rule
+# reads a 3 day minimum on a 5 minute grid, and a half-hour series inside the
+# 5 minute lookback is present on that grid only at its own sample times. That
+# is a harder input than the real one, and it passes.
+evaluation_interval: 30m
+
+tests:
+  # CASE 1: four normal cycles (about 9 days). Silent at 3, 5, 7 and 9 days.
+  - interval: 30m
+    input_series:
+      - series: 'kubelet_volume_stats_available_bytes{job="kubelet", namespace="tockmox-monitoring", persistentvolumeclaim="prometheus-tockmox-observability-kube-prom-prometheus-db-prometheus-tockmox-observability-kube-prom-prometheus-0"}'
+        values: '11000000000-27777778x108 11000000000-27777778x108 11000000000-27777778x108 11000000000-27777778x108'
+      - series: 'kubelet_volume_stats_capacity_bytes{job="kubelet", namespace="tockmox-monitoring", persistentvolumeclaim="prometheus-tockmox-observability-kube-prom-prometheus-db-prometheus-tockmox-observability-kube-prom-prometheus-0"}'
+        values: '50000000000x435'
+    alert_rule_test:
+      - eval_time: 3d
+        alertname: TockmoxPrometheusTSDBVolumeTroughRising
+        exp_alerts: []
+      - eval_time: 5d
+        alertname: TockmoxPrometheusTSDBVolumeTroughRising
+        exp_alerts: []
+      - eval_time: 7d
+        alertname: TockmoxPrometheusTSDBVolumeTroughRising
+        exp_alerts: []
+      - eval_time: 9d
+        alertname: TockmoxPrometheusTSDBVolumeTroughRising
+        exp_alerts: []
+
+  # CASE 2: two normal cycles, then the band moves up by five points
+  # (83% to 89%): retention is no longer bringing usage back to where it was.
+  # Silent at 5d (the 3 day window still holds the 78% trough of day 2.3),
+  # firing at 9d and 10d (every sample in the window is above 82%, plus the 1h
+  # `for`). It also fires at 7d, on the 82.6% minimum of the ramp that came
+  # after that last trough: the rule reads a trough that has not come back
+  # down for three days as exactly what it is.
+  - interval: 30m
+    input_series:
+      - series: 'kubelet_volume_stats_available_bytes{job="kubelet", namespace="tockmox-monitoring", persistentvolumeclaim="prometheus-tockmox-observability-kube-prom-prometheus-db-prometheus-tockmox-observability-kube-prom-prometheus-0"}'
+        values: '11000000000-27777778x108 11000000000-27777778x108 8500000000-27777778x108 8500000000-27777778x108 8500000000-27777778x108'
+      - series: 'kubelet_volume_stats_capacity_bytes{job="kubelet", namespace="tockmox-monitoring", persistentvolumeclaim="prometheus-tockmox-observability-kube-prom-prometheus-db-prometheus-tockmox-observability-kube-prom-prometheus-0"}'
+        values: '50000000000x544'
+    alert_rule_test:
+      - eval_time: 5d
+        alertname: TockmoxPrometheusTSDBVolumeTroughRising
+        exp_alerts: []
+      - eval_time: 9d
+        alertname: TockmoxPrometheusTSDBVolumeTroughRising
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: tockmox-monitoring
+              persistentvolumeclaim: prometheus-tockmox-observability-kube-prom-prometheus-db-prometheus-tockmox-observability-kube-prom-prometheus-0
+            exp_annotations: {"summary": "The Prometheus metrics volume floor is rising: retention is no longer reclaiming space", "description": "The 3-day minimum fill of tockmox-monitoring/prometheus-tockmox-observability-kube-prom-prometheus-db-prometheus-tockmox-observability-kube-prom-prometheus-0 is 83%, above the 0.82 line. Normal compaction cycles hold the trough well below it; a trough this high means the retention cut no longer brings usage down and the volume will fill on the next ramp. Look at WAL size, head chunks, TSDB snapshots and orphaned blocks on the volume before growing it. TockmoxPersistentVolumeFillingUp cannot fire on this volume while retention holds the apex below 90%; this is the instrument that can."}
+      - eval_time: 10d
+        alertname: TockmoxPrometheusTSDBVolumeTroughRising
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: tockmox-monitoring
+              persistentvolumeclaim: prometheus-tockmox-observability-kube-prom-prometheus-db-prometheus-tockmox-observability-kube-prom-prometheus-0
+            exp_annotations: {"summary": "The Prometheus metrics volume floor is rising: retention is no longer reclaiming space", "description": "The 3-day minimum fill of tockmox-monitoring/prometheus-tockmox-observability-kube-prom-prometheus-db-prometheus-tockmox-observability-kube-prom-prometheus-0 is 83%, above the 0.82 line. Normal compaction cycles hold the trough well below it; a trough this high means the retention cut no longer brings usage down and the volume will fill on the next ramp. Look at WAL size, head chunks, TSDB snapshots and orphaned blocks on the volume before growing it. TockmoxPersistentVolumeFillingUp cannot fire on this volume while retention holds the apex below 90%; this is the instrument that can."}
+
+  # CASE 3: the band shifts up by two points at the trough (80% to 85%) and stays
+  # under the line. A shift is not a leak; silent at 9d, deep into the new band.
+  - interval: 30m
+    input_series:
+      - series: 'kubelet_volume_stats_available_bytes{job="kubelet", namespace="tockmox-monitoring", persistentvolumeclaim="prometheus-tockmox-observability-kube-prom-prometheus-db-prometheus-tockmox-observability-kube-prom-prometheus-0"}'
+        values: '11000000000-27777778x108 11000000000-27777778x108 10000000000-23148148x108 10000000000-23148148x108 10000000000-23148148x108'
+      - series: 'kubelet_volume_stats_capacity_bytes{job="kubelet", namespace="tockmox-monitoring", persistentvolumeclaim="prometheus-tockmox-observability-kube-prom-prometheus-db-prometheus-tockmox-observability-kube-prom-prometheus-0"}'
+        values: '50000000000x544'
+    alert_rule_test:
+      - eval_time: 9d
+        alertname: TockmoxPrometheusTSDBVolumeTroughRising
+        exp_alerts: []
+      - eval_time: 10d
+        alertname: TockmoxPrometheusTSDBVolumeTroughRising
+        exp_alerts: []
+
+  # CASE 4: the Prometheus pod moves node at 40.5 hours, 45 points up the ramp
+  # (82.5%). The old series (instance 10.0.0.1) ends there; the new one
+  # (10.0.0.2) holds only 82.5% to 84%, so ITS OWN 3 day minimum is above the
+  # line for the 13.5 hours it lives. Aggregating AFTER min_over_time would fire
+  # on it. The rule aggregates INSIDE the subquery, so the merged series still
+  # holds the 78% trough from the old instance: silent at 50h, after the new
+  # series has been alive more than the 1h `for`.
+  - interval: 30m
+    input_series:
+      - series: 'kubelet_volume_stats_available_bytes{job="kubelet", namespace="tockmox-monitoring", persistentvolumeclaim="prometheus-tockmox-observability-kube-prom-prometheus-db-prometheus-tockmox-observability-kube-prom-prometheus-0", instance="10.0.0.1:10250"}'
+        values: '11000000000-27777778x81'
+      - series: 'kubelet_volume_stats_capacity_bytes{job="kubelet", namespace="tockmox-monitoring", persistentvolumeclaim="prometheus-tockmox-observability-kube-prom-prometheus-db-prometheus-tockmox-observability-kube-prom-prometheus-0", instance="10.0.0.1:10250"}'
+        values: '50000000000x81'
+      - series: 'kubelet_volume_stats_available_bytes{job="kubelet", namespace="tockmox-monitoring", persistentvolumeclaim="prometheus-tockmox-observability-kube-prom-prometheus-db-prometheus-tockmox-observability-kube-prom-prometheus-0", instance="10.0.0.2:10250"}'
+        values: '_x82 8750000000-27777778x27'
+      - series: 'kubelet_volume_stats_capacity_bytes{job="kubelet", namespace="tockmox-monitoring", persistentvolumeclaim="prometheus-tockmox-observability-kube-prom-prometheus-db-prometheus-tockmox-observability-kube-prom-prometheus-0", instance="10.0.0.2:10250"}'
+        values: '_x82 50000000000x27'
+    alert_rule_test:
+      - eval_time: 50h
+        alertname: TockmoxPrometheusTSDBVolumeTroughRising
+        exp_alerts: []
+      - eval_time: 53h
+        alertname: TockmoxPrometheusTSDBVolumeTroughRising
+        exp_alerts: []
+
+  # CASE 5: a different claim in the same namespace is 95% full all the time.
+  # The selector is the Prometheus claim, so this is silent. (TockmoxPersistent
+  # VolumeFillingUp, in the selfcheck layer, is the alert for that volume.)
+  - interval: 30m
+    input_series:
+      - series: 'kubelet_volume_stats_available_bytes{job="kubelet", namespace="tockmox-monitoring", persistentvolumeclaim="storage-tockmox-observability-loki-0"}'
+        values: '2500000000x300'
+      - series: 'kubelet_volume_stats_capacity_bytes{job="kubelet", namespace="tockmox-monitoring", persistentvolumeclaim="storage-tockmox-observability-loki-0"}'
+        values: '50000000000x300'
+    alert_rule_test:
+      - eval_time: 5d
+        alertname: TockmoxPrometheusTSDBVolumeTroughRising
+        exp_alerts: []
