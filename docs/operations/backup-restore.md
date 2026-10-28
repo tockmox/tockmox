@@ -746,6 +746,17 @@ it, which is why this is a list and not a table:
 
 **Rehearse step 4 before you need step 1.**
 
+**To run this order at another location,** with the decisions it leaves open
+filled in (what the second site's values are, how the databases are told to
+recover, what to do about the volumes), see
+[restore a site at a second location](second-site-dr.md).
+
+**One more thing lives only in the cluster: the chart's own CA key.** It is not in
+any of the five planes above, so a rebuilt cluster mints a new CA and every
+machine that trusted the old one must trust the new. A CA you supply and seal
+into the site repository rides the secrets plane instead
+([bring your own CA](../administration/bring-your-own-ca.md)).
+
 ### Adopting an existing Garage
 
 If you point the platform layer at a Garage metadata volume that another install wrote, check which metadata
