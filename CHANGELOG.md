@@ -225,6 +225,29 @@ costs you, with the reasoning in the documentation rather than here.
   `stable` one does not move unannounced. All the probe's keys are marked
   `experimental`, which they already were in prose.
 
+- **The five things a disconnected install needs are declared in one file.**
+  `tools/airgap-manifest.yaml` names the five dependencies that
+  `docs/deployment/airgap.md` lists: the images, the upstream Helm subcharts,
+  the three prerequisites, the Tockmox charts repository and your site
+  repository. The table at the top of that page is now generated from it
+  (`tools/check-airgap-manifest.sh --write`), with the image and dependency
+  counts read from `images.txt` and the `Chart.yaml` files.
+  `tools/check-airgap-manifest.sh` reports what the manifest names that the tree
+  or the page lacks: a tool that does not exist, a step heading that moved, a
+  prerequisite its step never mentions. It reads the repository and nothing
+  else, and it is a list, not an offline bundle.
+- **The executed-docs throwaway cluster can run with the registry mirror as its
+  only registry.** `TOCKMOX_REGISTRY_MODE=nofallback` writes the mirror as the
+  sole endpoint for docker.io, quay.io, ghcr.io and registry.k8s.io, tells k3s
+  not to append the upstream endpoint, and points the registries' names at an
+  unroutable address while one firewall rule counts every attempt to reach it
+  (`TOCKMOX_UPSTREAM_DENY=edge` leaves that denying and counting to the network's
+  own firewall instead, for a segment that already logs it).
+  `throwaway-cluster.sh mirror-proof` prints `PASS` only when the node is
+  configured that way and the counter is zero. The default (`cache`, upstream as
+  the mirror's fallback) is unchanged, byte for byte, and supports "pulls are
+  cached" and nothing more. No provision has been run in the new mode yet.
+
 ### Changed
 
 - **The LiteLLM migrations Job is LiteLLM's own, as an Argo CD `Sync` hook, and

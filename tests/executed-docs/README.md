@@ -144,6 +144,8 @@ lib/zsh-paste.py       paste a block into an interactive zsh on a pty (the works
 provision/             create / exec / reboot / destroy a throwaway k3s VM
 paths/P*.sh            one documented path each, in dependency order
 run.sh                 provision, run selected paths, report, tear down
+provision/profiles/registry-mirror.sh  the mirror files both provisioner lanes write, and the guest's mirror-proof
+mirror-mode-test.sh    hermetic proof of the two mirror modes (also run by selftest.sh)
 selftest.sh            hermetic proof of the machinery above
 INVENTORY.md           every documented path, mapped to evidence or an exception
 ```
@@ -178,6 +180,57 @@ exactly what the paragraph said could not happen silently. The preflight is
 still there and still worth having ... it catches a runner that exists but is
 missing `kubectl`, or pointed at the wrong cluster. It just cannot catch a
 runner that is not there.
+
+## Registry mirror
+
+A by-the-book install pulls its images anonymously from four public registries,
+and an upstream rate limit then looks like a component that never became ready.
+`TOCKMOX_REGISTRY_MIRROR` points the node at a mirror you run. What that proves
+depends on the mode.
+
+**`cache` (the default) supports "pulls are cached" and nothing more.** The
+upstream stays the mirror's fallback, so an image missing from the mirror is
+repaired from upstream and the run ends the same way a closed image set does. A
+green run in this mode is not evidence for an air gap.
+
+**`nofallback` makes a miss fail instead of being repaired.** Three things
+change on the node: `registries.yaml` names the mirror and no upstream, a k3s
+drop-in sets `disable-default-registry-endpoint: true` (k3s otherwise appends
+each registry's own endpoint as a last resort), and a per-boot script points the
+registries' names at an unroutable address (192.0.2.1) while one firewall rule
+counts every attempt to reach it. Run it as:
+
+```bash
+export TOCKMOX_REGISTRY_MIRROR=harbor.example.com
+export TOCKMOX_REGISTRY_MODE=nofallback
+./provision/throwaway-cluster.sh create
+./provision/throwaway-cluster.sh mirror-proof
+```
+
+`mirror-proof` runs on the node and prints `mirror-proof: PASS` only when the
+configuration is the nofallback one and the counter reads zero. Read its limits
+before quoting it: it sees attempts to the registries' front-door and CDN names,
+not a redirect to a name nobody listed; it does not see what the mirror itself
+fetches from upstream; it covers the node's pulls and not a pod that opens its
+own connection; and the counter restarts at zero if the node reboots. Whether a
+real node honours the drop-in, and whether a provision completes with the counter
+at zero, are only established by running it on the lab substrate.
+
+Two more limits belong beside a zero. The provisioner still downloads k3s itself
+(`get.k3s.io` and the k3s binary are not denied), so a zero shows that the node's
+image pulls did not reach an upstream registry, not that the provision made no
+outbound connection at all. And the mirror has to be a closed set: a pull-through
+cache fetches from upstream on a miss, from its own side, which the node cannot
+see, so a cache in front of the registries makes a zero look better than it is.
+
+**Where the counter lives: `TOCKMOX_UPSTREAM_DENY`.** `node` (the default) is the
+three-part arrangement above, and the attempt never leaves the guest. When the
+network is what denies and counts (a segment whose firewall blocks and logs),
+that counter would see nothing, because the guest has already refused the
+request. Set `TOCKMOX_UPSTREAM_DENY=edge` there: `registries.yaml` and the k3s
+drop-in are unchanged, the node adds no hosts entries and no firewall rule, and
+`mirror-proof` checks the two files and says the counter is elsewhere. Pass the
+same value to `mirror-proof` as to `create`.
 
 ## Blast radius
 
@@ -234,6 +287,9 @@ test, and a run that cannot retrieve a kubeconfig produces no evidence at all.
 | `TOCKMOX_VM_NETWORK` | `pod` | network attachment for the VM. `pod` is KubeVirt's masquerade binding: the guest NATs out to the substrate API (so the `secret` handoff works from any harness host) and is reached only through the NodePort `create` publishes. A host that can route to the lab segment may override with a Multus NAD, e.g. `export TOCKMOX_VM_NETWORK=NAMESPACE/SEGMENT` ... measured 2026-09-04, a guest there has WAN but no route back to the management network, so the handoff never lands |
 | `TOCKMOX_VM_STORAGECLASS` | `harvester-longhorn-r1` | class for the VM's boot disk |
 | `TOCKMOX_HANDOFF` | `secret` | how the guest's kubeconfig comes back: `secret` (guest writes it outbound, no inbound path needed) or `http` (guest serves it once, no credential in the guest) |
+| `TOCKMOX_REGISTRY_MIRROR` | *(empty)* | `host[:port]` of a registry that mirrors docker.io, quay.io, ghcr.io and registry.k8s.io. Empty means every image pulls anonymously from upstream |
+| `TOCKMOX_REGISTRY_MODE` | `cache` | `cache`: the mirror is tried first and the upstream is the fallback. `nofallback`: the mirror is the only registry and upstream traffic is denied and counted (see "Registry mirror" below) |
+| `TOCKMOX_UPSTREAM_DENY` | `node` | nofallback only. `node`: the guest rejects and counts attempts to the upstream registries. `edge`: it does not, because the network does (a firewall that blocks and logs), so that firewall sees the attempt. Pass the same value to `mirror-proof` |
 | `TOCKMOX_KEEP_CLUSTER` | `0` | `1` leaves the cluster standing for inspection |
 | `TOCKMOX_EXPECTED_DEFAULT_COUNT` | `0` | expected count of default StorageClasses after P03 un-defaults `local-path` (1 once a platform layer is installed) |
 | `TOCKMOX_P08_EXPECTED_DEFAULT_COUNT` | `1` | what P08 expects `existing-cluster.md` Check 3 to find: `local-path` on a stock k3s throwaway. Set `0` when P03 has run first |

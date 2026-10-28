@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE FIVE THINGS A DISCONNECTED INSTALL NEEDS, as data (TM-0185).
+#
+# docs/deployment/airgap.md opens with a table of five dependencies. Until this
+# file existed the table was prose with some of its numbers pinned by
+# tools/doc-claims.txt; nothing declared the five as a set, so nothing could say
+# one was missing. This file declares them, and tools/check-airgap-manifest.sh
+#
+#   - regenerates the table from it (`--write`) and refuses the page when the
+#     table differs from what this file and the tree say (the gate),
+#   - reports what is missing: a tool that does not exist, a step that is not a
+#     heading on the page, a prerequisite its step never names, a setting the
+#     install files do not carry.
+#
+# This is a MANIFEST, not a bundle. ADR-0036 stands: Tockmox distributes source,
+# never an offline archive, and nothing here fetches, packs or ships a byte. The
+# idea taken from Zarf is the declarative list, not the tarball.
+#
+# WHAT IS DERIVED AND WHAT IS DECLARED. Surface 1's size is the number of
+# non-comment lines in images.txt, and surface 2's is the non-local dependencies
+# in charts/*/Chart.yaml, counted the way tools/helm-deps.sh and
+# tools/doc-claims.txt count them. Both move with the tree, so they are never
+# written here. Surfaces 3 to 5 are not in the tree to count, so their `items`
+# are declared and counted from this file.
+#
+# Fields per surface:
+#   id, name        the row's number and its Dependency cell
+#   size            `images` or `chart-dependencies` (derived), or `items` (counted)
+#   items           for `size: items`: name, kind, and `mention`, the text the
+#                   step's section must contain
+#   ships           the row's "What Tockmox ships for it" cell, verbatim
+#   tools           repository paths that must exist (and be executable)
+#   evidence        {file, contains}: a file that must carry that text
+#   step            number and heading anchor on the page
+manifestVersion: 1
+page: docs/deployment/airgap.md
+surfaces:
+  - id: 1
+    name: "Tockmox's own workload images"
+    size: images
+    ships: "`images.txt` and `tools/mirror-images.sh`"
+    tools: [images.txt, tools/mirror-images.sh, tools/gen-images.sh]
+    step: {number: 2, anchor: "2-mirror-the-images--required"}
+
+  - id: 2
+    name: "Upstream Helm subcharts"
+    size: chart-dependencies
+    ships: "`tools/helm-deps.sh`"
+    tools: [tools/helm-deps.sh]
+    step: {number: 3, anchor: "3-vendor-the-upstream-helm-subcharts--required"}
+
+  - id: 3
+    name: "Prerequisites: ArgoCD, sealed-secrets, `kubeseal`"
+    size: items
+    items:
+      - {name: ArgoCD, kind: chart, mention: "ArgoCD"}
+      - {name: sealed-secrets, kind: chart, mention: "sealed-secrets"}
+      - {name: kubeseal, kind: binary, mention: "kubeseal"}
+    ships: "nothing"
+    step: {number: 4, anchor: "4-carry-in-the-three-prerequisites--required"}
+
+  - id: 4
+    name: "The Tockmox charts git repository"
+    size: items
+    items:
+      - {name: "the Tockmox charts repository", kind: repository, mention: "The Tockmox charts repository"}
+    ships: "`tockmox.repoURL` points at your copy"
+    evidence:
+      - {file: install/tockmox.yaml.example, contains: "repoURL"}
+    step: {number: 5, anchor: "5-serve-both-git-repositories-inside-the-boundary--required"}
+
+  - id: 5
+    name: "Your site git repository"
+    size: items
+    items:
+      - {name: "your site repository", kind: repository, mention: "Your site repository"}
+    ships: "[install](install.md) states the requirement"
+    evidence:
+      - {file: docs/deployment/install.md, contains: "Phase 2"}
+    step: {number: 5, anchor: "5-serve-both-git-repositories-inside-the-boundary--required"}
