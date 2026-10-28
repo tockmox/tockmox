@@ -22,7 +22,10 @@ deleted rather than left behind.
 
 That is why this page is a procedure with a backup step rather than a one-liner.
 The one-liner still exists ... it is [step 5](#5-move-the-revision) ... and
-everything around it is there so you can undo it.
+everything around it is there so you can undo it where it can be undone. Rollback
+is symmetric where it can be and not absolutely, and
+[step 2](#2-back-up-what-a-rollback-will-not-bring-back) names the cases where it
+is not.
 
 **An upgrade never edits your site repository's `site/values/`.** The revision
 points at the *Tockmox* repository. Your values, your `apps/` and your
@@ -301,8 +304,10 @@ Authentik, Grafana): a patch may carry a dependency update that moves one of
 them, and their database migrations only go forward. **Optional for any other
 patch**, and cheap enough that skipping it buys you very little.
 
-Rollback is symmetrical where it can be, not absolutely. Tockmox itself ships
-declarative manifests and no migrations of its own, so for most changes you
+Rollback is symmetrical where it can be, not absolutely, and this page does not
+claim otherwise. Tockmox itself ships declarative manifests and no schema
+migrations of its own (the bundled applications run theirs; LiteLLM's runs in a
+Job the chart renders), so for a change that touches none of the rows below you
 change the revision back and sync. **Four things break that symmetry**, and they
 are why this step exists:
 
@@ -1070,7 +1075,20 @@ not in the same commit as a bump you are watching.
 **Conditional. Do this if** step 6 or step 7 failed and the release notes do not
 explain it.
 
-Rollback is the same procedure with the two revisions swapped:
+**Rollback is symmetric where it can be, not absolutely.** Swapping the two
+revisions puts every manifest back. It does not put back anything the newer
+release changed that is not a manifest. Decide which case you are in before you
+swap:
+
+| What the upgrade did | Is swapping the revisions enough | What to do |
+|---|---|---|
+| Moved charts, values and images, and none of the cases below | Yes | Swap the revisions, below |
+| Moved a bundled application that migrates its own database schema: Open WebUI, LiteLLM, Authentik, or Grafana on its Postgres database | No. The older application starts against a schema the newer one already changed, and an older version cannot be relied on to read it | Restore the database backup from [step 2](#2-back-up-what-a-rollback-will-not-bring-back) first, then swap the revisions. What was written since the upgrade is lost with the restore |
+| Pruned a PersistentVolumeClaim, narrowed a CRD, or renamed a namespace | No. Putting the declaration back does not bring the contents back | A restore from [backup and restore](../operations/backup-restore.md), a separate procedure |
+| Moved Authentik's database to CloudNativePG, and you have not yet done step 6 of that move | The move has its own way back | [Rolling back, before step 6](#move-authentiks-database-to-cloudnativepg) |
+
+The rest of this section is the first row: the same procedure with the two
+revisions swapped.
 
 **WORKSTATION ... SITE REPO**
 
@@ -1205,6 +1223,15 @@ this page as written.** What is verified is narrower and worth stating exactly:
   in [architecture § revision channels](../architecture.md#revision-channels).
 - **The StatefulSet block was observed on a live cluster on 2026-08-18**, and
   that date and scope are stated where the claim appears.
+- **The chained rollback has not been run.** Nothing has taken a cluster from the
+  previous release to this one and back, and then written through the application
+  (not a `kubectl` read) to see that the older version works against what the
+  newer one left. The exceptions in [step 2](#2-back-up-what-a-rollback-will-not-bring-back)
+  are named from two sources: the LiteLLM migrations Job is rendered by the
+  chart in this tree, and the Authentik, Open WebUI and Grafana cases are those
+  applications' own behaviour as upstream documents it, not tested here. The order
+  the table gives for them (restore the backup, then swap) is step 2's order and
+  has not been run either.
 - Everything else on this page ... the prune behaviour, the PVC diff, the
   rollback symmetry ... is derived from how the Applications are generated and
   from ArgoCD's documented behaviour. Reading a page cannot establish that it

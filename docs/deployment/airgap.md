@@ -2,7 +2,7 @@
 okf_version: "0.2"
 type: HowTo
 title: "Install with no internet access"
-description: "The five things a disconnected install needs in place, in the order you do them, and exactly where each one changes the normal install flow."
+description: "The five things a disconnected install needs in place, in the order you do them, where each one changes the normal install flow, and how to update the install later from your own mirror."
 tags: [airgap, deployment, offline, mirroring, images, helm, git]
 status: stable
 generated:
@@ -159,6 +159,7 @@ connected install and this one.
 | Your site values, before Phase 3 | Set `global.certIssuer`. Set `global.imageRegistry` only on the fallback path, where you cannot configure the nodes | [2](#2-mirror-the-images--required), [6](#6-switch-the-certificate-issuer-to-your-internal-ca--required) |
 | [install § Phase 3 apply](install.md#phase-3--apply) | Nothing. This step is unchanged | ... |
 | After the platform layer is Healthy | Publish the product documentation from a directory built on a connected machine: `tools/publish-docs.sh --context CTX --site DIR`. The docs site shows a placeholder until you do | [7](#7-run-the-install--required) |
+| Each later release | Mirror the new images, re-vendor the chart archives and carry the new tag inside first, then run the ordinary upgrade from inside | [8](#8-update-a-disconnected-install--required-at-every-release) |
 | After the install, if you run `helm test` | It will fail to pull, by design. That is the test tooling, not your deployment | see [registry](registry.md#helm-test-is-not-air-gap-capable-and-that-is-deliberate) |
 
 Everything else on [fresh-install](fresh-install.md) and [install](install.md)
@@ -621,6 +622,243 @@ node whose `registries.yaml` was not written or not restarted into, an image
 missing from the mirror, or, on the `global.imageRegistry` fallback path, an
 image that key does not reach.
 
+## 8. Update a disconnected install ... Required, at every release
+
+**An update repeats the connected half of the install for the new tag, then runs
+the ordinary upgrade from inside.** The mirror you built in steps 2 to 5 is the
+thing you update: images, chart archives and the Tockmox git tag go in first,
+and nothing in the boundary ever reaches the internet. This is the
+mirror-once-then-update-from-your-mirror path that takes the place of a shipped
+offline bundle, which
+[registry](registry.md#why-there-is-no-offline-image-bundle) explains.
+
+**Order is the whole procedure.** Everything the new release needs has to be
+inside the boundary **before** the revision moves. Move the revision first and
+ArgoCD reports `ComparisonError` for a tag it cannot find, or the pods report
+`ImagePullBackOff` for an image the mirror lacks. Neither error says the mirror is
+behind.
+
+**Keep the old release inside the boundary until you accept the new one.**
+[Rolling back](upgrade.md#roll-back) re-renders the old tag and pulls the old
+images from your mirror. A mirror cleaned of the previous release cannot roll
+back. `tools/mirror-images.sh` adds images and never removes one.
+
+### Before you begin an update
+
+| What you need | Why | How to check |
+|---|---|---|
+| The install from steps 1 to 7, still in place | Every sub-step reuses its registry, its git server and its transfer path | `kubectl -n argocd get applications` shows nine layers `Synced` and `Healthy` |
+| A **connected host** with a clone of the Tockmox source tree and the tools from [before you begin](#before-you-begin) | Sub-steps 8.1 to 8.4 run there | `git -C "$TOCKMOX" status --short` prints nothing |
+| The same clone path on the **workstation inside the boundary** | Sub-steps 8.5 to 8.7 run there. It is the clone that filled your internal git server | `git -C "$TOCKMOX" tag --list "$CURRENT_REVISION"` prints your current revision |
+| The release notes read, from your current revision to the target | They name every action the update needs, and say when ArgoCD or k3s must move first | [upgrade § 1](upgrade.md#1-read-the-release-notes) |
+
+**YOU SUPPLY:** the revision you run now and the one you are moving to. Set them
+on each host you use, with the path to its clone of the source tree.
+
+**CONNECTED** ... outside the boundary, never a cluster NODE
+
+```bash
+export TOCKMOX=YOUR_TOCKMOX_CLONE_PATH
+export CURRENT_REVISION=YOUR_CURRENT_REVISION
+export TARGET_REVISION=YOUR_TARGET_REVISION
+git -C "$TOCKMOX" fetch origin --tags
+git -C "$TOCKMOX" tag --list "$CURRENT_REVISION" "$TARGET_REVISION"
+```
+
+**Success condition:** the last command prints both revisions. A missing line
+is a tag the clone does not have, and every later command in this step would
+quietly compare against nothing.
+
+### 8.1 Verify the target tag ... Required
+
+Do it on the connected host, before anything is mirrored from it. The signed tag
+is the check that covers every release, and it is the last chance to look at
+the source before it is carried in: [verifying what you
+downloaded § 1](verify.md#1-verify-the-signed-tag), with `TAG` set to
+`$TARGET_REVISION`.
+
+**Success condition:** the one [verify](verify.md#1-verify-the-signed-tag) gives.
+
+### 8.2 See what the new release asks for ... Required
+
+Two lists decide the work: the images, and the chart archives.
+
+**CONNECTED** ... outside the boundary, never a cluster NODE
+
+```bash
+: "${TOCKMOX:?export TOCKMOX first, see the start of step 8}"
+: "${CURRENT_REVISION:?export CURRENT_REVISION first, see the start of step 8}"
+: "${TARGET_REVISION:?export TARGET_REVISION first, see the start of step 8}"
+git -C "$TOCKMOX" diff "$CURRENT_REVISION" "$TARGET_REVISION" -- images.txt \
+  | grep -E '^[-+][a-z0-9]' || echo "images.txt unchanged"
+git -C "$TOCKMOX" diff "$CURRENT_REVISION" "$TARGET_REVISION" -- 'charts/*/Chart.lock' \
+  | grep -E '^[-+] *(name|version):' || echo "no dependency moved"
+```
+
+**Success condition:** you can say which images the mirror lacks. A line
+starting `+` is an image the new release pulls and the mirror does not hold.
+A line starting `-` is one the new release stops asking for: leave it, because
+the rollback needs it. In the second list, each pair is a dependency archive
+that changes version, which 8.4 replaces.
+
+### 8.3 Mirror the new images ... Required
+
+This is [step 2](#2-mirror-the-images--required) again, from the target tree.
+`tools/mirror-images.sh` reads `images.txt` from where you run it, and it skips
+every destination that already holds the same digest, so only what is missing
+crosses.
+
+**CONNECTED** ... outside the boundary, never a cluster NODE
+
+```bash
+: "${TOCKMOX:?export TOCKMOX first, see the start of step 8}"
+: "${TARGET_REVISION:?export TARGET_REVISION first, see the start of step 8}"
+cd "$TOCKMOX"
+git checkout --detach "$TARGET_REVISION"
+./tools/mirror-images.sh --registry REGISTRY_HOST/mirror --dry-run
+```
+
+Read the dry run, then run the same command without `--dry-run`, as in step 2.
+The success condition for this sub-step is checked from inside the boundary in
+8.6, because only the inside can say what a node will be able to pull.
+
+If you use the [`global.imageRegistry` fallback](#globalimageregistry-is-the-fallback)
+and not the node-side mirror, also read
+`git -C "$TOCKMOX" diff "$CURRENT_REVISION" "$TARGET_REVISION" -- tools/check-airgap.sh`.
+An image added to that script's exemption list is one the key does not reach,
+and your site values have to wire it by hand.
+
+### 8.4 Re-vendor the chart archives ... Required
+
+This is [step 3](#3-vendor-the-upstream-helm-subcharts--required) again.
+**Replace the archives; do not add to them.** Helm loads every archive in a
+layer's `charts/` directory, so the old and the new version of one dependency
+side by side fail the render with a schema error that blames your values. It
+was seen on a dependency bump, and it is invisible in git because the directory
+is ignored.
+
+**CONNECTED** ... outside the boundary, never a cluster NODE
+
+```bash
+: "${TOCKMOX:?export TOCKMOX first, see the start of step 8}"
+cd "$TOCKMOX"
+rm -rf charts/*/charts
+./tools/helm-deps.sh
+```
+
+**Success condition:** the two counts in
+[step 3](#3-vendor-the-upstream-helm-subcharts--required) match. Then carry the
+archives inside the way you did the first time, replacing the old ones.
+
+### 8.5 Carry the target tag inside ... Required
+
+A git bundle carries exactly the commits between the two revisions, as one file
+for whatever moves bytes across your boundary. It requires your current
+revision to exist at the other end, which it does if the inside clone filled
+your git server.
+
+**CONNECTED** ... outside the boundary, never a cluster NODE
+
+```bash
+: "${TOCKMOX:?export TOCKMOX first, see the start of step 8}"
+: "${CURRENT_REVISION:?export CURRENT_REVISION first, see the start of step 8}"
+: "${TARGET_REVISION:?export TARGET_REVISION first, see the start of step 8}"
+git -C "$TOCKMOX" bundle create "$HOME/tockmox-$TARGET_REVISION.bundle" \
+  "$CURRENT_REVISION..$TARGET_REVISION"
+```
+
+Move `tockmox-$TARGET_REVISION.bundle` across the boundary. On the inside, from
+the clone that filled your git server:
+
+**WORKSTATION** ... inside the boundary. **YOU SUPPLY:** the remote or URL of the
+repository [step 5](#5-serve-both-git-repositories-inside-the-boundary--required)
+serves, and the path the bundle landed at.
+
+```bash
+export TOCKMOX=YOUR_TOCKMOX_CLONE_PATH
+export TARGET_REVISION=YOUR_TARGET_REVISION
+export BUNDLE=YOUR_BUNDLE_PATH
+export CHARTS_REMOTE=YOUR_INTERNAL_CHARTS_REMOTE
+git -C "$TOCKMOX" bundle verify "$BUNDLE"
+git -C "$TOCKMOX" fetch "$BUNDLE" "refs/tags/$TARGET_REVISION:refs/tags/$TARGET_REVISION"
+git -C "$TOCKMOX" push "$CHARTS_REMOTE" "$TARGET_REVISION"
+```
+
+**Success condition:** `bundle verify` prints `is okay`, and the tag is now on the
+server ArgoCD reads (8.6 checks that). `bundle verify` failing with `requires
+this ref` means the inside clone does not hold your current revision; fix that
+before going on.
+
+### 8.6 Prove everything is inside ... Required
+
+Both checks run from inside the boundary, and both name the thing that will
+actually be asked for.
+
+**WORKSTATION** ... inside the boundary
+
+```bash
+: "${TOCKMOX:?export TOCKMOX first, see the start of step 8}"
+: "${TARGET_REVISION:?export TARGET_REVISION first, see the start of step 8}"
+: "${GIT_HOST:?export GIT_HOST first, see step 5}"
+git ls-remote --tags "git://$GIT_HOST/tockmox.git" "$TARGET_REVISION"
+cd "$TOCKMOX"
+git checkout --detach "$TARGET_REVISION"
+./tools/mirror-images.sh --registry REGISTRY_HOST/mirror --verify
+grep -vcE '^[[:punct:]]|^$' images.txt
+```
+
+**Success condition:** the first command prints a SHA and the tag name. The
+`--verify` line reads `N entries, N present, 0 missing`, and `N` equals the
+last command's count, which is the new release's image count. If you serve the
+charts over HTTP, also run the smart-protocol check in
+[step 5](#5-serve-both-git-repositories-inside-the-boundary--required): a tag that
+lists with `git ls-remote` can still be unreadable to ArgoCD's repo-server.
+
+### 8.7 Run the upgrade ... Required
+
+Now, and not before, run [upgrade to a new release](upgrade.md) from
+[step 0](upgrade.md#0-write-down-what-you-are-on-now) through
+[step 7](upgrade.md#7-confirm-the-workloads-actually-came-up), unchanged. Its
+step 1 read of the notes and its step 2 backup apply here as they do on a
+connected site.
+
+Add one check to the end of step 7, from step 7 of this page:
+
+**WORKSTATION**
+
+```bash
+kubectl get pods -A | grep -E 'ImagePullBackOff|ErrImagePull' \
+  || echo "no image pull failures: correct"
+```
+
+**Success condition:** the "correct" line. A pull failure here is almost always
+8.3 or the node-side mirror of [step 2](#2-mirror-the-images--required), not the
+layer that reports it.
+
+### 8.8 Republish the documentation ... Optional
+
+**What you get:** the docs site inside the boundary matches the release you now
+run. What you lose by skipping it: the site keeps serving the previous
+release's pages. On a connected machine, from the same checkout at the target
+tag, `tools/build-docs.sh DIR`; carry `DIR` across; then
+`tools/publish-docs.sh --context CTX --site DIR` from inside, as in
+[step 7](#7-run-the-install--required).
+
+### 8.9 When the release moves ArgoCD or k3s ... Conditional
+
+**Run this if** the release notes say a prerequisite floor moved. Do it before
+8.7, one change per window: [upgrade ArgoCD and k3s](upgrade-foundations.md) has
+the air-gapped ArgoCD route and the k3s note, and its own list of what has not
+been run.
+
+### 8.10 After you accept the release ... Optional
+
+The previous release's images are now only a rollback target. The mirror tool
+has no prune, so removing them is your registry's own retention or garbage
+collection, and it is a decision to take after the rollback window you set
+yourself, not a step of the update. Keep the previous release's bundle and
+chart archives for the same reason.
+
 ## What is not certified here
 
 The 2026-08-25 result at the top of this page is a measurement of **one
@@ -630,6 +868,15 @@ start to finish as written, and it is not a claim about any later build. The
 counts in the tables above were read from the 0.6.0 tree on 2026-09-01, from
 `images.txt`, the `Chart.yaml` files and `tools/check-airgap.sh`; they will move
 with the tree, and the gates print their own totals every run.
+
+**The update path in step 8 has not been run.** It is composed from the first
+install's steps, the tools' documented behaviour and the upgrade page, and no
+disconnected site has been taken from one release to the next with it. What was
+run is narrower: the two `git diff` readings in 8.2 against real release tags in a
+connected checkout, and the bundle commands in 8.5 against a scratch repository
+rather than the Tockmox one. The order it insists on (everything inside before the
+revision moves) and the failures it names for the wrong order are reasoned from
+how ArgoCD resolves a revision and how a node pulls an image, not observed.
 
 Two claims on this page are **beliefs rather than measurements**, because
 nothing tests them:
@@ -647,6 +894,8 @@ Documented procedures are verified by running them, not by reviewing them. The
 
 - [Prepare a fresh cluster](fresh-install.md) then [installation](install.md)
   ... the flow this page modifies
+- [Upgrade to a new release](upgrade.md) ... what step 8 hands over to once the
+  new release is inside the boundary
 - [A container registry](registry.md) ... what to run as the mirror, and why
   there is no bundle
 - [Time synchronisation](time-sync.md) ... step 1 in full: choosing the source,
