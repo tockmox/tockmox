@@ -273,6 +273,19 @@ costs you, with the reasoning in the documentation rather than here.
   rollback has not been run end to end, and the page says so.
   Nothing to do on upgrade.
 
+- **An Open WebUI or LiteLLM bump no longer needs a site edit.** Open WebUI's
+  trust-bundle initContainer learns whether a CA is coming from a new ConfigMap,
+  `tockmox-ai-trust-env`, that renders whether or not SSO is on (`true` when
+  `global.certIssuer` is set; `modelGateway.trustBundle.expectCA` overrides it), so
+  a site with SSO off no longer restates the container, and its image, to set
+  `TOCKMOX_EXPECT_CA`. A `build-ca-bundle` initContainer a site adds to LiteLLM
+  may name its image `{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}`
+  and then follows every bump; the render now refuses one that names any other
+  image. **Action, if your site restates either container:** delete the Open WebUI
+  `extraInitContainers` and `image.tag`, and give LiteLLM's `build-ca-bundle` the
+  expression above and drop `litellm.image.tag`
+  (`docs/administration/tls-and-trust.md`, "Trust inside the cluster").
+
 ### Fixed
 
 - **The Argo CD sign-in recipe works on a site that uses the shipped private CA.**

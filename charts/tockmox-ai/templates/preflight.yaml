@@ -115,6 +115,41 @@ because the bundle it writes is that image's own trust store.
 {{- end -}}
 {{- end -}}
 {{- /*
+LITELLM'S CA-BUNDLE INITCONTAINER NAMES THE APPLICATION IMAGE TOO (TM-1053).
+
+Tockmox ships no CA step for LiteLLM; a site that needs one adds an initContainer
+named `build-ca-bundle` (and the same list under litellm.migrationJob, whose
+init containers are its own), which copies certifi out of the application image
+and appends the CA. It must run on the application's image for the reason the
+Open WebUI one does: the bundle is that image's own store. Until 0.9.0 nothing
+checked it, and a site that restated the image as a literal had to move two lines
+on every LiteLLM bump, which is why the homelab also pinned `litellm.image.tag`.
+
+The subchart runs `tpl` over both lists, so the container can say
+    image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+and then follows the application on its own, with no tag in the site's values.
+This renders the image the way the subchart will and refuses one that is not the
+application's. It looks at the container by that NAME; a container with another
+name is the site's own.
+*/ -}}
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm")) (hasKey .Subcharts "litellm") -}}
+{{- $lsub := index .Subcharts "litellm" -}}
+{{- $lv := $lsub.Values -}}
+{{- $limg := $lv.image | default dict -}}
+{{- $lwant := printf "%s:%s" $limg.repository ($limg.tag | default $lsub.Chart.AppVersion) -}}
+{{- $lists := dict "litellm.extraInitContainers" ($lv.extraInitContainers | default list) "litellm.migrationJob.extraInitContainers" ((($lv.migrationJob | default dict).extraInitContainers) | default list) -}}
+{{- range $where, $list := $lists -}}
+{{- range $list -}}
+{{- if eq .name "build-ca-bundle" -}}
+{{- $lgot := tpl (.image | default "") $lsub -}}
+{{- if ne $lgot $lwant -}}
+{{- fail (printf "%s[build-ca-bundle].image resolves to %q, and the LiteLLM container runs %q. The bundle it builds is its own image's trust store, so a different image hands the proxy a different set of public roots and nothing says so. Write the image as \"{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}\" (the subchart runs tpl over this list) and it follows every LiteLLM bump with no tag in your values." $where $lgot $lwant) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- /*
 `serviceMonitors` is deliberately NOT guarded here (TM-0825). Declining the
 observability capability while pinning `apps.serviceMonitors.enabled: true` is
 the documented "run your own Prometheus operator" route: the capability says

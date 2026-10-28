@@ -214,6 +214,22 @@ apps:
 #   modelGateway.*   objects THIS chart renders around it
 # ---------------------------------------------------------------------------
 modelGateway:
+  # Open WebUI's trust bundle (TM-1053). Lives here because this object is the
+  # provisional one; it is not about the gateway. templates/trust-env.yaml renders
+  # the ConfigMap the `tockmox-trust-bundle` initContainer reads.
+  trustBundle:
+    # Is a Tockmox CA coming to the Open WebUI pod? The initContainer waits up to
+    # 300s for it when true and builds the bundle at once when false.
+    #   null   follow global.certIssuer: set means a CA is coming (the default, and
+    #          right for every site whose Ingress certificate comes from it)
+    #   true   a CA arrives although global.certIssuer is empty
+    #   false  global.certIssuer is set but the console's certificate carries no
+    #          ca.crt, so waiting would only delay the pod
+    # A site used to restate the whole initContainer to get `true` with SSO off,
+    # and with it the image, which then had to move with every Open WebUI bump.
+    # Restart Open WebUI after changing this: a ConfigMap read through envFrom
+    # does not roll a pod.
+    expectCA: null
   # A CNPG Cluster rendered by this chart, in the release namespace, following
   # docs/administration/adding-an-application.md. LiteLLM stores keys, teams,
   # budgets and spend here; it is not a cache, and losing it loses your keys.
@@ -1180,6 +1196,13 @@ open-webui:
       envFrom:
         - secretRef:
             name: tockmox-ai-sso-env
+            optional: true
+        # AFTER the Secret, so that modelGateway.trustBundle.expectCA wins over the
+        # Secret's own copy of the key. This one renders whether or not SSO does
+        # (templates/trust-env.yaml), which is what lets a site with SSO off stop
+        # restating this container (TM-1053).
+        - configMapRef:
+            name: tockmox-ai-trust-env
             optional: true
       command: ["/bin/sh", "-c"]
       args:
