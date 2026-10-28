@@ -215,6 +215,23 @@ costs you, with the reasoning in the documentation rather than here.
   `/tmp/dashboards/Tockmox/`; update the path or the home page falls back to
   Grafana's default.
 
+- **The air-gap runbook now covers updating, and the rollback section says
+  which case you are in.**
+  [`airgap.md`](docs/deployment/airgap.md) has a new step 8: mirror the images
+  once, then update every later release from your own mirror (ADR-0036, the
+  REQ-0004 amendment), with a git bundle for the chart repository, a check that
+  nothing is pulled from outside, and a note on when the previous release's
+  images can go. The step is written from the procedure and has not been run on
+  a disconnected install.
+  [`upgrade.md`](docs/deployment/upgrade.md) already said rollback is symmetric
+  where it can be and not absolutely; its Roll back section opened with "the
+  same procedure with the two revisions swapped". It now opens with a four-row
+  table that says which case you are in before you swap. The bundled
+  applications that migrate their own database schema (Open WebUI, LiteLLM,
+  Authentik, Grafana) and pruned volumes are the exceptions. The chained
+  rollback has not been run end to end, and the page says so.
+  Nothing to do on upgrade.
+
 ### Fixed
 
 - **The Argo CD sign-in recipe works on a site that uses the shipped private CA.**

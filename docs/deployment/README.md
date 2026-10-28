@@ -55,7 +55,7 @@ Then [sign in for the first time](../usage/getting-started.md).
 |---|---|
 | [Deploying into virtual machines](virtual-machines.md) | The hypervisor settings that break Tockmox when left at their defaults, and the per-platform walkthroughs for Harvester, OpenShift Virtualization, vSphere and Synology VMM |
 | [A container registry](registry.md) | Why Tockmox ships no registry today and no offline bundle, which registry is planned to ship and when, what `global.imageRegistry` does and does not reach, and how to run one yourself in the meantime |
-| [Install with no internet access](airgap.md) | The five things a disconnected install needs in place, in the order you do them, and exactly where each one changes the normal install flow |
+| [Install with no internet access](airgap.md) | The five things a disconnected install needs in place, in the order you do them, where each one changes the normal install flow, and how to update the install later from your own mirror |
 | [Time synchronisation for a disconnected site](time-sync.md) | Why every node's clock has to agree, how to point k3s nodes' chrony at an internal time source when nothing can reach a public pool, what drift looks like when it goes wrong, and the commands that verify it |
 
 ### Already running

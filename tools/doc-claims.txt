@@ -263,11 +263,29 @@ states: [0-9]+ CI gates
 # 2026-10-23: 421 -> 422 and 38 -> 39 pages, tockmox-ui.md's first block: sealing the Authentik half of the UI client secret for an install minted before 0.9.0 (TM-0956).
 # 2026-10-26: 422 -> 424 and 39 -> 40 pages, platform-management.md's first two blocks: the generator's rewrite and --check commands in its new Cases section.
 # 2026-10-27: 424 -> 431, Authentik on CloudNativePG (TM-0788): upgrade.md's five-block move procedure, secrets.md's block sealing tockmox-authentik-db for an install minted before 0.9.0, and backup-restore.md's read of the identity drill register.
+# 2026-10-27: 431 -> 439, airgap.md step 8, the update path for a disconnected install (TM-0120): eight blocks.
 page:   tests/executed-docs/INVENTORY.md
 claim:  fenced bash blocks across
 test:   grep -rhE '^[ \t]*```bash$' docs/ | wc -l | tr -d ' '
-expect: 431
+expect: 439
 states: [0-9]+ fenced bash blocks
+
+# TM-0970, TM-0120 (2026-10-27): two sentences pinned so they cannot be edited
+# back into a stronger claim without this file moving in the same commit.
+# upgrade.md says rollback is symmetric where it can be, not absolutely, and
+# the table row that names the bundled applications which migrate their own
+# schema is the exception that makes the sentence true. airgap.md step 8 is the
+# update path for a disconnected install; a reader who finds only the install
+# half assumes the mirror is a one-time chore.
+page:   docs/deployment/upgrade.md
+claim:  Rollback is symmetric where it can be, not absolutely
+test:   grep -c '^| Moved a bundled application that migrates its own database schema: Open WebUI, LiteLLM, Authentik' docs/deployment/upgrade.md | tr -d ' '
+expect: 1
+
+page:   docs/deployment/airgap.md
+claim:  Update a disconnected install
+test:   grep -c '^## 8\. Update a disconnected install' docs/deployment/airgap.md | tr -d ' '
+expect: 1
 
 # TM-0469 added the KUBE_CONTEXT export block to fresh-install.md, which moved
 # the total above and ALSO moved a second, unregistered number in the same file
