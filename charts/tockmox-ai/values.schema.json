@@ -119,6 +119,20 @@
       "description": "Objects this chart renders around the vendored LiteLLM chart.",
       "additionalProperties": true,
       "properties": {
+        "trustBundle": {
+          "type": "object",
+          "description": "Open WebUI's trust bundle initContainer (TM-1053).",
+          "additionalProperties": false,
+          "properties": {
+            "expectCA": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "Is a Tockmox CA coming to the Open WebUI pod? null follows global.certIssuer; true or false overrides it."
+            }
+          }
+        },
         "database": {
           "type": "object",
           "required": [

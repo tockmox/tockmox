@@ -567,6 +567,35 @@ bash 4 or newer.** Measured against bash 3.2.57 on macOS, 2026-08-31: it printed
 an error, examined nothing, and exited 0. The script now guards against that,
 and the guard is the reason to check which bash you invoked it with.
 
+**You should not need to restate the trust-bundle container, and your
+application tags should not depend on it.** Open WebUI's initContainer decides
+whether to wait for the CA from `TOCKMOX_EXPECT_CA`, and from 0.9.0 that arrives
+in a ConfigMap (`tockmox-ai-trust-env`) that renders whether or not SSO is on. It
+is `true` when `global.certIssuer` is set. If a CA arrives although
+`global.certIssuer` is empty, or `global.certIssuer` is set and the console's
+certificate will never carry a `ca.crt`, set
+`modelGateway.trustBundle.expectCA` to `true` or `false`, and restart Open WebUI
+afterwards (a ConfigMap read through `envFrom` does not roll a pod). Before 0.9.0
+a site with SSO off restated the whole container to set that variable, and the
+image named in it had to equal Open WebUI's, so every Open WebUI bump needed a
+change in the site repo as well. Delete the restated
+`open-webui.extraInitContainers` and the `open-webui.image.tag` you kept in step
+with it.
+
+LiteLLM ships no CA step. If you add one, name the container `build-ca-bundle`,
+put it in both `litellm.extraInitContainers` and
+`litellm.migrationJob.extraInitContainers` (they are separate lists), and write
+its image as the subchart's own expression, which the subchart runs through
+`tpl`:
+
+```yaml
+image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+```
+
+It then follows every LiteLLM bump with no tag in your values. An image that is
+any other value is refused at render time, naming this expression.
+`./tools/check-site-follows-product.sh` asserts both on the rendered artifact.
+
 **The complete check is a federated login**, end to end, in a browser. The
 mechanism is verified and the walk-through is not: see
 [verification status](#verification-status).

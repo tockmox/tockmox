@@ -741,13 +741,13 @@ states: [0-9]+ exemptions
 page:   docs/usage/what-you-get.md
 claim:  rendered resources
 test:   tools/render-counts.sh --read total
-expect: 608
+expect: 609
 states: [0-9]+ rendered resources
 
 page:   docs/architecture.md
 claim:  resources** render with the CI values
 test:   tools/render-counts.sh --read total
-expect: 608
+expect: 609
 states: [0-9]+ resources\*\* render
 
 page:   docs/usage/what-you-get.md
@@ -793,9 +793,9 @@ expect: 35
 states: [0-9]+ \| Argo Workflows \(client
 
 page:   docs/usage/what-you-get.md
-claim:  | ai | 35 | Open WebUI with
+claim:  | ai | 36 | Open WebUI with
 test:   tools/render-counts.sh --read ai
-expect: 35
+expect: 36
 states: [0-9]+ \| Open WebUI with
 
 page:   docs/usage/what-you-get.md
