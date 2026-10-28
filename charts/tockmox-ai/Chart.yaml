@@ -12,7 +12,7 @@ dependencies:
     version: 0.8.0
     repository: "file://../tockmox-common"
   - name: open-webui
-    version: 17.0.0
+    version: 17.3.0
     repository: "https://helm.openwebui.com"
     condition: apps.openWebui.enabled,capabilities.aiPlane.enabled
   # The model gateway. Aliased to `litellm` so the values key reads as the
@@ -26,6 +26,6 @@ dependencies:
   # Chart.yaml lists them.
   - name: litellm-helm
     alias: litellm
-    version: "1.106.3"
+    version: "1.106.5"
     repository: "oci://ghcr.io/berriai"
     condition: apps.litellm.enabled,capabilities.aiPlane.enabled
