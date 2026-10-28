@@ -354,6 +354,30 @@ none on the embedded outpost is left exactly as it is. It is identified by
 `managed`, the stable marker Authentik itself creates it with, never by its
 display name, which an operator can rename.
 
+THE OUTPOST ENTRY ALSO SETS `config.authentik_host` (TM-0425, the maintainers' lab,
+2026-10-28). The embedded outpost builds the browser-facing sign-in URL from it:
+`GetOIDCEndpoint` in the outpost's endpoint.go rewrites scheme and host of the
+authorization and end-session URLs to `authentik_host` for an embedded outpost,
+and with it blank logs "Outpost has localhost/blank API Connection but no
+authentik_host is configured" and leaves the URL as the API returned it. That is
+`http://localhost/application/o/authorize/...`, so an unauthenticated request to
+a forward-auth console was refused correctly and redirected to nothing. A fresh
+Authentik creates the embedded outpost with `authentik_host: ""` and nothing in
+a stock install fills it. Nothing else is needed: for an embedded outpost the
+same function uses `authentik_host` alone (`authentik_host_browser` is read only
+for a non-embedded outpost), and users and the outpost see one auth host.
+
+`config` is a JSON field and a blueprint REPLACES it whole (the importer
+saves with `partial=True`, which merges top-level fields, not the contents of a
+JSON field). A one-key dict is safe: the API's `validate_config` runs
+`from_dict(OutpostConfig, config)` and the model's `config` property does the
+same on read, so every other key takes its dataclass default; the Go outpost
+reads only `authentik_host` (required, set here) and `log_level` (with a
+fallback). Keys an operator set by hand on the embedded outpost are therefore
+dropped at the next apply, like its provider list, once any console is on.
+The value is the auth host the OAuth apps in this file already use; the
+trailing slash is the form the lab premise check ran with.
+
 Greenfield rule: the only lookups are the two default flows already used above.
 `keepProviders` names objects a stock install does not have, which is why it is
 empty by default and why values.yaml says a missing name fails the blueprint.
@@ -450,6 +474,8 @@ empty by default and why values.yaml says a missing name fails the blueprint.
         identifiers:
           managed: goauthentik.io/outposts/embedded
         attrs:
+          config:
+            authentik_host: "{{ $scheme }}://{{ $authHost }}/"
           providers:
 {{- range $k := $faOn }}
             - !KeyOf provider-fa-{{ $k }}

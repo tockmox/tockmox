@@ -100,6 +100,10 @@
             "middleware": {
               "type": "string",
               "description": "Provider-qualified Traefik Middleware. Empty uses the identity layer's on a stock install: tockmox-authentik-tockmox-forward-auth@kubernetescrd."
+            },
+            "address": {
+              "type": "string",
+              "description": "Address the Traefik dashboard's own forward-auth Middleware asks (an IngressRoute cannot attach the identity layer's Middleware across namespaces). Empty uses the identity layer's Authentik server on a stock install."
             }
           }
         }

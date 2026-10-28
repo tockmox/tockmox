@@ -21,8 +21,28 @@ dashboard and its API only, and Authentik in front unless
 An IngressRoute rather than an Ingress, because the backend is Traefik's own
 `api@internal` TraefikService, which an Ingress cannot name. So it carries its
 own Certificate (an Ingress gets one from the cert-manager annotation; an
-IngressRoute does not) when global.certIssuer is set, and the forward-auth
-Middleware by its provider-qualified name.
+IngressRoute does not) when global.certIssuer is set, and its own forward-auth
+Middleware, `traefik-dashboard-forward-auth`, in THIS namespace.
+
+WHY A MIDDLEWARE OF ITS OWN (TM-0217, found on the maintainers' lab, 2026-10-28). The
+consoles that are Ingresses (Longhorn here, Prometheus and Alertmanager in the
+observability layer) attach the identity layer's `tockmox-forward-auth` through
+the `router.middlewares` annotation, where a provider-qualified name
+(`<namespace>-<name>@kubernetescrd`) reaches another namespace. An IngressRoute
+cannot: Traefik's Kubernetes CRD provider refuses every `@kubernetescrd`
+reference, and any Middleware in another namespace, while
+`providers.kubernetesCRD.allowCrossNamespace` is false (the upstream default,
+and what this chart leaves it at), logs "invalid reference to middleware ...
+@kubernetescrd references are disallowed" and answers the route 404. So the
+dashboard route carries a Middleware rendered beside it, with the same
+forwardAuth spec as the identity layer's, aimed at the identity layer's
+Authentik server Service. `ingress.forwardAuth.address` overrides that address.
+The alternative, `allowCrossNamespace: true`, lets an IngressRoute in any
+namespace attach any Middleware in any namespace; this chart does not turn it on
+for one console. Traefik already calls that Service for the Ingress consoles, so
+the policy layer's allow-from-traefik rule covers this Middleware as well.
+tools/check-forward-auth.sh fails on any rendered IngressRoute that reaches
+across namespaces while allowCrossNamespace is off.
 
 The port-forward path (`traefik.api.insecure`) is NOT replaced: a console that
 tells you why routing is broken should not be reachable only through the
@@ -32,7 +52,9 @@ of the tool you would use to find it.
 {{- $tr := .Values.ingress.apps.traefik | default dict }}
 {{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "traefik")) $tr.enabled }}
 {{- $host := $tr.host | default (include "tockmox.internalHost" (dict "svc" "traefik" "ctx" $)) }}
+{{- /* Called for its refusal (forwardAuth on while the identity capability is off fails the render); the value it returns is a router.middlewares annotation, which an IngressRoute cannot use. */ -}}
 {{- $fa := include "tockmox.forwardAuthAnnotations" (dict "ctx" $ "app" "traefik" "on" $tr.forwardAuth) | fromYaml }}
+{{- $faAddress := ((.Values.ingress.forwardAuth | default dict).address) | default "http://tockmox-identity-authentik-server.tockmox-authentik.svc.cluster.local/outpost.goauthentik.io/auth/traefik" }}
 {{- if .Values.global.certIssuer }}
 ---
 apiVersion: cert-manager.io/v1
@@ -69,9 +91,9 @@ spec:
       services:
         - name: api@internal
           kind: TraefikService
-      {{- with $fa }}
+      {{- if $fa }}
       middlewares:
-        - name: {{ index . "traefik.ingress.kubernetes.io/router.middlewares" }}
+        - name: traefik-dashboard-forward-auth
       {{- end }}
     # The bare host redirects to the dashboard, so the portal tile can launch it.
     - match: Host(`{{ $host }}`) && Path(`/`)
@@ -81,8 +103,8 @@ spec:
           kind: TraefikService
       middlewares:
         - name: traefik-dashboard-root
-      {{- with $fa }}
-        - name: {{ index . "traefik.ingress.kubernetes.io/router.middlewares" }}
+      {{- if $fa }}
+        - name: traefik-dashboard-forward-auth
       {{- end }}
   {{- if .Values.global.certIssuer }}
   tls:
@@ -101,4 +123,25 @@ spec:
   redirectRegex:
     regex: ^(https?://[^/]+)/?$
     replacement: ${1}/dashboard/
+{{- if $fa }}
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: traefik-dashboard-forward-auth
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "8"
+spec:
+  forwardAuth:
+    address: {{ $faAddress }}
+    trustForwardHeader: true
+    authResponseHeaders:
+      - X-authentik-username
+      - X-authentik-groups
+      - X-authentik-email
+      - X-authentik-name
+      - X-authentik-uid
+{{- end }}
 {{- end }}

@@ -30,6 +30,23 @@
 #   F4  a host override given to both halves moves the provider, the callback
 #       and the route together.
 #   F5  keepProviders adds its names to the outpost list (by name lookup).
+#   F6  the embedded outpost entry sets `config.authentik_host`, non-empty and
+#       equal to the origin of the Ingress that serves Authentik (the render's
+#       own auth host, and its scheme). Without it the embedded outpost builds
+#       its sign-in redirect from a blank host and an unauthenticated request
+#       to a console is sent to http://localhost/application/o/authorize/...
+#       (the maintainers' lab, 2026-10-28). Every other check here passed on that render,
+#       because each looked at the provider list and none at the outpost's host.
+#   F7  no rendered IngressRoute (every chart, stock values and ci/values-all-on)
+#       names a Middleware with an `@kubernetescrd` suffix or a namespace other
+#       than its own, or a Service in another namespace, unless the platform's
+#       Traefik is rendered with providers.kubernetesCRD.allowCrossNamespace on;
+#       and a local Middleware name resolves to a Middleware rendered in that
+#       namespace. Traefik answers such a route 404 and logs one line (the maintainers' lab,
+#       2026-10-28, the dashboard). Ingress ANNOTATIONS are not covered, because
+#       they may carry `@kubernetescrd` names: the rule is the CRD provider's.
+#   FA_ONLY=fa|crossns restricts a run to F1-F6 or to F7 (the selftest uses it
+#   so each mutation is caught by the assertion it is about).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -97,7 +114,13 @@ def route_host_and_ref(console):
         r = ir[0]["spec"]["routes"][0]
         host = r["match"].split("Host(`")[1].split("`")[0]
         mws = [m["name"] for m in r.get("middlewares", [])]
-        return host, (mws[0] if mws else None)
+        # an IngressRoute cannot attach another namespace's Middleware (F7), so the
+        # dashboard route carries its own; every route of it must carry it (the bare-host
+        # route redirects first, then asks Authentik)
+        for rr in ir[0]["spec"]["routes"]:
+            if "traefik-dashboard-forward-auth" not in [m["name"] for m in rr.get("middlewares", [])]:
+                return host, None
+        return host, (mws[-1] if mws else None)
     ds = plat if console == "longhorn" else obs
     ing = find(ds, "Ingress", console)
     if not ing: return None, None
@@ -134,7 +157,16 @@ if mode in ("all", "override"):
     for c in CONSOLES:
         host, mref = route_host_and_ref(c)
         if not host: fail("F2 no %s route with the console on" % c)
-        if mref != ref: fail("F2 the %s route attaches %r, not the rendered Middleware %r" % (c, mref, ref))
+        if c == "traefik":
+            # An IngressRoute cannot reach the identity layer's Middleware (F7); its own must
+            # exist beside it and say exactly what the identity layer's says.
+            if mref != "traefik-dashboard-forward-auth":
+                fail("F2 the traefik dashboard route attaches %r on every route, not its own namespace-local Middleware" % mref)
+            own = find(plat, "Middleware", "traefik-dashboard-forward-auth")
+            if len(own) != 1: fail("F2 the dashboard route names traefik-dashboard-forward-auth, which the platform render does not serve")
+            if own[0]["spec"].get("forwardAuth") != mw[0]["spec"]["forwardAuth"]:
+                fail("F2 the dashboard Middleware's forwardAuth spec differs from the identity layer's: %s vs %s" % (own[0]["spec"].get("forwardAuth"), mw[0]["spec"]["forwardAuth"]))
+        elif mref != ref: fail("F2 the %s route attaches %r, not the rendered Middleware %r" % (c, mref, ref))
         p = providers.get("tockmox-fa-" + c)
         if not p or p["state"] != "present": fail("F2 no present provider for %s" % c)
         if p["attrs"].get("mode") != "forward_single": fail("F2 the %s provider is not forward_single" % c)
@@ -158,6 +190,17 @@ if mode in ("all", "override"):
         fail("F2 the embedded outpost is not set exactly once, by its managed marker")
     keyofs = sorted(x["!KeyOf"] for x in out[0]["attrs"]["providers"] if "!KeyOf" in x)
     if keyofs != sorted("provider-fa-" + c for c in CONSOLES): fail("F2 the outpost serves %s, not the four consoles" % keyofs)
+    # F6: the embedded outpost must know the browser-facing host of Authentik.
+    auth_ing = find(ident, "Ingress", "authentik")
+    if len(auth_ing) != 1: fail("F6 expected one Ingress named authentik (the auth host) in the identity render, found %d" % len(auth_ing))
+    auth_host = auth_ing[0]["spec"]["rules"][0]["host"]
+    scheme = "https" if auth_ing[0]["spec"].get("tls") else "http"
+    cfg = out[0]["attrs"].get("config")
+    got = cfg.get("authentik_host") if isinstance(cfg, dict) else None
+    if not got:
+        fail("F6 the embedded outpost entry sets no non-empty config.authentik_host: its sign-in redirect would go to http://localhost/application/o/authorize/... (got %r)" % (cfg,))
+    if got != "%s://%s/" % (scheme, auth_host):
+        fail("F6 the embedded outpost's authentik_host is %r, not the auth host's origin %r" % (got, "%s://%s/" % (scheme, auth_host)))
     if mode == "override":
         h = route_host_and_ref("prometheus")[0]
         if h != "metrics.example.org": fail("F4 the prometheus route did not move to the override host (%s)" % h)
@@ -165,18 +208,115 @@ if mode in ("all", "override"):
         if finds != [{"!Find": ["authentik_providers_proxy.proxyprovider", ["name", "site-proxy"]]}]:
             fail("F5 keepProviders did not add site-proxy to the outpost by name: %s" % finds)
         print("ok    F4 a host override moves provider, callback and route together")
+        print("ok    F6 the outpost's authentik_host follows an auth host override (%s)" % got)
         print("ok    F5 keepProviders keeps a site provider on the embedded outpost")
     else:
         print("ok    F2 four consoles: one Middleware on this release's outpost, providers, bindings, callbacks and routes that name each other")
+        print("ok    F6 the embedded outpost sets authentik_host %s, the auth host's origin" % got)
     sys.exit(0)
 fail("unknown mode " + mode)
 PY
+}
+
+assert_crossns() { # <namespace:renderfile>...; F7 over every IngressRoute in the renders
+  python3 - "$@" <<'PY'
+import re, sys, yaml
+
+KINDS = re.compile(r"(?m)^kind: (IngressRoute|IngressRouteTCP|Middleware|Deployment|DaemonSet)\s*$")
+routes, mws, crd_open = [], set(), False
+
+def fail(msg):
+    print("FAIL  " + msg); sys.exit(1)
+
+def own_ns(d, default):
+    return (d.get("metadata") or {}).get("namespace") or default
+
+def containers(d):
+    spec = ((d.get("spec") or {}).get("template") or {}).get("spec") or {}
+    return list(spec.get("containers") or []) + list(spec.get("initContainers") or [])
+
+for arg in sys.argv[1:]:
+    ns, path = arg.split(":", 1)
+    text = open(path).read()
+    if text.startswith("Error"):
+        fail("F7 a render did not produce YAML (%s): %s" % (path.rsplit("/", 1)[-1], text.splitlines()[0][:200]))
+    # Parse only the documents F7 reads: a render also carries CRDs that no loader
+    # needs to understand, and which cost seconds.
+    for chunk in re.split(r"(?m)^---\s*$", text):
+        m = KINDS.search(chunk)
+        if not m:
+            continue
+        try:
+            d = yaml.safe_load(chunk)
+        except yaml.YAMLError as e:
+            fail("F7 could not parse a %s document in %s: %s" % (m.group(1), path.rsplit("/", 1)[-1], str(e).splitlines()[0]))
+        if not isinstance(d, dict):
+            continue
+        k = d.get("kind")
+        if k == "Middleware":
+            mws.add((own_ns(d, ns), d["metadata"]["name"]))
+        elif k in ("IngressRoute", "IngressRouteTCP"):
+            routes.append((own_ns(d, ns), d))
+        elif k in ("Deployment", "DaemonSet"):
+            for c in containers(d):
+                for a in (c.get("args") or []):
+                    if isinstance(a, str) and a.lower() == "--providers.kubernetescrd.allowcrossnamespace=true":
+                        crd_open = True
+
+if not routes:
+    fail("F7 no IngressRoute rendered in any chart: the check would pass on nothing (the dashboard route is expected with ingress.apps.traefik on)")
+if crd_open:
+    print("ok    F7 Traefik is rendered with providers.kubernetesCRD.allowCrossNamespace on: cross-namespace references are permitted (%d IngressRoutes not constrained)" % len(routes))
+    sys.exit(0)
+
+for ns, d in routes:
+    who = "IngressRoute %s/%s" % (ns, d["metadata"]["name"])
+    for r in (d.get("spec") or {}).get("routes") or []:
+        for m in r.get("middlewares") or []:
+            name, mns = m.get("name", ""), m.get("namespace") or ""
+            if name.endswith("@kubernetescrd"):
+                fail("F7 %s attaches %s: Traefik refuses an @kubernetescrd reference from an IngressRoute while allowCrossNamespace is off (the route answers 404)" % (who, name))
+            if mns and mns != ns:
+                fail("F7 %s attaches Middleware %s/%s from another namespace while allowCrossNamespace is off" % (who, mns, name))
+            if "@" not in name and (ns, name) not in mws:
+                fail("F7 %s attaches Middleware %s, which no render serves in namespace %s" % (who, name, ns))
+        for sv in r.get("services") or []:
+            sns = sv.get("namespace") or ""
+            if sns and sns != ns:
+                fail("F7 %s routes to %s/%s in another namespace while allowCrossNamespace is off" % (who, sns, sv.get("name")))
+print("ok    F7 %d IngressRoutes in %d renders: none reaches across a namespace or names an @kubernetescrd Middleware (allowCrossNamespace off)" % (len(routes), len(sys.argv) - 1))
+PY
+}
+
+ALL_CHARTS=(crds policy platform observability exporters identity devops ai selfcheck)
+NS_OF() { # <chart> -> the namespace its layer lands in on a stock install
+  case "$1" in
+    platform) echo tockmox-platform ;; observability|exporters) echo tockmox-monitoring ;;
+    identity) echo "$ID_NS" ;; devops) echo tockmox-devops ;; ai) echo tockmox-ai ;; selfcheck) echo tockmox-selfcheck ;;
+    *) echo tockmox-system ;;
+  esac
+}
+crossns_checks() { # <tmpdir>: render EVERY chart with stock values and with ci/values-all-on, then F7
+  local t="$1" c ns args=()
+  for c in "${ALL_CHARTS[@]}"; do
+    ns="$(NS_OF "$c")"
+    render "$c" "$ns" "$t/x-$c-stock" || { echo "FAIL  F7 $c did not render (stock): $(head -n 1 "$t/x-$c-stock")"; return 1; }
+    render "$c" "$ns" "$t/x-$c-allon" -f ci/values-all-on.yaml --set global.certIssuer=tockmox-ca \
+      || { echo "FAIL  F7 $c did not render (all switches on): $(head -n 1 "$t/x-$c-allon")"; return 1; }
+    args+=("$ns:$t/x-$c-stock" "$ns:$t/x-$c-allon")
+  done
+  assert_crossns "${args[@]}"
 }
 
 run_checks() { local rc=0; RC_T="$(mktemp -d)"; run_checks_in "$RC_T" || rc=1; rm -rf "$RC_T"; return $rc; }
 
 run_checks_in() {
   local t="$1"
+  case "${FA_ONLY:-}" in
+    crossns) crossns_checks "$t"; return ;;
+    fa|"") ;;
+    *) echo "FA_ONLY must be fa or crossns" >&2; return 2 ;;
+  esac
   render identity "$ID_NS" "$t/id0"
   render observability tockmox-monitoring "$t/ob0"
   render platform tockmox-platform "$t/pl0"
@@ -205,15 +345,17 @@ print("ok    F3 identity off refuses the route; forwardAuth: false routes it wit
 PY
 
   render identity "$ID_NS" "$t/id5" "${ALL_ID[@]}" --set sso.forwardAuth.apps.prometheus.host=metrics.example.org \
-    --set 'sso.forwardAuth.keepProviders={site-proxy}'
+    --set 'sso.forwardAuth.keepProviders={site-proxy}' --set ingress.apps.authentik.host=sso.example.org
   render observability tockmox-monitoring "$t/ob5" "${ALL_OBS[@]}" --set ingress.apps.prometheus.host=metrics.example.org
   assert_py override "$t/id5" "$t/ob5" "$t/pl1" || return 1
+
+  [ "${FA_ONLY:-}" = fa ] || crossns_checks "$t"
 }
 
 selftest() {
   # Each mutation breaks one seam in a scratch copy of the charts; the gate must go red on every one.
   local t fails=0; t="$(mktemp -d)"
-  mutate() { # <label> <file under charts/> <sed expression>
+  mutate() { # <label> <file under charts/> <sed expression> [fa|crossns: run only that half]
     rm -rf "$t/charts"; cp -R charts "$t/charts"
     sed "$3" "charts/$2" > "$t/charts/$2"
     if cmp -s "charts/$2" "$t/charts/$2"; then echo "SELFTEST-FAIL  mutation did not change $2 ($1)"; fails=$((fails + 1)); return; fi
@@ -225,7 +367,7 @@ selftest() {
       done ;;
     esac
     local why
-    if why="$(FA_CHARTS="$t/charts" run_checks 2>&1)"; then
+    if why="$(FA_CHARTS="$t/charts" FA_ONLY="${4:-}" run_checks 2>&1)"; then
       echo "SELFTEST-FAIL  still green with: $1"; fails=$((fails + 1))
     else
       # Say WHICH assertion caught it: red for an unrelated reason (a render
@@ -244,6 +386,65 @@ selftest() {
   mutate "the identity refusal is removed" tockmox-common/templates/_helpers.tpl 's/{{- if not (include "tockmox.capabilityEnabled" (dict "ctx" .ctx "capability" "identity")) -}}/{{- if false -}}/'
   # shellcheck disable=SC2016  # the $ is Helm template text the mutation must match literally, not a shell variable
   mutate "disabled consoles left present" tockmox-identity/templates/sso-blueprints.yaml 's/state: {{ ternary "present" "absent" $on }}/state: present/'
+  # shellcheck disable=SC2016  # the $ is Helm template text the mutation must match literally, not a shell variable
+  mutate "the embedded outpost's authentik_host is blank (TM-0425, the lab defect)" tockmox-identity/templates/sso-blueprints.yaml 's|authentik_host: "{{ $scheme }}://{{ $authHost }}/"|authentik_host: ""|' fa
+  mutate "the embedded outpost entry carries no config at all (the 2e82832 shape)" tockmox-identity/templates/sso-blueprints.yaml '/^          config:$/,/^            authentik_host:/d' fa
+  # shellcheck disable=SC2016  # the $ is Helm template text the mutation must match literally, not a shell variable
+  mutate "the embedded outpost's authentik_host is the wrong host" tockmox-identity/templates/sso-blueprints.yaml 's|authentik_host: "{{ $scheme }}://{{ $authHost }}/"|authentik_host: "{{ $scheme }}://{{ $domain }}/"|' fa
+  mutate "the dashboard IngressRoute attaches the identity Middleware across namespaces (TM-0217, the lab defect), F7 alone" tockmox-platform/templates/ingress.yaml 's|- name: traefik-dashboard-forward-auth|- name: tockmox-authentik-tockmox-forward-auth@kubernetescrd|' crossns
+  mutate "the dashboard IngressRoute attaches the identity Middleware across namespaces (TM-0217, the lab defect), whole gate" tockmox-platform/templates/ingress.yaml 's|- name: traefik-dashboard-forward-auth|- name: tockmox-authentik-tockmox-forward-auth@kubernetescrd|'
+  mutate "the dashboard IngressRoute names a namespace-local Middleware that is not rendered" tockmox-platform/templates/ingress.yaml 's|- name: traefik-dashboard-forward-auth|- name: traefik-dashboard-forward-authx|' crossns
+  # shellcheck disable=SC2016  # the $ is Helm template text the mutation must match literally, not a shell variable
+  mutate "the dashboard Middleware asks a different address than the identity layer's" tockmox-platform/templates/ingress.yaml 's|address: {{ $faAddress }}|address: http://authentik.invalid/|' fa
+  # F7 against hand-written renders: what it must refuse, and what it must leave alone.
+  fixture() { # <label> <pass|red> <yaml>
+    printf '%s\n' "$3" > "$t/fx.yaml"
+    local out rc=0
+    out="$(assert_crossns "tockmox-platform:$t/fx.yaml" 2>&1)" || rc=$?
+    if { [ "$2" = pass ] && [ "$rc" -eq 0 ]; } || { [ "$2" = red ] && [ "$rc" -ne 0 ]; }; then
+      echo "$([ "$2" = pass ] && echo green || echo red )   fixture: $1"
+      if [ "$2" = red ]; then echo "$out" | grep -m1 '^FAIL' | sed 's/^/        caught by: /'; fi
+    else
+      echo "SELFTEST-FAIL  fixture expected $2, got exit $rc: $1"; echo "$out" | head -n 3 | sed 's/^/        /'; fails=$((fails + 1))
+    fi
+  }
+  # shellcheck disable=SC2016  # the backticks are YAML (a Traefik Host rule), not a command substitution
+  local ROUTE_OK='kind: Middleware
+metadata: {name: local-auth}
+---
+kind: IngressRoute
+metadata: {name: r}
+spec:
+  routes:
+    - match: Host(`a`)
+      services: [{name: api@internal, kind: TraefikService}]
+      middlewares: [{name: local-auth}]'
+  fixture "an own-namespace Middleware passes" pass "$ROUTE_OK"
+  fixture "an Ingress annotation naming an @kubernetescrd Middleware is not this check's business" pass "$ROUTE_OK
+---
+kind: Ingress
+metadata:
+  name: longhorn
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: tockmox-authentik-tockmox-forward-auth@kubernetescrd"
+  fixture "a middleware that names its own namespace explicitly passes" pass "$(printf '%s' "$ROUTE_OK" | sed 's/{name: local-auth}\]/{name: local-auth, namespace: tockmox-platform}]/')"
+  fixture "an @kubernetescrd Middleware on an IngressRoute" red "$(printf '%s' "$ROUTE_OK" | sed 's/{name: local-auth}\]/{name: tockmox-authentik-tockmox-forward-auth@kubernetescrd}]/')"
+  fixture "a Middleware named with another namespace" red "$(printf '%s' "$ROUTE_OK" | sed 's/{name: local-auth}\]/{name: local-auth, namespace: tockmox-authentik}]/')"
+  fixture "a local Middleware name nobody renders" red "$(printf '%s' "$ROUTE_OK" | sed 's/{name: local-auth}\]/{name: missing}]/')"
+  fixture "a Service in another namespace" red "$(printf '%s' "$ROUTE_OK" | sed 's/{name: api@internal, kind: TraefikService}/{name: svc, namespace: other}/')"
+  fixture "an @file Middleware (another provider) is left alone" pass "$(printf '%s' "$ROUTE_OK" | sed 's/{name: local-auth}\]/{name: secure@file}]/')"
+  fixture "allowCrossNamespace rendered on permits the reference" pass "$(printf '%s' "$ROUTE_OK" | sed 's/{name: local-auth}\]/{name: tockmox-authentik-tockmox-forward-auth@kubernetescrd}]/')
+---
+kind: Deployment
+metadata: {name: traefik}
+spec:
+  template:
+    spec:
+      containers:
+        - name: traefik
+          args: ['--providers.kubernetescrd', '--providers.kubernetescrd.allowCrossNamespace=true']"
+  fixture "no IngressRoute at all fails rather than passing on nothing" red 'kind: Ingress
+metadata: {name: x}'
   rm -rf "$t"
   if [ "$fails" -eq 0 ]; then echo "selftest: every assertion can go red"; return 0; fi
   echo "selftest: $fails mutation(s) stayed green" >&2; return 1

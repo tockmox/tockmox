@@ -182,7 +182,10 @@ so it answers on every internal hostname that reaches Traefik and `/api` hands
 out router and service configuration. It stays off.
 `ingress.apps.traefik.enabled` in the platform layer renders a different one: a
 Host-matched IngressRoute to `api@internal` for `/dashboard` and `/api` on
-`traefik.<internalDomain>` only, behind Authentik, with its own certificate.
+`traefik.<internalDomain>` only, behind Authentik, with its own certificate and
+its own forward-auth Middleware in the platform namespace (an IngressRoute
+cannot attach the identity layer's; [Identity, the Traefik dashboard carries its
+own Middleware](identity.md#the-traefik-dashboard-carries-its-own-middleware)).
 
 The port-forward path below stays as the break-glass whichever you choose, and
 on purpose. **Unlike the other consoles, `kubectl port-forward` alone does not

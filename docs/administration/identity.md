@@ -304,7 +304,7 @@ from observability.
 | Layer | Renders |
 |---|---|
 | identity | Per console: a proxy provider in `forward_single` mode for that one host, an application (a tile on the portal) and the `access` binding, the same as the OAuth consoles. Once: one Traefik Middleware, `tockmox-forward-auth`. Per console: an Ingress on its host for `/outpost.goauthentik.io/` only, the sign-in callback. |
-| observability, platform | The console's route, with the Middleware attached (`traefik.ingress.kubernetes.io/router.middlewares`). |
+| observability, platform | The console's route. Prometheus, Alertmanager and Longhorn are Ingresses and attach the identity layer's Middleware by its provider-qualified name in the `traefik.ingress.kubernetes.io/router.middlewares` annotation. The Traefik dashboard is an IngressRoute, which cannot ([below](#the-traefik-dashboard-carries-its-own-middleware)), so the platform layer renders a Middleware for it in its own namespace. |
 
 **One provider per console, not one for the domain.** A single domain-level
 provider would gate every console with one access decision, so letting a role
@@ -336,14 +336,60 @@ A name that does not exist puts the blueprint in error, and one blueprint in
 error stops discovery for all of them ([the greenfield rule](#the-greenfield-rule-for-blueprints)).
 With every console off, the outpost is not touched.
 
+**The same entry sets the outpost's `authentik_host`** to the Authentik origin
+(`https://auth.<internalDomain>/`, following `ingress.apps.authentik.host` and
+the scheme the install serves). The embedded outpost builds the address of the
+sign-in page from it. Authentik creates the embedded outpost with the field
+blank, and a blank field sends an unauthenticated browser to
+`http://localhost/application/o/authorize/...` instead of the login page. The
+field is set whole, like the provider list: any other value in the outpost's
+configuration that you set by hand on the embedded outpost is replaced at the
+next apply, and the defaults take over. `authentik_host_browser` is not needed,
+because the embedded outpost uses `authentik_host` for the browser and for its
+own calls.
+
 **Port-forward still works**, and stays the break-glass: an Authentik outage
 otherwise locks you out of Prometheus and Alertmanager, the two consoles you
 would use to see why. [Configuration, hostnames and
 TLS](configuration.md#hostnames-and-tls) covers the Traefik dashboard's.
 
-**Using the Middleware for a route of your own.** Attach
-`tockmox-authentik-tockmox-forward-auth@kubernetescrd` to your Ingress or
-IngressRoute and create a proxy provider for its host (`forward_single`) on the
+### The Traefik dashboard carries its own Middleware
+
+The dashboard route is a Traefik IngressRoute, because its backend is Traefik's
+own `api@internal` service, which an Ingress cannot name. An IngressRoute may
+attach only a Middleware in its own namespace: Traefik's Kubernetes CRD provider
+refuses an `@kubernetescrd` name and any other namespace while
+`providers.kubernetesCRD.allowCrossNamespace` is false, which is the default and
+what the platform layer leaves it at. Such a route is answered `404`, and the
+Traefik log says `invalid reference to middleware ...@kubernetescrd`. So the
+platform layer renders `traefik-dashboard-forward-auth` in its own namespace,
+with the same `forwardAuth` spec as the identity layer's Middleware, and the
+dashboard route attaches that. Nothing else changes: the same provider, the same
+`access` binding and the same callback Ingress in the identity layer.
+
+The Middleware asks the identity layer's Authentik server Service on a stock
+install. If you moved the identity layer, set the address in the platform layer:
+
+```yaml
+# site/values/platform.yaml
+ingress:
+  forwardAuth:
+    address: http://<release>-authentik-server.<namespace>.svc.cluster.local/outpost.goauthentik.io/auth/traefik
+```
+
+Setting `providers.kubernetesCRD.allowCrossNamespace: true` on Traefik would let
+the dashboard attach the identity layer's Middleware instead, and it would also
+let an IngressRoute in any namespace attach a Middleware from any other
+namespace and route to a Service in any other namespace, so whoever can create
+an IngressRoute can publish a backend that its own namespace never exposed.
+Tockmox does not turn it on for one console.
+
+**Using the Middleware for a route of your own.** For an Ingress, attach
+`tockmox-authentik-tockmox-forward-auth@kubernetescrd` in the
+`traefik.ingress.kubernetes.io/router.middlewares` annotation. An IngressRoute
+cannot use that name (see above): create a Middleware with the same
+`forwardAuth` spec in the IngressRoute's own namespace and attach that. Either
+way, create a proxy provider for the route's host (`forward_single`) on the
 embedded outpost, then list that provider in `keepProviders`. The Middleware
 passes `X-authentik-username`, `-groups`, `-email`, `-name` and `-uid` to the
 backend.
