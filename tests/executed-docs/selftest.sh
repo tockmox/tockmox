@@ -1131,5 +1131,27 @@ if [ "$HS_CASES" -eq 0 ] || { [ "$HS_RC" -ne 0 ] && ! printf '%s\n' "$HS_OUT" | 
   bad "handoff-secret-test.sh ran its cases" "rc=${HS_RC}, ${HS_CASES} case(s): $(printf '%s' "$HS_OUT" | tail -3)"
 fi
 
+# ---------------------------------------------------------------------------
+# The registry-mirror modes. TM-0575.
+#
+# cache (the default, unchanged) and nofallback (the mirror is the only registry,
+# upstream traffic denied and counted), in both provisioner lanes, plus the
+# guest's mirror-proof. Folded in the same way as the handoff cases above, and for
+# the same reason: the per-commit gate runs them, every case counts as one of this
+# file's own, and a run that yields no case is a failure.
+MM_OUT="$(bash "${HERE}/mirror-mode-test.sh" 2>&1)"; MM_RC=$?
+MM_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) MM_CASES=$((MM_CASES+1)); ok "mirror mode: ${line#ok   }" ;;
+    "FAIL "*) MM_CASES=$((MM_CASES+1)); bad "mirror mode: ${line#FAIL }" "run tests/executed-docs/mirror-mode-test.sh for detail" ;;
+  esac
+done <<EOF_MM
+$MM_OUT
+EOF_MM
+if [ "$MM_CASES" -eq 0 ] || { [ "$MM_RC" -ne 0 ] && ! printf '%s\n' "$MM_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "mirror-mode-test.sh ran its cases" "rc=${MM_RC}, ${MM_CASES} case(s): $(printf '%s' "$MM_OUT" | tail -3)"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -13,6 +13,8 @@
 #   throwaway-cluster.sh reboot   ... hard node restart (used to test durability claims)
 #   throwaway-cluster.sh destroy  ... delete every VM in the namespace
 #   throwaway-cluster.sh await    ... resume create's wait for a guest already provisioning
+#   throwaway-cluster.sh mirror-proof ... under TOCKMOX_REGISTRY_MODE=nofallback, report on the
+#                                     guest whether any upstream registry was contacted
 #
 # MicroOS images only (provision/profiles/microos.sh, TM-0715):
 #
@@ -119,6 +121,24 @@ DISK="${TOCKMOX_VM_DISK:-250Gi}"
 #
 #   TOCKMOX_REGISTRY_MIRROR=harbor.example.com ./throwaway-cluster.sh create
 REGISTRY_MIRROR="${TOCKMOX_REGISTRY_MIRROR:-}"
+# REGISTRY MODE, added 2026-10-27 (TM-0575). `cache` (the default, and what every
+# run so far was) keeps the upstream as the mirror's fallback. `nofallback` makes
+# the mirror the only registry and denies, and counts, upstream traffic, so a
+# provision that finishes proves the image set was closed instead of repaired
+# from upstream. What it does and does not show is written at the top of
+# profiles/registry-mirror.sh, which both lanes read.
+#
+#   TOCKMOX_REGISTRY_MIRROR=harbor.example.com TOCKMOX_REGISTRY_MODE=nofallback \
+#     ./throwaway-cluster.sh create && ./throwaway-cluster.sh mirror-proof
+REGISTRY_MODE="${TOCKMOX_REGISTRY_MODE:-cache}"
+# Where nofallback's upstream denial and counter live: `node` (default; the guest
+# rejects and counts) or `edge` (the network does; a segment whose firewall blocks
+# and logs). `edge` exists so that firewall can SEE a request the guest makes to an
+# upstream: under `node` the guest refuses it before it leaves. Only read in
+# nofallback mode; profiles/registry-mirror.sh explains both.
+REGISTRY_DENY="${TOCKMOX_UPSTREAM_DENY:-node}"
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/profiles/registry-mirror.sh"
 CPU_CORES="${TOCKMOX_VM_CORES:-8}"
 MEMORY="${TOCKMOX_VM_MEMORY:-24Gi}"
 STORAGE_CLASS="${TOCKMOX_VM_STORAGECLASS:-harvester-longhorn-r1}"
@@ -573,6 +593,9 @@ create() {
   # First, before preflight touches anything: nothing may be created or deleted
   # on behalf of a run whose token must not reach a guest (TM-0849).
   check_handoff_token
+  # The same rule for the registry mode: a nofallback run with no mirror, or an
+  # unknown mode, is refused before it reaches the hypervisor (TM-0575).
+  mirror_mode_check "$REGISTRY_MIRROR" "$REGISTRY_MODE" "$REGISTRY_DENY" || exit 2
   preflight
   clear_stale_handoff
   mint_ssh_key
@@ -795,6 +818,16 @@ create() {
   # a run whose pull failures have to be diagnosed by inference later.
   if [ -n "$REGISTRY_MIRROR" ]; then
     echo "  registry mirror: ${REGISTRY_MIRROR} (docker.io, quay.io, ghcr.io, registry.k8s.io)" >&2
+    if [ "$REGISTRY_MODE" = "nofallback" ] && [ "$REGISTRY_DENY" = "edge" ]; then
+      echo "  registry mode: nofallback ... the mirror is the ONLY registry (registries.yaml and the k3s" >&2
+      echo "                 drop-in). Upstream denial and the counter are the network's (upstream-deny=edge)." >&2
+    elif [ "$REGISTRY_MODE" = "nofallback" ]; then
+      echo "  registry mode: nofallback ... the mirror is the ONLY registry; upstream names are" >&2
+      echo "                 denied on the node and every attempt is counted (run mirror-proof)." >&2
+    else
+      echo "  registry mode: cache ... the upstream is the mirror's fallback, so this run cannot" >&2
+      echo "                 show that the image set is closed. TOCKMOX_REGISTRY_MODE=nofallback can." >&2
+    fi
   else
     echo "  registry mirror: NONE ... every image pulls anonymously from upstream." >&2
     echo "                   An upstream rate limit will look like a component that" >&2
@@ -873,7 +906,7 @@ create() {
     [ -n "$mx_ca" ] || echo "  NOTE: guest will not verify the API's certificate (no CA for ${GUEST_API_SERVER})" >&2
     if ! MX_OUTDIR="$mx_dir" MX_PREFIX="$VM_NAME" MX_API="$GUEST_API_SERVER" MX_NS="$NS" \
          MX_TOKEN="$API_TOKEN" MX_CA_B64="$mx_ca" MX_USER="$SSH_USER" MX_PUBKEY="$pubkey" \
-         MX_HOSTNAME="$VM_NAME" MX_MIRROR="$REGISTRY_MIRROR" \
+         MX_HOSTNAME="$VM_NAME" MX_MIRROR="$REGISTRY_MIRROR" MX_MIRROR_MODE="$REGISTRY_MODE" MX_UPSTREAM_DENY="$REGISTRY_DENY" \
          MX_READY_BUDGET="${TOCKMOX_MICROOS_READY_BUDGET:-900}" \
          microos_cloud_config "$udfile"; then
       rm -f "$udfile"
@@ -901,19 +934,26 @@ create() {
     echo "write_files:"
     if [ -n "$REGISTRY_MIRROR" ]; then
       # k3s reads this at start and rewrites every pull through the mirror.
-      # Endpoint order matters: the mirror is tried first and the upstream is
-      # the fallback, so a mirror outage degrades to today's behaviour rather
-      # than failing the run.
+      # In cache mode the mirror is tried first and the upstream is the
+      # fallback, so a mirror outage degrades to today's behaviour rather than
+      # failing the run. In nofallback mode the upstream is not named at all
+      # (profiles/registry-mirror.sh says what else closes the gap).
       echo "  - path: /etc/rancher/k3s/registries.yaml"
       echo "    permissions: \"0600\""
       echo "    content: |"
-      echo "      mirrors:"
-      for _up in docker.io quay.io ghcr.io registry.k8s.io; do
-        echo "        ${_up}:"
-        echo "          endpoint:"
-        echo "            - \"https://${REGISTRY_MIRROR}\""
-        echo "            - \"https://${_up}\""
-      done
+      mirror_registries_yaml "$REGISTRY_MIRROR" "$REGISTRY_MODE" | sed 's/^/      /'
+      if [ "$REGISTRY_MODE" = "nofallback" ]; then
+        echo "  - path: ${MIRROR_K3S_DROPIN}"
+        echo "    permissions: \"0600\""
+        echo "    content: |"
+        mirror_k3s_dropin "$REGISTRY_MODE" | sed 's/^/      /'
+        if [ "$REGISTRY_DENY" = "node" ]; then
+          echo "  - path: ${MIRROR_DENY_PERBOOT}"
+          echo "    permissions: \"0755\""
+          echo "    content: |"
+          mirror_deny_script | sed 's/^/      /'
+        fi
+      fi
     fi
     echo "  - path: /etc/rancher/k3s/config.yaml"
     echo "    permissions: \"0600\""
@@ -1010,6 +1050,10 @@ create() {
       echo "      [ \"\$ok\" = 1 ] || { echo \"TOCKMOX-HANDOFF: FAILED, kubeconfig not delivered (last http_code=\$code)\"; exit 1; }"
     fi
     echo "runcmd:"
+    # Before anything can pull: the deny rules are in place when k3s first starts.
+    if [ "$REGISTRY_MODE" = "nofallback" ] && [ "$REGISTRY_DENY" = "node" ] && [ -n "$REGISTRY_MIRROR" ]; then
+      echo "  - [ sh, -c, \"${MIRROR_DENY_PERBOOT}\" ]"
+    fi
     if [ "$HANDOFF" = "secret" ]; then
       # Every command lives in a write_files BLOCK SCALAR and runcmd only calls
       # it. Not a style preference ... an earlier version inlined the beacon in
@@ -1539,6 +1583,19 @@ node_exec() {
       "${SSH_USER}@${ip}" "sudo -n bash -s" <<<"$1"
 }
 
+mirror_proof() {
+  # TM-0575. Reports, from the node, whether a nofallback run was configured as
+  # one and whether anything tried to reach an upstream registry. Exits non-zero
+  # unless both hold. See profiles/registry-mirror.sh for what it cannot see.
+  if [ "$REGISTRY_MODE" != "nofallback" ]; then
+    echo "REFUSING: mirror-proof reads a nofallback run. TOCKMOX_REGISTRY_MODE is '${REGISTRY_MODE}'; a cache-mode" >&2
+    echo "          cluster falls back to upstream on purpose, so a zero here would mean nothing." >&2
+    exit 2
+  fi
+  mirror_mode_check "$REGISTRY_MIRROR" "$REGISTRY_MODE" "$REGISTRY_DENY" || exit 2
+  node_exec "$(mirror_proof_script "$REGISTRY_MIRROR" "$REGISTRY_DENY")"
+}
+
 reboot() {
   # A node reboot, used to test claims of the form "this survives a restart".
   # Deliberately a VM restart rather than `systemctl restart k3s`: it needs no
@@ -1978,7 +2035,8 @@ case "${1:-}" in
   ip)      vm_ip; echo ;;
   kubeconfig) printf '%s\n' "$KUBECONFIG_OUT" ;;
   await)   await_guest ;;
+  mirror-proof) mirror_proof ;;
   uninstall-proof) uninstall_proof ;;
   evidence) evidence ;;
-  *) echo "usage: $0 {create|await|exec CMD|reboot|destroy|reset --every-vm-in-NS|sweep PREFIX MINUTES|snapshot RUNG|restore RUNG|snapshots|ip|kubeconfig|uninstall-proof|evidence}" >&2; exit 2 ;;
+  *) echo "usage: $0 {create|await|exec CMD|reboot|destroy|reset --every-vm-in-NS|sweep PREFIX MINUTES|snapshot RUNG|restore RUNG|snapshots|ip|kubeconfig|uninstall-proof|evidence|mirror-proof}" >&2; exit 2 ;;
 esac

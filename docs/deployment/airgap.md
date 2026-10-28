@@ -122,6 +122,7 @@ block says which:
 Five dependencies, not one. Miss any and the install stops, and only the first
 has a tool shipped with it.
 
+<!-- tockmox:airgap-surfaces:begin -->
 | # | Dependency | Size | What Tockmox ships for it | Step |
 |---|---|---|---|---|
 | 1 | Tockmox's own workload images | 44 | `images.txt` and `tools/mirror-images.sh` | [2](#2-mirror-the-images--required) |
@@ -129,6 +130,15 @@ has a tool shipped with it.
 | 3 | Prerequisites: ArgoCD, sealed-secrets, `kubeseal` | 2 charts and 1 binary | nothing | [4](#4-carry-in-the-three-prerequisites--required) |
 | 4 | The Tockmox charts git repository | 1 repository | `tockmox.repoURL` points at your copy | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |
 | 5 | Your site git repository | 1 repository | [install](install.md) states the requirement | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |
+<!-- tockmox:airgap-surfaces:end -->
+
+The table is generated from
+[`tools/airgap-manifest.yaml`](https://github.com/tockmox/tockmox/blob/main/tools/airgap-manifest.yaml),
+the one file that declares the five. Run `tools/check-airgap-manifest.sh` in the
+source tree to list anything the manifest names that the tree or this page lacks:
+a tool that does not exist, a step heading that moved, a prerequisite its step
+never mentions. It reads the repository only; it does not look at your site, and
+it is a list, not an offline bundle.
 
 Counts re-read on 2026-10-04: `images.txt` carries 44 non-comment lines (its
 header names the day `tools/gen-images.sh` generated it); the `Chart.yaml` files carry 19

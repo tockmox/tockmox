@@ -356,6 +356,10 @@ run_gate "the release-bars gate goes red on a missing row, a drifted cell and a 
 run_gate "the model gateway is the shipped default, the console goes through it, the console-key Job is scoped, a site may override (TM-0460)" bash tools/check-gateway-default.sh
 run_gate "the gateway-default gate goes red on every mutation (TM-0460)" bash tools/check-gateway-default.sh --selftest
 run_gate "global.imageRegistry redirects every image" bash tools/check-airgap.sh
+# TM-0185: the five surfaces of a disconnected install are declared in
+# tools/airgap-manifest.yaml, and the table at the top of airgap.md is generated from it.
+run_gate "the five air-gap surfaces are declared once, every tool and step exists, and airgap.md's table matches (TM-0185)" bash tools/check-airgap-manifest.sh
+run_gate "the air-gap manifest gate goes red on a missing tool, a dangling step, an unnamed prerequisite and a stale table (TM-0185)" bash tools/check-airgap-manifest.sh --selftest
 # The docs-site gates. The selftest needs only python3; the main run builds the
 # site and skips (2) when the pinned MkDocs toolchain is not installed, because a
 # laptop without a docs venv is not a tree with a defect. See

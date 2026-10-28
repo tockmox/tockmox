@@ -745,7 +745,21 @@ microos_cloud_config() {
   microos_handoff   > "$d/handoff.sh"
   printf '%s\n' "$MICROOS_TEARDOWN_SCAFFOLD" > "$d/teardown.SCAFFOLD.sh"
   printf '#!/bin/bash\nexec /var/lib/tockmox-harness/driver.sh per-boot\n' > "$d/perboot.sh"
-  MX_SCRATCH="$d" python3 - "$out" <<'PY'
+  # The registry-mirror files come from the one lib both lanes read
+  # (registry-mirror.sh, TM-0575); python below only carries them.
+  local mx_mode="${MX_MIRROR_MODE:-cache}" mx_deny="${MX_UPSTREAM_DENY:-node}"
+  if [ -n "${MX_MIRROR:-}" ]; then
+    # shellcheck source=/dev/null
+    declare -F mirror_registries_yaml >/dev/null \
+      || . "$(dirname "${BASH_SOURCE[0]}")/registry-mirror.sh"
+    mirror_mode_check "$MX_MIRROR" "$mx_mode" "$mx_deny" || { rm -rf "$d"; return 2; }
+    mirror_registries_yaml "$MX_MIRROR" "$mx_mode" > "$d/registries.yaml"
+    if [ "$mx_mode" = "nofallback" ]; then
+      mirror_k3s_dropin "$mx_mode" > "$d/k3s-dropin.yaml"
+      if [ "$mx_deny" = "node" ]; then mirror_deny_script > "$d/upstream-deny.sh"; fi
+    fi
+  fi
+  MX_SCRATCH="$d" MX_DROPIN_PATH="${MIRROR_K3S_DROPIN:-}" MX_DENY_PATH="${MIRROR_DENY_PERBOOT:-}" python3 - "$out" <<'PY'
 import base64, json, os, pathlib, sys
 
 E = os.environ
@@ -781,12 +795,14 @@ mirror = E.get("MX_MIRROR", "")
 if mirror:
     # Scaffolding, and in /etc: see the header on /etc and snapshots. If the
     # documented reboot loses it, pulls fall back to upstream, which is the
-    # mirror's own designed failure mode.
-    lines = ["mirrors:"]
-    for up in ("docker.io", "quay.io", "ghcr.io", "registry.k8s.io"):
-        lines += ["  %s:" % up, "    endpoint:",
-                  '      - "https://%s"' % mirror, '      - "https://%s"' % up]
-    files.append(wf("/etc/rancher/k3s/registries.yaml", ("\n".join(lines) + "\n").encode(), "0600"))
+    # mirror's own designed failure mode (cache mode); in nofallback mode the
+    # upstream is also denied by the per-boot script, which does not depend on
+    # anything the reboot can lose.
+    files.append(wf("/etc/rancher/k3s/registries.yaml", (scratch / "registries.yaml").read_bytes(), "0600"))
+    if (scratch / "k3s-dropin.yaml").exists():
+        files.append(wf(E["MX_DROPIN_PATH"], (scratch / "k3s-dropin.yaml").read_bytes(), "0600"))
+    if (scratch / "upstream-deny.sh").exists():
+        files.append(wf(E["MX_DENY_PATH"], (scratch / "upstream-deny.sh").read_bytes(), "0755"))
 
 cfg = {
     "hostname": E["MX_HOSTNAME"],
