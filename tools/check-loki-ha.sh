@@ -26,7 +26,8 @@ cd "$(dirname "$0")/.." || exit 1
 # Probed before --selftest too: without helm or PyYAML every run below exits 2,
 # and the selftest would read that as the unmutated file going red.
 command -v helm >/dev/null 2>&1 || { echo "check-loki-ha: helm not on PATH" >&2; exit 2; }
-python3 -c 'import yaml' 2>/dev/null || { echo "check-loki-ha: python3 PyYAML missing" >&2; exit 2; }
+# Probe the way the checks below run (-I, isolated); see check-kured-gate.sh.
+python3 -I -c 'import yaml' 2>/dev/null || { echo "check-loki-ha: python3 -I (isolated) has no PyYAML" >&2; exit 2; }
 if [ "${1:-}" = "--selftest" ]; then
   # Each mutation of the HA values must turn the check red; the unmutated file
   # must be green. A check that cannot go red is not a check.

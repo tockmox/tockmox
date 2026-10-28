@@ -1,0 +1,146 @@
+# TockmoxLokiNotIngesting and TockmoxLokiIngestionCollapsed (the alert pack).
+#
+# DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
+#
+# THE SHAPE UNDER TEST. The first alert measures the log pipeline and never looks
+# at a pod, so pod churn cannot reset it; it has two arms (a counter that stopped
+# moving, and a series that is gone) and each has its own firing case. The second
+# catches a partial break: some lines still arrive, but under a tenth of the
+# baseline. EVERY CASE ASSERTS ONE DIRECTION AND THE FILE ASSERTS BOTH:
+#
+#   1  healthy ingest                           silent, both alerts
+#   2  counter stalls (arm 1)                   NotIngesting fires
+#   3  series disappears (arm 2)                NotIngesting fires
+#   4  a pod restart: a 5 minute gap + reset    silent (the reason for
+#                                               absent_over_time over absent)
+#   5  rate collapses to 5% of baseline         Collapsed fires, after its `for`
+#   6  a quiet cluster collapses further        Collapsed silent (baseline under
+#                                               the 1 line/s floor)
+#   7  rate halves                              Collapsed silent
+#
+# Timing frame: the interval is 5m, so `0+3000x48` is a counter at 10 lines a
+# second for four hours. (5m and not 1m: the gate evaluates every rendered rule,
+# upstream's included, at each step, and eight simulated hours at 1m is ~480
+# evaluations of all of them per case.) A time after a stall or a gap is chosen well clear of
+# the 10m and 15m window edges, which differ between promtool 2.x and 3.x in
+# whether a range is left-open.
+evaluation_interval: 5m
+
+tests:
+  # CASE 1: healthy. Silent for both alerts, at the end of the run.
+  - interval: 5m
+    input_series:
+      - series: 'loki_distributor_lines_received_total{namespace="tockmox-monitoring", pod="loki-0"}'
+        values: '0+3000x48'
+    alert_rule_test:
+      - eval_time: 3h
+        alertname: TockmoxLokiNotIngesting
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: TockmoxLokiIngestionCollapsed
+        exp_alerts: []
+
+  # CASE 2 (arm 1): Loki is up and the counter stops moving at minute 60. The
+  # 10m rate is 0 from minute 65 under promtool 3.x (left-open windows: the
+  # samples at 60 and 65 are equal) and from minute 70 under 2.x, so the 15m
+  # `for` elapses at 80 or 85. Silent at 75m, firing at 95m, true under both.
+  # (80m was the 2.x edge and fired under 3.15.1, the version CI pins.)
+  # The alert carries no pod label: it aggregates.
+  - interval: 5m
+    input_series:
+      - series: 'loki_distributor_lines_received_total{namespace="tockmox-monitoring", pod="loki-0"}'
+        values: '0+3000x12 36000x36'
+    alert_rule_test:
+      - eval_time: 75m
+        alertname: TockmoxLokiNotIngesting
+        exp_alerts: []
+      - eval_time: 95m
+        alertname: TockmoxLokiNotIngesting
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations: {"summary": "Loki is not ingesting logs", "description": "Loki has received no log lines for 15 minutes or more. The logging pipeline is down and a permanent hole is growing: the log shipper does not backfill, so every minute here is lost for good, the logs of the incident itself included. This alert is deliberately immune to pod churn, because it measures ingestion and not pod readiness; if it is firing, logs are not arriving whatever the Loki pod's status says. Check in this order: the Loki volume is attached (`kubectl -n tockmox-monitoring get pvc`, then the volume object in the storage layer); the Loki pod's log (`kubectl -n tockmox-monitoring logs <loki pod> --tail=50`); and, if Loki is healthy, the senders (`kubectl get pods -A -l app.kubernetes.io/name=alloy`)."}
+
+  # CASE 3 (arm 2): Loki is GONE at minute 60. The series does not exist, rate()
+  # returns no data and arm 1 cannot match; absent_over_time carries the alert.
+  # Silent at 70m (the gap is shorter than the 15m window), firing at 110m.
+  - interval: 5m
+    input_series:
+      - series: 'loki_distributor_lines_received_total{namespace="tockmox-monitoring", pod="loki-0"}'
+        values: '0+3000x12 _x36'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: TockmoxLokiNotIngesting
+        exp_alerts: []
+      - eval_time: 110m
+        alertname: TockmoxLokiNotIngesting
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: tockmox-monitoring
+            exp_annotations: {"summary": "Loki is not ingesting logs", "description": "Loki has received no log lines for 15 minutes or more. The logging pipeline is down and a permanent hole is growing: the log shipper does not backfill, so every minute here is lost for good, the logs of the incident itself included. This alert is deliberately immune to pod churn, because it measures ingestion and not pod readiness; if it is firing, logs are not arriving whatever the Loki pod's status says. Check in this order: the Loki volume is attached (`kubectl -n tockmox-monitoring get pvc`, then the volume object in the storage layer); the Loki pod's log (`kubectl -n tockmox-monitoring logs <loki pod> --tail=50`); and, if Loki is healthy, the senders (`kubectl get pods -A -l app.kubernetes.io/name=alloy`)."}
+
+  # CASE 4: an ordinary pod restart. The series is missing for one sample (5 minutes) and the
+  # counter resets to 0 when it comes back. Silent at every point after, which is
+  # what absent_over_time (not bare absent) is for.
+  - interval: 5m
+    input_series:
+      - series: 'loki_distributor_lines_received_total{namespace="tockmox-monitoring", pod="loki-0"}'
+        values: '0+3000x12 _x1 0+3000x23'
+    alert_rule_test:
+      - eval_time: 65m
+        alertname: TockmoxLokiNotIngesting
+        exp_alerts: []
+      - eval_time: 75m
+        alertname: TockmoxLokiNotIngesting
+        exp_alerts: []
+      - eval_time: 100m
+        alertname: TockmoxLokiNotIngesting
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: TockmoxLokiNotIngesting
+        exp_alerts: []
+
+  # CASE 5: the rate falls from 10 lines/s to 0.5 lines/s (5% of baseline) at
+  # minute 420, and some lines keep arriving, so NotIngesting cannot see it. The
+  # 15m rate is under a tenth of the baseline by minute 435; `for: 30m` elapses
+  # by 465. Silent at 440m, firing at 480m.
+  - interval: 5m
+    input_series:
+      - series: 'loki_distributor_lines_received_total{namespace="tockmox-monitoring", pod="loki-0"}'
+        values: '0+3000x84 252150+150x40'
+    alert_rule_test:
+      - eval_time: 440m
+        alertname: TockmoxLokiIngestionCollapsed
+        exp_alerts: []
+      - eval_time: 480m
+        alertname: TockmoxLokiIngestionCollapsed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations: {"summary": "Loki ingestion has dropped by more than 90% against its 6h baseline", "description": "Loki is still receiving some logs, but the rate has collapsed to under 10% of its own 6-hour baseline for 30 minutes or more. Something stopped shipping: usually a log shipper pod down on one node, or a namespace whose logs no longer match the collection config. The shipper is a DaemonSet, so a missing pod means that node's logs are silently gone. Compare `kubectl get pods -A -l app.kubernetes.io/name=alloy -o wide` against `kubectl get nodes`."}
+      - eval_time: 480m
+        alertname: TockmoxLokiNotIngesting
+        exp_alerts: []
+
+  # CASE 6: a cluster that is always quiet (0.5 lines/s) goes to nothing. The
+  # baseline is under the 1 line/s floor, so the relative rule stays out of it;
+  # NotIngesting is the alert for that. Silent for Collapsed.
+  - interval: 5m
+    input_series:
+      - series: 'loki_distributor_lines_received_total{namespace="tockmox-monitoring", pod="loki-0"}'
+        values: '0+150x84 12600x40'
+    alert_rule_test:
+      - eval_time: 480m
+        alertname: TockmoxLokiIngestionCollapsed
+        exp_alerts: []
+
+  # CASE 7: the rate halves. A drop, not a collapse: silent.
+  - interval: 5m
+    input_series:
+      - series: 'loki_distributor_lines_received_total{namespace="tockmox-monitoring", pod="loki-0"}'
+        values: '0+3000x84 253500+1500x40'
+    alert_rule_test:
+      - eval_time: 480m
+        alertname: TockmoxLokiIngestionCollapsed
+        exp_alerts: []

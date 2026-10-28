@@ -120,3 +120,13 @@ inferenceNodes:
       metrics: {node_exporter: 9100}
       management: {enrolled: true}
       endpoints: []
+
+# tockmox-observability: the alert pack's model-gateway group (opt-in, off by
+# default because it reads metrics nothing scrapes unless the operator enables
+# them), with the latency exemption set so tests/rules/alert-pack-litellm.yaml
+# exercises the rule the way a site with local models renders it.
+alertPack:
+  litellm:
+    enabled: true
+    latency:
+      exemptModelRegex: "(local|ops)-.*"

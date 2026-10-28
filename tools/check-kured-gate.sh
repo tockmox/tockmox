@@ -41,7 +41,9 @@ LIB=tools/lib/kured_gate.py
 for t in python3 helm; do
   if [ "$(tool_state "$t")" != ok ]; then echo "check-kured-gate: SKIPPED ... $(tool_why "$t")" >&2; exit 2; fi
 done
-python3 -c 'import yaml' 2>/dev/null || { echo "check-kured-gate: SKIPPED ... python3 has no PyYAML" >&2; exit 2; }
+# Probe the way the gate runs (-I, isolated): a PyYAML found only through the user site or PYTHONPATH passes a
+# plain probe and then fails the -I run with a traceback instead of a skip.
+python3 -I -c 'import yaml' 2>/dev/null || { echo "check-kured-gate: SKIPPED ... python3 -I (isolated, as this gate runs it) has no PyYAML" >&2; exit 2; }
 
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 

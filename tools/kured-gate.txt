@@ -76,6 +76,15 @@ alert ClusterAdminBindingAttempt          pass   # a policy event
 alert LonghornSupportBundleClusterAdminInUse pass # a policy event
 alert StaticSATokenRotationOverdue        pass   # a credential age
 
+# ---- observability: the alert pack ----
+alert TockmoxLokiNotIngesting             pass   # logs are not arriving; a reboot does not change it, and the pipeline alert is deliberately blind to pods
+alert TockmoxLokiIngestionCollapsed       pass   # a shipper stopped on some node; a reboot does not make logs arrive
+alert TockmoxPrometheusTSDBVolumeTroughRising pass # the metrics volume floor is rising; a reboot does not change the rate
+alert TockmoxLiteLLMDown                  pass   # the model gateway cannot be scraped; a service fault, not node safety
+alert TockmoxLiteLLMMetricsAbsent         pass   # the gateway is gone or never scraped; a blind spot a reboot does not change
+alert TockmoxLiteLLMHighErrorRate         pass   # requests are failing; a service or provider fault
+alert TockmoxLiteLLMHighLatencyP95        pass   # requests are slow; a service or provider fault
+
 # ---- upstream: kube-prometheus-stack rules the gate names ----
 # Not authored here, so not annotatable. Each must still render, or a chart bump
 # that renames one drops it from the gate without a word.

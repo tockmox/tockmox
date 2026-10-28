@@ -595,6 +595,64 @@
     },
     "tockmoxUi": {
       "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "alertPack": {
+      "type": "object",
+      "description": "Tockmox-owned block: alertPack. Alert rules for Loki ingest liveness, the Prometheus volume trough and (opt-in) the model gateway, ported from rules a running site had proven.",
+      "x-tockmox-stability": "provisional",
+      "x-tockmox-stability-ruled": "2026-10-27",
+      "x-tockmox-stability-rerule": "0.10.0",
+      "additionalProperties": false,
+      "properties": {
+        "prometheusTsdb": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "troughThreshold": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "description": "3-day minimum fill ratio of the Prometheus volume above which TockmoxPrometheusTSDBVolumeTroughRising fires."
+            }
+          }
+        },
+        "litellm": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Render the model gateway rules. Needs the prometheus callback and a scrape of the gateway Service; TockmoxLiteLLMMetricsAbsent fires without them."
+            },
+            "namespaceRegex": {
+              "type": "string",
+              "minLength": 1
+            },
+            "serviceRegex": {
+              "type": "string",
+              "minLength": 1
+            },
+            "errorRatio": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "latency": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "p95Seconds": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "exemptModelRegex": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "additionalProperties": false,
