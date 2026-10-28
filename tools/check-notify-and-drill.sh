@@ -43,6 +43,8 @@
 # LIMIT: no cluster. Whether CNPG accepts recoveryTarget.backupID from the
 # barman-cloud plugin path, and that a Backup CR's status.backupId names what
 # the store holds, are the lab's to prove.
+# shellcheck disable=SC2015  # "check && echo ok || { echo FAIL; rc=1; }" is this file's idiom; the echo never fails
+# shellcheck disable=SC2016  # the stubs' case patterns and the sed mutations match shell text literally, on purpose
 set -euo pipefail
 cd "$(dirname "$0")/.."
 for c in helm python3 jq; do command -v "$c" >/dev/null 2>&1 || { echo "check-notify-and-drill: $c missing" >&2; exit 2; }; done

@@ -132,6 +132,7 @@
 #     `tockmox-garage-sync-<name>` and a CronJob name may have 52. Asserted on
 #     the render: a 32 character name gives a 52 character CronJob and a one-shot
 #     Job within 63; a 33 character name is refused.
+# shellcheck disable=SC2016  # the mutations' sed patterns match Helm and script text literally, not shell variables
 set -euo pipefail
 cd "$(dirname "$0")/.."
 command -v helm >/dev/null 2>&1 || { echo "check-upgrade-safety: helm not on PATH" >&2; exit 2; }

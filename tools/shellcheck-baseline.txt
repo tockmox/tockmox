@@ -95,11 +95,8 @@ tools/check-no-site-specifics.sh	SC1007	1
 tools/check-no-site-specifics.sh	SC2034	1
 tools/check-no-site-specifics.sh	SC2086	1
 tools/check-no-site-specifics.sh	SC2164	1
-tools/check-notify-and-drill.sh	SC2015	5
-tools/check-notify-and-drill.sh	SC2016	8
 tools/check-pasteable-blocks.sh	SC2016	30
 tools/check-pasteable-blocks.sh	SC2059	5
-tools/check-platform-seams.sh	SC2329	22
 tools/check-policy-gate.sh	SC2015	2
 tools/check-policy-gate.sh	SC2164	1
 tools/check-posture-probe.sh	SC2164	1
@@ -107,10 +104,7 @@ tools/check-rbac-aggregation-allowlist.sh	SC2016	1
 tools/check-sa-tokens.sh	SC2015	1
 tools/check-trust-wiring.sh	SC2034	1
 tools/check-upgrade-safety.sh	SC2012	1
-tools/check-upgrade-safety.sh	SC2016	1
 tools/check-upgrade-safety.sh	SC2034	1
-tools/check-upgrade-safety.sh	SC2086	1
-tools/check-upgrade-safety.sh	SC2116	1
 tools/check-values-tiers.sh	SC2016	6
 tools/check-values-tiers.sh	SC2034	1
 tools/check-values-tiers.sh	SC2164	1
