@@ -369,6 +369,14 @@ costs you, with the reasoning in the documentation rather than here.
   across a namespace while `allowCrossNamespace` is off (F7). Nothing to change
   on upgrade.
 
+- **A restore drill that fails early now says why in its register row.** When the
+  drill's `kubectl apply` was refused, or the scratch Cluster never became Ready,
+  the row read `FAIL` with nothing to explain it, and a drill that fails in seconds
+  is gone before its log is collected. The model gateway's and Authentik's drills
+  now write `apply refused: <the API server's message>` or `cluster never became
+  Ready (phase: <phase>): <the wait's message>`, on one line, cut at 240
+  characters (`docs/operations/backup-restore.md`, "Reading a row").
+
 ## [0.8.2] ... 2026-10-25
 
 A patch release: two fixes to how the identity layer applies Authentik
