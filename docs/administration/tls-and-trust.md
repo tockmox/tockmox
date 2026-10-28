@@ -103,10 +103,12 @@ performing it.
 | Option | Choose it when | What you set |
 |---|---|---|
 | **The shipped private CA** (recommended for a LAN install) | You have no public domain, no outbound access, or no wish to run ACME. Needs no internet, no DNS delegation and no ACME account, which is the point on a platform expected to run disconnected | `global.certIssuer: tockmox-ca` |
-| **Your own ACME or corporate issuer** | You have a real domain and outbound access, or an existing CA you already trust everywhere | `certIssuer.selfSigned.enabled: false`, create your own `ClusterIssuer`, and point `global.certIssuer` at its name |
+| **Your own ACME or corporate issuer** | You have a real domain and outbound access, or an existing CA you already trust everywhere | `certIssuer.selfSigned.enabled: false`, create your own `ClusterIssuer`, and point `global.certIssuer` at its name. For an existing CA whose key you place in the cluster yourself, [bring your own CA](bring-your-own-ca.md) is the whole procedure, including where the key Secret must live |
 | **Nothing** | You are still evaluating | Leave `global.certIssuer` empty. Every console serves plain HTTP |
 
-**If you chose your own issuer, steps 2 to 5 do not apply to you.** Every layer
+**If you chose your own issuer, step 2 does not apply to you,** and steps 3 to 5
+do only if the CA behind it is not already trusted on the machines you browse
+from (then use that CA's certificate in place of `tockmox-ca.crt`). Every layer
 reads only the issuer's name, so nothing else changes. Skip to [trust inside the
 cluster](#trust-inside-the-cluster), which still does apply.
 

@@ -27,8 +27,9 @@ These pages cover a running cluster: the routine work, how to know it is healthy
 | 3 | [Troubleshooting](troubleshooting.md) | A symptom index for a running Tockmox cluster: what you see, what causes it, the fix, and how you know the fix worked |
 | 4 | [Prove a backup by restoring it](backup-restore.md) | Back up a CloudNativePG database to an S3 store and then prove the backup by bootstrapping a new cluster from it and reading a row back |
 | 5 | [Escrow the sealed-secrets key](sealed-secrets-key-escrow.md) | Export the sealed-secrets controller's private key encrypted, keep it off the cluster, keep it current across key renewals, restore it to a rebuilt cluster with bootstrap-secrets, and drill the restore |
-| 6 | [CIS benchmark scan with kube-bench](kube-bench.md) | An opt-in weekly kube-bench CronJob for k3s, the privileged namespace it needs, how to run it once and read the result, what it cannot see from inside a container, and a place to record what you found |
-| 7 | [Uninstall Tockmox](uninstall.md) | Remove Tockmox from a cluster in the one order that finishes, including the finalizers, webhooks and cluster-scoped objects that outlive the layers and break the next install |
+| 6 | [Restore a site at a second location](second-site-dr.md) | Rebuild a lost Tockmox site at another location from its site repository, the escrowed sealed-secrets key, the CA and the off-site backups, in the order that works, and what that order does not bring back |
+| 7 | [CIS benchmark scan with kube-bench](kube-bench.md) | An opt-in weekly kube-bench CronJob for k3s, the privileged namespace it needs, how to run it once and read the result, what it cannot see from inside a container, and a place to record what you found |
+| 8 | [Uninstall Tockmox](uninstall.md) | Remove Tockmox from a cluster in the one order that finishes, including the finalizers, webhooks and cluster-scoped objects that outlive the layers and break the next install |
 
 <!-- tockmox:section-index:end -->
 

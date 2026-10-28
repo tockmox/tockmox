@@ -526,6 +526,10 @@ been run.
   ... where the key sits among the five planes
 - [Install with no internet access](../deployment/airgap.md) ... carrying the
   controller chart and image in
+- [Bring your own CA](../administration/bring-your-own-ca.md) ... a CA key sealed
+  into the site repository is covered by this escrow, and the chart's own is not
+- [Restore a site at a second location](second-site-dr.md) ... this page's
+  restore, as one step of rebuilding a lost site
 
 <!-- tockmox:footer:begin -->
 

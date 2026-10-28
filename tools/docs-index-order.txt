@@ -39,6 +39,7 @@ secrets
 group: Identity & trust
 identity
 tls-and-trust
+bring-your-own-ca
 api-endpoint
 audit-logging
 group: Infrastructure
@@ -66,6 +67,7 @@ monitoring
 troubleshooting
 backup-restore
 sealed-secrets-key-escrow
+second-site-dr
 kube-bench
 uninstall
 

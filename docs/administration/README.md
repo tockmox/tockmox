@@ -37,6 +37,7 @@ The two experimental groups at the end are not covered by the stable values cont
 |---|---|
 | [Identity and access](identity.md) | How single sign-on is wired: the two groups every app maps and binds, what needs a restart, break-glass, and what the blueprint gates do and do not prove |
 | [TLS and trust](tls-and-trust.md) | Turn on HTTPS for every console, get the private CA out of the cluster, and install it on each machine you browse from |
+| [Bring your own certificate authority](bring-your-own-ca.md) | Install Tockmox with an operator-supplied CA instead of the chart's own: name the issuer, put the CA key Secret where cert-manager reads it, move an existing key without re-minting it, and know what you now trust |
 | [The Kubernetes API endpoint](api-endpoint.md) | Give the API server a name that outlives any one node, why a multi-node cluster needs one to be worth its extra hardware, and the SAN trap that breaks it on exactly the day it matters |
 | [Turn on API audit logging](audit-logging.md) | Switch on kube-apiserver audit recording on your nodes; collection into Loki already ships wired and needs no change |
 

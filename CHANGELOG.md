@@ -168,6 +168,28 @@ costs you, with the reasoning in the documentation rather than here.
   tuning) and omitted ones it does; it now lists what the chart renders.
   Nothing to do on upgrade.
 
+- **Bring your own certificate authority is a documented path.**
+  [`bring-your-own-ca.md`](docs/administration/bring-your-own-ca.md) seals an
+  operator's CA key into the site repository, applies a ClusterIssuer named
+  `site-ca`, points `global.certIssuer` at it and proves the result, with no
+  chart change. It says what a rebuilt cluster does to the chart's own CA
+  (mints a new one, so every trusting machine must re-trust) and why a supplied
+  CA avoids that. The procedure has not been run by the executed-docs harness
+  or by hand; the page says so under "What is not certified here".
+- **A second-site disaster-recovery runbook, and an inventory of every
+  executable path the docs instruct.**
+  [`second-site-dr.md`](docs/operations/second-site-dr.md) rebuilds Tockmox on a
+  second site from the object store and the escrowed sealed-secrets key, using
+  the databases' recovery switches (`modelGateway.database.recovery.*`,
+  `identity.database.recovery.*`), with a readiness check to run before the
+  disaster and a section on what is not certified. It has not been executed on a
+  second cluster.
+  [`tests/executed-docs/INVENTORY.md`](tests/executed-docs/INVENTORY.md) now has
+  one row for each of the 42 pages that carry bash blocks (462 blocks): 10 are
+  partly executed, 2 are written exceptions, 30 are open, none is executed end to
+  end.
+  Nothing to do on upgrade.
+
 ### Changed
 
 - **`tools/helm-deps.sh` works with no network when the tree already carries
