@@ -107,6 +107,7 @@ If you find yourself needing something not listed here, that is a gap worth
 | `global.serviceCIDR` | no | `10.43.0.0/16` | Service network. k3s default |
 | `global.timezone` | no | `UTC` | IANA zone for scheduled jobs |
 | `global.imageRegistry` | no | `""` | Mirror prefix. Empty pulls upstream |
+| `global.resilience.profile` | no | unset | `resilient`, set by `profiles/resilient.yaml` and not by hand. The model gateway and identity layers then refuse to render while their database backups are off or point inside the cluster, and alert while no restore drill has passed. Provisional. See [the resilient profile](../deployment/profiles.md#the-resilient-profile--optional) |
 | `global.namespaceLabels` | no | `{}` | Extra labels on every Namespace the policy and platform layers create, for an admission mutator keyed on namespace labels (for example `zarf.dev/agent: ignore`). A label the chart sets itself is refused at render |
 
 `site.name` is installer-only and is not a chart value. Nothing derives from it

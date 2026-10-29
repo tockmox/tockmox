@@ -38,6 +38,24 @@ global:
   # Empty falls back to the cluster default, which un-does the policy without
   # complaining. Set it to a class you have.
   localStorageClass: "local-path"
+
+  # THE RESILIENT CLAIM (TM-0597). Empty makes no claim. `resilient`, set by
+  # profiles/resilient.yaml, says "this install is resilient": the layers that
+  # have a backup then REFUSE to render while the backup is off or points inside
+  # the cluster, and raise an alert while no restore drill has passed. Leave it
+  # empty unless the backup target is outside the cluster. What it checks and
+  # what it cannot is docs/deployment/profiles.md, "The resilient profile".
+  # Tier: provisional (ruled 2026-10-29, again by 0.10.0).
+  #
+  # DELIBERATELY NOT DECLARED HERE. An empty default would still be a change to
+  # `.Values`, and the vendored litellm chart hashes its whole values tree into
+  # the migrations Job's annotation, so declaring the key would roll that Job
+  # on every upgrade of every install that never heard of this profile. Unset
+  # and "" mean the same thing; the schema (values.schema.json) is where the key
+  # is declared.
+  #
+  # resilience:
+  #   profile: resilient     # set by profiles/resilient.yaml, not by hand
 namespaces:
   ai: tockmox-ai
 

@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# What a site supplies to the identity layer for profiles/resilient.yaml, as
+# obvious placeholders (TM-0597). See ci/values-profile-resilient-tockmox-ai.yaml
+# for why this file exists and how the gates use it.
+
+identity:
+  database:
+    backup:
+      objectStore:
+        endpoint: https://s3.offsite.example.net
+        region: us-east-1
+        bucket: example-offsite-backups
+        credentialsSecretName: offsite-s3-credentials
+        destinationPath: s3://example-offsite-backups/cnpg/authentik
+
+# The bundled-server shape (authentik.postgresql.enabled) backs up with the
+# pg_dump bridge instead; this keeps that shape renderable under the profile.
+databaseBackup:
+  endpoint: https://s3.offsite.example.net
+  bucket: example-offsite-backups

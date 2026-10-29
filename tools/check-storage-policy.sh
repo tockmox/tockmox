@@ -178,7 +178,12 @@ for prof in profiles/*.yaml; do
   out="$tmp/$(basename "$prof" .yaml).yaml"; : > "$out"; rendered=1
   for c in charts/tockmox-*; do
     [ "$c" = "charts/tockmox-common" ] && continue
-    if ! helm template t "$c" -f "$VALUES" -f "$prof" >> "$out" 2> "$tmp/err"; then
+    # A profile with a YOU SUPPLY value (profiles/resilient.yaml: an off-cluster
+    # backup target, TM-0597) is rendered with the values a site would put after
+    # it, per layer, when ci/values-profile-<name>-<layer>.yaml exists.
+    supply=(); sf="ci/values-profile-$(basename "$prof" .yaml)-$(basename "$c").yaml"
+    [ -f "$sf" ] && supply=(-f "$sf")
+    if ! helm template t "$c" -f "$VALUES" -f "$prof" ${supply[@]+"${supply[@]}"} >> "$out" 2> "$tmp/err"; then
       echo "FAIL $prof: $(basename "$c") does not render: $(grep -m1 -o 'execution error.*' "$tmp/err" | cut -c1-240)"
       prc=1; rendered=0
     fi

@@ -413,6 +413,8 @@ run_gate "the release-bars gate goes red on a missing row, a drifted cell and a 
 # ci.yaml yet, for the reason at the top of this file.
 run_gate "the model gateway is the shipped default, the console goes through it, the console-key Job is scoped, a site may override (TM-0460)" bash tools/check-gateway-default.sh
 run_gate "the gateway-default gate goes red on every mutation (TM-0460)" bash tools/check-gateway-default.sh --selftest
+run_gate "the resilient profile refuses an in-cluster backup target and keeps its drill alarm with the drill off (TM-0597)" bash tools/check-resilient-profile.sh
+run_gate "the resilient-profile gate goes red on every mutation (TM-0597)" bash tools/check-resilient-profile.sh --selftest
 run_gate "global.imageRegistry redirects every image" bash tools/check-airgap.sh
 # TM-0185: the five surfaces of a disconnected install are declared in
 # tools/airgap-manifest.yaml, and the table at the top of airgap.md is generated from it.

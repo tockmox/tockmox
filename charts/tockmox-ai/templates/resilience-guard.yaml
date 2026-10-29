@@ -1,0 +1,33 @@
+{{- /*
+THE RESILIENT PROFILE'S REFUSAL, model gateway database (TM-0597).
+
+Renders nothing. It exists to FAIL the render, and only when the install
+claims to be resilient (`global.resilience.profile: resilient`, set by
+profiles/resilient.yaml) and the gateway's database is not backed up to
+somewhere that survives the cluster. A stock install never enters this file's
+body, which is what keeps its render byte-identical.
+
+Two refusals, each naming its reason:
+  1. backups are off. A resilient claim with no backup is not a claim.
+  2. the ObjectStore this chart renders points at an endpoint inside the
+     cluster's DNS, or at none. The default endpoint IS the shipped Garage's
+     Service, so a resilient install that has not named its own target stops
+     here, which is the point.
+
+NOT CHECKED, said here so the omission is a decision: when
+`modelGateway.database.backup.objectStoreName` names an ObjectStore you
+created, its endpoint lives in a CR this chart does not render and cannot read,
+so it is accepted as given. docs/deployment/profiles.md lists it.
+*/ -}}
+{{- if include "tockmox.resilience.claimed" . -}}
+{{- if include "tockmox.appEnabled" (dict "ctx" . "app" "litellm") -}}
+{{- $db := .Values.modelGateway.database -}}
+{{- if not (include "tockmox-ai.dbBackupEnabled" .) -}}
+{{- fail "global.resilience.profile is resilient, but the model gateway's database backups are off (modelGateway.database.backup.enabled is false, or capabilities.dataProtection is). A resilient install is backed up; set backup.enabled to true or remove the resilient profile. See docs/deployment/profiles.md, \"The resilient profile\"." -}}
+{{- end -}}
+{{- $os := $db.backup.objectStore | default dict -}}
+{{- if and $os.create (not $db.backup.objectStoreName) -}}
+{{- include "tockmox.resilience.requireOffClusterTarget" (dict "ctx" . "key" "modelGateway.database.backup.objectStore.endpoint" "value" $os.endpoint) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

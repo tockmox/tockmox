@@ -42,6 +42,24 @@
         "localStorageClass": {
           "type": "string",
           "description": "StorageClass for data the application replicates itself or can re-derive. Empty uses the cluster default."
+        },
+        "resilience": {
+          "type": "object",
+          "description": "The resilient claim (TM-0597). Set by profiles/resilient.yaml. With profile `resilient` the layers that have a backup refuse to render while it is off or points inside the cluster, and alert while no restore drill has passed. docs/deployment/profiles.md, \"The resilient profile\".",
+          "additionalProperties": false,
+          "properties": {
+            "profile": {
+              "type": "string",
+              "enum": [
+                "",
+                "resilient"
+              ],
+              "description": "Empty makes no claim; `resilient` claims it."
+            }
+          },
+          "x-tockmox-stability": "provisional",
+          "x-tockmox-stability-ruled": "2026-10-29",
+          "x-tockmox-stability-rerule": "0.10.0"
         }
       },
       "x-tockmox-stability": "stable"

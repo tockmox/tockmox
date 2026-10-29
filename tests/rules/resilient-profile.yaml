@@ -1,0 +1,494 @@
+# The resilient profile's drill alarm: TockmoxResilientDrillAbsent and
+# TockmoxResilientNoPassingDrill ... TM-0597.
+#
+# DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules,
+# and renders them WITH profiles/resilient.yaml, because these rules exist only
+# while the install claims to be resilient (global.resilience.profile).
+#
+# THE DEFECT THEY CLOSE. TockmoxRestoreDrillStale, NeverRan and Failed render
+# inside the drill's own template, so a drill that is DISABLED renders no rule
+# at all, kube-state-metrics has no drill series, and a freshness rule over
+# nothing returns nothing. Absence read as green. A resilient install with its
+# drill off therefore looked exactly like one whose drill was healthy.
+#
+# EVERY CASE ASSERTS BOTH DIRECTIONS, and the file asserts them against the same
+# rendered rules: a fresh install and a disabled drill FIRE; a drill that exists
+# and has passed, and a cluster whose kube-state-metrics is not being scraped,
+# are SILENT. The signals are kube-state-metrics' own series for the drill
+# CronJob and its Jobs, so nothing here depends on where the drill register is
+# kept (the ConfigMap today, the object store after TM-0459).
+#
+# Timing: promtool's clock starts at 0, and every case stops at 3h on purpose: promtool evaluates
+# every rendered rule in the tree at every step up to the last eval_time, so a ten day horizon costs
+# minutes per case under load and nothing here needs it. Both rules carry `for: 30m` and the
+# interval is 5m, so a condition true from the start is pending at 10m and
+# firing by 1h.
+#
+# The selectors are those of the RENDER: tockmox-ai with ci/values.yaml (drill
+# `tockmox-litellm-db-drill` in `tockmox-ai`) and tockmox-identity (drill
+# `tockmox-authentik-db-drill` in `tockmox-authentik`). The two layers' alerts
+# share their names, so each case supplies series for ONE layer's namespace and
+# the other layer's rules stay silent behind their scrape guard.
+
+evaluation_interval: 5m
+
+tests:
+  # AI CASE 1: the drill is DISABLED (no CronJob at all) on a cluster that is being
+  # scraped. This is the case that read green. Pending at 10m, firing by 1h.
+  - interval: 5m
+    input_series:
+      - series: 'kube_namespace_status_phase{namespace="tockmox-ai", phase="Active"}'
+        values: '1x45'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: tockmox-ai
+              cronjob: tockmox-litellm-db-drill
+            exp_annotations:
+              summary: "This install claims to be resilient and has no running restore drill"
+              description: "global.resilience.profile is resilient, which promises a scheduled restore drill for the model gateway's database, and the drill CronJob tockmox-litellm-db-drill does not exist or is suspended. A backup that has never been restored is a hope, not a backup. Enable it (modelGateway.database.backup.restoreDrill.enabled) or unsuspend it."
+      - eval_time: 3h
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: tockmox-ai
+              cronjob: tockmox-litellm-db-drill
+            exp_annotations:
+              summary: "This install claims to be resilient and has no running restore drill"
+              description: "global.resilience.profile is resilient, which promises a scheduled restore drill for the model gateway's database, and the drill CronJob tockmox-litellm-db-drill does not exist or is suspended. A backup that has never been restored is a hope, not a backup. Enable it (modelGateway.database.backup.restoreDrill.enabled) or unsuspend it."
+
+  # AI CASE 2: the drill exists and is not suspended. Silent throughout, including
+  # at 3h, where a rule that fired on everything would still be firing.
+  - interval: 5m
+    input_series:
+      - series: 'kube_namespace_status_phase{namespace="tockmox-ai", phase="Active"}'
+        values: '1x45'
+      - series: 'kube_cronjob_info{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '1x45'
+      - series: 'kube_cronjob_spec_suspend{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '0x45'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts: []
+
+  # AI CASE 3: the drill exists and is SUSPENDED. Its series are present, so absence
+  # alone would miss it; the suspend arm fires.
+  - interval: 5m
+    input_series:
+      - series: 'kube_namespace_status_phase{namespace="tockmox-ai", phase="Active"}'
+        values: '1x45'
+      - series: 'kube_cronjob_info{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '1x45'
+      - series: 'kube_cronjob_spec_suspend{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '1x45'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: tockmox-ai
+              cronjob: tockmox-litellm-db-drill
+            exp_annotations:
+              summary: "This install claims to be resilient and has no running restore drill"
+              description: "global.resilience.profile is resilient, which promises a scheduled restore drill for the model gateway's database, and the drill CronJob tockmox-litellm-db-drill does not exist or is suspended. A backup that has never been restored is a hope, not a backup. Enable it (modelGateway.database.backup.restoreDrill.enabled) or unsuspend it."
+
+  # AI CASE 4: kube-state-metrics is not being scraped (no series for the namespace
+  # at all). Everything looks absent, and neither rule may say so: a dead
+  # kube-state-metrics has its own alert, and this is not the drill's fault.
+  - interval: 5m
+    input_series:
+      - series: 'kube_namespace_status_phase{namespace="somewhere-else", phase="Active"}'
+        values: '1x45'
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts: []
+
+  # AI CASE 5: a FRESH install. The CronJob exists and its first slot is days away,
+  # so TockmoxRestoreDrillNeverRan is silent by design; under the resilient claim
+  # this alert fires anyway, and stays until a drill has passed. Silent at 10m
+  # (pending), firing at 1h and still at 3h.
+  - interval: 5m
+    input_series:
+      - series: 'kube_namespace_status_phase{namespace="tockmox-ai", phase="Active"}'
+        values: '1x45'
+      - series: 'kube_cronjob_info{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '1x45'
+      - series: 'kube_cronjob_spec_suspend{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '0x45'
+      - series: 'kube_cronjob_next_schedule_time{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '432000x45'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "This install claims to be resilient and no restore drill has passed"
+              description: "global.resilience.profile is resilient and no drill Job for the model gateway's database has ever succeeded. The claim is unproven until one has. The drill runs on its weekly schedule; to run it now, `kubectl -n tockmox-ai create job --from=cronjob/tockmox-litellm-db-drill tockmox-litellm-db-drill-first` and read its log. If the drill is disabled, turn it on (modelGateway.database.backup.restoreDrill.enabled)."
+      - eval_time: 3h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "This install claims to be resilient and no restore drill has passed"
+              description: "global.resilience.profile is resilient and no drill Job for the model gateway's database has ever succeeded. The claim is unproven until one has. The drill runs on its weekly schedule; to run it now, `kubectl -n tockmox-ai create job --from=cronjob/tockmox-litellm-db-drill tockmox-litellm-db-drill-first` and read its log. If the drill is disabled, turn it on (modelGateway.database.backup.restoreDrill.enabled)."
+
+  # AI CASE 6: a drill Job SUCCEEDED at 2h. The alert fires before it (the install
+  # was fresh) and is gone after it, however long after.
+  - interval: 5m
+    input_series:
+      - series: 'kube_namespace_status_phase{namespace="tockmox-ai", phase="Active"}'
+        values: '1x45'
+      - series: 'kube_cronjob_info{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '1x45'
+      - series: 'kube_cronjob_spec_suspend{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '0x45'
+      - series: 'kube_job_status_completion_time{namespace="tockmox-ai", job_name="tockmox-litellm-db-drill-29330000"}'
+        values: '_x24 7200x21'
+      - series: 'kube_job_status_succeeded{namespace="tockmox-ai", job_name="tockmox-litellm-db-drill-29330000"}'
+        values: '_x24 1x21'
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "This install claims to be resilient and no restore drill has passed"
+              description: "global.resilience.profile is resilient and no drill Job for the model gateway's database has ever succeeded. The claim is unproven until one has. The drill runs on its weekly schedule; to run it now, `kubectl -n tockmox-ai create job --from=cronjob/tockmox-litellm-db-drill tockmox-litellm-db-drill-first` and read its log. If the drill is disabled, turn it on (modelGateway.database.backup.restoreDrill.enabled)."
+      - eval_time: 3h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts: []
+
+  # AI CASE 7: a drill Job FAILED (no success). Not a pass, so the claim is still
+  # unproven and the alert fires. Also carries a completion time on a Job with
+  # succeeded 0, which the `> 0` filter must not count.
+  - interval: 5m
+    input_series:
+      - series: 'kube_namespace_status_phase{namespace="tockmox-ai", phase="Active"}'
+        values: '1x45'
+      - series: 'kube_cronjob_info{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '1x45'
+      - series: 'kube_cronjob_spec_suspend{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '0x45'
+      - series: 'kube_job_status_completion_time{namespace="tockmox-ai", job_name="tockmox-litellm-db-drill-29330000"}'
+        values: '3600x45'
+      - series: 'kube_job_status_succeeded{namespace="tockmox-ai", job_name="tockmox-litellm-db-drill-29330000"}'
+        values: '0x45'
+      - series: 'kube_job_status_failed{namespace="tockmox-ai", job_name="tockmox-litellm-db-drill-29330000"}'
+        values: '1x45'
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "This install claims to be resilient and no restore drill has passed"
+              description: "global.resilience.profile is resilient and no drill Job for the model gateway's database has ever succeeded. The claim is unproven until one has. The drill runs on its weekly schedule; to run it now, `kubectl -n tockmox-ai create job --from=cronjob/tockmox-litellm-db-drill tockmox-litellm-db-drill-first` and read its log. If the drill is disabled, turn it on (modelGateway.database.backup.restoreDrill.enabled)."
+      - eval_time: 3h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "This install claims to be resilient and no restore drill has passed"
+              description: "global.resilience.profile is resilient and no drill Job for the model gateway's database has ever succeeded. The claim is unproven until one has. The drill runs on its weekly schedule; to run it now, `kubectl -n tockmox-ai create job --from=cronjob/tockmox-litellm-db-drill tockmox-litellm-db-drill-first` and read its log. If the drill is disabled, turn it on (modelGateway.database.backup.restoreDrill.enabled)."
+
+  # AI CASE 8: a Job that is not the drill succeeded in the same namespace (a
+  # backup Job). It must not count as a drill pass.
+  - interval: 5m
+    input_series:
+      - series: 'kube_namespace_status_phase{namespace="tockmox-ai", phase="Active"}'
+        values: '1x45'
+      - series: 'kube_cronjob_info{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '1x45'
+      - series: 'kube_cronjob_spec_suspend{namespace="tockmox-ai", cronjob="tockmox-litellm-db-drill"}'
+        values: '0x45'
+      - series: 'kube_job_status_completion_time{namespace="tockmox-ai", job_name="tockmox-some-other-backup-29330000"}'
+        values: '3600x45'
+      - series: 'kube_job_status_succeeded{namespace="tockmox-ai", job_name="tockmox-some-other-backup-29330000"}'
+        values: '1x45'
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "This install claims to be resilient and no restore drill has passed"
+              description: "global.resilience.profile is resilient and no drill Job for the model gateway's database has ever succeeded. The claim is unproven until one has. The drill runs on its weekly schedule; to run it now, `kubectl -n tockmox-ai create job --from=cronjob/tockmox-litellm-db-drill tockmox-litellm-db-drill-first` and read its log. If the drill is disabled, turn it on (modelGateway.database.backup.restoreDrill.enabled)."
+      - eval_time: 3h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "This install claims to be resilient and no restore drill has passed"
+              description: "global.resilience.profile is resilient and no drill Job for the model gateway's database has ever succeeded. The claim is unproven until one has. The drill runs on its weekly schedule; to run it now, `kubectl -n tockmox-ai create job --from=cronjob/tockmox-litellm-db-drill tockmox-litellm-db-drill-first` and read its log. If the drill is disabled, turn it on (modelGateway.database.backup.restoreDrill.enabled)."
+
+  # IDENTITY CASE 1: the drill is DISABLED (no CronJob at all) on a cluster that is being
+  # scraped. This is the case that read green. Pending at 10m, firing by 1h.
+  - interval: 5m
+    input_series:
+      - series: 'kube_namespace_status_phase{namespace="tockmox-authentik", phase="Active"}'
+        values: '1x45'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: tockmox-authentik
+              cronjob: tockmox-authentik-db-drill
+            exp_annotations:
+              summary: "This install claims to be resilient and has no running restore drill"
+              description: "global.resilience.profile is resilient, which promises a scheduled restore drill for Authentik's database, and the drill CronJob tockmox-authentik-db-drill does not exist or is suspended. A backup that has never been restored is a hope, not a backup. Enable it (identity.database.backup.restoreDrill.enabled), or, on the bundled server, which has no drill, move Authentik's database to CloudNativePG (docs/deployment/upgrade.md)."
+      - eval_time: 3h
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: tockmox-authentik
+              cronjob: tockmox-authentik-db-drill
+            exp_annotations:
+              summary: "This install claims to be resilient and has no running restore drill"
+              description: "global.resilience.profile is resilient, which promises a scheduled restore drill for Authentik's database, and the drill CronJob tockmox-authentik-db-drill does not exist or is suspended. A backup that has never been restored is a hope, not a backup. Enable it (identity.database.backup.restoreDrill.enabled), or, on the bundled server, which has no drill, move Authentik's database to CloudNativePG (docs/deployment/upgrade.md)."
+
+  # IDENTITY CASE 2: the drill exists and is not suspended. Silent throughout, including
+  # at 3h, where a rule that fired on everything would still be firing.
+  - interval: 5m
+    input_series:
+      - series: 'kube_namespace_status_phase{namespace="tockmox-authentik", phase="Active"}'
+        values: '1x45'
+      - series: 'kube_cronjob_info{namespace="tockmox-authentik", cronjob="tockmox-authentik-db-drill"}'
+        values: '1x45'
+      - series: 'kube_cronjob_spec_suspend{namespace="tockmox-authentik", cronjob="tockmox-authentik-db-drill"}'
+        values: '0x45'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts: []
+
+  # IDENTITY CASE 3: the drill exists and is SUSPENDED. Its series are present, so absence
+  # alone would miss it; the suspend arm fires.
+  - interval: 5m
+    input_series:
+      - series: 'kube_namespace_status_phase{namespace="tockmox-authentik", phase="Active"}'
+        values: '1x45'
+      - series: 'kube_cronjob_info{namespace="tockmox-authentik", cronjob="tockmox-authentik-db-drill"}'
+        values: '1x45'
+      - series: 'kube_cronjob_spec_suspend{namespace="tockmox-authentik", cronjob="tockmox-authentik-db-drill"}'
+        values: '1x45'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: tockmox-authentik
+              cronjob: tockmox-authentik-db-drill
+            exp_annotations:
+              summary: "This install claims to be resilient and has no running restore drill"
+              description: "global.resilience.profile is resilient, which promises a scheduled restore drill for Authentik's database, and the drill CronJob tockmox-authentik-db-drill does not exist or is suspended. A backup that has never been restored is a hope, not a backup. Enable it (identity.database.backup.restoreDrill.enabled), or, on the bundled server, which has no drill, move Authentik's database to CloudNativePG (docs/deployment/upgrade.md)."
+
+  # IDENTITY CASE 4: kube-state-metrics is not being scraped (no series for the namespace
+  # at all). Everything looks absent, and neither rule may say so: a dead
+  # kube-state-metrics has its own alert, and this is not the drill's fault.
+  - interval: 5m
+    input_series:
+      - series: 'kube_namespace_status_phase{namespace="somewhere-else", phase="Active"}'
+        values: '1x45'
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: TockmoxResilientDrillAbsent
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts: []
+
+  # IDENTITY CASE 5: a FRESH install. The CronJob exists and its first slot is days away,
+  # so TockmoxRestoreDrillNeverRan is silent by design; under the resilient claim
+  # this alert fires anyway, and stays until a drill has passed. Silent at 10m
+  # (pending), firing at 1h and still at 3h.
+  - interval: 5m
+    input_series:
+      - series: 'kube_namespace_status_phase{namespace="tockmox-authentik", phase="Active"}'
+        values: '1x45'
+      - series: 'kube_cronjob_info{namespace="tockmox-authentik", cronjob="tockmox-authentik-db-drill"}'
+        values: '1x45'
+      - series: 'kube_cronjob_spec_suspend{namespace="tockmox-authentik", cronjob="tockmox-authentik-db-drill"}'
+        values: '0x45'
+      - series: 'kube_cronjob_next_schedule_time{namespace="tockmox-authentik", cronjob="tockmox-authentik-db-drill"}'
+        values: '432000x45'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts: []
+      - eval_time: 1h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "This install claims to be resilient and no restore drill has passed"
+              description: "global.resilience.profile is resilient and no drill Job for Authentik's database has ever succeeded. The claim is unproven until one has. The drill runs on its weekly schedule; to run it now, `kubectl -n tockmox-authentik create job --from=cronjob/tockmox-authentik-db-drill tockmox-authentik-db-drill-first` and read its log. If the drill is disabled, turn it on (identity.database.backup.restoreDrill.enabled)."
+      - eval_time: 3h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "This install claims to be resilient and no restore drill has passed"
+              description: "global.resilience.profile is resilient and no drill Job for Authentik's database has ever succeeded. The claim is unproven until one has. The drill runs on its weekly schedule; to run it now, `kubectl -n tockmox-authentik create job --from=cronjob/tockmox-authentik-db-drill tockmox-authentik-db-drill-first` and read its log. If the drill is disabled, turn it on (identity.database.backup.restoreDrill.enabled)."
+
+  # IDENTITY CASE 6: a drill Job SUCCEEDED at 2h. The alert fires before it (the install
+  # was fresh) and is gone after it, however long after.
+  - interval: 5m
+    input_series:
+      - series: 'kube_namespace_status_phase{namespace="tockmox-authentik", phase="Active"}'
+        values: '1x45'
+      - series: 'kube_cronjob_info{namespace="tockmox-authentik", cronjob="tockmox-authentik-db-drill"}'
+        values: '1x45'
+      - series: 'kube_cronjob_spec_suspend{namespace="tockmox-authentik", cronjob="tockmox-authentik-db-drill"}'
+        values: '0x45'
+      - series: 'kube_job_status_completion_time{namespace="tockmox-authentik", job_name="tockmox-authentik-db-drill-29330000"}'
+        values: '_x24 7200x21'
+      - series: 'kube_job_status_succeeded{namespace="tockmox-authentik", job_name="tockmox-authentik-db-drill-29330000"}'
+        values: '_x24 1x21'
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "This install claims to be resilient and no restore drill has passed"
+              description: "global.resilience.profile is resilient and no drill Job for Authentik's database has ever succeeded. The claim is unproven until one has. The drill runs on its weekly schedule; to run it now, `kubectl -n tockmox-authentik create job --from=cronjob/tockmox-authentik-db-drill tockmox-authentik-db-drill-first` and read its log. If the drill is disabled, turn it on (identity.database.backup.restoreDrill.enabled)."
+      - eval_time: 3h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts: []
+      - eval_time: 3h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts: []
+
+  # IDENTITY CASE 7: a drill Job FAILED (no success). Not a pass, so the claim is still
+  # unproven and the alert fires. Also carries a completion time on a Job with
+  # succeeded 0, which the `> 0` filter must not count.
+  - interval: 5m
+    input_series:
+      - series: 'kube_namespace_status_phase{namespace="tockmox-authentik", phase="Active"}'
+        values: '1x45'
+      - series: 'kube_cronjob_info{namespace="tockmox-authentik", cronjob="tockmox-authentik-db-drill"}'
+        values: '1x45'
+      - series: 'kube_cronjob_spec_suspend{namespace="tockmox-authentik", cronjob="tockmox-authentik-db-drill"}'
+        values: '0x45'
+      - series: 'kube_job_status_completion_time{namespace="tockmox-authentik", job_name="tockmox-authentik-db-drill-29330000"}'
+        values: '3600x45'
+      - series: 'kube_job_status_succeeded{namespace="tockmox-authentik", job_name="tockmox-authentik-db-drill-29330000"}'
+        values: '0x45'
+      - series: 'kube_job_status_failed{namespace="tockmox-authentik", job_name="tockmox-authentik-db-drill-29330000"}'
+        values: '1x45'
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "This install claims to be resilient and no restore drill has passed"
+              description: "global.resilience.profile is resilient and no drill Job for Authentik's database has ever succeeded. The claim is unproven until one has. The drill runs on its weekly schedule; to run it now, `kubectl -n tockmox-authentik create job --from=cronjob/tockmox-authentik-db-drill tockmox-authentik-db-drill-first` and read its log. If the drill is disabled, turn it on (identity.database.backup.restoreDrill.enabled)."
+      - eval_time: 3h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "This install claims to be resilient and no restore drill has passed"
+              description: "global.resilience.profile is resilient and no drill Job for Authentik's database has ever succeeded. The claim is unproven until one has. The drill runs on its weekly schedule; to run it now, `kubectl -n tockmox-authentik create job --from=cronjob/tockmox-authentik-db-drill tockmox-authentik-db-drill-first` and read its log. If the drill is disabled, turn it on (identity.database.backup.restoreDrill.enabled)."
+
+  # IDENTITY CASE 8: a Job that is not the drill succeeded in the same namespace (a
+  # backup Job). It must not count as a drill pass.
+  - interval: 5m
+    input_series:
+      - series: 'kube_namespace_status_phase{namespace="tockmox-authentik", phase="Active"}'
+        values: '1x45'
+      - series: 'kube_cronjob_info{namespace="tockmox-authentik", cronjob="tockmox-authentik-db-drill"}'
+        values: '1x45'
+      - series: 'kube_cronjob_spec_suspend{namespace="tockmox-authentik", cronjob="tockmox-authentik-db-drill"}'
+        values: '0x45'
+      - series: 'kube_job_status_completion_time{namespace="tockmox-authentik", job_name="tockmox-some-other-backup-29330000"}'
+        values: '3600x45'
+      - series: 'kube_job_status_succeeded{namespace="tockmox-authentik", job_name="tockmox-some-other-backup-29330000"}'
+        values: '1x45'
+    alert_rule_test:
+      - eval_time: 1h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "This install claims to be resilient and no restore drill has passed"
+              description: "global.resilience.profile is resilient and no drill Job for Authentik's database has ever succeeded. The claim is unproven until one has. The drill runs on its weekly schedule; to run it now, `kubectl -n tockmox-authentik create job --from=cronjob/tockmox-authentik-db-drill tockmox-authentik-db-drill-first` and read its log. If the drill is disabled, turn it on (identity.database.backup.restoreDrill.enabled)."
+      - eval_time: 3h
+        alertname: TockmoxResilientNoPassingDrill
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "This install claims to be resilient and no restore drill has passed"
+              description: "global.resilience.profile is resilient and no drill Job for Authentik's database has ever succeeded. The claim is unproven until one has. The drill runs on its weekly schedule; to run it now, `kubectl -n tockmox-authentik create job --from=cronjob/tockmox-authentik-db-drill tockmox-authentik-db-drill-first` and read its log. If the drill is disabled, turn it on (identity.database.backup.restoreDrill.enabled)."

@@ -57,6 +57,8 @@ alert TockmoxWalArchiveBacklog            pass   # archiving is behind; availabi
 alert TockmoxRestoreDrillStale            pass   # the drill is overdue
 alert TockmoxRestoreDrillNeverRan         pass   # the drill has not run
 alert TockmoxRestoreDrillFailed           pass   # the drill failed
+alert TockmoxResilientDrillAbsent         pass   # the resilient profile has no running drill (disabled, missing or suspended); a reboot neither causes nor cures that
+alert TockmoxResilientNoPassingDrill      pass   # no drill has passed yet under the resilient profile; a claim is unproven, not a node at risk
 alert TockmoxUISignInFailing              pass   # the console sign-in; a service fault, not node safety
 alert TockmoxUIUnreachable                pass   # the console is down; a service fault, not node safety
 

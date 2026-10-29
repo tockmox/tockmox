@@ -199,6 +199,20 @@ for layer in $LAYERS; do
     -f ci/values.yaml -f ci/values-all-on.yaml \
     > "$WORK/render-$layer.yaml" 2>/dev/null \
     || { echo "check-alert-rules: REFUSING ... charts/tockmox-$layer did not render" >&2; exit 1; }
+  # A rule that renders only under a PROFILE is invisible to the all-on render
+  # above, and an alert nothing renders is an alert nothing tests (TM-0597: the
+  # resilient profile's drill alarm exists only while the profile is on). The
+  # profile is passed with the values a site would supply after it
+  # (ci/values-profile-<name>-tockmox-<layer>.yaml). Rules the two renders have
+  # in common are read once, by the extraction below.
+  for ov in ci/values-profile-*-tockmox-"$layer".yaml; do
+    [ -f "$ov" ] || continue
+    pn="${ov#ci/values-profile-}"; pn="${pn%-tockmox-"$layer".yaml}"
+    helm template "tockmox-$layer" "charts/tockmox-$layer" \
+      -f ci/values.yaml -f ci/values-all-on.yaml -f "profiles/$pn.yaml" -f "$ov" \
+      > "$WORK/render-$layer-profile-$pn.yaml" 2>/dev/null \
+      || { echo "check-alert-rules: REFUSING ... charts/tockmox-$layer did not render under profiles/$pn.yaml" >&2; exit 1; }
+  done
 done
 
 python3 - "$WORK" <<'PY'
@@ -215,10 +229,17 @@ work = sys.argv[1]
 # never be green ... which is how a suite learns to be ignored. We lint what we
 # author and syntax-check what we ship, and those are honestly different bars.
 ours, theirs, n_ours, n_theirs = [], [], 0, 0
+seen = set()
+# A profile render of a layer repeats every rule that layer's all-on render has,
+# so each PrometheusRule is read once: promtool refuses two groups of one name.
 for f in sorted(glob.glob(os.path.join(work, "render-*.yaml"))):
     for d in yaml.safe_load_all(open(f)):
         if not (isinstance(d, dict) and d.get("kind") == "PrometheusRule"):
             continue
+        ident = (d["metadata"].get("namespace"), d["metadata"]["name"])
+        if ident in seen:
+            continue
+        seen.add(ident)
         mine = (d["metadata"].get("labels") or {}).get("tockmox.com/managed-by") == "tockmox"
         for g in d["spec"]["groups"]:
             g = dict(g)

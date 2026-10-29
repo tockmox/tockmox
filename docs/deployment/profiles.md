@@ -2,8 +2,8 @@
 okf_version: "0.2"
 type: HowTo
 title: "Install a profile"
-description: "Deploy less than the full stack: pick one of the shipped profiles, pass it to every layer, and prove it removed what you expected."
-tags: [deployment, profiles, minimal, reference, capabilities, sizing]
+description: "Deploy less than the full stack, or claim resilience: pick one of the shipped profiles, pass it to every layer, and prove it did what you expected."
+tags: [deployment, profiles, minimal, reference, resilient, capabilities, sizing]
 status: stable
 generated:
   by: hand
@@ -55,6 +55,7 @@ rather than assumed, and a written-down list of what you gave up.
 | `minimal.yaml` | You want the AI plane and the platform under it, and do not want log aggregation, replicated storage, or an identity provider | The smallest deployment that is still Tockmox |
 | `household-sso.yaml` | One node, a few people, and you want each of them to sign in once | `minimal.yaml` with Authentik and single sign-on put back. Measured on a running single-node cluster (0.8.0 lab, 2026-10-06): every layer Synced and Healthy, and a browser signed in through Authentik and got a streamed reply from a model host on the network, through the gateway (TM-0276). A household user sees no model until an administrator grants it ([identity](../administration/identity.md)) |
 | `observability-off.yaml` | You already monitor the cluster elsewhere, or want neither Prometheus nor Loki, and the cluster has no Prometheus operator CRDs | Declines the observability capability and turns off every vendored subchart's own monitor switch. **Add it after another profile; it does not replace one.** Without it, the platform and identity layers refuse to render with the capability off. Measured on a cluster with no Prometheus operator CRDs (0.7.1-rc2 gate): every layer synced. **Your own site applications must leave their monitors out too**: a ServiceMonitor in `apps/` stops `site-apps` with "could not find monitoring.coreos.com/ServiceMonitor" (TM-0825) |
+| `resilient.yaml` | You want the install to refuse to call itself resilient until its database backups leave the cluster and a restore drill has passed | Makes one claim, `global.resilience.profile: resilient`, and turns on what the claim needs. **Add it after another profile; it does not replace one.** The layers with a database backup then refuse to render until you name an off-cluster target, and two alerts watch the drill. [The resilient profile](#the-resilient-profile--optional) is the contract |
 
 **None of them is a fork, and none is a separate product.** Each is a file in
 `profiles/`, each sets keys you could set yourself, and reading one tells you
@@ -300,6 +301,131 @@ does removes the backup machinery. Alerting stays for the same reason: it is
 the evidence half of the self-check spine, and it delivers through ntfy or
 Apprise whether or not you keep Loki.
 
+## The resilient profile ... Optional
+
+`resilient.yaml` is the one profile that adds a duty instead of removing a
+component. It sets `global.resilience.profile: resilient`, turns backups and the
+weekly restore drill on, and from then on the model gateway and identity layers
+**refuse to render** unless the database backups go somewhere outside the
+cluster. **Add it after another profile (or after your own globals), never
+instead of one.** It sets no footprint, no storage class and no component.
+
+**YOU SUPPLY:** an S3-compatible endpoint that is not in the cluster, with its
+bucket, the region it signs for, and a Secret holding its keys. The profile does
+not choose one, and a store that dies with the cluster is what it refuses.
+
+### What the profile promises, checks and cannot check
+
+| It promises | What checks it | What it cannot check |
+|---|---|---|
+| Database backups are on | Render refusal in `tockmox-ai` (model gateway database) and `tockmox-identity` (Authentik's database, CloudNativePG or the bundled server's `pg_dump` bridge) when they are off | That a backup that is on is succeeding: the existing backup alerts (`TockmoxWalArchiveBacklog`, the Authentik backup freshness alerts) own that |
+| The backup target is outside the cluster | Render refusal naming the reason when the endpoint is empty, a `.svc` or `.cluster.local` name, a bare Service name, a `<service>.<namespace>` pair in a `tockmox-*`, `default` or `kube-system` namespace or one of the release's own, or a loopback address. The shipped default endpoint is the Garage inside the cluster, so it is refused | See the next table. The test reads one string at render time; it never resolves it |
+| A restore drill is scheduled | `TockmoxResilientDrillAbsent`: the drill CronJob does not exist (the drill is disabled, never synced or deleted) or is suspended | That the drill's script restores correctly: that is what the drill itself reports through `TockmoxRestoreDrillFailed` |
+| A restore has been shown to work | `TockmoxResilientNoPassingDrill`: no drill Job has ever succeeded. A fresh resilient install carries it from the first sync until the first drill passes, which on the weekly schedule can be six days. Afterwards `TockmoxRestoreDrillStale` takes over at 15 days | That the restored database holds the data you care about beyond the drill's own assertions |
+| The sealed-secrets private key is backed up | Nothing | Everything. No object in the cluster records that a person exported the key ([secrets](../administration/secrets.md)), so the profile lists it here and does not pretend to check it. A marker an operator writes by hand would be a checkbox, not a check |
+
+### What the endpoint test does not detect
+
+The test is a rule about names, so a target that is in the cluster's failure
+domain under a name that looks external passes. Each of these renders:
+
+| Passes the test | Why |
+|---|---|
+| A NAS or MinIO reached through an ExternalName Service | The endpoint is a cluster-internal name that resolves outside. Resolution is never attempted |
+| An IP address that is a cluster address (a Service ClusterIP, a pod IP) | IP literals are not compared with `global.serviceCIDR` or `global.clusterCIDR` |
+| A hostname that resolves to an in-cluster ingress, or to a store on the same machine or rack as the cluster | The failure domain is physical, and the test sees a string |
+| An ObjectStore you created and named with `objectStoreName` | Its endpoint is in a resource these charts do not render. The profile checks that backups are on, not where that CR points |
+| The platform layer's Longhorn backup target | The platform layer does not read the claim; Longhorn volume backups are not covered |
+| The credentials | The profile refuses the shipped endpoint, not the shipped credentials Secret. Pointing an off-cluster endpoint at `tockmox-garage-credentials` renders, and the first backup fails |
+
+Loopback in any spelling (`127.x`, `::1`, `0:0:0:0:0:0:0:1`, `::ffff:127.0.0.1`)
+and the unspecified address (`0.0.0.0`, `::`) are refused. A public hostname
+that merely has a label named `svc` (`s3.svc.example.com`) renders: the Service
+form needs a service and a namespace label before `svc`, as in
+`garage.tockmox-platform.svc` or a custom cluster domain's
+`garage.tockmox-platform.svc.k8s.internal`. A public name of that exact shape,
+two labels then `svc`, would be refused.
+
+### Pass it after your chosen profile ... Required
+
+Pass `profiles/resilient.yaml` to every layer, **after** the profile you chose in
+step 1 and before your per-layer files, by either route in step 2. The profile
+file is read by every layer and acted on by two: `tockmox-ai` and
+`tockmox-identity`. The other seven ignore the key.
+
+### Name the target in each layer's own values ... Required
+
+The identity keys are not known to the other layers' schemas, so one shared file
+cannot carry both blocks. Put each block in the layer's own file
+(`site/values/ai.yaml`, `site/values/identity.yaml`):
+
+```yaml
+modelGateway:
+  database:
+    backup:
+      objectStore:
+        endpoint: https://YOUR_S3_ENDPOINT
+        region: YOUR_REGION
+        bucket: YOUR_BUCKET
+        credentialsSecretName: YOUR_CREDENTIALS_SECRET
+        destinationPath: s3://YOUR_BUCKET/litellm-db
+```
+
+```yaml
+identity:
+  database:
+    backup:
+      objectStore:
+        endpoint: https://YOUR_S3_ENDPOINT
+        region: YOUR_REGION
+        bucket: YOUR_BUCKET
+        credentialsSecretName: YOUR_CREDENTIALS_SECRET
+        destinationPath: s3://YOUR_BUCKET/cnpg/authentik
+```
+
+The Secret named by `credentialsSecretName` must exist in each layer's
+namespace with the keys `ACCESS_KEY_ID`, `ACCESS_SECRET_KEY` and `REGION`, the
+same shape the shipped Garage bootstrap writes. `REGION` must be the region
+the store signs for: a mismatch lets restores succeed while WAL archiving
+silently fails ([backup and restore](../operations/backup-restore.md)). An install that kept the
+bundled Authentik server sets `databaseBackup.endpoint` and `databaseBackup.bucket`
+instead, and has no restore drill: `TockmoxResilientDrillAbsent` says so for as
+long as the claim stands.
+
+**Success condition:** both layers render. The first command refuses with the
+reason, the second renders; run both from the Tockmox checkout:
+
+```bash
+: "${SITE_REPO:?export SITE_REPO first, see Before you begin}"
+helm template t charts/tockmox-ai -f "$SITE_REPO/site/values/global.yaml" \
+  -f profiles/resilient.yaml >/dev/null
+helm template t charts/tockmox-ai -f "$SITE_REPO/site/values/global.yaml" \
+  -f profiles/resilient.yaml -f "$SITE_REPO/site/values/ai.yaml" >/dev/null && echo "renders"
+```
+
+The first prints `global.resilience.profile is resilient, but
+modelGateway.database.backup.objectStore.endpoint is ...`, naming the Service
+form it found. **If it renders instead, the profile is not being read by that
+layer**: check the path in `valueFiles`. Repeat with `charts/tockmox-identity`
+and `identity.yaml`.
+
+### Run the first drill ... Required
+
+A fresh resilient install raises `TockmoxResilientNoPassingDrill` as a warning
+until a drill passes. Do not wait for the weekly slot. **WORKSTATION**, once per
+layer's drill:
+
+```bash
+kubectl -n tockmox-ai create job --from=cronjob/tockmox-litellm-db-drill tockmox-litellm-db-drill-first
+kubectl -n tockmox-ai logs -f job/tockmox-litellm-db-drill-first
+```
+
+The identity drill is `tockmox-authentik-db-drill` in the `tockmox-authentik`
+namespace. **Success condition:** the Job reports `Complete`, and the alert
+clears within one evaluation interval and `for` period of the next scrape. If it
+does not clear, the drill failed: the log says why, and `TockmoxRestoreDrillFailed`
+is the alert for that.
+
 ## Going further, and where to stop ... Optional
 
 The next two things worth reaching for, with what they return and what they
@@ -344,6 +470,14 @@ A profile is a starting point that is known to render and known to be coherent.
 **It is not a claim that the result suits you**, and it is not a claim that this
 page has been executed start to finish as written. The render guard in step 3 is
 the honest limit of what a profile can check for you.
+
+**The resilient profile's refusals and its two alerts are proven on the render and
+under `promtool test rules`, and not on a cluster.** `tools/check-resilient-profile.sh`
+renders the refusals and the alert rules, and `tests/rules/resilient-profile.yaml`
+fires and silences them against synthetic kube-state-metrics series. Nobody has
+yet watched `TockmoxResilientNoPassingDrill` fire on a fresh resilient install
+and clear when the first drill passed, and the commands under "Run the first drill" are written, not
+yet run end to end ([testing standard](../testing-standard.md)).
 
 The render and image counts above carry their measurement date. Documented
 procedures are verified by running them, not by reviewing them ... the
