@@ -15,7 +15,7 @@
   <table>
     <caption id="c-cap">Passing comparisons of {{ row.route.model }} for {{ row.alias }}</caption>
     <thead><tr><th scope="col">Run</th><th scope="col">Date</th><th scope="col">Graded by</th><th scope="col">Eval set</th><th scope="col">File</th></tr></thead>
-    <tbody>{% for v in row.counted %}<tr><th scope="row"><code>{{ v.run_id }}</code></th><td>{{ v.date }}</td><td>{{ v.grader }}</td><td>{{ v.eval_set[0] }} {{ v.eval_set[1] }}</td><td><code>{{ v.path }}</code></td></tr>{% endfor %}</tbody>
+    <tbody>{% for v in row.counted %}<tr><th scope="row"><a href="/models/v/{{ v.run_id|urlencode }}"><code>{{ v.run_id }}</code></a></th><td>{{ v.date }}</td><td>{{ v.grader }}</td><td>{{ v.eval_set[0] }} {{ v.eval_set[1] }}</td><td><code>{{ v.path }}</code></td></tr>{% endfor %}</tbody>
   </table>
   </div>
   {% else %}<p class="empty">No passing comparison yet.</p>{% endif %}

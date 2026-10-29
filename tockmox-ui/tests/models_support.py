@@ -64,8 +64,11 @@ def lifecycle_doc(**extra):
 
 
 def verdict_record(model, alias, verdict="pass", run="r1", date="2026-10-07", klass="chat", incumbent="", revision="",
-                   eval_version="v1", grader="rule", results=None, criterion=None, placement=None):
-    """A REQ-0045 comparative verdict record (AC-45.9) as the eval runner writes it."""
+                   eval_version="v1", grader="rule", results=None, criterion=None, placement=None, sampling=None,
+                   extras=None):
+    """A REQ-0045 comparative verdict record (AC-45.9) as the eval runner writes it. Each run gets its own sampling
+    seed unless `sampling` is given, so separate runs are separate evidence (TM-1248); pass the same `sampling` to
+    two runs to model a rerun of the same thing."""
     d = {"schema": "comparative-verdict/1", "run_id": run, "date": date, "class": klass, "alias": alias,
          "candidate": {"model": model, **({"revision": revision} if revision else {})},
          "eval_set": {"id": f"{klass}-set", "version": eval_version}, "grader": grader,
@@ -75,6 +78,8 @@ def verdict_record(model, alias, verdict="pass", run="r1", date="2026-10-07", kl
         d["incumbent"] = {"model": incumbent}
     if placement:
         d["placement"] = placement
+    d["sampling"] = sampling if sampling is not None else {"seed": run}
+    d.update(extras or {})
     return json.dumps(d)
 
 

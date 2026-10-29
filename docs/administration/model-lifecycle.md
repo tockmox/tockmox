@@ -39,8 +39,9 @@ gives, on evidence the evaluation produced.
    only, as `<alias>-next`, beside the live `<alias>` it competes for. The
    production gateway, which is what agents and users call, never has it.
 3. **Second approval, promote it.** After `modelLifecycle.promotion.requiredPasses`
-   passing comparisons against the current model (3 by default), the alias on the
-   production gateway moves to it. A failed comparison resets the count.
+   independent passing comparisons against the current model (1 by default), the
+   alias on the production gateway moves to it. A failed comparison resets the
+   count. A candidate that fails is **rejected**, which is a commit too.
 4. **Nothing changes by itself.** Each approval is a commit to your site repo.
 
 ## Why a second gateway
@@ -147,7 +148,10 @@ modelLifecycle:
 ```
 
 - **`stage`** is `candidate` (admitted, on the eval gateway only), `promoted`,
-  or `retired`. Absent means `promoted`.
+  `retired`, or `rejected` (a build that failed its evaluation or was reverted,
+  with `rejection: {reason, date}`: nothing may route it, on either gateway, and
+  the watcher offers the model again only at another revision). Absent means
+  `promoted`.
 - **`adopted`** is how a model that was already serving enters the catalog,
   written once. Every later change to its alias goes through an evaluation.
 - **`source.kind`** is `huggingface`, `ollama` or `hosted`. A `hosted` entry's
@@ -199,9 +203,14 @@ Because the routes change, the commit also updates the
 `tockmox.com/node-routes` annotation, which rolls the production gateway
 ([inference nodes](inference-nodes.md), "The two rolling annotations").
 
-`promotion.requiredPasses` (default 3) and the optional
+`promotion.requiredPasses` (default 1) and the optional
 `promotion.requiredPassesByClass`, a per-workload-class override, are read by the
-tools that check the evaluation record. **The chart does not enforce them in
+tools that check the evaluation record. **They count independent evidence**: a
+passing verdict counts once per evidence key (the candidate's revision, the eval
+set and its sha256, the sampling settings, the engine and the node), so three
+reruns of one frozen set count once. Repetition inside a run is the eval set's
+`epochs`. To require more than one, vary something real: a second set version, a
+second seed regime, a second node. **The chart does not enforce them in
 this release**: a commit that moves an alias renders whether or not the
 comparisons happened. The UI refuses to start on values where an alias moved
 without them, and `python -m app.verdict_check` (see "Evidence") checks the
@@ -215,7 +224,7 @@ alias is compared against and in what happens to the old model.
 
 | Case | Made by | Compared against | Class and passes | The old model |
 |---|---|---|---|---|
-| **A different model replaces the incumbent** | admitting a candidate, or Recommend | the model the alias serves now | the class you name; `requiredPasses` (3) unless the class has its own number | retired when no other alias routes it; kept, with a note, when one does |
+| **A different model replaces the incumbent** | admitting a candidate, or Recommend | the model the alias serves now | the class you name; `requiredPasses` (1) unless the class has its own number | retired when no other alias routes it; kept, with a note, when one does. The route it had is recorded as `promotion.previous`, for a revert |
 | **A brand-new alias, no incumbent** | Recommend, for a class with no live alias | nothing: absolute bars | the class you name; `requiredPasses` | there is none |
 | **The same model on another node** (a re-placement) | Recommend, for a model already serving the alias elsewhere | the same model where it runs now | class `perf`; 1 pass by default | **never retired**: it is the model the new route serves |
 
@@ -250,6 +259,26 @@ The gate (`check_promotions`) accepts a re-placement record when it names a move
 between two different places and the place it moved to is where the alias routes
 now. A record that no longer matches the route (the alias moved again without a
 new evaluation) is a gate failure.
+
+### Reject and revert
+
+Both are commits you review, like every other change here, and nothing reverts
+on its own. In this release the alias page of the Tockmox UI
+(`/models/a/<alias>`) renders the revert change for you to review and commit,
+and each comparison has its own page (`/models/v/<run>`). A reject button, the
+PR opener's reject and revert lanes and the production health watch that would
+propose a revert are not built yet; reject is a function in `app/models.py`.
+
+| Change | When | What it does |
+|---|---|---|
+| **Reject** (`models.reject`) | the evidence says Worse, the known-bad control kept passing, or you dismiss the candidate | removes `<alias>-next`, so the node frees the memory; marks the entry `rejected` with the reason, the date and the revision |
+| **Revert** (`models.revert`) | a promoted build misbehaves in production | points `<alias>` back at `promotion.previous`, the route it had before (node, endpoint, params, model info); marks the demoted build `rejected` with the reason; promotes the previous model again |
+
+A revert of a promotion made before `promotion.previous` was recorded, or of a
+brand-new alias, is refused by name: route the alias by hand through the change
+it needs. If the promotion marked the old model `retired` and its files have
+since left the node, put them back before the revert merges; the change says so.
+An Inconclusive result opens nothing: it asks for more evidence.
 
 ## Moving an existing gateway over
 

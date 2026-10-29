@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}{{ alias }}{% endblock %}
+{% block main %}
+<p><a href="/models">Models</a></p>
+<h1><code>{{ alias }}</code></h1>
+<p class="lede">Serves <code>{{ live.model }}</code> on {{ live.node }} ({{ live.endpoint }}) through the production gateway.{% if e %} The catalog has it at stage {{ badge({"promoted": "ok", "candidate": "warning", "retired": "unknown", "rejected": "critical"}[e.stage], e.stage) }}.{% else %} The catalog has no entry for this model.{% endif %}</p>
+{% if error %}<p>{{ badge("critical", "Not reverted") }} {{ error }}</p>{% endif %}
+
+<section class="panel" aria-labelledby="now-h">
+  <h2 id="now-h">What it serves now</h2>
+  <dl class="facts">
+    <div><dt>Model</dt><dd>{% if e %}<a href="/models/m/{{ e.id|urlencode }}"><code>{{ live.model }}</code></a>{% else %}<code>{{ live.model }}</code>{% endif %}</dd></div>
+    <div><dt>Node</dt><dd>{{ live.node }}</dd></div>
+    <div><dt>Endpoint</dt><dd>{{ live.endpoint }}</dd></div>
+    {% if e and e.source.revision %}<div><dt>Pinned build</dt><dd><code>{{ e.source.revision }}</code></dd></div>{% endif %}
+  </dl>
+</section>
+
+<section class="panel" aria-labelledby="promo-h">
+  <h2 id="promo-h">Promotion record</h2>
+  {% if promo %}
+  <p>{% if promo.class %}Class {{ promo.class }}{% endif %}{% if promo.required %}, {{ promo.required }} passing comparison(s) required, {{ promo.evidence|length if promo.evidence is iterable and promo.evidence is not string else 0 }} on record{% endif %}{% if promo.from %}. Moved from <code>{{ promo.from }}</code>{% endif %}.</p>
+  {% if promo.evidence is iterable and promo.evidence is not string and promo.evidence %}
+  <div class="table-wrap" role="region" aria-labelledby="ev-cap" tabindex="0">
+  <table>
+    <caption id="ev-cap" class="visually-hidden">Comparisons the promotion rests on</caption>
+    <thead><tr><th scope="col">Run</th><th scope="col">Date</th><th scope="col">Graded by</th><th scope="col">File</th></tr></thead>
+    <tbody>{% for x in promo.evidence %}<tr><th scope="row">{% if x.runId %}<a href="/models/v/{{ x.runId|urlencode }}"><code>{{ x.runId }}</code></a>{% else %}<span class="muted">not recorded</span>{% endif %}</th><td>{{ x.date or "not recorded" }}</td><td>{{ x.grader or "not recorded" }}</td><td><code>{{ x.path }}</code></td></tr>{% endfor %}</tbody>
+  </table>
+  </div>
+  {% endif %}
+  {% elif e and e.adopted %}<p class="empty">In service since before it was catalogued (adopted {{ e.adopted }}). No comparison is on record.</p>
+  {% else %}<p class="empty">No promotion record.</p>{% endif %}
+</section>
+
+<section class="panel" aria-labelledby="prev-h">
+  <h2 id="prev-h">What it served before</h2>
+  {% if prev %}
+  <dl class="facts">
+    <div><dt>Model</dt><dd><code>{{ prev.model }}</code></dd></div>
+    <div><dt>Node</dt><dd>{{ prev.node }}</dd></div>
+    <div><dt>Endpoint</dt><dd>{{ prev.endpoint }}</dd></div>
+  </dl>
+  <p class="muted small">Recorded when the last promotion was generated. A revert goes back to this route.</p>
+  {% else %}<p class="empty">No previous route is recorded.</p>{% endif %}
+</section>
+
+<section class="panel" aria-labelledby="rev-h">
+  <h2 id="rev-h">Revert to previous</h2>
+  {% if revert.ok %}
+  <form method="post" action="/models/a/{{ alias|urlencode }}/revert">
+    <input type="hidden" name="csrf" value="{{ user.csrf }}">
+    <p>This generates a change that points <code>{{ alias }}</code> back at <code>{{ prev.model }}</code> and marks <code>{{ live.model }}</code> rejected with your reason. Nothing changes until you commit it.</p>
+    <label for="reason">Why <span class="muted">(recorded on the demoted build)</span></label>
+    <input id="reason" name="reason" type="text" value="{{ reason }}" autocomplete="off" required maxlength="400">
+    <button class="btn" type="submit">Generate the revert</button>
+  </form>
+  {% else %}<p>{{ badge("unknown", "Unavailable") }} {{ revert.why }}</p>{% endif %}
+</section>
+{% endblock %}

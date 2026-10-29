@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, source_line %}
+{% macro nr() %}<span class="muted">not recorded</span>{% endmacro %}
+{% block title %}Comparison {{ v.run_id }}{% endblock %}
+{% block main %}
+<p><a href="/models">Models</a> · <a href="/models/a/{{ v.alias|urlencode }}">{{ v.alias }}</a></p>
+<h1>Comparison <code>{{ v.run_id }}</code></h1>
+<p class="lede">{{ badge(c.state, c.word, true) }} <code>{{ v.alias }}</code>: <code>{{ v.candidate.model }}</code>{% if v.absolute %} judged on absolute bars (there is no incumbent){% else %} against <code>{{ v.incumbent.model }}</code>{% endif %}. Class {{ v.klass }}, run {{ v.date }}, graded by {{ v.grader }}.</p>
+{% if v.placement %}<p>{{ badge("warning", "Re-placement") }} This measures a move of the same model from {{ c.move_text }}.</p>{% endif %}
+
+{% if c.screening %}<p class="warnbox">{{ badge("warning", "Screening") }} Screening: fewer than 30 cases, cannot say Better. A small set can show Same, Worse or Inconclusive, never an improvement worth moving an alias for.</p>{% endif %}
+{% if c.control and c.control.passed %}<p class="warnbox">{{ badge("critical", "Control passed") }} The known-bad control passed too, so the graders could not tell good from bad. This comparison does not count.</p>{% endif %}
+{% for w in v.warnings %}<p class="warnbox">{{ badge("warning", "Check this") }} {{ w }}.</p>{% endfor %}
+{% for a in v.advisories if not (c.screening and a.startswith("screening set")) %}<p class="warnbox">{{ badge("warning", "Note") }} {{ a[0]|upper }}{{ a[1:] }}.</p>{% endfor %}
+
+<section class="panel" aria-labelledby="count-h">
+  <h2 id="count-h">Did it count toward promotion</h2>
+  {% if c.counted %}<p>{{ badge("ok", "Counted") }} It is one of the passing comparisons that count for <code>{{ v.alias }}</code> now.</p>
+  {% else %}<p>{{ badge("unknown", "Not counted") }} {{ c.why_not }}.</p>{% endif %}
+  <p class="muted small">Only a pass counts. A fail resets the count; an inconclusive neither counts nor resets. The same evidence twice counts once.</p>
+</section>
+
+<section class="panel flush" aria-labelledby="num-h">
+  <div class="panel-head"><h2 id="num-h">The numbers</h2></div>
+  <div class="table-wrap" role="region" aria-labelledby="num-cap" tabindex="0">
+  <table>
+    <caption id="num-cap" class="visually-hidden">What this comparison measured</caption>
+    <thead><tr><th scope="col">Measure</th><th scope="col">Value</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">Cases</th><td class="num">{% if c.n is not none %}{{ c.n }}{% else %}{{ nr() }}{% endif %}</td></tr>
+      <tr><th scope="row">Wins (candidate better)</th><td class="num">{% if c.wins is not none %}{{ c.wins }}{% else %}{{ nr() }}{% endif %}</td></tr>
+      <tr><th scope="row">Losses (candidate worse)</th><td class="num">{% if c.losses is not none %}{{ c.losses }}{% else %}{{ nr() }}{% endif %}</td></tr>
+      <tr><th scope="row">Ties</th><td class="num">{% if c.ties is not none %}{{ c.ties }}{% else %}{{ nr() }}{% endif %}</td></tr>
+      <tr><th scope="row">Method</th><td>{% if c.method %}{{ c.method }}{% else %}{{ nr() }}{% endif %}</td></tr>
+      <tr><th scope="row">Interval</th><td>{% if c.interval %}{{ c.interval }}{% else %}{{ nr() }}{% endif %}</td></tr>
+      <tr><th scope="row">{{ "Bar" if v.absolute else "Margin and minimum effect" }}</th><td>{% if c.threshold %}{{ c.threshold }}{% else %}{{ nr() }}{% endif %}</td></tr>
+      <tr><th scope="row">p-value</th><td>{% if c.pvalue %}{{ c.pvalue }}{% else %}{{ nr() }}{% endif %}</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section class="panel" aria-labelledby="ctl-h">
+  <h2 id="ctl-h">Known-bad control</h2>
+  {% if c.control %}
+  {% if c.control.passed %}<p>{{ badge("critical", "Passed") }} The control should fail. It passed, so the graders cannot tell good from bad.</p>
+  {% else %}<p>{{ badge("ok", "Failed as it should") }} The graders marked the known-bad answers bad.</p>{% endif %}
+  {% if c.control.cases is not none %}<p class="muted">Control cases: {{ c.control.cases }}</p>{% endif %}
+  {% else %}<p>{{ badge("warning", "Not recorded") }} This record has no known-bad control, so nothing shows its graders can fail.</p>{% endif %}
+</section>
+
+<section class="panel" aria-labelledby="how-h">
+  <h2 id="how-h">How it was run</h2>
+  <dl class="facts">
+    <div><dt>Sampling</dt><dd>{% if c.sampling %}{{ c.sampling }}{% else %}{{ nr() }}{% endif %}</dd></div>
+    <div><dt>Engine</dt><dd>{% if c.engine %}{{ c.engine }}{% else %}{{ nr() }}{% endif %}</dd></div>
+    <div><dt>Node</dt><dd>{% if c.node %}{{ c.node }}{% else %}{{ nr() }}{% endif %}</dd></div>
+    <div><dt>Eval set</dt><dd>{{ v.eval_set[0] }} version {{ v.eval_set[1] }}</dd></div>
+    <div><dt>Eval set sha256</dt><dd>{% if c.set_sha %}<code>{{ c.set_sha }}</code>{% else %}{{ nr() }}{% endif %}</dd></div>
+    {% if v.grader == "judge" %}<div><dt>Judge</dt><dd>{% if c.judge %}<code>{{ c.judge.model }}</code>{% if c.judge.prompt_version %} prompt {{ c.judge.prompt_version }}{% endif %}{% else %}{{ nr() }}{% endif %}</dd></div>{% endif %}
+    <div><dt>Candidate build</dt><dd>{% if v.candidate.revision %}<code>{{ v.candidate.revision }}</code>{% else %}{{ nr() }}{% endif %}</dd></div>
+    <div><dt>Criterion</dt><dd>{{ v.criterion }}</dd></div>
+  </dl>
+</section>
+
+<section class="panel flush" aria-labelledby="twin-h">
+  <div class="panel-head"><h2 id="twin-h">What it cites</h2></div>
+  {% if v.results %}
+  <div class="table-wrap" role="region" aria-labelledby="twin-cap" tabindex="0">
+  <table>
+    <caption id="twin-cap" class="visually-hidden">Result twins this comparison rests on</caption>
+    <thead><tr><th scope="col">Result file</th><th scope="col">sha256</th></tr></thead>
+    <tbody>{% for r in v.results %}<tr><th scope="row"><code>{{ r.path }}</code></th><td>{% if r.sha256 %}<code>{{ r.sha256 }}</code>{% else %}<span class="muted">no hash: an older form that nothing hashed</span>{% endif %}</td></tr>{% endfor %}</tbody>
+  </table>
+  </div>
+  {% else %}<p class="empty">It cites no result twin, so nothing it rests on is hashed.</p>{% endif %}
+  <p class="muted small">This record: <code>{{ v.path or "not recorded" }}</code> · sha256 <code>{{ v.sha256 }}</code></p>
+</section>
+{% if verdict_reading is not none %}<p>{{ source_line(verdict_reading) }}</p>{% endif %}
+{% endblock %}

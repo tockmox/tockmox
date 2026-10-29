@@ -740,7 +740,12 @@ inferenceNodes:
 modelLifecycle:
   catalog: []
   promotion:
-    requiredPasses: 3
+    # Independent passing evidence per required leg (TM-1248): a verdict counts
+    # once per evidence key (candidate revision, eval set and its sha256,
+    # sampling, engine, node), so rerunning one frozen set no longer counts
+    # three times. Raise it only by varying something real: a second set
+    # version, a second seed regime, a second node.
+    requiredPasses: 1
   # The model watcher (and, with pullRequests, its PR opener) as a CronJob of
   # its own: the one part of Tockmox that reaches the internet unprompted, so
   # OFF by default. It runs in the Tockmox UI image, which ships as source

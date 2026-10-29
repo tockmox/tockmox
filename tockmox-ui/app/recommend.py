@@ -325,7 +325,7 @@ def pool(lc: ml.Lifecycle, report, cfg: Config) -> list:
             out.append(opt)
 
     for e in lc.catalog:
-        if e.stage != "retired" and e.source.kind != "hosted":
+        if e.stage not in ("retired", "rejected") and e.source.kind != "hosted":
             add(Option(e.model, e.source, "catalog", e, sizes.get(e.source.ref) if e.source.kind == "huggingface" else None))
     for c in (report.candidates if report else []):
         if c.kind in ("quant", "successor") and c.source.kind == "huggingface":

@@ -9,6 +9,9 @@ eval gateway, and promoting it to the production gateway after enough passing co
   POST /models/evaluate
   GET  /models/promote?alias=       what the verdicts say for a -next route, and the promotion when there are enough
   POST /models/promote
+  GET  /models/v/<runId>            one comparison: the label, the numbers, how it was run, what it cites, whether it counted
+  GET  /models/a/<alias>            one live alias: what it serves, its promotion record, and the revert
+  POST /models/a/<alias>/revert     the revert change (alias back to promotion.previous), for a person to review and commit
   GET  /models/promote-hosted?entry=  the same for a hosted candidate, choosing its alias and data-class tags
   POST /models/promote-hosted
   GET  /models/recommend?node=<id>  per alias class, a shortlist for one node (AC-48.14). A hypothesis list: it admits nothing
@@ -29,6 +32,7 @@ from . import models as ml
 from . import nodes as nm
 from . import recommend as rc
 from . import results as rs
+from . import verdict_stats as vst
 from .probe import Refused
 
 # A build check is a reading like any other: an old one does not vouch for today (AC-48.4's rule).
@@ -427,6 +431,122 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
                           verdict_reading=vr, status_code=400)
         return _change(request, u, new_lc, inv, notes, f"Promote {e.model} as {target}", fmt,
                        {"entry": entry, "target": target, "tags": tags}, "/models/promote-hosted")
+
+    # ------------------------------------------------------------ one comparison, and one alias (revert)
+
+    def _pct(x):
+        return f"{x:+.3f}"
+
+    def compare_view(v, vs):
+        """Everything the Compare page shows for one verdict, as plain values. A field an older producer did not write is
+        None, and the template says "not recorded"."""
+        ex = v.extras
+        label = ex.get("label") or v.verdict
+        state = {"better": "ok", "same": "ok", "worse": "critical", "inconclusive": "warning", "pass": "ok", "fail": "critical"}[label]
+        dc = ex.get("discordant")
+        n = ex.get("n")
+        wins, losses = (dc["b"], dc["c"]) if dc else (None, None)
+        ties = n - wins - losses if (n is not None and dc and n >= wins + losses) else None
+        iv = ex.get("interval")
+        method = ex.get("method")
+        pval = None
+        if dc and method in (None, "sign-test+bootstrap"):
+            pval = f"{vst.sign_test(wins, losses):.4g} (exact sign test on the {wins + losses} discordant pair(s), worked out here)"
+        if iv:
+            wil = method == "wilson"
+            fmt_ = (lambda x: f"{x:.3f}") if wil else _pct
+            what = "pass rate, 95% Wilson interval" if wil else "difference in pass rate, candidate minus incumbent, 95% interval"
+            interval = f"{fmt_(iv[0])} to {fmt_(iv[1])} ({what})"
+        else:
+            interval = None
+        if "bar" in ex:
+            threshold = f"bar {ex['bar']:.3f}: the interval's lower end must reach it"
+        elif "margin" in ex or "min_effect" in ex:
+            threshold = ", ".join(x for x in (f"margin {ex['margin']:.3f}" if "margin" in ex else "",
+                                              f"min effect {ex['min_effect']:.3f}" if "min_effect" in ex else "") if x)
+        else:
+            threshold = None
+        ctl = ex.get("control")
+        samp = ex.get("sampling")
+        eng = ex.get("engine")
+        # did it count: ask count_passes the way the promote page does, for the alias as it stands now
+        e = L.lifecycle.by_model(v.candidate.get("model", ""))
+        live = next((x for x in inv.routes if x.alias == v.alias), None)
+        counted, notes = ml.count_passes(vs, v.alias, v.candidate.get("model", ""), e.source.revision if e else "",
+                                         live.model if live else "", v.placement or None)
+        did = any(c is v for c in counted)
+        mine = [x for x in notes if x.startswith(v.run_id + " ")]
+        if did:
+            why = ""
+        elif mine:
+            why = "; ".join(mine)
+            why = why[0].upper() + why[1:]
+        else:
+            why = ("It is not among the passes that count now: a later fail reset the count, or a newer version of the eval set, "
+                   "another class or another build took over")
+        return {"label": label, "state": state, "word": label.capitalize(), "n": n, "wins": wins, "losses": losses, "ties": ties,
+                "method": method, "interval": interval, "threshold": threshold, "pvalue": pval,
+                "control": ctl, "sampling": ", ".join(f"{k} {val}" for k, val in sorted(samp.items())) if samp else None,
+                "engine": (f"{eng['id']} {eng['version']}".strip() + (f" ({eng['flags']})" if eng["flags"] else "")) if eng else None,
+                "node": ex.get("node"), "set_sha": ex.get("set_sha256"), "judge": ex.get("judge"), "screening": bool(ex.get("screening")),
+                "counted": did, "why_not": why, "move_text": (f"{v.placement['from_node']} to {v.placement['to_node']}" if v.placement else "")}
+
+    @app.get("/models/v/{run_id}")
+    def models_verdict(request: Request, run_id: str):
+        """The Compare page: one comparative verdict, answer first, then the numbers, how it was run, and what it cites."""
+        u, deny = admin(request)
+        if deny:
+            return deny
+        vr, vs = verdicts()
+        v = next((x for x in vs if x.run_id == run_id), None)
+        if v is None:
+            return render(request, "error.html", u, status_code=404, title="Not found",
+                          message="There is no comparison with that run id in the verdict records this page reads.")
+        return render(request, "models_compare.html", u, v=v, c=compare_view(v, vs), verdict_reading=vr)
+
+    def alias_view(alias):
+        """(live route, entry, revert) for a live alias, or None. `revert` is {"ok": True} or {"ok": False, "why": text}: the
+        LifecycleError revert() raises, asked with a placeholder reason so the reason itself is not what refuses it."""
+        live = next((r for r in inv.routes if r.alias == alias and not alias.endswith(ml.NEXT)), None)
+        if live is None:
+            return None
+        try:
+            ml.revert(alias, "check", _now().strftime("%Y-%m-%d"), L.lifecycle, inv)
+            rv = {"ok": True, "why": ""}
+        except (ml.LifecycleError, nm.NodeError) as ex:
+            rv = {"ok": False, "why": str(ex)}
+        return live, L.lifecycle.by_model(live.model), rv
+
+    def alias_page(request, u, alias, error=None, reason="", status_code=200):
+        av = alias_view(alias)
+        if av is None:
+            return render(request, "error.html", u, status_code=404, title="Not found", message="There is no such live alias.")
+        live, e, rv = av
+        promo = (e.promotion if e else {}) or {}
+        return render(request, "models_alias.html", u, alias=alias, live=live, e=e, promo=promo, prev=promo.get("previous"),
+                      revert=rv, error=error, reason=reason, status_code=status_code)
+
+    @app.get("/models/a/{alias}")
+    def models_alias(request: Request, alias: str):
+        u, deny = admin(request)
+        if deny:
+            return deny
+        return alias_page(request, u, alias)
+
+    @app.post("/models/a/{alias}/revert")
+    def models_revert(request: Request, alias: str, csrf: str = Form(""), reason: str = Form(""), fmt: str = Form("")):
+        u, deny = admin(request)
+        if deny:
+            return deny
+        if not csrf_ok(u, csrf):
+            return PlainTextResponse("bad request", status_code=400)
+        if alias_view(alias) is None:
+            return bad(request, u, "There is no such live alias.", 404)
+        try:
+            new_lc, new_inv, notes = ml.revert(alias, reason, _now().strftime("%Y-%m-%d"), L.lifecycle, inv)
+        except (ml.LifecycleError, nm.NodeError) as ex:
+            return alias_page(request, u, alias, error=str(ex), reason=reason, status_code=400)
+        return _change(request, u, new_lc, new_inv, notes, f"Revert {alias}", fmt, {"reason": reason}, f"/models/a/{alias}/revert")
 
     @app.get("/models/m/{eid}")
     def models_model(request: Request, eid: str):

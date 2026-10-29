@@ -41,7 +41,7 @@
   <h2 id="promo-h">Promotion record</h2>
   <p><code>{{ e.promotion.alias or e.promotion.aliases|join(", ") }}</code>{% if e.promotion.from %} moved from <code>{{ e.promotion.from }}</code>{% endif %}{% if e.promotion.class %}, class {{ e.promotion.class }}{% endif %}{% if e.promotion.required %}, {{ e.promotion.required }} passing comparison(s) required{% endif %}{% if e.promotion.tags %}, tagged {{ e.promotion.tags|join(", ") }}{% endif %}.</p>
   {% if e.promotion.evidence is iterable and e.promotion.evidence is not string %}
-  <ul>{% for x in e.promotion.evidence %}<li><code>{{ x.runId }}</code> {{ x.date }}{% if x.grader %} · graded by {{ x.grader }}{% endif %} · <code>{{ x.path }}</code></li>{% endfor %}</ul>
+  <ul>{% for x in e.promotion.evidence %}<li>{% if x.runId %}<a href="/models/v/{{ x.runId|urlencode }}"><code>{{ x.runId }}</code></a>{% else %}<code>{{ x.runId }}</code>{% endif %} {{ x.date }}{% if x.grader %} · graded by {{ x.grader }}{% endif %} · <code>{{ x.path }}</code></li>{% endfor %}</ul>
   {% endif %}
 </section>
 {% endif %}

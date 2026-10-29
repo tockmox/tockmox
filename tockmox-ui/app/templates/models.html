@@ -57,7 +57,7 @@
     {% for x in nexts %}
       <tr>
         <th scope="row"><code>{{ x.route.alias }}</code><div class="muted small"><code>{{ x.route.model }}</code></div></th>
-        <td><code>{{ x.alias }}</code><div class="muted small">{% if x.live %}<code>{{ x.live.model }}</code>{% else %}nothing yet{% endif %}</div>{% if x.replacement %}<div class="small">{{ badge("warning", "Re-placement") }} <span class="muted">the same model, moving from {{ x.move.from_node }} to {{ x.move.to_node }}: decided by class <code>perf</code>, nothing is retired</span></div>{% endif %}</td>
+        <td><a href="/models/a/{{ x.alias|urlencode }}"><code>{{ x.alias }}</code></a><div class="muted small">{% if x.live %}<code>{{ x.live.model }}</code>{% else %}nothing yet{% endif %}</div>{% if x.replacement %}<div class="small">{{ badge("warning", "Re-placement") }} <span class="muted">the same model, moving from {{ x.move.from_node }} to {{ x.move.to_node }}: decided by class <code>perf</code>, nothing is retired</span></div>{% endif %}</td>
         <td>{{ x.route.node }}</td>
         <td>{% if x.ready %}{{ badge("ok", "Ready to promote") }}{% elif x.counted %}{{ badge("warning", x.counted|length ~ " of " ~ x.required) }}{% else %}{{ badge("unknown", "0 of " ~ x.required) }}{% endif %}<div class="muted small">passing comparison(s){% if x.klass %} for class {{ x.klass }}{% endif %}{% if not x.entry %}; not in the catalog yet: add it before promoting{% endif %}{% if x.notes %}; {{ x.notes|join("; ") }}{% endif %}</div></td>
         <td class="num"><a href="/models/evaluate?alias={{ x.route.alias|urlencode }}" class="small">Start an evaluation<span class="visually-hidden"> of {{ x.route.alias }}</span></a><br><a href="/models/promote?alias={{ x.route.alias|urlencode }}" class="small">{{ "Promote" if x.ready else "See the count" }}<span class="visually-hidden"> for {{ x.route.alias }}</span></a></td>
@@ -118,7 +118,7 @@
       <tr><th scope="row"><a href="/models/m/{{ e.id|urlencode }}"><code>{{ e.model }}</code></a>{% if e.size_gib is not none %}<br><span class="muted">{{ e.size_gib }} GiB</span>{% endif %}</th>
         <td>{{ badge({"promoted": "ok", "candidate": "warning", "retired": "unknown"}[e.stage], e.stage) }}{% if e.promotion %}<br><span class="muted">{{ e.promotion.evidence|length }} pass(es){% if e.promotion.evidence %}, last {{ e.promotion.evidence[-1].date }}{% endif %}</span>{% elif e.adopted %}<br><span class="muted">adopted {{ e.adopted }}</span>{% endif %}{% if e.pending %}<br><span class="muted">newer build pending</span>{% endif %}</td>
         <td>{{ e.source.kind }}{% if e.source.revision %}<br><code title="{{ e.source.revision }}">{{ e.source.revision[:7] }}</code>{% else %}<br><span class="muted">no pinned revision</span>{% endif %}</td>
-        <td>{% for r in row.routes %}<code>{{ r.alias }}</code> <span class="muted">({{ r.node }})</span>{% if not loop.last %}<br>{% endif %}{% else %}<span class="muted">none</span>{% endfor %}</td>
+        <td>{% for r in row.routes %}{% if r.alias.endswith("-next") %}<code>{{ r.alias }}</code>{% else %}<a href="/models/a/{{ r.alias|urlencode }}"><code>{{ r.alias }}</code></a>{% endif %} <span class="muted">({{ r.node }})</span>{% if not loop.last %}<br>{% endif %}{% else %}<span class="muted">none</span>{% endfor %}</td>
         <td>{{ e.track|join(", ") or "nothing" }}</td></tr>
     {% endfor %}
     </tbody>

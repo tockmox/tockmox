@@ -499,6 +499,10 @@ def derive(site: Site, ai_node_id: str, doc: dict) -> dict:
             bad("hosted-model-on-node", f"route {r.alias}: catalog entry {e.id!r} is a hosted model; an AI node "
                 "serves open weights it holds")
             continue
+        if e.stage == "rejected":
+            bad("rejected-model-routed", f"route {r.alias}: catalog entry {e.id!r} was rejected "
+                f"({(e.rejection or {}).get('reason', '?')}) and is routed nowhere; remove the route")
+            continue
         if e.stage == "retired":
             bad("retired-model-routed", f"route {r.alias}: catalog entry {e.id!r} is retired but still routed here; "
                 "re-point or remove the route first (a retired model's files are removed from the node)")
