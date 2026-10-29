@@ -15,6 +15,12 @@
 #   paths     ... needs a real cluster and roughly twenty minutes. Nightly and
 #                 before every release tag, on the devtest runner.
 #
+# A THIRD CADENCE lives in its own workflow, docs-no-cluster.yaml: the six pages
+# whose blocks need no cluster, run on every pull request and push with no path
+# filter (TM-0289). It is not a job here because this file's `docs/**` filter
+# would miss a chart-only change that breaks a documented command, and widening
+# the filter would widen the `paths` job below with it.
+#
 # The second job is the expensive one, so testing-standard rule 6 applies with
 # full force: "A check that is expensive and therefore quietly never runs is
 # worse than one that does not exist, because it appears in the inventory."

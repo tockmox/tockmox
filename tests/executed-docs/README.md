@@ -15,6 +15,13 @@ it is the file to read if you want an honest answer rather than a build badge.
 # hermetic, no cluster, about a second
 bash tests/executed-docs/selftest.sh
 
+# the six pages whose procedures need no cluster, every bash block run and its
+# output asserted (needs helm, jq, git, ssh-keygen, sha256sum, PyYAML, and
+# `bash tools/helm-deps.sh` once); about twenty seconds. `--selftest` proves it
+# goes red: five planted mutations, each of which must fail it.
+bash tests/executed-docs/pages-no-cluster.sh
+bash tests/executed-docs/pages-no-cluster.sh --selftest
+
 # the real thing: needs a KUBECONFIG scoped to tockmox-test on the Harvester rig,
 # and the NAME of that rig's context (see "Every call names its cluster" below)
 TOCKMOX_SUBSTRATE_CONTEXT=harvester-rig \
@@ -147,6 +154,11 @@ run.sh                 provision, run selected paths, report, tear down
 provision/profiles/registry-mirror.sh  the mirror files both provisioner lanes write, and the guest's mirror-proof
 mirror-mode-test.sh    hermetic proof of the two mirror modes (also run by selftest.sh)
 selftest.sh            hermetic proof of the machinery above
+pages-no-cluster.sh    the six no-cluster pages (values-contract, customising, capabilities,
+                       configuration, platform-management, verify): every bash block extracted
+                       with lib/extract-block.sh and run, output asserted; a manifest that must
+                       account for every fence on the page, so a new block is a red job until
+                       it is run or skipped with a reason
 INVENTORY.md           every documented path, mapped to evidence or an exception
 ```
 
@@ -155,6 +167,7 @@ INVENTORY.md           every documented path, mapped to evidence or an exception
 | Job | Cadence | Why |
 |---|---|---|
 | `selftest` | per-commit | hermetic, no network, no cluster, about a second |
+| `docs-no-cluster` (its own workflow, `.github/workflows/docs-no-cluster.yaml`) | per-commit, every pull request and push, no path filter | no cluster; one network fetch of the charts' dependencies; about a minute. Its own file because `executed-docs.yaml` filters on `docs/**` and its `paths` job is the expensive one, while these pages render against `charts/` and `ci/` |
 | `paths` | nightly 07:00 UTC, plus `workflow_dispatch`, on the `tockmox-devtest` runner | needs a real cluster and about twenty minutes |
 
 Standard rule 6 says a check that is expensive and therefore quietly never runs
