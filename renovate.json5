@@ -189,10 +189,12 @@
       dependencyDashboardApproval: false,
     },
     {
-      // THE AI PLANE TAKES EVERY RELEASE AS IT LANDS (maintainer ruling,
-      // 2026-10-17). Open WebUI and LiteLLM ship several releases a week and
-      // their fixes matter (spend accounting, access checks), so no 3-day soak
-      // and no Monday window: a PR opens as soon as a stable release is out.
+      // OPEN WEBUI TAKES EVERY RELEASE AS IT LANDS (maintainer ruling,
+      // 2026-10-17); LITELLM DOES NOT, see the rule right below. Both ship
+      // several releases a week and their fixes matter (spend accounting,
+      // access checks), so this rule sets no soak and no Monday window: a PR
+      // opens as soon as a stable release is out. That ruling stands for Open
+      // WebUI; for LiteLLM the next rule puts three days back (TM-1197).
       // AFTER the non-major group on purpose, so this group name wins for
       // these packages. Both Open WebUI pins (the image tag and the
       // trust-bundle initContainer) are the same package, so they land in one
@@ -212,6 +214,35 @@
       groupName: "AI plane (Open WebUI, LiteLLM)",
       groupSlug: "ai-plane",
       dependencyDashboardApproval: false,
+    },
+    {
+      // LITELLM WAITS THREE DAYS ON MAIN (maintainer ruling, 2026-10-28,
+      // TM-1197). On 2026-10-21 LiteLLM's release pipeline was hijacked and
+      // v1.107.0 shipped a credential stealer; our bump to 1.106.2 merged 36
+      // minutes before that window opened, so the exposure was luck. The wait
+      // lets the vendor pull a bad release before a PR for it exists (1.107.0
+      // was pulled, not re-cut). Open WebUI keeps the
+      // no-soak rule above. The group, the schedule and the no-tick are
+      // inherited from that rule, so a LiteLLM PR still opens by itself and
+      // still lands in the one AI-plane PR; only its age changed.
+      // Digests are the other half: tools/check-litellm-compromise.sh refuses
+      // a known-bad digest in images.txt, but it cannot see a bump by tag
+      // alone, which is the path Renovate takes, so this wait is what covers
+      // that one.
+      // ORDER MATTERS in two directions. AFTER the AI-plane rule above, or its
+      // `minimumReleaseAge: null` would win for LiteLLM. BEFORE the release
+      // line below, because packageRules are last-wins and the line's seven
+      // days must override these three for PRs against release-0.8; this rule
+      // is also pinned to main by name, so moving it later cannot shorten the
+      // line's wait. Security alerts keep their exemption in
+      // vulnerabilityAlerts at the bottom.
+      matchBaseBranches: ["main"],
+      matchPackageNames: [
+        "ghcr.io/berriai/litellm-database",
+        "litellm-helm",
+        "ghcr.io/berriai/litellm-helm",
+      ],
+      minimumReleaseAge: "3 days",
     },
 
     // THE RELEASE LINE. Everything from here down is scoped to the branch in
