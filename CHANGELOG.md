@@ -36,6 +36,27 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **Six documentation pages are executed on every pull request and push, with no
+  cluster (TM-0289).** The new `docs-no-cluster` workflow runs
+  `tests/executed-docs/pages-no-cluster.sh`: every `bash` block on
+  `values-contract.md`, `customising.md`, `capabilities.md`, `configuration.md`,
+  `platform-management.md` and `verify.md` is extracted by the harness's own
+  `extract-block.sh` and run, and what it prints is checked against the success
+  condition the page states (`retention_period: 720h`, a second object count that
+  is lower, a delta of 4, `Good "git" signature for jeff@maaks.com`). 24 of the 31
+  blocks run; the other 7 need a cluster or the network and are named as skipped in
+  the log. The script counts each page's fences, so a block added to one of the
+  pages without a decision turns the job red. `verify.md` runs against a fixture
+  repository and a throwaway key, not a published tag. The job's first run found
+  two blocks that failed as printed, and both are fixed: the two rung 1 renders in
+  `customising.md` now pass `--set global.storageClass=longhorn`, and the
+  `harbor_netpol` comparison in `configuration.md` renders against
+  `ci/values.yaml`, which carries the node sources the policy layer has required
+  since 0.8.0 (it printed `0` and an error before). `tests/executed-docs/INVENTORY.md`
+  now records the 2026-10-28 rulings as written exceptions (section E1), restates
+  the card's "7 of N paths" as counts with the command for each, and
+  `tools/doc-claims.txt` pins three of them. It also runs inside `tools/check-all.sh`.
+
 - **Platform Management shows the agents' cases.** With
   `features.platform.specialistsUrl` set to a specialist host (and
   `secrets.platformSpecialistsToken` for its read-only caller), `/platform/cases`

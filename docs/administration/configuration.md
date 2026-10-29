@@ -371,25 +371,26 @@ out of the layer's own `values.yaml` before you set one. A switch that removes n
 object is the same failure as no switch at all, and it looks identical from
 outside.
 
-Measured behaviour, not aspiration. The first `grep -c` prints `54`, the second
-prints `58`:
+Measured behaviour, not aspiration. The first `grep -c` prints `80`, the second
+prints `84`:
 
 ```bash
 helm template t charts/tockmox-policy \
-  --set global.internalDomain=example.internal \
-  --set global.lanCIDR=192.168.1.0/24 | grep -c '^kind:'
+  -f ci/values.yaml | grep -c '^kind:'
 
 helm template t charts/tockmox-policy \
-  --set global.internalDomain=example.internal \
-  --set global.lanCIDR=192.168.1.0/24 \
+  -f ci/values.yaml \
   --set apps.harbor_netpol.enabled=true | grep -c '^kind:'
 ```
 
-**Measured 2026-09-01 against the 0.6.0 tree with Helm v3.16.3.** Substitute your
-own domain and CIDR; any syntactically valid pair renders the same count. The
-load-bearing number is the **delta of 4**, which is the Harbor bundle. The
-absolute counts move with every policy the layer gains and are re-derived per
-release rather than enforced per commit.
+**Measured 2026-10-29 against the 0.9.0 tree with Helm v3.19.0 and v4.3.1.** Run from the
+root of a checkout. `ci/values.yaml` is the stand-in site file CI renders every
+layer with: it names the domain and CIDR this layer needs and the node sources
+the platform NetworkPolicy has demanded since 0.8.0, without which the render
+stops with an error and prints a `0`. The number that matters is the **delta of
+4**, which is the Harbor bundle. The absolute counts move with every policy the
+layer gains and are re-derived per release; the delta is what the per-commit run
+of this block enforces.
 
 To turn off a whole functional story rather than one component, use
 [capabilities](capabilities.md). The interaction between the two switches, and
@@ -413,7 +414,10 @@ cluster that already has an equivalent scheme.
 Every value, default and required/optional marking on this page was read out of
 the shipped `values.yaml` and `values.schema.json` files on 2026-09-01, and the
 two render measurements and the guard behaviour were executed against the 0.6.0
-tree on that date.
+tree on that date. The Harbor render comparison under Per-app toggles was re-run
+on 2026-10-29 and is run again on every commit by
+`tests/executed-docs/pages-no-cluster.sh`; the port-forward block under Hostnames
+and TLS needs a cluster and has not been executed as written.
 
 **That is not the same as certifying that a deployment configured this way
 behaves as described.** Reading a page cannot establish that, and neither can

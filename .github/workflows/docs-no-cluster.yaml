@@ -1,0 +1,104 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The six pages whose procedures need no cluster, executed on every commit.
+# TM-0289, Jeff 2026-10-28 (docs/QUESTION-TM-0289.md, item 3): "the six no-cluster
+# pages run first as one hermetic per-commit job."
+#
+# This is the third cadence of the executed-documentation harness, and it has
+# its own workflow for two reasons rather than one more job in executed-docs.yaml:
+#
+#   - executed-docs.yaml filters on docs/** and tests/executed-docs/**, because
+#     its `paths` job costs twenty minutes on a self-hosted runner and runs on
+#     every push that passes the filter. These six pages are rendered against
+#     charts/, ci/ and a generator in tools/, so a chart-only pull request that
+#     breaks a documented command (the storage-class guard and the node-source
+#     guard both did, and the page said nothing) must trigger THIS job. Widening
+#     that filter would widen the cluster job with it.
+#   - ci.yaml's named steps are a counted, pinned surface (tools/doc-claims.txt),
+#     the reason check-all.yaml and portability-macos.yaml are their own files.
+#
+# So: no path filter, pull_request and push, like ci.yaml. It also runs inside
+# tools/check-all.sh (and so inside check-all.yaml), which is how a maintainer
+# gets it before pushing; this workflow is the named check.
+#
+# WHAT RUNS: tests/executed-docs/pages-no-cluster.sh. Every bash block on
+# values-contract.md, customising.md, capabilities.md, configuration.md,
+# platform-management.md and verify.md is extracted by the harness's own
+# extract-block.sh and run, and what it prints is asserted against the success
+# condition the page states. Seven blocks that need a cluster, or the network,
+# are named in the log as skipped; they are not coverage. The script counts the
+# fences on each page, so a block added without a decision turns this red.
+#
+# "HERMETIC" HERE MEANS NO CLUSTER. It is not the selftest job's "no network":
+# tools/helm-deps.sh fetches the charts' pinned dependencies, as ci.yaml's first
+# job does, and that is the only network use. Everything else runs offline.
+#
+# THE SECOND STEP PROVES THE FIRST CAN GO RED: --selftest plants five mutations
+# in a copy of three pages (a broken command, an unclassified block, a vanished
+# section, a renamed placeholder, a wrong tag) and requires this same script to
+# fail on each, naming the finding.
+#
+# NOT PROVEN BY THIS JOB: that a block pastes into zsh (the pages tell macOS
+# readers to use it; tools/check-pasteable-blocks.sh holds the paste rules), that
+# verify.md's commands work on a real published tag (it runs against a fixture
+# repository and a throwaway key), and anything the skipped blocks cover.
+name: docs-no-cluster
+on:
+  pull_request:
+  push:
+    # release-* for the same reason as ci.yaml (TM-0775).
+    branches: [main, 'release-*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-no-cluster-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  pages:
+    name: the six no-cluster pages execute
+    # GitHub-hosted: safe against fork pull requests, and it needs no cluster.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: read the Helm pin from ci.yaml
+        shell: bash -euo pipefail {0}
+        run: |
+          # Renovate bumps HELM_VERSION in ci.yaml only; this file reads it there
+          # rather than carrying a copy that would drift (check-all.yaml does the same).
+          v="$(sed -n 's/^  HELM_VERSION: "\([^"]*\)".*/\1/p' .github/workflows/ci.yaml | head -1)"
+          [ -n "$v" ] || { echo "::error::HELM_VERSION not found in ci.yaml's env block"; exit 1; }
+          echo "HELM_VERSION=$v" >> "$GITHUB_ENV"
+          echo "HELM_VERSION=$v"
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: tools the pages use
+        shell: bash -euo pipefail {0}
+        run: |
+          python3 -c 'import yaml' 2>/dev/null || python3 -m pip install -q pyyaml
+          command -v jq >/dev/null || sudo apt-get install -y -q jq
+          echo "helm:       $(helm version --short)"
+          echo "jq:         $(jq --version)"
+          echo "git:        $(git --version)"
+          echo "ssh-keygen: $(ssh -V 2>&1)"
+          echo "python:     $(python3 --version) PyYAML $(python3 -c 'import yaml; print(yaml.__version__)')"
+
+      - name: chart dependencies
+        shell: bash -euo pipefail {0}
+        run: bash tools/helm-deps.sh
+
+      - name: every bash block on the six pages runs, and its output is asserted
+        shell: bash -euo pipefail {0}
+        run: bash tests/executed-docs/pages-no-cluster.sh
+
+      - name: the job goes red on a broken command, an unclassified block, a vanished section, a renamed placeholder and a wrong tag
+        shell: bash -euo pipefail {0}
+        run: bash tests/executed-docs/pages-no-cluster.sh --selftest

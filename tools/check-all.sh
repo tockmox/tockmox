@@ -368,6 +368,8 @@ run_gate "no pipe into grep -q under pipefail (a match must not read as a SIGPIP
 run_gate "the grep -q pipe gate goes red on every shape it names, and green on the fixed form" python3 tools/check-pipe-grep-q.py --selftest
 run_gate "no bare kubectl or helm in the executed-docs harness (TM-0797)" bash tools/check-harness-context.sh
 run_gate "the harness-context gate goes red on a bare call (TM-0797)" bash tools/check-harness-context.sh --selftest
+run_gate "the six no-cluster documentation pages execute: every bash block runs and its output is asserted (TM-0289; also docs-no-cluster.yaml)" bash tests/executed-docs/pages-no-cluster.sh
+run_gate "the no-cluster pages job goes red on a broken command, an unclassified block, a vanished section, a renamed placeholder and a wrong tag (TM-0289)" bash tests/executed-docs/pages-no-cluster.sh --selftest
 run_gate "a lanCIDR containing the clusterCIDR is refused when nodeOriginSources is set (TM-0790)" bash tools/check-lan-cidr-overlap.sh
 run_gate "garage.blockSize renders block_size only when set, above the tables (TM-0782)" bash tools/check-garage-block-size.sh
 run_gate "SSO blueprints are parseable YAML" bash tools/check-blueprint-discovery.sh

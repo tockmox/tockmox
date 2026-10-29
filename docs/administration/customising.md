@@ -96,9 +96,14 @@ push.
 helm template t charts/tockmox-observability \
   --set global.internalDomain=example.internal \
   --set global.lanCIDR=192.168.1.0/24 \
+  --set global.storageClass=longhorn \
   -f "$SITE_REPO/site/values/observability.yaml" \
   | grep retention_period
 ```
+
+`global.storageClass` is named because the observability layer refuses to render
+without one, and `longhorn` is the class it ships, so the render succeeds. Your
+own class is in `site/values/global.yaml`; this check does not read that file.
 
 The output is `retention_period: 720h`. If it is `168h`, your file is not being
 read or your key path is wrong, and no amount of committing will change that.
@@ -121,6 +126,7 @@ it:
 helm template t charts/tockmox-observability \
   --set global.internalDomain=example.internal \
   --set global.lanCIDR=192.168.1.0/24 \
+  --set global.storageClass=longhorn \
   -f "$SITE_REPO/site/values/observability.yaml" \
   | grep retention_enabled
 ```
@@ -331,10 +337,13 @@ confirm with the same `jsonpath` command, which should then print an object.
 ## What is not certified here
 
 The two render measurements on this page were executed on 2026-09-01 against the
-0.6.0 tree with Helm v3.16.3. **Nothing else on this page has been executed as
-written**: the success conditions describe what to look for, and the
-cluster-side ones in particular have not been walked end to end on a fresh
-deployment as part of publishing this page.
+0.6.0 tree with Helm v3.16.3. Since 2026-10-29 `tests/executed-docs/pages-no-cluster.sh`
+also runs the `SITE_REPO` check, both rung 1 renders and the rung 4 count
+comparison on every commit, against a fixture site repository, and asserts on
+what they print. **The other blocks have not been executed as written**: the
+cluster-side success conditions, and the `kustomize build` of rung 3, which
+fetches a published tag over the network, have not been walked end to end on a
+fresh deployment as part of publishing this page.
 
 The dashboard-replacement claim in rung 2 is explicitly a belief and is labelled
 as one. See the [testing standard](../testing-standard.md) for which paths are
@@ -352,6 +361,14 @@ covered by a real deploy.
 What this page used to say, and when it changed. Nothing here is needed to follow the page.
 
 <a id="history-the-render-and-compare-block"></a>
+
+### The rung 1 renders and the storage class
+
+Until 2026-10-29 the two rung 1 blocks did not name `global.storageClass`. The
+observability layer has refused to render without one since the storage contract,
+so both blocks printed an error and no `retention_period` or `retention_enabled`
+line, and the page's success condition read as "your file is not being read".
+The per-commit run of this page's blocks found it.
 
 ### The render-and-compare block
 
