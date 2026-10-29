@@ -21,6 +21,9 @@ WHAT IT DOES, ONCE:
   4. creates the bucket
   5. creates an access key, grants it read/write on the bucket
   6. writes the S3 credentials into a Secret the ObjectStore reads
+  6b. (drillRegister on) the restore-drill register: its own bucket, its own
+     key with read/write on that bucket only, its own Secret, copied to the
+     namespaces that run a drill (TM-0459)
   7. (Longhorn on) points Longhorn's backup target at the store
   8. (web serving on) for each static site: creates its bucket with a global
      alias equal to the site host, turns website access on, and, when the site
@@ -38,6 +41,25 @@ run again, knowing that anything holding the old key stops working.
 {{- $g := .Values.garage -}}
 {{- $name := "tockmox-garage" -}}
 {{- $sites := include "tockmox.garageWeb.sites" . | fromYamlArray -}}
+{{- /*
+THE RESTORE-DRILL REGISTER (TM-0459). Decided at render time like step 7, so the
+Role, the env and the script agree. The Secret is copied only to the namespaces
+that are BOTH on the register's list and in credentialsNamespaces: the copy
+target's Role is rendered from credentialsNamespaces, and a site that took
+`tockmox-authentik` out of it (identity off, as that list's comment says to) must
+not have its render refused by a key it never set.
+*/ -}}
+{{- $dr := $g.drillRegister | default dict -}}
+{{- $drOn := $dr.enabled | default false -}}
+{{- $drSecret := $dr.credentialsSecretName | default "tockmox-drill-register-credentials" -}}
+{{- $drBucket := $dr.bucket | default "tockmox-drill-register" -}}
+{{- $drNamespaces := list -}}
+{{- range ($dr.namespaces | default list) }}
+{{- if has . $g.credentialsNamespaces }}{{- $drNamespaces = append $drNamespaces . }}{{- end }}
+{{- end }}
+{{- if and $drOn (eq $drBucket $g.bucket) }}
+{{- fail "garage.drillRegister.bucket is the same bucket as garage.bucket. The register is a bucket of its own so that the key that writes evidence cannot touch the backups, and the key that writes backups cannot forge evidence." }}
+{{- end }}
 {{- /*
 STEP 7 (Longhorn's default BackupTarget -> the shipped Garage) RUNS ONLY WHEN IT
 IS WANTED, decided at render time so the Role, the Secret and the script all
@@ -159,7 +181,7 @@ rules:
     verbs: ["create"]
   - apiGroups: [""]
     resources: ["secrets"]
-    resourceNames: [{{ $g.secretName | quote }}, {{ $g.credentialsSecretName | quote }}, "tockmox-longhorn-backup"{{- range $sites }}{{- if .writerKey }}, {{ .secret | quote }}{{- end }}{{- end }}]
+    resourceNames: [{{ $g.secretName | quote }}, {{ $g.credentialsSecretName | quote }}, "tockmox-longhorn-backup"{{- if $drOn }}, {{ $drSecret | quote }}{{- end }}{{- range $sites }}{{- if .writerKey }}, {{ .secret | quote }}{{- end }}{{- end }}]
     verbs: ["get", "patch", "update"]
 {{- if $syncJobs }}
   # Step 9 starts one run of each site sync CronJob: read the CronJob it copies
@@ -254,7 +276,7 @@ rules:
     verbs: ["create"]
   - apiGroups: [""]
     resources: ["secrets"]
-    resourceNames: [{{ $g.credentialsSecretName | quote }}]
+    resourceNames: [{{ $g.credentialsSecretName | quote }}{{- if and $drOn (has $ns $drNamespaces) }}, {{ $drSecret | quote }}{{- end }}]
     verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -383,6 +405,12 @@ spec:
             # reach a Secret sitting here. One source, copied, beats an operator
             # copying it by hand and beats two Secrets that can drift.
             - { name: COPY_TO, value: {{ join " " $g.credentialsNamespaces | quote }} }
+{{- if $drOn }}
+            # Step 5b: the restore-drill register's bucket, Secret and copy targets.
+            - { name: DR_BUCKET, value: {{ $drBucket | quote }} }
+            - { name: DR_SEC,    value: {{ $drSecret | quote }} }
+            - { name: DR_COPY_TO, value: {{ join " " $drNamespaces | quote }} }
+{{- end }}
 {{- if $syncJobs }}
             # Step 9: one line per site sync CronJob: cronjob-name job-name.
             - name: SYNC_JOBS
@@ -520,6 +548,74 @@ spec:
                   --from-literal=REGION="$REGION"
                 say "wrote $CREDS"
               fi
+
+{{- if $drOn }}
+              # ---- 5b. the restore-drill register (TM-0459) ------------------
+              # A bucket of its own and a key of its own, so the drill that proves
+              # the backups holds no key to them, and the key that writes the
+              # backups cannot forge evidence. Garage grants per bucket (read,
+              # write, owner) and has no prefix scoping, so a separate bucket is
+              # the only way to narrow it. Same rules as step 5: check before
+              # create, never overwrite a credential, rotate by deleting the Secret.
+              if curl -s --max-time 10 -H "$AUTH" "$ADMIN/v2/GetBucketInfo?globalAlias=$DR_BUCKET" | grep -q '"id"'; then
+                say "register bucket $DR_BUCKET exists"
+              else
+                say "creating register bucket $DR_BUCKET"
+                curl -sf --max-time 15 -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+                  -d "{\"globalAlias\":\"$DR_BUCKET\"}" "$ADMIN/v2/CreateBucket" >/dev/null
+              fi
+              DRBID=$(curl -s --max-time 10 -H "$AUTH" "$ADMIN/v2/GetBucketInfo?globalAlias=$DR_BUCKET" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("id",""))')
+              [ -n "$DRBID" ] || { say "FAIL: no bucket id for $DR_BUCKET"; exit 1; }
+              if kubectl -n "$NS" get secret "$DR_SEC" >/dev/null 2>&1; then
+                say "register credentials $DR_SEC exist, leaving them alone"
+                if [ -z "$(kubectl -n "$NS" get secret "$DR_SEC" -o jsonpath='{.data.REGION}')" ]; then
+                  kubectl -n "$NS" patch secret "$DR_SEC" --type merge \
+                    -p "{\"stringData\":{\"REGION\":\"$REGION\"}}"
+                  say "added REGION to $DR_SEC"
+                fi
+              else
+                say "creating the register access key"
+                KEY=$(curl -sf --max-time 15 -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+                  -d "{\"name\":\"tockmox-drill-register\"}" "$ADMIN/v2/CreateKey")
+                AK=$(echo "$KEY" | python3 -c 'import sys,json;print(json.load(sys.stdin)["accessKeyId"])')
+                SK=$(echo "$KEY" | python3 -c 'import sys,json;print(json.load(sys.stdin)["secretAccessKey"])')
+                kubectl -n "$NS" create secret generic "$DR_SEC" \
+                  --from-literal=ACCESS_KEY_ID="$AK" \
+                  --from-literal=ACCESS_SECRET_KEY="$SK" \
+                  --from-literal=REGION="$REGION"
+                say "wrote $DR_SEC"
+              fi
+              # The grant is repeated on every run from the Secret's own key id (a grant is
+              # a set, so repeating it changes nothing), which also gives a recreated bucket
+              # its key back. A key this Garage does not know is logged, not fatal: the
+              # sync must not stall on it, and the drill FAILS LOUDLY on its first write.
+              AK=$(kubectl -n "$NS" get secret "$DR_SEC" -o jsonpath='{.data.ACCESS_KEY_ID}' | base64 -d)
+              if curl -sf --max-time 15 -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+                -d "{\"bucketId\":\"$DRBID\",\"accessKeyId\":\"$AK\",\"permissions\":{\"read\":true,\"write\":true,\"owner\":false}}" \
+                "$ADMIN/v2/AllowBucketKey" >/dev/null; then
+                say "register key has read/write on $DR_BUCKET only"
+              else
+                say "WARN: could not grant $AK on $DR_BUCKET (key unknown to this Garage?); the restore drill will fail on its first write until $DR_SEC is deleted and this Job re-run"
+              fi
+              for target in $DR_COPY_TO; do
+                [ "$target" = "$NS" ] && continue
+                if kubectl -n "$target" get secret "$DR_SEC" >/dev/null 2>&1; then
+                  say "$DR_SEC already present in $target"
+                  if [ -z "$(kubectl -n "$target" get secret "$DR_SEC" -o jsonpath='{.data.REGION}')" ]; then
+                    kubectl -n "$target" patch secret "$DR_SEC" --type merge \
+                      -p "{\"stringData\":{\"REGION\":\"$REGION\"}}"
+                    say "added REGION to $DR_SEC in $target"
+                  fi
+                else
+                  DRAK=$(kubectl -n "$NS" get secret "$DR_SEC" -o jsonpath='{.data.ACCESS_KEY_ID}' | base64 -d)
+                  DRSK=$(kubectl -n "$NS" get secret "$DR_SEC" -o jsonpath='{.data.ACCESS_SECRET_KEY}' | base64 -d)
+                  kubectl -n "$target" create secret generic "$DR_SEC" \
+                    --from-literal=ACCESS_KEY_ID="$DRAK" --from-literal=ACCESS_SECRET_KEY="$DRSK" \
+                    --from-literal=REGION="$REGION"
+                  say "copied $DR_SEC to $target"
+                fi
+              done
+{{- end }}
 
               # ---- 6. hand the credentials to the namespaces that consume them
               for target in $COPY_TO; do

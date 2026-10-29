@@ -751,6 +751,53 @@ section 6). A site that moved Open WebUI's database to CNPG names the Cluster in
 upgrade without the hook, for a database covered some other way or while the
 object store is down, set `modelGateway.upgradeBackup.enabled: false`.
 
+### The restore-drill register moved out of the ConfigMap (0.9.0)
+
+**Only if you run a restore drill** (`modelGateway.database.backup.restoreDrill`,
+and the identity database's, both on by default with backups). Nothing needs an
+edit in your site repo, and old rows are **not** carried across.
+
+Until 0.9.0 each drill wrote its dated PASS or FAIL row into a ConfigMap,
+`tockmox-restore-drill-register`, in its own namespace, cut to the last 24 rows.
+From 0.9.0 each run writes one JSON object to the `tockmox-drill-register` bucket
+of the shipped Garage and reads it back ([backup and restore](../operations/backup-restore.md#the-scheduled-drill-repeats-this-weekly)
+describes the object). It is a hard cut: the drills do not write the ConfigMap any
+more, nothing in the product reads it, and the drills' Role no longer grants
+access to ConfigMaps.
+
+What happens on the upgrade:
+
+1. The platform sync's bootstrap Job (a PostSync hook) creates the bucket, a key
+   with read and write on that bucket only, and the Secret
+   `tockmox-drill-register-credentials`, and copies the Secret to `tockmox-ai` and
+   `tockmox-authentik`. It never overwrites a Secret that exists. It runs after the
+   platform layer syncs, so a drill that starts between the AI or identity layer
+   syncing and that Job finishing has no Secret to mount: its pod does not start
+   and the Job fails at its deadline, which `TockmoxRestoreDrillFailed` reports.
+   The drills run weekly (Mondays), so this needs a coincidence; if it happens,
+   delete the failed Job and run the CronJob once by hand.
+2. The model gateway's network policy gains one rule, allowing the drill pod to
+   reach Garage's S3 port. The identity namespace has no egress policy.
+3. The first drill after the upgrade writes the first object. Until then the
+   register is empty, so a script or a habit that looked for the latest PASS in
+   the ConfigMap finds the old rows and nothing newer.
+
+The old rows stay where they are, in the ConfigMaps of `tockmox-ai` and
+`tockmox-authentik`, unchanged and no longer updated. Argo CD does not prune them
+(the chart never rendered them; the drill created them at run time). To keep the
+history, save each with `kubectl -n <namespace> get configmap
+tockmox-restore-drill-register -o yaml` into the site repository's records before
+removing it with `kubectl -n <namespace> delete configmap
+tockmox-restore-drill-register`; to drop it, delete it. A register object is
+read with the command in [backup and restore](../operations/backup-restore.md#the-scheduled-drill-repeats-this-weekly).
+
+A site that keeps its own S3 and declined Garage (`capabilities.dataProtection`
+off, or `garage.drillRegister.enabled: false`) has no register bucket or Secret
+from the platform layer. Point `restoreDrill.register.endpoint`, `.bucket` and
+`.credentialsSecretName` at the store and create the Secret
+(`ACCESS_KEY_ID`, `ACCESS_SECRET_KEY` and `REGION`, the region the store signs
+for) yourself; a drill with no Secret to mount fails its Job.
+
 ### The LiteLLM migrations Job gets a new name on upgrade to 0.8.0
 
 **Only if you run the model gateway (`apps.litellm`). Nothing to do if your

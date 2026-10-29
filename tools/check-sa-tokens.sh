@@ -41,7 +41,7 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
 # ALLOW LIST: <Kind> <name glob> # why this pod keeps a token. One per line.
 cat > "$tmp/allow.txt" <<'ALLOW'
-CronJob tockmox-litellm-db-drill   # restore drill: kubectl creates and deletes the drill Cluster, reads and patches the register ConfigMap (Role in restore-drill.yaml)
+CronJob tockmox-litellm-db-drill   # restore drill: kubectl creates and deletes the drill Cluster (Role in restore-drill.yaml); its register row goes to the object store, no ConfigMap access (TM-0459)
 CronJob tockmox-authentik-db-drill # identity restore drill (TM-0788): the same script and Role as the model gateway's, in the identity namespace (charts/tockmox-identity/templates/restore-drill.yaml)
 Job     tockmox-authentik-db-upgrade-guard # identity upgrade guard (TM-0788): lists PersistentVolumeClaims in its namespace before a sync and nothing else (list-only Role in authentik-db-upgrade-guard.yaml)
 Job     tockmox-garage-bootstrap   # bootstrap Job: kubectl reads and creates Secrets, patches the Longhorn BackupTarget, starts sync Jobs from CronJobs

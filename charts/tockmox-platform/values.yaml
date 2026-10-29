@@ -977,6 +977,37 @@ garage:
   #       pod-security.kubernetes.io/warn: restricted
   #       pod-security.kubernetes.io/audit: restricted
   credentialsNamespaceLabels: {}
+  # THE RESTORE-DRILL REGISTER (TM-0459). Each restore drill records its dated
+  # PASS or FAIL as one JSON object in a bucket of its own, and reads it back
+  # before the run may end as a PASS. The bootstrap Job (step 5b) creates the
+  # bucket and a key with read and write on THAT bucket only (not owner, and no
+  # reach into the backup bucket the drill is proving), writes the key into
+  # `credentialsSecretName`, and copies the Secret into each namespace below. The
+  # drills read it by those defaults (charts/tockmox-common, restoreDrill.register
+  # in the ai and identity layers); change a name here and change it there.
+  #
+  # Before 0.9.0 the row went into a ConfigMap (tockmox-restore-drill-register,
+  # cut to its last 24 rows). It is not migrated: see docs/deployment/upgrade.md.
+  #
+  # `enabled: false` creates no bucket, key or Secret. The drills then have nowhere
+  # to write and FAIL until `restoreDrill.register.*` in the ai and identity layers
+  # points them at a bucket and Secret of the site's own.
+  #
+  # THE REGISTER IS EXACTLY AS DURABLE AS THE BACKUPS IT DESCRIBES. This store is
+  # in the cluster and rides the same backups; docs/operations/backup-restore.md
+  # says what that means.
+  drillRegister:
+    enabled: true
+    bucket: tockmox-drill-register
+    credentialsSecretName: tockmox-drill-register-credentials
+    # Only the namespaces that run a drill: a key that can write the register can
+    # forge a PASS. The Secret is copied to the ones that are also in
+    # credentialsNamespaces above (the bootstrap's Role in a copy target comes
+    # from that list), so a site that took tockmox-authentik out of it because
+    # identity is off needs nothing here.
+    namespaces:
+      - tockmox-ai
+      - tockmox-authentik
   bootstrap:
     # A fresh Garage node answers 503 and stores nothing until a layout is
     # applied, and there is no manifest form for that. Turning this off means

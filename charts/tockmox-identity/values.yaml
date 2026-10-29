@@ -412,8 +412,8 @@ identity:
       # THE SCHEDULED RESTORE DRILL for this database (templates/restore-drill.
       # yaml): bootstraps a NEW cluster from the store, asserts recovery ended
       # and Authentik's user table came back with rows, writes a dated
-      # PASS/FAIL row to the tockmox-restore-drill-register ConfigMap in this
-      # namespace, and tears itself down. It never touches the live database.
+      # PASS/FAIL row to the drill register (an object in the object store, see
+      # `register` below), and tears itself down. It never touches the live database.
       # On when backups are on.
       restoreDrill:
         enabled: true
@@ -422,6 +422,20 @@ identity:
         schedule: "45 4 * * 1"
         suspend: false
         image: alpine/k8s:1.37.1
+        # WHERE THE DRILL RECORDS ITS ROW (TM-0459): one JSON object per run in
+        # a bucket of its own in the shipped Garage, read back and checksummed
+        # before the run may end as a PASS. A run whose row cannot be written or
+        # read back FAILS (non-zero exit, the reason in the Job's log and its
+        # termination message), so TockmoxRestoreDrillFailed pages. The platform
+        # layer's bootstrap creates the bucket and a key with read and write on
+        # it only (garage.drillRegister) and copies the Secret here. EMPTY uses
+        # those defaults; set all three to point at your own S3 instead (the
+        # Secret needs ACCESS_KEY_ID, ACCESS_SECRET_KEY and REGION: the signing
+        # region must be the store's own, and Garage's is `garage`).
+        register:
+          endpoint: ""                 # http://tockmox-garage.tockmox-platform.svc:3900
+          bucket: ""                   # tockmox-drill-register
+          credentialsSecretName: ""    # tockmox-drill-register-credentials
 
 sso:
   enabled: true

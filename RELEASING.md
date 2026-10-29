@@ -38,9 +38,9 @@ version bump it is almost always the benign case.
 
 Nothing reaches a tag without a **teardown-and-greenfield install of the exact
 tagged content** passing on a clean cluster: all layers Synced and Healthy,
-backup completed, restore drill PASS in the register, alert delivered to the
-notification topic. Assert on artifacts, not exit codes ... name a count or a
-specific row.
+backup completed, restore drill PASS in the register (an object in the
+`tockmox-drill-register` bucket), alert delivered to the notification topic.
+Assert on artifacts, not exit codes ... name a count or a specific row.
 
 Operator steps the docs require. A gate walker who skips one reads its symptom
 as a defect:

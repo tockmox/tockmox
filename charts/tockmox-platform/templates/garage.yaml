@@ -38,6 +38,8 @@ one Garage pod on upgrade for a key nobody set (TM-0782, default unchanged).
 {{- if eq ($g.dbEngine | default "sqlite") "sqlite" }}{{- $gsum = omit $gsum "dbEngine" -}}{{- end -}}
 {{- /* Namespace labels do not change the Garage config; keep them out of the pod-template checksum (TM-0815) so adding the key does not roll Garage. */ -}}
 {{- $gsum = omit $gsum "credentialsNamespaceLabels" -}}
+{{- /* The restore-drill register is a bucket, a key and two Secrets the bootstrap Job makes; none of it is in the Garage config, so it stays out of the hash too (TM-0459) and an upgrade does not restart the one Garage pod for it. */ -}}
+{{- $gsum = omit $gsum "drillRegister" -}}
 {{- if not (has ($g.dbEngine | default "sqlite") (list "sqlite" "lmdb")) -}}
 {{- fail (printf "garage.dbEngine must be \"sqlite\" or \"lmdb\", got %q" $g.dbEngine) -}}
 {{- end -}}
