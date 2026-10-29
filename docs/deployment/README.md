@@ -38,7 +38,7 @@ These pages take you from "what do I need" to a running install, and then to the
 | 4 | [Hardware sizing](sizing.md) | Four tiers with measured numbers, from one small box to a cluster you can lose a node from |
 | 5 | [Prepare a fresh cluster](fresh-install.md) | The recommended path: build a three-node or single-node k3s cluster with the settings Tockmox expects, install ArgoCD and sealed-secrets, and decide the four values |
 | 6 | [Prepare a cluster you already have](existing-cluster.md) | Six checks to run against an existing Kubernetes cluster before installing Tockmox, each with the condition that triggers it and how to tell it passed |
-| 7 | [Install a profile](profiles.md) | Deploy less than the full stack: pick one of the shipped profiles, pass it to every layer, and prove it removed what you expected |
+| 7 | [Install a profile](profiles.md) | Deploy less than the full stack, or claim resilience: pick one of the shipped profiles, pass it to every layer, and prove it did what you expected |
 
 ### Install
 

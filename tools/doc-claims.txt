@@ -270,7 +270,7 @@ states: [0-9]+ CI gates
 page:   tests/executed-docs/INVENTORY.md
 claim:  fenced bash blocks across
 test:   grep -rhE '^[ \t]*```bash$' docs/ | wc -l | tr -d ' '
-expect: 465
+expect: 467
 states: [0-9]+ fenced bash blocks
 
 # TM-0970, TM-0120 (2026-10-27): two sentences pinned so they cannot be edited

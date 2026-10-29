@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE RESILIENT PROFILE ... an install that can prove it survives losing the
+# cluster (TM-0597).
+#
+# Add it AFTER another profile, or after your own globals; it does not replace
+# one. It sets no footprint, no component and no storage class. It makes one
+# claim, `global.resilience.profile: resilient`, and turns on what the claim
+# needs. Pass it to every layer, the same way as minimal.yaml
+# (docs/deployment/profiles.md, "Pass it to every layer").
+#
+# WHAT THE CLAIM COSTS YOU. The layers that have a database backup then REFUSE
+# TO RENDER until the claim is true:
+#
+#   - the backup is on (the profile turns it on below);
+#   - the object-store endpoint is OUTSIDE the cluster. The shipped endpoint is
+#     the Garage inside the cluster, so a resilient install that has not named
+#     its own target stops here, on purpose: a backup that dies with the cluster
+#     is the thing this profile exists to refuse. An endpoint that is a .svc or
+#     .cluster.local name, a bare Service name, or a Service in one of the
+#     release's own namespaces is refused by name. What the check cannot see is
+#     listed in docs/deployment/profiles.md, "The resilient profile".
+#
+# And while the claim stands, two alerts watch the drill: one fires if the
+# restore drill is disabled, suspended or missing, and one fires from the first
+# sync until a drill has passed. A fresh resilient install therefore carries a
+# warning for up to a week, until the weekly drill runs once. That is the
+# point: "resilient" is unproven until a restore has been shown to work.
+#
+# YOU SUPPLY, in each layer's own values after this file (site/values/ai.yaml
+# and site/values/identity.yaml; the identity keys cannot ride in a file passed
+# to every layer, because the other layers' schemas do not know them): an
+# S3-compatible endpoint outside the cluster, its bucket and destinationPath,
+# the region it signs for, and the name of a Secret in that layer's namespace
+# holding the keys. The two templates are
+# ci/values-profile-resilient-tockmox-ai.yaml and
+# ci/values-profile-resilient-tockmox-identity.yaml (obvious placeholders, not
+# defaults).
+#
+# NOT COVERED, and the profile does not pretend to: the sealed-secrets private
+# key's backup (nothing in the cluster records that a human exported it;
+# docs/administration/secrets.md), the platform layer's Longhorn backup target,
+# and any ObjectStore you create yourself and name with objectStoreName (its
+# endpoint is in a resource these charts do not render).
+
+global:
+  resilience:
+    profile: resilient
+
+capabilities:
+  dataProtection:
+    enabled: true
+
+# The model gateway's database: backups on and the weekly drill scheduled. The
+# identity database follows the same two switches by default (backups follow
+# capabilities.dataProtection, the drill is on when backups are), so there is
+# nothing to set for it here; a site that turned either off in
+# site/values/identity.yaml is refused (backups) or alarmed (drill).
+modelGateway:
+  database:
+    backup:
+      enabled: true
+      restoreDrill:
+        enabled: true
+        suspend: false

@@ -57,6 +57,18 @@ for chart in $LAYERS; do
   helm template "$chart" "charts/$chart" -f ci/values.yaml -f ci/values-all-on.yaml > "$T/$chart.yaml" 2> "$T/$chart.err" \
     || { echo "check-kured-gate: REFUSING ... charts/$chart did not render: $(head -c 300 "$T/$chart.err")" >&2; exit 1; }
   RENDERED+=("$T/$chart.yaml")
+  # Alerts that render only under a PROFILE (TM-0597: the resilient profile's
+  # drill alarm) are invisible to the render above, so they would reach a
+  # cluster with no kured decision, and a ledger line for them would be
+  # reported as naming an alert that no longer renders. The profile is passed
+  # with the values a site supplies after it (ci/values-profile-<name>-<chart>.yaml).
+  for ov in ci/values-profile-*-"$chart".yaml; do
+    [ -f "$ov" ] || continue
+    pn="${ov#ci/values-profile-}"; pn="${pn%-"$chart".yaml}"
+    helm template "$chart" "charts/$chart" -f ci/values.yaml -f ci/values-all-on.yaml -f "profiles/$pn.yaml" -f "$ov" > "$T/$chart-profile-$pn.yaml" 2> "$T/$chart-profile-$pn.err" \
+      || { echo "check-kured-gate: REFUSING ... charts/$chart did not render under profiles/$pn.yaml: $(head -c 300 "$T/$chart-profile-$pn.err")" >&2; exit 1; }
+    RENDERED+=("$T/$chart-profile-$pn.yaml")
+  done
 done
 # THE BUNDLED-SERVER SHAPE OF THE IDENTITY LAYER (TM-0788). From 0.9.0 Authentik
 # runs on CNPG by default, and an install that keeps the bundled server (two

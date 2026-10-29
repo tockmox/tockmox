@@ -1,0 +1,101 @@
+{{- /*
+THE RESILIENT PROFILE'S EXISTENCE ALARM, identity database (TM-0597).
+
+Renders only while the install claims to be resilient
+(`global.resilience.profile: resilient`, set by profiles/resilient.yaml) and
+the observability capability is on. A stock install renders nothing here.
+
+WHY IT IS A FILE OF ITS OWN. The drill's freshness rules live in
+templates/restore-drill.yaml and render only while the drill does. A disabled
+drill (`restoreDrill.enabled: false`) therefore renders no CronJob, no Job and
+no rule: kube-state-metrics has no drill series at all, and every freshness
+rule is a rule over nothing. Absence and health look identical from the metrics
+side, so a resilient install with the drill off read GREEN. These two rules are
+the existence alarm for that case, and they render whether the drill does or
+not.
+
+WHERE THEY LOOK. At the drill CronJob and its Jobs as kube-state-metrics
+reports them (kube_cronjob_info, kube_cronjob_spec_suspend,
+kube_job_status_succeeded), never at the drill register. The register moved
+from a ConfigMap to the object store (TM-0459) and is not a thing a rule over
+cluster metrics can read, so these rules neither depend on where the row is
+kept nor on the drill's script. A drill Job that SUCCEEDED is a drill that
+recorded its row once the register move lands: the drill then exits non-zero
+when the row cannot be written or read back.
+
+THE `count(kube_namespace_status_phase...)` ARM is the scrape guard, the same
+shape as the Argo CD rules in the observability layer: it is true whenever
+kube-state-metrics is being scraped and this namespace exists, so a dead
+kube-state-metrics (which alerts on its own) cannot make every drill look
+absent.
+*/ -}}
+{{- if include "tockmox.resilience.claimed" . -}}
+{{- if and .Values.capabilities.observability.enabled (include "tockmox.appEnabled" (dict "ctx" . "app" "authentik")) }}
+{{- $db := .Values.identity.database -}}
+{{- $ns := .Values.namespaces.identity -}}
+{{- $drillName := printf "%s-drill" $db.name -}}
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $drillName }}-resilient
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: tockmox.identity.resilient-profile
+      interval: 5m
+      rules:
+        - alert: TockmoxResilientDrillAbsent
+          # THE EXISTENCE ARM. The profile says "resilient", which promises a
+          # scheduled restore drill, and there is no drill CronJob (disabled,
+          # never synced, or deleted) or it is suspended. A suspended CronJob
+          # still has its series, so absence alone would miss it.
+          expr: >-
+            (
+              absent(kube_cronjob_info{namespace={{ $ns | quote }}, cronjob={{ $drillName | quote }}})
+              or on ()
+              max by (namespace, cronjob) (kube_cronjob_spec_suspend{namespace={{ $ns | quote }}, cronjob={{ $drillName | quote }}} == 1)
+            )
+            and on ()
+            (count(kube_namespace_status_phase{namespace={{ $ns | quote }}}) > 0)
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "This install claims to be resilient and has no running restore drill"
+            description: >-
+              global.resilience.profile is resilient, which promises a
+              scheduled restore drill for Authentik's database, and the drill CronJob
+              {{ $drillName }} does not exist or is suspended. A backup that
+              has never been restored is a hope, not a backup. Enable it (identity.database.backup.restoreDrill.enabled), or, on the bundled server, which has no drill, move Authentik's database to CloudNativePG (docs/deployment/upgrade.md).
+        - alert: TockmoxResilientNoPassingDrill
+          # THE "UNTIL THE FIRST DRILL PASSES" ARM. Fires on a fresh resilient
+          # install and stays until one drill Job has succeeded, whatever the
+          # drill's schedule: the freshness rules wait for the first slot to
+          # pass, and under a resilient claim waiting is the thing being
+          # refused. It also covers the disabled drill (no Job can ever
+          # succeed). Clears the moment a drill Job succeeds.
+          expr: >-
+            absent(
+              kube_job_status_completion_time{namespace={{ $ns | quote }}, job_name=~"{{ $drillName }}-.*"}
+              and on (namespace, job_name)
+              kube_job_status_succeeded{namespace={{ $ns | quote }}, job_name=~"{{ $drillName }}-.*"} > 0
+            )
+            and on ()
+            (count(kube_namespace_status_phase{namespace={{ $ns | quote }}}) > 0)
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "This install claims to be resilient and no restore drill has passed"
+            description: >-
+              global.resilience.profile is resilient and no drill Job for
+              Authentik's database has ever succeeded. The claim is unproven until one
+              has. The drill runs on its weekly schedule; to run it now,
+              `kubectl -n {{ $ns }} create job --from=cronjob/{{ $drillName }} {{ $drillName }}-first`
+              and read its log. If the drill is disabled, turn it on
+              (identity.database.backup.restoreDrill.enabled).
+{{- end }}
+{{- end }}

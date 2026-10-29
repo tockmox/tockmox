@@ -36,6 +36,30 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **A resilient profile that refuses to present itself as resilient without an
+  off-cluster backup target (TM-0597).** `profiles/resilient.yaml`, added after
+  another profile, sets a new `global.resilience.profile: resilient`
+  (`provisional`, ruled 2026-10-29, ruled again by 0.10.0) and turns database
+  backups and the weekly restore drill on. `tockmox-ai` and `tockmox-identity`
+  then refuse to render, naming the reason, when the claim is made and the
+  backups are off or their `endpoint` is inside the cluster's DNS (empty, a
+  `.svc` or `.cluster.local` name, a bare Service name, a `<service>.<namespace>`
+  pair in a `tockmox-*`, `default` or `kube-system` namespace or the release's
+  own, or a loopback address); the shipped Garage endpoint is refused, so a
+  resilient install has to name its own target. Two alerts render only under the
+  claim and read kube-state-metrics' view of the drill CronJob and its Jobs, not
+  the drill register: `TockmoxResilientDrillAbsent` (no drill CronJob, or it is
+  suspended: a disabled drill rendered no alert at all, so absence read green)
+  and `TockmoxResilientNoPassingDrill` (no drill Job has ever succeeded, so a
+  fresh resilient install carries a warning until its first drill passes).
+  `tools/check-resilient-profile.sh` holds the refusals and the alarm, and
+  `tests/rules/resilient-profile.yaml` fires and silences the alerts. **A
+  stock install is unchanged** (the render is byte-identical). The test reads
+  one string at render time: a NAS behind an ExternalName Service, an IP that is
+  a cluster address, an `objectStoreName` you created yourself, the Longhorn
+  backup target and the sealed-secrets key backup are not checked, and
+  `docs/deployment/profiles.md`, "The resilient profile", lists each.
+
 - **Opt-in CoreDNS high availability for a cluster of three or more nodes.**
   `apps.corednsHa.enabled: true` (off by default, `provisional`) renders a
   HorizontalPodAutoscaler with a replica floor and a PodDisruptionBudget with

@@ -1,0 +1,44 @@
+{{- /*
+THE RESILIENT PROFILE'S REFUSAL, identity database (TM-0597).
+
+Renders nothing. It exists to FAIL the render, and only when the install
+claims to be resilient (`global.resilience.profile: resilient`, set by
+profiles/resilient.yaml) and Authentik's database is not backed up to
+somewhere that survives the cluster. A stock install never enters this file's
+body, which is what keeps its render byte-identical.
+
+Authentik's database has two shapes and each is checked in its own terms:
+  - on CloudNativePG (`identity.database.enabled`, the 0.9.0 default): backups
+    must be on, and the ObjectStore this chart renders must name an endpoint
+    outside the cluster's DNS.
+  - the bundled server kept (`authentik.postgresql.enabled`): its backup is the
+    nightly pg_dump bridge (`databaseBackup`), which must be on and must name
+    an endpoint outside the cluster's DNS. This shape has no restore drill; the
+    absence alarm in resilience-alerts.yaml says so for as long as the claim
+    stands.
+
+NOT CHECKED, said here so the omission is a decision: when
+`identity.database.backup.objectStoreName` names an ObjectStore you created,
+its endpoint lives in a CR this chart does not render and cannot read, so it is
+accepted as given. docs/deployment/profiles.md lists it.
+*/ -}}
+{{- if include "tockmox.resilience.claimed" . -}}
+{{- if include "tockmox.appEnabled" (dict "ctx" . "app" "authentik") -}}
+{{- if include "tockmox-identity.cnpgOn" . -}}
+{{- $db := .Values.identity.database -}}
+{{- if not (include "tockmox-identity.dbBackupEnabled" .) -}}
+{{- fail "global.resilience.profile is resilient, but the identity database's backups are off (identity.database.backup.enabled is false, or capabilities.dataProtection is). A resilient install is backed up; set backup.enabled to true or remove the resilient profile. See docs/deployment/profiles.md, \"The resilient profile\"." -}}
+{{- end -}}
+{{- $os := $db.backup.objectStore | default dict -}}
+{{- if and $os.create (not $db.backup.objectStoreName) -}}
+{{- include "tockmox.resilience.requireOffClusterTarget" (dict "ctx" . "key" "identity.database.backup.objectStore.endpoint" "value" $os.endpoint) -}}
+{{- end -}}
+{{- else if include "tockmox-identity.bundledOn" . -}}
+{{- $br := .Values.databaseBackup | default dict -}}
+{{- if not (and .Values.capabilities.dataProtection.enabled ($br.enabled | default false)) -}}
+{{- fail "global.resilience.profile is resilient, but the bundled Authentik server's backup (the pg_dump bridge) is off (databaseBackup.enabled is false, or capabilities.dataProtection is). A resilient install is backed up; set databaseBackup.enabled to true or remove the resilient profile. See docs/deployment/profiles.md, \"The resilient profile\"." -}}
+{{- end -}}
+{{- include "tockmox.resilience.requireOffClusterTarget" (dict "ctx" . "key" "databaseBackup.endpoint" "value" $br.endpoint) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}

@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# What a site supplies to the AI layer for profiles/resilient.yaml, as obvious
+# placeholders (TM-0597).
+#
+# The resilient profile makes the layers that have a database backup refuse to
+# render until the backup endpoint is an address outside the cluster. A gate
+# that renders every profile across every layer (tools/check-storage-policy.sh)
+# needs the profile to render, so it passes THIS file after the profile, the way
+# a site's own values would follow it. `.example.net` is reserved for
+# documentation (RFC 2606); nothing here resolves and nothing is a secret.
+#
+# Passed after profiles/<name>.yaml to the layer <layer> when
+# ci/values-profile-<name>-<layer>.yaml exists. One file per layer because the
+# identity keys cannot ride in a file every layer reads.
+
+modelGateway:
+  database:
+    backup:
+      objectStore:
+        endpoint: https://s3.offsite.example.net
+        region: us-east-1
+        bucket: example-offsite-backups
+        credentialsSecretName: offsite-s3-credentials
+        destinationPath: s3://example-offsite-backups/litellm-db
