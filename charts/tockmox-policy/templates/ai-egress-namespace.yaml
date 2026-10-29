@@ -19,7 +19,7 @@ deny cannot ship without:
   allow-egress-dns              kube-dns 53, every pod
   allow-egress-intra-namespace  the namespace itself, every pod not labelled tockmox.com/isolated
   allow-egress-cnpg             CNPG pods: Kubernetes API, Garage S3 (3900)
-  allow-egress-restore-drill    the drill's kubectl: Kubernetes API
+  allow-egress-restore-drill    the drill's kubectl: Kubernetes API; its register write: Garage S3 (3900)
   allow-egress-gateway-key      the console-key Job's kubectl: Kubernetes API (TM-0460)
   allow-egress-console-key-check  the console-key check: the model gateway, port 4000 (TM-0982)
   allow-egress-litellm          both gateways (production, eval): provider egress, LAN/cluster excluded
@@ -168,9 +168,14 @@ spec:
     {{- end }}
 ---
 # The weekly restore drill's CronJob pod runs kubectl: it creates the drill
-# Cluster, waits on it, patches the register ConfigMap and deletes the Cluster
-# (templates/restore-drill.yaml in the ai layer). It needs the API and nothing
-# else beyond the namespace. Inert where the drill is off.
+# Cluster, waits on it and deletes the Cluster, then writes its dated row to the
+# register bucket in the shipped Garage and reads it back (templates/
+# restore-drill.yaml in the ai layer, TM-0459). It needs the API, and Garage's S3
+# port 3900 in the platform namespace (the same path the CNPG pods above use;
+# the platform namespace's allow-s3-from-backup-clients already admits this
+# namespace), and nothing else beyond the namespace. Without the Garage rule the
+# row could not be written and every drill would FAIL, loudly. Inert where the
+# drill is off.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -202,6 +207,16 @@ spec:
           port: 443
         - protocol: TCP
           port: 6443
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.platform }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tockmox-garage
+      ports:
+        - protocol: TCP
+          port: 3900
 ---
 # The console-key Job (templates/gateway-key.yaml in the ai layer, TM-0460) runs
 # kubectl once: it reads and creates the console's virtual-key Secret. The

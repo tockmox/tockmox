@@ -51,7 +51,7 @@ it survives the loss of the first site.
 **Not carried by any of them,** so absent on the second site until it makes them
 again: metrics and log history, Grafana changes made in its UI, Alertmanager
 silences, the notification topic's history, the contents of the shipped object
-store, the restore-drill register's history, and any volume with no Longhorn
+store (the restore-drill register is an object in it, so its history is not carried either), and any volume with no Longhorn
 backup. The last one is yours to check; the readiness check below counts the
 backups that exist.
 

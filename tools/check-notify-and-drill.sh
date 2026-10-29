@@ -37,10 +37,21 @@
 # D3  A drill that FAILS says why on its register row (HL-0863). A pod that dies in seconds is gone before
 #     Alloy tails it, so the row is the only record: the Kubernetes API's own refusal text after `apply
 #     refused:`, the readiness wait's output and the cluster's phase after `cluster never became Ready`,
-#     on one line (no newline, no `=`, no double quote, no backslash, 240 characters), and the register
-#     patch the row travels in stays valid JSON. Both drills (model gateway, identity), run against the stub.
+#     on one line (no newline, no `=`, no double quote, no backslash, 240 characters), and the object the
+#     row travels in stays valid JSON. Both drills (model gateway, identity), run against the stub.
+# D4  The register is an object in the object store, not a ConfigMap (TM-0459), and a drill that cannot
+#     record its verdict FAILS. Both drills are run against a stand-in S3 that verifies SigV4 the way Garage
+#     does (key, secret, and the signing region, which must be the store's own): a PASS is written, read
+#     back and checksummed; a FAIL verdict is recorded too; and a write refused (403), a wrong key, a wrong
+#     secret, a wrong signing region (400), an unreachable store, an empty REGION, an object that rots
+#     between the write and the read, a write acknowledged but not stored, and a read that errors each end
+#     the run NON-ZERO with the reason in the log, whatever the restore's own verdict was. Thirty runs leave
+#     thirty objects (no row-count cap). No ConfigMap is written or granted. The two drills carry ONE copy of
+#     the writer, and the bucket and Secret names they default to are the ones the platform layer's bootstrap
+#     creates. The same writer was also run against a real Garage v2.4.1, outside this gate (the PR body).
 #
-# LIMIT: no cluster. Whether CNPG accepts recoveryTarget.backupID from the
+# LIMIT: no cluster, and the S3 here is a stand-in; the real-Garage run is the PR's, not this gate's. Whether
+# CNPG accepts recoveryTarget.backupID from the
 # barman-cloud plugin path, and that a Backup CR's status.backupId names what
 # the store holds, are the lab's to prove.
 # shellcheck disable=SC2015  # "check && echo ok || { echo FAIL; rc=1; }" is this file's idiom; the echo never fails
@@ -73,10 +84,18 @@ for d in yaml.safe_load_all(open(f"{t}/obs.yaml")):
         ok = (len(mnt) == 1 and "subPath" not in mnt[0] and len(vol) == 1 and vol[0]["secret"].get("optional") is True
               and len(env) == 1 and env[0]["name"] == vol[0]["secret"]["secretName"])
         open(f"{t}/ntfy.wiring", "w").write(("ok " + mnt[0]["mountPath"]) if ok else "bad")
-for src, out in (("ai.yaml", "drill.sh"), ("id.yaml", "id-drill.sh")):
+import json
+facts = {}
+for src, out, tag in (("ai.yaml", "drill.sh", "gateway"), ("id.yaml", "id-drill.sh", "identity")):
     for d in yaml.safe_load_all(open(f"{t}/{src}")):
         if d and d["kind"] == "CronJob" and d["metadata"]["name"].endswith("-drill"):
-            open(f"{t}/{out}", "w").write(d["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]["args"][0])
+            pod = d["spec"]["jobTemplate"]["spec"]["template"]["spec"]; c = pod["containers"][0]
+            open(f"{t}/{out}", "w").write(c["args"][0])
+            facts[tag] = {"env": {e["name"]: e for e in c.get("env") or []}, "policy": c.get("terminationMessagePolicy"),
+                          "mounts": [m["name"] for m in c.get("volumeMounts") or []], "volumes": [v["name"] for v in pod.get("volumes") or []]}
+        if d and d["kind"] == "Role" and d["metadata"]["name"] == "tockmox-restore-drill":
+            facts.setdefault(tag + "-role", d["rules"])
+open(f"{t}/drill.facts.json", "w").write(json.dumps(facts))
 PY
 [ -s "$T/bridge.py" ] && [ -s "$T/drill.sh" ] && [ -s "$T/id-drill.sh" ] || { echo "check-notify-and-drill: bridge, drill or identity drill not rendered" >&2; exit 1; }
 
@@ -151,28 +170,110 @@ n1() { # liveness script
 mkdir -p "$T/bin"
 cat > "$T/bin/kubectl" <<'SH'
 #!/bin/sh
-# Stub: records what the drill does. WAIT_RC, WAIT_MSG, CLUSTER_PHASE, APPLY_RC and APPLY_MSG steer it;
-# the register patch's JSON body lands in patched.json.
+# Stub: records what the drill does. WAIT_RC, WAIT_MSG, CLUSTER_PHASE, APPLY_RC and APPLY_MSG steer it.
+# It has NO verb for a ConfigMap: the register is an object in the object store (D4), and a drill that
+# still reached for one would get the stub's catch-all (exit 0, nothing) and be caught by D4's scan instead.
 case "$*" in
   *"get backups.postgresql.cnpg.io"*) cat "$STUB_DIR/backups.json" ;;
   *"get cluster.postgresql.cnpg.io"*imageName*) cat "$STUB_DIR/image" 2>/dev/null || exit 1 ;;
   *"get cluster.postgresql.cnpg.io"*phase*) printf '%s' "${CLUSTER_PHASE:-}" ;;
-  *"get configmap"*jsonpath*) cat "$STUB_DIR/register" 2>/dev/null || true ;;
-  *"get configmap"*) exit 0 ;;
   *apply\ -f*) cat > "$STUB_DIR/applied.yaml"; [ -z "${APPLY_MSG:-}" ] || printf '%s\n' "$APPLY_MSG" >&2; exit "${APPLY_RC:-0}" ;;
   *" wait "*) [ -z "${WAIT_MSG:-}" ] || printf '%s\n' "$WAIT_MSG" >&2; exit "${WAIT_RC:-0}" ;;
   *" exec "*) n=$(cat "$STUB_DIR/n" 2>/dev/null || echo 0); echo $((n+1)) > "$STUB_DIR/n"
               # 1st: pg_is_in_recovery, 2nd: public tables, 3rd (identity only): users.
               if [ "$n" = 0 ]; then echo f; elif [ "$n" = 1 ]; then echo 86; else echo "${USERS:-6}"; fi ;;
-  *" patch "*) for last in "$@"; do :; done; printf '%s' "$last" > "$STUB_DIR/patched.json" ;;
 esac
 exit 0
 SH
 chmod +x "$T/bin/kubectl"
+# The register's store: a stand-in S3 that verifies SigV4 (access key, secret, signing region) as Garage does.
+# Its code is a heredoc below; `mode` in $S3DIR steers it (ok, refuse, corrupt, lie, getfail).
+cat > "$T/s3stub.py" <<'PY'
+import hashlib, hmac, http.server, os, sys, urllib.parse
+# argv: port dir access-key secret-key region
+#   mode (a file in dir): ok = store what is PUT and return it | refuse = every PUT 403 | corrupt = store it
+#   right, return it with one byte changed (the object rots between the write and the read) | lie = PUT 200,
+#   nothing stored | getfail = store it, every GET 500
+port, root, AK, SK, REGION = int(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+def hm(k, m): return hmac.new(k, m.encode(), hashlib.sha256).digest()
+class H(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    def log_message(self, *a): pass
+    def mode(self):
+        try: return open(os.path.join(root, "mode")).read().strip()
+        except OSError: return "ok"
+    def reply(self, code, body=b"", ctype="application/xml"):
+        self.send_response(code); self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Type", ctype); self.end_headers()
+        if self.command != "HEAD": self.wfile.write(body)
+    def err(self, code, name, msg):
+        self.reply(code, ("<?xml version=\"1.0\"?><Error><Code>%s</Code><Message>%s</Message><Region>%s</Region></Error>" % (name, msg, REGION)).encode())
+    def auth(self, payload):
+        a = self.headers.get("Authorization", "")
+        if not a.startswith("AWS4-HMAC-SHA256 "): self.err(403, "AccessDenied", "no signature"); return False
+        f = dict(x.strip().split("=", 1) for x in a[len("AWS4-HMAC-SHA256 "):].split(","))
+        ak, date, region, svc, term = f["Credential"].split("/")
+        if region != REGION:
+            self.err(400, "AuthorizationHeaderMalformed", "Authorization header malformed, unexpected scope: '%s/%s/%s/%s', expected: '%s/%s/s3/aws4_request'" % (date, region, svc, term, date, REGION)); return False
+        if ak != AK: self.err(403, "InvalidAccessKeyId", "No such key: %s" % ak); return False
+        ch = "".join("%s:%s\n" % (h, " ".join(self.headers.get(h, "").split())) for h in f["SignedHeaders"].split(";"))
+        ph = self.headers.get("x-amz-content-sha256") or "UNSIGNED-PAYLOAD"
+        path, _, q = self.path.partition("?")
+        cr = "\n".join([self.command, urllib.parse.quote(urllib.parse.unquote(path), safe="/-_.~"), q, ch, f["SignedHeaders"], ph])
+        sts = "\n".join(["AWS4-HMAC-SHA256", self.headers.get("x-amz-date"), "%s/%s/%s/%s" % (date, region, svc, term), hashlib.sha256(cr.encode()).hexdigest()])
+        k = hm(hm(hm(hm(("AWS4" + SK).encode(), date), region), svc), term)
+        if not hmac.compare_digest(hmac.new(k, sts.encode(), hashlib.sha256).hexdigest(), f["Signature"]):
+            self.err(403, "AccessDenied", "Forbidden: Invalid signature"); return False
+        if self.command == "PUT" and ph != "UNSIGNED-PAYLOAD" and ph != hashlib.sha256(payload).hexdigest():
+            self.err(400, "XAmzContentSHA256Mismatch", "payload hash differs"); return False
+        return True
+    def target(self): return os.path.join(root, "objects", urllib.parse.unquote(self.path.partition("?")[0]).lstrip("/"))
+    def do_PUT(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        if not self.auth(body): return
+        m = self.mode()
+        if m == "refuse": return self.err(403, "AccessDenied", "Forbidden: bucket policy")
+        if m != "lie":
+            t = self.target(); os.makedirs(os.path.dirname(t), exist_ok=True); open(t, "wb").write(body)
+        self.reply(200)
+    def do_GET(self):
+        if not self.auth(b""): return
+        m = self.mode()
+        if m == "getfail": return self.err(500, "InternalError", "stub getfail")
+        t = self.target()
+        if not os.path.isfile(t): return self.err(404, "NoSuchKey", "The specified key does not exist.")
+        b = open(t, "rb").read()
+        if m == "corrupt": b = b[:-2] + (b"X" if b[-2:-1] != b"X" else b"Y") + b[-1:]
+        self.reply(200, b, "application/json")
+    do_HEAD = do_GET
+http.server.ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()
+PY
+S3DIR="$T/s3"; mkdir -p "$S3DIR"; S3PORT=$((20000 + RANDOM % 20000))
+python3 "$T/s3stub.py" "$S3PORT" "$S3DIR" GKdrilltest SECRETdrilltest garage &
+for _ in $(seq 50); do curl -s -o /dev/null "http://127.0.0.1:$S3PORT/" && break; sleep 0.1; done
+# What the drill pod gets from its env (the chart's Secret and defaults), pointed at the stand-in.
+export REG_ENDPOINT="http://127.0.0.1:$S3PORT" REG_BUCKET=tockmox-drill-register REG_AK=GKdrilltest REG_SK=SECRETdrilltest \
+  REG_REGION=garage REG_JOB=tockmox-drill-29000000 REG_CHART_VERSION=tockmox-test-0
+# A clock that moves one second per stamp, so no two runs write the same key (a real drill runs weekly).
+cat > "$T/bin/date" <<'SH'
+#!/bin/sh
+case "$*" in
+  *%Y-%m-%dT%H:%M:%SZ*) n=$(cat "$STUB_CLOCK" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$STUB_CLOCK"
+                        printf '2026-11-%02dT04:%02d:%02dZ\n' $(( (n-1)/3600 + 1 )) $(( ((n-1)%3600)/60 )) $(( (n-1)%60 )) ;;
+  *) exec /bin/date "$@" ;;
+esac
+SH
+chmod +x "$T/bin/date"; export STUB_CLOCK="$T/clock"
+drill_exec() { # dir script [VAR=value ...]: run the script, keep its output, exit code and the objects it wrote
+  local d="$1" s="$2" rc=0; shift 2
+  [ -n "${KEEP_S3:-}" ] || rm -rf "$S3DIR/objects"
+  env STUB_DIR="$d" "$@" PATH="$T/bin:$PATH" sh "$s" > "$d/out" 2>&1 || rc=$?
+  echo "$rc" > "$d/rc"; rm -rf "$d/s3"; [ ! -d "$S3DIR/objects" ] || cp -r "$S3DIR/objects" "$d/s3"
+}
 drill_run() { # script, backups.json, wait_rc, out dir, [source image], [users]
   local d="$4"; rm -rf "$d"; mkdir -p "$d"; cp "$2" "$d/backups.json"
   [ -n "${5:-}" ] && printf '%s' "$5" > "$d/image"
-  STUB_DIR="$d" WAIT_RC="$3" USERS="${6:-6}" PATH="$T/bin:$PATH" sh "$1" > "$d/out" 2>&1 || true
+  drill_exec "$d" "$1" WAIT_RC="$3" USERS="${6:-6}"
 }
 cat > "$T/two.json" <<'JSON'
 {"items":[
@@ -208,25 +309,25 @@ PY
 REFUSAL=$(printf 'Error from server (Forbidden): clusters.postgresql.cnpg.io is forbidden: User "system:serviceaccount:a:b" cannot create resource "clusters" in API group "postgresql.cnpg.io" in the namespace x=y\\z\nsecond\tline')
 LONG=$(python3 -c 'print("e" * 400)')
 d3() { # script, expected apply-refusal prefix check mode (gateway|identity)
-  local s="$1" d
-  d="$T/d3.apply"; rm -rf "$d"; mkdir -p "$d"; cp "$T/two.json" "$d/backups.json"
-  [ "$2" = identity ] && cp "$T/id-two.json" "$d/backups.json"
-  STUB_DIR="$d" APPLY_RC=1 APPLY_MSG="$REFUSAL" PATH="$T/bin:$PATH" sh "$s" > "$d/out" 2>&1 || true
-  d="$T/d3.wait"; rm -rf "$d"; mkdir -p "$d"; cp "$T/two.json" "$d/backups.json"
-  [ "$2" = identity ] && cp "$T/id-two.json" "$d/backups.json"
-  STUB_DIR="$d" WAIT_RC=1 CLUSTER_PHASE="Setting up primary" WAIT_MSG="error: timed out waiting for the condition on clusters/x" PATH="$T/bin:$PATH" sh "$s" > "$d/out" 2>&1 || true
-  d="$T/d3.long"; rm -rf "$d"; mkdir -p "$d"; cp "$T/two.json" "$d/backups.json"
-  [ "$2" = identity ] && cp "$T/id-two.json" "$d/backups.json"
-  STUB_DIR="$d" APPLY_RC=1 APPLY_MSG="$LONG" PATH="$T/bin:$PATH" sh "$s" > "$d/out" 2>&1 || true
+  local s="$1" d bj="two.json"
+  [ "$2" = identity ] && bj="id-two.json"
+  d="$T/d3.apply"; rm -rf "$d"; mkdir -p "$d"; cp "$T/$bj" "$d/backups.json"
+  drill_exec "$d" "$s" APPLY_RC=1 APPLY_MSG="$REFUSAL"
+  d="$T/d3.wait"; rm -rf "$d"; mkdir -p "$d"; cp "$T/$bj" "$d/backups.json"
+  drill_exec "$d" "$s" WAIT_RC=1 CLUSTER_PHASE="Setting up primary" WAIT_MSG="error: timed out waiting for the condition on clusters/x"
+  d="$T/d3.long"; rm -rf "$d"; mkdir -p "$d"; cp "$T/$bj" "$d/backups.json"
+  drill_exec "$d" "$s" APPLY_RC=1 APPLY_MSG="$LONG"
   python3 - "$T" 2>/dev/null <<'PY' || return 1
-import sys, json, re
+import sys, json, re, glob
 t = sys.argv[1]
 def row(sub):
-    r = [l for l in open(f"{t}/{sub}/out").read().splitlines() if l.startswith("register: ")]
+    r = [l for l in open(f"{t}/{sub}/out").read().splitlines() if l.startswith("register: ") and " FAIL " in l]
     assert len(r) == 1, (sub, r)
     return r[0][len("register: "):]
-def patched(sub):
-    return json.loads(open(f"{t}/{sub}/patched.json").read())["data"]["register"]
+def recorded(sub):                      # the object the row travels in: valid JSON, and it carries the row verbatim
+    o = glob.glob(f"{t}/{sub}/s3/*/*/*.json")
+    assert len(o) == 1, (sub, o)
+    return json.loads(open(o[0]).read())
 a = row("d3.apply")
 m = re.match(r"^\S+ FAIL apply refused: (.*) backup=\S+$", a)
 assert m, a
@@ -234,13 +335,14 @@ msg = m.group(1)
 assert "Forbidden" in msg and "cannot create resource" in msg and "clusters" in msg, msg
 assert '"' not in msg and "=" not in msg and "\\" not in msg and "\t" not in msg, msg
 assert a.count("=") == 1, a                      # only backup=<id>: no later key=value field is forged
-assert a in patched("d3.apply"), "the register patch lost the row"
+assert recorded("d3.apply")["row"] == a, "the register object lost the row"
 w = row("d3.wait")
 assert re.match(r"^\S+ FAIL cluster never became Ready \(phase: Setting up primary\): error: timed out waiting for the condition on clusters/x backup=\S+$", w), w
-assert w in patched("d3.wait"), "the register patch lost the row"
+assert recorded("d3.wait")["row"] == w, "the register object lost the row"
 l = row("d3.long")
 m = re.match(r"^\S+ FAIL apply refused: (.*) backup=\S+$", l)
 assert m and 1 <= len(m.group(1)) <= 240, (len(m.group(1)) if m else l)
+assert recorded("d3.long")["detail"].startswith("apply refused: ")
 PY
 }
 
@@ -270,6 +372,114 @@ PY
   grep -q '^register: .* FAIL in_recovery=f public_tables=86 users=0 backup=20261027T032000$' "$T/i.empty/out" || return 1
 }
 
+# ---- D4 ---------------------------------------------------------------------
+# The register is an object, and a drill that cannot record its verdict FAILS (TM-0459). The restore itself
+# PASSES in every case below but the FAIL one: what varies is the store.
+d4_case() { # name, script, kind, s3 mode, [VAR=value ...]: one drill run with a PASSing restore; rc and objects kept
+  local n="$1" s="$2" k="$3" mode="$4" d bj="two.json"; shift 4
+  [ "$k" = identity ] && bj="id-two.json"
+  d="$T/d4.$n"; rm -rf "$d"; mkdir -p "$d"; cp "$T/$bj" "$d/backups.json"; printf 'ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie' > "$d/image"
+  echo "$mode" > "$S3DIR/mode"
+  drill_exec "$d" "$s" WAIT_RC=0 USERS=6 "$@"
+  echo ok > "$S3DIR/mode"
+}
+d4() { # script, kind (gateway|identity)
+  local s="$1" k="$2" d db=tockmox-litellm-db
+  [ "$k" = identity ] && db=tockmox-authentik-db
+  d4_case pass "$s" "$k" ok
+  d4_case failv "$s" "$k" ok WAIT_RC=1
+  d4_case refuse "$s" "$k" refuse
+  d4_case badkey "$s" "$k" ok REG_AK=GKsomebodyelse
+  d4_case badsecret "$s" "$k" ok REG_SK=NOTTHESECRET
+  d4_case region "$s" "$k" ok REG_REGION=us-east-1
+  d4_case noregion "$s" "$k" ok REG_REGION=
+  d4_case down "$s" "$k" ok REG_ENDPOINT=http://127.0.0.1:9
+  d4_case rot "$s" "$k" corrupt
+  d4_case lie "$s" "$k" lie
+  d4_case getfail "$s" "$k" getfail
+  python3 - "$T" "$db" "$k" 2>/dev/null <<'PY' || return 1
+import sys, json, re, glob, hashlib
+t, db, kind = sys.argv[1:4]
+def case(n):
+    d = f"{t}/d4.{n}"
+    return int(open(f"{d}/rc").read()), open(f"{d}/out").read(), sorted(glob.glob(f"{d}/s3/*/*/*.json"))
+# A PASS is recorded: exit 0, ONE object at <db>/<stamp>-PASS.json, valid JSON carrying the evidence, and the log's
+# checksum is the checksum of the stored bytes.
+rc, out, objs = case("pass")
+assert rc == 0, ("a recorded PASS must exit 0", rc, out[-400:])
+assert len(objs) == 1 and re.search(rf"/tockmox-drill-register/{db}/\d{{8}}T\d{{6}}Z-PASS\.json$", objs[0]), objs
+o = json.load(open(objs[0]))
+assert o["schema"] == 1 and o["verdict"] == "PASS" and o["db"] == db and o["backupId"] != "none", o
+assert o["image"] == "ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie" and o["inRecovery"] == "f" and o["publicTables"] == "86", o
+assert o["row"] in out and o["detail"] in o["row"] and o["job"] == "tockmox-drill-29000000", o
+assert isinstance(o["durationSeconds"], int) and o["chartVersion"] == "tockmox-test-0", o
+if kind == "identity": assert o["users"] == "6", o
+m = re.search(r"^register: recorded s3://tockmox-drill-register/(\S+) sha256=([0-9a-f]{64})$", out, re.M)
+assert m and objs[0].endswith(m.group(1)) and m.group(2) == hashlib.sha256(open(objs[0], "rb").read()).hexdigest(), out[-300:]
+# A FAIL verdict is recorded too, and the drill still fails.
+rc, out, objs = case("failv")
+assert rc != 0 and len(objs) == 1 and objs[0].endswith("-FAIL.json") and json.load(open(objs[0]))["verdict"] == "FAIL", (rc, objs)
+assert "register: recorded " in out and "NOT RECORDED" not in out, out[-300:]
+# Every way the row can fail to be recorded fails the run, loudly, whatever the restore said.
+def loud(n, *needles):
+    rc, out, objs = case(n)
+    assert rc != 0, (n, "a drill that could not record its row must exit non-zero", rc, out[-500:])
+    assert re.search(r"^register: [^ ]+ PASS in_recovery=f ", out, re.M), (n, "the restore PASSed and the log must say so", out[-500:])
+    last = [l for l in out.splitlines() if l.strip()][-1]
+    assert last.startswith("register: NOT RECORDED, so this drill FAILS whatever its verdict (PASS): "), (n, last)
+    for x in needles: assert x in last, (n, x, last)
+    assert "register: recorded " not in out, (n, out[-300:])
+    return objs
+assert loud("refuse", "refused", "http 403") == []
+loud("badkey", "refused", "http 403", "InvalidAccessKeyId")
+loud("badsecret", "refused", "http 403", "Invalid signature")
+loud("region", "refused", "http 400", "AuthorizationHeaderMalformed")
+loud("noregion", "REGION is empty")
+loud("down", "refused", "curl exit 7")
+assert len(loud("rot", "read back", "differs from what was written", "wrote sha256 ")) == 1     # written, then rotted: caught on the read
+loud("lie", "read back", "http 404")
+loud("getfail", "read back", "http 500")
+PY
+  # No row-count cap: thirty runs leave thirty objects (the ConfigMap kept the last 24).
+  d="$T/d4.many"; rm -rf "$d"; mkdir -p "$d"; cp "$T/$( [ "$k" = identity ] && echo id-two.json || echo two.json )" "$d/backups.json"
+  rm -rf "$S3DIR/objects"
+  for _ in $(seq 30); do rm -f "$d/n"; KEEP_S3=1 drill_exec "$d" "$s" WAIT_RC=0 USERS=6; done
+  [ "$(find "$S3DIR/objects/tockmox-drill-register/$db" -name '*-PASS.json' | wc -l | tr -d ' ')" = 30 ] || return 1
+  # And no ConfigMap: not written by the script, not granted by the Role.
+  if grep -i 'configmap' "$s" >/dev/null; then return 1; fi
+  return 0
+}
+d4_static() { # platform values file
+  python3 - "$T" "$1" 2>/dev/null <<'PY' || return 1
+import sys, json, yaml
+t, pv = sys.argv[1:3]
+f = json.load(open(f"{t}/drill.facts.json"))
+g = yaml.safe_load(open(pv))["garage"]
+dr = g["drillRegister"]
+assert dr["enabled"] is True and dr["bucket"] != g["bucket"], dr          # a bucket of its own, never the backups'
+want = {"REG_BUCKET": dr["bucket"], "REG_ENDPOINT": "http://tockmox-garage.tockmox-platform.svc:3900"}
+for k in ("gateway", "identity"):
+    e = f[k]["env"]
+    for n, v in want.items(): assert e[n]["value"] == v, (k, n, e[n], v)
+    for n, key in (("REG_AK", "ACCESS_KEY_ID"), ("REG_SK", "ACCESS_SECRET_KEY"), ("REG_REGION", "REGION")):
+        r = e[n]["valueFrom"]["secretKeyRef"]
+        assert r["name"] == dr["credentialsSecretName"] and r["key"] == key and not r.get("optional"), (k, n, r)
+    assert f[k]["policy"] == "FallbackToLogsOnError", f[k]                  # the reason survives a pod that is gone in seconds
+    assert "tmp" in f[k]["mounts"] and "tmp" in f[k]["volumes"], f[k]       # readOnlyRootFilesystem: the writer needs a scratch dir
+    ns = {"gateway": "tockmox-ai", "identity": "tockmox-authentik"}[k]
+    assert ns in dr["namespaces"], (ns, dr["namespaces"])                    # the platform layer copies the Secret there
+    for rule in f[k + "-role"]:
+        assert "configmaps" not in rule["resources"], (k, rule)              # no ConfigMap access left
+PY
+}
+# One writer, two drills: the text between the markers is byte-identical in both rendered scripts.
+d4_one_copy() { # script, script
+  local a b
+  a=$(sed -n '/^ *# ---- the register writer/,/^ *# ---- end of the register writer/p' "$1" | sed 's/^ *//')
+  b=$(sed -n '/^ *# ---- the register writer/,/^ *# ---- end of the register writer/p' "$2" | sed 's/^ *//')
+  [ -n "$a" ] && [ "$a" = "$b" ]
+}
+
 if [ "${1:-}" = "--selftest" ]; then
   fail=0
   ok() { echo "selftest ok: $1 goes red"; }
@@ -280,6 +490,10 @@ if [ "${1:-}" = "--selftest" ]; then
   d2 "$T/id-drill.sh" || { echo "selftest FAIL: D2 red on the real identity drill"; fail=1; }
   d3 "$T/drill.sh" gateway || { echo "selftest FAIL: D3 red on the real drill"; fail=1; }
   d3 "$T/id-drill.sh" identity || { echo "selftest FAIL: D3 red on the real identity drill"; fail=1; }
+  d4 "$T/drill.sh" gateway || { echo "selftest FAIL: D4 red on the real drill"; fail=1; }
+  d4 "$T/id-drill.sh" identity || { echo "selftest FAIL: D4 red on the real identity drill"; fail=1; }
+  d4_static charts/tockmox-platform/values.yaml || { echo "selftest FAIL: D4 static wiring red on the real tree"; fail=1; }
+  d4_one_copy "$T/drill.sh" "$T/id-drill.sh" || { echo "selftest FAIL: D4 one-writer red on the real tree"; fail=1; }
   n1 "$T/ntfy.live" || { echo "selftest FAIL: N1 red on the real ntfy probe"; fail=1; }
   sed 's/for k in NTFY_AUTH_USERS NTFY_AUTH_ACCESS NTFY_AUTH_TOKENS; do/for k in; do/' "$T/ntfy.live" > "$T/m7.sh"
   if n1 "$T/m7.sh"; then no "N1 with the Secret comparison removed"; else ok "N1 with the Secret comparison removed"; fi
@@ -317,6 +531,33 @@ if [ "${1:-}" = "--selftest" ]; then
   done
   sed 's/tockmox-authentik-db-store/tockmox-litellm-db-store/' "$T/id-drill.sh" > "$T/m11.sh"
   if d2 "$T/m11.sh"; then no "D2 reading the model gateway's store"; else ok "D2 reading the model gateway's store"; fi
+  # D4: each assertion goes red on the smallest mutation that breaks what it guards. The first is the one the
+  # card asks for: the writer SWALLOWS its error (the old `|| true`), so a PASS that was never recorded exits 0.
+  for which in drill id-drill; do
+    kind=gateway; [ "$which" = id-drill ] && kind=identity
+    sed 's/if \[ "\$RECORDED" != 1 \]; then/if false; then/' "$T/$which.sh" > "$T/m16.sh"
+    if d4 "$T/m16.sh" $kind; then no "D4 ($kind) with the writer swallowing its failure"; else ok "D4 ($kind) with the writer swallowing its failure"; fi
+    sed 's/if \[ "\$_got" != "\$_sum" \]; then/if false; then/' "$T/$which.sh" > "$T/m17.sh"
+    if d4 "$T/m17.sh" $kind; then no "D4 ($kind) with the read-back comparison removed"; else ok "D4 ($kind) with the read-back comparison removed"; fi
+    sed 's/if \[ "\$_rc" -ne 0 \] || \[ "\$_code" != 200 \]; then/if false; then/' "$T/$which.sh" > "$T/m18.sh"
+    if d4 "$T/m18.sh" $kind; then no "D4 ($kind) with the HTTP status unchecked"; else ok "D4 ($kind) with the HTTP status unchecked"; fi
+    sed 's/aws:amz:\${REG_REGION}:s3/aws:amz:us-east-1:s3/' "$T/$which.sh" > "$T/m19.sh"
+    if d4 "$T/m19.sh" $kind; then no "D4 ($kind) signing for another region than the Secret's"; else ok "D4 ($kind) signing for another region than the Secret's"; fi
+    sed 's#^  REG_KEY=.*#  REG_KEY="${REG_DB}/latest.json"#' "$T/$which.sh" > "$T/m20.sh"
+    if d4 "$T/m20.sh" $kind; then no "D4 ($kind) overwriting one row instead of keeping every run"; else ok "D4 ($kind) overwriting one row instead of keeping every run"; fi
+    sed 's#register_write || true#register_write || true; kubectl -n "$NS" create configmap tockmox-restore-drill-register >/dev/null 2>\&1 || true#' "$T/$which.sh" > "$T/m21.sh"
+    if d4 "$T/m21.sh" $kind; then no "D4 ($kind) writing the ConfigMap again"; else ok "D4 ($kind) writing the ConfigMap again"; fi
+    sed 's/REG_ERR="REGION is empty in the register credentials Secret[^"]*"; return 1; }/:; }/' "$T/$which.sh" > "$T/m22.sh"
+    if d4 "$T/m22.sh" $kind; then no "D4 ($kind) signing with an empty REGION"; else ok "D4 ($kind) signing with an empty REGION"; fi
+  done
+  sed 's/--max-time 60/--max-time 61/' "$T/id-drill.sh" > "$T/m23.sh"
+  if d4_one_copy "$T/drill.sh" "$T/m23.sh"; then no "D4 with the two drills' writers diverged"; else ok "D4 with the two drills' writers diverged"; fi
+  sed 's/^    bucket: tockmox-drill-register$/    bucket: tockmox-drill-registry/' charts/tockmox-platform/values.yaml > "$T/m24.yaml"
+  if d4_static "$T/m24.yaml"; then no "D4 with the platform bootstrap and the drills naming different buckets"; else ok "D4 with the platform bootstrap and the drills naming different buckets"; fi
+  sed 's/^    bucket: tockmox-drill-register$/    bucket: tockmox-backups/' charts/tockmox-platform/values.yaml > "$T/m25.yaml"
+  if d4_static "$T/m25.yaml"; then no "D4 with the register in the backup bucket"; else ok "D4 with the register in the backup bucket"; fi
+  sed 's/^      - tockmox-authentik$//' charts/tockmox-platform/values.yaml > "$T/m26.yaml"
+  if d4_static "$T/m26.yaml"; then no "D4 with the identity namespace left out of the register Secret's copy targets"; else ok "D4 with the identity namespace left out of the register Secret's copy targets"; fi
   exit $fail
 fi
 
@@ -327,5 +568,9 @@ d1 "$T/drill.sh" && echo "ok: D1 drill pins and records backup=, on the source's
 d2 "$T/id-drill.sh" && echo "ok: D2 identity drill recovers the identity store and PASSes only with Authentik's users back" || { echo "FAIL: D2"; rc=1; }
 d3 "$T/drill.sh" gateway && echo "ok: D3 a failed drill names its cause on the register row (model gateway)" || { echo "FAIL: D3 (model gateway)"; rc=1; }
 d3 "$T/id-drill.sh" identity && echo "ok: D3 a failed drill names its cause on the register row (identity)" || { echo "FAIL: D3 (identity)"; rc=1; }
+d4 "$T/drill.sh" gateway && echo "ok: D4 the model gateway drill records an object, and FAILS when it cannot write it, read it back or match it (model gateway)" || { echo "FAIL: D4 (model gateway)"; rc=1; }
+d4 "$T/id-drill.sh" identity && echo "ok: D4 the identity drill records an object, and FAILS when it cannot write it, read it back or match it (identity)" || { echo "FAIL: D4 (identity)"; rc=1; }
+d4_static charts/tockmox-platform/values.yaml && echo "ok: D4 the drills' bucket, Secret and namespaces are the ones the platform bootstrap creates; no ConfigMap in either Role" || { echo "FAIL: D4 static wiring"; rc=1; }
+d4_one_copy "$T/drill.sh" "$T/id-drill.sh" && echo "ok: D4 both drills carry the same register writer" || { echo "FAIL: D4 one writer"; rc=1; }
 n1 "$T/ntfy.live" && echo "ok: N1 ntfy restarts onto its auth Secret when it appears or rotates" || { echo "FAIL: N1"; rc=1; }
 exit $rc

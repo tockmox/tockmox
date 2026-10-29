@@ -155,15 +155,15 @@ reasoning lives as comments beside its expression:
 
 A green backup job proves an upload happened. Only a restore proves a backup,
 and only a *scheduled* restore proves it still works next month. So the weekly
-drill writes a dated PASS or FAIL row into the
-`tockmox-restore-drill-register` ConfigMap, and three rules watch the drill's
-Jobs rather than the databases:
+drill writes a dated PASS or FAIL row as an object in the
+`tockmox-drill-register` bucket and reads it back, and three rules watch the
+drill's Jobs rather than the databases:
 
 | Alert | Fires when | Why it exists separately |
 |---|---|---|
 | `TockmoxRestoreDrillStale` | no PASS in 15 days | Two missed weekly cycles. One slot lost to a maintenance window stays silent; two never does |
 | `TockmoxRestoreDrillNeverRan` | no drill Job has ever completed, and the CronJob has passed a slot: scheduled over 26h ago, or its next scheduled time more than an hour gone | A freshness rule alone cannot see a drill that was never scheduled ... absence and health look identical from the metrics side. Keyed on the CronJob's own schedule, so a fresh install is silent until its first slot has come and gone (TM-0851; until 0.8.0 it fired for up to six days on every new install) |
-| `TockmoxRestoreDrillFailed` | the most recent drill ran and did not PASS | The other two see a drill that stopped or never started; neither sees one that ran and failed, and a failed drill that pages nobody is worse than no drill. Clears on the next PASS rather than when the failed Job is garbage-collected |
+| `TockmoxRestoreDrillFailed` | the most recent drill ran and did not PASS, or could not write its row and read it back (a drill that cannot record its verdict exits non-zero, whatever the restore found) | The other two see a drill that stopped or never started; neither sees one that ran and failed, and a failed drill that pages nobody is worse than no drill. Clears on the next PASS rather than when the failed Job is garbage-collected |
 
 All three are stated in `charts/tockmox-ai/values.yaml` beside the
 `restoreDrill` block; the rules render from

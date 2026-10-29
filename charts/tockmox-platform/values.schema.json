@@ -447,6 +447,30 @@
             }
           },
           "description": "Per-namespace labels for the namespaces in createCredentialsNamespaces, keyed by namespace name; merged over global.namespaceLabels. At least pod-security.kubernetes.io/*."
+        },
+        "drillRegister": {
+          "type": "object",
+          "description": "The restore-drill register (TM-0459): a dedicated bucket and a read/write key for it, copied to the namespaces that run a drill.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "bucket": {
+              "type": "string",
+              "minLength": 1
+            },
+            "credentialsSecretName": {
+              "type": "string",
+              "minLength": 1
+            },
+            "namespaces": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
         }
       }
     },

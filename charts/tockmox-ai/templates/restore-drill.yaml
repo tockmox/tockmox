@@ -15,13 +15,16 @@
 #   2. asserts on the artifact: recovery finished (pg_is_in_recovery = f)
 #      and the schema is populated (a table count with a floor, not an
 #      exit code)
-#   3. writes a dated PASS/FAIL row into the drill register ConfigMap, ending
-#      in backup=<backupId> so the row says WHICH backup it proved (TM-0794)
+#   3. writes a dated PASS/FAIL row to the drill register in the object store
+#      (one JSON object per run, bucket tockmox-drill-register), reads it back
+#      and compares it, ending in backup=<backupId> so the row says WHICH backup
+#      it proved (TM-0794). A run whose row cannot be written or read back
+#      FAILS, whatever the restore's own verdict was (TM-0459)
 #   4. tears the drill cluster down, PASS or FAIL, via trap
 #
 # Tockmox proves restorability; humans perform recovery. The drill never
 # touches the live database or its Services ... it reads the object store and
-# writes only objects named *-drill and the register.
+# writes only objects named *-drill and its own row in the register bucket.
 #
 # It lives HERE, beside the database it drills, rather than in the selfcheck
 # layer, because barman recovery resolves the ObjectStore CR and its S3
@@ -56,7 +59,8 @@ rules:
   # The drill creates and deletes ONLY its own recovery cluster; Kubernetes
   # RBAC cannot scope create by name, so the guardrail on the live database
   # is the script refusing to name anything but {{ $clusterName }} ... and the
-  # register showing what it did.
+  # register showing what it did. The register is in the object store (the
+  # Secret below), not a ConfigMap, so this Role grants no ConfigMap access.
   - apiGroups: ["postgresql.cnpg.io"]
     resources: ["clusters"]
     verbs: ["get", "list", "watch", "create", "delete"]
@@ -69,13 +73,6 @@ rules:
     verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["pods/exec"]
-    verbs: ["create"]
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    resourceNames: ["tockmox-restore-drill-register"]
-    verbs: ["get", "patch"]
-  - apiGroups: [""]
-    resources: ["configmaps"]
     verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -120,9 +117,8 @@ spec:
         spec:
           restartPolicy: Never
           serviceAccountName: tockmox-restore-drill
-          # Needs the API: kubectl creates and deletes the drill Cluster and reads the register
-          # ConfigMap (the Role below). Token kept on purpose (TM-0759); gate allowlist in
-          # tools/check-sa-tokens.sh.
+          # Needs the API: kubectl creates and deletes the drill Cluster (the Role above).
+          # Token kept on purpose (TM-0759); gate allowlist in tools/check-sa-tokens.sh.
           automountServiceAccountToken: true
           {{- with $db.priorityClassName }}
           priorityClassName: {{ . }}
@@ -141,6 +137,13 @@ spec:
               resources:
                 requests: { cpu: 20m, memory: 64Mi }
                 limits:   { memory: 128Mi }
+              # A failed drill's last log lines (the register writer's reason among them)
+              # land in the pod's termination message: the pod is gone in seconds.
+              terminationMessagePolicy: FallbackToLogsOnError
+              env:
+                {{- include "tockmox.drillRegister.env" (dict "ctx" $ "reg" $drill.register) | nindent 16 }}
+              volumeMounts:
+                - { name: tmp, mountPath: /tmp }
               command: ["sh", "-c"]
               args:
                 - |
@@ -151,11 +154,11 @@ spec:
                   DETAIL=""
                   BACKUP_ID=""
 
-                  # The failing step's own words on one line, for the register row (HL-0863): a pod that dies in
-                  # seconds is gone before Alloy tails it, so the row is the only record of why. No newline, no
-                  # "=" (later key=value fields are evidence), no double quote and no backslash (the register
-                  # patch is built by sed, and a stray one breaks its JSON), at most 240 characters.
-                  why() { printf '%s' "$1" | tr '\n\r\t"=\\' "   ': " | tr -s ' ' | cut -c1-240; }
+                  REG_DB={{ $db.name | quote }}
+                  REG_SERVER={{ $db.backup.serverName | default $db.name | quote }}
+                  REG_IMAGE=""
+                  REG_EXTRA_JSON=""
+                  {{- include "tockmox.drillRegister.script" . | nindent 18 }}
 
                   record() {
                     STAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -167,21 +170,27 @@ spec:
                     # before TM-0794 have no backup= field; "none" below means
                     # the drill found no completed Backup to pin, and the
                     # recovery then took the newest base backup in the store.
+                    # The same line is the log's record and the object's `row`.
                     ROW="${STAMP} ${VERDICT} ${DETAIL} backup=${BACKUP_ID:-none}"
                     echo "register: ${ROW}"
-                    kubectl -n "$NS" get configmap tockmox-restore-drill-register >/dev/null 2>&1 \
-                      || kubectl -n "$NS" create configmap tockmox-restore-drill-register >/dev/null 2>&1 || true
-                    PREV=$(kubectl -n "$NS" get configmap tockmox-restore-drill-register \
-                      -o jsonpath='{.data.register}' 2>/dev/null || true)
-                    NEWREG=$(printf '%s\n%s\n' "$PREV" "$ROW" | grep -v '^$' | tail -24)
-                    kubectl -n "$NS" patch configmap tockmox-restore-drill-register --type=merge \
-                      -p "{\"data\":{\"register\":$(printf '%s' "$NEWREG" | sed 's/"/\\"/g; s/$/\\n/' | tr -d '\n' | sed 's/^/"/; s/$/"/')}}" || true
+                    register_write || true
                   }
 
                   teardown() {
                     kubectl -n "$NS" delete cluster.postgresql.cnpg.io "$CLUSTER" --ignore-not-found --timeout=120s || true
                   }
-                  finish() { teardown; record; }
+                  # THE RUN IS NOT OVER UNTIL ITS ROW IS READ BACK (TM-0459). A PASS whose row
+                  # was never recorded is a failed drill: exit 1 whatever the verdict, so the Job
+                  # fails and TockmoxRestoreDrillFailed pages. The reason goes in the log's last
+                  # line, which FallbackToLogsOnError copies into the pod's termination message.
+                  finish() {
+                    teardown
+                    record
+                    if [ "$RECORDED" != 1 ]; then
+                      echo "register: NOT RECORDED, so this drill FAILS whatever its verdict (${VERDICT}): ${REG_ERR}"
+                      exit 1
+                    fi
+                  }
                   trap finish EXIT
 
                   # A leftover drill cluster means the last run died mid-flight;
@@ -221,6 +230,7 @@ spec:
                     IMG=$(printf '  imageName: "%s"' "$SRC_IMAGE")
                   fi
                   echo "image: ${SRC_IMAGE:-the operator default}"
+                  REG_IMAGE="${SRC_IMAGE:-}"
 
                   APPLY_OUT=$(cat <<EOF | kubectl apply -f - 2>&1
                   apiVersion: postgresql.cnpg.io/v1
@@ -274,12 +284,16 @@ spec:
                   TABLES=$(kubectl -n "$NS" exec "${CLUSTER}-1" -c postgres -- \
                     psql -U postgres -d {{ .Values.litellm.db.database | quote }} -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';" 2>/dev/null || echo 0)
                   DETAIL="in_recovery=${INREC} public_tables=${TABLES}"
+                  REG_EXTRA_JSON=$(jq -nc --arg r "$INREC" --arg t "$TABLES" '{inRecovery:$r, publicTables:$t}')
                   echo "verify: ${DETAIL}"
                   if [ "$INREC" = "f" ] && [ "${TABLES:-0}" -ge 5 ] 2>/dev/null; then
                     VERDICT=PASS
                     exit 0
                   fi
                   exit 1
+          volumes:
+            - name: tmp
+              emptyDir: {}
 {{- if .Values.capabilities.observability.enabled }}
 ---
 apiVersion: monitoring.coreos.com/v1
@@ -314,8 +328,9 @@ spec:
             description: >-
               The scheduled restore drill has not PASSED in over two of its
               weekly cycles. The backups may still be fine; the point is
-              nobody has proof. Check the drill register ConfigMap and the
-              last drill Job's log.
+              nobody has proof. Read the newest objects under
+              s3://tockmox-drill-register/<database>/ and the last drill
+              Job's log.
         - alert: TockmoxRestoreDrillNeverRan
           # A freshness rule computed over series that do not exist returns
           # nothing and looks healthy ... the unconnected-wire shape. This
@@ -399,8 +414,10 @@ spec:
               The latest scheduled restore drill ran and did not PASS. The
               live database is untouched; what is in question is whether the
               object store holds a database anyone can come back from. Read
-              the FAIL row in the drill register ConfigMap and the failed drill
-              Job's log (`kubectl -n {{ .Values.namespaces.ai }} logs job/<name>`),
+              the FAIL object under s3://tockmox-drill-register/<database>/ (a
+              drill that could not write or read back its own row also ends
+              here, and then the reason is in the Job's log, not the bucket)
+              and the failed drill Job's log (`kubectl -n {{ .Values.namespaces.ai }} logs job/<name>`),
               then run the manual recovery in
               docs/operations/backup-restore.md section 5 to find out.
 {{- end }}

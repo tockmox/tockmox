@@ -56,8 +56,8 @@ benign case, and "almost always" is exactly when a reader stops checking.
 
 Nothing reaches a tag without a **teardown-and-greenfield install of the
 exact tagged content** passing on a clean cluster: all layers Synced and
-Healthy, backup completed, restore drill PASS in the register, alert
-delivered to the notification topic. Assert on artifacts, not exit codes ...
+Healthy, backup completed, restore drill PASS in the register (an object in
+the `tockmox-drill-register` bucket), alert delivered to the notification topic. Assert on artifacts, not exit codes ...
 name a count or a specific row. The 0.5.0 gate run is the model: it caught a
 DNS-record omission and a first-sync race that no amount of rendering would
 have found.

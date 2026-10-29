@@ -940,7 +940,7 @@
                 },
                 "restoreDrill": {
                   "type": "object",
-                  "description": "Weekly scheduled restore drill: bootstraps a new cluster from the object store, verifies Authentik's user table came back, records PASS/FAIL in the tockmox-restore-drill-register ConfigMap, tears down.",
+                  "description": "Weekly scheduled restore drill: bootstraps a new cluster from the object store, verifies Authentik's user table came back, records PASS/FAIL as an object in the drill register bucket of the object store (read back before the run may PASS), tears down.",
                   "properties": {
                     "enabled": {
                       "type": "boolean"
@@ -954,6 +954,21 @@
                     },
                     "image": {
                       "type": "string"
+                    },
+                    "register": {
+                      "type": "object",
+                      "description": "Where the drill records its row (TM-0459). Empty strings use the shipped Garage's drill-register bucket and the Secret the platform layer's bootstrap copies here.",
+                      "properties": {
+                        "endpoint": {
+                          "type": "string"
+                        },
+                        "bucket": {
+                          "type": "string"
+                        },
+                        "credentialsSecretName": {
+                          "type": "string"
+                        }
+                      }
                     }
                   }
                 }

@@ -46,6 +46,13 @@
 #     the two crossings (Alloy to the Loki gateway, Prometheus to the SMART exporter) have
 #     allow rules (TM-0799).
 #
+# S19 The Garage bootstrap Job provisions the restore-drill register (TM-0459): a bucket
+#     of its own (never the backup bucket), a key with read and write and NOT owner on it,
+#     a Secret of its own, and a copy of that Secret into the model gateway's and the
+#     identity namespaces, with the Role in each that lets the Job create it there. The
+#     drills' side of the same wire (the bucket and Secret names they read) is
+#     tools/check-notify-and-drill.sh D4.
+#
 # `--selftest` feeds each assertion the render it must refuse (the same chart
 # with the seam left unset, or the value reverted) and requires a non-zero
 # answer, so a check that could never fail is found here and not in review.
@@ -258,12 +265,47 @@ sys.exit(1 if bad else 0)
 PY
 }
 
+s19() { python3 - "$1" <<'PY'
+import sys, yaml
+docs = [d for d in yaml.safe_load_all(open(sys.argv[1])) if d]
+job = [d for d in docs if d.get("kind") == "Job" and d["metadata"]["name"] == "tockmox-garage-bootstrap"]
+if len(job) != 1: sys.exit(1)
+c = job[0]["spec"]["template"]["spec"]["containers"][0]
+env = {e["name"]: e.get("value") for e in c["env"]}
+bad = []
+if not env.get("DR_BUCKET") or env["DR_BUCKET"] == env.get("BUCKET"): bad.append("the register is not in a bucket of its own: %r vs %r" % (env.get("DR_BUCKET"), env.get("BUCKET")))
+if not env.get("DR_SEC") or env["DR_SEC"] == env.get("CREDS"): bad.append("the register has no Secret of its own")
+copy = (env.get("DR_COPY_TO") or "").split()
+for ns in ("tockmox-ai", "tockmox-authentik"):
+    if ns not in copy: bad.append("the register Secret is not copied to %s" % ns)
+sc = c["args"][0]
+i, j = sc.find("5b. the restore-drill register"), sc.find("---- 6. hand the credentials")
+step = sc[i:j] if 0 <= i < j else ""
+for need in ('GetBucketInfo?globalAlias=$DR_BUCKET', 'CreateBucket', 'v2/CreateKey', '\\"name\\":\\"tockmox-drill-register\\"', 'AllowBucketKey', '\\"read\\":true,\\"write\\":true,\\"owner\\":false', 'create secret generic "$DR_SEC"', 'create secret generic "$DR_SEC"'):
+    if need not in step: bad.append("step 5b lacks %r" % need)
+if '\\"owner\\":true' in step: bad.append("step 5b grants owner")
+role = {(d["metadata"]["namespace"], d["metadata"]["name"]): d for d in docs if d.get("kind") == "Role"}
+def named(ns):
+    r = role.get((ns, "tockmox-garage-bootstrap"))
+    out = set()
+    for rule in (r or {}).get("rules", []):
+        if "secrets" in rule.get("resources", []): out |= set(rule.get("resourceNames", []))
+    return out
+rel = job[0]["metadata"]["namespace"]
+for ns in [rel] + [n for n in copy if n != rel]:
+    if env.get("DR_SEC") not in named(ns): bad.append("the Job's Role in %s cannot read the register Secret" % ns)
+for b in bad: print("   ", b, file=sys.stderr)
+sys.exit(1 if bad else 0)
+PY
+}
+
 # Renders. "good" has the seam in use; "bad" is what the assertion must refuse.
 LAB=(--set 'global.namespaceLabels.zarf\.dev/agent=ignore')
 r pol.good policy "${LAB[@]}"
 r plat.good platform "${LAB[@]}" --set 'garage.credentialsNamespaces={tockmox-ai,tockmox-authentik,site-x,site-y}' --set 'garage.createCredentialsNamespaces={site-x,site-y}' \
   --set 'garage.credentialsNamespaceLabels.site-x.pod-security\.kubernetes\.io/warn=restricted'
 r pol.bad policy
+r plat.noreg platform --set garage.drillRegister.enabled=false
 r plat.bad platform --set 'garage.credentialsNamespaces={tockmox-ai,tockmox-authentik,site-x,site-y}' --set 'garage.createCredentialsNamespaces={site-x,site-y}'
 r probe.good exporters --set ingress.apps.openWebui.host=ai.example.org
 r probe.bad exporters
@@ -307,6 +349,7 @@ if [ "${1:-}" = "--selftest" ]; then
   must_refuse() { local n="$1"; shift; if "$@"; then echo "selftest FAIL: $n passed on a render it must refuse"; fail=1; else echo "selftest ok: $n goes red"; fi; }
   must_hold s1 "$T/pol.good" "$T/plat.good"
   must_hold s2 "$T/plat.good"
+  must_hold s19 "$T/plat.good"
   must_hold s3 "$T/probe.good"
   must_hold s4 "$T/dash.good"
   must_hold s5 "$T/pm.good"
@@ -325,6 +368,10 @@ if [ "${1:-}" = "--selftest" ]; then
   must_hold s18 "$T/na.obs" "$T/na.exp" "$T/na.pol" 2>/dev/null
   must_refuse S1 s1 "$T/pol.bad" "$T/plat.bad"
   must_refuse S2 s2 "$T/plat.bad"
+  must_refuse "S19 (garage.drillRegister.enabled false)" s19 "$T/plat.noreg"
+  sed '/5b. the restore-drill register/,/---- 6. hand the credentials/ s/\\"owner\\":false/\\"owner\\":true/' "$T/plat.good" > "$T/plat.owner"; must_refuse "S19 (the register key granted owner)" s19 "$T/plat.owner"
+  sed 's/DR_SEC,    value: "tockmox-drill-register-credentials"/DR_SEC,    value: "tockmox-garage-credentials"/' "$T/plat.good" > "$T/plat.sharedsec"; must_refuse "S19 (the register sharing the backups' Secret)" s19 "$T/plat.sharedsec"
+  sed 's/DR_COPY_TO, value: "tockmox-ai tockmox-authentik"/DR_COPY_TO, value: "tockmox-ai"/' "$T/plat.good" > "$T/plat.nocopy"; must_refuse "S19 (the Secret not copied to the identity namespace)" s19 "$T/plat.nocopy"
   must_refuse S3 s3 "$T/probe.bad"
   # S4: a bare key must trip it
   printf 'kind: ConfigMap\nmetadata:\n  name: tockmox-dashboard-authentik\ndata:\n  authentik.json: x\n' > "$T/dash.bad"; must_refuse S4 s4 "$T/dash.bad"
@@ -361,6 +408,7 @@ rc=0
 chk() { local n="$1"; shift; if "$@"; then echo "  ok $n"; else echo "FAIL $n"; rc=1; fi; }
 chk "S1 global.namespaceLabels on every policy and platform Namespace" s1 "$T/pol.good" "$T/plat.good"
 chk "S2 per-namespace labels (Pod Security) on one credentials namespace only" s2 "$T/plat.good"
+chk "S19 the Garage bootstrap provisions the restore-drill register: own bucket, own read/write key, own Secret, copied to the drill namespaces" s19 "$T/plat.good"
 chk "S3 console probes follow ingress.apps.<app>.host" s3 "$T/probe.good"
 chk "S4 dashboard ConfigMap keys are prefixed tockmox-" s4 "$T/dash.good"
 chk "S5 CNPG operator PodMonitor renders by default" s5 "$T/pm.good"

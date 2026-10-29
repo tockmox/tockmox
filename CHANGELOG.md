@@ -11,6 +11,31 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Breaking
 
+- **Breaking: the restore drill's register moved from a ConfigMap to the shipped
+  object store, a drill that cannot record its row now fails, and old rows are
+  not carried over.** The model-gateway drill (`tockmox-ai`) and the Authentik
+  drill (`tockmox-identity`) now write one JSON object per run to a bucket of
+  their own, `tockmox-drill-register` (`<database>/<time>-<PASS|FAIL>.json`),
+  read it back and compare its checksum, through one writer shared from
+  `tockmox-common`. A run whose row cannot be written or read back exits
+  non-zero with the reason in the log and in the pod's termination message, so
+  `TockmoxRestoreDrillFailed` fires instead of a PASS that left no record. The
+  `tockmox-restore-drill-register` ConfigMap, the Role rules that patched it,
+  the `kubectl patch` and every `|| true` around the write are gone, with no
+  dual write. `tockmox-platform`'s Garage bootstrap Job mints a key for that
+  bucket alone (it cannot touch the backups) and copies its Secret
+  `tockmox-drill-register-credentials` into `tockmox-ai` and
+  `tockmox-authentik`; `tockmox-policy` lets the two drill pods reach Garage on
+  :3900; the Garage pod is not restarted. New values: `garage.drillRegister.*`
+  (platform) and `restoreDrill.register.*` (ai, identity). **Action:** sync
+  `tockmox-platform` before `tockmox-ai` and `tockmox-identity` so the Secret
+  exists when the next drill fires. Rows already in the old ConfigMaps are not
+  migrated and the ConfigMaps are left in place, not pruned: save what you want
+  to keep, then delete them. On a site that runs its own S3 instead of the
+  shipped Garage, set `restoreDrill.register.*` in both charts to a bucket and
+  Secret of your own (`docs/deployment/upgrade.md`, "The restore-drill register
+  moved out of the ConfigMap").
+
 - **Breaking: Authentik runs on CloudNativePG on a fresh install, and an
   install on the bundled PostgreSQL must choose before it upgrades.** The
   identity layer now renders Authentik's database as a CloudNativePG cluster,

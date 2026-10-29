@@ -570,32 +570,62 @@ about your database. Run it yourself once.
 
 Since 0.5.0 (2026-08-19) a weekly CronJob automates exactly the sequence above:
 it bootstraps a fresh cluster from the store, asserts recovery finished and
-that the schema has substance, writes a dated PASS or FAIL row into the
-`tockmox-restore-drill-register` ConfigMap, and tears itself down. It never
-touches the live database. On by default once backups are on
-(`modelGateway.database.backup.restoreDrill`).
+that the schema has substance, writes a dated PASS or FAIL row to the drill
+register, and tears itself down. It never touches the live database. On by
+default once backups are on (`modelGateway.database.backup.restoreDrill`).
 
-**WORKSTATION**
+**The register is one JSON object per run** (from 0.9.0), in a bucket of its own,
+`tockmox-drill-register`, in the shipped Garage, under the database's name:
+`tockmox-litellm-db/<UTC stamp>-<PASS|FAIL>.json`. Nothing trims it, so every
+run since the install is still there. Before 0.9.0 the row went into the
+`tockmox-restore-drill-register` ConfigMap, cut to its last 24 rows; see
+[upgrade](../deployment/upgrade.md#the-restore-drill-register-moved-out-of-the-configmap-090).
+The platform layer's bootstrap Job creates the bucket and a key that can read and
+write that bucket and nothing else, and copies the key's Secret
+(`tockmox-drill-register-credentials`) to `tockmox-ai` and `tockmox-authentik`.
+
+**A drill that cannot record its row has failed.** The drill writes the object,
+reads it back and compares a SHA-256 of what it wrote with what it read. If the
+write is refused, the store cannot be reached, the signing region is wrong, the
+object comes back different or the read fails, the Job exits non-zero whatever
+the restore itself found, the reason is the last line of its log and of its pod's
+termination message, and `TockmoxRestoreDrillFailed` pages. A PASS that was never
+recorded cannot look like a PASS.
+
+**WORKSTATION.** Lists the model gateway's register and prints the newest row.
 
 ```bash
-kubectl -n tockmox-ai get configmap tockmox-restore-drill-register \
-  -o jsonpath='{.data}{"\n"}'
+AK=$(kubectl -n tockmox-ai get secret tockmox-drill-register-credentials -o jsonpath='{.data.ACCESS_KEY_ID}' | base64 -d)
+SK=$(kubectl -n tockmox-ai get secret tockmox-drill-register-credentials -o jsonpath='{.data.ACCESS_SECRET_KEY}' | base64 -d)
+kubectl -n tockmox-platform port-forward svc/tockmox-garage 3900:3900 >/dev/null 2>&1 & PF=$!
+sleep 3
+LATEST=$(curl -s --aws-sigv4 "aws:amz:garage:s3" --user "$AK:$SK" \
+  "http://127.0.0.1:3900/tockmox-drill-register?list-type=2&prefix=tockmox-litellm-db/" \
+  | grep -o '<Key>[^<]*' | sed 's/<Key>//' | sort | tail -1)
+curl -s --aws-sigv4 "aws:amz:garage:s3" --user "$AK:$SK" "http://127.0.0.1:3900/tockmox-drill-register/$LATEST"; echo
+kill "$PF"
 ```
 
 The register's first three rows on the reference install read **FAIL, PASS,
 PASS**. The FAIL is the point: the drill's very first run caught a backup
 destination that had been silently broken since a reinstall. That is the entire
-argument for drills that run on a schedule and complain.
+argument for drills that run on a schedule and complain. (Those three rows were
+ConfigMap rows, written before 0.9.0.)
 
-**Reading a row.** A row is `<UTC time> <PASS|FAIL> <detail> backup=<backupId>`.
-Read the first field as the time and the second as the verdict, then pick the
-rest out by key: on a PASS the detail is `in_recovery=f public_tables=<n>`, on a
+**Reading a row.** An object carries the fields `time`, `verdict`, `db`,
+`backupId`, `serverName`, `image`, `durationSeconds`, `detail`, `job`,
+`chartVersion` and `schema` (1), plus what the drill measured: `inRecovery` and
+`publicTables`, and `users` on the identity database's. `row` holds the same
+line the drill prints in its log, `<UTC time> <PASS|FAIL> <detail>
+backup=<backupId>`; read it as the time first and the verdict second, then pick
+the rest out by key: on a PASS the detail is `in_recovery=f public_tables=<n>`, on a
 FAIL it is the failing step's own words, so never match on position. From 0.9.0
 a refusal reads `apply refused: <the API server's message>` and a cluster that
 did not come up reads `cluster never became Ready (phase: <phase>): <the wait's
 message>`, each on one line and cut at 240 characters, because a drill that
 fails in seconds is gone before the log collector reads its pod and the row is
-then the only record of why. `backup=` names the
+then the only record of why (when the row itself could not be written, the
+termination message of the failed pod carries the reason instead). `backup=` names the
 base backup the drill restored: it pins the newest completed `Backup` of the
 live cluster, so the row says exactly what was proved. `backup=none` means no
 completed `Backup` was visible to the drill and the recovery took the newest
@@ -620,7 +650,7 @@ means a failed backup or restore (TM-0673, TM-0672):
   `tockmox_cnpg_cluster_condition`, once per scrape, until the status appears.
   Any new CloudNativePG Cluster does the same in its first seconds.
 
-A real failure shows up in the register as a FAIL row and in
+A real failure shows up in the register as a FAIL object and in
 `TockmoxRestoreDrillFailed`, not only in these lines.
 
 Three alerts watch the drill itself, so a drill that stops running, never ran,
@@ -639,18 +669,25 @@ backup.
 **The identity database has a drill of its own** (from 0.9.0, wherever
 Authentik runs on `tockmox-authentik-db`): the same script against the identity
 store, Mondays at 04:45, after the model gateway's, so the two never hold a
-drill cluster at once. It writes to the `tockmox-restore-drill-register`
-ConfigMap in `tockmox-authentik`, and its rows carry one more field before
-`backup=`: `users=<n>`, the row count of Authentik's user table in the restored
-database. A restore whose schema came back with no users is a FAIL, because
+drill cluster at once. It writes to the same register bucket, under
+`tockmox-authentik-db/`, with the same writer, and its rows carry one more field
+before `backup=`: `users=<n>`, the row count of Authentik's user table in the
+restored database. A restore whose schema came back with no users is a FAIL, because
 nobody could sign in to it. On by default with the database's backups
 (`identity.database.backup.restoreDrill`).
 
-**WORKSTATION**
+**WORKSTATION.** Lists the identity database's register and prints the newest row.
 
 ```bash
-kubectl -n tockmox-authentik get configmap tockmox-restore-drill-register \
-  -o jsonpath='{.data}{"\n"}'
+AK=$(kubectl -n tockmox-authentik get secret tockmox-drill-register-credentials -o jsonpath='{.data.ACCESS_KEY_ID}' | base64 -d)
+SK=$(kubectl -n tockmox-authentik get secret tockmox-drill-register-credentials -o jsonpath='{.data.ACCESS_SECRET_KEY}' | base64 -d)
+kubectl -n tockmox-platform port-forward svc/tockmox-garage 3900:3900 >/dev/null 2>&1 & PF=$!
+sleep 3
+LATEST=$(curl -s --aws-sigv4 "aws:amz:garage:s3" --user "$AK:$SK" \
+  "http://127.0.0.1:3900/tockmox-drill-register?list-type=2&prefix=tockmox-authentik-db/" \
+  | grep -o '<Key>[^<]*' | sed 's/<Key>//' | sort | tail -1)
+curl -s --aws-sigv4 "aws:amz:garage:s3" --user "$AK:$SK" "http://127.0.0.1:3900/tockmox-drill-register/$LATEST"; echo
+kill "$PF"
 ```
 
 **This page remains the manual procedure the drill automates. Run it yourself
@@ -859,6 +896,27 @@ layers, not the cluster, and the correction is in the changelog. The sequence
 is assembled from parts that were each run separately, which is a weaker
 claim, and this page will say otherwise only when it has been run rather than
 described.
+
+**The register writer has not yet written a row on a cluster.** The drill's
+register moved to the object store in 0.9.0. The writer is run by the repository's
+gates against a stand-in S3 that verifies SigV4 as Garage does, and was run once
+against a real Garage v2.4.1 release binary on 2026-10-29, with the rendered
+bootstrap script and both rendered drill scripts (the restore itself stubbed): the
+bootstrap created the bucket and key and was a no-op on its second run, the
+register key could not write the backup bucket and the backup key could not write
+the register, each drill recorded a PASS and a FAIL row that were read back and
+checksummed, and a bad key, a wrong signing region, an empty REGION, a missing
+bucket, an unreachable store and an object changed between the write and the read
+each ended the run non-zero with the reason in the log. No scheduled drill
+has yet written its row to the Garage of a running cluster, so the bucket and key
+the bootstrap Job creates, the Secret copy into the two drill namespaces and the
+drill pod's route to Garage are proved to render and not yet to work. **The
+register is as durable as the backups it describes**: the shipped Garage is in the
+cluster and its volume rides the same Longhorn backups, so losing the cluster
+loses the register unless Garage's data has left it
+([storage](../administration/storage.md#the-shipped-object-store-and-what-one-copy-covers)).
+Copying rows somewhere else, into version control for example, is a site's own
+job and is not done by the drill.
 
 **The identity database on CNPG (0.9.0) is a render, not yet a restore.** Its
 Cluster, ObjectStore, ScheduledBackup, drill and alerts are proved to render,
