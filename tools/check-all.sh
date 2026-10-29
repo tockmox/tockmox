@@ -321,6 +321,8 @@ run_gate "every alert we author has a kured reboot-gate decision, and the printe
 run_gate "the kured-gate check goes red on an unclassified alert, a stale line, a renamed upstream alert and a drifted regexp (TM-0225)" bash tools/check-kured-gate.sh --selftest
 run_gate "Loki is one replica on the filesystem by default, a second replica on the filesystem is refused, and the documented HA values render three on an object store (TM-0778)" bash tools/check-loki-ha.sh
 run_gate "the Loki HA check goes red on one replica, a filesystem schema, a filesystem compactor, replication factor 1 and filesystem storage (TM-0778)" bash tools/check-loki-ha.sh --selftest
+run_gate "opt-in CoreDNS HA: the stock render writes no HPA or PDB in kube-system, the switch adds exactly those two, a floor under 2 is refused by name (TM-0828)" bash tools/check-coredns-ha.sh
+run_gate "the CoreDNS HA gate goes red on every mutation (TM-0828)" bash tools/check-coredns-ha.sh --selftest
 run_gate "every CNPG database has an ingress NetworkPolicy" bash tools/check-cnpg-netpol.sh
 run_gate "every CNPG database is reachable by its operator on :8000" bash tools/check-cnpg-operator-reach.sh
 run_gate "storage policy holds on the rendered claims" bash tools/check-storage-policy.sh

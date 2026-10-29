@@ -36,6 +36,25 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **Opt-in CoreDNS high availability for a cluster of three or more nodes.**
+  `apps.corednsHa.enabled: true` (off by default, `provisional`) renders a
+  HorizontalPodAutoscaler with a replica floor and a PodDisruptionBudget with
+  `maxUnavailable: 1` on the distribution's CoreDNS, both in `kube-system`, and
+  nothing else: the Deployment and its ConfigMap stay the distribution's, and
+  the autoscaler raises the Deployment again after k3s puts it back to one
+  replica. The `corednsHa` block sets the floor (`minReplicas`, 2), the ceiling
+  (`maxReplicas`, 3), `cpuTargetUtilization` (80) and the target
+  (`deployment: coredns`, `podLabels: k8s-app: kube-dns`, the k3s names). The
+  render refuses a floor under 2 and says why (a single CoreDNS pod makes the
+  budget a no-op: a drain evicts the only DNS server), and refuses a ceiling
+  below the floor, an empty Deployment name and an empty pod selector. These are
+  the first Tockmox-authored objects in `kube-system`; the default ArgoCD
+  project allows them, a restricted AppProject needs `kube-system` as a
+  destination. A stock render is unchanged. See `docs/deployment/sizing.md`, "DNS
+  in the HA tier", for what to check on a distribution other than k3s. **Not
+  proven:** the floor across a k3s restart and a drain on several nodes on a
+  cluster built from this chart.
+
 - **Six documentation pages are executed on every pull request and push, with no
   cluster (TM-0289).** The new `docs-no-cluster` workflow runs
   `tests/executed-docs/pages-no-cluster.sh`: every `bash` block on

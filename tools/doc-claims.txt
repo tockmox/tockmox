@@ -898,3 +898,18 @@ page:   docs/deployment/deployment-shapes.md
 claim:  Every install page that
 test:   for f in $( { grep -rliE --include='*.md' 'proxmox|openshift|kvm[ -]based|existing[ -]cluster|cluster you already|HA tier|HA cluster|HA build|three-node|3-node' docs README.md charts/*/README.md; for p in prerequisites fresh-install existing-cluster install virtual-machines hardware-platforms sizing README; do echo docs/deployment/$p.md; done; } | sort -u | grep -v '^docs/deployment/deployment-shapes.md$' ); do grep -q 'deployment-shapes.md' "$f" || echo "$f"; done | wc -l | tr -d ' '
 expect: 0
+
+# ---------------------------------------------------------------------------
+# OPT-IN COREDNS HA (sizing.md, "DNS in the HA tier"). Two sentences that rot by
+# editing a value or a guard, not a count. The page says the chart ships this
+# off and refuses a floor under 2; the tree settles both.
+# ---------------------------------------------------------------------------
+page:   docs/deployment/sizing.md
+claim:  Tockmox ships this as an opt-in and leaves it off
+test:   awk '/^  corednsHa:/{getline; gsub(/[ ]/,""); print; exit}' charts/tockmox-platform/values.yaml
+expect: enabled:false
+
+page:   docs/deployment/sizing.md
+claim:  The chart refuses a floor under 2, and says why
+test:   grep -c 'needs a floor of at least 2' charts/tockmox-platform/templates/preflight.yaml | tr -d ' '
+expect: 1

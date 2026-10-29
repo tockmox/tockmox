@@ -396,6 +396,25 @@ To turn off a whole functional story rather than one component, use
 [capabilities](capabilities.md). The interaction between the two switches, and
 which one wins, is on that page.
 
+## CoreDNS high availability
+
+Off by default, for a cluster of three or more schedulable nodes. Set in
+`site/values/platform.yaml`; the reasons, what to check on a distribution other
+than k3s, and what is not proven are on
+[the DNS section of sizing](../deployment/sizing.md#dns-in-the-ha-tier).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `apps.corednsHa.enabled` | `false` | Render a HorizontalPodAutoscaler and a PodDisruptionBudget on the distribution's CoreDNS, in `kube-system` |
+| `corednsHa.minReplicas` | `2` | The replica floor. Below 2 the render is refused |
+| `corednsHa.maxReplicas` | `3` | The autoscaler's ceiling. At least the floor |
+| `corednsHa.cpuTargetUtilization` | `80` | Average CPU, as a percentage of the CoreDNS container's CPU request |
+| `corednsHa.deployment` | `coredns` | The CoreDNS Deployment's name (the k3s name) |
+| `corednsHa.podLabels` | `k8s-app: kube-dns` | The labels on its pods (the k3s labels). Empty is refused |
+
+The `corednsHa` block is `provisional`
+([the values contract](values-contract.md#not-every-tockmox-key-carries-the-same-promise)).
+
 ## PriorityClasses
 
 ```yaml

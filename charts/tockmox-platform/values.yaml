@@ -272,6 +272,12 @@ apps:
   # the range you supply below.
   addressPool:
     enabled: true
+  # An HPA replica floor and a PodDisruptionBudget on the distro's CoreDNS, in
+  # kube-system. OFF by default: it is for a cluster of three or more schedulable
+  # nodes and writes outside the namespaces this product owns. Settings, and
+  # what to check on a distribution other than k3s, are in `corednsHa` below.
+  corednsHa:
+    enabled: false
 
 # ---------------------------------------------------------------------------
 # TLS ON-RAMP. cert-manager shipped here from the start with no issuer to go
@@ -357,6 +363,60 @@ certIssuer:
 addressPool:
   # @schema type:[string, array, null]
   range: ""
+
+# ---------------------------------------------------------------------------
+# CoreDNS HIGH AVAILABILITY (apps.corednsHa, OFF by default). For a cluster of
+# three or more schedulable nodes. Read templates/coredns-ha.yaml before turning
+# it on, and docs/deployment/sizing.md, "DNS in the HA tier".
+#
+# WHAT IT RENDERS: a HorizontalPodAutoscaler whose minReplicas is a floor under
+# the distro's CoreDNS Deployment, and a PodDisruptionBudget with
+# maxUnavailable: 1 on its pods, both in kube-system. Nothing else. It never
+# renders, patches or takes over the Deployment: the distro owns that, and
+# re-asserts it (k3s puts it back to one replica when it starts or upgrades; the
+# HPA raises it again).
+#
+# THE FIRST OBJECTS THIS PRODUCT WRITES INTO kube-system. The policy layer
+# creates no kube-system namespace (namespaces.yaml: "the distro's") and the
+# `default` ArgoCD AppProject the installer's Applications use allows any
+# destination namespace unless the site has edited it, so this needs no Project
+# edit. A site that put the platform Application in a restricted AppProject must
+# add kube-system to that Project's destinations.
+#
+# WHY minReplicas MAY NOT BE 1: the PodDisruptionBudget allows one pod to be
+# unavailable. With one CoreDNS pod that allowance is the whole of cluster DNS:
+# a drain (kured, a node upgrade) evicts the only server, and DNS is down until
+# its replacement starts. The budget then protects nothing while the objects
+# read as high availability. The render refuses a floor under 2 with that reason
+# (templates/preflight.yaml). A floor of 2 or more also needs that many
+# schedulable nodes where the distro's manifest spreads pods by host (k3s's
+# does), or a replica sits Pending.
+#
+# WHAT TO CHECK FIRST (these are the names the k3s manifest uses; other
+# distributions name them differently, and a wrong name renders clean and does
+# nothing: the HPA reports it cannot find its target, the budget selects no
+# pod):
+#   deployment   the CoreDNS Deployment's name in kube-system
+#   podLabels    the labels on its pods, which the budget selects
+# The HPA also needs a CPU request on the CoreDNS container and a metrics
+# source (metrics-server) to scale up under load; without a request it cannot
+# compute a utilization. Whether the floor still holds in that state has not
+# been tested here.
+# ---------------------------------------------------------------------------
+corednsHa:
+  # The replica floor. At least 2 (see above).
+  minReplicas: 2
+  # The ceiling the HPA may scale to under CPU load. At least minReplicas.
+  maxReplicas: 3
+  # Average CPU utilization, as a percentage of the container's CPU request.
+  cpuTargetUtilization: 80
+  # The distro's CoreDNS Deployment (k3s: coredns).
+  deployment: coredns
+  # The labels on the CoreDNS pods, which the PodDisruptionBudget selects
+  # (k3s: k8s-app: kube-dns). May not be empty: an empty selector in a budget
+  # selects every pod in the namespace.
+  podLabels:
+    k8s-app: kube-dns
 
 # ---------------------------------------------------------------------------
 # Upstream chart values. Anything not set here uses the upstream default.

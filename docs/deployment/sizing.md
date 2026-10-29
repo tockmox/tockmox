@@ -131,6 +131,7 @@ this row.
 | **Longhorn** | `defaultClassReplicaCount: 3`, and turn `replicaSoftAntiAffinity` **off** |
 | **CNPG** | `instances: 3` per database |
 | **Networking** | MetalLB across all three. An API-server endpoint that outlives one node ... **you supply this, Tockmox does not install it**, see [the API endpoint](../administration/api-endpoint.md) |
+| **DNS** | CoreDNS is the distribution's, and on k3s it runs as one replica. A replica floor and a disruption budget are **opt-in**: `apps.corednsHa`, see [DNS in the HA tier](#dns-in-the-ha-tier) |
 
 **Three, because quorum.** k3s's embedded etcd needs a majority to elect a
 leader. Two nodes tolerate zero failures for the control plane: lose one and
@@ -155,6 +156,86 @@ power event, a bad upgrade applied to all three, or a mistaken `kubectl delete`
 takes the cluster regardless. **HA and backups are different controls for
 different failures, and HA is the one people mistake for both.** Everything in
 the Resilient tier still applies.
+
+## DNS in the HA tier
+
+Three nodes do not make cluster DNS highly available by themselves. k3s ships
+CoreDNS as a one-replica Deployment that it re-applies when it starts or
+upgrades, so a replica count raised by hand goes back to one. With one CoreDNS
+pod, rebooting or draining the node it runs on takes name resolution away from
+every workload until the pod is rescheduled. The tier needs the second CoreDNS
+replica to exist before a node is lost.
+
+**Tockmox ships this as an opt-in and leaves it off.** It renders two objects in
+`kube-system` and nothing else: a HorizontalPodAutoscaler whose `minReplicas` is a
+floor under the distribution's CoreDNS Deployment, and a PodDisruptionBudget with
+`maxUnavailable: 1` on its pods. Both are additive. The Deployment and its
+ConfigMap stay the distribution's: k3s keeps editing the ConfigMap, and taking
+the manifest over would also make the CoreDNS version Tockmox's to maintain. The
+autoscaler keeps raising the Deployment to the floor after k3s puts it back.
+
+Switch it on in `site/values/platform.yaml`:
+
+```yaml
+apps:
+  corednsHa:
+    enabled: true
+corednsHa:
+  minReplicas: 2     # the floor; 2 is the lowest the chart accepts
+  maxReplicas: 3     # the ceiling under CPU load
+```
+
+**The chart refuses a floor under 2, and says why.** The budget lets one pod be
+unavailable. With one CoreDNS pod that allowance is all of cluster DNS, so a
+drain (kured, a node upgrade) evicts the only server and the budget protects
+nothing, while the two objects read as high availability. A floor of 2 or more
+also needs that many schedulable nodes. The k3s manifest the maintainer's
+cluster runs (v1.34.6) spreads CoreDNS pods by host, so a replica with no node of
+its own sits Pending. On one node, leave the
+switch off. A ceiling below the floor, an empty Deployment name and an empty pod
+selector are refused as well, because each renders clean and does nothing (an
+empty selector in a budget selects every pod in `kube-system`).
+
+**Check these before you switch it on, on any distribution but k3s.** The
+defaults are the names the k3s manifest uses. A wrong name is not an error: the
+autoscaler reports it cannot find its target and the budget selects no pod.
+
+| Setting | k3s default | What to check |
+|---|---|---|
+| `corednsHa.deployment` | `coredns` | The CoreDNS Deployment's name: `kubectl -n kube-system get deployments` |
+| `corednsHa.podLabels` | `k8s-app: kube-dns` | The labels on its pods: `kubectl -n kube-system get pods --show-labels` |
+
+**The autoscaler also needs two things from the cluster.** A CPU request on the
+CoreDNS container, because a utilization is a percentage of the request
+(`corednsHa.cpuTargetUtilization`, 80 by default), and a metrics source
+(metrics-server). k3s ships both. On another distribution, check that both
+exist; without them the autoscaler cannot scale CoreDNS up under load. Whether
+it still holds the floor in that state is not tested here.
+
+**These are the first Tockmox-authored objects in `kube-system`.** The policy
+layer creates no `kube-system` namespace (it is the distribution's), and the
+[namespace guard](../administration/namespace-guard.md) covers only namespaces
+labelled as Tockmox's, so neither affects them. The installer's Applications use
+ArgoCD's `default` project, which allows any destination namespace unless the
+site edited it. A site that put the platform Application in a restricted
+AppProject adds `kube-system` to that project's destinations, or the sync fails
+on those two objects. The platform layer already writes into `kube-system`
+through cert-manager's chart, which places its leader-election Roles and
+RoleBindings there.
+
+**Switching it off** prunes both objects. The Deployment stays at whatever count
+the autoscaler last set until the distribution next re-applies its own manifest.
+
+**Not proven.** The render is checked by `tools/check-coredns-ha.sh`: the stock
+render writes neither object, the switch adds exactly these two, and a floor
+under 2 is refused. Nothing has run this chart's two objects on a cluster. The
+same two objects have run on a four-node k3s cluster since June 2026 (floor 3,
+ceiling 4), which is where the k3s names and the behaviour above come from, and
+it is one cluster. Not tested: that the floor holds across a k3s restart on a
+cluster built from this chart, that a drain on several schedulable nodes keeps
+DNS answering, and the names on any distribution but k3s. No release gate
+installs three nodes ([deployment shapes](deployment-shapes.md)), so the drain
+has nowhere to be proven yet.
 
 ## Sizing the AI plane separately
 

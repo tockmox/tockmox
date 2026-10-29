@@ -1,0 +1,71 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+CoreDNS high availability, opt-in (apps.corednsHa). Two additive objects in
+kube-system and nothing else. The settings, and the reasons, are in values.yaml
+beside `corednsHa`; the render-time refusals are in templates/preflight.yaml.
+
+THE DISTRO OWNS THE DEPLOYMENT. k3s writes its CoreDNS manifest into the server's
+manifests directory and re-applies it when it starts or upgrades, so a replica
+count set by hand is put back to one. Taking the manifest over (a .skip file)
+would also hand this product the CoreDNS version and a fight with k3s's own
+controller, which keeps editing the NodeHosts key of the CoreDNS ConfigMap. So
+this chart renders neither the Deployment nor the ConfigMap. It renders:
+
+  - a HorizontalPodAutoscaler on the Deployment with minReplicas as a floor. The
+    autoscaler re-asserts the floor continuously, so the floor survives the
+    distro putting the Deployment back to one replica.
+  - a PodDisruptionBudget with maxUnavailable: 1 on its pods, so a voluntary
+    disruption (a kured reboot, a node drain) never takes more than one server
+    away at a time.
+
+Pod spread is not set here. Where the distro's manifest already spreads the pods
+by host, only the count needed holding.
+
+The namespace is written explicitly on both objects because the Application's
+destination is the platform namespace, not kube-system. Removing the switch
+prunes both; the Deployment is left at whatever count the autoscaler last set,
+until the distro next puts it back.
+
+The same two objects have run on a four-node k3s cluster since June 2026 (floor
+3, ceiling 4). What has not been run: a floor held across a k3s restart, and a
+drain, on a cluster built from this chart.
+*/ -}}
+{{- if include "tockmox.appEnabled" (dict "ctx" $ "app" "corednsHa") }}
+{{- $c := .Values.corednsHa }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tockmox-coredns-ha
+  namespace: kube-system
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ $c.deployment }}
+  minReplicas: {{ $c.minReplicas }}
+  maxReplicas: {{ $c.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $c.cpuTargetUtilization }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: tockmox-coredns-ha
+  namespace: kube-system
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- toYaml $c.podLabels | nindent 6 }}
+{{- end }}
