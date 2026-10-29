@@ -181,8 +181,9 @@ on the `0.8` line and corrected as trains run.
   dependency commits stop applying to the line. On the line a patch update opens
   on its own, a minor waits for a dashboard tick (the tick is the nomination),
   a major is never proposed, workflow pins are off, and everything waits seven
-  days, the AI plane included; `main` keeps the AI plane's no-soak rule for
-  dogfooding. Security alerts jump the queue on both. Read the effective config
+  days, the AI plane included; `main` keeps Open WebUI's no-soak rule for
+  dogfooding, while LiteLLM waits three days there too (TM-1197). Security
+  alerts jump the queue on both. Read the effective config
   in the Renovate log once per line: an inherited setting has overridden the
   file before.
 - **Nomination is the PR.** Approving it at the cutoff puts it on the train.

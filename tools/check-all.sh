@@ -333,6 +333,11 @@ run_gate "every OIDC console gets a trust bundle" bash tools/check-trust-wiring.
 run_gate "a product bump of Open WebUI or LiteLLM reaches a site with no site edit (TM-1053)" bash tools/check-site-follows-product.sh
 run_gate "the site-follows-product gate goes red on every mutation (TM-1053)" bash tools/check-site-follows-product.sh --selftest
 run_gate "site LiteLLM hooks load through values alone (TM-0787)" bash tools/check-litellm-hooks.sh
+# TM-1197. No known-bad LiteLLM digest or 1.107.0 tag (the incident) is named in images.txt, the SBOM, a chart or any
+# other file outside the docs; the list is tools/litellm-bad-digests.txt. Not in ci.yaml yet, for the reason at
+# the top of this file.
+run_gate "no known-bad LiteLLM image digest or 1.107.0 tag appears in images.txt or anywhere else a LiteLLM image can be named (TM-1197)" bash tools/check-litellm-compromise.sh
+run_gate "the LiteLLM-compromise gate goes red on the index digest, each platform manifest, the published 12-hex prefixes, the exact bad tag and a bad list, and passes the next release (TM-1197)" bash tools/check-litellm-compromise.sh --selftest
 run_gate "inference-node routes match the UI and the eval gateway is fenced (TM-0920)" bash tools/check-inference-nodes.sh
 # The AI-node toolkit (ai-node/): lint, unit tests and the converger wrapper's tests. Not in ci.yaml yet,
 # for the reason the posture-probe note below gives. The Linux simulation of the whole playbook changes the

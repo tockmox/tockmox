@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# KNOWN-BAD LITELLM IMAGE DIGESTS AND TAGS (TM-1197). One list, read by
+# tools/check-litellm-compromise.sh; add a line here when a new bad artifact is
+# published, nothing else needs to change.
+#
+# WHAT THEY ARE. LiteLLM's release pipeline was hijacked on 2026-10-21 and
+# v1.107.0 shipped a credential stealer: on PyPI, and in the
+# v1.107.0 / latest / main-latest / main-stable tags of ghcr.io/berriai/litellm,
+# litellm-database and litellm-non_root. The vendor pulled 1.107.0 and did not
+# re-cut it.
+#
+# SOURCES, read 2026-10-29:
+#   [vendor] https://docs.litellm.ai/blog/security-incident-oct-21-2026
+#   [issue]  https://github.com/BerriAI/litellm/issues/47826
+# The card TM-1197 names only the first digest below. The others come from the
+# same two sources; each line says which. Not listed: layer digests (the issue
+# names sha256:b52b5f46cf92... for the venv layer, truncated), because no image
+# reference carries a layer digest.
+#
+# WHY SOME ENTRIES ARE 12 HEX. The product pins ghcr.io/berriai/litellm-database,
+# and no public source gives that image's index digest in full: the vendor post
+# and the issue print only "sha256:c00f9d92c427..." (and "sha256:7b00e91cd2fe..."
+# for litellm-non_root). A 48-bit prefix is still a digest key, and it is the
+# only way to cover the image we ship. When a full digest is published, ADD it
+# as a new line and keep the prefix line; the check matches an entry against a
+# digest in the tree whenever one is a prefix of the other, at 12 hex or more.
+#
+# FORMAT, one entry per line: sha256:<12 to 64 lowercase hex>, then a label.
+# The gate refuses a line that does not parse, so a typo cannot go quiet.
+
+sha256:1bbcb1443bc962e45f5aad53fe3d2c30600e0379715fb6c664cdd3ac126c339e  image index of litellm on Docker Hub, and (truncated in the sources) ghcr.io/berriai/litellm; tags v1.107.0 latest main-latest main-stable (TM-1197 card, vendor post)
+sha256:bd1aeee419ea36da9aa2b657288da4101887be468f020ac63d22ba6ed84a3ea5  v1.107.0 amd64 platform manifest (issue 47826, IOC table)
+sha256:56b74573eed6e4aafe4b50603dbe7853e0345f188c8e44a09f1098caf1f4bcdf  v1.107.0 arm64 platform manifest (issue 47826, IOC table)
+sha256:c00f9d92c427  ghcr.io/berriai/litellm-database image index, published truncated to 12 hex (vendor post, issue 47826)
+sha256:7b00e91cd2fe  ghcr.io/berriai/litellm-non_root image index, published truncated to 12 hex (vendor post, issue 47826)
+
+# THE TAG (maintainer ruling 2026-10-29). images.txt pins LiteLLM by tag only, so a bump to the bad version names
+# no digest; these lines refuse the exact tag on each image the incident names, in both spellings (the vendor's
+# tags carry a "v", the product's pin does not). Matching is exact: 1.107.0-rc.2 and 1.107.1 are untouched.
+# 1.107.0 was pulled, not re-cut; if a clean release ever ships under this number, delete these lines on purpose.
+tag:ghcr.io/berriai/litellm:v1.107.0  [vendor] [issue]
+tag:ghcr.io/berriai/litellm:1.107.0  [vendor] [issue], unprefixed spelling
+tag:ghcr.io/berriai/litellm-database:v1.107.0  [vendor] [issue]
+tag:ghcr.io/berriai/litellm-database:1.107.0  [vendor] [issue], unprefixed spelling (the product's pin form)
+tag:ghcr.io/berriai/litellm-non_root:v1.107.0  [vendor] [issue]
+tag:ghcr.io/berriai/litellm-non_root:1.107.0  [vendor] [issue], unprefixed spelling
+tag:litellm/litellm:v1.107.0  [vendor] Docker Hub (with or without the docker.io/ prefix)
+tag:litellm/litellm:1.107.0  [vendor] Docker Hub, unprefixed spelling

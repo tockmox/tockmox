@@ -264,6 +264,22 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Changed
 
+- **LiteLLM updates wait three days before Renovate opens them on `main`, and a
+  new gate refuses the compromised 1.107.0 image digests.** LiteLLM's release
+  pipeline was hijacked on 2026-10-21 and v1.107.0 shipped a credential
+  stealer. The AI-plane rule no longer takes LiteLLM (`litellm-helm` and the
+  `ghcr.io/berriai/litellm-database` image) as it lands: it carries a three-day
+  `minimumReleaseAge` there, so a release the vendor pulls is gone before a PR
+  exists. Open WebUI keeps the no-soak rule, and the release line keeps its
+  seven days. `tools/check-litellm-compromise.sh`, a `tools/check-all.sh` gate,
+  fails when a known-bad digest (the list is `tools/litellm-bad-digests.txt`,
+  with the full digests and the two 12-hex prefixes the vendor published for
+  `litellm-database` and `litellm-non_root`) appears in `images.txt` or in any
+  file outside the docs, and when a LiteLLM image is named at exactly the
+  `1.107.0` or `v1.107.0` tag (images.txt pins LiteLLM by tag, so a bump to the
+  bad version names no digest; `1.107.1` and pre-releases are untouched). Cost: a LiteLLM fix on `main` reaches
+  a PR three days later than before, and a security alert still jumps the queue.
+
 - **The LiteLLM migrations Job is LiteLLM's own, as an Argo CD `Sync` hook, and
   a version change takes a database backup first.** `tockmox-ai` no longer
   renders its own hash-named copy of the Job: the vendored `litellm-helm` renders
