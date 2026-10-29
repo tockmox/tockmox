@@ -78,6 +78,7 @@
           "blackbox",
           "certManager",
           "cnpg",
+          "corednsHa",
           "dashboards",
           "devops_netpol",
           "diagnostic_identity",
@@ -410,6 +411,9 @@
     },
     "tockmoxUi": {
       "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "corednsHa": {
+      "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
     }
   },
   "additionalProperties": false,

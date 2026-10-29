@@ -148,6 +148,7 @@
           "blackbox",
           "certManager",
           "cnpg",
+          "corednsHa",
           "dashboards",
           "devops_netpol",
           "diagnostic_identity",
@@ -633,6 +634,43 @@
     },
     "tockmoxUi": {
       "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "corednsHa": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Opt-in CoreDNS high availability (switch: apps.corednsHa.enabled): a HorizontalPodAutoscaler replica floor and a PodDisruptionBudget on the distro's CoreDNS Deployment, both in kube-system. The render refuses a floor under 2. Defaults are k3s's names; check them on another distribution (docs/deployment/sizing.md, DNS in the HA tier).",
+      "x-tockmox-stability": "provisional",
+      "x-tockmox-stability-ruled": "2026-10-29",
+      "x-tockmox-stability-rerule": "0.10.0",
+      "properties": {
+        "minReplicas": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The replica floor. The render refuses a value under 2 while apps.corednsHa is on, naming the reason (a single CoreDNS pod makes the budget a no-op and a drain takes DNS down)."
+        },
+        "maxReplicas": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The autoscaler's ceiling. At least minReplicas."
+        },
+        "cpuTargetUtilization": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Average CPU utilization, as a percentage of the CoreDNS container's CPU request, above which the autoscaler adds a replica."
+        },
+        "deployment": {
+          "type": "string",
+          "description": "The distro's CoreDNS Deployment in kube-system. k3s: coredns."
+        },
+        "podLabels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Labels on the CoreDNS pods, selected by the PodDisruptionBudget. k3s: k8s-app: kube-dns. Empty is refused."
+        }
+      }
     }
   },
   "additionalProperties": false,

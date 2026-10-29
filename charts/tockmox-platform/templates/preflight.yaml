@@ -71,6 +71,31 @@ whether or not this pass would otherwise have touched it. */ -}}
 {{- $_ := include "tockmox.garageWeb.sites" $ -}}
 {{- end -}}
 {{- /*
+COREDNS HA REFUSES THE SETTINGS THAT MAKE IT A DECORATION (apps.corednsHa).
+The PodDisruptionBudget allows ONE pod to be unavailable. On a floor of one
+CoreDNS pod that is the only DNS server: a drain evicts it and DNS is down until
+the replacement starts, so the objects would read as high availability and
+deliver none. Refused here, with the reason, rather than rendered. The other
+three are values that render clean and select or scale nothing: a ceiling under
+the floor, no Deployment name, and an empty pod selector (which a budget reads as
+every pod in kube-system).
+*/ -}}
+{{- if include "tockmox.appEnabled" (dict "ctx" $ "app" "corednsHa") -}}
+{{- $c := .Values.corednsHa | default dict -}}
+{{- if lt (int ($c.minReplicas | default 0)) 2 -}}
+{{- fail (printf "corednsHa.minReplicas is %v and apps.corednsHa is on. CoreDNS HA needs a floor of at least 2: the PodDisruptionBudget lets one pod be unavailable, so with a single CoreDNS pod a drain (kured, a node upgrade) evicts the only DNS server and cluster DNS is down until the replacement starts. Set corednsHa.minReplicas to 2 or more on a cluster with that many schedulable nodes (see docs/deployment/sizing.md, DNS in the HA tier), or set apps.corednsHa.enabled to false on a single node." (printf "%v" ($c.minReplicas | default 0))) -}}
+{{- end -}}
+{{- if lt (int ($c.maxReplicas | default 0)) (int $c.minReplicas) -}}
+{{- fail (printf "corednsHa.maxReplicas (%v) is below corednsHa.minReplicas (%v). The autoscaler's ceiling must be at least its floor." $c.maxReplicas $c.minReplicas) -}}
+{{- end -}}
+{{- if not $c.deployment -}}
+{{- fail "corednsHa.deployment is empty. It names the distro's CoreDNS Deployment in kube-system (k3s: coredns), which the autoscaler scales; check it with the Deployment list in kube-system." -}}
+{{- end -}}
+{{- if not $c.podLabels -}}
+{{- fail "corednsHa.podLabels is empty. It selects the CoreDNS pods for the PodDisruptionBudget (k3s: k8s-app: kube-dns), and an empty selector selects every pod in kube-system." -}}
+{{- end -}}
+{{- end -}}
+{{- /*
 SUBCHART MONITORS DO NOT FOLLOW THE CAPABILITY, SO REFUSE THE HALF-OFF STATE (TM-0825).
 `capabilities.observability.enabled: false` stops every ServiceMonitor,
 PodMonitor and PrometheusRule this chart's OWN templates write. The monitors a

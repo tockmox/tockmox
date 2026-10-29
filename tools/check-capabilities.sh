@@ -136,6 +136,10 @@ CORE=(certManager metallb traefik longhorn cnpg kured addressPool
       # declining a capability must not switch a safety control on or off. Same
       # reasoning as kube_bench for sitting here.
       namespace_guard
+      # corednsHa is the distro's DNS made redundant, not a story: OFF by
+      # default, for three or more nodes, and no capability decision should switch
+      # an object in kube-system on or off. Same reasoning as namespace_guard.
+      corednsHa
       # etcdScrapeConfig is a site seam, not a story: OFF by default,
       # because its targets are the site's own control-plane addresses, and
       # declining observability already removes it (it renders only with the
