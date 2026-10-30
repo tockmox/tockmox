@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+schema: eval-set/1
+id: agent
+version: v1
+class: agent
+classification: public
+grader: rule
+criterion: "Pass rate on 48 tool-use cases (36 must call the right tool with the right arguments, 12 must answer without a tool) is not worse than the incumbent by the margin, or clears the bar with no incumbent."
+margin: 0.05
+min_effect: 0.05
+bar: 0.85
+epochs: 1
+max_tokens: 300
+# Read by the tool-reliability leg, not by the eval-set/1 loader: the most unparseable tool calls a candidate may
+# produce as a fraction of calls.
+tool_parse_bar: 0.02
+description: >-
+  A public, synthetic tool-use bar for an agent model, written against 17 home and office tools (weather,
+  thermostat, lights, document search, calendar, messages, stock quotes, unit conversion, to-dos, music, timers,
+  locks, directions, alarms, room booking). 36 cases need exactly one call to the right tool with the right
+  arguments (enums, numbers, booleans, arrays, a nested object, dates resolved against a stated "today", several
+  tools offered with only one that fits, and follow-ups that depend on an earlier tool result). 12 cases must be
+  answered directly: questions the model can answer, requests no offered tool fits, requests missing a required
+  detail, and follow-ups whose answer is already in an earlier tool result. Nothing in it is personal data.

@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+schema: eval-set/1
+id: large
+version: v1
+class: large
+classification: public
+grader: rule
+criterion: "Pass rate on 48 general-purpose cases (verbatim copy, JSON extraction, arithmetic, format constraints, short reasoning) is not worse than the incumbent by the margin, or clears the bar with no incumbent."
+margin: 0.05
+min_effect: 0.05
+bar: 0.85
+epochs: 1
+max_tokens: 400
+description: >-
+  A public, synthetic bar for a large local model. 13 verbatim-copy cases (numbers, unicode quotes, tabs,
+  indentation, backslashes, identifiers), 10 structured extractions graded against a JSON schema with the
+  expected values pinned, 12 single-number word problems graded on a final "Answer:" line, 8 format-constraint
+  cases and 5 short reasoning cases. Every passage is written for this set; nothing in it is personal data or
+  quoted from a copyrighted work.

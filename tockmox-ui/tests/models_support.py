@@ -104,8 +104,9 @@ def apply_change(lc, inv, add_lc, add_inv):
     return new_lc, new_inv
 
 
-def models_client(tmp_path, lifecycle=None, inventory=None, groups=None, extra=None, probe_transport=None):
-    """A logged-in admin client through the real app. Returns (client, user)."""
+def models_client(tmp_path, lifecycle=None, inventory=None, groups=None, extra=None, probe_transport=None, prometheus=None):
+    """A logged-in admin client through the real app. Returns (client, user). `prometheus` is a handler(request) -> Response for
+    the Prometheus the app reads (demand, spend); without it the app would try the real network and read Unknown."""
     from fastapi.testclient import TestClient
 
     from app import config
@@ -122,7 +123,8 @@ def models_client(tmp_path, lifecycle=None, inventory=None, groups=None, extra=N
     if extra:
         extra(doc)
     s = config.parse(doc)
-    tp = Transports(probe=httpx.MockTransport(probe_transport)) if probe_transport else Transports()
+    tp = Transports(probe=httpx.MockTransport(probe_transport) if probe_transport else None,
+                    prometheus=httpx.MockTransport(prometheus) if prometheus else None)
     app = create_app(s, tp, notes_path=str(tmp_path / "none.md"))
     c = TestClient(app, follow_redirects=False)
     sess = Sessions(s.session_secret, 3600, s.admin_group, False)

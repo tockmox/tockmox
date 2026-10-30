@@ -16,18 +16,30 @@ eval gateway, and promoting it to the production gateway after enough passing co
   POST /models/promote-hosted
   GET  /models/recommend?node=<id>  per alias class, a shortlist for one node (AC-48.14). A hypothesis list: it admits nothing
   POST /models/recommend/admit      the same change as /models/propose, for one row of that list ("Admit for evaluation")
+  GET  /models/inbox                what the watcher found, as cards: reason, fit per node, licence, a model card's own results
+                                    as a labelled hint, and Evaluate / Snooze 30 days / Dismiss (TM-1258, TM-1265)
+  POST /models/inbox/snooze         the values change that snoozes one candidate (modelLifecycle.inbox.snoozed); writes nothing
+  POST /models/inbox/dismiss        the same for modelLifecycle.inbox.dismissed
+  GET  /models/c/<alias>            the candidate for an alias: the plan, and a strip of its runs from run-status/1 files
+  GET  /models/budget               requests and estimated cost per alias, and the local share of traffic; Unknown where nothing says
+  POST /models/v/<runId>/reject     the reject change for a fail, worse or tradeoff comparison (reason required); writes nothing
   GET  /models/profiles             workload profiles -> a residency plan per node, and the engine configs
   POST /models/builds               read which build each node holds for the pinned models it serves (TM-0934),
                                     through the probe's fences; the result lives in memory and goes stale
 """
 from __future__ import annotations
 
+import copy
 import datetime
 
 import yaml
 from fastapi import Form, Request
 from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 
+from . import budget as bg
+from . import candidate as cd
+from . import fit as fx
+from . import inbox as ib
 from . import models as ml
 from . import nodes as nm
 from . import recommend as rc
@@ -68,8 +80,11 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         r = src_verdicts.read()
         return r, (r.data or {}).get("verdicts", []) if r.data else []
 
+    def gateway_list():
+        return [m for m in s.nodes.gateway_model_list if isinstance(m, dict)]
+
     def gateway_names():
-        return {str(m.get("model_name", "")) for m in s.nodes.gateway_model_list if isinstance(m, dict)}
+        return {str(m.get("model_name", "")) for m in gateway_list()}
 
     def rows():
         out = []
@@ -105,6 +120,32 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
 
     def probe_on():
         return prober is not None and prober.enabled
+
+    def today():
+        return _now().date()
+
+    def inbox_cfg():
+        """(Inbox, "") or (empty Inbox, why): a malformed modelLifecycle.inbox is shown on the page, not hidden."""
+        try:
+            return ib.parse((L.raw or {}).get("inbox")), ""
+        except ml.LifecycleError as e:
+            return ib.Inbox(), str(e)
+
+    def retire_note(when):
+        """The countdown for a deprecation's date, with its badge state: ("retires in 12 days (2026-11-10)", "warning")."""
+        r = ib.retirement(when, today())
+        return {**r, "badge": ib.retire_state(r)}
+
+    hosted_by_model = {}                 # "provider/model" -> [gateway aliases that route it to the provider]
+    for m_ in gateway_list():
+        h_ = bg.hosted_model(m_)
+        if h_ and m_.get("model_name"):
+            hosted_by_model.setdefault(h_, []).append(str(m_["model_name"]))
+
+    budget_cfg, budget_problems = bg.parse_budget((L.raw or {}).get("budget"))
+    # the spend source rides the demand source's URL, timeout and transport: one Prometheus, one set of fences
+    spend_src = (bg.SpendSource(src_demand.url, budget_cfg["spendQuery"], src_demand.timeout, src_demand.transport)
+                 if budget_cfg["spendQuery"] and hasattr(src_demand, "url") else None)
 
     def drift_rows():
         if not probe_on():
@@ -147,17 +188,25 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         rep = src_report.read()
         vr, vs = verdicts()
         cat, unc = rows()
-        cands = rep.data.candidates if rep.data else []
+        inbox, inbox_why = inbox_cfg()
+        cands, snoozed, dismissed = ib.split(rep.data.candidates if rep.data else [], inbox, today())
         groups = {k: [c for c in cands if c.kind == k] for k in ("revision", "digest", "quant", "successor", "frontier", "deprecation")}
+        rmap = ib.retire_map(rep.data, today())
+        for row in cat:
+            row["retire"] = ib.retire_for(rmap, row["entry"].model, row["entry"].source.ref)
+            if row["retire"]:
+                row["retire"] = {**row["retire"], "badge": ib.retire_state(row["retire"])}
+            row["hosted_aliases"] = hosted_by_model.get(row["entry"].source.ref, []) if row["entry"].source.kind == "hosted" else []
         hosted = [e for e in L.lifecycle.catalog if e.source.kind == "hosted" and e.stage == "candidate"]
         drift = drift_rows()
         return render(request, "models.html", u, catalog=cat, uncatalogued=unc, reading=rep, groups=groups,
                       watch_on=L.watch_enabled, gate=ml.check_promotions(L.lifecycle, inv),
                       gate_notes=ml.promotion_notes(L.lifecycle), nexts=next_rows(vs), hosted=hosted,
                       verdict_reading=vr, lc=L.lifecycle, drift=drift, drift_findings=ml.drift_findings(drift),
-                      probe_on=probe_on(), checked_at=builds["at"], nodes=inv.nodes)
+                      probe_on=probe_on(), checked_at=builds["at"], nodes=inv.nodes, inbox_count=len(cands), hidden_count=len(snoozed) + len(dismissed),
+                      inbox_why=inbox_why, retire_note=retire_note)
 
-    def _change(request, u, new_lc, new_inv, notes, title, fmt, form_fields, path):
+    def _change(request, u, new_lc, new_inv, notes, title, fmt, form_fields, path, raw=None):
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         header = (f"Generated by Tockmox UI {app_version} for {u.name} at {stamp}.\n"
                   f"Replaces the modelLifecycle and inferenceNodes blocks in {s.nodes.values_file}. Review, then commit.")
@@ -165,7 +214,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         if problems:
             return bad(request, u, "This change would fail the promotion gate: " + "; ".join(problems))
         # carry every key the operator set (reportFile, watch, demandQuery ...; probe, gateway ...): review finding
-        doc = ml.change_doc(L.raw, s.nodes.raw, new_lc, new_inv)
+        doc = ml.change_doc(L.raw if raw is None else raw, s.nodes.raw, new_lc, new_inv)
         text = "".join(f"# {h}\n" for h in header.splitlines()) + yaml.dump(doc, Dumper=nm._Dumper, sort_keys=False, width=120)
         if fmt == "yaml":
             return Response(text, media_type="application/yaml",
@@ -181,6 +230,22 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
                       eval_list=nm.model_list_yaml(derived, "eval") if nm.gateway_routes(derived, "eval") else "",
                       form_fields=form_fields, values_file=s.nodes.values_file, path=path)
 
+    def replacement_candidate(dep, report):
+        """(hosted Candidate, "") for the replacement a deprecation names, or (None, why). The report's own frontier candidate for it
+        is used when there is one; otherwise one is built from the name, so a replacement the provider's list does not show yet can
+        still be admitted for evaluation."""
+        if not dep.replacement:
+            return None, (f"The report names no replacement for {dep.model}. Name one under "
+                          f"modelLifecycle.watch.providers.{dep.subject}.replacements, or admit a hosted model from the list by hand.")
+        known = next((c for c in (report.candidates if report else []) if c.kind == "frontier" and c.model == dep.replacement), None)
+        if known is not None:
+            return known, ""
+        e = L.lifecycle.by_model(dep.replacement)
+        if e is not None:
+            return None, f"{dep.replacement} is already in the catalog (stage {e.stage}): start its evaluation from the Models page."
+        return ml.Candidate(f"frontier:{dep.replacement}", "frontier", dep.subject, dep.replacement, ml.Source("hosted", dep.replacement, ""),
+                            f"{dep.replacement} replaces {dep.model}, which {dep.subject} retires ({dep.when or 'date not given'})"), ""
+
     @app.post("/models/propose")
     def models_propose(request: Request, csrf: str = Form(""), cid: str = Form(""), fmt: str = Form("")):
         u, deny = admin(request)
@@ -192,8 +257,13 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         cand = next((c for c in (rep.data.candidates if rep.data else []) if c.id == cid), None)
         if cand is None:
             return bad(request, u, "That candidate is not in the watcher's current report.", 404)
+        if cand.kind == "deprecation":
+            # a retiring hosted model: what is offered is the replacement the report names, as a hosted candidate (TM-1265)
+            cand, why = replacement_candidate(cand, rep.data)
+            if cand is None:
+                return bad(request, u, why)
         try:
-            add_lc, add_inv, notes = ml.propose(cand, L.lifecycle, inv, taken=gateway_names())
+            add_lc, add_inv, notes = ml.propose(cand, L.lifecycle, inv, taken=gateway_names(), gateway=gateway_list())
             new_lc = ml.merge(L.lifecycle, add_lc)
             new_inv = nm.merge(inv, add_inv) if add_inv.routes else inv
         except (ml.LifecycleError, nm.NodeError, ValueError) as e:
@@ -286,6 +356,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         try:
             add_lc, add_inv, notes = rc.build_change(row.action, row.alias, row.option, node, ep, cr.spec, L.lifecycle, inv,
                                                      gateway_names())
+            ml.stamp_next_routes(add_inv, inv, gateway_list())          # TM-1119: tier and tags, as propose() writes them
             new_lc = ml.merge(L.lifecycle, add_lc)
             new_inv = nm.merge(inv, add_inv) if add_inv.routes else inv
         except (ml.LifecycleError, nm.NodeError, ValueError) as e:
@@ -294,6 +365,177 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
                          "second approval"]
         return _change(request, u, new_lc, new_inv, notes, f"Admit {model} for evaluation as {row.alias}{ml.NEXT}", fmt,
                        {"node": node, "cls": cls, "model": model, "endpoint": ep}, "/models/recommend/admit")
+
+    # ------------------------------------------------------------ the inbox (TM-1258, TM-1265)
+
+    FIT_BADGE = {"fits": "ok", "tight": "warning", "over": "critical", "unknown": "unknown"}
+    INBOX_RANK = {"deprecation": 0, "revision": 1, "digest": 1, "successor": 2, "quant": 3, "frontier": 4}
+    HOSTED_HELD = ("Hosted candidates are admitted to the eval gateway untagged, and the eval runner holds them: it sends a hosted "
+                   "model no case until a data class is enforced end to end (the safety rails, TM-1249).")
+
+    def fit_chips(c, rep, results):
+        """One chip per node for a local candidate, from fit v2 (fit_compat): {node, state, text}. A candidate with no size is Unknown."""
+        if c.source.kind not in ("huggingface", "ollama"):
+            return []
+        rec = (rep.sizes if rep else {}).get(c.source.ref) if c.source.kind == "huggingface" else None
+        entry = L.lifecycle.entry(c.subject)
+        # c.size_gib is the watcher's own (the incumbent's for a new revision of the same bytes); the incumbent's size is NOT a quant's
+        est = c.size_gib or nm.estimate_size_gib(c.model)
+        opt = rc.Option(c.model, c.source, "watcher", None, rec, c.detail)
+        kind = rc._kind_of(opt)
+        live = next((r for r in inv.routes if entry and r.model == entry.model and not r.alias.endswith(ml.NEXT)), None)
+        need = fx.route_need(live) if live else fx.Need()
+        cfg, _why = rec_config()
+        sizes = rc.sizes_by_model(L.lifecycle, rep)
+        out = []
+        for n in inv.nodes:
+            eps = rc._compatible(n, opt, kind)
+            if not eps:
+                out.append({"node": n, "state": "unknown", "text": f"no endpoint on {n.name} can serve this build"})
+                continue
+            facts = dict(facts_for(n.id))
+            if not facts.get("wired_limit_mib"):
+                facts.update(rc.facts_from_results(results, n.id))
+            op = ((cfg.nodes.get(n.id) or {}).get("wiredLimitGiB") if cfg else None)
+            if op:
+                facts["operator_usable_gib"] = op
+            f = fx.fit_compat(n, inv.routes_on(n.id), est, eps[0][1], sizes=sizes, facts=facts, need=need, new_record=rec)
+            if f.state == "unknown" or f.new_gib is None or f.usable_gib is None:
+                why = "its size is not known" if f.new_gib is None else "the node's memory is not known"
+                out.append({"node": n, "state": "unknown", "text": f"{n.name}: Unknown, {why}"})
+            else:
+                out.append({"node": n, "state": FIT_BADGE[f.state], "text": f"{n.name}: {f.state}, {f.total:.0f} of {f.usable_gib:.0f} GiB planned"})
+        return out
+
+    def licence_chip(c, rep):
+        cfg, why = rec_config()
+        if cfg is None:
+            return {"state": "unknown", "word": "Licence: Unknown", "text": "modelLifecycle.recommend is not valid, so the allow list cannot be read: " + why}
+        rec = (rep.sizes if rep else {}).get(c.source.ref) if c.source.kind == "huggingface" else None
+        lic, text = rc.licence_state(rc.Option(c.model, c.source, "watcher", None, rec, c.detail), cfg)
+        name = (rec.license if rec and rec.license else "") or "unknown"
+        return {"state": {"allowed": "ok", "exception": "warning", "outside": "critical"}.get(lic, "unknown"),
+                "word": f"Licence: {name}", "text": "" if lic == "allowed" else text}
+
+    def inbox_cards(rep, shown):
+        results = load_results()[0]
+        cards = []
+        for c in shown:
+            hosted = c.source.kind == "hosted"
+            card = {"c": c, "reason": ib.REASONS[c.kind][0], "reason_why": ib.REASONS[c.kind][1], "hosted": hosted,
+                    "fits": [] if hosted else fit_chips(c, rep, results), "licence": None if hosted else licence_chip(c, rep),
+                    "hint": None, "retire": None, "replacement": None}
+            rec = (rep.sizes if rep else {}).get(c.source.ref) if c.source.kind == "huggingface" else None
+            if rec and rec.eval_results:
+                card["hint"] = "; ".join(f"{x['name'] or 'metric'} {x['value']}" + (f" on {x['dataset']}" if x['dataset'] else "") for x in rec.eval_results[:4])
+            if c.kind == "deprecation":
+                card["retire"] = retire_note(c.when)
+                if c.replacement:
+                    e = L.lifecycle.by_model(c.replacement)
+                    card["replacement"] = {"model": c.replacement, "entry": e}
+            cards.append(card)
+        cards.sort(key=lambda k: (INBOX_RANK[k["c"].kind], (k["retire"] or {}).get("date") or "9999", k["c"].model))
+        return cards
+
+    @app.get("/models/inbox")
+    def models_inbox(request: Request):
+        u, deny = admin(request)
+        if deny:
+            return deny
+        rep = src_report.read()
+        inbox, inbox_why = inbox_cfg()
+        cands, snoozed, dismissed = ib.split(rep.data.candidates if rep.data else [], inbox, today())
+        return render(request, "models_inbox.html", u, reading=rep, cards=inbox_cards(rep.data, cands), snoozed=snoozed, dismissed=dismissed,
+                      inbox_why=inbox_why, held=HOSTED_HELD, days=ib.SNOOZE_DAYS, watch_on=L.watch_enabled)
+
+    def inbox_change(request, u, kind, cid, fmt):
+        rep = src_report.read()
+        cand = next((c for c in (rep.data.candidates if rep.data else []) if c.id == cid), None)
+        if cand is None:
+            return bad(request, u, "That candidate is not in the watcher's current report.", 404)
+        inbox, inbox_why = inbox_cfg()
+        if inbox_why:
+            return bad(request, u, "modelLifecycle.inbox is not valid, so it cannot be extended: " + inbox_why)
+        raw_inbox = (L.raw or {}).get("inbox")
+        if kind == "snooze":
+            new_inbox = ib.with_snooze(raw_inbox, cid, today())
+            until = next(x["until"] for x in new_inbox["snoozed"] if x["id"] == cid)
+            title = f"Snooze {cand.model} for {ib.SNOOZE_DAYS} days"
+            notes = [f"{cid} is hidden until {until}: the watcher leaves it out of its report, and the Models pages hide it",
+                     "it comes back on its own after that date; the entry is a date, not a decision"]
+        else:
+            new_inbox = ib.with_dismiss(raw_inbox, cid, today())
+            title = f"Dismiss {cand.model}"
+            notes = [f"{cid} is hidden for good: the watcher leaves it out of its report",
+                     "a NEW candidate for the same model (another revision, say) has another id and is offered again",
+                     "to bring this one back, delete its line from modelLifecycle.inbox.dismissed"]
+        new_raw = copy.deepcopy(L.raw or {})
+        new_raw["inbox"] = new_inbox
+        notes.append("this changes only modelLifecycle.inbox: no route, no catalog entry and no gateway entry")
+        return _change(request, u, L.lifecycle, inv, notes, title, fmt, {"cid": cid}, f"/models/inbox/{kind}", raw=new_raw)
+
+    @app.post("/models/inbox/snooze")
+    def models_inbox_snooze(request: Request, csrf: str = Form(""), cid: str = Form(""), fmt: str = Form("")):
+        u, deny = admin(request)
+        if deny:
+            return deny
+        if not csrf_ok(u, csrf):
+            return PlainTextResponse("bad request", status_code=400)
+        return inbox_change(request, u, "snooze", cid, fmt)
+
+    @app.post("/models/inbox/dismiss")
+    def models_inbox_dismiss(request: Request, csrf: str = Form(""), cid: str = Form(""), fmt: str = Form("")):
+        u, deny = admin(request)
+        if deny:
+            return deny
+        if not csrf_ok(u, csrf):
+            return PlainTextResponse("bad request", status_code=400)
+        return inbox_change(request, u, "dismiss", cid, fmt)
+
+    # ------------------------------------------------------------ the candidate for an alias: plan and run strip (TM-1258)
+
+    @app.get("/models/c/{alias}")
+    def models_candidate(request: Request, alias: str):
+        u, deny = admin(request)
+        if deny:
+            return deny
+        base = alias[: -len(ml.NEXT)] if alias.endswith(ml.NEXT) else alias
+        nxt = next((r for r in inv.routes if r.alias == base + ml.NEXT), None)
+        live = next((r for r in inv.routes if r.alias == base), None)
+        runs, problem = cd.read_runs(cd.status_dir(L.raw))
+        mine = cd.runs_for(runs, base)
+        if nxt is None and not mine:
+            return render(request, "error.html", u, status_code=404, title="Not found",
+                          message=f"{base} has no candidate: there is no {base}{ml.NEXT} route and no run on record for it.")
+        now = _now()
+        strips = [cd.strip(r, now) for r in mine]
+        latest = strips[0] if strips else None
+        ce = L.lifecycle.by_model(nxt.model) if nxt else None
+        le = L.lifecycle.by_model(live.model) if live else None
+        move = {"from_node": live.node, "to_node": nxt.node} if nxt and ml.is_replacement(live, nxt) else None
+        node = inv.node(nxt.node) if nxt else None
+        ep = node.endpoint(nxt.endpoint) if node else None
+        vr, vs = verdicts()
+        have = {v.run_id for v in vs}
+        seen_legs = [l["name"] for l in (latest or {}).get("legs") or []]
+        plan = {"legs": seen_legs or list(cd.DEFAULT_LEGS), "from_status": bool(seen_legs), "estimated": (latest or {}).get("estimated", ""),
+                "window": (latest or {}).get("window", ""), "disk_gib": (latest or {}).get("disk_gib"), "quiet": cd.quiet_window(L.raw)}
+        return render(request, "models_candidate.html", u, alias=base, nxt=nxt, live=live, ce=ce, le=le, move=move, engine=ep.engine if ep else "",
+                      plan=plan, words=cd.LEG_WORDS, latest=latest, earlier=strips[1:6], problem=problem, status_dir=cd.status_dir(L.raw),
+                      have_verdicts=have, verdict_reading=vr)
+
+    # ------------------------------------------------------------ the budget (TM-1258)
+
+    @app.get("/models/budget")
+    def models_budget(request: Request):
+        u, deny = admin(request)
+        if deny:
+            return deny
+        demand = src_demand.read()
+        spend = spend_src.read() if spend_src is not None else None
+        data = bg.build(demand, spend, inv, gateway_list(), budget_cfg)
+        return render(request, "models_budget.html", u, b=data, demand=demand, spend=spend, window=bg.window_of(s.lifecycle.demand_query),
+                      problems=budget_problems, demand_query=s.lifecycle.demand_query, spend_query=budget_cfg["spendQuery"])
 
     # ------------------------------------------------------------ start an evaluation (AC-48.13)
 
@@ -442,7 +684,10 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         None, and the template says "not recorded"."""
         ex = v.extras
         label = ex.get("label") or v.verdict
-        state = {"better": "ok", "same": "ok", "worse": "critical", "inconclusive": "warning", "pass": "ok", "fail": "critical"}[label]
+        # an older runner wrote pass / fail; the label set is better / same / worse / inconclusive, and a tradeoff (TM-1269) is neither
+        # a win nor a loss. A label this page does not know reads as a warning, never as a crash and never as OK.
+        state = {"better": "ok", "same": "ok", "worse": "critical", "inconclusive": "warning", "tradeoff": "warning", "pass": "ok",
+                 "fail": "critical"}.get(label, "warning")
         dc = ex.get("discordant")
         n = ex.get("n")
         wins, losses = (dc["b"], dc["c"]) if dc else (None, None)
@@ -491,18 +736,72 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
                 "node": ex.get("node"), "set_sha": ex.get("set_sha256"), "judge": ex.get("judge"), "screening": bool(ex.get("screening")),
                 "counted": did, "why_not": why, "move_text": (f"{v.placement['from_node']} to {v.placement['to_node']}" if v.placement else "")}
 
+    def reject_view(v, label):
+        """What the Reject button on the Compare page does. It is shown for a fail, worse or tradeoff comparison; it is offered when
+        `<alias>-next` still routes the candidate and models.reject would accept it, and otherwise says why not (its own words)."""
+        if not (v.verdict == "fail" or label in ("worse", "tradeoff")):
+            return {"show": False}
+        nxt = next((r for r in inv.routes if r.alias == v.alias + ml.NEXT), None)
+        if nxt is None or nxt.model != v.candidate.get("model"):
+            return {"show": True, "offered": False, "why": f"{v.alias}{ml.NEXT} does not route {v.candidate.get('model')} now: it was already "
+                                                           "rejected or promoted, or the route was replaced"}
+        try:
+            ml.reject(nxt.alias, "check", today().isoformat(), L.lifecycle, inv)
+        except (ml.LifecycleError, nm.NodeError) as ex:
+            return {"show": True, "offered": False, "why": str(ex)}
+        return {"show": True, "offered": True, "alias_next": nxt.alias, "model": nxt.model}
+
+    def compare_page(request, u, run_id, error=None, reason="", status_code=200):
+        vr, vs = verdicts()
+        v = next((x for x in vs if x.run_id == run_id), None)
+        if v is None:
+            return render(request, "error.html", u, status_code=404, title="Not found",
+                          message="There is no comparison with that run id in the verdict records this page reads.")
+        c = compare_view(v, vs)
+        return render(request, "models_compare.html", u, v=v, c=c, verdict_reading=vr, rj=reject_view(v, c["label"]), error=error,
+                      reason=reason, status_code=status_code)
+
     @app.get("/models/v/{run_id}")
     def models_verdict(request: Request, run_id: str):
         """The Compare page: one comparative verdict, answer first, then the numbers, how it was run, and what it cites."""
         u, deny = admin(request)
         if deny:
             return deny
+        return compare_page(request, u, run_id)
+
+    @app.post("/models/v/{run_id}/reject")
+    def models_reject(request: Request, run_id: str, csrf: str = Form(""), reason: str = Form(""), fmt: str = Form("")):
+        """The reject change for the candidate a comparison judged: `<alias>-next` leaves the eval gateway and its entry becomes
+        rejected, with the reason. A change to review and commit; nothing is written here."""
+        u, deny = admin(request)
+        if deny:
+            return deny
+        if not csrf_ok(u, csrf):
+            return PlainTextResponse("bad request", status_code=400)
         vr, vs = verdicts()
         v = next((x for x in vs if x.run_id == run_id), None)
         if v is None:
-            return render(request, "error.html", u, status_code=404, title="Not found",
-                          message="There is no comparison with that run id in the verdict records this page reads.")
-        return render(request, "models_compare.html", u, v=v, c=compare_view(v, vs), verdict_reading=vr)
+            return bad(request, u, "There is no comparison with that run id in the verdict records this page reads.", 404)
+        rj = reject_view(v, compare_view(v, vs)["label"])
+        if not rj["show"]:
+            return bad(request, u, "Only a comparison that failed, came out worse or was a tradeoff can be rejected from here.")
+        if not rj["offered"]:
+            return compare_page(request, u, run_id, error=rj["why"], reason=reason, status_code=400)
+        try:
+            new_lc, new_inv, notes = ml.reject(rj["alias_next"], reason, today().isoformat(), L.lifecycle, inv)
+        except (ml.LifecycleError, nm.NodeError) as ex:
+            return compare_page(request, u, run_id, error=str(ex), reason=reason, status_code=400)
+        notes = notes + [f"this follows comparison {run_id}; its record stays where it is, as the evidence for the rejection"]
+        return _change(request, u, new_lc, new_inv, notes, f"Reject {rj['model']} on {rj['alias_next']}", fmt, {"reason": reason},
+                       f"/models/v/{run_id}/reject")
+
+    def hosted_alias(alias):
+        """{model, entry} for an alias the gateway routes to a hosted provider, else None (TM-1265: its page carries the countdown)."""
+        m = next((g for g in gateway_list() if g.get("model_name") == alias and not alias.endswith(ml.NEXT)), None)
+        h = bg.hosted_model(m) if m else ""
+        if not h:
+            return None
+        return {"model": h, "entry": L.lifecycle.by_model(h) or next((e for e in L.lifecycle.catalog if e.source.ref == h), None)}
 
     def alias_view(alias):
         """(live route, entry, revert) for a live alias, or None. `revert` is {"ok": True} or {"ok": False, "why": text}: the
@@ -520,11 +819,18 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
     def alias_page(request, u, alias, error=None, reason="", status_code=200):
         av = alias_view(alias)
         if av is None:
-            return render(request, "error.html", u, status_code=404, title="Not found", message="There is no such live alias.")
+            h = hosted_alias(alias)
+            if h is None:
+                return render(request, "error.html", u, status_code=404, title="Not found", message="There is no such live alias.")
+            rep = src_report.read()
+            r = ib.retire_for(ib.retire_map(rep.data, today()), h["model"], h["entry"].model if h["entry"] else "")
+            return render(request, "models_alias.html", u, alias=alias, live=None, e=h["entry"], promo={}, prev=None, revert={"ok": False, "why": ""},
+                          error=None, reason="", hosted=h, retire=({**r, "badge": ib.retire_state(r)} if r else None), reading=rep,
+                          status_code=status_code)
         live, e, rv = av
         promo = (e.promotion if e else {}) or {}
         return render(request, "models_alias.html", u, alias=alias, live=live, e=e, promo=promo, prev=promo.get("previous"),
-                      revert=rv, error=error, reason=reason, status_code=status_code)
+                      revert=rv, error=error, reason=reason, status_code=status_code, hosted=None, retire=None, reading=None)
 
     @app.get("/models/a/{alias}")
     def models_alias(request: Request, alias: str):

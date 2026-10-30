@@ -204,6 +204,34 @@ class Flag:
     text: str
 
 
+def speed_range(tps: float | None) -> tuple[int, int] | None:
+    """A predicted decode speed as a whole-number range, never a decimal (TM-1274): the prediction is bandwidth over
+    bytes read, good to perhaps a tenth either way, and one decimal place says otherwise. Plus or minus 12%, widened
+    outward to a step of 10 tokens/s from 100, 5 from 20, else 1. 125 reads as 110 to 140."""
+    if tps is None or tps <= 0:
+        return None
+    step = 10 if tps >= 100 else 5 if tps >= 20 else 1
+    lo = max(1, int(tps * 0.88 // step) * step)
+    hi = max(lo + step, -int(-(tps * 1.12) // step) * step)
+    return lo, hi
+
+
+def measured_decode(results, node_id: str, model: str):
+    """(tokens/s, date) from the newest perf twin for this model on this node that carries a single-stream decode
+    figure, else None. A measurement replaces the prediction on the page."""
+    best = None
+    for r in results or ():
+        if r.kind != "perf" or r.node != node_id or r.model != model:
+            continue
+        ms = [m for m in r.metrics if m.name in ("decode_tps_p50", "decode_tps_stream_p50") and m.value > 0]
+        if not ms:
+            continue
+        m = min(ms, key=lambda x: x.concurrency or 1)
+        if best is None or (r.date, r.path) > (best[1], best[2]):
+            best = (m.value, r.date, r.path)
+    return (best[0], best[1]) if best else None
+
+
 @dataclass
 class Row:
     option: Option
@@ -218,6 +246,8 @@ class Row:
     admissible: bool
     why_not: str
     in_service: str = ""            # where the model serves the class alias now, when it does
+    tps_range: tuple | None = None  # (low, high) whole tokens/s: how a predicted speed is shown (TM-1274)
+    tps_measured: tuple | None = None   # (tokens/s, date) once a perf twin has measured it: replaces the range
 
 
 @dataclass
@@ -501,7 +531,8 @@ def recommend(node_id: str, lc: ml.Lifecycle, inv: nm.Inventory, report, cfg: Co
             if action == "incumbent":
                 why_not = f"already serves {alias} on {node.name}"
             rows.append(Row(opt, alias, action, fit, tps, how, flags, hints, eps, adm, why_not,
-                            f"{live.node}" if in_service else ""))
+                            f"{live.node}" if in_service else "", speed_range(tps),
+                            measured_decode(results, node_id, opt.model) if spec.kind == "chat" else None))
         rows.sort(key=lambda r: (0 if licence_state(r.option, cfg)[0] in ("allowed", "exception") else 1, FIT_RANK[r.fit.state],
                                  -(r.tps if r.tps is not None else -1.0), r.fit.footprint.weights_gib or 1e9))
         classes.append(ClassResult(spec, live.alias if live else "", live.model if live else "", rows[:cfg.shortlist], len(rows) + excluded, excluded))

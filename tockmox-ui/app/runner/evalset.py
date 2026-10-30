@@ -4,7 +4,11 @@
 A set is a directory  evals/sets/<class>/<version>/  holding
 
   set.yaml      schema: eval-set/1, id, version, class, classification (REQUIRED), grader: rule, criterion,
-                margin, min_effect (paired), bar (absolute), epochs, max_tokens, description
+                margin, min_effect (paired), bar (absolute), epochs, max_tokens, description,
+                tool_parse_bar (optional, default 0.02: the most tool-call parse failures the candidate may show
+                over the reliability leg before the verdict fails whatever its quality),
+                speed_criterion (optional, {decode_tok_s_min_ratio: r}: candidate decode tokens/s over the
+                incumbent's must reach r, or a quality pass reads as a tradeoff)
   cases.jsonl   one case per line: {"id", "messages", "tools"?, "response_format"?, "max_tokens"?, "grade": {...}}
 
 Grades are deterministic (REQ-0045 ruling 1: a model judge is a separate, calibrated path, not this one):
@@ -28,6 +32,8 @@ import re
 from dataclasses import dataclass, field
 
 import yaml
+
+from .. import verdict_stats as vs
 
 SCHEMA = "eval-set/1"
 CLASSIFICATIONS = ("public", "internal", "confidential", "restricted")
@@ -65,6 +71,12 @@ class EvalSet:
     epochs: int = 1
     max_tokens: int = 512
     path: str = ""
+    tool_parse_bar: float = 0.02
+    speed_criterion: dict = field(default_factory=dict)
+
+    def tool_cases(self) -> list:
+        """The cases that offer tools: what the tool-call reliability leg cycles through."""
+        return [c for c in self.cases if c.tools]
 
 
 def _case(raw: dict, i: int) -> Case:
@@ -131,10 +143,16 @@ def load(directory: str, repo_path: str = "") -> EvalSet:
     epochs = meta.get("epochs", 1)
     if isinstance(epochs, bool) or not isinstance(epochs, int) or not 1 <= epochs <= 20:
         raise SetError(f"{sp}: epochs must be 1 to 20")
+    speed = {}
+    if meta.get("speed_criterion") is not None:
+        try:
+            speed = vs.check_speed_criterion(meta["speed_criterion"])
+        except vs.StatsError as e:
+            raise SetError(f"{sp}: {e}") from None
     h = hashlib.sha256(sb + b"\0" + cb).hexdigest()
     return EvalSet(meta["id"], str(meta["version"]), meta["class"], meta["classification"], meta["criterion"], cases, h,
                    frac("margin", 0.05), frac("min_effect", 0.05), frac("bar", 0.9), epochs,
-                   int(meta.get("max_tokens", 512)), repo_path or directory)
+                   int(meta.get("max_tokens", 512)), repo_path or directory, frac("tool_parse_bar", vs.DEFAULT_TOOL_PARSE_BAR), speed)
 
 
 # ---------------------------------------------------------------- grading

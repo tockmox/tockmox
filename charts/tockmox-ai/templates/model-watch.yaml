@@ -21,8 +21,11 @@ The report lands on a small PVC the Tockmox UI mounts read-only when it runs in 
 {{- $lc := .Values.modelLifecycle | default dict -}}
 {{- $w := $lc.watch | default dict -}}
 {{- if $w.enabled -}}
-{{- if not $w.image -}}
-{{- fail "modelLifecycle.watch.enabled is true but modelLifecycle.watch.image is empty: the watcher runs in the Tockmox UI image, which ships as source (TM-0902). Build it from the Tockmox UI's Dockerfile, push it to your registry, and name it here." -}}
+{{- /* The watcher runs in the Tockmox UI image. Empty watch.image means "the UI's image" (tockmoxUi.image), so a
+site that moves its UI image (a pin bump) moves the watcher with it instead of leaving it on an older build. */ -}}
+{{- $wImage := $w.image | default (($.Values.tockmoxUi | default dict).image | default "") -}}
+{{- if not $wImage -}}
+{{- fail "modelLifecycle.watch.enabled is true but neither modelLifecycle.watch.image nor tockmoxUi.image is set: the watcher runs in the Tockmox UI image, which ships as source (TM-0902). Build it from the Tockmox UI's Dockerfile, push it to your registry, and name it in tockmoxUi.image (or watch.image)." -}}
 {{- end -}}
 {{- $pr := $w.pullRequests | default dict -}}
 {{- $sec := $w.secrets | default dict -}}
@@ -144,7 +147,7 @@ spec:
           containers:
           {{- end }}
             - name: watcher
-              image: {{ $w.image | quote }}
+              image: {{ $wImage | quote }}
               imagePullPolicy: IfNotPresent
               command: [python, -m, app.watcher, /config/config.yaml, /work/report.json]
               {{- with $sec.providerKeys }}
@@ -163,7 +166,7 @@ spec:
           {{- if $pr.enabled }}
           containers:
             - name: opener
-              image: {{ $w.image | quote }}
+              image: {{ $wImage | quote }}
               imagePullPolicy: IfNotPresent
               command: [python, -m, app.pr_opener, /config/config.yaml, /work/report.json, --apply]
               {{- with $sec.forgeToken }}

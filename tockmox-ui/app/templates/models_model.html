@@ -8,8 +8,8 @@
 
 <section class="panel" aria-labelledby="src-h">
   <h2 id="src-h">Where it comes from</h2>
-  <p>{{ badge({"promoted": "ok", "candidate": "warning", "retired": "unknown"}[e.stage], e.stage) }}
-{% if e.stage == "candidate" %}Admitted for evaluation: it is on the eval gateway only, and no agent can call it.{% elif e.stage == "retired" %}No longer served.{% elif e.adopted %}In service since before it was catalogued (adopted {{ e.adopted }}).{% else %}Promoted with passing comparisons on record.{% endif %}</p>
+  <p>{{ badge({"promoted": "ok", "candidate": "warning", "retired": "unknown", "rejected": "critical"}[e.stage], e.stage) }}
+{% if e.stage == "candidate" %}Admitted for evaluation: it is on the eval gateway only, and no agent can call it.{% elif e.stage == "retired" %}No longer served.{% elif e.stage == "rejected" %}Rejected{% if e.rejection %} on {{ e.rejection.date }}: {{ e.rejection.reason }}{% endif %}. Nothing routes it, and the watcher offers it again only as a new revision.{% elif e.adopted %}In service since before it was catalogued (adopted {{ e.adopted }}).{% else %}Promoted with passing comparisons on record.{% endif %}</p>
   <dl class="facts">
     <div><dt>Source</dt><dd>{{ e.source.kind }} <code>{{ e.source.ref }}</code></dd></div>
     <div><dt>Pinned build</dt><dd>{% if e.source.revision %}<code>{{ e.source.revision }}</code>{% else %}<span class="muted">none: the watcher cannot tell you when it changes</span>{% endif %}</dd></div>

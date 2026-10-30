@@ -8,12 +8,23 @@ a person to merge it:
   evidence  files the eval runner wrote (result twins, verdict records) -> a PR that ADDS them under evals/. A third
             kind that is not an approval: it carries the proof the promotion PR will cite, and it never touches the
             values file (see "Evidence PRs" below)
+  reject    a -next route a person (or the Compare page's Reject button) gave up on -> the route leaves the eval gateway
+            and its catalog entry becomes `rejected` with the reason (TM-1262). Never planned by a run: it is asked for
+  revert    a live alias that must go back to what it served before its last promotion -> the alias is re-pointed and the
+            demoted build becomes `rejected` (TM-1262). Asked for by a person, or by the health watch
 
     python -m app.pr_opener CONFIG.yaml REPORT.json            # dry run: print the plan, touch nothing
     python -m app.pr_opener CONFIG.yaml REPORT.json --apply    # open the PRs
 
 It builds every change with the same functions the Tockmox UI uses (models.propose, promote, change_doc) and runs
 the same promotion gate before opening anything. It is a separate process from the UI, which stays write-free.
+
+    python -m app.pr_opener reject CONFIG.yaml ALIAS-next --reason "why" [--apply]
+    python -m app.pr_opener revert CONFIG.yaml ALIAS --reason "why" [--apply]
+
+A reject or revert PR sits in the same lane as admit and promote: one model-lifecycle PR is open at a time (a reject or revert
+refuses while another is open, and waits for none). It is built by models.reject / models.revert, so every refusal those raise
+(a model that still serves a live alias, no previous route on record, a missing reason ...) is the opener's refusal, word for word.
 
 What it will not do:
   - promote a hosted model: its data-class tags are a human choice made in the UI (REQ-0048 ruling 2);
@@ -22,6 +33,8 @@ What it will not do:
   - talk to any host but the configured forge API, or follow a redirect;
   - open a PR while another model-lifecycle PR is open. Every PR rewrites the same file, and Jeff merges PRs in the
     order they appear, so they come one at a time: the next run plans against what was merged.
+  - plan a candidate that modelLifecycle.inbox snoozed or dismissed (inbox.py), and it records the PR it opened for a
+    candidate as `pr` in the report file, which the Inbox page links.
 
 Evidence PRs (the third kind; AC-45.9, design 3.1 stage 7):
 
@@ -45,23 +58,28 @@ Config, under modelLifecycle.watch.pullRequests:
 from __future__ import annotations
 
 import base64
+import datetime
 import hashlib
 import json
 import os
 import re
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from urllib.parse import quote, urlsplit
 
 import httpx
 import yaml
 
+from . import inbox as inboxmod
 from . import models as ml
 from . import nodes as nm
 from . import results as rs
 
 MAX_BYTES = 2 << 20
 EVIDENCE_BRANCH = "tockmox/evidence/"
+REJECT_BRANCH = "tockmox/reject/"
+REVERT_BRANCH = "tockmox/revert/"
 EVIDENCE_MAX_FILE = 1 << 20
 EVIDENCE_MAX_FILES = 200
 EVIDENCE_MAX_TOTAL = 8 << 20
@@ -81,7 +99,7 @@ class PRSpec:
     title: str
     body: str
     text: str                      # the whole new values file ("" for an evidence PR)
-    kind: str                      # admit | promote | evidence
+    kind: str                      # admit | promote | evidence | reject | revert
     subject: str                   # candidate id or alias
     files: dict = field(default_factory=dict)   # evidence PR only: repo path -> bytes to add
 
@@ -123,12 +141,14 @@ def check_values_file(doc) -> None:
                       "rewrites the whole file, so the site's other litellm values belong in another values file")
 
 
-def plan(values: dict, report: dict | None, verdicts, open_branches=(), max_open=1) -> Plan:
+def plan(values: dict, report: dict | None, verdicts, open_branches=(), max_open=1, today=None) -> Plan:
     """What PRs this run would open. values: the machine-owned values file as it is on the base branch."""
     check_values_file(values)
     lc_raw, in_raw = values.get("modelLifecycle") or {}, values.get("inferenceNodes") or {}
     lc, inv = ml.parse(lc_raw), nm.parse_inventory(in_raw)
-    gw_names = {str(m.get("model_name", "")) for m in (in_raw.get("gateway") or {}).get("modelList") or [] if isinstance(m, dict)}
+    skip = inboxmod.skipped_ids(inboxmod.parse(lc_raw.get("inbox")), today or datetime.datetime.now(datetime.timezone.utc))
+    gw_list = [m for m in (in_raw.get("gateway") or {}).get("modelList") or [] if isinstance(m, dict)]
+    gw_names = {str(m.get("model_name", "")) for m in gw_list}
     # an evidence PR adds files under evals/ and never touches the values file, so it does not hold up the one-at-a-time lane
     out, busy = Plan(), {b for b in open_branches if not b.startswith(EVIDENCE_BRANCH)}
     if busy:
@@ -176,11 +196,14 @@ def plan(values: dict, report: dict | None, verdicts, open_branches=(), max_open
             continue
         if cand.kind not in ADMIT_KINDS:
             continue
+        if cand.id in skip:
+            out.skipped.append((cand.id, "snoozed or dismissed in modelLifecycle.inbox"))
+            continue
         if cand.kind not in ("revision", "digest") and lc.by_model(cand.model):
             out.skipped.append((cand.id, "already in the catalog"))
             continue
         try:
-            add_lc, add_inv, notes = ml.propose(cand, lc, inv, taken=gw_names)
+            add_lc, add_inv, notes = ml.propose(cand, lc, inv, taken=gw_names, gateway=gw_list)
             new_lc = ml.merge(lc, add_lc)
             new_inv = nm.merge(inv, add_inv) if add_inv.routes else inv
         except (ml.LifecycleError, nm.NodeError, ValueError) as e:
@@ -205,6 +228,77 @@ def plan(values: dict, report: dict | None, verdicts, open_branches=(), max_open
         add(PRSpec(f"tockmox/admit/{branch_slug(cand.model)}", f"{verb} {cand.model}", body,
                    _values_text(ml.change_doc(lc_raw, in_raw, new_lc, new_inv), header), "admit", cand.id))
     return out
+
+
+# ---------------------------------------------------------------- reject and revert PRs (TM-1262)
+
+def _one_at_a_time(open_branches):
+    busy = sorted(b for b in open_branches if not b.startswith(EVIDENCE_BRANCH))
+    if busy:
+        raise Refused(f"{len(busy)} model-lifecycle PR(s) already open ({', '.join(busy)}): one at a time. Merge or close it, then ask again")
+
+
+def _change_spec(values, open_branches, build, kind, branch_prefix, subject, title, intro, closing):
+    check_values_file(values)
+    _one_at_a_time(open_branches)
+    lc_raw, in_raw = values.get("modelLifecycle") or {}, values.get("inferenceNodes") or {}
+    lc, inv = ml.parse(lc_raw), nm.parse_inventory(in_raw)
+    try:
+        new_lc, new_inv, notes = build(lc, inv)
+    except (ml.LifecycleError, nm.NodeError) as e:
+        raise Refused(str(e)) from None
+    problems = ml.check_promotions(new_lc, new_inv)
+    if problems:
+        raise Refused("the change would fail the promotion gate: " + "; ".join(problems))
+    header = ["Generated by the Tockmox model watcher's opener. Machine-owned: edit through the Tockmox UI or a PR like this one."]
+    body = intro(lc, inv) + "\n\n" + "".join(f"- {n}\n" for n in notes) + "\n" + closing
+    return PRSpec(f"{branch_prefix}{branch_slug(subject)}", title(lc, inv), body,
+                  _values_text(ml.change_doc(lc_raw, in_raw, new_lc, new_inv), header), kind, subject)
+
+
+def plan_reject(values: dict, alias_next: str, reason: str, when: str, open_branches=()) -> PRSpec:
+    """The reject PR for `<alias>-next` (models.reject), or Refused with models.reject's own reason."""
+    def model_of(inv):
+        return next((r.model for r in inv.routes if r.alias == alias_next), alias_next)
+    return _change_spec(
+        values, open_branches, lambda lc, inv: ml.reject(alias_next, reason, when, lc, inv), "reject", REJECT_BRANCH, alias_next,
+        lambda lc, inv: f"Reject {model_of(inv)} on {alias_next}",
+        lambda lc, inv: f"Rejects `{model_of(inv)}` on `{alias_next}`.\n\nWhy: {reason.strip()[:400]}",
+        "Merging this takes the candidate off the eval gateway and records the reason on its catalog entry. It moves no live alias, "
+        "and the watcher offers the model again only at a different revision.")
+
+
+def plan_revert(values: dict, alias: str, reason: str, when: str, open_branches=()) -> PRSpec:
+    """The revert PR for a live alias (models.revert), or Refused with models.revert's own reason."""
+    def model_of(inv):
+        return next((r.model for r in inv.routes if r.alias == alias), alias)
+    return _change_spec(
+        values, open_branches, lambda lc, inv: ml.revert(alias, reason, when, lc, inv), "revert", REVERT_BRANCH, alias,
+        lambda lc, inv: f"Revert {alias} from {model_of(inv)}",
+        lambda lc, inv: f"Reverts `{alias}` from `{model_of(inv)}` to what it served before its last promotion.\n\nWhy: {reason.strip()[:400]}",
+        "Merging this changes what the production gateway serves: the alias goes back to the previous model and the demoted build "
+        "is marked rejected.")
+
+
+def run_change(cfg, kind, subject, reason, forge, apply=False, when=None, log=print):
+    """Open (or, without apply, only plan) the reject or revert PR for `subject`. Returns (spec, url)."""
+    if kind not in ("reject", "revert"):
+        raise Refused(f"{kind!r} is not a change this opener makes by request (reject or revert)")
+    pr_cfg = (((cfg.get("modelLifecycle") or {}).get("watch") or {}).get("pullRequests")) or {}
+    base, path = pr_cfg.get("baseBranch", "main"), pr_cfg.get("valuesPath", "")
+    if not path:
+        raise Refused("modelLifecycle.watch.pullRequests.valuesPath is not set")
+    text, file_sha = forge.read_file(path, base)
+    values = yaml.safe_load(text) or {}
+    when = when or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+    spec = (plan_reject if kind == "reject" else plan_revert)(values, subject, reason, when, forge.open_branches())
+    if not apply:
+        log(f"would open  {spec.branch}  {spec.title}")
+        return spec, ""
+    trailers = [str(t) for t in pr_cfg.get("commitTrailers") or []]
+    url = forge.open_pr(base, spec, path, file_sha, spec.title + ("\n\n" + "\n".join(trailers) if trailers else ""))
+    log(f"opened      {spec.branch}  {url}")
+    return spec, url
 
 
 # ---------------------------------------------------------------- evidence PRs (additive files under evals/)
@@ -518,6 +612,26 @@ def run(cfg, report, forge, apply=False, env=os.environ, log=print):
     return p, opened
 
 
+def record_pr_links(report_path, links):
+    """Write each opened admit PR's URL into the report as `pr` on its candidate (https only), so the Inbox page can link it.
+    Atomic; a report that cannot be rewritten is reported and left alone."""
+    try:
+        with open(report_path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        for c in doc.get("candidates") or []:
+            if links.get(c.get("id"), "").startswith("https://"):
+                c["pr"] = links[c["id"]]
+        d = os.path.dirname(os.path.abspath(report_path))
+        fd, tmp = tempfile.mkstemp(dir=d, prefix=".report-")
+        with os.fdopen(fd, "w") as fh:
+            json.dump(doc, fh, indent=1)
+        os.replace(tmp, report_path)
+        return True
+    except (OSError, ValueError) as e:
+        print(f"could not record the PR link in {report_path}: {e}", file=sys.stderr)
+        return False
+
+
 def _forge_from(cfg, pr_cfg):
     token = os.environ.get(pr_cfg.get("tokenEnv", "TOCKMOX_BOT_TOKEN"), "")
     app = pr_cfg.get("githubApp") or {}
@@ -533,14 +647,23 @@ def _forge_from(cfg, pr_cfg):
 
 
 def main(argv):
+    argv = list(argv)
+    reason = ""
+    if "--reason" in argv:
+        i = argv.index("--reason")
+        reason = argv[i + 1] if i + 1 < len(argv) else ""
+        del argv[i:i + 2]
     args = [a for a in argv[1:] if not a.startswith("--")]
     apply = "--apply" in argv
     evidence = bool(args) and args[0] == "evidence"
-    if evidence:
+    change = args[0] if args and args[0] in ("reject", "revert") else ""
+    if evidence or change:
         args = args[1:]
     if len(args) != 2:
         print("usage: python -m app.pr_opener CONFIG.yaml REPORT.json [--apply]\n"
-              "       python -m app.pr_opener evidence CONFIG.yaml DIR [--apply]", file=sys.stderr)
+              "       python -m app.pr_opener evidence CONFIG.yaml DIR [--apply]\n"
+              "       python -m app.pr_opener reject CONFIG.yaml ALIAS-next --reason WHY [--apply]\n"
+              "       python -m app.pr_opener revert CONFIG.yaml ALIAS --reason WHY [--apply]", file=sys.stderr)
         return 2
     cfg = yaml.safe_load(open(args[0], encoding="utf-8")) or {}
     pr_cfg = (((cfg.get("modelLifecycle") or {}).get("watch") or {}).get("pullRequests")) or {}
@@ -557,8 +680,17 @@ def main(argv):
             print(f"refused: {e}", file=sys.stderr)
             return 1
         return 0
+    if change:
+        try:
+            run_change(cfg, change, args[1], reason, forge, apply)
+        except Refused as e:
+            print(f"refused: {e}", file=sys.stderr)
+            return 1
+        return 0
     report = json.load(open(args[1], encoding="utf-8")) if os.path.exists(args[1]) else None
-    run(cfg, report, forge, apply)
+    p, opened = run(cfg, report, forge, apply)
+    if apply and opened and report is not None:
+        record_pr_links(args[1], {spec.subject: url for spec, url in zip(p.prs, opened) if spec.kind == "admit"})
     return 0
 
 

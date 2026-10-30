@@ -316,6 +316,57 @@ spec:
           port: 9090
         - protocol: TCP
           port: 9093
+---
+# The model jobs (tockmox-ai, REQ-0048): the eval runner's scheduler reads Prometheus for its quiet-window check
+# (no production traffic on a node before it measures), and the production health watch reads it to compare a
+# promoted model with the one it replaced, then posts to ntfy on a breach. Prometheus :9090 for both, ntfy :80 and
+# :8080 for the health watch; never Alertmanager :9093 (its API also takes silences). Inert where the jobs are off,
+# for the same reason as allow-from-tockmox-ui above: it admits only pods carrying BOTH the job's name label and
+# tockmox.com/isolated in the AI namespace, which the AI layer renders only when the job is enabled.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-from-model-jobs
+  namespace: {{ .Values.namespaces.monitoring }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: [prometheus, tockmox-ntfy]
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.ai }}
+          podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [tockmox-eval-scheduler, tockmox-health-watch]
+              - key: tockmox.com/isolated
+                operator: In
+                values: ["true"]
+      ports:
+        - protocol: TCP
+          port: 9090
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.ai }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tockmox-health-watch
+              tockmox.com/isolated: "true"
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 8080
 {{- if .Values.namespaces.node_agents }}
 ---
 # THE NODE-AGENTS NAMESPACE (TM-0799). node-exporter, Alloy's log DaemonSet and the

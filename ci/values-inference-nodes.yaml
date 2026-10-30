@@ -68,7 +68,15 @@ modelLifecycle:
     enabled: true
     allowedClients:
       - podSelector: {matchLabels: {app.kubernetes.io/name: eval-runner}}
+      # the scheduled runner's Job pods (templates/eval-runner.yaml)
+      - podSelector: {matchLabels: {tockmox.com/eval-client: "true"}}
     environmentSecrets: [tockmox-eval-provider-keys]
+  # The eval runner on a schedule (TM-1261, TM-1264). No runner.image: it falls back to tockmoxUi.image below.
+  runner:
+    enabled: true
+    nodes:
+      studio: {engineVersion: "0.32.2"}
+    evidence: {pullRequests: true}
 
 litellm:
   proxyConfigMap:

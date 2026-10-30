@@ -84,7 +84,7 @@ def test_kinds_get_distinct_paths_so_legs_of_one_run_never_collide():
     base = rs.parse(result_text())
     paths = {rs.repo_path(rs.parse(result_text(kind=k, plane=p, **({"gateway": {"route": "a"}} if p == "gateway" else {}))))
              for k in rs.KINDS for p in rs.PLANES}
-    assert len(paths) == 6 and rs.repo_path(base).startswith("evals/results/beta/")
+    assert len(paths) == 2 * len(rs.KINDS) == 10 and rs.repo_path(base).startswith("evals/results/beta/")
 
 
 def test_load_dir_lists_a_file_that_does_not_parse_instead_of_dropping_it(tmp_path):

@@ -346,6 +346,8 @@ run_gate "site LiteLLM hooks load through values alone (TM-0787)" bash tools/che
 run_gate "no known-bad LiteLLM image digest or 1.107.0 tag appears in images.txt or anywhere else a LiteLLM image can be named (TM-1197)" bash tools/check-litellm-compromise.sh
 run_gate "the LiteLLM-compromise gate goes red on the index digest, each platform manifest, the published 12-hex prefixes, the exact bad tag and a bad list, and passes the next release (TM-1197)" bash tools/check-litellm-compromise.sh --selftest
 run_gate "inference-node routes match the UI and the eval gateway is fenced (TM-0920)" bash tools/check-inference-nodes.sh
+run_gate "the production health watch renders with no token, the right image and only the egress it needs (TM-1263)" bash tools/check-health-watch.sh
+run_gate "the eval scheduler and the health watch are admitted to Prometheus by tockmox-policy (labels joined across charts)" bash tools/check-model-jobs-reach.sh
 # The AI-node toolkit (ai-node/): lint, unit tests and the converger wrapper's tests. Not in ci.yaml yet,
 # for the reason the posture-probe note below gives. The Linux simulation of the whole playbook changes the
 # host (empty directories, tmpfs and overlays in a private mount namespace) and takes about five minutes,

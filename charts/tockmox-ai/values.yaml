@@ -825,6 +825,42 @@ modelLifecycle:
       accessModes: [ReadWriteOnce]
     egress:
       extra: []
+  # The production health watch (REQ-0048 AC-48.19, TM-1263): a CronJob in the Tockmox
+  # UI image that reads Prometheus every 15 minutes and compares each promoted alias
+  # with what it served before (promotion.previous) on error rate and p95 latency,
+  # at LIKE HOURS of the day, inside soakDays of the promotion. OFF by default.
+  # A breach renders the revert change as a PR and sends an ntfy message; nothing
+  # here reverts or merges anything. An inconclusive reading renders nothing.
+  # Tool-call parse failures and thumbs are not judged until the gateway hook and
+  # the console expose them (rules.toolParseMetrics names the two counters).
+  # The image is the Tockmox UI's (tockmoxUi.image) unless you name another.
+  # pullRequests opens the revert PR with the model watcher's opener config and
+  # secrets (watch.pullRequests, watch.secrets). The monitoring namespace must
+  # admit this pod to Prometheus (tockmox-policy). docs/administration/model-lifecycle.md.
+  healthWatch:
+    enabled: false
+    image: ""
+    schedule: "*/15 * * * *"
+    prometheusUrl: ""                 # empty: the UI's Prometheus (tockmoxUi.config.sources.prometheus.url, else this release's)
+    soakDays: 14
+    rules:
+      errorRateRatio: 2.0             # breach: the error rate over this many times the like-hours baseline
+      p95Ratio: 1.5
+      toolParseFailureRatio: 2.0
+      minRequests: 50                 # a window or baseline with fewer requests is never judged
+      forMinutes: 30                  # a breach must hold this long
+      likeHours: true                 # compare with the same hours of the day, not a flat mean (TM-1274)
+      # windowMinutes: 60             # each reading is a trailing window of this length (a multiple of 15)
+      # baselineDays: 7               # days before the promotion that make the baseline
+      # errorRateFloor: 0.01          # a baseline of zero failures is read as this
+      # toolParseMetrics: {failures: my_hook_tool_parse_failures_total, total: my_hook_tool_calls_total}   # both labelled requested_model
+    autoRevert: {}                    # {<alias>: true}: mark that alias's revert PR for the site's auto-merge. Off for every alias
+    notify:
+      ntfyUrl: ""                     # e.g. http://tockmox-ntfy.tockmox-monitoring.svc (the topic is `topic` in topicSecret, else `alerts`)
+      topicSecret: ""                 # a Secret with optional keys `token` (bearer, for an ntfy with auth) and `topic`
+    pullRequests: false
+    egress:
+      extra: []
   # Defense in depth for the PRODUCTION gateway (needs inferenceNodes.render):
   # a virtual key minted with no model list gets this one instead of every
   # model. Mint-time only on LiteLLM, so it is not a fence. Unset by default;
@@ -844,6 +880,55 @@ modelLifecycle:
     environmentSecrets: []
     resources:
       requests: { cpu: 50m, memory: 384Mi }
+      limits: { memory: 1Gi }
+  # THE EVAL RUNNER ON A SCHEDULE (TM-1261, TM-1264). OFF by default. A CronJob (the
+  # scheduler) looks every `schedule` for admitted candidates (a live <alias>-next route
+  # on the eval gateway; merging the admit PR was the consent to evaluate it) with no
+  # finished run, waits until production has been quiet on the node, and starts ONE Job
+  # per node that runs `python -m app.runner run` against the eval gateway. The scheduler
+  # alone holds a Kubernetes token (create/get/list/watch/delete Jobs, get/list Pods, in
+  # this release's namespace); the Job pods hold none. Progress is one JSON file per run
+  # (run-status/1) on a small volume the Tockmox UI mounts read-only; the evidence the Job
+  # writes (results, verdicts) lands beside it, and the UI reads verdicts and results from
+  # there unless verdictsDir / resultsDir are set. Needs evalGateway.enabled.
+  # The runner is the Tockmox UI image, which ships as source (TM-0902): empty `image`
+  # means tockmoxUi.image, and the image MUST be built from the same commit as this chart.
+  # The Job pods carry tockmox.com/eval-client: "true": add a peer that selects it to
+  # evalGateway.allowedClients, or the gateway admits nobody. templates/eval-runner.yaml;
+  # docs/administration/model-lifecycle.md, "Running evaluations on a schedule".
+  runner:
+    enabled: false
+    image: ""                          # empty = tockmoxUi.image
+    schedule: "*/15 * * * *"
+    gatewayUrl: ""                     # empty = http://tockmox-litellm-eval:4000 (this release's eval gateway)
+    prometheusUrl: ""                  # empty = the Prometheus the Tockmox UI uses (tockmox-observability-kube-prometheus)
+    # A run starts only when no more than maxProductionRequests requests reached the node's
+    # live aliases through the production gateway in the last `minutes`.
+    quietWindow: {minutes: 10, maxProductionRequests: 0}
+    steps: [1, 2]                      # concurrency steps of the perf leg
+    perfRequests: 20                   # requests per step
+    workers: 2                         # parallel quality requests
+    toolReliabilityCalls: 100          # the tool-call reliability leg
+    prefillContexts: [4096, 16384, 32768, 65536]   # prompt sizes of the prefill leg, in tokens
+    status:
+      size: 1Gi
+      accessModes: [ReadWriteOnce]
+      storageClass: ""
+    # Per inference node, what the scheduler cannot read from the inventory:
+    #   {studio: {engine: mlx-lm, engineVersion: "0.32.2", healthUrl: "http://192.0.2.10:8080/health"}}
+    # engineVersion is what the node runs now (ai-node.yaml engines.<id>.version); a change since
+    # the last finished run of an alias on that node schedules the engine-upgrade re-evaluation.
+    # productionAliases: production aliases this node serves that inferenceNodes.routes does not say (a hand-written
+    # model_list while inferenceNodes.render is off); the quiet-window check counts their requests too.
+    nodes: {}
+    # Only these live aliases' <alias>-next candidates are scheduled; empty means every admitted candidate. A
+    # first run on a new site, or one candidate you want measured before the others queue behind it on the node.
+    aliases: []
+    evidence:
+      pullRequests: false              # true: open the evidence PR with watch.pullRequests and watch.secrets
+    extraSetsConfigMap: ""             # a ConfigMap of site eval sets: keys <class>__<version>__set.yaml and __cases.jsonl
+    resources:
+      requests: { cpu: 100m, memory: 256Mi }
       limits: { memory: 1Gi }
 
 # ---------------------------------------------------------------------------

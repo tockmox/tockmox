@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, source_line %}
+{% block title %}Models budget{% endblock %}
+{% block main %}
+<p><a href="/models">Models</a></p>
+<div class="page-head">
+  <div><h1>Budget</h1>
+  <p class="lede">Per alias, how many requests the gateway served{% if window %} in the last {{ window }}{% endif %}, what the hosted ones cost, and how much of the traffic stayed on your own nodes. A figure nothing measured reads <strong>Unknown</strong>, never 0: an alias with no series may have had no traffic or may not be counted at all, and this page cannot tell which.</p></div>
+  <div class="page-actions"><a class="btn-ghost" href="/models/inbox">Inbox</a></div>
+</div>
+
+{% for p in problems %}<p class="warnbox">{{ badge("warning", "Budget settings") }} {{ p }}.</p>{% endfor %}
+
+<section class="panel" aria-labelledby="share-h">
+  <h2 id="share-h">Local share</h2>
+  {% if b.local_share is not none %}
+  <p class="counts"><span><strong>{{ (b.local_share * 100)|round(1) }}%</strong> of {{ "{:,.0f}".format(b.total_requests) }} requests were served by your own nodes ({{ "{:,.0f}".format(b.local_requests) }} local).</span></p>
+  {% if b.unknown_aliases %}<p>{{ badge("warning", "Partial") }} {{ b.unknown_aliases|length }} alias(es) have no figure and are not in this share: {% for a in b.unknown_aliases %}<code>{{ a }}</code>{% if not loop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
+  {% else %}<p>{{ badge("unknown", "Unknown") }} No alias has a request figure, so there is no share to compute.</p>{% endif %}
+  <p class="muted">{{ source_line(demand) }}</p>
+</section>
+
+<section class="panel flush" aria-labelledby="rows-h">
+  <div class="panel-head"><h2 id="rows-h">Per alias</h2>
+    <span class="src muted">requests from <code>modelLifecycle.demandQuery</code>{% if spend_query %}; spend from <code>modelLifecycle.budget.spendQuery</code>{% endif %}</span></div>
+  {% if b.rows %}
+  <div class="table-wrap" role="region" aria-labelledby="bud-cap" tabindex="0">
+  <table>
+    <caption id="bud-cap" class="visually-hidden">Requests, share and cost per alias</caption>
+    <thead><tr><th scope="col">Alias</th><th scope="col">Where it runs</th><th scope="col">Requests</th><th scope="col">Share of traffic</th><th scope="col">Cost</th></tr></thead>
+    <tbody>
+    {% for r in b.rows %}
+      <tr>
+        <th scope="row"><a href="/models/a/{{ r.alias|urlencode }}"><code>{{ r.alias }}</code></a>{% if r.model %}<div class="muted small"><code>{{ r.model }}</code></div>{% endif %}</th>
+        <td>{{ {"local": "Your nodes", "hosted": "Hosted provider", "other": "Not routed here"}[r.kind] }}</td>
+        <td class="num">{% if r.requests is not none %}{{ r.requests_text }}{% else %}{{ badge("unknown", "Unknown") }}<div class="muted small">{{ r.requests_why }}</div>{% endif %}</td>
+        <td class="num">{% if r.share is not none %}{{ (r.share * 100)|round(1) }}%{% elif r.kind == "other" %}<span class="muted">not counted</span>{% else %}{{ badge("unknown", "Unknown") }}{% endif %}</td>
+        <td>{% if r.kind == "hosted" %}{% if r.cost.state == "unknown" %}{{ badge("unknown", "Unknown") }}<div class="muted small">{{ r.cost.how }}</div>{% else %}{{ r.cost.text }}<div class="muted small">{{ r.cost.how }}</div>{% endif %}{% elif r.kind == "local" %}<span class="muted">no per-request charge</span>{% else %}<span class="muted">not priced</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="muted small">Hosted total: {% if b.hosted_cost is not none %}<strong>{{ b.hosted_cost_text }}</strong>{% if b.hosted_cost_partial %} at least: {{ b.hosted_unknown|length }} hosted alias(es) are Unknown ({% for a in b.hosted_unknown %}<code>{{ a }}</code>{% if not loop.last %}, {% endif %}{% endfor %}){% endif %}{% else %}Unknown{% endif %}. A local route costs the node, which this page does not price.</p>
+  {% else %}<p class="empty">No alias is routed, so there is nothing to count.</p>{% endif %}
+</section>
+
+<section class="panel" aria-labelledby="src-h">
+  <h2 id="src-h">Where these numbers come from</h2>
+  <ul class="plain">
+    <li>{{ source_line(demand) }}</li>
+    {% if spend is not none %}<li>{{ source_line(spend) }}</li>
+    {% else %}<li>{{ badge("unknown", "No spend query") }} <span class="muted">cost is Unknown unless you set <code>modelLifecycle.budget.spendQuery</code> (measured USD per alias or model) or <code>modelLifecycle.budget.usdPerRequest</code> (your own estimate per alias, labelled as one).</span></li>{% endif %}
+  </ul>
+  <p class="muted small">Requests query: <code>{{ demand_query }}</code></p>
+</section>
+{% endblock %}

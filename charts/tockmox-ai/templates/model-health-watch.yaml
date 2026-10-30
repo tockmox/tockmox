@@ -1,0 +1,230 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+The production health watch (REQ-0048 AC-48.19, TM-1263). OFF by default: modelLifecycle.healthWatch.enabled.
+
+Every 15 minutes a small CronJob in the Tockmox UI image reads Prometheus and compares each promoted alias with what
+it served before its promotion (promotion.previous), on error rate and p95 latency from the gateway's own metrics, at
+LIKE HOURS of the day, inside the soak window (python -m app.health_watch; the rules are values). A breach renders the
+revert change as a PR and sends an ntfy message; it never reverts anything itself, and an inconclusive reading renders
+nothing. The status is the job log (and, with pullRequests, the PR body): the pod has no volume.
+
+One CronJob, no Kubernetes authority (no service-account token), and a NetworkPolicy of its own:
+  ingress   none
+  egress    DNS to kube-system; Prometheus (the monitoring namespace, 9090) unless prometheusUrl points elsewhere, in
+            which case egress.extra must open it; ntfy when notify.ntfyUrl is set (an in-cluster <svc>.<ns>.svc URL
+            opens that namespace's ntfy pods on the URL's port; any other host opens HTTPS to the internet minus
+            every private range, as NetworkPolicy cannot name hosts); with pullRequests, HTTPS to the forge the same
+            way; plus healthWatch.egress.extra.
+The pod carries tockmox.com/isolated, so the policy layer's namespace-wide ingress allows skip it. THE MONITORING
+NAMESPACE admits only the Tockmox UI to Prometheus (tockmox-policy allow-from-tockmox-ui): the policy layer must also
+admit this pod, or the watch reads every alias as inconclusive.
+
+With pullRequests it uses the model watcher's opener config and secrets (modelLifecycle.watch.pullRequests and
+watch.secrets), so the bot that opens the admit and promote PRs opens the revert PR.
+*/ -}}
+{{- $lc := .Values.modelLifecycle | default dict -}}
+{{- $h := $lc.healthWatch | default dict -}}
+{{- if $h.enabled -}}
+{{- $ui := .Values.tockmoxUi | default dict -}}
+{{- $img := $h.image | default (ternary ($ui.image | default "") "" (default false $ui.enabled)) -}}
+{{- if not $img -}}
+{{- fail "modelLifecycle.healthWatch.enabled is true but there is no image: healthWatch.image is empty and the Tockmox UI is off or has no tockmoxUi.image. The health watch runs in the Tockmox UI image, which ships as source (TM-0902). Build it, push it to your registry, and name it in tockmoxUi.image (it is used by default) or healthWatch.image." -}}
+{{- end -}}
+{{- $w := $lc.watch | default dict -}}
+{{- $pr := $w.pullRequests | default dict -}}
+{{- $sec := $w.secrets | default dict -}}
+{{- $appKey := ($pr.githubApp | default dict) -}}
+{{- $nt := $h.notify | default dict -}}
+{{- if $h.pullRequests -}}
+{{- if and (ne ($pr.forge | default "github") "github") (not $sec.forgeToken) -}}
+{{- fail "modelLifecycle.healthWatch.pullRequests is on for a Forgejo forge but modelLifecycle.watch.secrets.forgeToken names no Secret: the health watch opens the revert PR with the model watcher's opener config and secrets, and needs the bot's token in it (key: token)" -}}
+{{- end -}}
+{{- if and (eq ($pr.forge | default "github") "github") (not $appKey) (not $sec.forgeToken) -}}
+{{- fail "modelLifecycle.healthWatch.pullRequests is on, but the model watcher's opener has no way to authenticate: set modelLifecycle.watch.pullRequests.githubApp (appId) or modelLifecycle.watch.secrets.forgeToken. The health watch opens the revert PR through the watcher's opener config and secrets" -}}
+{{- end -}}
+{{- if or (not $pr.repo) (not $pr.valuesPath) -}}
+{{- fail "modelLifecycle.healthWatch.pullRequests is on, but modelLifecycle.watch.pullRequests.repo or valuesPath is empty: the revert PR is a change to the site's models values file, which the opener config names" -}}
+{{- end -}}
+{{- end -}}
+{{- $ns := .Values.namespaces | default dict -}}
+{{- $monNs := $ns.monitoring | default "tockmox-monitoring" -}}
+{{- $siteProm := ((((($ui.config | default dict).sources) | default dict).prometheus) | default dict).url -}}
+{{- $promUrl := $h.prometheusUrl | default $siteProm | default (printf "http://tockmox-observability-kube-prometheus.%s.svc:9090" $monNs) -}}
+{{- $customProm := or $h.prometheusUrl $siteProm -}}
+{{- /* The config the job reads: the catalog and inventory (to know which aliases are promoted), the health-watch block
+       without its chart-only keys, and the opener config the revert PR uses. */ -}}
+{{- $hcfg := omit $h "image" "schedule" "egress" "resources" "notify" -}}
+{{- $_ := set $hcfg "enabled" true -}}
+{{- $_ := set $hcfg "prometheusUrl" $promUrl -}}
+{{- if $nt.ntfyUrl -}}{{- $_ := set $hcfg "notify" (dict "ntfyUrl" $nt.ntfyUrl) -}}{{- end -}}
+{{- $p2 := deepCopy $pr -}}
+{{- if $appKey -}}
+{{- $_ := set $p2 "githubApp" (merge (dict "privateKeyFile" "/bot/private-key.pem") (omit $appKey "privateKeyFile")) -}}
+{{- end -}}
+{{- if $sec.forgeToken -}}{{- $_ := set $p2 "tokenEnv" "TOCKMOX_BOT_TOKEN" -}}{{- end -}}
+{{- $lcCfg := omit $lc "watch" "healthWatch" "runner" "evalGateway" "productionKeys" -}}
+{{- $_ := set $lcCfg "healthWatch" $hcfg -}}
+{{- $_ := set $lcCfg "watch" (dict "pullRequests" $p2) -}}
+{{- $cfg := dict "modelLifecycle" $lcCfg "inferenceNodes" (.Values.inferenceNodes | default dict) -}}
+{{- $cfgText := $cfg | toYaml -}}
+{{- $res := $h.resources | default (dict "requests" (dict "cpu" "50m" "memory" "128Mi") "limits" (dict "memory" "256Mi")) -}}
+{{- /* where ntfy is: an in-cluster Service URL opens that namespace's ntfy pods; any other host opens public HTTPS */ -}}
+{{- $nu := dict -}}
+{{- if $nt.ntfyUrl -}}{{- $nu = urlParse (toString $nt.ntfyUrl) -}}{{- end -}}
+{{- $nhost := (regexReplaceAll ":[0-9]+$" ($nu.host | default "") "") -}}
+{{- $nport := (regexFind "[0-9]+$" ($nu.host | default "")) | default (ternary "443" "80" (eq ($nu.scheme | default "") "https")) -}}
+{{- $nsvc := regexFindAll "^([a-z0-9-]+)\\.([a-z0-9-]+)\\.svc(\\.cluster\\.local)?$" $nhost -1 -}}
+{{- $nsvcNs := "" -}}
+{{- if $nsvc -}}{{- $nsvcNs = (index (regexSplit "\\." $nhost -1) 1) -}}{{- end -}}
+{{- $nutok := $nt.topicSecret -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-health-watch
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-health-watch
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+{{ $cfgText | indent 4 }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tockmox-health-watch
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  schedule: {{ $h.schedule | default "*/15 * * * *" | quote }}
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            {{- include "tockmox.labels" . | nindent 12 }}
+            app.kubernetes.io/name: tockmox-health-watch
+            tockmox.com/isolated: "true"
+          annotations:
+            checksum/config: {{ $cfgText | sha256sum | trunc 16 | quote }}
+        spec:
+          serviceAccountName: tockmox-health-watch
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: health-watch
+              image: {{ $img | quote }}
+              imagePullPolicy: IfNotPresent
+              command: [python, -m, app.health_watch, /config/config.yaml, --apply]
+              {{- if or $nutok (and $h.pullRequests $sec.forgeToken) }}
+              env:
+                {{- if $nutok }}
+                - name: NTFY_TOKEN
+                  valueFrom: { secretKeyRef: { name: {{ $nutok | quote }}, key: token, optional: true } }
+                - name: NTFY_TOPIC
+                  valueFrom: { secretKeyRef: { name: {{ $nutok | quote }}, key: topic, optional: true } }
+                {{- end }}
+                {{- if and $h.pullRequests $sec.forgeToken }}
+                - name: TOCKMOX_BOT_TOKEN
+                  valueFrom: { secretKeyRef: { name: {{ $sec.forgeToken | quote }}, key: token } }
+                {{- end }}
+              {{- end }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              resources:
+                {{- toYaml $res | nindent 16 }}
+              volumeMounts:
+                - { name: config, mountPath: /config, readOnly: true }
+                {{- if and $h.pullRequests $appKey }}
+                - { name: bot-key, mountPath: /bot, readOnly: true }
+                {{- end }}
+          volumes:
+            - name: config
+              configMap: { name: tockmox-health-watch }
+            {{- if and $h.pullRequests $appKey }}
+            - name: bot-key
+              secret:
+                secretName: {{ $sec.githubAppKey | default "tockmox-model-watch-bot-app" | quote }}
+                defaultMode: 0440
+                items: [{ key: private-key.pem, path: private-key.pem }]
+            {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tockmox-health-watch
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-health-watch
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    {{- if not $customProm }}
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $monNs }} }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: prometheus }
+      ports:
+        - { port: 9090, protocol: TCP }
+    {{- end }}
+    {{- if and $nt.ntfyUrl $nsvcNs }}
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $nsvcNs }} }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: tockmox-ntfy }
+      ports:
+        - { port: {{ $nport }}, protocol: TCP }
+    {{- end }}
+    {{- if or $h.pullRequests (and $nt.ntfyUrl (not $nsvcNs)) }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
+              - 127.0.0.0/8
+      ports:
+        - { port: 443, protocol: TCP }
+        {{- if and $nt.ntfyUrl (not $nsvcNs) (ne $nport "443") }}
+        - { port: {{ $nport }}, protocol: TCP }
+        {{- end }}
+    {{- end }}
+    {{- with (($h.egress | default dict).extra) }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

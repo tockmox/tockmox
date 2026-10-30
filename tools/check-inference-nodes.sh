@@ -29,7 +29,10 @@
 #     enrolled ids and its Stale threshold is three of aiNodes.convergeIntervalSeconds;
 #   - default models for new production keys render into the config and change its hash;
 #   - the model watcher and the Tockmox UI have exactly the authority and egress documented;
-#   - eighteen wrong configurations are refused with a sentence naming the cause;
+#   - the scheduled eval runner (TM-1261): its token only on the scheduler pod, a Role of Jobs and Pods in the release
+#     namespace, Job pods isolated and labelled for the eval gateway, egress to the nodes only, the UI reading its
+#     status volume read-only, and each of its render guards;
+#   - twenty-five wrong configurations are refused with a sentence naming the cause;
 #   - an Ollama route with no num_ctx is refused, naming the node, the endpoint and the route (TM-0957);
 #   - the policy layer's aiEgress.*.extraEgress refuses providerAllow's {cidr, ports} shape at render and
 #     accepts a NetworkPolicy egress rule, and the four pages that send a reader there show that rule (TM-0978).
@@ -91,8 +94,19 @@ refuse "default key models set twice (by hand and by key)" "keep one of them" \
   --set 'litellm.proxy_config.litellm_settings.default_key_generate_params.models={local-chat}' || rc=1
 refuse "default key models without the chart rendering the config" "needs inferenceNodes.render.enabled" \
   --set 'modelLifecycle.productionKeys.defaultModels={local-chat}' --set 'inferenceNodes.render.enabled=false' || rc=1
-refuse "the watcher on with no image" "modelLifecycle.watch.image is empty" \
-  --set 'modelLifecycle.watch.image=' || rc=1
+refuse "the watcher on with no image of its own and no UI image" "neither modelLifecycle.watch.image nor tockmoxUi.image is set" \
+  --set 'modelLifecycle.watch.image=' --set 'tockmoxUi.enabled=false' --set 'tockmoxUi.image=' || rc=1
+# An empty watch.image means the UI's image, so a pin bump that moves tockmoxUi.image moves the watcher too.
+ui_img=$(helm template t "$AI" -f "$BASE" -f "$FIX" --set 'modelLifecycle.watch.image=' 2>/dev/null | python3 -c '
+import sys, yaml
+d = [x for x in yaml.safe_load_all(sys.stdin) if x]
+ui = [x for x in d if x["kind"] == "Deployment" and x["metadata"]["name"] == "tockmox-ui"][0]
+cj = [x for x in d if x["kind"] == "CronJob" and x["metadata"]["name"] == "tockmox-model-watch"][0]
+uimg = ui["spec"]["template"]["spec"]["containers"][0]["image"]
+wimgs = {c["image"] for c in cj["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"]}
+print("same" if wimgs == {uimg} else "different %s %s" % (uimg, sorted(wimgs)))')
+if [ "$ui_img" = "same" ]; then echo "  ok an empty watch.image runs the watcher in the UI's image"
+else echo "FAIL an empty watch.image should fall back to tockmoxUi.image: $ui_img"; rc=1; fi
 refuse "GitHub pull requests with no App and no token" "has no way to authenticate" \
   --set 'modelLifecycle.watch.pullRequests.githubApp=null' || rc=1
 refuse "Forgejo pull requests with no token Secret" "needs the bot's token" \
@@ -339,7 +353,7 @@ if [ "$n_on" = 1 ] && [ "$n_off" = 0 ]; then echo "  ok the UI's Ingress renders
 else echo "FAIL the UI's Ingress: default $n_on, disabled $n_off (want 1 and 0)"; rc=1; fi
 
 # EMPTY allowedClients MEANS NOBODY: the policy still renders, with no ingress rule.
-helm template t "$AI" -f "$BASE" -f "$FIX" --set 'modelLifecycle.evalGateway.allowedClients=null' > "$tmp/none.yaml"
+helm template t "$AI" -f "$BASE" -f "$FIX" --set 'modelLifecycle.evalGateway.allowedClients=null' --set 'modelLifecycle.runner.enabled=false' > "$tmp/none.yaml"
 python3 - "$tmp/none.yaml" <<'PY' || rc=1
 import sys, yaml
 np = next(d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind") == "NetworkPolicy" and d["metadata"]["name"] == "tockmox-litellm-eval")
@@ -368,9 +382,149 @@ rec = bool(ui) and st.get("type") == "RollingUpdate" and str(ru.get("maxSurge"))
 print("%s %s" % (aff, rec))'; }
 got=$(colo); if [ "$got" = "True True" ]; then echo "  ok RWO report volume: the watcher is required onto the UI's node and the UI rolls with maxSurge 0 (not Recreate)"
 else echo "FAIL RWO report volume with the UI on: affinity/no-surge = $got (want True True): a surge would wait on Multi-Attach, Recreate is refused over a live Deployment"; rc=1; fi
-got=$(colo --set 'modelLifecycle.watch.report.accessModes={ReadWriteMany}'); if [ "$got" = "False False" ]; then echo "  ok RWX report volume: no co-scheduling forced"
+got=$(colo --set 'modelLifecycle.watch.report.accessModes={ReadWriteMany}' --set 'modelLifecycle.runner.status.accessModes={ReadWriteMany}'); if [ "$got" = "False False" ]; then echo "  ok RWX report volume: no co-scheduling forced"
 else echo "FAIL RWX report volume: affinity/no-surge = $got (want False False)"; rc=1; fi
 refuse "a ReadWriteOncePod report volume" "has ReadWriteOncePod: the watcher writes the report" --set 'modelLifecycle.watch.report.accessModes={ReadWriteOncePod}' || rc=1
+
+# ---- THE EVAL RUNNER ON A SCHEDULE (TM-1261, TM-1264) ------------------------------------------------------------
+# The fixture turns it on (ci/values-inference-nodes.yaml). Refusals first, each with its cause named; then the render.
+refuse "the runner on with no image (none of its own, none in the UI)" "modelLifecycle.runner.image is empty and tockmoxUi has no image" \
+  --set 'tockmoxUi.enabled=false' --set 'tockmoxUi.image=' || rc=1
+refuse "the runner on with the eval gateway off" "modelLifecycle.evalGateway.enabled is false" \
+  --set 'modelLifecycle.evalGateway.enabled=false' || rc=1
+refuse "the runner on with nobody allowed to reach the eval gateway" "evalGateway.allowedClients is empty" \
+  --set 'modelLifecycle.evalGateway.allowedClients=null' || rc=1
+refuse "a ReadWriteOncePod status volume" "modelLifecycle.runner.status.accessModes has ReadWriteOncePod" \
+  --set 'modelLifecycle.runner.status.accessModes={ReadWriteOncePod}' || rc=1
+refuse "a ReadWriteOnce status volume with the UI off" "nothing to pin them there" \
+  --set 'tockmoxUi.enabled=false' --set 'modelLifecycle.runner.image=registry.example/ui:1' || rc=1
+refuse "the evidence PR with no watcher pull-request settings" "evidence.pullRequests is true but modelLifecycle.watch.pullRequests.enabled is not" \
+  --set 'modelLifecycle.watch.pullRequests.enabled=false' || rc=1
+refuse "a health URL named by host (a NetworkPolicy cannot name a host)" "names a host, not an IPv4 address" \
+  --set 'modelLifecycle.runner.nodes.studio.healthUrl=http://studio.lan:8080/health' || rc=1
+
+helm template t "$AI" -f "$BASE" -f "$FIX" > "$tmp/runner.yaml"
+helm template t "$AI" -f "$BASE" -f "$FIX" --set 'modelLifecycle.runner.enabled=false' > "$tmp/runner-off.yaml"
+helm template t "$AI" -f "$BASE" -f "$FIX" --set 'modelLifecycle.runner.image=registry.example/runner:9' \
+  --set 'modelLifecycle.runner.evidence.pullRequests=false' --set 'modelLifecycle.runner.status.accessModes={ReadWriteMany}' \
+  --set 'modelLifecycle.verdictsDir=/site/verdicts' --set 'modelLifecycle.runner.extraSetsConfigMap=site-sets' \
+  --set 'modelLifecycle.watch.report.accessModes={ReadWriteMany}' > "$tmp/runner-b.yaml"
+python3 - "$tmp/runner.yaml" "$tmp/runner-off.yaml" "$tmp/runner-b.yaml" <<'PY' || rc=1
+import sys, yaml
+def docs(path):
+    return [d for d in yaml.safe_load_all(open(path)) if isinstance(d, dict) and d.get("kind")]
+def find(ds, kind, name):
+    return next((d for d in ds if d["kind"] == kind and d["metadata"]["name"] == name), None)
+bad = 0
+def check(cond, msg):
+    global bad
+    print(("  ok " if cond else "FAIL ") + msg)
+    bad += (not cond)
+on, off, alt = docs(sys.argv[1]), docs(sys.argv[2]), docs(sys.argv[3])
+UI_IMG = "registry.example/tockmox/tockmox-ui:0.8.0-site"
+names = ("tockmox-eval-runner", "tockmox-eval-runner-status", "tockmox-eval-scheduler", "tockmox-eval-run")
+check(not [d for d in off if d["metadata"]["name"] in names], "runner off: none of its objects render")
+
+sa = find(on, "ServiceAccount", "tockmox-eval-runner")
+role = find(on, "Role", "tockmox-eval-runner")
+rb = find(on, "RoleBinding", "tockmox-eval-runner")
+check(sa is not None and sa["automountServiceAccountToken"] is False, "the runner's ServiceAccount does not mount a token by default")
+check(role["rules"] == [{"apiGroups": ["batch"], "resources": ["jobs"], "verbs": ["create", "get", "list", "watch", "delete"]},
+                        {"apiGroups": [""], "resources": ["pods"], "verbs": ["get", "list"]}]
+      and not find(on, "ClusterRole", "tockmox-eval-runner"),
+      "its authority is Jobs (create/get/list/watch/delete) and Pods (get/list) in the release namespace, nothing cluster-wide")
+check(rb["roleRef"]["name"] == "tockmox-eval-runner" and rb["subjects"][0]["name"] == "tockmox-eval-runner", "the Role is bound to that ServiceAccount only")
+
+cj = find(on, "CronJob", "tockmox-eval-scheduler")
+spod = cj["spec"]["jobTemplate"]["spec"]["template"]
+sps = spod["spec"]
+check(sps["automountServiceAccountToken"] is True and sps["serviceAccountName"] == "tockmox-eval-runner"
+      and spod["metadata"]["labels"].get("tockmox.com/isolated") == "true", "the scheduler pod alone mounts the token, and is isolated")
+check(cj["spec"]["schedule"] == "*/15 * * * *" and cj["spec"]["concurrencyPolicy"] == "Forbid"
+      and sps["containers"][0]["image"] == UI_IMG and sps["containers"][0]["command"][-4:-2] == ["app.runner", "schedule"],
+      "the scheduler runs `app.runner schedule` in the UI image (runner.image empty falls back to tockmoxUi.image), Forbid overlap")
+check("podAffinity" in sps.get("affinity", {}), "the scheduler is required onto the UI pod's node (ReadWriteOnce status volume)")
+
+cm = find(on, "ConfigMap", "tockmox-eval-runner")
+tmpl = yaml.safe_load(cm["data"]["job-template.yaml"])
+tpod = tmpl["spec"]["template"]
+tsp = tpod["spec"]
+tc = tsp.get("initContainers", []) + tsp.get("containers", [])
+check(tsp["automountServiceAccountToken"] is False and tpod["metadata"]["labels"].get("tockmox.com/isolated") == "true"
+      and tpod["metadata"]["labels"].get("tockmox.com/eval-client") == "true" and tpod["metadata"]["labels"]["app.kubernetes.io/name"] == "tockmox-eval-run",
+      "the Job pods mount no token, are isolated, and carry tockmox.com/eval-client for the eval gateway's policy")
+runner = next(c for c in tc if c["name"] == "runner")
+check(runner["env"] == [{"name": "EVAL_GATEWAY_KEY", "valueFrom": {"secretKeyRef": {"name": "tockmox-litellm-eval", "key": "masterkey"}}}]
+      and [c["name"] for c in tc] == ["runner", "evidence-pr"] and "initContainers" in tsp
+      and all(c["securityContext"]["readOnlyRootFilesystem"] and c["resources"]["limits"]["memory"] for c in tc),
+      "the Job reads the eval gateway key from the existing Secret; runner then evidence-pr; read-only root, memory limit")
+check("podAffinity" in tsp.get("affinity", {}) and tmpl["spec"]["backoffLimit"] == 0 and tmpl["spec"]["ttlSecondsAfterFinished"] > 0,
+      "the Job is co-scheduled with the UI, never retried by Kubernetes, and cleaned up")
+cfg = yaml.safe_load(cm["data"]["config.yaml"])
+rc_ = cfg["modelLifecycle"]["runner"]
+check(rc_["statusDir"] == "/var/lib/tockmox/evals" and rc_["gatewayUrl"] == "http://tockmox-litellm-eval:4000"
+      and rc_["prometheusUrl"].startswith("http://tockmox-observability-kube-prometheus.tockmox-monitoring.svc")
+      and rc_["nodes"] == {"studio": {"engineVersion": "0.32.2"}} and not set(rc_) & {"image", "schedule", "status", "resources", "evidence"}
+      and cfg["modelLifecycle"]["watch"]["pullRequests"]["githubApp"]["privateKeyFile"] == "/bot/private-key.pem",
+      "the config carries the resolved runner block, the nodes and the watcher's opener settings, and no chart-only keys")
+
+pvc = find(on, "PersistentVolumeClaim", "tockmox-eval-runner-status")
+check(pvc["spec"]["accessModes"] == ["ReadWriteOnce"] and pvc["spec"]["resources"]["requests"]["storage"] == "1Gi", "the status volume: 1Gi ReadWriteOnce by default")
+
+ui = find(on, "Deployment", "tockmox-ui")["spec"]
+usp = ui["template"]["spec"]
+mounts = {m["mountPath"]: m.get("readOnly") for m in usp["containers"][0]["volumeMounts"]}
+vol = next(v for v in usp["volumes"] if v["name"] == "eval-runner-status")
+ucfg = yaml.safe_load(find(on, "ConfigMap", "tockmox-ui")["data"]["config.yaml"])["modelLifecycle"]
+check(mounts.get("/var/lib/tockmox/evals") is True and vol["persistentVolumeClaim"] == {"claimName": "tockmox-eval-runner-status", "readOnly": True},
+      "the UI mounts the status volume read-only")
+check(ucfg["verdictsDir"] == "/var/lib/tockmox/evals/site/evals/verdicts" and ucfg["resultsDir"] == "/var/lib/tockmox/evals/site/evals/results",
+      "the UI reads verdicts and results from the runner's site tree by default")
+check(ui["strategy"]["rollingUpdate"] == {"maxSurge": 0, "maxUnavailable": 1}, "the UI rolls with maxSurge 0 while a ReadWriteOnce status volume is mounted")
+
+egress = lambda name: find(on, "NetworkPolicy", name)["spec"]
+for name, sel in (("tockmox-eval-scheduler", "tockmox-eval-scheduler"), ("tockmox-eval-run", "tockmox-eval-run")):
+    p = egress(name)
+    check(p["podSelector"] == {"matchLabels": {"app.kubernetes.io/name": sel}} and p["policyTypes"] == ["Ingress", "Egress"] and p["ingress"] == [],
+          f"{name}: selects its pod, no ingress")
+def cidrs(p):
+    return sorted((r["to"][0]["ipBlock"]["cidr"], r["ports"][0]["port"]) for r in p["egress"] if "ipBlock" in r["to"][0] and r["to"][0]["ipBlock"]["cidr"].endswith("/32"))
+want_nodes = sorted([("192.0.2.10/32", 8080), ("192.0.2.10/32", 11434), ("192.0.2.10/32", 8090), ("192.0.2.10/32", 8000), ("192.0.2.10/32", 8001), ("192.0.2.20/32", 8000)])
+sp, jp = egress("tockmox-eval-scheduler"), egress("tockmox-eval-run")
+check(cidrs(sp) == want_nodes and cidrs(jp) == want_nodes, "both reach exactly the nodes' endpoints (address/32 and port) and nothing else on the LAN")
+check(any(r["to"][0].get("podSelector") == {"matchLabels": {"app.kubernetes.io/name": "prometheus"}} and r["ports"] == [{"port": 9090, "protocol": "TCP"}] for r in sp["egress"])
+      and any(r["to"][0].get("ipBlock", {}).get("cidr") == "10.0.0.0/16" and r["ports"] == [{"port": 6443, "protocol": "TCP"}] for r in sp["egress"]),
+      "the scheduler also reaches Prometheus (9090) and the Kubernetes API")
+check(not any(r["to"][0].get("podSelector") == {"matchLabels": {"app.kubernetes.io/name": "tockmox-litellm-eval"}} for r in sp["egress"])
+      and any(r["to"][0].get("podSelector") == {"matchLabels": {"app.kubernetes.io/name": "tockmox-litellm-eval"}} and r["ports"] == [{"port": 4000, "protocol": "TCP"}] for r in jp["egress"]),
+      "only the Job reaches the eval gateway Service (4000); only the scheduler reaches Prometheus and the API")
+web = [r for r in jp["egress"] if r.get("ports") == [{"port": 443, "protocol": "TCP"}]]
+PRIVATE = {"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"}
+check(len(web) == 1 and web[0]["to"][0]["ipBlock"]["cidr"] == "0.0.0.0/0" and PRIVATE <= set(web[0]["to"][0]["ipBlock"]["except"])
+      and not [r for r in sp["egress"] if r.get("ports") == [{"port": 443, "protocol": "TCP"}]],
+      "evidence.pullRequests: the Job (not the scheduler) may use HTTPS to the internet minus every private range")
+gw = find(on, "NetworkPolicy", "tockmox-litellm-eval")["spec"]["ingress"][0]["from"]
+check({"podSelector": {"matchLabels": {"tockmox.com/eval-client": "true"}}} in gw, "the fixture's allowedClients admits the Job label (the site does this)")
+
+# the other variant: own image, no pull requests, ReadWriteMany, a site set ConfigMap, a verdictsDir the site chose
+acj = find(alt, "CronJob", "tockmox-eval-scheduler")["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+atmpl = yaml.safe_load(find(alt, "ConfigMap", "tockmox-eval-runner")["data"]["job-template.yaml"])["spec"]["template"]["spec"]
+ajp = find(alt, "NetworkPolicy", "tockmox-eval-run")["spec"]
+aui = find(alt, "Deployment", "tockmox-ui")["spec"]
+auc = yaml.safe_load(find(alt, "ConfigMap", "tockmox-ui")["data"]["config.yaml"])["modelLifecycle"]
+check(acj["containers"][0]["image"] == "registry.example/runner:9" and atmpl["containers"][0]["image"] == "registry.example/runner:9",
+      "runner.image set: it wins over tockmoxUi.image")
+check("affinity" not in acj and "affinity" not in atmpl and "strategy" not in aui, "ReadWriteMany: no co-scheduling and no no-surge rollout forced")
+check([c["name"] for c in atmpl["containers"]] == ["runner"] and "initContainers" not in atmpl
+      and not [r for r in ajp["egress"] if r.get("ports") == [{"port": 443, "protocol": "TCP"}]],
+      "without evidence.pullRequests: one container and no internet egress")
+check(any(v["name"] == "sets" and v["configMap"]["name"] == "site-sets" for v in acj["volumes"])
+      and any(m["mountPath"] == "/etc/tockmox-eval/sets" and m["readOnly"] for m in acj["containers"][0]["volumeMounts"]),
+      "extraSetsConfigMap is mounted read-only at /etc/tockmox-eval/sets in the scheduler")
+check(auc["verdictsDir"] == "/site/verdicts" and auc["resultsDir"] == "/var/lib/tockmox/evals/site/evals/results",
+      "a verdictsDir the site set is kept; the other still defaults")
+sys.exit(1 if bad else 0)
+PY
 
 # ---- LAB FINDINGS 2026-10-08 (TM-0920 lab rehearsal, agent C; F4 F5 F6 F7 F8 F10 and the pages) -------------
 # Each of these rendered cleanly and failed on a cluster. The assertions below evaluate the rendered NetworkPolicies
