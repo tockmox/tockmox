@@ -184,9 +184,10 @@ A catalog entry the watcher can act on looks like this:
       adopted: "2026-10-07"
 ```
 
-**A hosted candidate is served untagged.** Data-class tags on the production
-gateway decide which requests may leave the site, and choosing them is part of
-promoting the model. A promoted hosted model is an ordinary hand-written entry in
+**A hosted candidate is tagged `open` on the eval gateway, and nothing more.**
+The eval gateway filters by tag, so only public eval data reaches it (see "The
+data-class rails" below). Data-class tags on the production gateway decide which
+requests may leave the site, and choosing them is part of promoting the model. A promoted hosted model is an ordinary hand-written entry in
 `litellm.proxy_config.model_list`, with the tags you chose.
 
 ## Promoting
@@ -538,8 +539,8 @@ modelLifecycle:
 ```
 
 The card then offers the replacement as a hosted candidate. Evaluate admits it
-to the eval gateway; the eval runner still holds a hosted candidate until a data
-class is enforced end to end (TM-1249), and the card says so.
+to the eval gateway, where the data-class rails let it see public eval sets
+only, and the card says so.
 
 **Candidate** (`/models/c/<alias>`). The plan for an evaluation of
 `<alias>-next`: the alias it competes for, the incumbent, the legs (the latest
@@ -659,6 +660,28 @@ is about the candidate or the incumbent. A twin edited after the verdict, a twin
 missing, and a hash nobody computed each fail the check. A path that leaves the
 repo, symlinks included, is refused rather than hashed. The command prints
 warnings for bare-path entries and exits 1 on any problem.
+
+### The data-class rails
+
+Every eval set names its class (`classification`: public, internal, confidential
+or restricted), and a row (`cases.jsonl`) may name a higher one; a set or row
+without a valid class is refused. Two checks then keep eval data where it may go:
+
+- **The runner** takes the highest class in the set and refuses to send anything
+  above public to a route the eval gateway does not report as local
+  (`model_info.endpoint_tier`). A route the gateway says nothing about counts as
+  not local. It tags every request with the class: `open` for public, `internal`,
+  and `restricted` for confidential and restricted.
+- **The eval gateway** filters by tag (`router_settings.enable_tag_filtering`).
+  A node route is local unless it says otherwise and serves every class
+  (`restricted`, `internal`, `open`) unless it sets its own tags; an external route
+  or a hosted candidate serves `open` alone, and the chart refuses to render an
+  external eval route tagged for more.
+
+So a hosted candidate is evaluated on public sets only. Grades are deterministic
+(there is no judge on this path), so no eval data reaches a judge model. An
+untagged request is not fenced by the gateway; the runner never sends one, and
+the eval gateway admits only `modelLifecycle.evalGateway.allowedClients`.
 
 ### What the eval runner measures
 

@@ -545,9 +545,31 @@ def render_model_list(inv: Inventory, gateway: str = "production") -> list[dict]
         entry = {"model_name": r.alias, "litellm_params": lp}
         info = dict(r.model_info)
         info.setdefault("tockmox_node", r.node)
+        if gateway == "eval":
+            eval_class_fence(r.alias, lp, info)
         entry["model_info"] = info
         out.append(entry)
     return out
+
+
+EVAL_LOCAL_TAGS = ("restricted", "internal", "open")
+# TM-1249: an eval set's class, as the tag the runner sends with every request to the eval gateway
+EVAL_CLASS_TAG = {"public": "open", "internal": "internal", "confidential": "restricted", "restricted": "restricted"}
+
+
+def eval_class_fence(alias: str, lp: dict, info: dict) -> None:
+    """TM-1249: the eval gateway filters by tag. A node route is local unless it says otherwise and may serve every class;
+    an external route may serve open (public data) only. Fills the defaults in place; refuses an external route tagged
+    for more. The chart applies the same (templates/_inference-nodes.tpl)."""
+    tier = info.get("endpoint_tier") or "local"
+    if tier not in ("local", "external"):
+        raise NodeError(f"route {alias} has model_info.endpoint_tier {tier!r}; it must be local or external")
+    info["endpoint_tier"] = tier
+    if "tags" not in lp:
+        lp["tags"] = list(EVAL_LOCAL_TAGS) if tier == "local" else ["open"]
+    if tier == "external" and any(t != "open" for t in lp["tags"]):
+        raise NodeError(f"route {alias} is external but its tags {lp['tags']} let the eval gateway send it data above "
+                        "public; an external route may carry only the tag open (TM-1249)")
 
 
 def _env_name(secret: str) -> str:

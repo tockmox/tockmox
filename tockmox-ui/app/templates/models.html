@@ -70,7 +70,7 @@
     {% endfor %}
     {% for e in hosted %}
       <tr>
-        <th scope="row"><code>{{ e.model }}</code><div class="muted small">hosted candidate on the eval gateway, untagged</div></th>
+        <th scope="row"><code>{{ e.model }}</code><div class="muted small">hosted candidate on the eval gateway, tagged open (public eval data only)</div></th>
         <td><span class="muted">–</span></td><td><span class="muted">hosted</span></td><td><span class="muted">–</span></td>
         <td class="num"><a href="/models/evaluate?entry={{ e.id|urlencode }}" class="small">Start an evaluation<span class="visually-hidden"> of {{ e.model }}</span></a><br><a href="/models/promote-hosted?entry={{ e.id|urlencode }}" class="small">Promote<span class="visually-hidden"> {{ e.model }}</span></a></td>
       </tr>

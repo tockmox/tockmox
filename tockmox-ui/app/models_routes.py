@@ -370,8 +370,8 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
 
     FIT_BADGE = {"fits": "ok", "tight": "warning", "over": "critical", "unknown": "unknown"}
     INBOX_RANK = {"deprecation": 0, "revision": 1, "digest": 1, "successor": 2, "quant": 3, "frontier": 4}
-    HOSTED_HELD = ("Hosted candidates are admitted to the eval gateway untagged, and the eval runner holds them: it sends a hosted "
-                   "model no case until a data class is enforced end to end (the safety rails, TM-1249).")
+    HOSTED_HELD = ("Hosted candidates are admitted to the eval gateway tagged open: the eval runner sends them public eval sets "
+                   "only, and the eval gateway refuses them anything tagged above open (the data-class rails, TM-1249).")
 
     def fit_chips(c, rep, results):
         """One chip per node for a local candidate, from fit v2 (fit_compat): {node, state, text}. A candidate with no size is Unknown."""

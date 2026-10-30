@@ -18,7 +18,7 @@
   <h2 id="el-h">What the eval gateway will get</h2>
   <p>Only the eval runner can reach this gateway. Candidates live here, beside the model each is compared against.</p>
 {% if eval_list %}<pre tabindex="0"><code>{{ eval_list }}</code></pre>{% endif %}
-{% if eval_hosted %}<p>Hosted candidates are not on a node: add this to the eval gateway's <code>model_list</code>. It carries no data-class tags.</p>
+{% if eval_hosted %}<p>Hosted candidates are not on a node: add this to the eval gateway's <code>model_list</code>. It carries the tag <code>open</code> alone, so only public eval data reaches it.</p>
 <pre tabindex="0"><code>{{ eval_hosted }}</code></pre>{% endif %}
 </section>
 {% endif %}

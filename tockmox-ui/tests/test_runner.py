@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """HL-0917: the eval runner v0 against stub OpenAI-compatible gateways. Each stub model has a behaviour, so every
 outcome the runner can produce is produced here: better, worse, absolute bars, a control that does not fail, a
-broken stream, the classification and hosted-candidate refusals, and an unhealthy node."""
+broken stream, the data-class rails (TM-1249), and an unhealthy node."""
 import json
 import os
 import re
@@ -40,17 +40,29 @@ def _answer(model, messages, body):
 
 
 def gateway(behaviour):
-    """A stub gateway. `behaviour` maps a route name to a stub model name."""
+    """A stub gateway. `behaviour` maps a route name to a stub model name. `_tiers` ({route: tier}) answers GET
+    /model/info as LiteLLM does; `_seen` (a list) collects every chat request's tags (TM-1249)."""
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
 
         def do_GET(self):
+            if self.path.startswith("/model/info") and "_tiers" in behaviour:
+                b = json.dumps({"data": [{"model_name": k, "model_info": {"endpoint_tier": v}}
+                                         for k, v in behaviour["_tiers"].items()]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(b)))
+                self.end_headers()
+                self.wfile.write(b)
+                return
             self.send_response(200 if behaviour.get("_healthy", True) else 503)
             self.end_headers()
 
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
+            if "_seen" in behaviour:
+                behaviour["_seen"].append(body.get("tags"))
             model = behaviour.get(body["model"], body["model"])
             text, call = _answer(model, body["messages"], body)
             if model.startswith("thinker"):
@@ -185,17 +197,51 @@ def test_a_broken_stream_fails_smoke_and_the_verdict(tmp_path):
     assert res["verdict"] == "fail" and "smoke failed" in json.loads((tmp_path / "site" / res["verdict_path"]).read_text())["criterion"]
 
 
-@pytest.mark.parametrize("classification", ["confidential", "restricted"])
-def test_a_set_above_internal_is_refused(tmp_path, classification):
+@pytest.mark.parametrize("classification", ["internal", "confidential", "restricted"])
+def test_data_above_public_goes_to_no_route_the_gateway_does_not_report_as_local(tmp_path, classification):
+    """TM-1249: unknown tier counts as not local, so a gateway that says nothing gets public data only."""
     es = make_set(tmp_path, classification=classification)
-    with pytest.raises(RunError, match="public or internal"):
+    with pytest.raises(RunError, match="not known to be local"):
         _run(tmp_path, es, {})
+    with pytest.raises(RunError, match="route local-agent-next is external"):
+        _run(tmp_path, es, {"_tiers": {"local-agent-next": "external", "local-agent": "local"}})
+    with pytest.raises(RunError, match="route local-agent is external"):       # the incumbent's route is held too
+        _run(tmp_path, es, {"_tiers": {"local-agent-next": "local", "local-agent": "external"}})
 
 
-def test_a_hosted_candidate_is_refused(tmp_path):
+@pytest.mark.parametrize("classification,tag", [("public", "open"), ("internal", "internal"), ("confidential", "restricted"),
+                                                ("restricted", "restricted")])
+def test_on_local_routes_every_request_carries_the_sets_class_as_a_tag(tmp_path, classification, tag):
+    es = make_set(tmp_path, classification=classification)
+    seen = []
+    res = _run(tmp_path, es, {"local-agent-next": "good", "local-agent": "half", "_seen": seen,
+                              "_tiers": {"local-agent-next": "local", "local-agent": "local"}})
+    assert res["verdict"] == "pass" and seen and all(t == [tag] for t in seen)
+
+
+def test_a_hosted_candidate_gets_public_data_only(tmp_path):
+    """The hosted-candidate refusal that held until TM-1249 is now the class rail: an external route takes public sets."""
+    tiers = {"local-agent-next": "external", "local-agent": "local"}
     es = make_set(tmp_path)
-    with pytest.raises(RunError, match="hosted candidate"):
-        _run(tmp_path, es, {}, req=dict(REQ, candidate={"model": "anthropic/claude-x"}))
+    seen = []
+    res = _run(tmp_path, es, {"local-agent-next": "good", "local-agent": "half", "_tiers": tiers, "_seen": seen},
+               req=dict(REQ, candidate={"model": "anthropic/claude-x"}))
+    assert res["verdict"] == "pass" and all(t == ["open"] for t in seen)
+
+
+def test_one_row_above_its_sets_class_raises_the_whole_run(tmp_path):
+    es = make_set(tmp_path)
+    rows = [json.loads(x) for x in open(os.path.join(es.path, "cases.jsonl"))]
+    rows[3]["classification"] = "restricted"
+    open(os.path.join(es.path, "cases.jsonl"), "w").write("\n".join(json.dumps(r) for r in rows) + "\n")
+    es = evalset.load(es.path)
+    assert evalset.run_class(es) == "restricted" and es.cases[3].classification == "restricted"
+    with pytest.raises(RunError, match=r"carries restricted data \(1 of 40 cases above public\)"):
+        _run(tmp_path, es, {"_tiers": {"local-agent-next": "external", "local-agent": "local"}})
+    rows[3]["classification"] = "secret"
+    open(os.path.join(es.path, "cases.jsonl"), "w").write("\n".join(json.dumps(r) for r in rows) + "\n")
+    with pytest.raises(evalset.SetError, match="classification must be one of"):
+        evalset.load(es.path)
 
 
 def test_an_unhealthy_node_aborts(tmp_path):

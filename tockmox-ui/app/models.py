@@ -279,8 +279,8 @@ def parse(doc: dict | None) -> Lifecycle:
     if "tags" in fr:
         # Jeff, 2026-10-07: new models, local or hosted, are unusable until explicitly approved. A default tag
         # would make a hosted model usable for that data class on arrival, so the key is refused, not ignored.
-        raise LifecycleError("frontier.tags is withdrawn: a new hosted model lands untagged on the eval gateway, and its "
-                             "data-class tags are chosen when it is promoted")
+        raise LifecycleError("frontier.tags is withdrawn: a new hosted model lands on the eval gateway tagged open alone "
+                             "(TM-1249), and its production data-class tags are chosen when it is promoted")
     lc.frontier_providers = dict(fr.get("providers") or {})
     pr = doc.get("promotion") or {}
     if not isinstance(pr, dict):
@@ -885,11 +885,12 @@ def _propose_frontier(cand, lc, inv, taken=()):
                              "would spread that route's traffic to the provider")
     entry = Entry(_slug(f"{provider}-{mid}"), cand.model, cand.source, stage="candidate", track=("deprecation",))
     keyenv = (lc.frontier_providers.get(provider) or {}).get("keyEnv", f"{provider.upper()}_API_KEY")
-    notes = ["admitted to the EVAL gateway only, with no data-class tags: no agent can call it (the production "
-             "gateway does not have it, which TM-0936 showed is the only fence that holds for every key)",
+    notes = ["admitted to the EVAL gateway only, tagged open alone: the eval runner sends it public eval sets only "
+             "(TM-1249), and no agent can call it (the production gateway does not have it, which TM-0936 showed is the "
+             "only fence that holds for every key)",
              f"start an evaluation against the alias it should compete for; after enough passing comparisons, promoting "
              f"it is a separate change, and that is where you choose its data-class tags"]
-    eval_entry = {"model_name": alias, "litellm_params": {"model": cand.model, "api_key": f"os.environ/{keyenv}"},
+    eval_entry = {"model_name": alias, "litellm_params": {"model": cand.model, "api_key": f"os.environ/{keyenv}", "tags": ["open"]},
                   "model_info": {"endpoint_tier": "external", "tockmox_catalog": entry.id}}
     add = Lifecycle([entry])
     add.eval_gateway_entries = [eval_entry]
@@ -1045,15 +1046,17 @@ def propose_replacement(alias: str, node: str, endpoint: str, lc: Lifecycle, inv
 
 
 def hosted_candidate_entries(lc: Lifecycle) -> list[dict]:
-    """The eval gateway's entries for hosted catalog entries at stage candidate (no data-class tags). The
-    chart derives the same list (tockmox-ai.hostedCandidates); tests/golden in tockmox/tockmox pins it."""
+    """The eval gateway's entries for hosted catalog entries at stage candidate, tagged open alone (TM-1249: the eval
+    gateway filters by tag, so only public eval data reaches them). The chart derives the same list
+    (tockmox-ai.hostedCandidates); tests/golden in tockmox/tockmox pins it."""
     out = []
     for e in lc.catalog:
         if e.stage != "candidate" or e.source.kind != "hosted" or "/" not in e.source.ref:
             continue
         provider, mid = e.source.ref.split("/", 1)
         keyenv = (lc.frontier_providers.get(provider) or {}).get("keyEnv", f"{provider.upper()}_API_KEY")
-        out.append({"model_name": mid, "litellm_params": {"model": e.source.ref, "api_key": f"os.environ/{keyenv}"},
+        out.append({"model_name": mid, "litellm_params": {"model": e.source.ref, "api_key": f"os.environ/{keyenv}",
+                                                          "tags": ["open"]},
                     "model_info": {"endpoint_tier": "external", "tockmox_catalog": e.id}})
     return out
 

@@ -31,7 +31,7 @@
       <p class="muted">{{ c.detail }}{% if c.url %} · <a href="{{ c.url }}" rel="noopener noreferrer">upstream page</a>{% endif %}</p>
       {% if c.pr %}<p>An admit change is already open for this: <a href="{{ c.pr }}" rel="noopener noreferrer">the pull request</a><span class="visually-hidden"> for {{ c.model }}</span>.</p>{% endif %}
       {% if k.retire %}<p>{{ badge(k.retire.badge, k.retire.text) }}</p>{% endif %}
-      {% if k.hosted and c.kind != "deprecation" %}<p>{{ badge("unknown", "Hosted: held") }} <span class="muted">{{ held }}</span></p>{% endif %}
+      {% if k.hosted and c.kind != "deprecation" %}<p>{{ badge("unknown", "Hosted: public data only") }} <span class="muted">{{ held }}</span></p>{% endif %}
       {% if not k.hosted %}
       <p class="chips-row">
         {% for f in k.fits %}{{ badge(f.state, "Fit: " ~ f.text) }} {% else %}{{ badge("unknown", "Fit: Unknown") }} <span class="muted">there are no inference nodes in the inventory</span>{% endfor %}

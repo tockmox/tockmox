@@ -85,11 +85,12 @@ def test_propose_successor_gives_a_next_route_and_a_valid_change(world, tmp_path
     cfgmod.parse(d)
 
 
-def test_propose_frontier_admits_it_to_the_eval_gateway_untagged(world, tmp_path):
+def test_propose_frontier_admits_it_to_the_eval_gateway_tagged_open(world, tmp_path):
     c, app, s, u = admin(world, tmp_path)
     t = html.unescape(c.post("/models/propose", data={"csrf": u.csrf, "cid": CANDS[1]["id"]}).text)
     assert "What the eval gateway will get" in t and "What the production gateway will get" not in t
-    assert "claude-opus-5-5" in t and "tags:" not in t.split("What the eval gateway will get")[1].split("The values blocks")[0]
+    ev = t.split("What the eval gateway will get")[1].split("The values blocks")[0]
+    assert "claude-opus-5-5" in t and "tags:" in ev and "- open" in ev and "internal" not in ev
 
 
 def test_propose_needs_csrf_and_a_current_candidate(world, tmp_path):

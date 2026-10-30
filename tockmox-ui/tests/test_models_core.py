@@ -145,7 +145,7 @@ def test_successor_is_proposed_as_next_beside_the_live_route():
     assert next(r for r in new_I.routes if r.alias == "local-chat").model == "mlx-community/Qwen3.8-27B-4bit"   # untouched
 
 
-def test_frontier_proposal_lands_on_the_eval_gateway_untagged_and_as_a_candidate():
+def test_frontier_proposal_lands_on_the_eval_gateway_tagged_open_and_as_a_candidate():
     """Ruling 2 (2026-10-07): new models, local or hosted, are unusable until explicitly approved."""
     L, I = lc(), inv()
     cand = ml.Candidate("frontier:anthropic/claude-opus-5-5", "frontier", "anthropic", "anthropic/claude-opus-5-5",
@@ -153,7 +153,7 @@ def test_frontier_proposal_lands_on_the_eval_gateway_untagged_and_as_a_candidate
     add_lc, add_inv, notes = ml.propose(cand, L, I)
     assert add_lc.production_gateway_entries == [] and len(add_lc.eval_gateway_entries) == 1
     g = add_lc.eval_gateway_entries[0]
-    assert "tags" not in g["litellm_params"] and g["litellm_params"]["api_key"] == "os.environ/ANTHROPIC_API_KEY"
+    assert g["litellm_params"]["tags"] == ["open"] and g["litellm_params"]["api_key"] == "os.environ/ANTHROPIC_API_KEY"
     assert add_lc.catalog[0].stage == "candidate" and add_inv.routes == []
     new_L = ml.merge(L, add_lc)
     assert ml.check_promotions(new_L, I) == []                         # a hosted candidate is not a gate failure

@@ -58,20 +58,32 @@ eval:
     model: openai/mlx-community/Example-27B-4bit
     api_base: http://192.0.2.10:8080/v1
     api_key: no-auth
+    tags:
+    - restricted
+    - internal
+    - open
   model_info:
     tockmox_node: studio
+    endpoint_tier: local
 - model_name: local-chat-next
   litellm_params:
     model: openai/mlx-community/Example-2-27B-4bit
     api_base: http://192.0.2.10:8080/v1
     api_key: no-auth
+    tags:
+    - restricted
+    - internal
+    - open
   model_info:
     tockmox_node: studio
+    endpoint_tier: local
 hostedCandidates:
 - model_name: example-model-9
   litellm_params:
     model: anthropic/example-model-9
     api_key: os.environ/EXAMPLE_ANTHROPIC_KEY
+    tags:
+    - open
   model_info:
     endpoint_tier: external
     tockmox_catalog: hosted-new

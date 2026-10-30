@@ -25,7 +25,10 @@ No database: it serves the master key only, and the network policy is the fence.
 {{- if and $eg.enabled (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm")) -}}
 {{- $routes := include "tockmox-ai.nodeRoutes" (dict "root" $ "gateway" "eval") | fromYamlArray -}}
 {{- $hosted := include "tockmox-ai.hostedCandidates" . | fromYamlArray -}}
-{{- $config := dict "model_list" (concat $routes $hosted) "general_settings" (dict "master_key" "os.environ/PROXY_MASTER_KEY") -}}
+{{- /* TM-1249: tag filtering is what makes each deployment's tags a fence (an untagged request is not fenced; the runner
+tags every request it sends). */ -}}
+{{- $config := dict "model_list" (concat $routes $hosted) "general_settings" (dict "master_key" "os.environ/PROXY_MASTER_KEY")
+      "router_settings" (dict "enable_tag_filtering" true) -}}
 {{- $cfgText := $config | toYaml -}}
 {{- $img := .Values.litellm.image | default dict -}}
 {{- $tag := $img.tag | default .Subcharts.litellm.Chart.AppVersion -}}
