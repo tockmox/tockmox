@@ -496,15 +496,33 @@ Three admin pages under Models turn the watcher's report and the eval runner's
 status files into something you decide from. Each is read only: every button
 renders a change for you to commit.
 
-**Inbox** (`/models/inbox`). One card per candidate in the watcher's report,
-tagged with why it is there: *New revision*, *Other quant*, *Successor*,
-*Hosted, new* or *Hosted, retiring*. A local candidate carries a fit chip per
-node (the same fit v2 arithmetic as Recommend; a size nobody knows reads
-Unknown, never fits), a licence chip against `modelLifecycle.recommend`'s allow
-list, and, when the model card reports them, its self-reported results under a
-label that says they are a hint and not a measurement. **Evaluate** renders the
-existing admit change. **Snooze 30 days** and **Dismiss** render a change to
-`modelLifecycle.inbox`:
+**Inbox** (`/models/inbox`). One scannable row per candidate in the watcher's
+report. Each row shows the reason tag (*New revision*, *Other quant*,
+*Successor*, *Hosted, new* or *Hosted, retiring*), the model id with one plain
+sentence under it, the best fit, the size and one primary action. The best fit
+is the node where the candidate fits best: fits beats tight beats over, and a
+tie goes to the faster predicted speed, shown as "node, fits, about N tok/s".
+The speed is predicted from memory bandwidth, not measured. A candidate nobody
+has sized reads "not sized yet", never fits, and a hosted one reads "hosted, no
+node". The primary action is **Evaluate**, which renders the existing admit
+change. When the report records an open admit PR, **Review PR #N** replaces
+Evaluate, and a retiring hosted model keeps its own action ("Evaluate the
+replacement"). A small menu on each row holds **Snooze 30 days**, **Dismiss**
+and the upstream page; both render a change to `modelLifecycle.inbox`.
+
+Open a row to see the rest: the fit on each node (the same fit v2 arithmetic as
+Recommend, with the model's memory and the context and slots it was planned
+at), a licence chip against `modelLifecycle.recommend`'s allow list, the model
+card's self-reported results under a label that says they are a hint and not a
+measurement, and the state of the admit PR. A hosted row explains there that
+the eval gateway gives it public eval sets only. The rows and the menu are plain
+HTML, so they work from the keyboard and without JavaScript.
+
+The chips at the top filter the list: *All*, *Local*, *Frontier*, *Snoozed* and
+*Dismissed*, each with its count. *Snoozed* and *Dismissed* list the hidden
+candidates, with the date a snooze ends, and carry no actions. The filter is the
+`show` query parameter (`/models/inbox?show=frontier`). The entries look like
+this:
 
 ```yaml
 modelLifecycle:
@@ -517,14 +535,16 @@ The ids are the report's candidate ids. A snoozed candidate comes back on its
 date; a dismissed one stays hidden until the watcher finds a different candidate
 (a new revision has a new id). The watcher and the PR opener skip both lists as
 well, so a hidden candidate is not in the next report and is not opened as a PR.
-The hidden ones are listed at the foot of the Inbox. A card links an open admit
-PR when the report records one: the opener writes `pr` onto the candidate after
-it opens the admit PR, and the watcher carries it forward while the candidate is
-still found. A report that is missing, old or from a partial run is shown as
-Unknown, and an empty Inbox is then not called clean.
+The hidden ones are in the *Snoozed* and *Dismissed* views. A row links an open
+admit PR when the report records one: the opener writes `pr` onto the candidate
+after it opens the admit PR, and the watcher carries it forward while the
+candidate is still found. Source health is one quiet line at the foot of the
+page: which upstreams answered in the watcher's last report and how long ago, or
+which one did not answer. A report that is missing, old or from a partial run is
+shown as Unknown on that line, and an empty Inbox is then not called clean.
 
 **Hosted retirement.** A hosted model its provider is retiring shows "retires in
-N days" (or "retired on DATE" once past) on its Inbox card, on the Models
+N days" (or "retired on DATE" once past) on its Inbox row, on the Models
 catalog and on the alias page of a gateway alias that routes to it. The date
 comes from the provider's listing. A provider's API does not name a replacement,
 so name it yourself under the watcher's provider settings:
