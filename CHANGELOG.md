@@ -521,6 +521,19 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Changed
 
+- **The candidate page draws a run as a pipeline of stages, and has a Re-run
+  button (TM-1301).** `/models/c/<alias>` now shows the latest run as connected
+  boxes with an arrow between each (Control, Smoke, Perf, Prefill, Tool calls,
+  Quality, Verdict), each with its state and, once done, its key number read
+  from the leg's recorded metrics (the leg's summary when a number was not
+  recorded). The last five earlier runs list with their date, state, the
+  reason each ended and a one-line mini pipeline. Re-run, offered only when
+  the latest run is done or failed, renders the change that adds its run id to
+  `modelLifecycle.runner.rerun`; nothing is written, you commit it, and the
+  runner queues a new run on its next pass. The page still names no better
+  model before the verdict. The per-leg table moved into a fold. Costs you
+  nothing to adopt: no new values, and the runner is unchanged.
+
 - **The eval gateway's model list carries data-class tags and tiers.** Node
   routes on the eval gateway gain `model_info.endpoint_tier: local` and the tags
   `restricted`, `internal`, `open` when they set none; hosted candidates gain the
