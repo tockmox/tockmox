@@ -670,6 +670,15 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **`tools/check-notify-and-drill.sh` and its `--selftest` no longer fail each
+  other's D4 when run at once (TM-1291).** The drill scripts keep their register
+  scratch files in `/tmp/drill-register` (an emptyDir in the pod); the gate runs
+  them on the host, and `check-all.sh` runs the gate and its selftest side by
+  side, so both used one directory and D4 failed in one or both. The gate now
+  points its own copies at its per-run directory and refuses if that line is
+  renamed; what the chart renders is unchanged, and the gate no longer leaves
+  `/tmp/drill-register` behind.
+
 - **`tools/check-all.sh` names a gate that never returns instead of hanging
   with it.** A tree that already lacked Grafana's memory limit sent the
   memory-limit gate's selftest into a regular expression that backtracked

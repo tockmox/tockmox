@@ -98,6 +98,15 @@ for src, out, tag in (("ai.yaml", "drill.sh", "gateway"), ("id.yaml", "id-drill.
 open(f"{t}/drill.facts.json", "w").write(json.dumps(facts))
 PY
 [ -s "$T/bridge.py" ] && [ -s "$T/drill.sh" ] && [ -s "$T/id-drill.sh" ] || { echo "check-notify-and-drill: bridge, drill or identity drill not rendered" >&2; exit 1; }
+# The drills keep the register's scratch files in REG_TMP=/tmp/drill-register, an emptyDir in the pod. On a host,
+# two copies of this gate (check-all runs it and its --selftest side by side) shared that directory and corrupted
+# each other's D4 runs: alone each passed, together both failed D4. The test copies use this run's own directory;
+# the rendered product text is unchanged, and the line is required so a rename cannot slip past this rewrite.
+for f in "$T/drill.sh" "$T/id-drill.sh"; do
+  grep -q '^REG_TMP=/tmp/drill-register$' "$f" \
+    || { echo "check-notify-and-drill: $f no longer sets REG_TMP=/tmp/drill-register; move this per-run rewrite with it" >&2; exit 1; }
+  sed "s#^REG_TMP=/tmp/drill-register\$#REG_TMP=$T/drill-register#" "$f" > "$f.run" && mv "$f.run" "$f"
+done
 
 # ---- B1 ---------------------------------------------------------------------
 SECRET=tok-SECRET-9f3a
