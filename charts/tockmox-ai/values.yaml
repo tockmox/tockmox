@@ -515,7 +515,7 @@ modelGateway:
   # templates/preflight.yaml refuses the module without the registration and
   # the registration without the module. Keys that existed
   # before it are untouched until next updated: list them with
-  # tools/audit-keys.sh. docs/usage/ai-plane.md, "Keys".
+  # tools/audit-keys.sh. docs/usage/ai-plane.md, "Scope every key: the key policy".
   # ------------------------------------------------------------------------
   keyPolicy:
     enabled: false

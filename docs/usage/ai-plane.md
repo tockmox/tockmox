@@ -567,6 +567,22 @@ litellm:
 With `inferenceNodes.render` on, the second edit changes the gateway config's
 hash, and the render prints the value to set in `litellm.podAnnotations`.
 
+A site that serves a `-next` route on the production gateway on purpose (a
+shadow comparison, say) and has keys naming it sets `refuseSuffixes: []`, and
+says why beside it; the default refuses them.
+
+**Audit the keys you already have, before and after.** The policy sees a key
+only when it is written, so a key minted before it keeps whatever it has until
+its next update. `tools/audit-keys.sh --context <your-context>` lists, from
+inside the LiteLLM pod and without printing any key, every key that is open
+(no model list or a wildcard one: it can call every model today, policy or
+not), names a `-next` model, or states no MCP access. Pass
+`--allow <alias>` for each alias in `allowAllModelsAliases` and the console's
+key, and `--no-suffix` if you set `refuseSuffixes: []`. Fix what it reports
+with the script that minted the key: a key that names its models and states
+its MCP access passes the policy on every later update. It exits 1 while any
+finding remains.
+
 **How it is proven.** `tests/key-policy/run.sh` starts the vendored LiteLLM
 version with a real database and two fake backends and records, with the policy
 on, that each refusal above answers 403 and that a refused key reaches nothing;

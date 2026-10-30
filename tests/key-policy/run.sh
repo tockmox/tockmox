@@ -165,6 +165,30 @@ e0=$(ext); c=$(chat "$K1" frontier-x)
 [ "$c" = 200 ] && ok "9 red: and key 1 now reaches frontier-x: the update-reopens-it hole, measured" \
   || ok "9 red: key 1 still refused on frontier-x after the update ($c): this LiteLLM does not reopen on update"
 
+# 10 tools/audit-keys.sh against this database: the keys the red leg let through are exactly what it reports
+code=$(mgmt /key/generate "{\"key_alias\":\"agent-n\",\"models\":[\"local-agent-next\"],$NOMCP}")
+[ "$code" = 200 ] || bad "10 audit: could not mint the -next key without the policy ($code)"
+code=$(mgmt /key/block "{\"key\":\"$KR\"}")
+[ "$code" = 200 ] || bad "10 audit: could not block the open red-leg key ($code $(head -c 200 "$work/resp"))"
+bash tools/audit-keys.sh --url "http://127.0.0.1:$PORT_PROXY" --allow open-webui > "$work/audit.out" 2>&1; arc=$?
+got=$(grep -E '^(OPEN|NEXT|NO-MCP|BLOCKED) ' "$work/audit.out" | sed -E 's/ \(sk-[^)]*\)//; s/:.*//' | sort | tr '\n' ';')
+want="BLOCKED agent-r;NEXT    agent-n;NO-MCP  agent-r2;OPEN    agent-a;"
+[ "$arc" = 1 ] && [ "$got" = "$want" ] && ok "10 audit: reports the open key, the -next key and the key with no MCP statement, and the blocked open key as BLOCKED (exit 1)" \
+  || bad "10 audit: exit $arc, got '$got', want '$want': $(cat "$work/audit.out")"
+grep -q '^BLOCKED agent-r .*unblocked it is OPEN (no model list)' "$work/audit.out" && grep -q '1 blocked key(s) reported, not counted' "$work/audit.out" \
+  && ok "10 audit: the blocked key says what unblocking it would bring back, and is not counted" || bad "10 audit: the BLOCKED line or count is wrong: $(cat "$work/audit.out")"
+for k in "$K1" "$KR" "$KEY"; do
+  if [ -n "$k" ] && grep -qF "$k" "$work/audit.out"; then bad "10 audit: printed a key"; fi
+done
+bash tools/audit-keys.sh --url "http://127.0.0.1:$PORT_PROXY" > "$work/audit2.out" 2>&1
+grep -q '^OPEN    open-webui ' "$work/audit2.out" && ok "10 audit: without --allow, the console alias is reported too" \
+  || bad "10 audit: open-webui not reported without --allow: $(cat "$work/audit2.out")"
+bash tools/audit-keys.sh --url "http://127.0.0.1:$PORT_PROXY" --allow open-webui --no-suffix > "$work/audit3.out" 2>&1
+! grep -q '^NEXT ' "$work/audit3.out" && ok "10 audit: --no-suffix drops the -next finding (a site with refuseSuffixes: [])" \
+  || bad "10 audit: --no-suffix still reported NEXT"
+PROXY_MASTER_KEY=wrong bash tools/audit-keys.sh --url "http://127.0.0.1:$PORT_PROXY" > /dev/null 2>&1; arc=$?
+[ "$arc" = 2 ] && ok "10 audit: a refused /key/list is exit 2, never a clean 0" || bad "10 audit: a wrong master key gave exit $arc"
+
 echo
 "$LITELLM_BIN" --version 2>/dev/null | tail -1 | sed 's/^/litellm: /'
 if [ "$fail" = 0 ]; then echo "key-policy: PASSED"; exit 0; fi
