@@ -24,7 +24,7 @@ ghcr.io/goauthentik/server:2026.8.5
 ghcr.io/jkroepke/access-log-exporter:0.5.1
 ghcr.io/jkroepke/kube-webhook-certgen:1.11.0
 ghcr.io/kubereboot/kured:1.23.0
-ghcr.io/open-webui/open-webui:v0.12.4
+ghcr.io/open-webui/open-webui:v0.12.5
 nginxinc/nginx-unprivileged:1.31-alpine
 python:3.14-slim
 quay.io/argoproj/argocli:v4.1.6
