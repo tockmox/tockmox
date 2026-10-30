@@ -392,6 +392,10 @@ costs you, with the reasoning in the documentation rather than here.
   promptly. Open WebUI's `LICENSE` at `v0.12.4` is byte-identical to `v0.12.3`, so the
   licence terms in `docs/frontend-posture.md` stand. The image pin moved to the `v0.12.4`
   tag, which upstream publishes as the same digest as `0.12.4`.
+- **Open WebUI 0.12.5.** Upstream again ships security fixes whose advisories follow CVE
+  assignment; update promptly. Open WebUI's `LICENSE` at `v0.12.5` is byte-identical to
+  `v0.12.4` (both sha256 `5f1bd74c48bf13ab0f82e177ad9e637313b92533d20ead2593d49347a47fc232`,
+  checked 2026-10-29), so the licence terms in `docs/frontend-posture.md` stand.
 
 ### Fixed
 
