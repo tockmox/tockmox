@@ -8,8 +8,9 @@ watcher (modelLifecycle and inferenceNodes), and does four things in a pass:
 
   1. WORK. Every live `<alias>-next` route served on the eval gateway whose catalog entry is at stage `candidate` is an
      admitted candidate: merging the admit PR was the consent to evaluate it. It is work unless a run-status/1 for the same
-     (alias, candidate model and revision, eval set sha256, engine id and version, node) is already `done` or `failed`.
-     A failed run is not retried by itself: change the build, the set or the engine, or delete the status file.
+     (alias, candidate model and revision, eval set sha256, engine id and version, node, route digest) is already `done` or
+     `failed`. A failed run is not retried by itself: change the build, the set, the engine or the route's provider and
+     params (TM-1295: turning thinking off on a -next route re-runs it), or delete the status file.
      TM-1264: a node whose engine (id or version) differs from the one in the last `done` run of the build an alias serves gets
      a re-evaluation of the incumbent, trigger `engine-upgrade`, smoke and perf legs only. It decides nothing: a
      regression is written into the status `reason`, and no verdict, label or promotion follows from it.
@@ -31,6 +32,7 @@ from __future__ import annotations
 import copy
 import datetime as dt
 import hashlib
+import json
 import os
 import re
 import sys
@@ -180,6 +182,7 @@ class Work:
     es: object = None
     setdir: str = ""
     set_problem: str = ""
+    route_digest: str = ""           # TM-1295: the route's provider and params; a change schedules a new run
 
     @property
     def legs(self):
@@ -192,13 +195,23 @@ class Work:
 
     def key(self) -> tuple:
         return (self.alias, self.candidate["model"], self.candidate.get("revision", ""), self.set_ref()["sha256"],
-                self.engine.get("id", ""), self.engine.get("version", ""), self.node, self.trigger)
+                self.engine.get("id", ""), self.engine.get("version", ""), self.node, self.trigger, self.route_digest)
 
 
 def status_key(s: dict) -> tuple:
     return (s["alias"], s["candidate"]["model"], s["candidate"].get("revision", ""), (s.get("set") or {}).get("sha256", ""),
             (s.get("engine") or {}).get("id", ""), (s.get("engine") or {}).get("version", ""), s.get("node", ""),
-            s["trigger"])
+            s["trigger"], s.get("route_digest", ""))
+
+
+def route_digest(route) -> str:
+    """TM-1295: what the gateway sends the engine besides the model (the route's provider and params, e.g. a thinking
+    switch or an output cap). Part of the run key, so fixing a route re-runs its evaluation instead of the scheduler
+    skipping it as done. A route with neither has the empty digest, which every status written before this had."""
+    params, provider = dict(getattr(route, "params", None) or {}), str(getattr(route, "provider", "") or "")
+    if not params and not provider:
+        return ""
+    return hashlib.sha256(json.dumps({"provider": provider, "params": params}, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
 def alias_class(alias: str, lc: ml.Lifecycle, *entries) -> str:
@@ -287,6 +300,7 @@ def discover(cfg: dict, settings: Settings, statuses: list, work_dir: str, log=l
             placement = {"from_node": live.node, "to_node": r.node}
         w = Work(alias, klass, "admitted", _pin(lc, r.model), inc, r.node, engine_for(inv, r.node, r.endpoint, settings),
                  r.alias, r.alias in served, placement)
+        w.route_digest = route_digest(r)
         attach_set(w)
         out.append(w)
 
@@ -304,6 +318,7 @@ def discover(cfg: dict, settings: Settings, statuses: list, work_dir: str, log=l
         entry = lc.by_model(r.model)
         w = Work(r.alias, alias_class(r.alias, lc, entry) or prev.get("class", ""), "engine-upgrade", _pin(lc, r.model), None,
                  r.node, eng, r.alias, r.alias in served)
+        w.route_digest = route_digest(r)
         attach_set(w)
         out.append(w)
     return out
@@ -542,7 +557,7 @@ def schedule(cfg: dict, kube, *, prom_transport=None, health_transport=None, dry
         plan = {"legs": w.legs, "estimated_seconds": estimate_seconds(w, s), "disk_gib": None, "window": "next quiet window"}
         doc = live or st.new_status(run_id, w.alias, w.klass or "unclassed", w.candidate, w.incumbent, w.node, w.engine,
                                     w.set_ref(), w.trigger, plan)
-        doc = dict(doc, plan=plan)
+        doc = dict(doc, plan=plan, route_digest=w.route_digest)
 
         def hold(state: str, reason: str):
             nonlocal doc

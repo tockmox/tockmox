@@ -21,6 +21,27 @@ class Aborted(RuntimeError):
     """A leg stopped because the node or the gateway was not fit to measure (health, load, a production request)."""
 
 
+class BudgetSpent(ValueError):
+    """TM-1295: the answers came back empty because the token budget ran out first (finish_reason length, no content,
+    no tool call), usually spent on reasoning. That measures the route's settings, not the model, so the run stops with
+    the cause and writes no verdict. It is a refusal, not a transient: the scheduler does not retry it until the route
+    changes (its params are part of the run key)."""
+
+
+def budget_spent(r: dict) -> bool:
+    """A reply cut at max_tokens before any answer: finish_reason length, empty content, no tool call."""
+    return r.get("finish_reason") == "length" and not (r.get("content") or "").strip() and not r.get("tool_calls")
+
+
+def budget_sentence(model: str, n: int, of: int, reasoning: bool) -> str:
+    why = ("the model spent the whole token budget reasoning (the engine returned reasoning text and no answer)"
+           if reasoning else "the reply was cut at max_tokens before any answer")
+    return (f"{n} of {of} replies from {model} came back empty with finish_reason length: {why}. This measures the "
+            "route's settings, not the model. Turn thinking off on the -next route (for Qwen3.x on mlx-lm: params "
+            "extra_body.chat_template_kwargs.enable_thinking false) or raise max_tokens there; the next scheduler pass "
+            "re-runs once the route changes.")
+
+
 # ---------------------------------------------------------------- the known-bad control
 
 class _Bad(BaseHTTPRequestHandler):
@@ -78,6 +99,7 @@ def smoke(base, key, model, health=None) -> list[dict]:
     """Five checks, each a 0/1 metric: finish reason stop, one tool call parses, a JSON reply, a well-formed stream
     with a usage chunk and [DONE], and a verbatim canary."""
     out = []
+    replies = []
 
     def check(name, fn):
         if health:
@@ -88,12 +110,17 @@ def smoke(base, key, model, health=None) -> list[dict]:
             ok, why = False, str(e)[:160]
         out.append({"name": name, "value": 1.0 if ok else 0.0, "unit": "bool", "n": 1, "why": why})
 
+    def call(*a, **k):
+        r = cl.complete(*a, **k)
+        replies.append(r)
+        return r
+
     def stop():
-        r = cl.complete(base, key, model, [{"role": "user", "content": "Say hello in one word."}], max_tokens=32)
+        r = call(base, key, model, [{"role": "user", "content": "Say hello in one word."}], max_tokens=32)
         return r["finish_reason"] == "stop", f"finish_reason {r['finish_reason']}"
 
     def tool():
-        r = cl.complete(base, key, model, [{"role": "user", "content": "What time is it in Chicago? Use the tool."}],
+        r = call(base, key, model, [{"role": "user", "content": "What time is it in Chicago? Use the tool."}],
                         tools=_TOOL, max_tokens=256)
         calls = r["tool_calls"]
         if len(calls) != 1 or calls[0]["name"] != "get_time":
@@ -105,7 +132,7 @@ def smoke(base, key, model, health=None) -> list[dict]:
         return isinstance(args.get("tz"), str), "tz argument missing" if not isinstance(args.get("tz"), str) else ""
 
     def jsonr():
-        r = cl.complete(base, key, model, [{"role": "user", "content": 'Reply with a JSON object {"ok": true} and nothing else.'}],
+        r = call(base, key, model, [{"role": "user", "content": 'Reply with a JSON object {"ok": true} and nothing else.'}],
                         response_format={"type": "json_object"}, max_tokens=64)
         try:
             return json.loads(r["content"].strip().strip("`").removeprefix("json").strip()).get("ok") is True, ""
@@ -113,19 +140,22 @@ def smoke(base, key, model, health=None) -> list[dict]:
             return False, "not JSON"
 
     def stream():
-        r = cl.complete(base, key, model, [{"role": "user", "content": "Count from one to five."}], max_tokens=64, stream=True)
+        r = call(base, key, model, [{"role": "user", "content": "Count from one to five."}], max_tokens=64, stream=True)
         s = r["stream"]
         ok = s["done"] and s["usage_chunk"] and s["order_ok"] and s["events"] > 0 and r["finish_reason"] == "stop"
         return ok, "" if ok else f"stream {s}"
 
     def canary():
         token = "canary-" + secrets.token_hex(6)
-        r = cl.complete(base, key, model, [{"role": "user", "content": f"Repeat exactly, with nothing else: {token}"}], max_tokens=64)
+        r = call(base, key, model, [{"role": "user", "content": f"Repeat exactly, with nothing else: {token}"}], max_tokens=64)
         return token in r["content"], "" if token in r["content"] else "the canary was not repeated verbatim"
 
     for name, fn in (("smoke_finish_stop", stop), ("smoke_tool_call_parses", tool), ("smoke_json_reply", jsonr),
                      ("smoke_stream_well_formed", stream), ("smoke_verbatim_canary", canary)):
         check(name, fn)
+    spent = [r for r in replies if budget_spent(r)]
+    if spent and any(m["value"] != 1.0 for m in out):
+        raise BudgetSpent(budget_sentence(model, len(spent), len(replies), any(r.get("reasoning_chars") for r in spent)))
     return out
 
 
@@ -176,6 +206,8 @@ def quality(base, key, model, es: EvalSet, workers=2, seed=1, health=None) -> li
     if health:
         health()
 
+    spent, answered, thought, lock = [0], [0], [False], threading.Lock()
+
     def run_case(case):
         out = []
         for ep in range(es.epochs):
@@ -183,12 +215,22 @@ def quality(base, key, model, es: EvalSet, workers=2, seed=1, health=None) -> li
                 r = cl.complete(base, key, model, case.messages, tools=case.tools or None,
                                 response_format=case.response_format, max_tokens=case.max_tokens or es.max_tokens,
                                 temperature=0.0 if ep == 0 else 0.7, seed=seed + ep)
+                with lock:
+                    answered[0] += 1
+                    if budget_spent(r):
+                        spent[0] += 1
+                        thought[0] = thought[0] or bool(r.get("reasoning_chars"))
                 out.append(grade(case, r)[0])
             except cl.GatewayError:
                 out.append(False)
         return out
     with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
-        return list(ex.map(run_case, es.cases))
+        res = list(ex.map(run_case, es.cases))
+    # TM-1295: when at least half the answers are empty for want of tokens, the pass rate measures the route's
+    # settings; stop with the cause rather than write a Worse verdict about the model
+    if answered[0] and spent[0] * 2 >= answered[0]:
+        raise BudgetSpent(budget_sentence(model, spent[0], answered[0], thought[0]))
+    return res
 
 
 # ---------------------------------------------------------------- prefill (TM-1268)

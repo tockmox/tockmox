@@ -688,6 +688,19 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **The eval runner no longer writes a Worse verdict for a thinking model
+  whose route left thinking on.** A reply cut at `max_tokens` with no answer
+  (`finish_reason: length`, empty content, usually reasoning beside it) failed
+  every case, so a Qwen3.x candidate on mlx-lm without `enable_thinking: false`
+  scored 0 and read as worse than the incumbent. The run now stops `failed` with
+  no verdict when a smoke check fails on such replies or at least half the
+  quality answers are cut that way, and its reason names the cause and the route
+  setting that fixes it. The scheduler's run key now includes a digest of the
+  `-next` route's `provider` and `params`, so fixing the route measures the
+  candidate again on the next pass; existing status files keep their key until
+  the route changes (`docs/administration/model-lifecycle.md`, "A model that only
+  thinks").
+
 - **Two documented commands give the right answer on a Mac.** The uninstall
   page's listing of namespaces your site declared, and the existing-cluster
   check for a running LoadBalancer controller, used `grep 'a\|b'`, which BSD

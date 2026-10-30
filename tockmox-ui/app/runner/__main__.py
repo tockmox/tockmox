@@ -175,7 +175,7 @@ def main(argv=None) -> int:
         print(f"runner: {e}", file=sys.stderr)
         tr.finish("aborted", str(e))
         return 1
-    except (RunError, evalset.SetError) as e:
+    except (RunError, evalset.SetError, legs.BudgetSpent) as e:
         print(f"runner: {e}", file=sys.stderr)
         tr.finish("failed", str(e))
         return 1

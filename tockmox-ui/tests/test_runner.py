@@ -53,6 +53,9 @@ def gateway(behaviour):
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
             model = behaviour.get(body["model"], body["model"])
             text, call = _answer(model, body["messages"], body)
+            if model.startswith("thinker"):
+                self.think(body)
+                return
             if body.get("stream"):
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -70,6 +73,28 @@ def gateway(behaviour):
                 msg["tool_calls"] = [{"id": "c1", "type": "function", "function": call}]
             b = json.dumps({"choices": [{"index": 0, "message": msg, "finish_reason": "tool_calls" if call else "stop"}],
                             "usage": {"prompt_tokens": 5, "completion_tokens": 3}}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+        def think(self, body):
+            """TM-1295: a thinking model whose route did not turn thinking off. It reasons until max_tokens and answers
+            nothing: finish_reason length, empty content, the reasoning beside it (as mlx-lm and LiteLLM return it)."""
+            if body.get("stream"):
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.end_headers()
+                for d, fin in (({"reasoning_content": "Let me think about"}, None), ({"reasoning_content": " this carefully."}, None),
+                               ({}, "length")):
+                    ch = {"choices": [{"index": 0, "delta": d, "finish_reason": fin}]}
+                    self.wfile.write(b"data: " + json.dumps(ch).encode() + b"\n\n")
+                self.wfile.write(b"data: " + json.dumps({"choices": [], "usage": {"completion_tokens": body["max_tokens"]}}).encode() + b"\n\n")
+                self.wfile.write(b"data: [DONE]\n\n")
+                return
+            msg = {"role": "assistant", "content": "", "reasoning_content": "Let me think about this carefully."}
+            b = json.dumps({"choices": [{"index": 0, "message": msg, "finish_reason": "length"}],
+                            "usage": {"prompt_tokens": 5, "completion_tokens": body["max_tokens"]}}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(b)))

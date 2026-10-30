@@ -21,7 +21,9 @@ def complete(base_url: str, key: str, model: str, messages: list, *, tools=None,
              max_tokens: int = 512, temperature: float = 0.0, seed: int | None = None, stream: bool = False,
              timeout: float = 300.0) -> dict:
     """Returns {"content", "tool_calls": [{"name", "arguments"}], "finish_reason", "usage", "ttft_s", "total_s",
-    "stream": {"events", "done", "usage_chunk", "order_ok"} (stream only)}."""
+    "reasoning_chars", "stream": {"events", "done", "usage_chunk", "order_ok"} (stream only)}. reasoning_chars counts
+    the reasoning text an engine returns beside the answer (reasoning_content or reasoning), so a caller can tell a
+    model that spent its token budget thinking from one that answered nothing."""
     body = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": temperature}
     if seed is not None:
         body["seed"] = seed
@@ -46,8 +48,14 @@ def complete(base_url: str, key: str, model: str, messages: list, *, tools=None,
             msg = ch.get("message") or {}
             return {"content": msg.get("content") or "", "tool_calls": _calls(msg.get("tool_calls")),
                     "finish_reason": ch.get("finish_reason"), "usage": d.get("usage") or {},
-                    "ttft_s": total, "total_s": total}
+                    "ttft_s": total, "total_s": total, "reasoning_chars": len(_reasoning(msg))}
         return _stream(c, url, headers, body, t0, model)
+
+
+def _reasoning(part) -> str:
+    """The reasoning text in a message or a stream delta: LiteLLM passes reasoning_content, some engines reasoning."""
+    v = part.get("reasoning_content") or part.get("reasoning") or ""
+    return v if isinstance(v, str) else ""
 
 
 def _calls(raw) -> list:
@@ -59,7 +67,7 @@ def _calls(raw) -> list:
 
 
 def _stream(c, url, headers, body, t0, model) -> dict:
-    content, calls, finish, usage, ttft = [], {}, None, {}, None
+    content, calls, finish, usage, ttft, reasoning = [], {}, None, {}, None, 0
     events, done, usage_chunk, order_ok, after_done = 0, False, False, True, False
     with c.stream("POST", url, headers=headers, json=body) as r:
         if r.status_code != 200:
@@ -83,6 +91,7 @@ def _stream(c, url, headers, body, t0, model) -> dict:
                 usage, usage_chunk = d["usage"], True
             for ch in d.get("choices") or []:
                 delta = ch.get("delta") or {}
+                reasoning += len(_reasoning(delta))
                 if delta.get("content"):
                     if ttft is None:
                         ttft = time.monotonic() - t0
@@ -100,6 +109,6 @@ def _stream(c, url, headers, body, t0, model) -> dict:
                     finish = ch["finish_reason"]
     total = time.monotonic() - t0
     return {"content": "".join(content), "tool_calls": [calls[k] for k in sorted(calls)], "finish_reason": finish,
-            "usage": usage, "ttft_s": ttft if ttft is not None else total, "total_s": total,
+            "usage": usage, "ttft_s": ttft if ttft is not None else total, "total_s": total, "reasoning_chars": reasoning,
             "stream": {"events": events, "done": done, "usage_chunk": usage_chunk,
                        "order_ok": order_ok and not after_done}}
