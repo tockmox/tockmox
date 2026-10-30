@@ -28,7 +28,7 @@ cd "$(dirname "$0")/.."
 py="${TOCKMOX_UI_PYTHON:-python3}"
 root="$(pwd)"
 # Absolute before any cd: the renderer runs from tockmox-ui/, so a relative
-# TOCKMOX_UI_PYTHON (build/ui-venv/bin/python) must not be resolved from there,
+# TOCKMOX_UI_PYTHON (build/gates-venv/bin/python) must not be resolved from there,
 # and `command -v` returns a path containing a slash unchanged.
 case "$py" in /*) ;; */*) py="$root/$py" ;; *) py="$(command -v "$py" || echo "$py")" ;; esac
 # The probe imports the renderer itself, not a hand-kept module list. The list
@@ -39,8 +39,8 @@ case "$py" in /*) ;; */*) py="$root/$py" ;; *) py="$(command -v "$py" || echo "$
 # matters: can this interpreter run the renderer.
 if ! ( cd "$root/tockmox-ui" && "$py" -c 'import yaml, jsonschema, app.ai_nodes' ) >/dev/null 2>&1; then
   echo "check-ai-node-render: SKIPPED: $py cannot import the renderer (tockmox-ui/app/ai_nodes.py) and its packages."
-  echo "  python3 -m venv build/ui-venv && build/ui-venv/bin/pip install -r tockmox-ui/requirements.txt"
-  echo "  TOCKMOX_UI_PYTHON=build/ui-venv/bin/python ./tools/check-ai-node-render.sh"
+  echo "  tools/dev-env.sh   (builds build/gates-venv from tools/requirements-gates.txt), then:"
+  echo "  TOCKMOX_UI_PYTHON=build/gates-venv/bin/python ./tools/check-ai-node-render.sh"
   exit 2
 fi
 FIXTURE="tockmox-ui/tests/fixtures/ai_nodes/site"

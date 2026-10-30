@@ -503,6 +503,16 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Changed
 
+- **One file pins the toolchain, and `tools/check-all.sh` holds you to it.**
+  `mise.toml` names the Helm, kubeconform, shellcheck and gitleaks versions CI
+  uses, and the Python minor version. `check-all.sh` stops before any gate when
+  the tools on your PATH are different (`tools/toolchain.sh --check` names
+  them), because a gate result from another Helm does not predict CI.
+  `tools/dev-env.sh` installs the pinned tools (with mise, or from
+  checksum-verified release assets on Linux x86_64) and the gates' Python
+  packages from the new hashed lockfile `tools/requirements-gates.txt`; then
+  `eval "$(tools/dev-env.sh --env)"`. The workflows read the same pins.
+
 - **`tools/check-all.sh` needs a git clone and says so.** Run from an unpacked
   archive it now stops at once and asks for `git clone`, where it used to run a
   partial suite: several gates judge what git tracks, and outside a clone they

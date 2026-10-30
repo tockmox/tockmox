@@ -14,13 +14,15 @@
 # Its own workflow, not a step in ci.yaml, for the reason portability-macos
 # gives: ci.yaml's named steps are a counted, pinned surface (tools/doc-claims.txt).
 #
-# TOOL PINS COME FROM ci.yaml. Renovate's custom managers bump HELM_VERSION and
-# KUBECONFORM_VERSION in ci.yaml only, so this file reads them (and the
-# kubeconform checksum) from there at run time rather than carrying a copy that
-# would drift. The Tockmox UI's packages go in a venv, as ci.yaml builds one,
-# so the UI tests and the AI-node render gate run here rather than skip. Gates
-# needing a tool installed nowhere here (promtool, gitleaks, the MkDocs venv)
-# report SKIPPED, as on a laptop; ci.yaml runs those.
+# TOOL PINS COME FROM mise.toml, through tools/toolchain.sh --pins. The
+# kubeconform checksum is read from ci.yaml's env block, where it sits beside
+# the copy of the version that tools/toolchain.sh --drift holds to mise.toml.
+# The gates' Python packages come from tools/requirements-gates.txt, installed
+# with --require-hashes into one venv that is first on PATH, so every gate
+# imports exactly the locked set and nothing a runner image happens to carry.
+# check-all.sh then refuses to start unless the tools on PATH match mise.toml.
+# Gates needing a tool installed nowhere here (promtool, gitleaks, the MkDocs
+# venv) report SKIPPED, as on a laptop; ci.yaml runs those.
 name: check-all
 on:
   pull_request:
@@ -57,47 +59,46 @@ jobs:
           # previous release tag; without tags they report that half skipped.
           fetch-depth: 0
 
-      - name: read the tool pins from ci.yaml
+      - name: read the tool pins from mise.toml
         shell: bash -euo pipefail {0}
         run: |
-          pin() { sed -n "s/^  $1: \"\([^\"]*\)\".*/\1/p" .github/workflows/ci.yaml | head -1; }
-          for k in HELM_VERSION KUBECONFORM_VERSION KUBECONFORM_SHA256; do
-            v="$(pin "$k")"
-            [ -n "$v" ] || { echo "::error::$k not found in ci.yaml's env block"; exit 1; }
-            echo "$k=$v" >> "$GITHUB_ENV"
-            echo "$k=$v"
-          done
+          bash tools/toolchain.sh --pins | tee -a "$GITHUB_ENV"
+          v="$(sed -n 's/^  KUBECONFORM_SHA256: "\([^"]*\)".*/\1/p' .github/workflows/ci.yaml | head -1)"
+          [ -n "$v" ] || { echo "::error::KUBECONFORM_SHA256 not found in ci.yaml's env block"; exit 1; }
+          echo "KUBECONFORM_SHA256=$v" | tee -a "$GITHUB_ENV"
 
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: ${{ env.HELM_VERSION }}
 
-      - name: kubeconform, PyYAML and jq
+      - name: kubeconform and jq
         shell: bash -euo pipefail {0}
         run: |
           curl -fsSL -o kubeconform.tar.gz "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
           echo "${KUBECONFORM_SHA256}  kubeconform.tar.gz" | sha256sum -c -
           tar -xzf kubeconform.tar.gz kubeconform && sudo install -m755 kubeconform /usr/local/bin/
           rm -f kubeconform kubeconform.tar.gz
-          python3 -c 'import yaml' 2>/dev/null || python3 -m pip install -q pyyaml
-          # tools/check-namespace-guard.sh evaluates the guard's CEL expression; without this it exits 2 (skipped).
-          python3 -c 'import celpy' 2>/dev/null || python3 -m pip install -q cel-python==0.1.5
           command -v jq >/dev/null || sudo apt-get install -y -q jq
+
+      - name: the gates' Python packages, from the lockfile
+        # PyYAML, cel-python (tools/check-namespace-guard.sh), jsonschema,
+        # pytest and the Tockmox UI's packages, at the versions and hashes in
+        # tools/requirements-gates.txt. The venv goes first on PATH, so every
+        # gate's python3 is this one.
+        shell: bash -euo pipefail {0}
+        run: |
+          python3 -m venv build/gates-venv
+          build/gates-venv/bin/python -m pip install -q --disable-pip-version-check --require-hashes -r tools/requirements-gates.txt
+          echo "$PWD/build/gates-venv/bin" >> "$GITHUB_PATH"
           echo "bash:        $(bash --version | head -1)"
           echo "helm:        $(helm version --short)"
           echo "kubeconform: $(kubeconform -v)"
-          echo "python:      $(python3 --version) PyYAML $(python3 -c 'import yaml; print(yaml.__version__)')"
-
-      - name: the Tockmox UI's packages, in a venv
-        shell: bash -euo pipefail {0}
-        run: |
-          python3 -m venv build/ui-venv
-          build/ui-venv/bin/pip install -q -r tockmox-ui/requirements.txt pytest
+          echo "python:      $(build/gates-venv/bin/python --version) PyYAML $(build/gates-venv/bin/python -c 'import yaml; print(yaml.__version__)')"
 
       - name: every static gate, on Linux
         shell: bash -euo pipefail {0}
         env:
-          TOCKMOX_UI_PYTHON: build/ui-venv/bin/python
+          TOCKMOX_UI_PYTHON: build/gates-venv/bin/python
         run: bash tools/check-all.sh
 
   shellcheck-advisory:

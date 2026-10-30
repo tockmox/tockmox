@@ -75,9 +75,8 @@ Every pull request must pass CI, which runs 40 gates. Run them yourself first:
 
 It runs every gate that does not need a live cluster, names each as it goes
 and says which it skipped and why. It needs `helm` (v4.3.1, see below), `python3` with the PyYAML
-module (`python3 -m pip install pyyaml`, or your package manager's
-`python3-yaml`), and `jq`, and refuses to start if one is missing, because several gates cannot tell "the tree
-is wrong" from "the tool is absent".
+module (`./tools/dev-env.sh` sets up both), and `jq`, and refuses to start if one is missing or is not
+the pinned version, because several gates cannot tell "the tree is wrong" from "the tool is absent".
 
 CI also runs, and `check-all.sh` names as skipped:
 
@@ -97,9 +96,14 @@ harness that executes them.
 
 ### Toolchain, and the smallest check for a documentation-only change
 
-**Use Helm v4.3.1.** That is the version CI pins (`HELM_VERSION` in
-`.github/workflows/ci.yaml`, repeated in `portability-macos.yaml` and
-`policy-gate.yaml`), so it is the one a green run on your machine predicts.
+**Use Helm v4.3.1.** Every tool version lives in one file, `mise.toml`, and
+CI reads it from there, so the pinned version is the one a green run on your
+machine predicts. `./tools/dev-env.sh` installs the pinned tools (through
+[mise](https://mise.jdx.dev) where you have it, from checksum-verified release
+assets on Linux x86_64 where you do not) and the gates' Python packages from
+`tools/requirements-gates.txt`, then `eval "$(./tools/dev-env.sh --env)"` puts
+them first on your PATH. `check-all.sh` refuses to start when the tools on your
+PATH are not the pinned ones (`./tools/toolchain.sh --check` says which).
 Helm 3 and Helm 4 have disagreed on a render before (a parent's `null` does not
 delete a subchart default under Helm 4), and this project has not verified its
 checks on Helm 3. Some pages under `docs/` quote measurements taken with Helm

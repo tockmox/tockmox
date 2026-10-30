@@ -402,9 +402,11 @@ jobs:
           # venv is built here because the runner's python3 has none of the
           # UI's packages; the gate exits 2 (skipped) without them, and a
           # skipped gate is not what this step is for.
-          python3 -m venv build/ui-venv
-          build/ui-venv/bin/pip install -q -r tockmox-ui/requirements.txt pytest
-          TOCKMOX_UI_PYTHON=build/ui-venv/bin/python ./tools/check-tockmox-ui-tests.sh
+          # The packages come from the gates' lockfile (with hashes), the same
+          # set check-all.yaml and tools/dev-env.sh install.
+          python3 -m venv build/gates-venv
+          build/gates-venv/bin/python -m pip install -q --disable-pip-version-check --require-hashes -r tools/requirements-gates.txt
+          TOCKMOX_UI_PYTHON=build/gates-venv/bin/python ./tools/check-tockmox-ui-tests.sh
 
       - name: SSO blueprints are parseable YAML
         # Independent of the steps before it. Without this, ONE early
