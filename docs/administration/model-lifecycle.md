@@ -744,13 +744,39 @@ one Job per node.
 whose catalog entry is at stage `candidate` is an admitted candidate: merging the
 admit PR was your consent to evaluate it. It is measured once per combination of
 the alias, the candidate's model and revision, the eval set and its sha256, the
-engine and its version, and the node. A run that finished (`done` or `failed`)
-for that combination is not started again by itself; change one of the five, or
-delete the run's status file, to measure again. A run that was `aborted`, because
-the node stopped answering, is tried again. The request it runs is built from the
-route and the catalog: the candidate is what `-next` serves, the incumbent is what
-the live alias serves, and with no live alias the comparison is judged on the
-absolute bars.
+engine and its version, the node, and the `-next` route's `provider` and `params`
+(as a digest; a route with neither has none). A run that finished (`done` or
+`failed`) for that combination is not started again by itself; change one of
+them, or delete the run's status file, to measure again. So fixing a route's
+settings (turning thinking off, raising `max_tokens`) measures the candidate again
+on the next pass, without touching the status files. A run that was `aborted`,
+because the node stopped answering, is tried again. The request it runs is built
+from the route and the catalog: the candidate is what `-next` serves, the
+incumbent is what the live alias serves, and with no live alias the comparison is
+judged on the absolute bars.
+
+**A model that only thinks.** A reasoning model behind a route that leaves its
+thinking on (Qwen3.x on mlx-lm does by default) can spend every token of
+`max_tokens` reasoning and answer nothing: the reply comes back with
+`finish_reason: length`, empty content and the reasoning beside it. Graded, that
+reads as a model that got every case wrong, so the runner does not grade it. When
+a smoke check fails and any smoke reply was cut that way, or when at least half
+the quality answers were, the run stops `failed`, writes no verdict, and its
+`reason` says how many replies came back empty and whether the engine returned
+reasoning. The fix is on the route, for example:
+
+```yaml
+- alias: local-large-next
+  provider: openai
+  params:
+    max_tokens: 8192
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
+```
+
+and the changed route is measured again on the next pass. A few cut answers
+among many are graded as wrong answers, as before.
 
 **Which eval set.** The workload class of the alias decides it: the class a profile
 (`modelLifecycle.profiles.<id>.classes`) gives the alias, else the `promotion.class`

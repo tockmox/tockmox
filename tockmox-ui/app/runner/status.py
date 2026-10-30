@@ -80,6 +80,9 @@ def validate(d) -> list[str]:
     for k in ("created", "updated"):
         if not isinstance(d.get(k), str) or not d.get(k):
             bad.append(f"{k} is missing")
+    rd = d.get("route_digest", "")
+    if not (isinstance(rd, str) and re.fullmatch(r"[0-9a-f]{0,64}", rd)):
+        bad.append("route_digest must be a hex string (or absent)")
     if d.get("label") is not None and d["label"] not in LABELS:
         bad.append(f"label must be null or one of {LABELS}")
     return bad
