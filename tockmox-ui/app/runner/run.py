@@ -38,12 +38,14 @@ import yaml
 from .. import models as ml
 from .. import results as rs
 from .. import verdict_stats as vs
+from . import client as cl
 from . import legs
-from .evalset import EvalSet
+from .evalset import EvalSet, run_class
 
 MAX_CONTEXT_STEP = 1_000_000
 
-ALLOWED_CLASSIFICATIONS = ("public", "internal")
+# TM-1249: an eval set's class as the tag the eval gateway filters on (the same table as app/nodes.py EVAL_CLASS_TAG)
+CLASS_TAG = {"public": "open", "internal": "internal", "confidential": "restricted", "restricted": "restricted"}
 METHOD_PATH = "evals/methodology/runner-v1.md"
 METHOD_TEXT = """# Eval runner v1: methodology
 
@@ -122,18 +124,39 @@ def check_request_extras(req: dict, path: str = "the request"):
 
 
 def guard(req: dict, es: EvalSet):
-    """The rails that hold until TM-1249 enforces a data class end to end."""
-    if es.classification not in ALLOWED_CLASSIFICATIONS:
-        raise RunError(f"eval set {es.id} is classified {es.classification}: this runner sends only public or internal "
-                       "sets to any route until the data class is enforced at the eval gateway (TM-1249)")
-    model = (req.get("candidate") or {}).get("model", "")
-    if re.match(r"^(anthropic|openai|openrouter|google|gemini|mistral|cohere)/", model):
-        raise RunError(f"{model} is a hosted candidate: hosted candidates wait for the safety rails (TM-1249)")
     if req["class"] != es.klass and req["class"] != ml.PERF:
         raise RunError(f"the request is for class {req['class']}, the set is class {es.klass}")
 
 
-def run(req: dict, es: EvalSet, *, gateway: str, key: str, node: str, engine: str, engine_version: str,
+def rails(es: EvalSet, tiers: dict, routes) -> str:
+    """TM-1249, the runner's half of the data-class rail (the eval gateway's tag filter is the other): the set and every
+    row carry a class (evalset.load refuses one without), and data above public goes to no route the gateway does not
+    report as local. A route the gateway does not describe counts as not local. Returns the tag every request carries.
+    There is no judge on this path (grades are deterministic, evalset refuses another grader), so no judge can be non-local."""
+    klass = run_class(es)
+    if klass != "public":
+        n = sum(1 for c in es.cases if c.classification not in ("", "public")) if es.classification == "public" else len(es.cases)
+        for route in routes:
+            tier = (tiers.get(route) or {}).get("endpoint_tier")
+            if tier != "local":
+                raise RunError(f"eval set {es.id} carries {klass} data ({n} of {len(es.cases)} cases above public) and route "
+                               f"{route} is {'external' if tier == 'external' else 'not known to be local (the eval gateway does not report its endpoint_tier)'}: "
+                               "only public data goes to a route that is not local (TM-1249). Use a public set, or serve the route from a node.")
+    return CLASS_TAG[klass]
+
+
+def run(req: dict, es: EvalSet, **kw) -> dict:
+    """Run the bundle (see _measure for the arguments and the result), inside TM-1249's rails: every request it sends
+    carries the eval set's class as a tag, and data above public reaches only routes the gateway reports as local."""
+    guard(req, es)
+    alias = req["alias"]
+    routes = [kw.get("route") or alias + ml.NEXT] + ([alias] if req.get("incumbent") else [])
+    tag = rails(es, cl.model_info(kw["gateway"], kw["key"]), routes)
+    with cl.tagged([tag]):
+        return _measure(req, es, **kw)
+
+
+def _measure(req: dict, es: EvalSet, *, gateway: str, key: str, node: str, engine: str, engine_version: str,
         out: str, steps=(1, 2), perf_requests=20, workers=2, seed=1, health=None, today=None,
         environment=None, quant="", run_id=None, progress=None, only=None, route=None, tool_calls=100,
         prefill_contexts=legs.DEFAULT_PREFILL_CONTEXTS, prefill_requests=3, route_info=None) -> dict:
@@ -153,7 +176,6 @@ def run(req: dict, es: EvalSet, *, gateway: str, key: str, node: str, engine: st
     start, "done" at its end (summary one plain line, never a winner; metrics the partial numbers), "skipped" with the
     reason in `summary`, "failed" with the reason just before the exception propagates. A callback that raises is
     ignored."""
-    guard(req, es)
     check_request_extras(req)
     today = today or _today()
     alias = req["alias"]

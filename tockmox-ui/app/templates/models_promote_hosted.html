@@ -3,7 +3,7 @@
 {% block title %}Promote {{ e.model }}{% endblock %}
 {% block main %}
 <h1>Promote {{ e.model }}</h1>
-<p class="lede">A hosted candidate sits on the eval gateway with no data-class tags. Promoting it puts it on the production gateway under an alias, with the tags you choose here, after enough passing comparisons for that alias.</p>
+<p class="lede">A hosted candidate sits on the eval gateway tagged <code>open</code> alone, for public eval data. Promoting it puts it on the production gateway under an alias, with the tags you choose here, after enough passing comparisons for that alias.</p>
 {% if verdict_reading is not none %}<p>{{ source_line(verdict_reading) }}</p>{% endif %}
 {% if error %}<p>{{ badge("critical", "Not promoted") }} {{ error }}</p>{% endif %}
 <form method="get" action="/models/promote-hosted" class="panel">

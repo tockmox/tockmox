@@ -222,7 +222,7 @@ def plan(values: dict, report: dict | None, verdicts, open_branches=(), max_open
         hosted = cand.kind == "frontier"
         body = (f"{cand.detail}\n\n" + (f"Upstream: {cand.url}\n\n" if cand.url else "")
                 + "".join(f"- {n}\n" for n in notes)
-                + ("\nThe eval gateway serves hosted candidates from the catalog (stage candidate), with no data-class tags.\n" if hosted else "")
+                + ("\nThe eval gateway serves hosted candidates from the catalog (stage candidate), tagged open alone (public eval data only, TM-1249).\n" if hosted else "")
                 + "\nMerging this is the first approval (REQ-0048): the candidate can be evaluated. No agent can call it.")
         verb = "Record a new build of" if cand.kind in ("revision", "digest") else "Admit for evaluation:"
         add(PRSpec(f"tockmox/admit/{branch_slug(cand.model)}", f"{verb} {cand.model}", body,

@@ -61,6 +61,17 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **Data-class rails for evaluations: eval data above public never reaches a
+  route that is not local.** The eval runner tags every request with its eval
+  set's class (`open`, `internal` or `restricted`; a row in `cases.jsonl` may
+  raise its set's class) and refuses to send anything above public to a route
+  the eval gateway does not report as local. The eval gateway now filters by
+  tag: node routes serve every class unless they set their own tags, external
+  routes and hosted candidates serve `open` alone, and the chart refuses an
+  external eval route tagged for more. Hosted candidates, which the runner held
+  until now, are evaluated on public sets
+  (`docs/administration/model-lifecycle.md`, "The data-class rails").
+
 - **`modelLifecycle.runner.rerun`: measure a finished evaluation again.** List
   run ids (`run_id` from the run's status) and the next scheduler pass queues a
   new run of the same candidate, set, engine, node and route, under a new run id.
@@ -509,6 +520,13 @@ costs you, with the reasoning in the documentation rather than here.
   See `docs/administration/namespace-guard.md`.
 
 ### Changed
+
+- **The eval gateway's model list carries data-class tags and tiers.** Node
+  routes on the eval gateway gain `model_info.endpoint_tier: local` and the tags
+  `restricted`, `internal`, `open` when they set none; hosted candidates gain the
+  tag `open`. The eval gateway pod rolls once. A runner that sends no tags (any
+  build before this one) is not fenced and keeps working, so the chart and the
+  UI image can move in either order. The production gateway is unchanged.
 
 - **One file pins the toolchain, and `tools/check-all.sh` holds you to it.**
   `mise.toml` names the Helm, kubeconform, shellcheck and gitleaks versions CI

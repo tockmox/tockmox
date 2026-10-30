@@ -75,6 +75,17 @@ The UI does the same (app/nodes.py NO_AUTH_KEY). */ -}}
 {{- $lp = merge (deepCopy $params) $lp -}}
 {{- $info := deepCopy ($r.modelInfo | default dict) -}}
 {{- if not (hasKey $info "tockmox_node") -}}{{- $_ := set $info "tockmox_node" $r.node -}}{{- end -}}
+{{- if eq $gw "eval" -}}
+{{- /* THE EVAL GATEWAY'S DATA-CLASS RAIL (TM-1249). The eval gateway filters by tag, and the runner tags every request
+with its eval set's class (public -> open, internal -> internal, confidential and restricted -> restricted). A node
+route is local unless it says otherwise and may serve every class; an external route may serve open only. The UI
+applies the same defaults and the same refusal (app/nodes.py render_model_list). */ -}}
+{{- $tier := $info.endpoint_tier | default "local" -}}
+{{- if not (has $tier (list "local" "external")) -}}{{- fail (printf "inferenceNodes.routes: route %s has model_info.endpoint_tier %q; it must be local or external" $r.alias $tier) -}}{{- end -}}
+{{- $_ := set $info "endpoint_tier" $tier -}}
+{{- if not (hasKey $lp "tags") -}}{{- $_ := set $lp "tags" (ternary (list "restricted" "internal" "open") (list "open") (eq $tier "local")) -}}{{- end -}}
+{{- if and (eq $tier "external") (without $lp.tags "open") -}}{{- fail (printf "inferenceNodes.routes: route %s is external but its tags %s let the eval gateway send it data above public; an external route may carry only the tag open (TM-1249)" $r.alias (toJson $lp.tags)) -}}{{- end -}}
+{{- end -}}
 {{- $out = append $out (dict "model_name" $r.alias "litellm_params" $lp "model_info" $info) -}}
 {{- end -}}
 {{- end -}}
@@ -83,8 +94,9 @@ The UI does the same (app/nodes.py NO_AUTH_KEY). */ -}}
 
 {{- /*
 Hosted models admitted for evaluation (REQ-0048): catalog entries at stage `candidate` whose source is a
-hosted provider. They go to the eval gateway only, with NO data-class tags; tags are chosen when one is
-promoted, and a promoted hosted model is an entry in the production gateway's own model_list.
+hosted provider. They go to the eval gateway only, tagged `open` alone (TM-1249): the eval gateway filters by tag,
+so only public eval data reaches them. Production tags are chosen when one is promoted, and a promoted hosted model
+is an entry in the production gateway's own model_list.
 */ -}}
 {{- define "tockmox-ai.hostedCandidates" -}}
 {{- $lc := .Values.modelLifecycle | default dict -}}
@@ -97,7 +109,7 @@ promoted, and a promoted hosted model is an entry in the production gateway's ow
 {{- $mid := $parts._1 | default "" -}}
 {{- if not $mid -}}{{- fail (printf "modelLifecycle.catalog: hosted candidate %s needs source.ref provider/model" .id) -}}{{- end -}}
 {{- $keyEnv := ((get $providers $provider) | default dict).keyEnv | default (printf "%s_API_KEY" (upper $provider)) -}}
-{{- $out = append $out (dict "model_name" $mid "litellm_params" (dict "model" .source.ref "api_key" (printf "os.environ/%s" $keyEnv)) "model_info" (dict "endpoint_tier" "external" "tockmox_catalog" .id)) -}}
+{{- $out = append $out (dict "model_name" $mid "litellm_params" (dict "model" .source.ref "api_key" (printf "os.environ/%s" $keyEnv) "tags" (list "open")) "model_info" (dict "endpoint_tier" "external" "tockmox_catalog" .id)) -}}
 {{- end -}}
 {{- end -}}
 {{- toYaml $out -}}

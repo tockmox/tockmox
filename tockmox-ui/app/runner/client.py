@@ -7,6 +7,7 @@ first token and time to the complete answer, and, when streaming, the shape of t
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 
@@ -15,6 +16,40 @@ import httpx
 
 class GatewayError(RuntimeError):
     pass
+
+
+# TM-1249: the data-class tag every request of the current run carries. The eval gateway filters by tag, so a request
+# tagged above open never reaches an external route. Process-wide (the runner measures one run per process, and the
+# legs' thread pools must see it, which a contextvar would not); set only through tagged().
+_TAGS: list = []
+
+
+@contextlib.contextmanager
+def tagged(tags):
+    global _TAGS
+    prev, _TAGS = _TAGS, list(tags)
+    try:
+        yield
+    finally:
+        _TAGS = prev
+
+
+def model_info(base_url: str, key: str, timeout: float = 10.0) -> dict:
+    """{route name: model_info} as the gateway reports it (LiteLLM GET /model/info). {} when it cannot tell, which the
+    runner reads as "not known to be local"."""
+    try:
+        with httpx.Client(timeout=timeout, follow_redirects=False) as c:
+            r = c.get(base_url.rstrip("/") + "/model/info", headers={"Authorization": f"Bearer {key}"})
+        rows = r.json().get("data") if r.status_code == 200 else None
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return {}
+    out = {}
+    for row in rows or []:
+        if isinstance(row, dict) and isinstance(row.get("model_name"), str):
+            info = row.get("model_info") if isinstance(row.get("model_info"), dict) else {}
+            tags = ((row.get("litellm_params") or {}).get("tags")) if isinstance(row.get("litellm_params"), dict) else None
+            out.setdefault(row["model_name"], dict(info, **({"tags": tags} if tags is not None else {})))
+    return out
 
 
 def complete(base_url: str, key: str, model: str, messages: list, *, tools=None, response_format=None,
@@ -31,6 +66,8 @@ def complete(base_url: str, key: str, model: str, messages: list, *, tools=None,
         body["tools"] = tools
     if response_format:
         body["response_format"] = response_format
+    if _TAGS:
+        body["tags"] = list(_TAGS)
     if stream:
         body["stream"] = True
         body["stream_options"] = {"include_usage": True}

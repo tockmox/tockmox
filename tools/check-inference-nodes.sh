@@ -17,7 +17,8 @@
 #     hand-written entries kept first; the routes hash and the config hash match
 #     the golden's and sit on the ConfigMap;
 #   - no -next route reaches the production config; the eval config holds exactly
-#     the golden's eval routes plus its hosted candidates, untagged;
+#     the golden's eval routes plus its hosted candidates, filters by tag, and fences
+#     each entry by tier (TM-1249: local routes every class, external ones open only);
 #   - the eval gateway pod carries tockmox.com/isolated, mounts its own config, and
 #     its NetworkPolicy admits only the fixture's peer, on 4000;
 #   - the policy layer's namespace-wide allows skip isolated pods;
@@ -83,6 +84,10 @@ refuse "a route names a node that does not exist" "which is not in inferenceNode
   --set 'inferenceNodes.routes[0].node=nope' || rc=1
 refuse "a route sets a derived param" "which is derived from the node" \
   --set 'inferenceNodes.routes[0].params.api_base=http://x' || rc=1
+refuse "an external eval route tagged for data above public (TM-1249)" "an external route may carry only the tag open" \
+  --set 'inferenceNodes.routes[1].modelInfo.endpoint_tier=external' --set 'inferenceNodes.routes[1].params.tags={open,internal}' || rc=1
+refuse "an eval route whose tier is neither local nor external (TM-1249)" "it must be local or external" \
+  --set 'inferenceNodes.routes[1].modelInfo.endpoint_tier=cloud' || rc=1
 refuse "default key models empty (means every model)" "reads an empty list as EVERY model" \
   --set-json 'modelLifecycle.productionKeys={"defaultModels":[]}' || rc=1
 refuse "default key models naming all-proxy-models" "which means every model" \
@@ -211,8 +216,12 @@ ecm = find(nodes, "ConfigMap", "tockmox-litellm-eval-config")
 ecfg = yaml.safe_load(ecm["data"]["config.yaml"]) if ecm else {}
 check(ecfg.get("model_list") == golden["eval"] + golden["hostedCandidates"],
       "the eval gateway serves exactly the -next routes, what they are compared against, and hosted candidates")
-check(all("tags" not in e["litellm_params"] for e in golden["hostedCandidates"]) and golden["hostedCandidates"],
-      "hosted candidates carry no data-class tags")
+check(all(e["litellm_params"].get("tags") == ["open"] for e in golden["hostedCandidates"]) and golden["hostedCandidates"],
+      "hosted candidates carry the tag open alone (TM-1249: public eval data only)")
+check(all(e["model_info"].get("endpoint_tier") in ("local", "external") and e["litellm_params"].get("tags")
+          for e in ecfg.get("model_list", [])), "every eval-gateway entry names its tier and the classes it may serve")
+check((ecfg.get("router_settings") or {}).get("enable_tag_filtering") is True,
+      "the eval gateway filters by tag, so each entry's tags fence it (TM-1249)")
 
 dep = find(nodes, "Deployment", "tockmox-litellm-eval")
 pod = (dep or {}).get("spec", {}).get("template", {})

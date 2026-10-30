@@ -131,10 +131,10 @@ def test_a_licence_off_the_allow_list_is_a_problem_and_no_licence_is_unknown(tmp
     assert "Licence: unknown" in cb and "not on the allow list until it is" in cb
 
 
-def test_a_hosted_card_says_it_is_held_by_the_runner_rails(tmp_path):
+def test_a_hosted_card_says_the_data_class_rails_give_it_public_data_only(tmp_path):
     c, u = page_client(tmp_path, candidates=[CANDIDATES["frontier"]])
     t = text(c.get("/models/inbox"))
-    assert "Hosted: held" in t and "the safety rails, TM-1249" in t and "Fit:" not in t
+    assert "Hosted: public data only" in t and "the data-class rails, TM-1249" in t and "Fit:" not in t
 
 
 def test_an_open_admit_pr_is_linked_and_a_non_https_link_is_not(tmp_path):
@@ -259,7 +259,7 @@ def test_the_inbox_card_for_a_retiring_model_counts_down_and_offers_the_replacem
     c, u = page_client(tmp_path, candidates=[retiring(day(12))])
     t = plain(c.get("/models/inbox"))
     assert "retires in 12 days" in t and f"Replacement named: {HOSTED_NEW}" in t and "Evaluate the replacement" in t
-    assert "the safety rails, TM-1249" in t                                 # held by the runner rails, on the card
+    assert "the data-class rails, TM-1249" in t                             # public data only, on the card
     r = c.post("/models/propose", data={"csrf": u.csrf, "cid": CANDIDATES["deprecation"]["id"]})
     t2 = text(r)
     assert r.status_code == 200 and f"Admit {HOSTED_NEW} for evaluation" in t2 and "eval gateway" in t2 and "endpoint_tier: external" in t2
