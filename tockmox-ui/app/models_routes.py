@@ -21,6 +21,7 @@ eval gateway, and promoting it to the production gateway after enough passing co
   POST /models/inbox/snooze         the values change that snoozes one candidate (modelLifecycle.inbox.snoozed); writes nothing
   POST /models/inbox/dismiss        the same for modelLifecycle.inbox.dismissed
   GET  /models/c/<alias>            the candidate for an alias: the plan, and a strip of its runs from run-status/1 files
+  POST /models/c/<alias>/rerun      the values change that lists a finished run in modelLifecycle.runner.rerun (TM-1301); writes nothing
   GET  /models/budget               requests and estimated cost per alias, and the local share of traffic; Unknown where nothing says
   POST /models/v/<runId>/reject     the reject change for a fail, worse or tradeoff comparison (reason required); writes nothing
   GET  /models/profiles             workload profiles -> a residency plan per node, and the engine configs
@@ -522,7 +523,38 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
                 "window": (latest or {}).get("window", ""), "disk_gib": (latest or {}).get("disk_gib"), "quiet": cd.quiet_window(L.raw)}
         return render(request, "models_candidate.html", u, alias=base, nxt=nxt, live=live, ce=ce, le=le, move=move, engine=ep.engine if ep else "",
                       plan=plan, words=cd.LEG_WORDS, latest=latest, earlier=strips[1:6], problem=problem, status_dir=cd.status_dir(L.raw),
-                      have_verdicts=have, verdict_reading=vr)
+                      have_verdicts=have, verdict_reading=vr, rerun=cd.rerun_offer(latest, cd.rerun_ids(L.raw)))
+
+    @app.post("/models/c/{alias}/rerun")
+    def models_candidate_rerun(request: Request, alias: str, csrf: str = Form(""), run_id: str = Form(""), fmt: str = Form("")):
+        """TM-1301: measure a finished run again. The change lists its run id in modelLifecycle.runner.rerun (appended to what the
+        site already lists); the runner's next pass queues a new run for the same combination. A change to review and commit."""
+        u, deny = admin(request)
+        if deny:
+            return deny
+        if not csrf_ok(u, csrf):
+            return PlainTextResponse("bad request", status_code=400)
+        base = alias[: -len(ml.NEXT)] if alias.endswith(ml.NEXT) else alias
+        runs, _problem = cd.read_runs(cd.status_dir(L.raw))
+        run = next((r for r in cd.runs_for(runs, base) if str(r.get("run_id", "")) == run_id), None)
+        if run is None:
+            return bad(request, u, f"There is no run {run_id or '(none given)'} on record for {base}.", 404)
+        if run.get("state") not in cd.FINISHED:
+            return bad(request, u, f"Run {run_id} is {run.get('state')}: only a run that is done or failed can be run again.")
+        listed = cd.rerun_ids(L.raw)
+        new_raw = copy.deepcopy(L.raw or {})
+        cur = new_raw.get("runner")
+        runner = dict(cur) if isinstance(cur, dict) else {}
+        runner["rerun"] = listed if run_id in listed else listed + [run_id]
+        new_raw["runner"] = runner
+        notes = [f"run {run_id} is listed in modelLifecycle.runner.rerun" + (" (it already was; nothing else changes)" if run_id in listed else ""),
+                 "the runner's next scheduled pass queues a new run for the same candidate, eval set, engine, node and route, under a new run id",
+                 "a listed id whose combination already has a newer finished run is left alone, so the line can stay until you tidy it",
+                 "a rerun of one frozen set counts once toward promotion: it is more evidence about the same thing, not another vote",
+                 "this changes only modelLifecycle.runner: no route, no catalog entry and no gateway entry"]
+        if not runner.get("enabled"):
+            notes.insert(1, "modelLifecycle.runner.enabled is off here, so nothing measures it until the runner is turned on")
+        return _change(request, u, L.lifecycle, inv, notes, f"Run {run_id} again", fmt, {"run_id": run_id}, f"/models/c/{alias}/rerun", raw=new_raw)
 
     # ------------------------------------------------------------ the budget (TM-1258)
 

@@ -545,14 +545,25 @@ only, and the card says so.
 **Candidate** (`/models/c/<alias>`). The plan for an evaluation of
 `<alias>-next`: the alias it competes for, the incumbent, the legs (the latest
 run's, else the runner's defaults), the estimated wall time when a run has one,
-and the quiet-window rule it waits for. Below it, a strip from the runner's
-`run-status/1` files: each leg queued, running, done, failed or skipped, with
-partial numbers under a banner that says nothing here tells which model is
-better until the verdict. An aborted run shows its reason. A run that says
-running but has not been written for an hour is shown as Unknown. The files are
-read from `modelLifecycle.statusDir` (default `/var/lib/tockmox/evals`); mount
-the runner's status volume read only into the UI pod. A missing directory is
-Unknown, not an empty list.
+and the quiet-window rule it waits for. Below it, the latest run from the
+runner's `run-status/1` files, drawn as connected stages with an arrow between
+each: Control, Smoke, Perf, Prefill, Tool calls, Quality, then Verdict. Each
+stage shows its state (queued, running, done, failed or skipped) and, once
+done, its key number as the runner recorded it (smoke checks passed, decode
+tokens per second at the lowest concurrency, time to first token at the longest
+context, and so on); a stage with no recorded number shows the leg's summary
+instead. The Verdict stage shows the runner's label once the run is done, and
+partial numbers sit under a banner that says nothing here tells which model is
+better until the verdict. The five runs before it list with their date, state
+and the reason each ended. **Re-run** appears when the latest run is done or
+failed, and renders a change that adds its run id to
+`modelLifecycle.runner.rerun`; the runner's next pass queues a new run for the
+same combination, and a rerun of one frozen set counts once toward promotion.
+There is no Re-run while a run is queued, waiting or running. An aborted run
+shows its reason. A run that says running but has not been written for an hour
+is shown as Unknown. The files are read from `modelLifecycle.statusDir`
+(default `/var/lib/tockmox/evals`); mount the runner's status volume read
+only into the UI pod. A missing directory is Unknown, not an empty list.
 
 **Budget** (`/models/budget`). Per alias, requests over the window of
 `modelLifecycle.demandQuery`, each alias's share, and the share served by your

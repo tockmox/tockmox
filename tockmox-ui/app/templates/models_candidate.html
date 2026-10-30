@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import badge, source_line %}
+{% from "macros.html" import badge, source_line, state_icon %}
 {% block title %}Candidate for {{ alias }}{% endblock %}
 {% macro leg_badge(l) -%}
 {%- if l.state == "done" -%}{{ badge("ok", "Done") }}
@@ -8,6 +8,45 @@
 {%- elif l.state == "queued" -%}<span class="badge st-closed"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 5.5V10l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Queued</span></span>
 {%- elif l.state == "skipped" -%}<span class="badge st-closed"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Skipped</span></span>
 {%- else -%}{{ badge("unknown", "Unknown") }}{%- endif -%}
+{%- endmacro %}
+{#- TM-1301: the run as a pipeline of stages. A stage's state is a word, a shape and a colour, never colour alone. -#}
+{% macro stage_tone(s) -%}
+{%- if s.state == "done" -%}ok{%- elif s.state == "verdict-done" -%}{{ s.tone }}{%- elif s.state == "running" -%}warning{%- elif s.state in ("failed", "verdict-failed") -%}critical{%- else -%}unknown{%- endif -%}
+{%- endmacro %}
+{% macro stage_icon(s) -%}
+{%- if s.state == "running" -%}<svg class="ico spin" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2" opacity=".25"/><path d="M10 2a8 8 0 0 1 8 8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+{%- elif s.state == "queued" -%}<svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 5.5V10l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+{%- elif s.state == "skipped" -%}<svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+{%- else -%}{{ state_icon(stage_tone(s)|trim) }}{%- endif -%}
+{%- endmacro %}
+{% macro stage_badge(s) -%}
+<span class="badge st-{{ stage_tone(s)|trim }}">{{ stage_icon(s) }}<span>{{ s.word }}</span></span>
+{%- endmacro %}
+{% macro arrow(small=false) -%}
+<span class="{{ 'a' if small else 'arrow' }}" aria-hidden="true">{% if small %}<svg viewBox="0 0 14 10" focusable="false"><path d="M1 5h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/><path d="M8 1.5L12 5 8 8.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>{% else %}<svg viewBox="0 0 26 16" focusable="false"><path d="M1 8h20" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/><path d="M16 2l7 6-7 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>{% endif %}</span>
+{%- endmacro %}
+{% macro pipeline(run) -%}
+<ol class="pipe" role="list" aria-label="Stages of run {{ run.run_id }}">
+{%- for s in run.pipeline %}
+  <li class="pipe-item" role="listitem" aria-label="{{ s.aria }}">
+    <div class="stage {{ s.state }}">
+      <div class="nm">{{ s.name }}</div>
+      {{ stage_badge(s) }}
+      {% if s.big %}<div class="fig">{{ s.big }}{% if s.unit %}<small> {{ s.unit }}</small>{% endif %}</div>{% endif %}
+      <div class="cap">{{ s.cap }}</div>
+      {% if s.progress is not none %}<progress class="prog" max="100" value="{{ s.progress }}" aria-label="{{ s.progress }} percent of this stage">{{ s.progress }}%</progress>{% endif %}
+    </div>
+    {% if not loop.last %}{{ arrow() }}{% endif %}
+  </li>
+{%- endfor %}
+</ol>
+{%- endmacro %}
+{% macro mini(run) -%}
+<ol class="mini" role="list" aria-label="Stages of run {{ run.run_id }}">
+{%- for s in run.pipeline %}
+  <li class="mi" role="listitem" aria-label="{{ s.aria }}"><span class="m {{ s.state }}{% if s.state == 'verdict-done' %} {{ s.tone }}{% endif %}">{{ stage_icon(s) }}{{ s.name }}{% if s.state == "verdict-done" %} <span class="m-label">{{ s.big }}</span>{% endif %}</span>{% if not loop.last %}{{ arrow(true) }}{% endif %}</li>
+{%- endfor %}
+</ol>
 {%- endmacro %}
 {% block main %}
 <p><a href="/models">Models</a>{% if live %} · <a href="/models/a/{{ alias|urlencode }}">{{ alias }}</a>{% endif %}</p>
@@ -46,6 +85,13 @@
   {% if latest.stale %}<p class="warnbox">{{ badge("unknown", "Unknown") }} This run says {{ latest.state }} but its status was last written {{ latest.updated_ago }}. The runner may have stopped; this page cannot tell.</p>{% endif %}
   {% if latest.state != "done" %}<p class="warnbox">{{ badge("warning", "Not finished") }} Nothing here says which model is better until the verdict. Numbers below are partial: a leg that has run for some cases does not predict its end, and a good start is not a result.</p>
   {% else %}<p>{% if latest.label %}The runner's label for this run: <strong>{{ latest.label|capitalize }}</strong>. {% endif %}{% if latest.run_id in have_verdicts %}<a href="/models/v/{{ latest.run_id|urlencode }}">Read the comparison</a>, which has the numbers and what they rest on.{% else %}Its verdict record is not among the records this page reads yet{% if latest.evidence_pr %}: <a href="{{ latest.evidence_pr }}" rel="noopener noreferrer">the evidence pull request</a> carries it{% endif %}. Until it is, nothing counts toward promotion.{% endif %}</p>{% endif %}
+  {{ pipeline(latest) }}
+  <p class="state-key"><span><i class="d" aria-hidden="true"></i>Done, with its key number</span><span><i class="r" aria-hidden="true"></i>Running</span><span><i class="q" aria-hidden="true"></i>Queued</span><span><i class="f" aria-hidden="true"></i>Failed</span><span><i class="s" aria-hidden="true"></i>Skipped</span></p>
+  <div class="run-foot">
+    {% if rerun.offer %}<form method="post" action="/models/c/{{ alias|urlencode }}/rerun" class="inline"><input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="run_id" value="{{ latest.run_id }}"><button class="btn-ghost" type="submit">Re-run<span class="visually-hidden"> {{ latest.run_id }}</span></button></form>{% endif %}
+    {% if rerun.why %}<span class="muted small">{{ rerun.why }}</span>{% endif %}
+  </div>
+  <details class="legs-detail"><summary>{% if latest.state == "done" %}What each leg measured{% else %}Each leg, so far{% endif %}</summary>
   <div class="table-wrap" role="region" aria-labelledby="legs-cap" tabindex="0">
   <table>
     <caption id="legs-cap" class="visually-hidden">The legs of run {{ latest.run_id }}</caption>
@@ -60,11 +106,21 @@
     </tbody>
   </table>
   </div>
+  </details>
   {% if latest.estimated %}<p class="muted">Estimated {{ latest.estimated }}.</p>{% endif %}
   {% if earlier %}
-  <details><summary>Earlier runs ({{ earlier|length }})</summary>
-    <ul class="plain">{% for r in earlier %}<li><code>{{ r.run_id }}</code> · {{ r.state_word }}{% if r.reason %}: {{ r.reason }}{% endif %} <span class="muted">· updated {{ r.updated_ago or "at an unknown time" }}{% if r.label %} · label {{ r.label }}{% endif %}</span>{% if r.run_id in have_verdicts %} · <a href="/models/v/{{ r.run_id|urlencode }}">comparison</a>{% endif %}</li>{% endfor %}</ul>
-  </details>
+  <h3 id="earlier-h">Earlier runs ({{ earlier|length }})</h3>
+  <ul class="runs" aria-labelledby="earlier-h">
+    {% for r in earlier %}
+    <li>
+      <div class="rh"><code>{{ r.run_id }}</code>{% if r.when %}<span class="muted">{{ r.when }}</span>{% endif %}
+        {{ badge({"done": "ok", "failed": "critical", "aborted": "critical", "running": "warning", "waiting": "warning", "queued": "unknown"}.get(r.state, "unknown"), r.state_word) }}
+        {% if r.reason %}<span class="why">{{ r.reason }}</span>{% elif r.label %}<span class="why">verdict label {{ r.label }}</span>{% endif %}</div>
+      {{ mini(r) }}
+      <p class="muted small">updated {{ r.updated_ago or "at an unknown time" }}{% if r.reason and r.label %} · label {{ r.label }}{% endif %}{% if r.run_id in have_verdicts %} · <a href="/models/v/{{ r.run_id|urlencode }}">comparison</a>{% endif %}</p>
+    </li>
+    {% endfor %}
+  </ul>
   {% endif %}
   {% elif not problem %}<p class="empty">{{ badge("unknown", "No run yet") }} No run is on record for <code>{{ alias }}</code>. Start an evaluation to queue one.</p>
   {% else %}<p class="empty">No run can be listed.</p>{% endif %}
