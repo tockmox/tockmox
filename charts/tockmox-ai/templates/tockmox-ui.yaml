@@ -57,6 +57,13 @@ ServiceMonitor scrapes it and a PrometheusRule alerts on failed sign-in steps an
 {{- /* The chart owns these: one source of truth for the blocks, and the paths where it mounts the secrets. */ -}}
 {{- $lcCfg := deepCopy $lc -}}
 {{- if (($lc.watch | default dict).enabled) -}}{{- $_ := set $lcCfg "reportFile" "/var/lib/tockmox/model-watch/report.json" -}}{{- end -}}
+{{- /* The eval runner's evidence lives on its status volume, mounted read-only below; the UI reads verdicts and results from
+       there unless the site pointed them elsewhere (modelLifecycle.runner, templates/eval-runner.yaml). */ -}}
+{{- $runnerOn := (($lc.runner | default dict).enabled) -}}
+{{- if $runnerOn -}}
+{{- if not $lcCfg.verdictsDir -}}{{- $_ := set $lcCfg "verdictsDir" "/var/lib/tockmox/evals/site/evals/verdicts" -}}{{- end -}}
+{{- if not $lcCfg.resultsDir -}}{{- $_ := set $lcCfg "resultsDir" "/var/lib/tockmox/evals/site/evals/results" -}}{{- end -}}
+{{- end -}}
 {{- $_ := set $cfg "modelLifecycle" $lcCfg -}}
 {{- $_ := set $cfg "inferenceNodes" $in -}}
 {{- $_ := set $cfg "session" (merge (dict "secretFile" "/etc/tockmox-ui/session/secret") (omit ($cfg.session | default dict) "secretFile")) -}}
@@ -222,8 +229,9 @@ spec:
   replicas: 1
   {{- $wrep := (($lc.watch | default dict).report | default dict) -}}
   {{- $wmodes := $wrep.accessModes | default (list "ReadWriteOnce") -}}
-  {{- if and (($lc.watch | default dict).enabled) (not (has "ReadWriteMany" $wmodes)) }}
-  # The watcher's report volume is ReadWriteOnce: a surging rollout would need it on two nodes at once
+  {{- $rmodes := ((($lc.runner | default dict).status | default dict).accessModes) | default (list "ReadWriteOnce") -}}
+  {{- if or (and (($lc.watch | default dict).enabled) (not (has "ReadWriteMany" $wmodes))) (and $runnerOn (not (has "ReadWriteMany" $rmodes))) }}
+  # The watcher's report volume (and the eval runner's status volume) is ReadWriteOnce: a surging rollout would need it on two nodes at once
   # when the new pod lands elsewhere, and wait forever. maxSurge 0 removes the old pod first, which releases
   # the volume (see model-watch.yaml). NOT `type: Recreate`, which does the same: switching a live
   # RollingUpdate Deployment to Recreate is refused under ServerSideApply ("spec.strategy.rollingUpdate:
@@ -335,6 +343,9 @@ spec:
             {{- if (($lc.watch | default dict).enabled) }}
             - { name: model-watch, mountPath: /var/lib/tockmox/model-watch, readOnly: true }
             {{- end }}
+            {{- if $runnerOn }}
+            - { name: eval-runner-status, mountPath: /var/lib/tockmox/evals, readOnly: true }
+            {{- end }}
             - { name: tmp, mountPath: /tmp }
             - { name: tockmox-trust, mountPath: /etc/tockmox/trust, readOnly: true }
             {{- if $feedCm }}
@@ -376,6 +387,10 @@ spec:
         {{- if (($lc.watch | default dict).enabled) }}
         - name: model-watch
           persistentVolumeClaim: { claimName: tockmox-model-watch-report, readOnly: true }
+        {{- end }}
+        {{- if $runnerOn }}
+        - name: eval-runner-status
+          persistentVolumeClaim: { claimName: tockmox-eval-runner-status, readOnly: true }
         {{- end }}
         - name: tmp
           emptyDir: { sizeLimit: 64Mi }

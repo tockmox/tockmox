@@ -153,3 +153,10 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .chips a[aria-current="page"] { color: var(--tx-text); border-color: var(--tx-trim); background: var(--tx-surface); }
 .badge.st-closed { background: var(--st-unknown-soft); }
 table.timeline td:first-child { white-space: nowrap; }
+
+/* Models inbox, candidate page and budget (TM-1258): chips wrap, cards separate by a rule, the leg list reads as a row of names. */
+.chips-row { display: flex; flex-wrap: wrap; gap: .35rem .9rem; margin: .35rem 0; }
+.cands.inbox li { padding: .85rem 0; }
+.cands.inbox .page-actions { margin-top: .5rem; }
+ol.legs { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; counter-reset: leg; }
+ol.legs li { counter-increment: leg; } ol.legs li::before { content: counter(leg) ". "; color: var(--tx-text-muted); }

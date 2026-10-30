@@ -17,6 +17,11 @@ Sources, all read-only:
   Anthropic      GET  /v1/models                                  when a key is configured
   OpenAI         GET  /v1/models                                  when a key is configured (+shutdown_date)
 
+Inbox (TM-1258): a candidate whose id is in modelLifecycle.inbox.dismissed, or in .snoozed with a date still ahead, is left out of
+the report (and so is not sized). A retiring hosted model carries `replacement` when the provider's listing names one or the site
+does (watch.providers.<name>.replacements: {retiring id: replacement id}); a candidate keeps the `pr` link the PR opener recorded
+for it in the previous report.
+
 Sizes (AC-48.14, fit v2), for every catalogued Hugging Face model, every Hugging Face candidate in this report and
 every operator-named seed (modelLifecycle.recommend.seeds), at most watch.sizes.maxRepos (default 80) per run:
   Hugging Face   GET  /api/models/<repo>/revision/<sha>?blobs=true   file sizes at the pinned build (unpinned: the
@@ -42,6 +47,7 @@ import httpx
 import yaml
 
 from . import fit as fitmod
+from . import inbox as inboxmod
 from . import models as ml
 
 WATCH_HOSTS = frozenset({"huggingface.co", "registry.ollama.ai", "openrouter.ai", "api.anthropic.com", "api.openai.com"})
@@ -357,7 +363,8 @@ def run(cfg: dict, f: Fetcher, env=os.environ, now=None) -> dict:
         try:
             if name == "openrouter":
                 d = f.json("https://openrouter.ai/api/v1/models")
-                listed = [{"id": m["id"], "created": m.get("created"), "shutdown": m.get("expiration_date")} for m in d.get("data", [])]
+                listed = [{"id": m["id"], "created": m.get("created"), "shutdown": m.get("expiration_date"),
+                           "replacement": m.get("replacement")} for m in d.get("data", [])]
             elif name == "anthropic":
                 key = env.get(pc.get("keyEnv", "ANTHROPIC_API_KEY"), "")
                 if not key:
@@ -375,22 +382,44 @@ def run(cfg: dict, f: Fetcher, env=os.environ, now=None) -> dict:
             else:
                 note(name, False, "unknown provider")
                 continue
-            cands += ml.detect_frontier(name, listed, known.get(name, set()), pc.get("allow"))
+            cands += ml.detect_frontier(name, listed, known.get(name, set()), pc.get("allow"), pc.get("replacements") or {})
             note(name, True)
         except Exception as ex:  # noqa: BLE001
             note(name, False, _why(ex))
 
+    stamp = now or datetime.datetime.now(datetime.timezone.utc)
+    skip = inboxmod.skipped_ids(inboxmod.parse((cfg.get("modelLifecycle") or {}).get("inbox")), stamp)
     seen, uniq = set(), []
     for c in cands:
-        if c.id not in seen:
+        if c.id not in seen and c.id not in skip:
             seen.add(c.id)
             uniq.append(c)
-    ts = (now or datetime.datetime.now(datetime.timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    ts = stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
     sizes, size_gaps = collect_sizes(cfg, lc, uniq, f, ts)
     return {"schema": 1, "generatedAt": ts, "sources": sources, "gaps": gaps, "sizes": sizes, "sizeGaps": size_gaps,
             "candidates": [{"id": c.id, "kind": c.kind, "subject": c.subject, "model": c.model, "source": c.source.as_dict(),
                             "detail": c.detail, "url": c.url, **({"sizeGiB": c.size_gib} if c.size_gib is not None else {}),
+                            **({"replacement": c.replacement} if c.replacement else {}),
                             "when": str(c.when or "")} for c in uniq]}
+
+
+def read_previous(path) -> dict | None:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            d = json.load(fh)
+        return d if isinstance(d, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def carry_pr_links(doc: dict, previous: dict | None) -> None:
+    """The PR opener records the PR it opened for a candidate as `pr` in the report. The next watcher run writes the report again,
+    so a link for a candidate that is still found is carried over (https only); one for a candidate that is gone is dropped."""
+    links = {c.get("id"): c["pr"] for c in (previous or {}).get("candidates") or []
+             if isinstance(c, dict) and isinstance(c.get("pr"), str) and c["pr"].startswith("https://")}
+    for c in doc.get("candidates") or []:
+        if c["id"] in links:
+            c["pr"] = links[c["id"]]
 
 
 def write_atomic(path, doc):
@@ -408,6 +437,7 @@ def main(argv):
         print("watcher is off (modelLifecycle.watch.enabled is false); nothing fetched", file=sys.stderr)
         return 0
     doc = run(cfg, Fetcher(timeout=float(w.get("timeoutSeconds", 10))))
+    carry_pr_links(doc, read_previous(argv[2]))
     write_atomic(argv[2], doc)
     bad = [k for k, v in doc["sources"].items() if not v["ok"]]
     print(f"{len(doc['candidates'])} candidate(s); sources ok: {sorted(k for k, v in doc['sources'].items() if v['ok'])}"

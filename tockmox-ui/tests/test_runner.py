@@ -99,6 +99,8 @@ REQ = {"schema": "eval-request/1", "alias": "local-agent", "class": "agent", "ru
 def _run(tmp_path, es, behaviour, req=None, **kw):
     srv, url = gateway(behaviour)
     try:
+        kw.setdefault("tool_calls", 0)              # the prefill and tool-reliability legs have their own tests
+        kw.setdefault("prefill_contexts", ())       # (tests/test_runner_legs.py); here they stay off
         return run(req or REQ, es, gateway=url, key="k", node="mac-studio-m5", engine="mlx-lm", engine_version="0.32.2",
                    out=str(tmp_path / "site"), steps=(1,), perf_requests=4, today="2026-10-29", **kw)
     finally:
@@ -123,7 +125,7 @@ def test_a_better_candidate_gets_a_passing_verdict_with_hashed_twins(tmp_path):
         assert hashlib.sha256(body.encode()).hexdigest() == r["sha256"]
         kinds.add(rs.parse(body).kind)
     assert kinds == {"smoke", "perf", "quality"}
-    assert (site / "evals/methodology/runner-v0.md").exists()
+    assert (site / "evals/methodology/runner-v1.md").exists()
     counted, _ = ml.count_passes([v], "local-agent", "good-model", "a" * 40, "half-model")
     assert len(counted) == 1
 

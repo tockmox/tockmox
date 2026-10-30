@@ -1,0 +1,12 @@
+schema: eval-set/1
+id: large-fixture
+version: v1
+class: large
+classification: internal
+grader: rule
+criterion: fixture set for the scheduler tests, not a product set
+margin: 0.05
+min_effect: 0.05
+bar: 0.9
+epochs: 1
+max_tokens: 64

@@ -572,6 +572,9 @@ def count_passes(verdicts, alias: str, model: str, revision: str = "", incumbent
             else:
                 notes.append(f"{v.run_id} ({v.date}) failed")
             counted, seen, keys = [], set(), {}
+        elif v.extras.get("label") == "tradeoff":
+            notes.append(f"{v.run_id} ({v.date}) was a tradeoff (quality held, speed broke the criterion): "
+                         "neither counted nor reset; a person decides whether the quality is worth the speed")
         elif v.verdict == "inconclusive":
             notes.append(f"{v.run_id} ({v.date}) was inconclusive: neither counted nor reset")
         elif v.run_id in seen:
@@ -612,6 +615,11 @@ class Candidate:
     url: str = ""
     size_gib: float | None = None
     when: str = ""
+    replacement: str = ""         # a deprecation: the model the provider (or the site) names as its successor, "provider/model"
+    pr: str = ""                  # an https URL of the open admit PR for this candidate, when the report records one
+
+
+_REPLACEMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,40}/[A-Za-z0-9][A-Za-z0-9._:/-]{0,120}$")
 
 
 @dataclass
@@ -636,7 +644,9 @@ def parse_report(d: dict) -> Report:
                                _source(c.get("source"), "candidate"), str(c.get("detail", ""))[:400],
                                str(c.get("url", ""))[:300] if str(c.get("url", "")).startswith("https://") else "",
                                float(c["sizeGiB"]) if isinstance(c.get("sizeGiB"), (int, float)) else None,
-                               str(c.get("when", ""))[:40]))
+                               str(c.get("when", ""))[:40],
+                               str(c.get("replacement", "")) if _REPLACEMENT_RE.match(str(c.get("replacement", ""))) else "",
+                               str(c.get("pr", ""))[:300] if str(c.get("pr", "")).startswith("https://") else ""))
     gaps = [str(g)[:200] for g in (d.get("gaps") or [])[:200]]
     sizes, bad = fitmod.parse_sizes(d.get("sizes"))
     size_gaps = [str(g)[:200] for g in (d.get("sizeGaps") or [])[:500]] + bad[:50]
@@ -714,9 +724,22 @@ def detect_ollama(entry: Entry, remote_digest: str | None, pushed: str = "") -> 
                       f"https://ollama.com/library/{entry.source.ref.split(':')[0]}", entry.size_gib, pushed)]
 
 
-def detect_frontier(provider: str, listed: list[dict], known: set[str], allow: list[str] | None = None) -> list[Candidate]:
-    """listed: [{id, created?, shutdown?}] normalised by the watcher. known: model ids the gateway
-    already routes for this provider. allow: optional glob filter (e.g. ["claude-*"])."""
+def _replacement_id(provider: str, raw) -> str:
+    """"provider/model" for a replacement the provider (a listed item's `replacement`) or the site (watch.providers.<p>.replacements)
+    names. A bare id belongs to this provider. Anything that is not a plain model id is dropped, never guessed at."""
+    r = str(raw or "").strip()
+    if not r:
+        return ""
+    full = r if r.startswith(provider + "/") else f"{provider}/{r}"
+    return full if _REPLACEMENT_RE.match(full) else ""
+
+
+def detect_frontier(provider: str, listed: list[dict], known: set[str], allow: list[str] | None = None,
+                    replacements: dict | None = None) -> list[Candidate]:
+    """listed: [{id, created?, shutdown?, replacement?}] normalised by the watcher. known: model ids the gateway
+    already routes for this provider. allow: optional glob filter (e.g. ["claude-*"]). replacements: {retiring id: the
+    model that replaces it}, from the site's values; a listed item's own `replacement` wins."""
+    replacements = replacements or {}
     out = []
     for m in listed[:500]:
         mid = str(m.get("id", ""))
@@ -732,7 +755,7 @@ def detect_frontier(provider: str, listed: list[dict], known: set[str], allow: l
         if mid in known and m.get("shutdown"):
             out.append(Candidate(f"deprecation:{provider}/{mid}", "deprecation", provider, f"{provider}/{mid}",
                                  Source("hosted", f"{provider}/{mid}", ""), f"{provider} retires {mid} on {m['shutdown']}",
-                                 "", None, str(m["shutdown"])))
+                                 "", None, str(m["shutdown"]), _replacement_id(provider, m.get("replacement") or replacements.get(mid))))
     return out
 
 
@@ -742,8 +765,40 @@ def _slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:40].strip("-") or "model"
 
 
+def _tags_of(live: Route | None, gateway=()) -> list | None:
+    """The data-class tags the live alias carries: its route's params.tags, else the gateway list's entry for it."""
+    if live is None:
+        return None
+    t = (live.params or {}).get("tags")
+    if not isinstance(t, list):
+        gw = next((m for m in gateway if isinstance(m, dict) and m.get("model_name") == live.alias), None)
+        t = ((gw or {}).get("litellm_params") or {}).get("tags")
+    return [str(x) for x in t] if isinstance(t, list) and t else None
+
+
+def local_defaults(route: Route, live: Route | None = None, gateway=()) -> Route:
+    """TM-1119: what the policy gate reads off a node route. A node route is local-tier by definition, and the gate reads a
+    deployment with no model_info.endpoint_tier as external; with tag filtering on, an untagged deployment serves no class.
+    So a -next route gets `model_info.endpoint_tier: local` (unless the live route already said otherwise) and the live
+    alias's tags (a copy, never the same list). Idempotent; never overwrites what the route already has."""
+    tags = _tags_of(live, gateway)
+    if tags and "tags" not in route.params:
+        route.params["tags"] = tags
+    route.model_info.setdefault("endpoint_tier", "local")
+    return route
+
+
+def stamp_next_routes(add_inv: Inventory, inv: Inventory, gateway=()) -> Inventory:
+    """local_defaults() for every -next route in `add_inv`, against the live route of the same alias in `inv`. For a caller
+    that built the change some other way (the Recommend list's builder) and wants the same result as propose()."""
+    for r in add_inv.routes:
+        if r.alias.endswith(NEXT):
+            local_defaults(r, next((x for x in inv.routes if x.alias == r.alias[: -len(NEXT)]), None), gateway)
+    return add_inv
+
+
 def propose(cand: Candidate, lc: Lifecycle, inv: Inventory, node: str = "", endpoint: str = "", taken=(),
-            alias: str = "") -> tuple[Lifecycle, Inventory, list[str]]:
+            alias: str = "", gateway=()) -> tuple[Lifecycle, Inventory, list[str]]:
     """The ADDITIONS a candidate becomes: (lifecycle additions, inventory additions, notes). Merge them.
 
     `alias` limits the comparison to one live alias. Without it a -next route is added for EVERY live alias that
@@ -801,8 +856,8 @@ def propose(cand: Candidate, lc: Lifecycle, inv: Inventory, node: str = "", endp
             ep = endpoint or r.endpoint
             # deep copies: a shallow dict shared the incumbent's tags LIST, which PyYAML then wrote as an anchor
             # (&id001 / *id001) in the machine-owned values file (site PR #114, TM-0939)
-            routes.append(Route(r.alias + NEXT, n, ep, cand.model, r.kind, r.provider, copy.deepcopy(r.params),
-                                copy.deepcopy(r.model_info), entry.size_gib))
+            routes.append(local_defaults(Route(r.alias + NEXT, n, ep, cand.model, r.kind, r.provider, copy.deepcopy(r.params),
+                                               copy.deepcopy(r.model_info), entry.size_gib), r, gateway))
         if not live:
             notes.append(f"no live route uses {base.model}; place the candidate from its node page")
         elif not routes:
@@ -927,7 +982,7 @@ def propose_new(alias: str, model: str, source: Source, node: str, endpoint: str
         track = ("revision",) if source.kind in ("huggingface", "ollama") else ()
         add_lc.catalog.append(Entry(eid, model, source, family, base_model, quant, planning_size_or_none(size_gib), "candidate", track, {}))
     p, info = _route_limits(ep.engine, params, context_tokens)
-    route = Route(alias + NEXT, node, endpoint, model, kind, "", p, info, planning_size_or_none(size_gib))
+    route = local_defaults(Route(alias + NEXT, node, endpoint, model, kind, "", p, info, planning_size_or_none(size_gib)))
     add_inv = Inventory([n], [route])
     notes += [f"{alias} does not exist yet: {alias}{NEXT} is the only route, on the EVAL gateway, so no agent can call it",
               "there is no incumbent, so the comparison is judged on absolute bars, not against another model: " + "; ".join(ABSOLUTE_BARS),
@@ -941,7 +996,7 @@ def planning_size_or_none(g):
 
 
 def propose_replacement(alias: str, node: str, endpoint: str, lc: Lifecycle, inv: Inventory, taken=(),
-                        context_tokens: int | None = None) -> tuple[Lifecycle, Inventory, list[str]]:
+                        context_tokens: int | None = None, gateway=()) -> tuple[Lifecycle, Inventory, list[str]]:
     """Move the SAME model an alias serves to another node or endpoint (REQ-0048 ruling 6): `<alias>-next` there, the
     live route untouched. The catalog does not change (the entry is already promoted and pinned). The comparison is
     class `perf`, the incumbent is the same model where it runs now, and the promotion never retires the model."""
@@ -976,8 +1031,8 @@ def propose_replacement(alias: str, node: str, endpoint: str, lc: Lifecycle, inv
     info = {**copy.deepcopy(live.model_info), **info}
     if ep.engine != "ollama":
         p.pop("num_ctx", None)
-    route = Route(alias + NEXT, node, endpoint, live.model, live.kind, live.provider if old_ep and old_ep.engine == ep.engine else "",
-                  p, info, live.size_gib)
+    route = local_defaults(Route(alias + NEXT, node, endpoint, live.model, live.kind,
+                                 live.provider if old_ep and old_ep.engine == ep.engine else "", p, info, live.size_gib), live, gateway)
     notes = [f"same model ({live.model}), moved from {live.node} to {node}: nothing is retired, the catalog does not change",
              f"{alias}{NEXT} goes to the EVAL gateway only; {alias} stays where it is until the promotion",
              f"the comparison is class {PERF}: the same model on {live.node} is the incumbent, and a verdict must name the move "

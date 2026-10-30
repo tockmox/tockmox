@@ -6,7 +6,7 @@ the runner, the page and the gate can never disagree about what a result is.
 
 Pure: no network, no clock. Files are read and written only by the functions that take a root directory.
 
-    {"schema": "capability-result/1", "kind": "perf" | "smoke" | "quality", "date": "2026-10-22", "node": "<node id>",
+    {"schema": "capability-result/1", "kind": "perf" | "smoke" | "quality" | "prefill" | "tool_reliability", "date": "2026-10-22", "node": "<node id>",
      "model": "<model id as a route calls it>", "revision": "<40-hex | sha256:...>", "quant": "8bit",
      "engine": {"id": "mlx-lm", "version": "0.32.2"}, "plane": "engine" | "gateway",
      "gateway": {"litellm": "1.106.2", "route": "<alias>-next"},        # required when plane is gateway
@@ -34,7 +34,7 @@ import re
 from dataclasses import dataclass, field
 
 SCHEMA = "capability-result/1"
-KINDS = ("perf", "smoke", "quality")
+KINDS = ("perf", "smoke", "quality", "prefill", "tool_reliability")
 PLANES = ("engine", "gateway")
 MAX_BYTES = 1 << 20
 MAX_METRICS = 500

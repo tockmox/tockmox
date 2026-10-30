@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, source_line %}
+{% block title %}Candidate for {{ alias }}{% endblock %}
+{% macro leg_badge(l) -%}
+{%- if l.state == "done" -%}{{ badge("ok", "Done") }}
+{%- elif l.state == "failed" -%}{{ badge("critical", "Failed") }}
+{%- elif l.state == "running" -%}<span class="badge st-planned"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M5 3.5l11 6.5-11 6.5z" fill="currentColor"/></svg><span>Running</span></span>
+{%- elif l.state == "queued" -%}<span class="badge st-closed"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 5.5V10l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Queued</span></span>
+{%- elif l.state == "skipped" -%}<span class="badge st-closed"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Skipped</span></span>
+{%- else -%}{{ badge("unknown", "Unknown") }}{%- endif -%}
+{%- endmacro %}
+{% block main %}
+<p><a href="/models">Models</a>{% if live %} · <a href="/models/a/{{ alias|urlencode }}">{{ alias }}</a>{% endif %}</p>
+<div class="page-head">
+  <div><h1>Candidate for <code>{{ alias }}</code></h1>
+  <p class="lede">{% if nxt %}<code>{{ nxt.model }}</code> on {{ nxt.node }}{% if engine %} ({{ engine }}){% endif %}, on the eval gateway as <code>{{ nxt.alias }}</code>, competing for <code>{{ alias }}</code>.{% else %}There is no <code>{{ alias }}-next</code> route now (it was promoted, rejected or removed); these are the runs on record.{% endif %} This page is the plan and the progress of an evaluation. It says nothing about which model is better: the verdict does.</p></div>
+  <div class="page-actions">
+    {% if nxt %}<a class="btn-ghost" href="/models/evaluate?alias={{ nxt.alias|urlencode }}">Start an evaluation</a><a class="btn-ghost" href="/models/promote?alias={{ nxt.alias|urlencode }}">See the count</a>{% endif %}
+  </div>
+</div>
+
+<section class="panel" aria-labelledby="plan-h">
+  <h2 id="plan-h">The plan</h2>
+  <dl class="facts">
+    <div><dt>Competes for</dt><dd><code>{{ alias }}</code></dd></div>
+    <div><dt>Candidate</dt><dd>{% if nxt %}<code>{{ nxt.model }}</code>{% if ce and ce.source.revision %}<br><span class="muted">build <code title="{{ ce.source.revision }}">{{ ce.source.revision[:12] }}</code></span>{% endif %}{% elif latest and latest.candidate.model %}<code>{{ latest.candidate.model }}</code>{% else %}<span class="muted">not recorded</span>{% endif %}</dd></div>
+    <div><dt>Incumbent</dt><dd>{% if live %}<code>{{ live.model }}</code> on {{ live.node }}{% if le and le.source.revision %}<br><span class="muted">build <code title="{{ le.source.revision }}">{{ le.source.revision[:12] }}</code></span>{% endif %}{% elif nxt %}none: judged on absolute bars, there is nothing for it to be not worse than{% else %}<span class="muted">not recorded</span>{% endif %}</dd></div>
+    {% if move %}<div><dt>Kind</dt><dd>Re-placement: the same model, {{ move.from_node }} to {{ move.to_node }}</dd></div>{% endif %}
+    <div><dt>Estimated wall time</dt><dd>{% if plan.estimated %}{{ plan.estimated }}{% else %}<span class="muted">Unknown: no run has estimated it yet</span>{% endif %}</dd></div>
+    <div><dt>Disk needed</dt><dd>{% if plan.disk_gib is not none %}{{ plan.disk_gib }} GiB{% else %}<span class="muted">not recorded</span>{% endif %}</dd></div>
+  </dl>
+  <h3>Legs</h3>
+  <ol class="plain legs">{% for n in plan.legs %}<li><strong>{{ words.get(n, n) }}</strong></li>{% endfor %}</ol>
+  <p class="muted">{% if plan.from_status %}The legs the latest run planned.{% else %}The runner's default legs: no run on record has planned its own yet.{% endif %}</p>
+  <h3>When it runs</h3>
+  <p>{% if plan.window %}{{ plan.window }}. {% endif %}A run waits for a quiet window: it starts only after {{ plan.quiet.minutes }} minute(s) with {% if plan.quiet.maxProductionRequests == 0 %}no production requests{% else %}at most {{ plan.quiet.maxProductionRequests }} production request(s){% endif %} on the node, so measuring a candidate does not slow the people using it. A run that waits says why below.</p>
+</section>
+
+<section class="panel" aria-labelledby="runs-h">
+  <h2 id="runs-h">Runs</h2>
+  {% if problem %}<p class="warnbox">{{ badge("unknown", "Unknown") }} {{ problem }}.</p>{% endif %}
+  {% if latest %}
+  <p>{{ badge({"done": "ok", "failed": "critical", "aborted": "critical", "running": "warning", "waiting": "warning", "queued": "unknown"}.get(latest.state, "unknown"), latest.state_word) }} <code>{{ latest.run_id }}</code>
+    <span class="muted">· updated {{ latest.updated_ago or "at an unknown time" }}{% if latest.trigger %} · started by {{ latest.trigger }}{% endif %}{% if latest.node %} · {{ latest.node }}{% endif %}{% if latest.engine %} · {{ latest.engine }}{% endif %}{% if latest.set %} · set {{ latest.set }}{% endif %}</span></p>
+  {% if latest.state in ("waiting", "aborted", "failed") %}<p>{{ badge("critical" if latest.state != "waiting" else "warning", "Why") }} {{ latest.reason or "no reason was recorded" }}.</p>{% endif %}
+  {% if latest.stale %}<p class="warnbox">{{ badge("unknown", "Unknown") }} This run says {{ latest.state }} but its status was last written {{ latest.updated_ago }}. The runner may have stopped; this page cannot tell.</p>{% endif %}
+  {% if latest.state != "done" %}<p class="warnbox">{{ badge("warning", "Not finished") }} Nothing here says which model is better until the verdict. Numbers below are partial: a leg that has run for some cases does not predict its end, and a good start is not a result.</p>
+  {% else %}<p>{% if latest.label %}The runner's label for this run: <strong>{{ latest.label|capitalize }}</strong>. {% endif %}{% if latest.run_id in have_verdicts %}<a href="/models/v/{{ latest.run_id|urlencode }}">Read the comparison</a>, which has the numbers and what they rest on.{% else %}Its verdict record is not among the records this page reads yet{% if latest.evidence_pr %}: <a href="{{ latest.evidence_pr }}" rel="noopener noreferrer">the evidence pull request</a> carries it{% endif %}. Until it is, nothing counts toward promotion.{% endif %}</p>{% endif %}
+  <div class="table-wrap" role="region" aria-labelledby="legs-cap" tabindex="0">
+  <table>
+    <caption id="legs-cap" class="visually-hidden">The legs of run {{ latest.run_id }}</caption>
+    <thead><tr><th scope="col">Leg</th><th scope="col">State</th><th scope="col">{% if latest.state == "done" %}What it measured{% else %}So far{% endif %}</th></tr></thead>
+    <tbody>
+    {% for l in latest.legs %}
+      <tr><th scope="row">{{ l.word }}</th><td>{{ leg_badge(l) }}</td>
+        <td>{% if l.summary %}{{ l.summary }}{% endif %}{% if l.metrics %}<ul class="plain small">{% for k, v in l.metrics %}<li><span class="muted">{{ k }}</span> {{ v }}</li>{% endfor %}</ul>{% elif not l.summary %}<span class="muted">{% if l.state in ("done", "failed") %}no numbers recorded{% else %}nothing yet{% endif %}</span>{% endif %}</td></tr>
+    {% else %}
+      <tr><td colspan="3"><span class="muted">This run's status lists no legs.</span></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% if latest.estimated %}<p class="muted">Estimated {{ latest.estimated }}.</p>{% endif %}
+  {% if earlier %}
+  <details><summary>Earlier runs ({{ earlier|length }})</summary>
+    <ul class="plain">{% for r in earlier %}<li><code>{{ r.run_id }}</code> · {{ r.state_word }}{% if r.reason %}: {{ r.reason }}{% endif %} <span class="muted">· updated {{ r.updated_ago or "at an unknown time" }}{% if r.label %} · label {{ r.label }}{% endif %}</span>{% if r.run_id in have_verdicts %} · <a href="/models/v/{{ r.run_id|urlencode }}">comparison</a>{% endif %}</li>{% endfor %}</ul>
+  </details>
+  {% endif %}
+  {% elif not problem %}<p class="empty">{{ badge("unknown", "No run yet") }} No run is on record for <code>{{ alias }}</code>. Start an evaluation to queue one.</p>
+  {% else %}<p class="empty">No run can be listed.</p>{% endif %}
+  <p class="muted small">Read from run-status/1 files under <code>{{ status_dir }}/runs</code>, read only. {% if verdict_reading is not none %}{{ source_line(verdict_reading) }}{% endif %}</p>
+</section>
+{% endblock %}

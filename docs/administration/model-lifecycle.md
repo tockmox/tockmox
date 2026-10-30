@@ -263,11 +263,16 @@ new evaluation) is a gate failure.
 ### Reject and revert
 
 Both are commits you review, like every other change here, and nothing reverts
-on its own. In this release the alias page of the Tockmox UI
-(`/models/a/<alias>`) renders the revert change for you to review and commit,
-and each comparison has its own page (`/models/v/<run>`). A reject button, the
-PR opener's reject and revert lanes and the production health watch that would
-propose a revert are not built yet; reject is a function in `app/models.py`.
+on its own. The alias page of the Tockmox UI (`/models/a/<alias>`) renders the
+revert change, and each comparison page (`/models/v/<run>`) has a **Reject**
+button for a Fail, Worse or Tradeoff verdict: it asks for a reason, renders
+`models.reject`'s change and writes nothing. The PR opener has a lane for each
+(`python -m app.pr_opener reject CONFIG ALIAS-next --reason WHY [--apply]` and
+`revert CONFIG ALIAS --reason WHY [--apply]`): the same lane as admit and
+promote, so only one model-lifecycle PR is open at a time, and a refusal is
+`models.reject`'s or `models.revert`'s own sentence. The production health watch
+([below](#watching-a-promoted-model)) proposes the revert when a promoted build
+does worse than what it replaced.
 
 | Change | When | What it does |
 |---|---|---|
@@ -279,6 +284,99 @@ brand-new alias, is refused by name: route the alias by hand through the change
 it needs. If the promotion marked the old model `retired` and its files have
 since left the node, put them back before the revert merges; the change says so.
 An Inconclusive result opens nothing: it asks for more evidence.
+
+### Watching a promoted model
+
+A promotion is judged on an evaluation, and an evaluation is a sample. The health
+watch (off by default) looks at the real traffic afterwards. Every 15 minutes a
+small CronJob in the Tockmox UI image reads Prometheus and compares each promoted
+alias with what it served before its promotion (`promotion.previous`). A breach
+renders the revert change above as a pull request through the same bot as the
+admit and promote PRs, and sends an ntfy message. It reverts nothing itself and
+merges nothing.
+
+```yaml
+modelLifecycle:
+  healthWatch:
+    enabled: true
+    # image: defaults to tockmoxUi.image, the same build
+    soakDays: 14
+    rules:
+      errorRateRatio: 2.0          # the error rate above 2x the baseline ...
+      p95Ratio: 1.5                # ... or p95 latency above 1.5x ...
+      toolParseFailureRatio: 2.0   # ... or tool-call parse failures above 2x
+      minRequests: 50
+      forMinutes: 30               # ... held for 30 minutes
+      likeHours: true
+    pullRequests: true             # the revert PR, with watch.pullRequests and watch.secrets
+    notify:
+      ntfyUrl: http://tockmox-ntfy.tockmox-monitoring.svc
+      topicSecret: tockmox-health-watch-ntfy   # optional keys: token, topic (default topic: alerts)
+    autoRevert: {}                 # {<alias>: true}; off for every alias
+```
+
+**What it reads.** The gateway's own metrics, for the alias as callers name it
+(`requested_model`): the non-2xx share of
+`litellm_proxy_total_requests_metric_total` and the 95th percentile of
+`litellm_request_total_latency_metric_bucket`. These are the series the alert pack
+already uses, so the gateway needs its `prometheus` callback and a scrape. Because
+the alias is the history, the previous model's behaviour is simply the alias
+before the promotion; there is no per-model series to join. When
+`promotion.promotedAt` is not recorded (nothing writes it yet), the promotion time
+is the first hour in which the `model` label on the alias's latency histogram names
+the promoted model.
+
+**Two signals are not judged yet, and the status says so rather than skipping them
+silently.** Tool-call parse failures need a counter at the gateway hook, and none
+exists: the policy gate exports only its decisions and its audit failures. A site
+that adds a hook counter of tool-call responses with unparseable arguments, and one
+of tool-using responses, both labelled `requested_model`, names them in
+`rules.toolParseMetrics` and they are judged like the error rate. Thumbs are not
+exposed by the console to Prometheus. Both show as `unknown` and neither passes nor
+fails an alias.
+
+**Like hours.** A busy hour is not like a quiet one: errors and latency often rise
+with load. Each reading is a trailing window (`windowMinutes`, 60) and its baseline
+is the same window at the same time of day on each of the `baselineDays` (7) before
+the promotion, pooled. A model that is slower at 14:00 than at 03:00 is not worse
+for it. Set `likeHours: false` for a flat comparison over every window before the
+promotion, which will call an ordinary daily peak a breach.
+
+**Provisional baselines.** An alias with no history before the promotion (a new
+alias, or Prometheus retention shorter than the promotion) is judged against its own
+first 24 hours, at times of day within an hour of the reading. Nothing is judged
+until those 24 hours are over, and every line says "provisional".
+
+**The states.** Each promoted alias gets one, with reasons, in the job log (`kubectl
+logs` of the last job) and in the PR body:
+
+| State | Meaning | What happens |
+|---|---|---|
+| `ok` | judged and inside the limits, or past `soakDays` | nothing |
+| `breach` | a signal over its ratio, with at least `minRequests` in the window and in its baseline, at every reading for `forMinutes` | the revert PR and the ntfy message |
+| `inconclusive` | a signal cannot be trusted this run: Prometheus did not answer, the series has a hole, or the limit was crossed but has not yet held for `forMinutes` | nothing. It pauses and tries again |
+| `insufficient-data` | too few requests, no baseline yet, no promotion time, or no `promotion.previous` | nothing. It never breaches |
+
+One inconclusive signal pauses the alias even when another signal is over its
+limit. A breach opens no PR while another model-lifecycle PR is open (the opener
+takes one at a time); the ntfy message says so and the next run tries again. A
+revert the change cannot make (the previous model was itself rejected, the demoted
+build serves another alias) is reported by `models.revert`'s own refusal.
+
+**autoRevert.** `autoRevert: {<alias>: true}` marks that alias's revert PR for your
+own auto-merge: the title ends `[auto-merge requested]`, the commit carries
+`Tockmox-Auto-Merge: requested`, and on GitHub the PR is labelled
+`tockmox/auto-merge`. Tockmox ships no automation that acts on the mark and the
+watch has no merge call; what merges it is a rule you write. It is off for every
+alias, and an inconclusive alias is never marked.
+
+**What it needs.** The pod has no service-account token. Its NetworkPolicy allows
+DNS, Prometheus, ntfy when set, and (with `pullRequests`) HTTPS to the forge. The
+monitoring namespace's own policy admits only the Tockmox UI to Prometheus, so the
+policy layer must also admit `app.kubernetes.io/name: tockmox-health-watch`, or
+every alias reads as inconclusive. `pullRequests` is refused at render unless the
+watcher's opener has a way to authenticate (`watch.pullRequests.githubApp` or
+`watch.secrets.forgeToken`).
 
 ## Moving an existing gateway over
 
@@ -351,7 +449,9 @@ narrows it further. An in-cluster forge such as Forgejo goes under
 `modelLifecycle.watch.egress.extra`. The report lands on a small volume the UI
 mounts read-only.
 
-The render refuses the watcher with no image, pull requests to GitHub with
+`image` may be left empty: the watcher then runs in the UI's image
+(`tockmoxUi.image`), so moving the UI to a new build moves the watcher with it.
+The render refuses the watcher when neither is set, pull requests to GitHub with
 neither an App nor a token, and pull requests to Forgejo with no token Secret.
 Leave it off on an air-gapped site.
 
@@ -388,6 +488,98 @@ turns the duty off.
 For GGUF repos with several quantisations the watcher sizes only the one the
 catalog entry's `quant` names, and sizes nothing when it names none: the sum of
 every quantisation is not a file anyone loads.
+
+## The Inbox, the candidate page and the budget
+
+Three admin pages under Models turn the watcher's report and the eval runner's
+status files into something you decide from. Each is read only: every button
+renders a change for you to commit.
+
+**Inbox** (`/models/inbox`). One card per candidate in the watcher's report,
+tagged with why it is there: *New revision*, *Other quant*, *Successor*,
+*Hosted, new* or *Hosted, retiring*. A local candidate carries a fit chip per
+node (the same fit v2 arithmetic as Recommend; a size nobody knows reads
+Unknown, never fits), a licence chip against `modelLifecycle.recommend`'s allow
+list, and, when the model card reports them, its self-reported results under a
+label that says they are a hint and not a measurement. **Evaluate** renders the
+existing admit change. **Snooze 30 days** and **Dismiss** render a change to
+`modelLifecycle.inbox`:
+
+```yaml
+modelLifecycle:
+  inbox:
+    snoozed:   [{id: "quant:example-org/Example-30B-4bit", until: "2026-11-29"}]
+    dismissed: [{id: "successor:example-org/Example-3-27B", date: "2026-10-30"}]
+```
+
+The ids are the report's candidate ids. A snoozed candidate comes back on its
+date; a dismissed one stays hidden until the watcher finds a different candidate
+(a new revision has a new id). The watcher and the PR opener skip both lists as
+well, so a hidden candidate is not in the next report and is not opened as a PR.
+The hidden ones are listed at the foot of the Inbox. A card links an open admit
+PR when the report records one: the opener writes `pr` onto the candidate after
+it opens the admit PR, and the watcher carries it forward while the candidate is
+still found. A report that is missing, old or from a partial run is shown as
+Unknown, and an empty Inbox is then not called clean.
+
+**Hosted retirement.** A hosted model its provider is retiring shows "retires in
+N days" (or "retired on DATE" once past) on its Inbox card, on the Models
+catalog and on the alias page of a gateway alias that routes to it. The date
+comes from the provider's listing. A provider's API does not name a replacement,
+so name it yourself under the watcher's provider settings:
+
+```yaml
+modelLifecycle:
+  watch:
+    providers:
+      openrouter:
+        allow: ["anthropic/*"]
+        replacements: {"anthropic/example-old-3": "anthropic/example-model-9"}
+```
+
+The card then offers the replacement as a hosted candidate. Evaluate admits it
+to the eval gateway; the eval runner still holds a hosted candidate until a data
+class is enforced end to end (TM-1249), and the card says so.
+
+**Candidate** (`/models/c/<alias>`). The plan for an evaluation of
+`<alias>-next`: the alias it competes for, the incumbent, the legs (the latest
+run's, else the runner's defaults), the estimated wall time when a run has one,
+and the quiet-window rule it waits for. Below it, a strip from the runner's
+`run-status/1` files: each leg queued, running, done, failed or skipped, with
+partial numbers under a banner that says nothing here tells which model is
+better until the verdict. An aborted run shows its reason. A run that says
+running but has not been written for an hour is shown as Unknown. The files are
+read from `modelLifecycle.statusDir` (default `/var/lib/tockmox/evals`); mount
+the runner's status volume read only into the UI pod. A missing directory is
+Unknown, not an empty list.
+
+**Budget** (`/models/budget`). Per alias, requests over the window of
+`modelLifecycle.demandQuery`, each alias's share, and the share served by your
+own nodes. For hosted aliases, a cost when one is known:
+
+```yaml
+modelLifecycle:
+  budget:
+    spendQuery: 'sum by (model_group) (increase(litellm_spend_metric_total[7d]))'  # measured USD per alias or model
+    usdPerRequest: {big-hosted-chat: 0.012}                                         # your estimate, shown as an estimate
+```
+
+A measured figure beats an estimate. With neither, or when Prometheus does not
+answer, the figure reads Unknown. It is never 0. A local route has no per-request
+charge here; what it costs is the node, which this page does not price.
+
+New values keys: `modelLifecycle.inbox.snoozed`, `modelLifecycle.inbox.dismissed`,
+`modelLifecycle.statusDir`, `modelLifecycle.budget.spendQuery`,
+`modelLifecycle.budget.usdPerRequest` and
+`modelLifecycle.watch.providers.<provider>.replacements`. `modelLifecycle` is an
+experimental block, so they need no chart change.
+
+### -next routes carry the live alias's tags
+
+A candidate admitted for evaluation is a node route, so it is written with
+`model_info.endpoint_tier: local` and the live alias's `tags`. Without them the
+policy gate reads the deployment as off-site, and with tag filtering on, an
+untagged deployment serves no data class.
 
 ## The build on the node
 
@@ -463,6 +655,45 @@ missing, and a hash nobody computed each fail the check. A path that leaves the
 repo, symlinks included, is refused rather than hashed. The command prints
 warnings for bare-path entries and exits 1 on any problem.
 
+### What the eval runner measures
+
+`python -m app.runner run` writes one twin per leg and one verdict. Besides control,
+smoke, perf and quality it has three legs that exist because a model can answer well
+and still be wrong for the job:
+
+- **Prefill** (`kind: prefill`). Time to first token at several context lengths,
+  `--prefill-contexts` (default `4096,16384,32768,65536`), `--prefill-requests`
+  streamed requests per length (default 3, one at a time, `max_tokens` 16). The
+  prompt is filler sized at four characters per token, an estimate the twin says so
+  about; where the engine reports `prompt_tokens` that count is recorded beside it
+  (`prompt_tokens_at_<ctx>`). Each prompt opens with a fresh nonce, so a prefix cache
+  cannot answer it. A length over the route's maximum input (the request's
+  `max_input_tokens`, or `--max-input-tokens`) is skipped, not sent, and the twin
+  names the reason. Metrics are `ttft_ms_at_<ctx>`, each with its `n`.
+- **Tool-call reliability** (`kind: tool_reliability`). Runs for a set whose cases
+  offer tools, and always for class `agent` (a built-in six-prompt battery when the
+  set has none). `--tool-reliability-calls` calls (default 100, 0 turns it off) cycle
+  through the tool-bearing cases at temperature 0.7, each with its own seed, so the
+  figure is variance and not one draw. `parse_failure_rate` counts arguments that are
+  not a JSON object and calls printed into the reply text (`<tool_call>`,
+  `[TOOL_CALLS]`, a `{"name", "arguments"}` object); `wrong_tool_rate` counts a
+  different, unoffered or missing tool where one was expected;
+  `schema_violation_rate` counts arguments that break the tool's own schema. A
+  parse-failure rate above the set's `tool_parse_bar` (default 0.02) fails the verdict
+  whatever the quality, and the verdict's criterion says why. The other two rates are
+  recorded for the reader and do not fail a run alone. The twin names the engine and,
+  when the request carries `chat_template`, the chat template.
+- **Speed.** A set or request may carry `speed_criterion: {decode_tok_s_min_ratio: 0.5}`
+  (candidate over incumbent). The incumbent's perf leg then runs too, and a quality
+  pass that decodes slower than that ratio is labelled `tradeoff`: verdict
+  `inconclusive`, never counted toward a promotion, never a reset. It is for a person
+  to weigh. Every verdict from this runner carries a one-line `summary`, for example
+  `Better on quality (+0.12 pass rate), 4.3x slower decode, tool parse 0.0%`.
+
+Every new field is optional and, when present, checked: a malformed `summary`,
+`speed`, `speed_criterion` or `tool_reliability` in a verdict, or a bad
+`tool_parse_bar` or `speed_criterion` in a set, is refused; older verdicts read as before.
+
 ### Evidence pull requests
 
 The PR opener has a third kind besides admit and promote. `python -m
@@ -486,6 +717,129 @@ that **adds** those files. It is deliberately narrow:
   lane belongs to the values file alone.
 
 Without `--apply` it prints what it would open and writes nothing.
+
+### Shipped eval sets
+
+The UI image carries two public, synthetic sets under `tockmox-ui/app/evalsets/<class>/<version>/`, each a
+directory of `set.yaml` and `cases.jsonl` in the `eval-set/1` format. `large/v1` is a general-purpose bar for a
+large local model: 13 verbatim-copy cases (numbers, curly quotes, tabs, indentation, backslashes), 10 JSON
+extractions checked against a schema with the expected values pinned, 12 word problems graded on a final
+`Answer: <number>` line, 8 format-constraint cases and 5 short reasoning cases. `agent/v1` has 48 cases against 17
+home and office tool schemas: 36 must make exactly one call to the right tool with the right arguments, and 12 must
+be answered without a tool. Both have 48 cases (so neither is a screening set), a bar of 0.85, a margin and
+minimum effect of 0.05, and one epoch, and every passage and tool is written for the set. A set's identity is the
+hash of its two files, so editing a case is a new version: copy the directory to `v2`, never change `v1` after a
+verdict names it. The tests (`tests/test_shipped_evalsets.py`) hold each set to the known-bad control and to
+hand-written right and wrong replies, so a grader loosened by mistake turns the suite red. A site adds its own
+sets beside these; keep them `public` or `internal`, since the runner refuses a set classified above `internal`.
+## Running evaluations on a schedule
+
+The eval runner (`python -m app.runner run`) measures one candidate against what an
+alias serves now. This section is about starting it for you. Turn it on with
+`modelLifecycle.runner.enabled` (off by default). A CronJob, the scheduler, wakes
+every `schedule` (15 minutes), decides what is worth measuring, and starts at most
+one Job per node.
+
+**What it measures.** Every `<alias>-next` route that the eval gateway serves and
+whose catalog entry is at stage `candidate` is an admitted candidate: merging the
+admit PR was your consent to evaluate it. It is measured once per combination of
+the alias, the candidate's model and revision, the eval set and its sha256, the
+engine and its version, and the node. A run that finished (`done` or `failed`)
+for that combination is not started again by itself; change one of the five, or
+delete the run's status file, to measure again. A run that was `aborted`, because
+the node stopped answering, is tried again. The request it runs is built from the
+route and the catalog: the candidate is what `-next` serves, the incumbent is what
+the live alias serves, and with no live alias the comparison is judged on the
+absolute bars.
+
+**Which eval set.** The workload class of the alias decides it: the class a profile
+(`modelLifecycle.profiles.<id>.classes`) gives the alias, else the `promotion.class`
+on a catalog entry, else the alias's own name when it is `local-<class>` (or
+`<class>`) and the product ships a set for that class, so a first `local-large-next`
+candidate on a site with no profile is judged as `large`. The runner takes the highest version the product ships for that
+class (`tockmox-ui/app/evalsets/<class>/<version>/`) or your own, from the ConfigMap
+named in `runner.extraSetsConfigMap` (keys `<class>__<version>__set.yaml` and
+`<class>__<version>__cases.jsonl`); at the same version yours wins. An alias with no
+class, or a class with no set, waits with that sentence as its reason.
+
+**Which candidates.** Every admitted `<alias>-next` candidate, in alias order, one
+run at a time per node. `runner.aliases` narrows that to the live aliases you list
+(`[local-large]` schedules only `local-large-next`), which is how a first run on a
+new site measures one candidate before the others queue behind it.
+
+**When it starts.** Only in a quiet window. The scheduler asks Prometheus how many
+requests reached the node's live aliases through the production gateway in the last
+`quietWindow.minutes` (the gateway's `litellm_proxy_total_requests_metric`, per
+requested model; the eval gateway does not export it, so its own traffic never
+counts), to the node's live aliases in `inferenceNodes.routes` plus any listed in
+`runner.nodes.<id>.productionAliases` (a production alias your hand-written
+`model_list` puts on the node while `inferenceNodes.render` is off). More than
+`quietWindow.maxProductionRequests` (0 by default) and the run waits. The node's health URL must also answer 2xx: the engine's own health path
+(`/health` for mlx-lm, `/api/version` for Ollama, `/v1/models` otherwise) or
+`runner.nodes.<id>.healthUrl`. A Prometheus that does not answer counts as "cannot
+tell", and waits too. Waiting is not an error: the run shows state `waiting` with
+the reason ("node busy: 3 production requests in the last 10 min"), and starts on a
+later pass. Two runs for one node run one after the other; the second shows `queued`.
+
+**After an engine upgrade.** Tell the runner what the node runs now with
+`runner.nodes.<id>.engineVersion` (and `engine` if it differs from the endpoint's).
+When that differs from the engine in the last finished run of the build an alias
+serves on that node, the scheduler re-measures that build, smoke and perf only,
+with trigger `engine-upgrade`. It decides nothing: no verdict, no label, no
+promotion. If smoke checks that passed before now fail, or the 95th percentile
+latency rose by more than 25% or decode throughput fell by more than 20% at the same
+concurrency, the run's `reason` says which figures, with both numbers. The eval
+gateway serves a live alias only while a `-next` route sits beside it, so an upgrade
+re-evaluation for any other alias waits and says so.
+
+**What you see.** One file per run, `<statusDir>/runs/<run_id>.json`
+(`run-status/1`), on a small volume the Tockmox UI mounts read-only. It names the
+alias, class, candidate, incumbent, node, engine, eval set, trigger and state
+(`queued`, `waiting`, `running`, `done`, `aborted`, `failed`), the planned legs and
+where each is, and, once there is one, the verdict path and label. A status never
+names a winner; the verdict does. The evidence the Job writes (result twins,
+verdict, methodology) is under `<statusDir>/site/` laid out like the site repo, and
+the UI reads verdicts and results from there unless you set
+`modelLifecycle.verdictsDir` or `resultsDir`. With
+`modelLifecycle.runner.evidence.pullRequests: true` the Job then opens the evidence
+pull request with the watcher's settings and secrets (`modelLifecycle.watch
+.pullRequests` and `watch.secrets`; see "Evidence pull requests").
+
+**What it needs.**
+
+- `modelLifecycle.evalGateway.enabled`, and a peer in `evalGateway.allowedClients`
+  that selects the Job pods, which carry `tockmox.com/eval-client: "true"`:
+
+  ```yaml
+  modelLifecycle:
+    evalGateway:
+      allowedClients:
+        - podSelector: {matchLabels: {tockmox.com/eval-client: "true"}}
+  ```
+
+  An empty list admits nobody, and the chart refuses to render the runner with one.
+- The Tockmox UI image. It ships as source, so you build it. `runner.image` empty
+  means `tockmoxUi.image`, and that is what you want: **the runner must run the UI
+  image built from the same commit as this chart**, because the Job arguments, the
+  eval-set layout and the status files are agreed between the two. Bumping only one
+  of them is how the scheduler ends up passing a flag the runner does not know.
+- Endpoints and any `healthUrl` named by IPv4 address. The runner's NetworkPolicy
+  can admit an address and a port, not a host name, and the chart refuses a name.
+- Storage: the status volume (`runner.status`, 1Gi) is written by the scheduler and
+  the Job pods and read by the UI. ReadWriteOnce attaches to one node, so with the UI
+  on the chart requires the scheduler and the Jobs onto the UI pod's node and rolls
+  the UI without a surge; ReadWriteMany needs neither. With the UI off, use
+  ReadWriteMany.
+
+**What it can reach.** The scheduler is the only pod with a Kubernetes token, and
+the token is limited to creating, reading, listing, watching and deleting Jobs and
+reading Pods in this namespace. The Job pods have no token. Each has a NetworkPolicy
+and carries `tockmox.com/isolated`. The scheduler reaches DNS, the Kubernetes API
+(`tockmoxUi.networkPolicy.apiServer`, else `global.lanCIDR` on 6443), Prometheus in
+the monitoring namespace, and the nodes' endpoints. A Job reaches DNS, the eval
+gateway Service on 4000 and the nodes' endpoints, and, only with
+`evidence.pullRequests`, HTTPS to the internet outside every private range. A
+`prometheusUrl` of your own that is a host name needs a NetworkPolicy of yours.
 
 ## Fit, with the arithmetic shown
 
@@ -556,7 +910,9 @@ approvals like any other.
   MoE model reads only its active experts, so it needs an active-parameter figure
   (from the name, as in `80B-A3B`); without one it gets no prediction rather than
   a wrong one. The prediction ignores cache reads, so it is optimistic at long
-  context. It is a prior to rank by and is labelled predicted on the page.
+  context. It is a prior to rank by and is labelled predicted on the page, shown as a
+  whole-number range ("about 110 to 140 tokens/s"), never a decimal, until a perf
+  twin has measured the model on the node and the measured figure replaces it.
 - **Flags.** A licence that is not on the allow list (`apache-2.0` and `mit` by
   default), unknown, or admitted by a site exception; known issues, as data you can
   edit (the default list carries one: 4-bit mixture-of-experts models have drifted

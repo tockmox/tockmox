@@ -6,6 +6,8 @@
   <div><h1>Models</h1><p class="lede">Every model the platform runs, what it is pinned to, and what is waiting on a comparison. <span class="help" title="A new model is admitted to the eval gateway as a -next route beside the live alias, where no agent can call it. After {{ lc.required_passes }} passing comparisons against the current model{% if lc.required_by_class %} (per class: {% for k, v in lc.required_by_class.items() %}{{ k }} {{ v }}{% if not loop.last %}, {% endif %}{% endfor %}){% endif %} it is promoted and the alias moves on the production gateway. Each step is a change you commit.">How admission and promotion work</span></p></div>
   <div class="page-actions">
     {% if probe_on %}<form method="post" action="/models/builds"><input type="hidden" name="csrf" value="{{ user.csrf }}"><button class="btn-ghost" type="submit">Check builds on the nodes</button></form>{% endif %}
+    <a class="btn-ghost" href="/models/inbox">Inbox{% if inbox_count %} ({{ inbox_count }}){% endif %}</a>
+    <a class="btn-ghost" href="/models/budget">Budget</a>
     <a class="btn-ghost" href="/models/profiles">Workload profiles</a>
   </div>
 </div>
@@ -22,6 +24,8 @@
   {% endif %}
 </section>
 
+{% if inbox_why %}<p class="warnbox">{{ badge("warning", "Inbox settings") }} {{ inbox_why }}. Until that is fixed nothing is hidden from this list.</p>{% endif %}
+{% if hidden_count %}<p class="muted">{{ hidden_count }} candidate(s) are snoozed or dismissed and not listed here: <a href="/models/inbox">the Inbox</a> shows them.</p>{% endif %}
 {% set labels = {"revision": "New revisions of models you run", "digest": "New builds of Ollama models you run", "quant": "Other quantisations of models you run", "successor": "Newer models in families you run", "frontier": "New hosted models", "deprecation": "Hosted models being retired"} %}
 {% for kind, items in groups.items() if items %}
 <section class="panel" aria-labelledby="c-{{ kind }}-h">
@@ -31,6 +35,7 @@
     <li>
       <p><code>{{ c.model }}</code>{% if c.size_gib is not none %} <span class="muted">about {{ c.size_gib }} GiB (estimate)</span>{% endif %}{% if c.when %} <span class="muted">· {{ c.when[:10] }}</span>{% endif %}</p>
       <p class="muted">{{ c.detail }}{% if c.url %} · <a href="{{ c.url }}" rel="noopener noreferrer">upstream page</a>{% endif %}</p>
+      {% if kind == "deprecation" %}{% set rn = retire_note(c.when) %}<p>{{ badge(rn.badge, rn.text) }}{% if c.replacement %} <span class="muted">replacement named: <code>{{ c.replacement }}</code> (offered in <a href="/models/inbox">the Inbox</a>)</span>{% endif %}</p>{% endif %}
       {% if kind != "deprecation" %}
       <form method="post" action="/models/propose" class="inline">
         <input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="cid" value="{{ c.id }}">
@@ -60,7 +65,7 @@
         <td><a href="/models/a/{{ x.alias|urlencode }}"><code>{{ x.alias }}</code></a><div class="muted small">{% if x.live %}<code>{{ x.live.model }}</code>{% else %}nothing yet{% endif %}</div>{% if x.replacement %}<div class="small">{{ badge("warning", "Re-placement") }} <span class="muted">the same model, moving from {{ x.move.from_node }} to {{ x.move.to_node }}: decided by class <code>perf</code>, nothing is retired</span></div>{% endif %}</td>
         <td>{{ x.route.node }}</td>
         <td>{% if x.ready %}{{ badge("ok", "Ready to promote") }}{% elif x.counted %}{{ badge("warning", x.counted|length ~ " of " ~ x.required) }}{% else %}{{ badge("unknown", "0 of " ~ x.required) }}{% endif %}<div class="muted small">passing comparison(s){% if x.klass %} for class {{ x.klass }}{% endif %}{% if not x.entry %}; not in the catalog yet: add it before promoting{% endif %}{% if x.notes %}; {{ x.notes|join("; ") }}{% endif %}</div></td>
-        <td class="num"><a href="/models/evaluate?alias={{ x.route.alias|urlencode }}" class="small">Start an evaluation<span class="visually-hidden"> of {{ x.route.alias }}</span></a><br><a href="/models/promote?alias={{ x.route.alias|urlencode }}" class="small">{{ "Promote" if x.ready else "See the count" }}<span class="visually-hidden"> for {{ x.route.alias }}</span></a></td>
+        <td class="num"><a href="/models/c/{{ x.alias|urlencode }}" class="small">Plan and runs<span class="visually-hidden"> for {{ x.route.alias }}</span></a><br><a href="/models/evaluate?alias={{ x.route.alias|urlencode }}" class="small">Start an evaluation<span class="visually-hidden"> of {{ x.route.alias }}</span></a><br><a href="/models/promote?alias={{ x.route.alias|urlencode }}" class="small">{{ "Promote" if x.ready else "See the count" }}<span class="visually-hidden"> for {{ x.route.alias }}</span></a></td>
       </tr>
     {% endfor %}
     {% for e in hosted %}
@@ -116,9 +121,9 @@
     <tbody>
     {% for row in catalog %}{% set e = row.entry %}
       <tr><th scope="row"><a href="/models/m/{{ e.id|urlencode }}"><code>{{ e.model }}</code></a>{% if e.size_gib is not none %}<br><span class="muted">{{ e.size_gib }} GiB</span>{% endif %}</th>
-        <td>{{ badge({"promoted": "ok", "candidate": "warning", "retired": "unknown"}[e.stage], e.stage) }}{% if e.promotion %}<br><span class="muted">{{ e.promotion.evidence|length }} pass(es){% if e.promotion.evidence %}, last {{ e.promotion.evidence[-1].date }}{% endif %}</span>{% elif e.adopted %}<br><span class="muted">adopted {{ e.adopted }}</span>{% endif %}{% if e.pending %}<br><span class="muted">newer build pending</span>{% endif %}</td>
+        <td>{{ badge({"promoted": "ok", "candidate": "warning", "retired": "unknown", "rejected": "critical"}[e.stage], e.stage) }}{% if row.retire %}<br>{{ badge(row.retire.badge, row.retire.text) }}{% endif %}{% if e.stage == "rejected" and e.rejection %}<br><span class="muted">{{ e.rejection.date }}: {{ e.rejection.reason }}</span>{% endif %}{% if e.promotion %}<br><span class="muted">{{ e.promotion.evidence|length }} pass(es){% if e.promotion.evidence %}, last {{ e.promotion.evidence[-1].date }}{% endif %}</span>{% elif e.adopted %}<br><span class="muted">adopted {{ e.adopted }}</span>{% endif %}{% if e.pending %}<br><span class="muted">newer build pending</span>{% endif %}</td>
         <td>{{ e.source.kind }}{% if e.source.revision %}<br><code title="{{ e.source.revision }}">{{ e.source.revision[:7] }}</code>{% else %}<br><span class="muted">no pinned revision</span>{% endif %}</td>
-        <td>{% for r in row.routes %}{% if r.alias.endswith("-next") %}<code>{{ r.alias }}</code>{% else %}<a href="/models/a/{{ r.alias|urlencode }}"><code>{{ r.alias }}</code></a>{% endif %} <span class="muted">({{ r.node }})</span>{% if not loop.last %}<br>{% endif %}{% else %}<span class="muted">none</span>{% endfor %}</td>
+        <td>{% for r in row.routes %}{% if r.alias.endswith("-next") %}<code>{{ r.alias }}</code>{% else %}<a href="/models/a/{{ r.alias|urlencode }}"><code>{{ r.alias }}</code></a>{% endif %} <span class="muted">({{ r.node }})</span>{% if not loop.last %}<br>{% endif %}{% else %}{% for a in row.hosted_aliases %}<a href="/models/a/{{ a|urlencode }}"><code>{{ a }}</code></a> <span class="muted">(hosted)</span>{% if not loop.last %}<br>{% endif %}{% else %}<span class="muted">none</span>{% endfor %}{% endfor %}</td>
         <td>{{ e.track|join(", ") or "nothing" }}</td></tr>
     {% endfor %}
     </tbody>

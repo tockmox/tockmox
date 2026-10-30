@@ -190,7 +190,7 @@ def test_propose_new_adds_a_candidate_and_a_next_route_and_no_live_route():
     (e,) = add_lc.catalog
     assert (e.model, e.stage, e.source.revision) == (NEW, "candidate", "5" * 40) and e.adopted == ""
     (r,) = add_inv.routes
-    assert r.alias == "local-fast-next" and r.model_info == {"max_input_tokens": 8192}
+    assert r.alias == "local-fast-next" and r.model_info == {"max_input_tokens": 8192, "endpoint_tier": "local"}      # TM-1119: a node route says it is local
     assert "local-fast" not in {x.alias for x in add_inv.routes}
     assert all("local-fast-next" not in str(x.alias) for x in nm.gateway_routes(nm.Inventory(add_inv.nodes, add_inv.routes), "production"))
     assert any("absolute bars" in n for n in notes) and any("no agent can call it" in n for n in notes)

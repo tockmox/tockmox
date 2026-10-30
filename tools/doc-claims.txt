@@ -680,7 +680,7 @@ states: [0-9]+ blocks run on your workstation
 page:   charts/tockmox-policy/README.md
 claim:  over eight namespaces
 test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c '^kind: NetworkPolicy' | tr -d ' '
-expect: 46
+expect: 47
 states: [0-9]+ over eight namespaces
 
 # The same number, on the two pages that RESTATE it. Added hours after the entry
@@ -697,7 +697,7 @@ states: [0-9]+ over eight namespaces
 page:   docs/usage/what-you-get.md
 claim:  NetworkPolicies in total
 test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c '^kind: NetworkPolicy' | tr -d ' '
-expect: 46
+expect: 47
 states: [A-Za-z0-9]+ NetworkPolicies
 
 # A FOURTH restating page, found 2026-09-14 by executing install.md's own
@@ -707,7 +707,7 @@ states: [A-Za-z0-9]+ NetworkPolicies
 page:   docs/deployment/install.md
 claim:  NetworkPolicy
 test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c '^kind: NetworkPolicy' | tr -d ' '
-expect: 46
+expect: 47
 states: [0-9]+ NetworkPolicy$
 
 # Pod Security: the label says `restricted` on all eight namespaces and, from
@@ -734,7 +734,7 @@ states: [0-9]+ namespaces carry an enforce label
 page:   charts/tockmox-policy/README.md
 claim:  resources
 test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c '^kind: ' | tr -d ' '
-expect: 77
+expect: 78
 states: [0-9]+ resources
 
 # NOT PINNED, deliberately, and the reason is worth keeping: the placeholder
@@ -768,13 +768,13 @@ states: [0-9]+ exemptions
 page:   docs/usage/what-you-get.md
 claim:  rendered resources
 test:   tools/render-counts.sh --read total
-expect: 615
+expect: 616
 states: [0-9]+ rendered resources
 
 page:   docs/architecture.md
 claim:  resources** render with the CI values
 test:   tools/render-counts.sh --read total
-expect: 615
+expect: 616
 states: [0-9]+ resources\*\* render
 
 page:   docs/usage/what-you-get.md
@@ -784,10 +784,10 @@ expect: 10
 states: [0-9]+ \| Cross-layer CRDs
 
 page:   docs/usage/what-you-get.md
-claim:  | policy | 80 | Namespaces, 46 NetworkPolicies
+claim:  | policy | 81 | Namespaces, 47 NetworkPolicies
 test:   tools/render-counts.sh --read policy
-expect: 80
-states: [0-9]+ \| Namespaces, 46 NetworkPolicies
+expect: 81
+states: [0-9]+ \| Namespaces, 47 NetworkPolicies
 
 page:   docs/usage/what-you-get.md
 claim:  | platform | 234 | Traefik, MetalLB

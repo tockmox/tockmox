@@ -6,6 +6,7 @@
 <p><a href="/models">Models</a> · <a href="/models/a/{{ v.alias|urlencode }}">{{ v.alias }}</a></p>
 <h1>Comparison <code>{{ v.run_id }}</code></h1>
 <p class="lede">{{ badge(c.state, c.word, true) }} <code>{{ v.alias }}</code>: <code>{{ v.candidate.model }}</code>{% if v.absolute %} judged on absolute bars (there is no incumbent){% else %} against <code>{{ v.incumbent.model }}</code>{% endif %}. Class {{ v.klass }}, run {{ v.date }}, graded by {{ v.grader }}.</p>
+{% if error %}<p class="warnbox">{{ badge("critical", "Not rejected") }} {{ error }}</p>{% endif %}
 {% if v.placement %}<p>{{ badge("warning", "Re-placement") }} This measures a move of the same model from {{ c.move_text }}.</p>{% endif %}
 
 {% if c.screening %}<p class="warnbox">{{ badge("warning", "Screening") }} Screening: fewer than 30 cases, cannot say Better. A small set can show Same, Worse or Inconclusive, never an improvement worth moving an alias for.</p>{% endif %}
@@ -19,6 +20,21 @@
   {% else %}<p>{{ badge("unknown", "Not counted") }} {{ c.why_not }}.</p>{% endif %}
   <p class="muted small">Only a pass counts. A fail resets the count; an inconclusive neither counts nor resets. The same evidence twice counts once.</p>
 </section>
+
+{% if rj.show %}
+<section class="panel" aria-labelledby="rej-h">
+  <h2 id="rej-h">Reject this candidate</h2>
+  {% if rj.offered %}
+  <form method="post" action="/models/v/{{ v.run_id|urlencode }}/reject">
+    <input type="hidden" name="csrf" value="{{ user.csrf }}">
+    <p>This comparison came out {{ c.word|lower }}. Rejecting generates a change that takes <code>{{ rj.alias_next }}</code> off the eval gateway, so its node frees the memory, and marks <code>{{ rj.model }}</code> rejected with your reason, so the watcher does not offer this build again. A newer revision is a new candidate. Nothing changes until you commit it.</p>
+    <label for="reason">Why <span class="muted">(required, recorded on the catalog entry)</span></label>
+    <input id="reason" name="reason" type="text" value="{{ reason }}" autocomplete="off" required maxlength="400">
+    <button class="btn" type="submit">Generate the rejection</button>
+  </form>
+  {% else %}<p>{{ badge("unknown", "Unavailable") }} {{ rj.why }}.</p>{% endif %}
+</section>
+{% endif %}
 
 <section class="panel flush" aria-labelledby="num-h">
   <div class="panel-head"><h2 id="num-h">The numbers</h2></div>

@@ -1,0 +1,479 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+The eval runner on a schedule (TM-1261, TM-1264). OFF by default: modelLifecycle.runner.enabled.
+
+WHAT RUNS. One CronJob, the scheduler (`python -m app.runner schedule`), in the Tockmox UI image. Each pass it lists the
+admitted candidates (a live <alias>-next route on the eval gateway whose catalog entry is at stage candidate: merging the
+admit PR was the consent to evaluate it), skips every one that already has a finished run, waits until production has
+been quiet on the node (Prometheus) and the node answers its health URL, and creates ONE Job per node from the template
+rendered below. The Job (`python -m app.runner run`) measures through the eval gateway, writes its evidence under
+<statusDir>/site and moves a run-status/1 file through its legs. With modelLifecycle.runner.evidence.pullRequests it
+then opens the evidence PR with the watcher's opener config and secrets (`app.runner evidence-pr`, which runs
+`python -m app.pr_opener evidence`).
+
+AUTHORITY. The scheduler pod is the only pod here that holds a Kubernetes token: a Role in THIS namespace with
+create/get/list/watch/delete on Jobs and get/list on Pods, nothing else. The Job pods run as the same ServiceAccount with
+the token not mounted. Both pods carry tockmox.com/isolated (the policy layer's namespace-wide ingress allows skip them)
+and a NetworkPolicy of their own:
+  scheduler  ingress none; egress DNS, the Kubernetes API, Prometheus, the nodes' health URLs
+  Job        ingress none; egress DNS, the eval gateway Service on 4000, the nodes' health URLs, and, only with
+             evidence.pullRequests, HTTPS to the internet minus every private range (as the watcher)
+The Job pods carry tockmox.com/eval-client: "true". The eval gateway admits only modelLifecycle.evalGateway
+.allowedClients (empty means nobody), so the site adds a peer that selects that label. This chart refuses an empty list.
+
+THE STATUS VOLUME has three writers/readers: the scheduler and the Job pods write it, the Tockmox UI reads it. A
+ReadWriteOnce volume attaches to one node, so with the UI on the scheduler and the Job pods are required onto the UI pod's
+node, and the UI rolls with maxSurge 0 (tockmox-ui.yaml, as for the watcher's report). Without the UI nothing anchors the
+pods to one node, so the volume must be ReadWriteMany. ReadWriteOncePod cannot serve two pods and is refused.
+
+THE JOB TEMPLATE is part of the ConfigMap (job-template.yaml), so the pod spec lives in this chart and the scheduler only
+fills in the name, labels and the `runner` container's arguments.
+*/ -}}
+{{- define "tockmox-ai.evalRunnerJob" -}}
+{{- $c := .root -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  labels:
+    {{- include "tockmox.labels" $c | nindent 4 }}
+    app.kubernetes.io/name: tockmox-eval-run
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 43200
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        {{- include "tockmox.labels" $c | nindent 8 }}
+        app.kubernetes.io/name: tockmox-eval-run
+        tockmox.com/isolated: "true"
+        tockmox.com/eval-client: "true"
+    spec:
+      serviceAccountName: tockmox-eval-runner
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      {{- if .colocate }}
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector: { matchLabels: { app.kubernetes.io/name: tockmox-ui } }
+              topologyKey: kubernetes.io/hostname
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile: { type: RuntimeDefault }
+      {{- if .pr }}
+      initContainers:
+      {{- else }}
+      containers:
+      {{- end }}
+        - name: runner
+          image: {{ .image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: [python, -m, app.runner]
+          env:
+            - name: EVAL_GATEWAY_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .gwSecret | quote }}
+                  key: {{ .gwKey | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            {{- toYaml .res | nindent 12 }}
+          volumeMounts:
+            - { name: status, mountPath: {{ .statusDir | quote }} }
+            - { name: tmp, mountPath: /tmp }
+      {{- if .pr }}
+      containers:
+        - name: evidence-pr
+          image: {{ .image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: [python, -m, app.runner]
+          {{- with .forgeToken }}
+          env:
+            - name: TOCKMOX_BOT_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ . | quote }}, key: token } }
+          {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            {{- toYaml .res | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /config, readOnly: true }
+            - { name: status, mountPath: {{ .statusDir | quote }} }
+            - { name: tmp, mountPath: /tmp }
+            {{- if .appKey }}
+            - { name: bot-key, mountPath: /bot, readOnly: true }
+            {{- end }}
+      {{- end }}
+      volumes:
+        - name: status
+          persistentVolumeClaim: { claimName: tockmox-eval-runner-status }
+        - name: tmp
+          emptyDir: { sizeLimit: 256Mi }
+        {{- if .pr }}
+        - name: config
+          configMap: { name: tockmox-eval-runner }
+        {{- end }}
+        {{- if and .pr .appKey }}
+        - name: bot-key
+          secret:
+            secretName: {{ .appKeySecret | quote }}
+            defaultMode: 0440
+            items: [{ key: private-key.pem, path: private-key.pem }]
+        {{- end }}
+{{- end -}}
+{{- /* host:port of a URL, as [host port] (port defaulted from the scheme); fails on anything but an IPv4 address, which
+       is all a NetworkPolicy ipBlock can name. */ -}}
+{{- define "tockmox-ai.evalRunnerTarget" -}}
+{{- $u := urlParse .url -}}
+{{- $hp := splitList ":" $u.host -}}
+{{- $host := index $hp 0 -}}
+{{- $port := ternary "443" "80" (eq $u.scheme "https") -}}
+{{- if gt (len $hp) 1 -}}{{- $port = index $hp 1 -}}{{- end -}}
+{{- if not (regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$" $host) -}}
+{{- fail (printf "modelLifecycle.runner: %s (%s) names a host, not an IPv4 address: the runner's NetworkPolicy can only admit an address. Use the node's address in the endpoint url (or in runner.nodes.<id>.healthUrl)." .what .url) -}}
+{{- end -}}
+{{- dict "host" $host "port" $port | toJson -}}
+{{- end -}}
+{{- $lc := .Values.modelLifecycle | default dict -}}
+{{- $r := $lc.runner | default dict -}}
+{{- if $r.enabled -}}
+{{- $ui := .Values.tockmoxUi | default dict -}}
+{{- $image := $r.image | default (ternary ($ui.image | default "") "" (default false $ui.enabled)) -}}
+{{- if not $image -}}
+{{- fail "modelLifecycle.runner.enabled is true but modelLifecycle.runner.image is empty and tockmoxUi has no image to fall back to (tockmoxUi.enabled with tockmoxUi.image): the runner runs in the Tockmox UI image, which ships as source (TM-0902). Build it from the same commit as this chart, push it to your registry, and name it in tockmoxUi.image or modelLifecycle.runner.image." -}}
+{{- end -}}
+{{- $eg := $lc.evalGateway | default dict -}}
+{{- if not $eg.enabled -}}
+{{- fail "modelLifecycle.runner.enabled is true but modelLifecycle.evalGateway.enabled is false: the runner measures candidates through the eval gateway and has nothing to talk to without it" -}}
+{{- end -}}
+{{- if not $eg.allowedClients -}}
+{{- fail "modelLifecycle.runner.enabled is true but modelLifecycle.evalGateway.allowedClients is empty, which admits nobody: add a peer that selects the runner's Job pods, for example {podSelector: {matchLabels: {tockmox.com/eval-client: \"true\"}}}" -}}
+{{- end -}}
+{{- $st := $r.status | default dict -}}
+{{- $modes := $st.accessModes | default (list "ReadWriteOnce") -}}
+{{- if has "ReadWriteOncePod" $modes -}}
+{{- fail "modelLifecycle.runner.status.accessModes has ReadWriteOncePod: the scheduler and the Job pods write the status volume and the Tockmox UI reads it, several pods. Use ReadWriteOnce (the chart co-schedules them with the UI) or ReadWriteMany." -}}
+{{- end -}}
+{{- $uiOn := $ui.enabled | default false -}}
+{{- $rwx := has "ReadWriteMany" $modes -}}
+{{- if and (not $uiOn) (not $rwx) -}}
+{{- fail "modelLifecycle.runner.status.accessModes is ReadWriteOnce and the Tockmox UI is off: the scheduler and the Job pods would need the volume on one node with nothing to pin them there. Use ReadWriteMany, or turn the UI on." -}}
+{{- end -}}
+{{- $colocate := and $uiOn (not $rwx) -}}
+{{- $ev := $r.evidence | default dict -}}
+{{- $w := $lc.watch | default dict -}}
+{{- $pr := $w.pullRequests | default dict -}}
+{{- $sec := $w.secrets | default dict -}}
+{{- $appKey := ($pr.githubApp | default dict) -}}
+{{- if $ev.pullRequests -}}
+{{- if not $pr.enabled -}}
+{{- fail "modelLifecycle.runner.evidence.pullRequests is true but modelLifecycle.watch.pullRequests.enabled is not: the evidence PR is opened with the watcher's opener config and secrets, so name the forge and repo there" -}}
+{{- end -}}
+{{- if and (ne ($pr.forge | default "github") "github") (not $sec.forgeToken) -}}
+{{- fail "modelLifecycle.runner.evidence.pullRequests is on for a Forgejo forge but modelLifecycle.watch.secrets.forgeToken names no Secret: the opener needs the bot's token in it (key: token)" -}}
+{{- end -}}
+{{- if and (eq ($pr.forge | default "github") "github") (not $appKey) (not $sec.forgeToken) -}}
+{{- fail "modelLifecycle.runner.evidence.pullRequests is on for GitHub but neither watch.pullRequests.githubApp (appId) nor watch.secrets.forgeToken is set: the opener has no way to authenticate" -}}
+{{- end -}}
+{{- end -}}
+{{- $evPr := ternary true false (default false $ev.pullRequests) -}}
+{{- $statusDir := "/var/lib/tockmox/evals" -}}
+{{- $ns := .Values.namespaces | default dict -}}
+{{- $monNs := $ns.monitoring | default "tockmox-monitoring" -}}
+{{- $promUrl := $r.prometheusUrl | default (printf "http://tockmox-observability-kube-prometheus.%s.svc:9090" $monNs) -}}
+{{- $gwUrl := $r.gatewayUrl | default "http://tockmox-litellm-eval:4000" -}}
+{{- $in := .Values.inferenceNodes | default dict -}}
+{{- $np := $ui.networkPolicy | default dict -}}
+{{- $api := $np.apiServer | default list -}}
+{{- if and (not $api) ((.Values.global | default dict).lanCIDR) -}}
+{{- $api = list (dict "cidr" .Values.global.lanCIDR "port" 6443) -}}
+{{- end -}}
+{{- if not $api -}}
+{{- fail "modelLifecycle.runner.enabled needs the Kubernetes API server address for the scheduler's NetworkPolicy: set tockmoxUi.networkPolicy.apiServer (for example [{cidr: 10.0.0.10/32, port: 6443}]) or global.lanCIDR" -}}
+{{- end -}}
+{{- /* Where the runner may reach on the nodes: every endpoint's origin, and a healthUrl override. */ -}}
+{{- $targets := dict -}}
+{{- range $n := ($in.nodes | default list) -}}
+{{- range $ep := ($n.endpoints | default list) -}}
+{{- $t := include "tockmox-ai.evalRunnerTarget" (dict "url" $ep.url "what" (printf "inferenceNodes.nodes[%s].endpoints[%s].url" $n.id $ep.id)) | fromJson -}}
+{{- $_ := set $targets (printf "%s:%s" $t.host $t.port) $t -}}
+{{- end -}}
+{{- end -}}
+{{- range $id, $o := ($r.nodes | default dict) -}}
+{{- if $o.healthUrl -}}
+{{- $t := include "tockmox-ai.evalRunnerTarget" (dict "url" $o.healthUrl "what" (printf "modelLifecycle.runner.nodes.%s.healthUrl" $id)) | fromJson -}}
+{{- $_ := set $targets (printf "%s:%s" $t.host $t.port) $t -}}
+{{- end -}}
+{{- end -}}
+{{- $promIp := "" -}}
+{{- if $r.prometheusUrl -}}
+{{- $pt := urlParse $r.prometheusUrl -}}
+{{- if regexMatch "^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+(:[0-9]+)?$" $pt.host -}}
+{{- $promIp = include "tockmox-ai.evalRunnerTarget" (dict "url" $r.prometheusUrl "what" "modelLifecycle.runner.prometheusUrl") -}}
+{{- end -}}
+{{- end -}}
+{{- /* The config both pods read: the site's modelLifecycle (catalog, profiles ...) with the runner block resolved, and the
+       watcher's pull-request settings only when the evidence PR is on. */ -}}
+{{- $rcfg := omit (deepCopy $r) "image" "schedule" "status" "resources" "evidence" -}}
+{{- $_ := set $rcfg "gatewayUrl" $gwUrl -}}
+{{- $_ := set $rcfg "prometheusUrl" $promUrl -}}
+{{- $_ := set $rcfg "statusDir" $statusDir -}}
+{{- $_ := set $rcfg "setsDir" "/etc/tockmox-eval/sets" -}}
+{{- $_ := set $rcfg "jobTemplate" "/etc/tockmox-eval/job-template.yaml" -}}
+{{- $lcCfg := omit (deepCopy $lc) "watch" "runner" "evalGateway" -}}
+{{- $_ := set $lcCfg "runner" $rcfg -}}
+{{- if $evPr -}}
+{{- $wcfg := deepCopy $pr -}}
+{{- if and $appKey -}}
+{{- $_ := set $wcfg "githubApp" (merge (dict "privateKeyFile" "/bot/private-key.pem") (omit $appKey "privateKeyFile")) -}}
+{{- end -}}
+{{- if $sec.forgeToken -}}
+{{- $_ := set $wcfg "tokenEnv" "TOCKMOX_BOT_TOKEN" -}}
+{{- end -}}
+{{- $_ := set $wcfg "enabled" true -}}
+{{- $_ := set $lcCfg "watch" (dict "pullRequests" $wcfg) -}}
+{{- end -}}
+{{- $cfgText := dict "modelLifecycle" $lcCfg "inferenceNodes" $in | toYaml -}}
+{{- $res := $r.resources | default (dict "requests" (dict "cpu" "100m" "memory" "256Mi") "limits" (dict "memory" "1Gi")) -}}
+{{- $jobText := include "tockmox-ai.evalRunnerJob" (dict "root" $ "image" $image "res" $res "colocate" $colocate "pr" $evPr "appKey" $appKey
+      "appKeySecret" ($sec.githubAppKey | default "tockmox-model-watch-bot-app") "forgeToken" $sec.forgeToken "statusDir" $statusDir
+      "gwSecret" ($eg.masterkeySecretName | default "tockmox-litellm-eval") "gwKey" ($eg.masterkeySecretKey | default "masterkey")) -}}
+{{- $sum := printf "%s%s" $cfgText $jobText | sha256sum | trunc 16 -}}
+{{- $sets := $r.extraSetsConfigMap | default "" -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-eval-runner
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tockmox-eval-runner
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tockmox-eval-runner
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: tockmox-eval-runner }
+subjects:
+  - { kind: ServiceAccount, name: tockmox-eval-runner, namespace: {{ .Release.Namespace }} }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-eval-runner
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+{{ $cfgText | indent 4 }}
+  job-template.yaml: |
+{{ $jobText | indent 4 }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tockmox-eval-runner-status
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  accessModes: {{ toJson $modes }}
+  {{- with ($st.storageClass | default ((.Values.global | default dict).storageClass)) }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $st.size | default "1Gi" }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tockmox-eval-scheduler
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  schedule: {{ $r.schedule | default "*/15 * * * *" | quote }}
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      template:
+        metadata:
+          labels:
+            {{- include "tockmox.labels" . | nindent 12 }}
+            app.kubernetes.io/name: tockmox-eval-scheduler
+            tockmox.com/isolated: "true"
+          annotations:
+            checksum/config: {{ $sum | quote }}
+        spec:
+          serviceAccountName: tockmox-eval-runner
+          # the one pod here that calls the Kubernetes API (Jobs in this namespace)
+          automountServiceAccountToken: true
+          restartPolicy: Never
+          {{- if $colocate }}
+          affinity:
+            podAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector: { matchLabels: { app.kubernetes.io/name: tockmox-ui } }
+                  topologyKey: kubernetes.io/hostname
+          {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            fsGroup: 65534
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: scheduler
+              image: {{ $image | quote }}
+              imagePullPolicy: IfNotPresent
+              command: [python, -m, app.runner, schedule, --config, /etc/tockmox-eval/config.yaml]
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              resources:
+                {{- toYaml $res | nindent 16 }}
+              volumeMounts:
+                - { name: config, mountPath: /etc/tockmox-eval/config.yaml, subPath: config.yaml, readOnly: true }
+                - { name: config, mountPath: /etc/tockmox-eval/job-template.yaml, subPath: job-template.yaml, readOnly: true }
+                {{- if $sets }}
+                - { name: sets, mountPath: /etc/tockmox-eval/sets, readOnly: true }
+                {{- end }}
+                - { name: status, mountPath: {{ $statusDir | quote }} }
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: config
+              configMap: { name: tockmox-eval-runner }
+            {{- if $sets }}
+            - name: sets
+              configMap: { name: {{ $sets | quote }} }
+            {{- end }}
+            - name: status
+              persistentVolumeClaim: { claimName: tockmox-eval-runner-status }
+            - name: tmp
+              emptyDir: { sizeLimit: 64Mi }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tockmox-eval-scheduler
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-eval-scheduler
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    {{- range $api }}
+    - to:
+        - ipBlock: { cidr: {{ .cidr | quote }} }
+      ports:
+        - { port: {{ .port | default 6443 }}, protocol: TCP }
+    {{- end }}
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $monNs }} }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: prometheus }
+      ports:
+        - { port: 9090, protocol: TCP }
+    {{- if $promIp }}
+    {{- $pi := $promIp | fromJson }}
+    - to:
+        - ipBlock: { cidr: {{ printf "%s/32" $pi.host | quote }} }
+      ports:
+        - { port: {{ $pi.port }}, protocol: TCP }
+    {{- end }}
+    {{- range $k := keys $targets | sortAlpha }}
+    {{- $t := get $targets $k }}
+    - to:
+        - ipBlock: { cidr: {{ printf "%s/32" $t.host | quote }} }
+      ports:
+        - { port: {{ $t.port }}, protocol: TCP }
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tockmox-eval-run
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-eval-run
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    - to:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: tockmox-litellm-eval }
+      ports:
+        - { port: 4000, protocol: TCP }
+    {{- range $k := keys $targets | sortAlpha }}
+    {{- $t := get $targets $k }}
+    - to:
+        - ipBlock: { cidr: {{ printf "%s/32" $t.host | quote }} }
+      ports:
+        - { port: {{ $t.port }}, protocol: TCP }
+    {{- end }}
+    {{- if $evPr }}
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 100.64.0.0/10
+              - 169.254.0.0/16
+              - 127.0.0.0/8
+      ports:
+        - { port: 443, protocol: TCP }
+    {{- end }}
+{{- end }}

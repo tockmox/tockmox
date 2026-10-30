@@ -7,6 +7,7 @@ tockmox-platform backing-image-manager      Longhorn's manager starts one per no
 tockmox-platform instance-manager           Longhorn's manager starts one per node and engine
 tockmox-platform longhorn-recovery-backend  the label reaches longhorn-manager pods at run time: the chart's Service selects it, its DaemonSet template does not carry it
 tockmox-platform longhorn-webhook           the same: Service selects it, the template does not carry it
+tockmox-ai       tockmox-eval-run           the eval scheduler (tockmox-eval-scheduler) creates one Job per run; no template renders its pod (TM-1261)
 #
 # Pods the site runs. Tockmox ships the cage; what runs in it is the site's choice.
 tockmox-diagnostic default-deny             the diagnostic identity's namespace holds whatever agent the site starts in it

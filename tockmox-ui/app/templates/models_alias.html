@@ -1,9 +1,24 @@
 {% extends "base.html" %}
-{% from "macros.html" import badge %}
+{% from "macros.html" import badge, source_line %}
 {% block title %}{{ alias }}{% endblock %}
 {% block main %}
 <p><a href="/models">Models</a></p>
 <h1><code>{{ alias }}</code></h1>
+{% if hosted %}
+<p class="lede">Routes to the hosted model <code>{{ hosted.model }}</code> through the production gateway.{% if e %} The catalog has it at stage {{ badge({"promoted": "ok", "candidate": "warning", "retired": "unknown", "rejected": "critical"}[e.stage], e.stage) }}.{% else %} The catalog has no entry for this model.{% endif %}</p>
+<section class="panel" aria-labelledby="ret-h">
+  <h2 id="ret-h">Retirement</h2>
+  {% if retire %}
+  <p>{{ badge(retire.badge, retire.text, true) }}</p>
+  {% if retire.state == "retired" %}<p>The provider has retired this model. A request to <code>{{ alias }}</code> may already fail.</p>{% endif %}
+  {% if retire.replacement %}<p>Replacement named: <code>{{ retire.replacement }}</code>. It is offered for evaluation in <a href="/models/inbox">the Inbox</a>; a hosted candidate is held by the eval runner until the safety rails (TM-1249) enforce a data class end to end.</p>
+  <form method="post" action="/models/propose" class="inline"><input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="cid" value="{{ retire.candidate }}"><button class="btn-ghost" type="submit">Evaluate the replacement<span class="visually-hidden"> {{ retire.replacement }}</span></button></form>
+  {% else %}<p class="muted">The report names no replacement.</p>{% endif %}
+  {% elif reading and reading.reason == "not configured" %}<p>{{ badge("unknown", "Unknown") }} No watcher report is configured, so nothing says whether this model is being retired.</p>
+  {% elif reading and reading.state == "unknown" %}<p>{{ badge("unknown", "Unknown") }} The watcher's report is missing, old or incomplete, so nothing says whether this model is being retired. {{ source_line(reading) }}</p>
+  {% else %}<p class="empty">The watcher's report lists no retirement for this model.</p>{% endif %}
+</section>
+{% else %}
 <p class="lede">Serves <code>{{ live.model }}</code> on {{ live.node }} ({{ live.endpoint }}) through the production gateway.{% if e %} The catalog has it at stage {{ badge({"promoted": "ok", "candidate": "warning", "retired": "unknown", "rejected": "critical"}[e.stage], e.stage) }}.{% else %} The catalog has no entry for this model.{% endif %}</p>
 {% if error %}<p>{{ badge("critical", "Not reverted") }} {{ error }}</p>{% endif %}
 
@@ -58,4 +73,5 @@
   </form>
   {% else %}<p>{{ badge("unknown", "Unavailable") }} {{ revert.why }}</p>{% endif %}
 </section>
+{% endif %}
 {% endblock %}

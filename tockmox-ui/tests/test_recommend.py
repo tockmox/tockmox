@@ -5,6 +5,7 @@ It never admits anything and writes nothing."""
 import datetime
 import json
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -186,6 +187,36 @@ def test_without_a_sizes_section_everything_is_an_estimate_and_the_page_says_so(
     rec = rc.recommend("alpha", lc, nm.parse_inventory(inventory_doc()), None, cfg)
     assert any("no sizes section" in n for n in rec.notes)
     assert rec.classes and rec.stack_state in ("unknown", "fits", "tight", "over")
+
+
+def test_a_predicted_speed_is_a_whole_number_range_never_a_decimal():
+    """TM-1274: bandwidth over bytes read is good to about a tenth, so the page says a range."""
+    assert rc.speed_range(125.0) == (110, 140)
+    assert rc.speed_range(125.3) == (110, 150)               # whole numbers whatever the decimals of the arithmetic
+    assert rc.speed_range(42.0) == (35, 50) and rc.speed_range(4.3) == (3, 5)
+    assert rc.speed_range(None) is None and rc.speed_range(0) is None
+    for x in (3.1, 9.9, 19.9, 20.0, 99.9, 100.0, 612.4):
+        lo, hi = rc.speed_range(x)
+        assert isinstance(lo, int) and isinstance(hi, int) and lo < x < hi and hi - lo <= 0.3 * x + 20
+    rec, *_ = setup([record(DENSE)])
+    r = by_model(rec, "agent", DENSE)
+    assert r.tps and r.tps_range == rc.speed_range(r.tps) and r.tps_measured is None
+
+
+def test_the_page_shows_the_range_and_a_measured_twin_replaces_it(tmp_path):
+    c, u = client_with(tmp_path, [record(DENSE)])
+    t = c.get("/models/recommend?node=alpha").text
+    rec, *_ = setup([record(DENSE)])
+    lo, hi = by_model(rec, "agent", DENSE).tps_range
+    assert f"about {lo} to {hi} tokens/s <span" in t and re.search(r"about \d+\.\d+ tokens/s", t) is None
+    res = rs.parse(result_text(node="alpha", model=DENSE, metrics=[{"name": "decode_tps_p50", "value": 57.4, "unit": "tok/s", "n": 20, "concurrency": 1}]),
+                   "evals/results/alpha/x.json")
+    rec, *_ = setup([record(DENSE)], results=[res])
+    assert by_model(rec, "agent", DENSE).tps_measured == (57.4, "2026-10-20")
+    (tmp_path / "m").mkdir()
+    c2, u2 = client_with(tmp_path / "m", [record(DENSE)], results=True)          # its twin carries decode_tps_stream_p50 31.2
+    t2 = c2.get("/models/recommend?node=alpha").text
+    assert "31 tokens/s" in t2 and "measured 2026-10-20" in t2 and f"about {lo} to {hi} tokens/s <span" not in t2
 
 
 def test_a_moe_with_no_active_parameter_count_gets_no_speed_instead_of_a_wrong_one():

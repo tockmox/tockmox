@@ -61,6 +61,72 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **Two eval sets ship with the runner: `large/v1` and `agent/v1`.** Public and synthetic, 48 cases each,
+  under `tockmox-ui/app/evalsets/`. `large` covers verbatim copy, JSON extraction, arithmetic, format
+  constraints and short reasoning; `agent` covers tool selection and arguments (36 cases) and answering without
+  a tool (12). Each is held to the known-bad control and to hand-written right and wrong replies in
+  `tests/test_shipped_evalsets.py`. `docs/administration/model-lifecycle.md`, "Shipped eval sets".
+- **A production health watch for promoted models, off by default (REQ-0048 AC-48.19, TM-1263).**
+  `modelLifecycle.healthWatch` renders a CronJob in the Tockmox UI image that reads
+  Prometheus every 15 minutes and compares each promoted alias with what it served
+  before (`promotion.previous`) on error rate and p95 latency, at like hours of the
+  day (TM-1274) and inside `soakDays`. A breach renders the revert change as a PR
+  through the watcher's bot and sends an ntfy message; an inconclusive reading
+  renders nothing; `autoRevert` is per alias and only marks the PR. Tool-call parse
+  failures and thumbs show as unknown until the gateway hook and the console count
+  them. The monitoring namespace's policy must admit the pod to Prometheus.
+  `docs/administration/model-lifecycle.md`, "Watching a promoted model".
+- **The eval runner on a schedule, and a re-evaluation after an engine upgrade
+  (TM-1261, TM-1264).** `modelLifecycle.runner.enabled` (off by default) renders
+  a scheduler CronJob that finds every admitted `<alias>-next` candidate with no
+  finished run, waits for a quiet window on the node (production requests in the
+  last `quietWindow.minutes` at most `maxProductionRequests`, and the node's
+  health URL answering), and starts one Job per node that runs the evaluation
+  through the eval gateway. Only the scheduler holds a Kubernetes token (Jobs and
+  Pods in the release namespace). Progress is one `run-status/1` file per run on
+  a volume the Tockmox UI mounts read-only; the UI reads the runner's verdicts
+  and results from it unless `verdictsDir` and `resultsDir` are set. A change in
+  `runner.nodes.<id>.engineVersion` since the last finished run schedules the
+  incumbent for smoke and perf with trigger `engine-upgrade`; a regression is a
+  sentence in the status, never a verdict or a promotion. The runner runs in the
+  Tockmox UI image (`runner.image` empty means `tockmoxUi.image`), which must be
+  built from the same commit as the chart; the site adds a peer selecting
+  `tockmox.com/eval-client: "true"` to `evalGateway.allowedClients`.
+  `runner.aliases` limits the schedule to the candidates of the live aliases it
+  lists, `runner.nodes.<id>.productionAliases` adds production aliases a
+  hand-written `model_list` puts on the node to the quiet-window check, and an
+  alias with no class from a profile or a promotion record takes it from its
+  name (`local-large` is `large`) when a set ships for that class.
+  `tools/check-model-jobs-reach.sh` proves the scheduler and the health watch
+  are admitted to Prometheus by `tockmox-policy`.
+  `docs/administration/model-lifecycle.md`, "Running evaluations on a schedule".
+
+- **Models: an Inbox, a candidate page, a budget page, a Reject button, reject
+  and revert PRs, and a hosted retirement countdown (TM-1258, TM-1262, TM-1265,
+  TM-1119).** `/models/inbox` shows the watcher's candidates with a reason, a fit
+  per node and a licence, and Snooze and Dismiss render a change to
+  `modelLifecycle.inbox` that the watcher and the PR opener then skip;
+  `/models/c/<alias>` shows the plan and the runner's progress with no winner
+  before the verdict; `/models/budget` shows requests, hosted cost and the local
+  share, Unknown where nothing says. The comparison page can reject a Fail, Worse
+  or Tradeoff candidate, and `python -m app.pr_opener reject|revert` opens the
+  change as a PR. A `-next` route now carries the live alias's tags and
+  `endpoint_tier: local`. New keys: `modelLifecycle.inbox`, `.statusDir`,
+  `.budget` and `.watch.providers.<p>.replacements`.
+
+- **The eval runner measures prefill and tool-call reliability, and reads a
+  speed tradeoff (TM-1267, TM-1268, TM-1269, TM-1274).** New twin kinds
+  `prefill` (time to first token at 4096 to 65536 tokens, steps over the route's
+  maximum skipped with the reason) and `tool_reliability` (parse failures, wrong
+  tool, schema violations over 100 calls at temperature 0.7; a parse-failure
+  rate above the set's `tool_parse_bar`, default 0.02, fails the verdict whatever
+  the quality). A set or request `speed_criterion` makes a quality pass that
+  decodes too slowly read `tradeoff`, which never counts toward a promotion.
+  Verdicts gain a one-line `summary`; every new field is optional and checked.
+  Recommend shows a predicted decode speed as a whole-number range until a
+  measured twin replaces it. New flags: `--tool-reliability-calls`,
+  `--prefill-contexts`, `--prefill-requests`, `--max-input-tokens`.
+
 - **`tools/audit-keys.sh`: the gateway keys the key policy would refuse
   (TM-0991).** The policy sees a key only when it is written; this lists, from
   inside the LiteLLM pod and without printing any key, every existing key that
@@ -126,8 +192,7 @@ costs you, with the reasoning in the documentation rather than here.
   gateway, an AI node refuses it, and Recommend skips it. `models.reject` removes
   `<alias>-next` and records why; a promotion now records the route it replaced
   as `promotion.previous`, and `models.revert` points the alias back at it.
-  The alias page renders the revert change; a reject button and the PR opener's
-  lanes for both are not built yet.
+  The alias page renders the revert change.
 
 - **Two Models pages: a comparison and an alias (TM-1258).** `/models/v/<run>`
   shows one verdict answer first (its label), then the counts, the interval,
@@ -144,7 +209,7 @@ costs you, with the reasoning in the documentation rather than here.
   a seeded bootstrap interval) or, with no incumbent, a Wilson bound against the
   set's bar. Sets above `internal` and hosted candidates are refused until the
   safety rails land (TM-1249). Opening the evidence PR is unchanged
-  (`app.pr_opener`). No chart surface schedules it yet.
+  (`app.pr_opener`).
 
 - **A resilient profile that refuses to present itself as resilient without an
   off-cluster backup target (TM-0597).** `profiles/resilient.yaml`, added after
@@ -437,6 +502,11 @@ costs you, with the reasoning in the documentation rather than here.
   See `docs/administration/namespace-guard.md`.
 
 ### Changed
+
+- **The model watcher's image defaults to the UI's.** An empty
+  `modelLifecycle.watch.image` now runs the watcher in `tockmoxUi.image`, so a
+  site that moves its UI build moves the watcher with it; the render refuses only
+  when neither is set.
 
 - **Promotion counts independent evidence, and `requiredPasses` defaults to 1
   (TM-1248).** A passing verdict now counts once per evidence key (candidate

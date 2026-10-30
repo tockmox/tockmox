@@ -1279,6 +1279,267 @@
               "type": "object"
             }
           }
+        },
+        "healthWatch": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The production health watch CronJob (REQ-0048 AC-48.19): judges each promoted alias against what it served before, at like hours, and renders a revert PR on a breach. Off by default.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "image": {
+              "type": "string"
+            },
+            "schedule": {
+              "type": "string",
+              "minLength": 9
+            },
+            "prometheusUrl": {
+              "type": "string"
+            },
+            "soakDays": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "rules": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "errorRateRatio": {
+                  "type": "number",
+                  "minimum": 1
+                },
+                "p95Ratio": {
+                  "type": "number",
+                  "minimum": 1
+                },
+                "toolParseFailureRatio": {
+                  "type": "number",
+                  "minimum": 1
+                },
+                "minRequests": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "forMinutes": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "likeHours": {
+                  "type": "boolean"
+                },
+                "windowMinutes": {
+                  "type": "integer",
+                  "minimum": 15,
+                  "multipleOf": 15
+                },
+                "baselineDays": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "errorRateFloor": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "toolParseMetrics": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "failures": {
+                      "type": "string"
+                    },
+                    "total": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "autoRevert": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "boolean"
+              }
+            },
+            "notify": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "ntfyUrl": {
+                  "type": "string"
+                },
+                "topicSecret": {
+                  "type": "string"
+                }
+              }
+            },
+            "pullRequests": {
+              "type": "boolean"
+            },
+            "resources": {
+              "type": "object"
+            },
+            "egress": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "extra": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "runner": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The eval runner on a schedule (TM-1261, TM-1264): a scheduler CronJob that starts one Job per node. Experimental, like the block it sits in (its tier is modelLifecycle's, ruled 2026-10-08, re-rule 0.9.0). templates/eval-runner.yaml; docs/administration/model-lifecycle.md.",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "image": {
+              "type": "string",
+              "description": "The Tockmox UI image, built from the same commit as this chart. Empty means tockmoxUi.image."
+            },
+            "schedule": {
+              "type": "string",
+              "minLength": 9
+            },
+            "gatewayUrl": {
+              "type": "string",
+              "pattern": "^(https?://.+)?$"
+            },
+            "prometheusUrl": {
+              "type": "string",
+              "pattern": "^(https?://.+)?$"
+            },
+            "quietWindow": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "minutes": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 1440
+                },
+                "maxProductionRequests": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "steps": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 64
+              }
+            },
+            "perfRequests": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "workers": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            },
+            "toolReliabilityCalls": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            },
+            "prefillContexts": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 256
+              }
+            },
+            "status": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "size": {
+                  "type": "string"
+                },
+                "accessModes": {
+                  "type": "array",
+                  "items": {
+                    "enum": [
+                      "ReadWriteOnce",
+                      "ReadWriteMany",
+                      "ReadWriteOncePod"
+                    ]
+                  }
+                },
+                "storageClass": {
+                  "type": "string"
+                }
+              }
+            },
+            "nodes": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "engine": {
+                    "type": "string"
+                  },
+                  "engineVersion": {
+                    "type": "string"
+                  },
+                  "healthUrl": {
+                    "type": "string",
+                    "pattern": "^https?://.+"
+                  },
+                  "productionAliases": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+                    },
+                    "uniqueItems": true
+                  }
+                }
+              }
+            },
+            "aliases": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9.-]*$",
+                "not": {
+                  "pattern": "-next$"
+                }
+              },
+              "uniqueItems": true
+            },
+            "evidence": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "pullRequests": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "extraSetsConfigMap": {
+              "type": "string"
+            },
+            "resources": {
+              "type": "object"
+            }
+          }
         }
       }
     },

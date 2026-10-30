@@ -22,6 +22,11 @@ Labels, fixed rules (the thresholds are the class's policy, passed in, never inv
 A set under SCREENING_FLOOR cases is "screening": it may say Same, Worse or Inconclusive, never Better, because a
 small frozen set cannot show an improvement worth moving an alias for. The verdict a label maps to:
 Better or Same -> pass, Worse -> fail, Inconclusive -> inconclusive.
+
+Tradeoff (TM-1269) is a fifth label that only `apply_speed` produces: the quality pass held, but the candidate broke the
+set's speed criterion (for example decode under half the incumbent's tokens per second). It maps to verdict
+"inconclusive", so it neither counts toward a promotion nor resets the count (models.count_passes also skips it by
+label): a person decides whether the quality is worth the speed. A summary line says it in one sentence.
 """
 from __future__ import annotations
 
@@ -29,8 +34,11 @@ import math
 import random
 
 SCREENING_FLOOR = 30
-LABELS = ("better", "same", "worse", "inconclusive")
-LABEL_VERDICT = {"better": "pass", "same": "pass", "worse": "fail", "inconclusive": "inconclusive"}
+LABELS = ("better", "same", "worse", "inconclusive", "tradeoff")
+LABEL_VERDICT = {"better": "pass", "same": "pass", "worse": "fail", "inconclusive": "inconclusive",
+                 "tradeoff": "inconclusive"}
+SPEED_KEYS = ("decode_tok_s_min_ratio",)
+DEFAULT_TOOL_PARSE_BAR = 0.02
 METHODS = ("sign-test+bootstrap", "wilson", "rule")
 BOOT_ITERS = 4000
 
@@ -152,6 +160,7 @@ def decide(pairs, margin: float, min_effect: float, seed: int = 1, safety_fails:
     else:
         label = "inconclusive"
     out = {"label": label, "verdict": LABEL_VERDICT[label], "n": n, "wins": wins, "losses": losses, "ties": ties,
+           "effect": round(sum(diffs) / n, 6),
            "discordant": {"b": wins, "c": losses}, "p_value": round(sign_test(wins, losses), 6),
            "interval": [round(lo, 6), round(hi, 6)], "margin": margin, "min_effect": min_effect,
            "screening": screening, "method": "sign-test+bootstrap",
@@ -174,10 +183,84 @@ def decide_absolute(passed: int, n: int, bar: float) -> dict:
     else:
         label = "inconclusive"
     return {"label": label, "verdict": LABEL_VERDICT[label], "n": n, "wins": passed, "losses": n - passed, "ties": 0,
-            "interval": [round(lo, 6), round(hi, 6)], "bar": bar, "screening": screening, "method": "wilson"}
+            "rate": round(passed / n, 6), "interval": [round(lo, 6), round(hi, 6)], "bar": bar,
+            "screening": screening, "method": "wilson"}
+
+
+# ---------------------------------------------------------------- speed, tool reliability, and the one-line summary
+
+def check_speed_criterion(sc) -> dict:
+    """A speed criterion is {"decode_tok_s_min_ratio": r}: the candidate's decode tokens per second over the
+    incumbent's must be at least r (0 < r <= 10). Raises StatsError; returns a clean copy."""
+    if not isinstance(sc, dict) or not sc or not set(sc) <= set(SPEED_KEYS):
+        raise StatsError(f"speed_criterion must be a map of {list(SPEED_KEYS)}")
+    r = sc.get("decode_tok_s_min_ratio")
+    if isinstance(r, bool) or not isinstance(r, (int, float)) or not 0 < r <= 10:
+        raise StatsError("speed_criterion.decode_tok_s_min_ratio must be a number above 0 and at most 10")
+    return {"decode_tok_s_min_ratio": float(r)}
+
+
+def apply_speed(decision: dict, speed_criterion: dict | None, cand_tps: float | None, inc_tps: float | None) -> dict:
+    """Fold the speed comparison into a paired decision. Returns the decision with `quality_label` (what quality alone
+    said), `speed` ({candidate_tok_s, incumbent_tok_s, ratio}) when both were measured, and, when the criterion is
+    broken by a quality pass, label "tradeoff" and verdict "inconclusive". A criterion that cannot be evaluated (a
+    side with no decode figure) turns a pass into inconclusive too: an unmeasured speed is not a met one. A fail,
+    or an inconclusive, stays what it was."""
+    d = dict(decision)
+    d["quality_label"] = d["label"]
+    ratio = None
+    if cand_tps and inc_tps and cand_tps > 0 and inc_tps > 0:
+        ratio = cand_tps / inc_tps
+        d["speed"] = {"candidate_tok_s": round(cand_tps, 3), "incumbent_tok_s": round(inc_tps, 3), "ratio": round(ratio, 4)}
+    if speed_criterion and d["verdict"] == "pass":
+        need = check_speed_criterion(speed_criterion)["decode_tok_s_min_ratio"]
+        if ratio is None:
+            d["label"], d["verdict"] = "inconclusive", "inconclusive"
+            d["speed_note"] = "decode speed could not be measured on both sides, so the speed criterion could not be judged"
+        elif ratio < need:
+            d["label"], d["verdict"] = "tradeoff", "inconclusive"
+            d["speed_note"] = (f"decode at {ratio:.2f}x the incumbent's is below the criterion of {need:g}x: "
+                               "quality held, speed did not")
+    return d
+
+
+def summary_line(decision: dict, tool: dict | None = None, bar: float | None = None) -> str:
+    """One line a person reads first: "Better on quality (+0.12 pass rate), 4.3x slower decode, tool parse 0.0%".
+    `decision` is a decide / decide_absolute / apply_speed result; `tool` is the tool-reliability figures."""
+    q = decision.get("quality_label", decision["label"])
+    eff = decision.get("effect")
+    if decision.get("method") == "wilson":
+        rate = decision.get("rate")
+        part = {"same": "Meets the quality bar", "worse": "Below the quality bar"}.get(q, "Quality bar not settled")
+        if rate is not None:
+            part += f" (pass rate {rate:.2f}, bar {decision.get('bar', 0):.2f})"
+    else:
+        word = {"better": "Better on quality", "same": "Same quality", "worse": "Worse on quality",
+                "inconclusive": "Quality inconclusive"}.get(q, "Quality " + q)
+        part = word + (f" ({eff:+.2f} pass rate)" if eff is not None else "")
+    parts = [part]
+    sp = decision.get("speed")
+    if sp:
+        r = sp["ratio"]
+        if r < 0.95:
+            parts.append(f"{1 / r:.1f}x slower decode")
+        elif r > 1.05:
+            parts.append(f"{r:.1f}x faster decode")
+        else:
+            parts.append("decode speed about the same")
+    if tool and tool.get("parse_failure_rate") is not None:
+        t = f"tool parse {tool['parse_failure_rate'] * 100:.1f}%"
+        if bar is not None and tool["parse_failure_rate"] > bar:
+            t += f" (over the {bar * 100:.1f}% bar)"
+        parts.append(t)
+    return ", ".join(parts)
 
 
 # ---------------------------------------------------------------- reading the optional verdict fields
+
+def _pos(x) -> bool:
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and x > 0
+
 
 _SAMPLING_KEYS = {"temperature", "top_p", "thinking", "max_tokens", "seed", "epochs"}
 
@@ -259,6 +342,35 @@ def check_extras(d: dict) -> tuple[dict, list[str]]:
             problems.append("control must be {passed: bool, cases?}")
         else:
             ex["control"] = {"passed": c["passed"], "cases": c.get("cases")}
+    if "summary" in d:
+        if not isinstance(d["summary"], str) or not d["summary"].strip() or len(d["summary"]) > 300 or "\n" in d["summary"]:
+            problems.append("summary must be one line of at most 300 characters")
+        else:
+            ex["summary"] = d["summary"]
+    if "speed_criterion" in d:
+        try:
+            ex["speed_criterion"] = check_speed_criterion(d["speed_criterion"])
+        except StatsError as e:
+            problems.append(str(e))
+    if "speed" in d:
+        sp = d["speed"]
+        if not (isinstance(sp, dict) and all(_pos(sp.get(k)) for k in ("candidate_tok_s", "incumbent_tok_s", "ratio"))):
+            problems.append("speed must be {candidate_tok_s, incumbent_tok_s, ratio}, positive numbers")
+        else:
+            ex["speed"] = {k: float(sp[k]) for k in ("candidate_tok_s", "incumbent_tok_s", "ratio")}
+    if "tool_reliability" in d:
+        tr = d["tool_reliability"]
+        rates = ("parse_failure_rate", "wrong_tool_rate", "schema_violation_rate")
+        ok = isinstance(tr, dict) and isinstance(tr.get("n"), int) and not isinstance(tr.get("n"), bool) and tr["n"] >= 1 \
+            and all(isinstance(tr.get(k), (int, float)) and not isinstance(tr.get(k), bool) and 0 <= tr[k] <= 1 for k in rates) \
+            and (tr.get("bar") is None or (isinstance(tr["bar"], (int, float)) and not isinstance(tr["bar"], bool) and 0 <= tr["bar"] < 1))
+        if not ok:
+            problems.append("tool_reliability must be {parse_failure_rate, wrong_tool_rate, schema_violation_rate (0 to 1), n, bar?}")
+        else:
+            ex["tool_reliability"] = {**{k: float(tr[k]) for k in rates}, "n": tr["n"],
+                                      **({"bar": float(tr["bar"])} if tr.get("bar") is not None else {})}
+    if ex.get("label") == "tradeoff" and "speed_criterion" not in ex:
+        problems.append("a tradeoff label needs the speed_criterion it rests on")
     es = d.get("eval_set")
     if isinstance(es, dict) and "sha256" in es:
         if not (isinstance(es["sha256"], str) and len(es["sha256"]) == 64 and all(ch in "0123456789abcdef" for ch in es["sha256"])):

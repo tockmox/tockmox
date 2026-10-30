@@ -32,14 +32,14 @@
       <p>
         {{ badge({"fits": "ok", "tight": "warning", "over": "critical", "unknown": "unknown"}[r.fit.state], "Fit: " ~ r.fit.state) }}
         {% if r.fit.total_gib is not none %}{{ "%.1f"|format(r.fit.footprint.total_gib) }} GiB ({{ r.fit.provenance }}){% else %}size unknown{% endif %}
-        · {% if r.tps is not none %}about {{ r.tps }} tokens/s <span class="muted">predicted</span>{% else %}no speed predicted <span class="muted">({{ r.tps_how }})</span>{% endif %}
+        · {% if r.tps_measured %}{{ r.tps_measured[0]|round|int }} tokens/s <span class="muted">measured {{ r.tps_measured[1] }}, single stream</span>{% elif r.tps_range %}about {{ r.tps_range[0] }} to {{ r.tps_range[1] }} tokens/s <span class="muted">predicted</span>{% else %}no speed predicted <span class="muted">({{ r.tps_how }})</span>{% endif %}
         {% if r.endpoints %}<span class="muted">· on {{ r.endpoints|map(attribute=0)|join(", ") }}</span>{% endif %}
       </p>
       {% if r.flags %}<ul>{% for f in r.flags %}<li>{{ badge("warning" if f.severity == "warn" else "unknown", {"licence": "Licence", "issue": "Known issue", "hint": "Hint", "note": "Note"}[f.kind]) }} {{ f.text }}</li>{% endfor %}</ul>{% endif %}
       {% if r.hints %}<p class="muted">Hints, not measurements: {{ r.hints|join("; ") }}</p>{% endif %}
       <details><summary>The arithmetic</summary>
         <ul>{% for l in r.fit.lines %}<li>{{ l }}</li>{% endfor %}</ul>
-        {% if r.tps is not none %}<p>Decode: {{ r.tps_how }} = {{ r.tps }} tokens/s, single stream, predicted.</p>{% endif %}
+        {% if r.tps_range %}<p>Decode: {{ r.tps_how }}, about {{ r.tps_range[0] }} to {{ r.tps_range[1] }} tokens/s, single stream, predicted. It is shown as a range because the arithmetic is good to roughly a tenth either way; a measured figure replaces it once a run has timed the model on this node.</p>{% endif %}
       </details>
       {% if r.action == "incumbent" %}
       <p class="muted">{{ r.why_not }}.</p>
