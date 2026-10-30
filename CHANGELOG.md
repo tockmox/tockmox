@@ -503,6 +503,14 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Changed
 
+- **`tools/check-all.sh` needs a git clone and says so.** Run from an unpacked
+  archive it now stops at once and asks for `git clone`, where it used to run a
+  partial suite: several gates judge what git tracks, and outside a clone they
+  crashed (`check-pipe-grep-q.py`) or passed having read nothing. Those gates
+  report SKIPPED there now when run on their own, and
+  `check-immutable-fields.sh` with no baseline tag is counted as skipped, not
+  passed.
+
 - **The model watcher's image defaults to the UI's.** An empty
   `modelLifecycle.watch.image` now runs the watcher in `tockmoxUi.image`, so a
   site that moves its UI build moves the watcher with it; the render refuses only

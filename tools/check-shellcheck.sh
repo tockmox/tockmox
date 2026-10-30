@@ -104,6 +104,11 @@ if [ "${1:-}" = "--selftest" ]; then
 fi
 
 have_sc || { echo "  SKIPPED: shellcheck is not on PATH or cannot run"; exit 2; }
+# Outside a git checkout `git ls-files` lists nothing, and zero scripts with zero findings read "nothing new":
+# a pass that checked nothing. The scan set is what git tracks, so refuse instead.
+if [ -z "${SHELLCHECK_FILES:-}" ] && ! git --no-optional-locks rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "  SKIPPED: $(pwd) is not a git checkout, and the scripts checked are the ones git tracks"; exit 2
+fi
 # A failed mktemp must stop the run: an empty path collects no findings and the
 # report would read "nothing new", a pass that checked nothing.
 all="$(mktemp)" && [ -f "$all" ] || { echo "  SKIPPED: cannot create a temporary file"; exit 2; }

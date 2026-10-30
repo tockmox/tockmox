@@ -195,6 +195,17 @@ skip_gate() {
 echo "Tockmox static gates, run locally."
 echo "Repository: $(pwd)"
 
+# A CLONE, NOT AN UNPACKED ARCHIVE. Several gates judge `git ls-files` (what ships), two compare against the
+# previous release tag, and the tree-unchanged assertion at the end reads `git status`. Outside a git checkout
+# those either skip or, worse, pass having read nothing, so this refuses rather than report a partial suite as
+# a run. A change made in an archive also has no base blob ids to apply against a moved main.
+if ! git --no-optional-locks rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo
+  echo "NOT A GIT CHECKOUT: $(pwd)"
+  echo "check-all.sh needs a clone: git clone https://github.com/tockmox/tockmox.git"
+  exit 1
+fi
+
 # ---------------------------------------------------------------- dependencies
 missing=""
 have helm || missing="${missing} helm"
