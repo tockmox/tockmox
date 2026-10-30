@@ -164,6 +164,11 @@ def run(req: dict, es: EvalSet, *, gateway: str, key: str, node: str, engine: st
     env = dict(environment or {"runner": "tockmox-eval v0"})
     only = set(only or ("smoke", "perf", "quality"))
     pg = _Progress(progress)
+    run_id = run_id or f"{es.klass}-{alias}-{today.replace('-', '')}-{seed}"
+    # TM-1295: a run id that already has a verdict is refused before any leg runs, not after an hour of them
+    if "quality" in only and os.path.exists(os.path.join(out, "evals", "verdicts", f"{run_id}.json")):
+        raise RunError(f"evals/verdicts/{run_id}.json already exists: a run id is used once (give this run another id, "
+                       "or another seed)")
 
     if "quality" in only:
         with pg.leg("control"):
@@ -181,7 +186,7 @@ def run(req: dict, es: EvalSet, *, gateway: str, key: str, node: str, engine: st
     base = dict(date=today, node=node, model=cand["model"], revision=cand.get("revision", ""), quant=quant,
                 engine_id=engine, engine_version=engine_version, plane="gateway", methodology=METHOD_PATH,
                 environment=env, gateway={"route": cand_route}, tool={"id": "tockmox-eval", "version": "1"},
-                workload={"seed": seed})
+                workload={"seed": seed}, run=run_id)
 
     sm, pm = [], []
     if "smoke" in only:
@@ -316,7 +321,6 @@ def run(req: dict, es: EvalSet, *, gateway: str, key: str, node: str, engine: st
     for t in twins:
         written.append(_write_twin(out, t))
     _write_method(out)
-    run_id = run_id or f"{es.klass}-{alias}-{today.replace('-', '')}-{seed}"
     rec = {"schema": ml.VERDICT_SCHEMA, "run_id": run_id, "date": today, "class": es.klass, "alias": alias,
            "candidate": {k: v for k, v in cand.items() if k in ("model", "revision") and v},
            "eval_set": {"id": es.id, "version": es.version, "sha256": es.sha256}, "grader": "rule",
@@ -408,17 +412,15 @@ def _decode_tps(metrics, concurrency):
 
 
 def _write_twin(out, r: rs.Result):
-    """results.write_new, with a run-unique path for a quality leg (two classes, or the incumbent's leg, on one day)."""
+    """results.write_new's rule (a twin is never edited) at results.repo_path's name, which carries the run id."""
     rel = rs.repo_path(r)
-    if r.kind == "quality":
-        rel = rel.replace("-quality-", f"-quality-{r.klass}-")
     text = rs.dumps(r)
     full = os.path.join(out, rel)
     if os.path.exists(full):
         with open(full, encoding="utf-8") as f:
             if f.read() != text:
-                raise RunError(f"{rel} exists with other contents: a result is never edited, measure on another day "
-                               "or with another seed")
+                raise RunError(f"{rel} exists with other contents: a result is never edited (this run id already wrote "
+                               "it; give the run another id)")
     else:
         os.makedirs(os.path.dirname(full), exist_ok=True)
         with open(full, "w", encoding="utf-8") as f:

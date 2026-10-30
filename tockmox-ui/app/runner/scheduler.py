@@ -10,7 +10,7 @@ watcher (modelLifecycle and inferenceNodes), and does four things in a pass:
      admitted candidate: merging the admit PR was the consent to evaluate it. It is work unless a run-status/1 for the same
      (alias, candidate model and revision, eval set sha256, engine id and version, node, route digest) is already `done` or
      `failed`. A failed run is not retried by itself: change the build, the set, the engine or the route's provider and
-     params (TM-1295: turning thinking off on a -next route re-runs it), or delete the status file.
+     params (TM-1295: turning thinking off on a -next route re-runs it), or list its run id in runner.rerun.
      TM-1264: a node whose engine (id or version) differs from the one in the last `done` run of the build an alias serves gets
      a re-evaluation of the incumbent, trigger `engine-upgrade`, smoke and perf legs only. It decides nothing: a
      regression is written into the status `reason`, and no verdict, label or promotion follows from it.
@@ -88,6 +88,7 @@ class Settings:
     prefill_contexts: list = field(default_factory=lambda: [4096, 16384, 32768, 65536])
     nodes: dict = field(default_factory=dict)
     aliases: list = field(default_factory=list)      # runner.aliases: only these live aliases' candidates; empty = all
+    rerun: list = field(default_factory=list)        # runner.rerun: finished run ids to measure again (TM-1295)
     sets_dir: str = "/etc/tockmox-eval/sets"
     job_template: str = "/etc/tockmox-eval/job-template.yaml"
     namespace: str = ""
@@ -112,6 +113,7 @@ def parse_settings(cfg: dict) -> Settings:
     s.aliases = [str(a) for a in r.get("aliases") or []]
     if any(a.endswith(ml.NEXT) for a in s.aliases):
         raise SchedulerError("runner.aliases names live aliases (local-large), not their -next routes")
+    s.rerun = [str(x) for x in r.get("rerun") or []]
     s.sets_dir = str(r.get("setsDir") or s.sets_dir)
     s.job_template = str(r.get("jobTemplate") or s.job_template)
     s.namespace = str(r.get("namespace") or "")
@@ -545,9 +547,13 @@ def schedule(cfg: dict, kube, *, prom_transport=None, health_transport=None, dry
     order = {"admitted": 0, "engine-upgrade": 1}
     for w in sorted(works, key=lambda x: order[x.trigger]):
         existing = [d for d in statuses if status_key(d) == w.key()]
-        if any(d["state"] in ("done", "failed") for d in existing):
-            continue
+        finished = [d for d in existing if d["state"] in ("done", "failed")]
         live = next((d for d in existing if d["state"] in ("queued", "running", "waiting")), None)
+        # TM-1295: runner.rerun names finished runs to measure again; a newer finished run of the same work settles it
+        if finished and not all(d["run_id"] in s.rerun for d in finished):
+            continue
+        if finished and live is None:
+            log(f"{w.alias}: re-run requested (runner.rerun lists {', '.join(sorted(d['run_id'] for d in finished))})")
         if live and live["state"] == "running":
             continue
         if live and live.get("job") and run_label(live["run_id"]) in by_run:

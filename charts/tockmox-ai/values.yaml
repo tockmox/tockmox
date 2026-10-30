@@ -924,6 +924,10 @@ modelLifecycle:
     # Only these live aliases' <alias>-next candidates are scheduled; empty means every admitted candidate. A
     # first run on a new site, or one candidate you want measured before the others queue behind it on the node.
     aliases: []
+    # Run ids (run-status/1's run_id) to measure again although they finished: the next pass queues a new run for the
+    # same candidate, set, engine, node and route, under a new run id. A listed id whose combination already has a newer
+    # finished run is left alone, so the list can stay until you tidy it. TM-1295's explicit re-run request.
+    rerun: []
     evidence:
       pullRequests: false              # true: open the evidence PR with watch.pullRequests and watch.secrets
     extraSetsConfigMap: ""             # a ConfigMap of site eval sets: keys <class>__<version>__set.yaml and __cases.jsonl

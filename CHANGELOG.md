@@ -61,6 +61,13 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **`modelLifecycle.runner.rerun`: measure a finished evaluation again.** List
+  run ids (`run_id` from the run's status) and the next scheduler pass queues a
+  new run of the same candidate, set, engine, node and route, under a new run id.
+  An id whose work already has a newer finished run is left alone, so the list
+  can stay until you tidy it. No status file needs deleting by hand
+  (`docs/administration/model-lifecycle.md`, "Running evaluations on a schedule").
+
 - **Two eval sets ship with the runner: `large/v1` and `agent/v1`.** Public and synthetic, 48 cases each,
   under `tockmox-ui/app/evalsets/`. `large` covers verbatim copy, JSON extraction, arithmetic, format
   constraints and short reasoning; `agent` covers tool selection and arguments (36 cases) and answering without
@@ -687,6 +694,17 @@ costs you, with the reasoning in the documentation rather than here.
   checked 2026-10-29), so the licence terms in `docs/frontend-posture.md` stand.
 
 ### Fixed
+
+- **Two eval runs of one build on one day no longer collide on their result
+  files, and the evidence PR accepts quality twins.** A twin's file name was
+  its date, model, engine, leg and plane, so a re-run on the day of the first
+  run (after a route fix, say) measured every leg and then refused to write a
+  twin the first run had written, with no verdict. Twins the runner writes now
+  name their run (`capability-result/1` gains an optional `run`) and carry the
+  run id at the end of the file name; twins without it keep their names. A run
+  id that already has a verdict is refused before any leg runs. The quality
+  twin's class, which only the runner put in its name, is now part of
+  `results.repo_path`, so the evidence PR no longer refuses it.
 
 - **The eval runner no longer writes a Worse verdict for a thinking model
   whose route left thinking on.** A reply cut at `max_tokens` with no answer
