@@ -61,6 +61,58 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **A key policy on the production gateway, off by default (TM-0991).**
+  `modelGateway.keyPolicy` loads LiteLLM's own `custom_key_policy` hook, which
+  refuses with 403, on every key generate, update and regenerate: a key with no
+  model list or a wildcard one (except aliases you name; the console's key is
+  named for you), a key naming a `-next` candidate, and a new key that does not
+  state its MCP access. An unreadable policy refuses every key write. Turning it
+  on is two edits, and the render refuses one without the other. Measured on
+  LiteLLM 1.106.6 with the policy off: an empty-list key reached the hosted
+  backend, and so did a scoped key updated to an empty list; with it on, both
+  writes are refused (`tests/key-policy/run.sh`). The console-key Job states
+  `no-mcp-servers` for the console's key when the policy is on.
+  `docs/usage/ai-plane.md`, "Scope every key".
+
+- **Knowledge mode, off by default (TM-1256).** `knowledge` in the AI layer
+  configures Open WebUI's own Knowledge feature: embeddings, and optionally
+  reranking, through the gateway on local routes only, hybrid search, file
+  retention off, and optionally oikb (MIT) keeping Knowledge bases in sync with
+  git through a git-sync sidecar, fenced by its own NetworkPolicy. The render
+  refuses a source classified above `internal`, a model that is not a local
+  route, pgvector without the console on CloudNativePG, and four more. It is
+  the one named exception in `docs/frontend-posture.md`. The console carries
+  two new optional `extraEnvFrom` references (`tockmox-ai-knowledge-env`,
+  `tockmox-ai-knowledge-key`) on every install; absent, they change nothing.
+  `docs/administration/knowledge-mode.md`.
+
+- **Per-tool egress for agent tools, off by default (TM-1251).** `agentEgress`
+  in the policy layer makes a namespace of agent tools egress default-deny with
+  DNS, and gives each tool back either NetworkPolicy egress rules (the CIDR
+  tier) or its own Smokescreen proxy that allows only the names you list and
+  refuses private, link-local, metadata, cluster, service and LAN addresses
+  (the hostname tier). The proxy image is built from source. The rendered proxy
+  configuration is exercised in a real Smokescreen
+  (`tests/agent-egress/proxy-proof.sh`), and the fence was proved on
+  kube-router in the lab with a red leg (the same tool reaches the internet
+  with the policies removed). `docs/usage/ai-plane.md`, "Fence the tools agents
+  call".
+
+- **A gate that every NetworkPolicy selects a rendered pod (TM-1251).**
+  `tools/check-policy-selects.sh` renders every layer three ways (defaults,
+  every application on, the optional surfaces) and fails on a policy whose
+  `podSelector` matches no pod in its namespace, with operator-made and
+  site-run pods listed in `tools/policy-selects-exceptions.txt` with reasons;
+  an exception no pass needs fails too. `--selftest` plants a selector typo
+  and expects red.
+
+- **The render refuses an otel, Langfuse or Arize callback that would export
+  prompt content (TM-1250).** With LiteLLM message logging on, those callbacks
+  copy every prompt and response to their collector. Set
+  `litellm_settings.turn_off_message_logging: true`, or acknowledge a collector
+  you trust with `modelGateway.contentLogging: {acknowledged: true, reason:
+  ...}`.
+
 - **A `rejected` catalog stage, and reject and revert changes (TM-1258).** A
   build that failed its evaluation, or was reverted, is `stage: rejected` with
   `rejection: {reason, date}`: the gate refuses any route to it, on either

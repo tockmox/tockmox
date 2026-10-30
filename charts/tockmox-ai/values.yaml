@@ -482,6 +482,62 @@ modelGateway:
     files: {}
 
   # ------------------------------------------------------------------------
+  # THE KEY POLICY (TM-0991). Off by default in this release; the default render
+  # is unchanged. Turning it on is two edits, checked together by preflight:
+  #
+  #   modelGateway:
+  #     keyPolicy:
+  #       enabled: true
+  #   litellm:
+  #     proxy_config:
+  #       general_settings:
+  #         custom_key_policy: hooks.tockmox_key_policy.check
+  #
+  # (With inferenceNodes.render on, the second edit changes the gateway-config
+  # hash; the render prints the new value for litellm.podAnnotations.)
+  #
+  # On LiteLLM a virtual key whose model list is empty, absent, `*` or
+  # `all-proxy-models` can call EVERY model the gateway has, and a key with no
+  # MCP list can call every MCP tool server. default_key_generate_params only
+  # helps when a key is minted: a later update back to an empty list reopens it.
+  # This module is LiteLLM's custom_key_policy, which runs on every key
+  # generate, update and regenerate, and refuses (403, with the reason):
+  #   - a key with no model list or a wildcard one, except an alias named in
+  #     allowAllModelsAliases (the console key's alias is added automatically:
+  #     the console is meant to see every production model);
+  #   - a key that names a model ending in a refused suffix (`-next`: candidates
+  #     live on the eval gateway, never behind a production key);
+  #   - a new key that does not state its MCP access (send
+  #     object_permission.mcp_servers: ["no-mcp-servers"] for none), and an
+  #     update that empties that list.
+  # A policy file it cannot read refuses every operation (fail closed).
+  #
+  # templates/preflight.yaml refuses the module without the registration and
+  # the registration without the module. Keys that existed
+  # before it are untouched until next updated: list them with
+  # tools/audit-keys.sh. docs/usage/ai-plane.md, "Keys".
+  # ------------------------------------------------------------------------
+  keyPolicy:
+    enabled: false
+    allowAllModelsAliases: []
+    refuseSuffixes: ["-next"]
+    requireMcp: true
+
+  # ------------------------------------------------------------------------
+  # PROMPT CONTENT IN AN OBSERVABILITY CALLBACK (TM-1250). LiteLLM's otel,
+  # Langfuse and Arize callbacks copy every prompt and response to their
+  # collector unless litellm_settings.turn_off_message_logging is true, so the
+  # render refuses one of them with message logging on. If the collector is one
+  # you trust with prompt content, say so here, with the reason:
+  #   contentLogging: {acknowledged: true, reason: "self-hosted Langfuse in this namespace"}
+  # A client cannot switch redaction off per request on LiteLLM 1.106.6: the
+  # proxy strips its opt-out unless a key or team is granted
+  # allow_client_message_redaction_opt_out.
+  contentLogging:
+    acknowledged: false
+    reason: ""
+
+  # ------------------------------------------------------------------------
   # THE POLICY GATE (TM-0383). Off by default; the default render is unchanged.
   #
   # A pre-call hook that gives every request a CLASS and refuses one whose class
@@ -791,6 +847,54 @@ modelLifecycle:
       limits: { memory: 1Gi }
 
 # ---------------------------------------------------------------------------
+# KNOWLEDGE MODE (TM-1256; docs/administration/knowledge-mode.md). OFF.
+# Open WebUI's own Knowledge feature, configured the Tockmox way: embeddings
+# through the gateway on a LOCAL-tier route (refused otherwise), hybrid search,
+# file retention off, and optionally oikb keeping Knowledge bases in sync with
+# git. It is console state: it leaves with the console, and it holds PUBLIC or
+# INTERNAL material only (a shared console's Knowledge grant is a convenience
+# boundary, not a confidentiality one; ADR-0038). frontend-posture.md names it
+# as the one optional exception to "the console is a replaceable client".
+#
+#   knowledge:
+#     enabled: true
+#     embeddingModel: local-embed          # a gateway alias with endpoint_tier: local
+#     embeddingDimensions: 1024
+#     vectorStore: chroma                  # or pgvector, only with the console on CNPG
+#     sync:
+#       enabled: true
+#       image: registry.example/oikb@sha256:...       # build or mirror it, pin the digest
+#       gitSyncImage: registry.k8s.io/git-sync/git-sync@sha256:...
+#       apiKeySecret: {name: tockmox-knowledge-sync, key: api-key}   # an Open WebUI API key of the sync user
+#       sourceEgress:
+#         - to: [{ipBlock: {cidr: 10.0.0.20/32}}]
+#           ports: [{port: 443, protocol: TCP}]
+#       sources:
+#         - {name: handbook, repo: https://forge.example/acme/handbook.git, ref: main, path: docs,
+#            knowledgeId: 7f3c..., classification: internal}
+# ---------------------------------------------------------------------------
+knowledge:
+  enabled: false
+  embeddingModel: ""
+  embeddingDimensions: 1024
+  rerankModel: ""                     # a local rerank alias; reranks through the gateway's /v1/rerank
+  vectorStore: chroma
+  hybridSearch: true
+  topK: 8
+  chunkSize: null
+  doclingUrl: ""
+  sync:
+    enabled: false
+    image: ""
+    gitSyncImage: ""
+    consoleUrl: ""                     # empty = the console Service of this release
+    apiKeySecret: {name: tockmox-knowledge-sync, key: api-key}
+    interval: 15m
+    gitPeriod: 5m
+    sourceEgress: []
+    sources: []
+
+# ---------------------------------------------------------------------------
 # THE TOCKMOX UI (experimental in 0.8.0; Jeff 2026-10-07). The admin console
 # for inference nodes and model lifecycle: it reads the cluster, Prometheus
 # and these blocks, and every change it makes ends in YAML an admin commits.
@@ -1095,6 +1199,14 @@ open-webui:
   extraEnvFrom:
     - secretRef:
         name: tockmox-ai-sso-env
+        optional: true
+    # Knowledge mode's settings (TM-1256), from the parent-rendered ConfigMap; absent unless knowledge.enabled.
+    - configMapRef:
+        name: tockmox-ai-knowledge-env
+        optional: true
+    # ... and its gateway key (RAG_OPENAI_API_KEY, RAG_EXTERNAL_RERANKER_API_KEY), a Secret the site creates.
+    - secretRef:
+        name: tockmox-ai-knowledge-key
         optional: true
     # THE FIRST-ACCOUNT WINDOW, CLOSED BY CONSTRUCTION (TM-0859, ruled for 0.8.0).
     # Open WebUI makes the first account it ever creates an administrator,

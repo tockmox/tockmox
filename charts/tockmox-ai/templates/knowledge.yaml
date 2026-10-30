@@ -1,0 +1,286 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+KNOWLEDGE MODE (TM-1256; DESIGN-2026-10-29-document-qa Option A). OFF by default.
+
+Configures Open WebUI's own Knowledge feature the Tockmox way, and keeps a Knowledge base in sync with a git
+repository. It is CONSOLE STATE: it leaves with the console, nothing else in Tockmox depends on it, and it holds public
+or internal material only (docs/frontend-posture.md, "Knowledge mode"). Restricted material belongs in a separate index,
+or on a single-principal console (ADR-0038's personal instance).
+
+What it renders:
+  - ConfigMap tockmox-ai-knowledge-env, read by the console through the shipped optional extraEnvFrom entry: embeddings
+    through the gateway (RAG_OPENAI_API_BASE_URL and RAG_OPENAI_API_KEY default to the console's own gateway URL and
+    key, so no second credential), hybrid search, Docling when named, the vector store, and file retention off (a
+    removed source file leaves the index);
+  - when knowledge.sync is on: oikb (MIT, the Open WebUI project's sync daemon) with a git-sync sidecar writing into an
+    emptyDir, so oikb only ever reads a local directory (forge-agnostic: oikb does not claim Forgejo, the sidecar does not
+    care) and git is the source of truth: restoring the console is "restore its database, then resync";
+  - a NetworkPolicy fencing the sync pod: ingress from nobody, egress to the console and to the source hosts only.
+
+Refused at render time, each a quiet failure otherwise:
+  - a source classified above internal (a shared console's Knowledge grant is a convenience boundary, not a
+    confidentiality one);
+  - an embedding model that is not a local-tier gateway route (documents would leave the site to be embedded);
+  - vectorStore pgvector when the console is not on CNPG (modelGateway.upgradeBackup.openWebuiClusterName): records in
+    one restore unit and vectors in another is the split-restore trap;
+  - a source with no Knowledge base id, or two sources writing one Knowledge base.
+*/ -}}
+{{- $k := .Values.knowledge | default dict -}}
+{{- if and $k.enabled (include "tockmox.appEnabled" (dict "ctx" $ "app" "openWebui")) -}}
+{{- if not $k.embeddingModel -}}
+{{- fail "knowledge.enabled is true but knowledge.embeddingModel is empty: name the gateway alias that embeds (a local-tier route)." -}}
+{{- end -}}
+{{- $routes := ((.Values.litellm | default dict).proxy_config | default dict).model_list | default list -}}
+{{- if (((.Values.inferenceNodes | default dict).render | default dict).enabled) -}}
+{{- $routes = concat $routes (include "tockmox-ai.nodeRoutes" (dict "root" $ "gateway" "production") | fromYamlArray) -}}
+{{- end -}}
+{{- if not (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm")) -}}
+{{- fail "knowledge.enabled is true but the gateway (apps.litellm) is off: Knowledge mode embeds through the gateway or not at all." -}}
+{{- end -}}
+{{- /* Every model Knowledge mode calls must be a LOCAL route on the production gateway. Local: a hand-written route
+that says endpoint_tier: local, or a route derived from a site inference node (tockmox_node) unless it says otherwise.
+Anything else could leave the site. */ -}}
+{{- $calls := list (list "embeddingModel" $k.embeddingModel "embedded") -}}
+{{- with $k.rerankModel -}}{{- $calls = append $calls (list "rerankModel" . "reranked") -}}{{- end -}}
+{{- range $calls -}}
+{{- $field := index . 0 -}}{{- $alias := index . 1 -}}{{- $verb := index . 2 -}}
+{{- $hit := dict -}}
+{{- range $routes -}}{{- if eq (.model_name | default "") $alias -}}{{- $hit = . -}}{{- end -}}{{- end -}}
+{{- if not $hit -}}
+{{- fail (printf "knowledge.%s %q is not a model on the production gateway (litellm.proxy_config.model_list or the inference-node routes)." $field $alias) -}}
+{{- end -}}
+{{- $info := $hit.model_info | default dict -}}
+{{- $tier := $info.endpoint_tier | default (ternary "local" "external" (hasKey $info "tockmox_node")) -}}
+{{- if ne $tier "local" -}}
+{{- fail (printf "knowledge.%s %q is not a local-tier route (model_info.endpoint_tier: local). Every document would leave the site to be %s; Knowledge mode calls local models or none." $field $alias $verb) -}}
+{{- end -}}
+{{- end -}}
+{{- /* The gateway, named explicitly. Open WebUI 0.12.4 does NOT default the RAG URL to the console's gateway:
+config.py resets OPENAI_API_BASE_URL to https://api.openai.com/v1 after building its URL lists, and
+RAG_OPENAI_API_BASE_URL defaults to that, so an unset URL sends every document to OpenAI (TM-1256 build, 2026-10-29). */ -}}
+{{- $gw := printf "http://%s-litellm:4000/v1" .Release.Name -}}
+{{- $store := $k.vectorStore | default "chroma" -}}
+{{- if not (has $store (list "chroma" "pgvector")) -}}
+{{- fail (printf "knowledge.vectorStore must be chroma or pgvector, got %q" $store) -}}
+{{- end -}}
+{{- $onCnpg := ((.Values.modelGateway | default dict).upgradeBackup | default dict).openWebuiClusterName -}}
+{{- if and (eq $store "pgvector") (not $onCnpg) -}}
+{{- fail "knowledge.vectorStore is pgvector but the console is not on CNPG (modelGateway.upgradeBackup.openWebuiClusterName is empty). Its records would restore from the console volume and its vectors from a database, at two different points. Move the console to CNPG first, or keep chroma, which lives on the same volume as the records." -}}
+{{- end -}}
+{{- $kbs := dict -}}
+{{- range ($k.sync | default dict).sources | default list -}}
+{{- if not (has (.classification | default "") (list "public" "internal")) -}}
+{{- fail (printf "knowledge.sync.sources %q is classified %q: Knowledge mode holds public or internal material only. A Knowledge grant on a shared console is enforced by the console alone; restricted material belongs in its own index, or on a console one person uses." (.name | default "?") (.classification | default "unset")) -}}
+{{- end -}}
+{{- if not .knowledgeId -}}
+{{- fail (printf "knowledge.sync.sources %q has no knowledgeId: create the Knowledge base in the console (owned by the sync user) and name its id." (.name | default "?")) -}}
+{{- end -}}
+{{- if hasKey $kbs .knowledgeId -}}
+{{- fail (printf "knowledge.sync.sources %q and %q both write Knowledge base %s: each would delete what the other added." (index $kbs .knowledgeId) .name .knowledgeId) -}}
+{{- end -}}
+{{- $_ := set $kbs .knowledgeId .name -}}
+{{- if not (regexMatch "^https://" (.repo | default "")) -}}
+{{- fail (printf "knowledge.sync.sources %q: repo must be an https:// URL" (.name | default "?")) -}}
+{{- end -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-ai-knowledge-env
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+data:
+  RAG_EMBEDDING_ENGINE: "openai"
+  RAG_OPENAI_API_BASE_URL: {{ $gw | quote }}
+  RAG_EMBEDDING_MODEL: {{ $k.embeddingModel | quote }}
+  {{- /* the key: RAG_OPENAI_API_KEY (and RAG_EXTERNAL_RERANKER_API_KEY) from Secret tockmox-ai-knowledge-key, which
+  the site mints scoped to these aliases (docs/administration/knowledge-mode.md). Without it the gateway answers 401:
+  nothing is embedded, and nothing leaves. */}}
+  {{- with $k.rerankModel }}
+  RAG_RERANKING_ENGINE: "external"
+  RAG_RERANKING_MODEL: {{ . | quote }}
+  RAG_EXTERNAL_RERANKER_URL: {{ printf "%s/rerank" $gw | quote }}
+  {{- end }}
+  BYPASS_RETRIEVAL_ACCESS_CONTROL: "false"
+  ENABLE_RAG_HYBRID_SEARCH: {{ ternary "true" "false" (ne (toString $k.hybridSearch) "false") | quote }}
+  RAG_TOP_K: {{ $k.topK | default 8 | quote }}
+  RAG_TOP_K_RERANKER: {{ $k.topK | default 8 | quote }}
+  ENABLE_KNOWLEDGE_FILE_RETENTION: "false"
+  {{- with $k.chunkSize }}
+  CHUNK_SIZE: {{ . | quote }}
+  {{- end }}
+  {{- with $k.doclingUrl }}
+  CONTENT_EXTRACTION_ENGINE: "docling"
+  DOCLING_SERVER_URL: {{ . | quote }}
+  {{- end }}
+  VECTOR_DB: {{ $store | quote }}
+  {{- if eq $store "pgvector" }}
+  PGVECTOR_CREATE_EXTENSION: "false"
+  PGVECTOR_INDEX_METHOD: "hnsw"
+  {{- if gt (int ($k.embeddingDimensions | default 1024)) 2000 }}
+  PGVECTOR_USE_HALFVEC: "true"
+  {{- end }}
+  PGVECTOR_INITIALIZE_MAX_VECTOR_LENGTH: {{ $k.embeddingDimensions | default 1024 | quote }}
+  {{- end }}
+  {{- if ($k.sync | default dict).enabled }}
+  {{- /* The sync daemon signs in with an Open WebUI API key (off by default in 0.12.4), and every API key on the
+  console is then limited to the Knowledge and file endpoints oikb calls (oikb client.py: /api/v1/knowledge/...,
+  /api/v1/files/). With ENABLE_PERSISTENT_CONFIG=False these are not changeable in the admin panel. */}}
+  ENABLE_API_KEYS: "true"
+  ENABLE_API_KEYS_ENDPOINT_RESTRICTIONS: "true"
+  API_KEYS_ALLOWED_ENDPOINTS: "/api/v1/knowledge,/api/v1/files"
+  {{- end }}
+{{- $sync := $k.sync | default dict -}}
+{{- if $sync.enabled }}
+{{- if not $sync.image -}}{{- fail "knowledge.sync.enabled is true but knowledge.sync.image is empty: name the oikb image you build or mirror, pinned by digest." -}}{{- end -}}
+{{- if not $sync.gitSyncImage -}}{{- fail "knowledge.sync.enabled is true but knowledge.sync.gitSyncImage is empty: name the git-sync image, pinned by digest." -}}{{- end -}}
+{{- if not $sync.sources -}}{{- fail "knowledge.sync.enabled is true but knowledge.sync.sources is empty." -}}{{- end -}}
+{{- /* The console's Service: the open-webui subchart's fullname, mirrored as in gateway-key.yaml. */ -}}
+{{- $owui := index .Values "open-webui" | default dict -}}
+{{- $owuiName := $owui.nameOverride | default "open-webui" -}}
+{{- $owuiFull := $owui.fullnameOverride | default (ternary .Release.Name (printf "%s-%s" .Release.Name $owuiName) (contains $owuiName .Release.Name)) | trunc 63 | trimSuffix "-" -}}
+{{- $cfg := dict "defaults" (dict "interval" ($sync.interval | default "15m")) "sources" list -}}
+{{- $srcs := list -}}
+{{- range $sync.sources -}}
+{{- $srcs = append $srcs (dict "name" .name "source" (printf "/data/%s/current/%s" .name (trimPrefix "/" (.path | default ""))) "kb-id" .knowledgeId) -}}
+{{- end -}}
+{{- $_ := set $cfg "sources" $srcs }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-knowledge-sync
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-knowledge-sync
+data:
+  .oikb.yaml: |
+{{ $cfg | toYaml | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tockmox-knowledge-sync
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-knowledge-sync
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-knowledge-sync
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tockmox-knowledge-sync
+        app.kubernetes.io/part-of: tockmox
+        tockmox.com/isolated: "true"
+      annotations:
+        checksum/config: {{ $cfg | toYaml | sha256sum | trunc 16 | quote }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65533
+        fsGroup: 65533
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        {{- range $sync.sources }}
+        - name: git-{{ .name }}
+          image: {{ $sync.gitSyncImage }}
+          args:
+            - --repo={{ .repo }}
+            - --ref={{ .ref | default "main" }}
+            - --root=/data/{{ .name }}
+            - --link=current
+            - --period={{ $sync.gitPeriod | default "5m" }}
+            - --depth=1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+        {{- end }}
+        - name: oikb
+          image: {{ $sync.image }}
+          args: ["daemon", "--port", "8080", "--config", "/config/.oikb.yaml"]
+          env:
+            # oikb keeps its sync history in a SQLite file under OIKB_CONFIG_DIR (else ~/.oikb), and the root
+            # filesystem is read-only: both point at the state volume. The history is regenerable.
+            - name: OIKB_CONFIG_DIR
+              value: /state
+            - name: HOME
+              value: /state
+            - name: OPEN_WEBUI_URL
+              value: {{ $sync.consoleUrl | default (printf "http://%s:80" $owuiFull) | quote }}
+            - name: OPEN_WEBUI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ ($sync.apiKeySecret | default dict).name | default "tockmox-knowledge-sync" }}
+                  key: {{ ($sync.apiKeySecret | default dict).key | default "api-key" }}
+            - name: LOG_FORMAT
+              value: json
+          ports:
+            - { name: http, containerPort: 8080 }
+          readinessProbe:
+            httpGet: { path: /health/ready, port: http }
+            periodSeconds: 30
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 30
+            periodSeconds: 60
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits: { memory: 512Mi }
+          volumeMounts:
+            - { name: config, mountPath: /config, readOnly: true }
+            - { name: data, mountPath: /data, readOnly: true }
+            - { name: state, mountPath: /state }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: config
+          configMap: { name: tockmox-knowledge-sync }
+        - name: data
+          emptyDir: {}
+        - name: state
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tockmox-knowledge-sync
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-knowledge-sync
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    - ports: [{ port: 53, protocol: UDP }, { port: 53, protocol: TCP }]
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: open-webui
+      ports: [{ port: 8080, protocol: TCP }]
+    {{- with $sync.sourceEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- else }}
+    {{- fail "knowledge.sync.sourceEgress is empty: give the git-sync containers an egress rule to the source host(s) (NetworkPolicy egress entries; ipBlock for a forge outside the cluster, a podSelector for one inside it)." }}
+    {{- end }}
+{{- end }}
+{{- end }}

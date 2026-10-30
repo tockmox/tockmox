@@ -11,6 +11,10 @@
 #                                backend killed, a restricted request with a
 #                                client fallback to an external model, and
 #                                nothing reaching the external backend
+#   tests/key-policy/            the key policy (TM-0991): unit tests, then a
+#                                real proxy and database refusing every bad
+#                                key write, and the same writes allowed with
+#                                the policy unregistered (the red leg)
 #
 # LiteLLM is installed at the version the chart vendors, read from the vendored
 # chart, so the test always runs the gate in the proxy that ships it.
@@ -49,3 +53,17 @@ jobs:
           echo "LiteLLM ${ver}"
       - name: the forced failure - local backend down, nothing reaches external
         run: bash tests/policy-gate/run.sh
+      # TM-0991. The key policy's unit tests, then the same LiteLLM with a real Postgres (the runner image's own
+      # binaries, under /usr/lib/postgresql) and its red leg: the policy unregistered, the same writes succeed.
+      - name: the key policy - unit tests
+        run: |
+          "$RUNNER_TEMP/litellm/bin/pip" install --quiet pytest
+          "$RUNNER_TEMP/litellm/bin/python" -m pytest -q tests/key-policy/test_key_policy.py
+      - name: the key policy - every bad key write refused by a real proxy, and allowed without it
+        # litellm[proxy] does not install the prisma client (only litellm's extra-proxy extra does); pinned to the
+        # version the local proof ran with, inside litellm's own range (>=0.11.0,<1.0).
+        run: |
+          "$RUNNER_TEMP/litellm/bin/pip" install --quiet "prisma==0.15.0"
+          proxy_dir="$("$RUNNER_TEMP/litellm/bin/python" -c 'import litellm, os; print(os.path.join(os.path.dirname(litellm.__file__), "proxy"))')"
+          (cd "$proxy_dir" && PATH="$RUNNER_TEMP/litellm/bin:$PATH" "$RUNNER_TEMP/litellm/bin/prisma" generate --schema schema.prisma >/dev/null)
+          bash tests/key-policy/run.sh

@@ -36,6 +36,13 @@ it stays in the product is decided around 1.0. Until then, no change adds
 coupling to Open WebUI-specific features. The console is held at its upstream
 image, unmodified (`charts/tockmox-ai/values.yaml`, `open-webui:` block).
 
+**One named exception: [Knowledge mode](administration/knowledge-mode.md).**
+Tockmox can configure the console's own Knowledge feature for you (off by
+default, `knowledge.enabled`). It is console state: it leaves with the console,
+it is not a capability anything else in Tockmox depends on, and it holds public
+or internal material only, which the chart enforces at render. Retrieval that
+other clients use stays planned as a separate service.
+
 ### 2. The boundary is the gateway, identity and the database
 
 Every capability Tockmox ships terminates outside the console:
@@ -46,7 +53,7 @@ Every capability Tockmox ships terminates outside the console:
 | Routing policy and the audit line | LiteLLM's policy gate (`modelGateway.policyGate`) | [The AI plane](usage/ai-plane.md) |
 | Sign-in (OIDC) | Authentik | `charts/tockmox-ai/values.yaml` (`OAUTH_CLIENT_SECRET` from `tockmox-sso-openwebui`), [Identity](administration/identity.md) |
 | Gateway keys and spend state | The gateway's Postgres database | [The AI plane](usage/ai-plane.md) (backups of the gateway database) |
-| Document retrieval (RAG) and private search | Planned as separate services, not console features; neither ships today | [The AI plane](usage/ai-plane.md#intended-components) |
+| Document retrieval (RAG) and private search | Planned as separate services, not console features; neither ships today. Knowledge mode, the exception above, is a console feature by design | [The AI plane](usage/ai-plane.md#intended-components), [Knowledge mode](administration/knowledge-mode.md) |
 
 **The exception you control.** The console can also be pointed straight at a
 model host. That is supported, but it skips the gateway, so there is no
@@ -62,9 +69,10 @@ state:
 - chat history and the console's own user table, on its data volume
   (`open-webui.persistence` in `charts/tockmox-ai/values.yaml`)
 - files a user uploads into a chat, and any document index Open WebUI builds
-  from them. That is upstream behaviour Tockmox neither configures nor relies on:
-  the chart sets no retrieval or vector-store variable for it
-  (`charts/tockmox-ai/values.yaml`, `extraEnvVars`)
+  from them. That is upstream behaviour Tockmox does not rely on, and with
+  Knowledge mode off (the default) the chart sets no retrieval or vector-store
+  variable for it (`charts/tockmox-ai/values.yaml`, `extraEnvVars`). With it on,
+  the Knowledge bases are the console's too; synced ones come back from git
 
 Model configuration does **not** go with it: the console reads its settings from
 the chart, not from its own database (`ENABLE_PERSISTENT_CONFIG=False` in

@@ -66,6 +66,7 @@ The two experimental groups at the end are not covered by the stable values cont
 | [Inference nodes](inference-nodes.md) | Record the machines that serve models outside the cluster (a Mac Studio, a DGX Spark, a workstation) once, and let the chart derive the model gateway's routes to them instead of hand-writing each one |
 | [AI nodes](ai-nodes.md) | Turn an Apple-silicon Mac into an inference node that converges itself from your site repository: accounts, firewall, engines, pinned models, telemetry and its own updates, with no agent that accepts commands |
 | [Model lifecycle and the eval gateway](model-lifecycle.md) | Why a new model, local or hosted, is unusable until a person approves it twice, why that needs a second gateway rather than an access group, how to run the eval gateway the chart ships, and how the UI recommends candidates, sizes them and records the evidence |
+| [Knowledge mode: the console's own document Q&A, configured the Tockmox way](knowledge-mode.md) | How to turn on Open WebUI's Knowledge feature with local embeddings through the gateway and Knowledge bases kept in sync with git, what it refuses to render and why, the boundary it does and does not give you, and how it restores |
 | [The Tockmox UI](tockmox-ui.md) | Run the Tockmox admin console in the AI layer: build its image from source, turn it on, know exactly what its network policy lets it reach, and read its provisional status API |
 
 ### Platform assurance — experimental

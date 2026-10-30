@@ -199,7 +199,7 @@ business.
 {{- if not $hasMount -}}
 {{- fail "LiteLLM hooks are in use but litellm.volumeMounts does not mount `tockmox-hooks` at /etc/litellm/hooks. LiteLLM resolves a callback path relative to the config file's directory (/etc/litellm), so `hooks.<file>.<object>` is read from /etc/litellm/hooks/<file>.py. litellm.volumeMounts is a list, and a site that sets it replaces the shipped entry; restate it: {name: tockmox-hooks, mountPath: /etc/litellm/hooks, readOnly: true}." -}}
 {{- end -}}
-{{- if and $hookFiles (not $regs) (not (include "tockmox.ai.policyGateOn" $)) -}}
+{{- if and $hookFiles (not $regs) (not (include "tockmox.ai.policyGateOn" $)) (not (include "tockmox.ai.keyPolicyOn" $)) -}}
 {{- fail "modelGateway.hooks.files renders a ConfigMap and mounts it, but no callback under `hooks.` is registered, so LiteLLM loads none of it. Add to litellm.proxy_config.litellm_settings.callbacks an entry of the form hooks.<file without .py>.<object>, for example hooks.policy_gate.gate." -}}
 {{- end -}}
 {{- range $regs -}}
@@ -211,6 +211,27 @@ business.
 {{- if not (hasKey $hookFiles $file) -}}
 {{- fail (printf "callback %q reads /etc/litellm/hooks/%s, but modelGateway.hooks.files has no key %q. The mount would be an empty directory and the proxy fails at startup with an import error." . $file $file) -}}
 {{- end -}}
+{{- end -}}
+{{- end -}}
+{{- /*
+THE KEY POLICY (TM-0991). Two ways to get it wrong render cleanly: the module mounted and never registered (every
+key write passes unchecked while the values say otherwise), and the registration left in place with the module
+turned off (the proxy fails at start-up on an import error). Each is a sentence here instead. Also refused: a
+registration that names anything else at that setting, which would silently replace the policy.
+*/ -}}
+{{- $kpReg := dig "general_settings" "custom_key_policy" "" ($lit.proxy_config | default dict) -}}
+{{- if include "tockmox.ai.keyPolicyOn" . -}}
+{{- if ne (toString $kpReg) "hooks.tockmox_key_policy.check" -}}
+{{- fail (printf "modelGateway.keyPolicy.enabled is true, but litellm.proxy_config.general_settings.custom_key_policy is %q, not hooks.tockmox_key_policy.check, so the module is mounted and never called: every key write would pass unchecked. Restore that setting, or turn the key policy off." (toString $kpReg)) -}}
+{{- end -}}
+{{- range ($.Values.modelGateway.keyPolicy.allowAllModelsAliases | default list) -}}
+{{- if or (eq . "") (contains "*" .) -}}
+{{- fail (printf "modelGateway.keyPolicy.allowAllModelsAliases has %q: name one key alias per entry; a pattern would turn the one named exception into a class of them." .) -}}
+{{- end -}}
+{{- end -}}
+{{- else if eq (toString $kpReg) "hooks.tockmox_key_policy.check" -}}
+{{- if include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm") -}}
+{{- fail "litellm.proxy_config.general_settings.custom_key_policy names hooks.tockmox_key_policy.check, but modelGateway.keyPolicy.enabled is false, so the file is not mounted and the proxy fails at start-up on an import error. Set custom_key_policy: null as well, or turn the key policy back on." -}}
 {{- end -}}
 {{- end -}}
 {{- /*
@@ -360,5 +381,31 @@ Job is what the new one's template is immutable against. */ -}}
 {{- end -}}
 {{- if ne (toString (index $mja "argocd.argoproj.io/hook-delete-policy" | default "")) "BeforeHookCreation" -}}
 {{- fail (printf "litellm.migrationJob.jobAnnotations[argocd.argoproj.io/hook-delete-policy] is %q, not BeforeHookCreation. The previous Job has to go before the next is created, or the new Job's pod template is a patch of an immutable field and the sync fails with `field is immutable`." (index $mja "argocd.argoproj.io/hook-delete-policy" | default "")) -}}
+{{- end -}}
+{{- end -}}
+{{- /* PROMPT CONTENT IN AN OBSERVABILITY CALLBACK (TM-1250; SEC-04 of the 2026-10-29 council).
+LiteLLM's otel, Langfuse and Arize callbacks send each request's messages and response to the collector unless
+litellm_settings.turn_off_message_logging is true (its default is false, LiteLLM 1.106.6). On a gateway whose whole
+point is that a restricted request stays on the site, a trace exporter that copies the prompt to a collector
+elsewhere is the same leak by another door, and it renders cleanly. So a render that registers one of them with
+message logging on fails, unless the site says, in a value a reviewer can see, that the collector is one it trusts
+with prompt content: modelGateway.contentLogging.acknowledged, with a reason. */ -}}
+{{- if $litellmOn -}}
+{{- $ls := ($lit.proxy_config | default dict).litellm_settings | default dict -}}
+{{- $guarded := list "otel" "langfuse" "langfuse_otel" "arize" "arize_phoenix" -}}
+{{- $named := list -}}
+{{- range (list "callbacks" "success_callback" "failure_callback" "service_callback") -}}
+{{- range (index $ls . | default list) -}}
+{{- if and (kindIs "string" .) (has . $guarded) (not (has . $named)) -}}{{- $named = append $named . -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $ack := (.Values.modelGateway | default dict).contentLogging | default dict -}}
+{{- if and $named (ne (toString $ls.turn_off_message_logging) "true") -}}
+{{- if not $ack.acknowledged -}}
+{{- fail (printf "litellm.proxy_config.litellm_settings registers %s with message logging on (turn_off_message_logging is not true), so every prompt and response goes to that collector, including the ones a policy keeps on the site. Set litellm_settings.turn_off_message_logging: true to export traces without content, or, if the collector is one you trust with prompt content, set modelGateway.contentLogging: {acknowledged: true, reason: \"...\"}." (join ", " $named)) -}}
+{{- end -}}
+{{- if not $ack.reason -}}
+{{- fail "modelGateway.contentLogging.acknowledged is true but contentLogging.reason is empty: say which collector is trusted with prompt content, and why, where a reviewer reads it." -}}
+{{- end -}}
 {{- end -}}
 {{- end -}}
