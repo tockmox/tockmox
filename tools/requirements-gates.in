@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The Python packages the gates import, as direct dependencies. The lockfile
+# beside this one (requirements-gates.txt) pins them and everything they pull
+# in, with hashes; install from that file, never from this one:
+#
+#   python3 -m venv build/gates-venv
+#   build/gates-venv/bin/pip install --require-hashes -r tools/requirements-gates.txt
+#
+# tools/dev-env.sh does exactly that. To change a pin, edit this file and
+# regenerate the lockfile with the command written at the top of it.
+pyyaml
+jsonschema
+pytest
+# tools/check-namespace-guard.sh evaluates the guard's CEL with this exact release.
+cel-python==0.1.5
+# The Tockmox UI's tests and tools/check-ai-node-render.sh import the UI's packages.
+-r ../tockmox-ui/requirements.txt

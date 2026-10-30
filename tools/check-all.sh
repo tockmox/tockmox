@@ -225,15 +225,23 @@ if [ -n "$missing" ]; then
   echo "tell the difference between 'the tree is wrong' and 'the tool is absent',"
   echo "and they report the first when they mean the second."
   echo
-  echo "  helm     https://helm.sh/docs/intro/install/  (v3)"
+  echo "  helm     the version mise.toml pins: tools/dev-env.sh installs it, or https://helm.sh/docs/intro/install/"
   echo "  jq       your package manager"
-  echo "  python3  3.9 or newer"
+  echo "  python3  the minor version mise.toml pins, or newer"
   echo "  python3-yaml  python3 -m pip install pyyaml, or your package manager's python3-yaml"
   exit 1
 fi
 
-echo "helm:    $(helm version --short 2>/dev/null || echo unknown)"
-echo "python3: $(python3 --version 2>&1)"
+# THE TOOLCHAIN IS CI'S, OR NOTHING RUNS. A render gate passed in an environment with Helm 3.16 and failed on
+# a Mac and in CI with Helm 4.3.1, and nothing in the green run said it had used another Helm. mise.toml is the
+# one place the versions live; tools/toolchain.sh holds the tools on PATH to it, and a mismatch stops the run
+# here, before a gate result that would not predict CI.
+printf '\n'
+bash tools/toolchain.sh --check || {
+  echo
+  echo "check-all.sh refuses to run with a toolchain that is not the pinned one (above)."
+  exit 1
+}
 
 # Subchart dependencies are vendored, so no `helm dep update` is needed. This
 # only rebuilds Chart.lock consistency if something is genuinely absent.
@@ -248,6 +256,8 @@ fi
 # ---------------------------------------------------------------------- gates
 TREE_BEFORE="$(tree_fingerprint)"
 [ "$JOBS" -le 1 ] || printf '\nRunning the gates %s at a time (CHECK_ALL_JOBS=1 for one at a time).\n' "$JOBS"
+run_gate "every copy of a tool pin says what mise.toml says" bash tools/toolchain.sh --drift
+run_gate "the toolchain checks go red on a planted mismatch" bash tools/toolchain.sh --selftest
 run_gate "every tool is executable" bash -c '
   bad=0
   for f in tools/*.sh; do

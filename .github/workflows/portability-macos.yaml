@@ -30,15 +30,17 @@ on:
 permissions:
   contents: read
 
-env:
-  HELM_VERSION: "v4.3.1"
-
 jobs:
   check-all-macos:
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: read the tool pins from mise.toml
+        # One source for every tool version (mise.toml); tools/toolchain.sh --drift
+        # refuses a workflow that carries its own copy.
+        shell: bash -euo pipefail {0}
+        run: bash tools/toolchain.sh --pins | tee -a "$GITHUB_ENV"
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: ${{ env.HELM_VERSION }}

@@ -66,15 +66,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: read the Helm pin from ci.yaml
+      - name: read the tool pins from mise.toml
+        # One source for every tool version (mise.toml); tools/toolchain.sh --drift
+        # refuses a workflow that carries its own copy.
         shell: bash -euo pipefail {0}
-        run: |
-          # Renovate bumps HELM_VERSION in ci.yaml only; this file reads it there
-          # rather than carrying a copy that would drift (check-all.yaml does the same).
-          v="$(sed -n 's/^  HELM_VERSION: "\([^"]*\)".*/\1/p' .github/workflows/ci.yaml | head -1)"
-          [ -n "$v" ] || { echo "::error::HELM_VERSION not found in ci.yaml's env block"; exit 1; }
-          echo "HELM_VERSION=$v" >> "$GITHUB_ENV"
-          echo "HELM_VERSION=$v"
+        run: bash tools/toolchain.sh --pins | tee -a "$GITHUB_ENV"
 
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:

@@ -24,11 +24,11 @@ cd "$(dirname "$0")/.."
 py="${TOCKMOX_UI_PYTHON:-python3}"
 if ! "$py" -c 'import fastapi, httpx, jwt, itsdangerous, yaml, pytest' >/dev/null 2>&1; then
   echo "check-tockmox-ui-tests: SKIPPED: $py lacks the UI's dependencies or pytest."
-  echo "  python3 -m venv build/ui-venv && build/ui-venv/bin/pip install -r tockmox-ui/requirements.txt pytest"
-  echo "  TOCKMOX_UI_PYTHON=build/ui-venv/bin/python ./tools/check-tockmox-ui-tests.sh"
+  echo "  tools/dev-env.sh   (builds build/gates-venv from tools/requirements-gates.txt), then:"
+  echo "  TOCKMOX_UI_PYTHON=build/gates-venv/bin/python ./tools/check-tockmox-ui-tests.sh"
   exit 2
 fi
-# A relative path (build/ui-venv/bin/python) is made absolute before the cd below; a bare command name
+# A relative path (build/gates-venv/bin/python) is made absolute before the cd below; a bare command name
 # (python3, the default) is left for PATH to find.
 case "$py" in /*) ;; */*) py="$(pwd)/$py" ;; esac
 n=$(find tockmox-ui/tests -name 'test_*.py' | wc -l | tr -d ' ')

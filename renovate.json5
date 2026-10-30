@@ -79,7 +79,60 @@
   // deploy-proof gate.
   ignorePaths: ["bootstrap/**"],
 
+  // mise.toml is the one source of the tool versions (tools/toolchain.sh). The
+  // native mise manager is off because it names the tools differently from the
+  // regex managers below ("helm" there, "helm/helm" here), and two names for one
+  // tool would open two PRs, each red on tools/toolchain.sh --drift until the
+  // other merged. With one depName per tool, a bump of mise.toml and of the
+  // copy beside its checksum in a workflow lands as ONE branch. That PR still
+  // needs the matching SHA-256 updated by hand: the download step fails until
+  // it is, which is the prompt.
+  mise: { enabled: false },
+
+  // The gates' Python lockfile (tools/requirements-gates.txt, hashed) is
+  // regenerated from tools/requirements-gates.in with the uv command written at
+  // the top of the lockfile.
+  "pip-compile": {
+    managerFilePatterns: ["/^tools/requirements-gates\\.txt$/"],
+  },
+
   customManagers: [
+    {
+      customType: "regex",
+      description: "Toolchain pin in mise.toml: helm",
+      managerFilePatterns: ["/^mise\\.toml$/"],
+      matchStrings: ["\\nhelm = \"(?<currentValue>[^\"]+)\""],
+      depNameTemplate: "helm/helm",
+      datasourceTemplate: "github-releases",
+      extractVersionTemplate: "^v(?<version>.+)$",
+    },
+    {
+      customType: "regex",
+      description: "Toolchain pin in mise.toml: kubeconform",
+      managerFilePatterns: ["/^mise\\.toml$/"],
+      matchStrings: ["\\nkubeconform = \"(?<currentValue>[^\"]+)\""],
+      depNameTemplate: "yannh/kubeconform",
+      datasourceTemplate: "github-releases",
+      extractVersionTemplate: "^v(?<version>.+)$",
+    },
+    {
+      customType: "regex",
+      description: "Toolchain pin in mise.toml: shellcheck",
+      managerFilePatterns: ["/^mise\\.toml$/"],
+      matchStrings: ["\\nshellcheck = \"(?<currentValue>[^\"]+)\""],
+      depNameTemplate: "koalaman/shellcheck",
+      datasourceTemplate: "github-releases",
+      extractVersionTemplate: "^v(?<version>.+)$",
+    },
+    {
+      customType: "regex",
+      description: "Toolchain pin in mise.toml: gitleaks",
+      managerFilePatterns: ["/^mise\\.toml$/"],
+      matchStrings: ["\\ngitleaks = \"(?<currentValue>[^\"]+)\""],
+      depNameTemplate: "gitleaks/gitleaks",
+      datasourceTemplate: "github-releases",
+      extractVersionTemplate: "^v(?<version>.+)$",
+    },
     // CI tool pins live as env vars in ci.yaml so they are visible and
     // updatable. Without these managers those versions rot silently.
     {
