@@ -416,7 +416,7 @@ set_env SIGNING_MODE warn; set_env TOOLKIT_REF v1
 reset_state; rm -f "$W/ansible.calls.vars"; FAKE_ANSIBLE=ok run; rc=$?
 eq "an unsigned commit with hostile top-level keys reaches the playbook (the playbook refuses it)" "$rc" 0
 check "the playbook is given exactly one extra-vars file for the site" bash -c "[ \$(grep -o -- '-e @[^ ]*' '$W/ansible.calls' | wc -l) = 1 ]"
-check "and never the site files themselves" bash -c "! grep -q 'ai-node.yaml\\|desired.yaml' '$W/ansible.calls'"
+check "and never the site files themselves" bash -c "! grep -E -q 'ai-node[.]yaml|desired[.]yaml' '$W/ansible.calls'"
 check "the vars are under tn_site and tagged !unsafe" bash -c "grep -qx 'tn_site: !unsafe' '$W/ansible.calls.vars'"
 check "the hostile keys are nested, not at the top level" bash -c "! grep -E '^(gpu_memory_sysctl|firewall_pfctl|tn_root):' '$W/ansible.calls.vars' && grep -qE '^    gpu_memory_sysctl: /tmp/evil' '$W/ansible.calls.vars'"
 check "both files are there" bash -c "grep -q '^  ai_node:' '$W/ansible.calls.vars' && grep -q '^  desired:' '$W/ansible.calls.vars'"

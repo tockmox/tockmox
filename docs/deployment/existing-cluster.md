@@ -78,7 +78,7 @@ for LoadBalancer Services?
 
 ```bash
 kubectl get svc --all-namespaces --field-selector spec.type=LoadBalancer
-kubectl get pods -n kube-system | grep -i 'svclb\|metallb\|kube-vip\|purelb'
+kubectl get pods -n kube-system | grep -i -E 'svclb|metallb|kube-vip|purelb'
 ```
 
 **Passes when** either no LoadBalancer controller is running, or exactly one is

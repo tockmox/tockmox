@@ -670,6 +670,17 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **Two documented commands give the right answer on a Mac.** The uninstall
+  page's listing of namespaces your site declared, and the existing-cluster
+  check for a running LoadBalancer controller, used `grep 'a\|b'`, which BSD
+  grep reads as the literal text `a|b`. On macOS the first listed every
+  namespace, `kube-system` included, and the second printed nothing, which the
+  page reads as "no controller". Both use `grep -E` now, as do the six
+  scripts that had the same form, and
+  `tools/check-grep-portability.py` keeps the basic form out of tracked shell
+  scripts and documentation bash blocks. `tools/check-notify-and-drill.sh` also
+  passes on a Mac now, where it had failed for want of `sha256sum`.
+
 - **`tools/check-notify-and-drill.sh` and its `--selftest` no longer fail each
   other's D4 when run at once (TM-1291).** The drill scripts keep their register
   scratch files in `/tmp/drill-register` (an emptyDir in the pod); the gate runs

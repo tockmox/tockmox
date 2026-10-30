@@ -177,6 +177,14 @@ n1() { # liveness script
 
 # ---- D1 ---------------------------------------------------------------------
 mkdir -p "$T/bin"
+# The register writer runs in the drill's Linux image, which has sha256sum. This gate runs it on the host, and
+# macOS has no sha256sum, so both rows failed there with "sha256sum: command not found" while CI (Linux) stayed
+# green. On a host without one, the stub directory gets a sha256sum that is shasum -a 256: same digest, same
+# "<digest>  <file>" output, which is all the writer reads (cut -d' ' -f1). The writer itself is not touched.
+if ! command -v sha256sum >/dev/null 2>&1; then
+  command -v shasum >/dev/null 2>&1 || { echo "check-notify-and-drill: neither sha256sum nor shasum on PATH" >&2; exit 2; }
+  printf '#!/bin/sh\nexec shasum -a 256 "$@"\n' > "$T/bin/sha256sum"; chmod +x "$T/bin/sha256sum"
+fi
 cat > "$T/bin/kubectl" <<'SH'
 #!/bin/sh
 # Stub: records what the drill does. WAIT_RC, WAIT_MSG, CLUSTER_PHASE, APPLY_RC and APPLY_MSG steer it.
