@@ -13,6 +13,7 @@ Pure: no network, no clock. Files are read and written only by the functions tha
      "tool": {"id": "guidellm", "version": "0.8.1"},                    # optional
      "workload": {"profile": "evals/profiles/<alias>.workload.json", "mode": "cold" | "warm", "seed": 1},   # optional
      "class": "chat",                                                   # optional: the workload class the run used
+     "run": "large-local-large-20261030-2",                             # optional: the eval run that measured it (TM-1295)
      "metrics": [{"name": "decode_tps_stream_p50", "value": 31.2, "unit": "tok/s", "n": 120, "concurrency": 4}, ...],
      "memory": {"peak_resident_gib": 29.4, "predicted_gib": 33.9, "context_tokens": 32768, "parallel_slots": 3},
      "power": {"tokens_per_joule": 0.42, "watts_mean": 71.0},           # optional
@@ -45,6 +46,7 @@ _METRIC = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _HEX = re.compile(r"^(sha256:)?[0-9a-f]{7,64}$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _PATH = re.compile(r"^evals/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
+_RUN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}$")      # run-status/1's run_id rule
 
 
 class ResultError(ValueError):
@@ -95,6 +97,7 @@ class Result:
     watts_mean: float | None = None
     sha256: str = ""            # of the file bytes, set by parse()
     path: str = ""              # where it sits in the site repo, set by load_dir()
+    run: str = ""               # TM-1295: the eval run (run_id) that measured it; part of the file name
 
     def metric(self, name: str, concurrency: int | None = None):
         return next((m for m in self.metrics if m.name == name and (concurrency is None or m.concurrency == concurrency)), None)
@@ -112,6 +115,8 @@ class Result:
                 d[k] = dict(v)
         if self.klass:
             d["class"] = self.klass
+        if self.run:
+            d["run"] = self.run
         d["metrics"] = [m.as_dict() for m in self.metrics]
         mem = {k: v for k, v in (("peak_resident_gib", self.peak_resident_gib), ("predicted_gib", self.predicted_gib),
                                  ("context_tokens", self.context_tokens), ("parallel_slots", self.parallel_slots)) if v is not None}
@@ -188,6 +193,9 @@ def parse(text: str, path: str = "") -> Result:
     klass = d.get("class", "") or ""
     if klass and not (isinstance(klass, str) and _ID.match(klass)):
         raise ResultError("class must be a slug")
+    run_id = d.get("run", "") or ""
+    if run_id and not (isinstance(run_id, str) and _RUN.match(run_id)):
+        raise ResultError("run must be a run id (letters, digits, '.', '_', '-')")
     raw_m = d.get("metrics")
     if not isinstance(raw_m, list) or not raw_m or len(raw_m) > MAX_METRICS:
         raise ResultError(f"metrics must be a list of 1 to {MAX_METRICS} {{name, value, unit, n}}")
@@ -216,7 +224,7 @@ def parse(text: str, path: str = "") -> Result:
                   _opt(mem, "parallel_slots", "memory.parallel_slots", positive=True, integer=True),
                   _opt(pw, "tokens_per_joule", "power.tokens_per_joule", positive=True),
                   _opt(pw, "watts_mean", "power.watts_mean", positive=True),
-                  hashlib.sha256(text.encode("utf-8")).hexdigest(), path)
+                  hashlib.sha256(text.encode("utf-8")).hexdigest(), path, run_id)
 
 
 def dumps(r: Result) -> str:
@@ -233,9 +241,16 @@ def model_slug(model: str) -> str:
 
 def repo_path(r: Result) -> str:
     """Where the twin lives in the site repo: evals/results/<node>/<date>-<model>-<engine>-<plane>.json for a perf leg,
-    with `smoke-` or `quality-` before the plane for the others (so legs of one run never share a name)."""
+    with `<kind>-` before the plane for the others (so legs of one run never share a name), the class after `quality-`
+    (two classes, or the incumbent's leg, on one day), and `-<run>` at the end when the twin names its run (TM-1295: two
+    runs of one build on one day, such as a re-run after a route fix, never share a name). A twin without `run` keeps
+    the name it always had."""
     mid = "" if r.kind == "perf" else f"{r.kind}-"
-    return f"evals/results/{r.node}/{r.date}-{model_slug(r.model)}-{re.sub(r'[^a-z0-9]+', '-', r.engine_id.lower()).strip('-')}-{mid}{r.plane}.json"
+    if r.kind == "quality" and r.klass:
+        mid = f"quality-{r.klass}-"
+    tail = f"-{r.run}" if r.run else ""
+    return (f"evals/results/{r.node}/{r.date}-{model_slug(r.model)}-{re.sub(r'[^a-z0-9]+', '-', r.engine_id.lower()).strip('-')}"
+            f"-{mid}{r.plane}{tail}.json")
 
 
 def write_new(root: str, r: Result) -> tuple[str, str]:

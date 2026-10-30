@@ -628,7 +628,12 @@ slots it was measured at, tokens per joule when power was read, the versions of
 everything it ran on (macOS, chip, memory, wired limit), and a pointer to the
 methodology file. A number with no method beside it is not a result, so the pointer
 is required and must stay under `evals/`. A twin is written once and never
-edited: a re-measurement is a new dated file. The reader refuses what it could
+edited: a re-measurement is a new file. A twin the eval runner writes names its
+run (`run`, the run id) and carries it at the end of its file name, so two runs of
+one build on one day (a re-run after a route fix, say) never share a name; a twin
+without `run` keeps the name `<date>-<model>-<engine>-[<kind>-]<plane>.json`. A run
+id is used once: a run whose id already has a verdict is refused before any leg
+runs. The reader refuses what it could
 misread: a non-finite number, a missing unit, a missing engine version (a result
 without one cannot be told stale), a gateway leg that names no route, a file over
 1 MiB.
@@ -747,7 +752,9 @@ the alias, the candidate's model and revision, the eval set and its sha256, the
 engine and its version, the node, and the `-next` route's `provider` and `params`
 (as a digest; a route with neither has none). A run that finished (`done` or
 `failed`) for that combination is not started again by itself; change one of
-them, or delete the run's status file, to measure again. So fixing a route's
+them, or list the run id in `runner.rerun`, to measure again (a listed id whose
+combination already has a newer finished run is left alone, so the list can stay
+until you tidy it). So fixing a route's
 settings (turning thinking off, raising `max_tokens`) measures the candidate again
 on the next pass, without touching the status files. A run that was `aborted`,
 because the node stopped answering, is tried again. The request it runs is built
