@@ -496,8 +496,9 @@ serve. With the observability capability on, the log pipeline keeps them.
 - **Traffic that does not pass through the gateway.** A client pointed at a
   model host directly, or a tool an application calls on its own (web search, a
   document fetcher), is outside it. Keep the console on the gateway (the
-  shipped default, [above](#point-the-console-at-the-gateway)) and the
-  [egress containment](#containing-the-console) on.
+  shipped default, [above](#point-the-console-at-the-gateway)), the
+  [egress containment](#containing-the-console) on, and agent tools behind
+  [per-tool egress](#fence-the-tools-agents-call-per-tool-egress).
 - **Who may use an `open` alias.** That is the gateway's virtual keys: scope each
   key to the models its holder may see.
 - **What is in a request.** There is no content classifier in this release. A
@@ -516,6 +517,65 @@ red (measured 2026-10-06: the external backend answered).
 > runner, not a cluster. Until a lab install records the same five cases, treat
 > the in-cluster wiring (the mount, the image's Python environment) as checked
 > by render, not by use.
+
+## Scope every key: the key policy
+
+**Optional, off by default, new in this release (TM-0991).** What you get: no
+virtual key on the production gateway can be minted or updated into one that
+reaches every model, names a candidate, or leaves its tool access unstated. What
+you give up: two edits to your gateway values, and every key you mint states its
+models and its MCP access.
+
+**Why it exists.** On LiteLLM a virtual key whose model list is empty, absent,
+`*` or `all-proxy-models` can call every model the gateway has, hosted ones
+included. `default_key_generate_params` (`modelLifecycle.productionKeys`) fills
+in a list only when a key is minted; a later update back to an empty list
+reopens it. Measured on LiteLLM 1.106.6, the version this release vendors, with
+the policy off: a key minted with an empty list reached the hosted backend, and
+a scoped key updated to an empty list reached it too.
+
+The policy is LiteLLM's own `custom_key_policy` hook, which runs on every key
+generate, update and regenerate. It refuses, with HTTP 403 and the reason:
+
+- a key with no model list or a wildcard one, except an alias you name in
+  `allowAllModelsAliases` (the console's key alias is added for you: the
+  console is meant to see every production model);
+- a key naming a model that ends in `-next`: candidates live on the
+  [eval gateway](../administration/model-lifecycle.md), never behind a
+  production key;
+- a new key that does not state its MCP access. Send
+  `"object_permission": {"mcp_servers": ["no-mcp-servers"]}` for a key that
+  uses no tool server; the console-key Job does this for the console's key.
+
+An unreadable policy file refuses every key write (it fails closed).
+
+**Turn it on** in `site/values/ai.yaml`. The render refuses one edit without
+the other:
+
+```yaml
+# site/values/ai.yaml
+modelGateway:
+  keyPolicy:
+    enabled: true
+    allowAllModelsAliases: []     # each an exception you can name in a review
+litellm:
+  proxy_config:
+    general_settings:
+      custom_key_policy: hooks.tockmox_key_policy.check
+```
+
+With `inferenceNodes.render` on, the second edit changes the gateway config's
+hash, and the render prints the value to set in `litellm.podAnnotations`.
+
+**How it is proven.** `tests/key-policy/run.sh` starts the vendored LiteLLM
+version with a real database and two fake backends and records, with the policy
+on, that each refusal above answers 403 and that a refused key reaches nothing;
+then restarts the same proxy with the policy unregistered and records that the
+same requests succeed and the empty-list key reaches the hosted backend. The
+second half is what shows the first half is the policy's work.
+
+> **Not yet run on a live install.** As for the policy gate: the proof is a real
+> proxy on a test runner, not a cluster.
 
 ## Containing the console
 
@@ -633,6 +693,74 @@ and a worse one. It puts a provider credential in the console, gives the pod
 that renders untrusted model output a general outbound path, and splits the
 record of what left your network across two components.
 
+### Fence the tools agents call: per-tool egress
+
+**Optional, off by default, new in this release (TM-1251).** The gateway scopes
+which models and tool servers a key may use. It cannot see a tool that calls the
+network itself: a fetch tool, a search tool, a Kubernetes tool. Per-tool egress
+fences those at the network, in a namespace of their own (`agentEgress` in the
+policy layer). Every pod in that namespace becomes egress default-deny with DNS,
+and each tool gets back exactly one of two things:
+
+| Tier | You write | The tool may reach |
+|---|---|---|
+| CIDR | `extraEgress`: NetworkPolicy egress rules, the shape `extraEgress` takes elsewhere | those addresses and ports |
+| Hostname | `allowHosts`: names and `*.domain` globs | its own Smokescreen proxy, and through it only those names, on 443 |
+
+```yaml
+# site/values/policy.yaml
+agentEgress:
+  enabled: true
+  namespace: agent-tools
+  proxy:
+    image: registry.example/smokescreen@sha256:...   # built from source (MIT)
+  tools:
+    k8s-ro:
+      podSelector: {app.kubernetes.io/name: k8s-mcp}
+      extraEgress:
+        - to: [{ipBlock: {cidr: 192.0.2.10/32}}]      # why: the API server
+          ports: [{protocol: TCP, port: 6443}]
+    web-fetch:
+      podSelector: {app.kubernetes.io/name: web-mcp}
+      allowHosts: ["docs.example.org", "*.example.com"]
+```
+
+A hostname tool's proxy refuses a name not on its list, and refuses a listed
+name that resolves to a private, link-local or metadata address, or to the
+cluster, service or LAN range; the proxy's own NetworkPolicy excepts those
+ranges too. Each tool has its own proxy, so which tool is asking comes from the
+NetworkPolicy, with no client certificate.
+
+**What the chart cannot do** is set `HTTPS_PROXY` inside a tool it does not
+ship. Set it in the tool's manifest (`http://agent-egress-proxy-<name>:4750`).
+The NetworkPolicy is what holds: a tool that ignores the proxy cannot connect
+to anything.
+
+**The residual.** The proxy sees the hostname a tool asks to CONNECT to, not the
+name inside the TLS tunnel, so a tool that lies about its destination can reach
+another site behind the same CDN address. A site that needs more runs a stricter
+tool, not a looser rule. There is no FQDN or L7 policy here: k3s's embedded
+controller enforces `ipBlock` with `except` and ports, which is what this uses.
+
+**What the render refuses:** an empty namespace or one of Tockmox's own; no
+tools; a tool with both tiers or neither; an empty or `{}` selector; the
+`{cidr, ports}` shape or an entry with no `to` in `extraEgress`; an address or a
+bare `*` in `allowHosts`; the hostname tier with no proxy image.
+`tests/agent-egress/render.sh` holds each refusal, and
+`tests/agent-egress/proxy-proof.sh` runs the rendered proxy configuration in a
+real Smokescreen.
+
+**Proved on kube-router, in the lab** (k3s 1.36.4, 2026-10-29), with the
+policies exactly as rendered: the CIDR tool reached its one address and port and
+nothing else on the same host; the hostname tool reached nothing directly and
+its listed names through the proxy; an unlisted name, a name resolving to
+loopback and one resolving to the service range were refused; a pod with neither
+label reached nothing but DNS. With every policy that selects the tool removed,
+the same tool reached the internet directly (the red leg), and with them back it
+could not. With the proxy's own address refusal switched off, the NetworkPolicy
+`except` still stopped a CONNECT to the service range. Not proved: Calico or
+Cilium, and a cluster with more than one node.
+
 ## Two boundaries worth stating rather than discovering
 
 **The LiteLLM proxy and its migrations Job run as uid 1000 with a read-only
@@ -687,7 +815,9 @@ flowchart LR
 LiteLLM, which does routing and policy. LiteLLM calls local model hosts, and
 calls external APIs only if you configure it to. A RAG index over your documents
 is planned, and SearXNG for private search is not shipped and not planned as an
-add-on. **Solid lines exist today: Open WebUI, LiteLLM, and whatever local model
+add-on. Until the index ships, [Knowledge mode](../administration/knowledge-mode.md)
+configures the console's own document Q&A, for public and internal material,
+with embeddings through the gateway. **Solid lines exist today: Open WebUI, LiteLLM, and whatever local model
 hosts your model list names. SearXNG and the RAG index are dashed because they
 ship in nothing today.**
 

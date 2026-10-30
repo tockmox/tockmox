@@ -483,6 +483,49 @@
               "description": "Image the hook runs kubectl and jq from. Empty is the restore drill's image."
             }
           }
+        },
+        "keyPolicy": {
+          "type": "object",
+          "description": "The Tockmox key policy (TM-0991): LiteLLM's custom_key_policy, refusing on every key write a key with no model list or a wildcard one (except named aliases; the console key's alias is added automatically), a key naming a candidate (-next), and a new key that does not state its MCP access. Off by default. Enabling it also needs litellm.proxy_config.general_settings.custom_key_policy: hooks.tockmox_key_policy.check; templates/preflight.yaml checks both. docs/usage/ai-plane.md.",
+          "x-tockmox-stability": "experimental",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "allowAllModelsAliases": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Key aliases allowed an empty or wildcard model list: each a named, reviewable exception."
+            },
+            "refuseSuffixes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "requireMcp": {
+              "type": "boolean",
+              "description": "A new key must carry object_permission.mcp_servers (['no-mcp-servers'] for none)."
+            }
+          }
+        },
+        "contentLogging": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "TM-1250: acknowledge that an otel, Langfuse or Arize callback exports prompt content, with the reason. Unset, the render refuses such a callback while message logging is on.",
+          "properties": {
+            "acknowledged": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
         }
       },
       "x-tockmox-stability": "provisional",
@@ -1359,6 +1402,141 @@
     },
     "corednsHa": {
       "description": "Not this layer's key. Owned by the platform layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "knowledge": {
+      "type": "object",
+      "description": "Knowledge mode (TM-1256): Open WebUI's Knowledge feature with local-tier embeddings through the gateway and optional oikb git sync. Public or internal material only; refused otherwise at render. docs/administration/knowledge-mode.md.",
+      "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-10-29",
+      "x-tockmox-stability-rerule": "0.10.0",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "embeddingModel": {
+          "type": "string"
+        },
+        "embeddingDimensions": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 8192
+        },
+        "vectorStore": {
+          "type": "string",
+          "enum": [
+            "chroma",
+            "pgvector"
+          ]
+        },
+        "hybridSearch": {
+          "type": "boolean"
+        },
+        "topK": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        },
+        "chunkSize": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 100
+        },
+        "doclingUrl": {
+          "type": "string"
+        },
+        "sync": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "image": {
+              "type": "string"
+            },
+            "gitSyncImage": {
+              "type": "string"
+            },
+            "consoleUrl": {
+              "type": "string"
+            },
+            "apiKeySecret": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                }
+              }
+            },
+            "interval": {
+              "type": "string"
+            },
+            "gitPeriod": {
+              "type": "string"
+            },
+            "sourceEgress": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              }
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "name",
+                  "repo",
+                  "knowledgeId",
+                  "classification"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]([a-z0-9-]{0,40}[a-z0-9])?$"
+                  },
+                  "repo": {
+                    "type": "string",
+                    "pattern": "^https://"
+                  },
+                  "ref": {
+                    "type": "string"
+                  },
+                  "path": {
+                    "type": "string"
+                  },
+                  "knowledgeId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "classification": {
+                    "type": "string",
+                    "enum": [
+                      "public",
+                      "internal",
+                      "confidential",
+                      "restricted"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "rerankModel": {
+          "type": "string"
+        }
+      }
+    },
+    "agentEgress": {
+      "description": "Not this layer's key. Owned by the policy layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
     }
   },
   "additionalProperties": false,

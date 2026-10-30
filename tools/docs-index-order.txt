@@ -56,6 +56,7 @@ group: AI & inference — experimental
 inference-nodes
 ai-nodes
 model-lifecycle
+knowledge-mode
 tockmox-ui
 group: Platform assurance — experimental
 platform-management

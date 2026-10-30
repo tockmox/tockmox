@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE KNOWLEDGE-MODE FIXTURE (TM-1256). Applied ON TOP of ci/values.yaml and
+# ci/values-inference-nodes.yaml by tests/knowledge/render.sh: embeddings on
+# the node route local-embed, chroma, and oikb syncing one internal source.
+# Documentation addresses (RFC 5737). Not a site.
+knowledge:
+  enabled: true
+  embeddingModel: local-embed
+  embeddingDimensions: 1024
+  sync:
+    enabled: true
+    image: registry.example/oikb@sha256:0000000000000000000000000000000000000000000000000000000000000001
+    gitSyncImage: registry.example/git-sync@sha256:0000000000000000000000000000000000000000000000000000000000000002
+    sourceEgress:
+      - to: [{ipBlock: {cidr: 192.0.2.30/32}}]
+        ports: [{port: 443, protocol: TCP}]
+    sources:
+      - {name: handbook, repo: "https://forge.example/acme/handbook.git", ref: main, path: docs,
+         knowledgeId: 11111111-2222-3333-4444-555555555555, classification: internal}

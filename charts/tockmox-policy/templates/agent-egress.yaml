@@ -1,0 +1,298 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+PER-TOOL EGRESS FOR AGENT TOOLS (TM-1251; DESIGN-2026-10-29-agent-kit-security K3). OFF by default.
+
+The gateway can scope which tools a key may call (the key policy, MCP permissions). It cannot see a tool that
+calls the internet itself: a fetch tool, a search tool, a Kubernetes tool. This fences those tools at the network,
+in a namespace of their own, with two tiers:
+
+  CIDR tier      tools.<name>.extraEgress: raw NetworkPolicy egress entries (the extraEgress idiom), for a tool
+                 that talks to fixed addresses (an API server, a database, a LAN service);
+  hostname tier  tools.<name>.allowHosts: the tool may reach ONE thing, its own Smokescreen proxy, and the proxy
+                 allows a CONNECT only to those names (default deny), refuses private, link-local and metadata
+                 addresses after resolution, and itself may reach only the internet on 443, the cluster, service
+                 and LAN ranges excepted. One proxy per tool, so identity comes from the NetworkPolicy (each tool
+                 reaches only its own proxy) and no client certificate is needed.
+
+Rendered, in agentEgress.namespace: egress default-deny and DNS for every pod (as in the AI namespace), one
+allow-egress-tool-<name> per CIDR tool, and per hostname tool a proxy Deployment, Service, ACL and two policies.
+
+WHAT THE CHART CANNOT DO: set HTTPS_PROXY inside a tool it does not own. The tool's own manifest sets it. The
+NetworkPolicy is what holds: a tool that ignores the proxy cannot connect to anything.
+
+STATED RESIDUAL: the proxy sees the CONNECT hostname, not the SNI inside the tunnel, so a shared CDN front can be
+abused by a tool that lies about its destination. A site that needs more runs a stricter tool, not a looser rule.
+
+Proven on kube-router (k3s's embedded controller) in the lab, or not at all: there is no FQDN or L7 policy here.
+*/ -}}
+{{- $ae := .Values.agentEgress | default dict -}}
+{{- if $ae.enabled -}}
+{{- $ns := $ae.namespace | default "" -}}
+{{- if not $ns -}}
+{{- fail "agentEgress.enabled is true but agentEgress.namespace is empty: name the namespace your agent tools run in. Every pod in it becomes egress default-deny." -}}
+{{- end -}}
+{{- range $k, $v := .Values.namespaces -}}
+{{- if and (kindIs "string" $v) (eq $v $ns) -}}
+{{- fail (printf "agentEgress.namespace %q is Tockmox's %s namespace. Agent tools run in a namespace of their own: default-deny egress here would cut every Tockmox workload in it, and its own policies would widen the tools." $ns $k) -}}
+{{- end -}}
+{{- end -}}
+{{- $tools := $ae.tools | default dict -}}
+{{- if not $tools -}}
+{{- fail "agentEgress.enabled is true but agentEgress.tools is empty: with no tool, every pod in the namespace is cut off and nothing is allowed back." -}}
+{{- end -}}
+{{- $proxy := $ae.proxy | default dict -}}
+{{- $port := int ($proxy.port | default 4750) -}}
+{{- $g := .Values.global -}}
+{{- $except := list $g.clusterCIDR $g.serviceCIDR "169.254.0.0/16" -}}
+{{- with $g.lanCIDR }}{{- $except = append $except . -}}{{- end -}}
+{{- range $name, $t := $tools -}}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$" $name) -}}
+{{- fail (printf "agentEgress.tools: %q is not a lowercase DNS label of at most 40 characters" $name) -}}
+{{- end -}}
+{{- $sel := $t.podSelector | default dict -}}
+{{- if not $sel -}}
+{{- fail (printf "agentEgress.tools.%s.podSelector is empty: {} selects every pod in the namespace, so every pod would get this tool's egress. Name the tool's labels." $name) -}}
+{{- end -}}
+{{- range $lk, $lv := $sel -}}
+{{- if or (not (kindIs "string" $lv)) (eq $lv "") -}}
+{{- fail (printf "agentEgress.tools.%s.podSelector.%s is empty or not a string: a label value that renders empty matches no pod, and the policy protects nothing while reporting Synced." $name $lk) -}}
+{{- end -}}
+{{- end -}}
+{{- $cidr := $t.extraEgress | default list -}}
+{{- $hosts := $t.allowHosts | default list -}}
+{{- if and $cidr $hosts -}}
+{{- fail (printf "agentEgress.tools.%s sets both extraEgress and allowHosts. Pick one tier per tool: a tool with a CIDR hole beside its proxy can skip the proxy." $name) -}}
+{{- end -}}
+{{- if not (or $cidr $hosts) -}}
+{{- fail (printf "agentEgress.tools.%s sets neither extraEgress (the CIDR tier) nor allowHosts (the hostname tier). A tool with no egress needs no entry." $name) -}}
+{{- end -}}
+{{- range $cidr -}}
+{{- if not (kindIs "map" .) -}}{{- fail (printf "agentEgress.tools.%s.extraEgress: each entry is a NetworkPolicy egress rule (a map)" $name) -}}{{- end -}}
+{{- if hasKey . "cidr" -}}
+{{- fail (printf "agentEgress.tools.%s.extraEgress: an entry has `cidr` at the top. The shape is a NetworkPolicy egress rule, `{to: [{ipBlock: {cidr: ...}}], ports: [...]}`; the {cidr, ports} shape renders clean and fails at the API server (the 0.8.0 lab lesson)." $name) -}}
+{{- end -}}
+{{- if not .to -}}
+{{- fail (printf "agentEgress.tools.%s.extraEgress: an entry has no `to`, which allows every destination on its ports. Name the destination." $name) -}}
+{{- end -}}
+{{- end -}}
+{{- range $hosts -}}
+{{- $h := toString . -}}
+{{- if or (regexMatch "^[0-9.]+$" $h) (contains ":" $h) (contains "/" $h) -}}
+{{- fail (printf "agentEgress.tools.%s.allowHosts: %q is an address, not a hostname. An address belongs in the CIDR tier (extraEgress), where the NetworkPolicy enforces it." $name $h) -}}
+{{- end -}}
+{{- if not (regexMatch "^(\\*\\.)?([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z]{2,63}$" (lower $h)) -}}
+{{- fail (printf "agentEgress.tools.%s.allowHosts: %q is not a hostname or a *.domain glob (a bare * would allow everything)" $name $h) -}}
+{{- end -}}
+{{- end -}}
+{{- if and $hosts (not $proxy.image) -}}
+{{- fail (printf "agentEgress.tools.%s uses the hostname tier but agentEgress.proxy.image is empty: build Smokescreen from source and name the image, pinned by digest." $name) -}}
+{{- end -}}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: agent-default-deny-egress
+  namespace: {{ $ns }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: agent-allow-egress-dns
+  namespace: {{ $ns }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+{{- range $name, $t := $tools }}
+{{- if $t.extraEgress }}
+---
+# CIDR tier: the entries verbatim. Every entry is a deliberate hole; record why beside it in your values.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+  name: allow-egress-tool-{{ $name }}
+  namespace: {{ $ns }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml $t.podSelector | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    {{- toYaml $t.extraEgress | nindent 4 }}
+{{- else }}
+{{- $pname := printf "agent-egress-proxy-%s" $name }}
+{{- $acl := dict "version" "v1" "services" list "default" (dict "name" $name "project" "tockmox-agent-egress" "action" "enforce" "allowed_domains" $t.allowHosts) }}
+{{- $cfg := dict "acl_file" "/etc/smokescreen/acl.yaml" "allow_missing_role" true "deny_ranges" $except }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+  name: {{ $pname }}
+  namespace: {{ $ns }}
+data:
+  # allow_missing_role: no client certificate, so every request gets the `default` rule, which is this tool's
+  # hosts and nothing else (one proxy per tool). deny_ranges adds the cluster, service, link-local and LAN ranges to
+  # Smokescreen's own refusal of private addresses after resolution.
+  config.yaml: |
+{{ $cfg | toYaml | indent 4 }}
+  acl.yaml: |
+{{ $acl | toYaml | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: {{ $pname }}
+  name: {{ $pname }}
+  namespace: {{ $ns }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $pname }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $pname }}
+        app.kubernetes.io/part-of: tockmox
+        tockmox.com/agent-egress-proxy: {{ $name }}
+      annotations:
+        checksum/config: {{ list $cfg $acl | toYaml | sha256sum | trunc 16 | quote }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: smokescreen
+          image: {{ $proxy.image }}
+          args:
+            - --config-file=/etc/smokescreen/config.yaml
+            - --listen-ip=0.0.0.0
+            - --listen-port={{ $port }}
+            - --expose-prometheus-metrics
+            - --prometheus-port=9810
+          ports:
+            - { name: proxy, containerPort: {{ $port }} }
+            - { name: metrics, containerPort: 9810 }
+          readinessProbe:
+            tcpSocket: { port: proxy }
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            {{- toYaml ($proxy.resources | default (dict "requests" (dict "cpu" "10m" "memory" "32Mi") "limits" (dict "memory" "128Mi"))) | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/smokescreen, readOnly: true }
+      volumes:
+        - name: config
+          configMap: { name: {{ $pname }} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+  name: {{ $pname }}
+  namespace: {{ $ns }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $pname }}
+  ports:
+    - { name: proxy, port: {{ $port }}, targetPort: proxy }
+---
+# The tool reaches its own proxy and nothing else (DNS comes from agent-allow-egress-dns).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+  name: allow-egress-tool-{{ $name }}
+  namespace: {{ $ns }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml $t.podSelector | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $pname }}
+      ports:
+        - { protocol: TCP, port: {{ $port }} }
+---
+# The proxy: reached by its tool only (and scraped by Prometheus); reaches the internet on 443, the cluster, service,
+# link-local and LAN ranges excepted, so a CONNECT to an internal name fails at the network even if the ACL allowed it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+  name: {{ $pname }}
+  namespace: {{ $ns }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $pname }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- toYaml $t.podSelector | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: {{ $port }} }
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Values.namespaces.monitoring }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - { protocol: TCP, port: 9810 }
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              {{- toYaml $except | nindent 14 }}
+      ports:
+        - { protocol: TCP, port: 443 }
+{{- end }}
+{{- end }}
+{{- end }}

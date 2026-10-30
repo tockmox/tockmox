@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE AGENT-EGRESS FIXTURE (TM-1251). Applied ON TOP of ci/values.yaml to the
+# policy layer by tests/agent-egress/render.sh and tools/check-policy-selects.sh:
+# one tool per tier in a namespace of their own. Documentation addresses (RFC
+# 5737) and example names. Not a site.
+agentEgress:
+  enabled: true
+  namespace: tockmox-agents
+  proxy:
+    image: registry.example/smokescreen@sha256:0000000000000000000000000000000000000000000000000000000000000003
+  tools:
+    k8s-ro:
+      podSelector: {app.kubernetes.io/name: example-k8s-mcp}
+      extraEgress:
+        - to: [{ipBlock: {cidr: 192.0.2.10/32}}]     # the API server
+          ports: [{protocol: TCP, port: 6443}]
+    web-fetch:
+      podSelector: {app.kubernetes.io/name: example-web-mcp}
+      allowHosts: ["docs.example.org", "*.example.com"]

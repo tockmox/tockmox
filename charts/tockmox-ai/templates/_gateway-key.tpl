@@ -88,7 +88,12 @@ spec:
         - name: KEY_ALIAS
           value: {{ $ck.alias | default "open-webui" | quote }}
         - name: GENERATE_EXTRA
-          value: {{ ($ck.generateExtra | default dict) | toJson | quote }}
+          {{- $extra := deepCopy ($ck.generateExtra | default dict) }}
+          {{- if and (include "tockmox.ai.keyPolicyOn" $ctx) (not (hasKey $extra "object_permission")) }}
+          {{- /* the key policy refuses a new key that does not state its MCP access; the console uses no tool server */}}
+          {{- $_ := set $extra "object_permission" (dict "mcp_servers" (list "no-mcp-servers")) }}
+          {{- end }}
+          value: {{ $extra | toJson | quote }}
         - name: WAIT_SECONDS
           value: {{ $ck.waitSeconds | default 600 | quote }}
         - name: CONSOLE_PODS

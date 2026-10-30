@@ -138,7 +138,7 @@ LIST
 check_C() {
   for L in ai identity; do
     k="KEY_$L"
-    for ep in https://s3.eu-west-1.amazonaws.com s3.offsite.example.net https://user:pw@s3.offsite.example.net:443/b http://192.168.1.50:9000 https://s3.svc.example.com http://[2001:db8::1]:9000; do
+    for ep in https://s3.eu-west-1.amazonaws.com s3.offsite.example.net https://user:pw@s3.offsite.example.net:443/b http://192.168.1.50:9000 https://s3.svc.example.com "http://[2001:db8::1]:9000"; do
       renders "$L" "C endpoint [$ep]" OUT "${PROFILE[@]}" --set "${!k}=$ep"
     done
     renders "$L" "C the site's supplied target" OUT "${PROFILE[@]}" -f "$ROOT/ci/values-profile-resilient-tockmox-$L.yaml"

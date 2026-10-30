@@ -449,6 +449,46 @@ aiEgress:
 # ---------------------------------------------------------------------------
 # Diagnostic identity ... read-only, network-isolated, for automated agents.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# PER-TOOL EGRESS FOR AGENT TOOLS (TM-1251; docs/usage/ai-plane.md, "Fence the
+# tools agents call"). OFF.
+#
+# The gateway scopes which models and tool servers a key may use; it cannot see
+# a tool that calls the network itself. This fences those tools at the network,
+# in a namespace of their own: every pod there becomes egress default-deny with
+# DNS, and each tool gets back ONE tier:
+#   extraEgress  NetworkPolicy egress rules verbatim (the extraEgress shape,
+#                `{to: [...], ports: [...]}`), for fixed addresses;
+#   allowHosts   names and *.domain globs, through a Smokescreen proxy of the
+#                tool's own (MIT; build it from source and pin the digest), which
+#                refuses any other name and any private, link-local, metadata,
+#                cluster, service or LAN address after resolution.
+# The tool's own manifest sets HTTPS_PROXY=http://agent-egress-proxy-<name>:4750;
+# the NetworkPolicy is what holds, so a tool that ignores it reaches nothing.
+#
+#   agentEgress:
+#     enabled: true
+#     namespace: agent-tools
+#     proxy: {image: registry.example/smokescreen@sha256:...}
+#     tools:
+#       k8s-ro:
+#         podSelector: {app.kubernetes.io/name: k8s-mcp}
+#         extraEgress:
+#           - to: [{ipBlock: {cidr: 192.0.2.10/32}}]    # why: the API server
+#             ports: [{protocol: TCP, port: 6443}]
+#       web-fetch:
+#         podSelector: {app.kubernetes.io/name: web-mcp}
+#         allowHosts: ["docs.example.org", "*.example.com"]
+# ---------------------------------------------------------------------------
+agentEgress:
+  enabled: false
+  namespace: ""
+  proxy:
+    image: ""
+    port: 4750
+    resources: {}
+  tools: {}
+
 diagnosticIdentity:
   # Extra API groups the identity may READ. Add a group here when an operator
   # you install brings a CRD the agent needs to see; it can never gain write.

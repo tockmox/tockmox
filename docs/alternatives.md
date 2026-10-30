@@ -101,7 +101,7 @@ the alternatives are compared against it.
 | Metrics, logs, alerting | Prometheus stack, Loki, Alloy, Grafana, Alertmanager, ntfy | Ship |
 | Traces, OpenTelemetry collector | Tempo, OpenTelemetry Collector | Not shipped |
 | AI gateway and console | LiteLLM, Open WebUI | Ship |
-| Retrieval, document conversion | PostgreSQL with pgvector, Docling | Not shipped |
+| Retrieval, document conversion | PostgreSQL with pgvector, Docling | Not shipped as a service. [Knowledge mode](administration/knowledge-mode.md) configures the console's own, for public and internal material |
 | Web search | SearXNG | Not shipped, and not planned as an add-on |
 | Model serving | `mlx-lm.server` and `llama-server` on Apple Silicon | Off-cluster; see [inference nodes](administration/inference-nodes.md) |
 

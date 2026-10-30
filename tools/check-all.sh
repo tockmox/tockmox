@@ -315,6 +315,11 @@ run_gate "no duplicate top-level keys in values files" bash tools/check-values-d
 run_gate "every capability is a switch that does something" bash tools/check-capabilities.sh
 run_gate "no NetworkPolicy guards an empty namespace" bash tools/check-no-ghost-policies.sh
 run_gate "every NetworkPolicy selector can actually match" bash tools/check-netpol-selectors.sh
+run_gate "every NetworkPolicy selects a rendered pod" bash tools/check-policy-selects.sh
+run_gate "the policy-selects gate can fail" bash tools/check-policy-selects.sh --selftest
+run_gate "Knowledge mode renders as designed and refuses what it must" bash tests/knowledge/render.sh
+run_gate "per-tool egress renders as designed and refuses what it must" bash tests/agent-egress/render.sh
+run_gate "a content-logging observability callback is refused" bash tests/content-logging/render.sh
 run_gate "every aggregated ClusterRole we ship is allowlisted" bash tools/check-rbac-aggregation-allowlist.sh
 run_gate "the alert rules we author are tested" bash tools/check-alert-rules.sh
 run_gate "every alert we author has a kured reboot-gate decision, and the printed regexp is what the decisions imply (TM-0225)" bash tools/check-kured-gate.sh
@@ -501,6 +506,11 @@ run_gate "every AI node's desired.yaml is what its inputs render" bash tools/che
 run_gate "the ai-node render gate goes red on a stale file, an unpinned revision, a port collision and a misspelt key" bash tools/check-ai-node-render.sh --selftest
 run_gate "the policy gate refuses every bad config by name" bash tools/check-policy-gate.sh
 run_gate "the policy gate holds with the local backend down" bash tests/policy-gate/run.sh
+# TM-0991, TM-1251. Real-binary proofs: exit 2 (skipped) without the litellm CLI and Postgres binaries, or
+# without a Smokescreen binary (SMOKESCREEN_BIN); each script says how to get them.
+run_gate "the key policy's unit tests" bash -c 'python3 -c "import pytest" 2>/dev/null || { echo "SKIPPED: no pytest for python3"; exit 2; }; python3 -m pytest -q tests/key-policy/test_key_policy.py'
+run_gate "the key policy refuses every bad key write, and the red leg reopens without it" bash tests/key-policy/run.sh
+run_gate "the rendered agent-egress proxy refuses what it must, in a real Smokescreen" bash tests/agent-egress/proxy-proof.sh
 
 # NOT a tools/check-*.sh script, and included anyway. CONTRIBUTING.md points
 # contributors at this one command, so a gate that runs in ci.yaml and not here
