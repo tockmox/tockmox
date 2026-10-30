@@ -127,7 +127,7 @@ assert_artifact \
   "matched"
 assert_artifact \
   "the controller is installed once, at the pinned chart and image" \
-  "grep '^helm upgrade' '$D/state/calls.log' | grep -o -- '--version 2.20.0\\|image.tag=0.40.0\\|fullnameOverride=sealed-secrets-controller' | sort | tr '\\n' ' '" \
+  "grep '^helm upgrade' '$D/state/calls.log' | grep -E -o -- '--version 2[.]20[.]0|image[.]tag=0[.]40[.]0|fullnameOverride=sealed-secrets-controller' | sort | tr '\\n' ' '" \
   "--version 2.20.0 fullnameOverride=sealed-secrets-controller image.tag=0.40.0 "
 assert_artifact \
   "exactly one install call" \

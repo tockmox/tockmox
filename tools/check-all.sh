@@ -375,6 +375,10 @@ run_gate "the upgrade-safety gate goes red on a migrations Job that is not a Syn
 # script go red on pushes whose PR run had passed.
 run_gate "no pipe into grep -q under pipefail (a match must not read as a SIGPIPE)" python3 tools/check-pipe-grep-q.py
 run_gate "the grep -q pipe gate goes red on every shape it names, and green on the fixed form" python3 tools/check-pipe-grep-q.py --selftest
+# BSD grep reads \| in a basic pattern as two literal characters, so `grep -q 'a\|b'` can never match on a Mac:
+# a gate written that way is green there whatever the tree holds, and a documented command prints the wrong set.
+run_gate "no GNU-only alternation in a basic grep pattern (BSD grep reads \\| literally)" python3 tools/check-grep-portability.py
+run_gate "the grep-portability gate goes red on each shape, and green on the -E form" python3 tools/check-grep-portability.py --selftest
 run_gate "no bare kubectl or helm in the executed-docs harness (TM-0797)" bash tools/check-harness-context.sh
 run_gate "the harness-context gate goes red on a bare call (TM-0797)" bash tools/check-harness-context.sh --selftest
 run_gate "the six no-cluster documentation pages execute: every bash block runs and its output is asserted (TM-0289; also docs-no-cluster.yaml)" bash tests/executed-docs/pages-no-cluster.sh

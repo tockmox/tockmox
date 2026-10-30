@@ -24,7 +24,7 @@ fail=0; ok() { echo "  ok   $*"; }; bad() { echo "  FAIL $*"; fail=1; }
 
 # The default render ships no gate.
 if out="$(helm template t "$CHART" "${BASE[@]}" 2>&1)"; then
-  grep -q 'tockmox_gate\|tockmox_policy' <<<"$out" \
+  grep -E -q 'tockmox_gate|tockmox_policy' <<<"$out" \
     && bad "the default render carries gate files" || ok "the default render carries no gate files"
 else bad "the default render failed: $(printf '%s' "$out" | head -2)"; fi
 

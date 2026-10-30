@@ -100,7 +100,7 @@ e0=$(ext); code=$(req '{"model":"frontier-x","messages":[{"role":"user","content
 # 3
 e0=$(ext); a0=$(audits)
 code=$(req '{"model":"frontier-x","messages":[{"role":"user","content":"three"}],"metadata":{"tockmox_class":"restricted"}}'); sleep 1
-[ "$code" = 403 ] && grep -q "class_forbids_endpoint_tier\|may not use" "$work/resp" && ok "3 tighten: a client-tightened restricted request to an external alias is refused 403" \
+[ "$code" = 403 ] && grep -E -q "class_forbids_endpoint_tier|may not use" "$work/resp" && ok "3 tighten: a client-tightened restricted request to an external alias is refused 403" \
   || bad "3 tighten: expected 403, got $code $(head -c 200 "$work/resp")"
 [ "$(( $(ext) - e0 ))" = 0 ] && ok "3 tighten: nothing reached the external backend" || bad "3 tighten: the external backend was reached"
 [ "$(( $(audits) - a0 ))" = 1 ] && [ "$(last_audit | field status)" = refused ] \

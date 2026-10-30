@@ -275,7 +275,7 @@ else bad "ubuntu lane, nofallback with the denial at the edge: same registries.y
 if ! ud_has "$UB_EDGE" "$MIRROR_DENY_PERBOOT" && ! grep -q 'upstream-deny' "$UB_EDGE" && ! grep -q '192\.0\.2\.1' "$UB_EDGE" \
    && printf '%s' "$OUT" | grep "upstream-deny=edge" >/dev/null; then
   ok "ubuntu lane, nofallback with the denial at the edge: no hosts remap, no deny script, no iptables rule; the transcript says so"
-else bad "ubuntu lane, nofallback with the denial at the edge: no hosts remap, no deny script, no iptables rule" "$(grep -n 'upstream-deny\|192.0.2.1' "$UB_EDGE" | head -3)"; fi
+else bad "ubuntu lane, nofallback with the denial at the edge: no hosts remap, no deny script, no iptables rule" "$(grep -n -E 'upstream-deny|192[.]0[.]2[.]1' "$UB_EDGE" | head -3)"; fi
 # The verb sends the guest the proof for the place the denial is, not another one.
 run_tc "$S" mirror-proof TOCKMOX_REGISTRY_MIRROR="$M" TOCKMOX_REGISTRY_MODE=nofallback TOCKMOX_UPSTREAM_DENY=edge TOCKMOX_VM_ADDRESS=192.0.2.77 TOCKMOX_VM_GUEST_ADDRESS=10.99.0.5/24
 if [ "$RC" -eq 0 ] && grep -q 'upstream-deny=edge' "$S/ssh-script" 2>/dev/null && ! grep -q 'iptables' "$S/ssh-script"; then
