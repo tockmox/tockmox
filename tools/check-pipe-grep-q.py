@@ -132,7 +132,12 @@ def scan(paths):
 
 
 def tracked(root):
-    out = subprocess.run(["git", "-C", root, "ls-files", "-z"], capture_output=True, check=True).stdout
+    """What git tracks under root, or None when root is not a git checkout (the caller reports SKIPPED)."""
+    try:
+        out = subprocess.run(["git", "--no-optional-locks", "-C", root, "ls-files", "-z"],
+                             capture_output=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
     return [os.path.join(root, p) for p in out.decode().split("\0") if p]
 
 
@@ -180,6 +185,12 @@ def main(argv):
     else:
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         paths = tracked(root)
+        if paths is None:
+            # Exit 2, the repository's SKIPPED. Until this, an unpacked archive got a Python traceback and exit 1,
+            # which reads as a defect in the tree. The scan set is what git tracks, so there is nothing to judge.
+            print(f"check-pipe-grep-q: SKIPPED: {root} is not a git checkout, and the scan set is what git tracks "
+                  "(clone the repository, or pass --root DIR to scan a directory)")
+            return 2
     found = scan(paths)
     for f in found:
         print("FAIL " + os.path.relpath(f.split(":", 1)[0], root) + ":" + f.split(":", 1)[1])

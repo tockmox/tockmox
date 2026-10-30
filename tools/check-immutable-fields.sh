@@ -500,7 +500,9 @@ else
   if [ -z "$BASE" ]; then BASE=${BASELINE_REF:-$(bash "$ROOT/tools/check-values-tiers.sh" --print-baseline "$REPO" 2>/dev/null || true)}; fi
   if [ -z "$BASE" ] || ! git --no-optional-locks -C "$REPO" rev-parse -q --verify "$BASE^{commit}" >/dev/null 2>&1; then
     echo "check-immutable-fields: SKIPPED, no baseline ref (${BASE:-none}); fetch tags or set BASELINE_REF. Not a pass: nothing was compared."
-    exit 0
+    # Exit 2, not 0. It said "not a pass" and exited 0, so check-all.sh counted it in the passed total, on a
+    # shallow clone or an unpacked archive alike.
+    exit 2
   fi
   bsrc="$BASE"; hsrc="$HEADREF"; label="$BASE vs $HEADREF"
 fi
