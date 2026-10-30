@@ -61,6 +61,13 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **`tools/audit-keys.sh`: the gateway keys the key policy would refuse
+  (TM-0991).** The policy sees a key only when it is written; this lists, from
+  inside the LiteLLM pod and without printing any key, every existing key that
+  can call every model (no model list or a wildcard), names a `-next` model, or
+  states no MCP access, so they can be fixed before the policy is turned on.
+  `docs/usage/ai-plane.md`, "Scope every key: the key policy".
+
 - **A key policy on the production gateway, off by default (TM-0991).**
   `modelGateway.keyPolicy` loads LiteLLM's own `custom_key_policy` hook, which
   refuses with 403, on every key generate, update and regenerate: a key with no
