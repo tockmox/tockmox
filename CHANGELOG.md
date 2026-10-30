@@ -61,6 +61,32 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **A `rejected` catalog stage, and reject and revert changes (TM-1258).** A
+  build that failed its evaluation, or was reverted, is `stage: rejected` with
+  `rejection: {reason, date}`: the gate refuses any route to it, on either
+  gateway, an AI node refuses it, and Recommend skips it. `models.reject` removes
+  `<alias>-next` and records why; a promotion now records the route it replaced
+  as `promotion.previous`, and `models.revert` points the alias back at it.
+  The alias page renders the revert change; a reject button and the PR opener's
+  lanes for both are not built yet.
+
+- **Two Models pages: a comparison and an alias (TM-1258).** `/models/v/<run>`
+  shows one verdict answer first (its label), then the counts, the interval,
+  the known-bad control, how it was run, what it cites, and whether it counted
+  toward promotion and why not. `/models/a/<alias>` shows what the alias
+  serves, its promotion record and the route it replaced, and renders the
+  revert change for you to review and commit.
+
+- **The eval runner v0 (HL-0917).** `python -m app.runner run` in the Tockmox
+  UI image takes an `eval-request/1` and an `eval-set/1` and writes an evidence
+  bundle: a known-bad control that stops the run when the graders cannot fail,
+  smoke, perf and quality legs against the eval gateway, hashed result twins,
+  and a verdict with paired statistics (wins, losses, ties, an exact sign test,
+  a seeded bootstrap interval) or, with no incumbent, a Wilson bound against the
+  set's bar. Sets above `internal` and hosted candidates are refused until the
+  safety rails land (TM-1249). Opening the evidence PR is unchanged
+  (`app.pr_opener`). No chart surface schedules it yet.
+
 - **A resilient profile that refuses to present itself as resilient without an
   off-cluster backup target (TM-0597).** `profiles/resilient.yaml`, added after
   another profile, sets a new `global.resilience.profile: resilient`
@@ -352,6 +378,17 @@ costs you, with the reasoning in the documentation rather than here.
   See `docs/administration/namespace-guard.md`.
 
 ### Changed
+
+- **Promotion counts independent evidence, and `requiredPasses` defaults to 1
+  (TM-1248).** A passing verdict now counts once per evidence key (candidate
+  revision, eval set and its sha256, sampling, engine, node), so three reruns of
+  one frozen set count once, not three times. `modelLifecycle.promotion.
+  requiredPasses` keeps its name and now means independent passing evidence,
+  default 1 (was 3 reruns). A site that set 3 now needs three verdicts that
+  differ in something real. Verdicts may carry the new optional fields (`n`,
+  `interval`, `label`, `sampling`, `engine`, `node`, `control` ...), each
+  checked when present; a verdict without them parses as before, with an
+  advisory where a known-bad control is missing.
 
 - **LiteLLM updates wait three days before Renovate opens them on `main`, and a
   new gate refuses the compromised 1.107.0 image digests.** LiteLLM's release

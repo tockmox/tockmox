@@ -358,6 +358,11 @@ def test_hosted_and_retired_entries_cannot_be_routed_to_a_node(tmp_path):
         entry_of(d, "mlx-community/Example-27B-8bit")["stage"] = "retired"
     assert refusal(make_site(tmp_path / "b", retired)).names == ["retired-model-routed"]
 
+    def rejected(d):                                  # TM-1258: a rejected build is routed nowhere
+        e = entry_of(d, "mlx-community/Example-27B-8bit")
+        e["stage"], e["rejection"] = "rejected", {"reason": "worse on tools", "date": "2026-10-29"}
+    assert refusal(make_site(tmp_path / "c", rejected)).names == ["rejected-model-routed"]
+
 
 def test_next_route_on_an_endpoint_that_also_serves_production(tmp_path):
     def f(d):

@@ -39,9 +39,12 @@ from dataclasses import dataclass, field, replace
 
 from . import fit as fitmod
 from . import nodes as nm
+from . import verdict_stats as vs
 from .nodes import ALIAS_RE, ID_RE, Inventory, NodeError, Route, estimate_size_gib, fit, loading
 
-STAGES = ("candidate", "promoted", "retired")
+# `rejected` (TM-1258, specified by the REQ-0048 amendment TM-1254; DESIGN-2026-10-29-eval-runner section 3): a build that failed its evaluation or was demoted,
+# with rejection {reason, date, revision}; nothing routes it, and the watcher offers it again only as a NEW revision.
+STAGES = ("candidate", "promoted", "retired", "rejected")
 SOURCE_KINDS = ("huggingface", "ollama", "modelkit", "hosted")
 TRACKS = ("revision", "quants", "successors", "deprecation")
 CANDIDATE_KINDS = ("revision", "quant", "successor", "frontier", "deprecation", "digest")
@@ -87,6 +90,7 @@ class Entry:
     adopted: str = ""             # date this model was taken into the catalog already in service (no eval on record)
     pending: dict = field(default_factory=dict)     # {revision, seen}: a newer build proposed for evaluation
     links: list = field(default_factory=list)       # [{title, url}] the operator adds: release notes, license ... https only
+    rejection: dict = field(default_factory=dict)   # stage rejected: {reason, date, revision?, alias?, demoted?}
 
     def serves(self, alias: str) -> bool:
         p = self.promotion or {}
@@ -109,6 +113,8 @@ class Entry:
             d["pending"] = self.pending
         if self.links:
             d["links"] = [dict(x) for x in self.links]
+        if self.rejection:
+            d["rejection"] = dict(self.rejection)
         return d
 
 
@@ -133,7 +139,7 @@ class Lifecycle:
     profiles: list[Profile] = field(default_factory=list)
     frontier_providers: dict = field(default_factory=dict)   # provider -> {"keyEnv": ...}
     active_profile: str = ""
-    required_passes: int = 3                                 # Jeff, 2026-10-07: "3 is fine for now, but ... configurable"
+    required_passes: int = 1                                 # TM-1248 (ruling E1, 2026-10-29): counts independent evidence keys, not reruns; was 3 reruns
     required_by_class: dict = field(default_factory=dict)    # class slug -> passes (REQ-0045 class 3 proposal: 1)
     eval_gateway_entries: list = field(default_factory=list)        # hosted entries a change adds (not serialised)
     production_gateway_entries: list = field(default_factory=list)  # hosted entries a promotion adds (not serialised)
@@ -239,10 +245,17 @@ def parse(doc: dict | None) -> Lifecycle:
         pend = raw.get("pending") or {}
         if pend and not (isinstance(pend, dict) and _HEX.match(str(pend.get("revision", "")))):
             raise LifecycleError(f"catalog {eid}: pending.revision must be a commit sha or digest")
+        rej = raw.get("rejection") or {}
+        if stage == "rejected":
+            if not (isinstance(rej, dict) and str(rej.get("reason", "")).strip()
+                    and re.match(r"^\d{4}-\d{2}-\d{2}$", str(rej.get("date", "")))):
+                raise LifecycleError(f"catalog {eid}: a rejected model records rejection.reason and rejection.date (YYYY-MM-DD)")
+        elif rej:
+            raise LifecycleError(f"catalog {eid}: rejection is set but the stage is {stage}")
         lc.catalog.append(Entry(eid, model, _source(raw.get("source"), f"catalog {eid}"),
                                 str(raw.get("family", "")), str(raw.get("baseModel", "")), str(raw.get("quant", "")),
                                 size, stage, track, dict(raw.get("promotion") or {}), adopted, dict(pend),
-                                _links(raw.get("links"), f"catalog {eid}")))
+                                _links(raw.get("links"), f"catalog {eid}"), dict(rej)))
     pids = set()
     for raw in doc.get("profiles") or []:
         pid = str(raw.get("id", ""))
@@ -272,7 +285,7 @@ def parse(doc: dict | None) -> Lifecycle:
     pr = doc.get("promotion") or {}
     if not isinstance(pr, dict):
         raise LifecycleError("promotion must be a mapping")
-    lc.required_passes = _passes(pr.get("requiredPasses", 3), "promotion.requiredPasses")
+    lc.required_passes = _passes(pr.get("requiredPasses", 1), "promotion.requiredPasses")
     by = pr.get("requiredPassesByClass") or {}
     if not isinstance(by, dict):
         raise LifecycleError("promotion.requiredPassesByClass must map a class to a number of passes")
@@ -347,6 +360,11 @@ def check_promotions(lc: Lifecycle, inv: Inventory) -> list[str]:
     problems = []
     for r in inv.routes:
         e = lc.by_model(r.model)
+        if e is not None and e.stage == "rejected":
+            # a rejected build is routed nowhere, the eval gateway included: the reject change removes its -next route
+            problems.append(f"route {r.alias} points at {r.model}, which was rejected "
+                            f"({(e.rejection or {}).get('date', '?')}: {(e.rejection or {}).get('reason', '?')})")
+            continue
         if e is None or r.alias.endswith(NEXT):
             continue
         if e.stage == "candidate":
@@ -413,6 +431,13 @@ class Verdict:
     warnings: list = field(default_factory=list)   # accepted but deprecated shapes (a bare-path results[] entry)
     placement: dict = field(default_factory=dict)  # {from_node, to_node}: the move a re-placement verdict measures
     criterion: str = ""
+    extras: dict = field(default_factory=dict)     # TM-1248 optional fields (n, label, interval, sampling, engine, node, control ...)
+    advisories: list = field(default_factory=list) # what a reader should know that does not make the record unusable
+
+    @property
+    def evidence_key(self) -> tuple:
+        """Two verdicts with the same key measured the same thing twice (verdict_stats.evidence_key)."""
+        return vs.evidence_key(self.candidate.get("revision", ""), self.eval_set, self.extras)
 
     @property
     def absolute(self) -> bool:
@@ -496,23 +521,33 @@ def parse_verdict(text: str, path: str = "") -> Verdict:
         raise LifecycleError("verdict placement must be {from_node, to_node}")
     if d["verdict"] == "pass" and not results:
         warnings.append("a passing verdict cites no result twin, so nothing it rests on is hashed")
+    extras, problems = vs.check_extras(d)
+    if problems:
+        raise LifecycleError("verdict " + "; ".join(problems))
+    advisories = []
+    if d["verdict"] == "pass" and "control" not in extras:
+        advisories.append("records no known-bad control, so nothing shows its graders can fail")
+    if extras.get("screening"):
+        advisories.append(f"screening set (n={extras.get('n', '?')}): directional only, it cannot show an improvement")
     return Verdict(d["run_id"], d["date"], d["class"], alias, side("incumbent", False), side("candidate", True),
                    (str(es["id"]), str(es["version"])), d["grader"], d["verdict"],
                    hashlib.sha256(text.encode("utf-8")).hexdigest(), path, results, warnings,
-                   {"from_node": pl["from_node"], "to_node": pl["to_node"]} if pl else {}, d["criterion"])
+                   {"from_node": pl["from_node"], "to_node": pl["to_node"]} if pl else {}, d["criterion"], extras, advisories)
 
 
 def count_passes(verdicts, alias: str, model: str, revision: str = "", incumbent: str | None = None,
                  placement: dict | None = None):
     """The passing comparisons that count toward moving `alias` to `model`, oldest first, and notes on what
     did not count. Only `pass` counts; a `fail` resets the count; `inconclusive` neither counts nor resets;
-    a run id counts once; only passes on the newest eval-set version count; a record for another build
+    a run id counts once, and so does an evidence key (TM-1248: the same build, eval set, sampling, engine and node
+    measured twice is one piece of evidence, not two); a pass whose known-bad control also passed does not count
+    (its graders could not tell good from bad); only passes on the newest eval-set version count; a record for another build
     (revision) or against another incumbent does not count.
 
     `incumbent=""` is the no-incumbent case (a brand-new alias): only records that name no incumbent count, and
     they are judged on absolute bars. `placement` is set for a re-placement (the same model on another node): only
     class `perf` records that name that very move count, because a perf pass for one move says nothing about another."""
-    notes, counted, seen = [], [], set()
+    notes, counted, seen, keys = [], [], set(), {}
     rel = sorted((v for v in verdicts if v.alias == alias and v.candidate.get("model") == model),
                  key=lambda v: (v.date, v.run_id))
     for v in rel:
@@ -536,14 +571,21 @@ def count_passes(verdicts, alias: str, model: str, revision: str = "", incumbent
                 notes.append(f"{v.run_id} ({v.date}) failed: the {len(counted)} pass(es) before it no longer count")
             else:
                 notes.append(f"{v.run_id} ({v.date}) failed")
-            counted, seen = [], set()
+            counted, seen, keys = [], set(), {}
         elif v.verdict == "inconclusive":
             notes.append(f"{v.run_id} ({v.date}) was inconclusive: neither counted nor reset")
         elif v.run_id in seen:
             notes.append(f"{v.run_id} appears twice: counted once")
+        elif (v.extras.get("control") or {}).get("passed") is True:
+            notes.append(f"{v.run_id} ({v.date}): its known-bad control passed too, so its graders could not tell "
+                         "good from bad: not counted")
+        elif v.evidence_key in keys:
+            notes.append(f"{v.run_id} ({v.date}) measured the same build, eval set, sampling, engine and node as "
+                         f"{keys[v.evidence_key]}: the same evidence twice, counted once")
         else:
             counted.append(v)
             seen.add(v.run_id)
+            keys[v.evidence_key] = v.run_id
     if counted:
         newest = counted[-1].eval_set
         old = [v for v in counted if v.eval_set != newest]
@@ -1030,8 +1072,8 @@ def promote(alias_next: str, verdicts, lc: Lifecycle, inv: Inventory) -> tuple[L
     e = lc.by_model(nxt.model)
     if e is None:
         raise LifecycleError(f"{nxt.model} is not in the catalog; propose it first")
-    if e.stage == "retired":
-        raise LifecycleError(f"{nxt.model} is retired")
+    if e.stage in ("retired", "rejected"):
+        raise LifecycleError(f"{nxt.model} is {e.stage}")
     old = live.model if live else ""
     replacement = is_replacement(live, nxt)
     placement = None
@@ -1042,6 +1084,9 @@ def promote(alias_next: str, verdicts, lc: Lifecycle, inv: Inventory) -> tuple[L
         placement = {"from_node": live.node, "to_node": nxt.node, "from_endpoint": live.endpoint, "to_endpoint": nxt.endpoint}
     counted, klass, req, cnotes = _passed(alias, nxt.model, verdicts, lc, e.source.revision, old, placement)
     rec_extra = {"placement": placement} if replacement else {}
+    if live is not None and not replacement:
+        # what a revert restores (TM-1258): the route as it was, so demotion is one reviewed change, not a rebuild
+        rec_extra["previous"] = _route_snapshot(live)
     record = _record(alias, old, klass, req, counted, **rec_extra)
     routed_now = {r.alias for r in inv.routes if r.model == nxt.model and not r.alias.endswith(NEXT)}
     # a model that already serves another alias keeps the record that justified THAT (the same model on two aliases is
@@ -1443,3 +1488,108 @@ def build_drift(lc: Lifecycle, inv: Inventory, readings: dict, unread: str = "no
 def drift_findings(rows: list[DriftRow]) -> list[str]:
     return [f"{x.alias} on {x.node} serves {x.entry.model} build {x.actual[:12]}, but the catalog pins "
             f"{_norm_build(x.pinned)[:12] or x.pinned}" for x in rows if x.state == "drift"]
+
+
+# ---------------------------------------------------------------- reject and revert (TM-1258; design sections 3 and 8)
+
+def _route_snapshot(r: Route) -> dict:
+    d = {"model": r.model, "node": r.node, "endpoint": r.endpoint, "kind": r.kind}
+    for k, v in (("provider", r.provider), ("params", dict(r.params)), ("modelInfo", dict(r.model_info)), ("sizeGiB", r.size_gib)):
+        if v:
+            d[k] = v
+    return d
+
+
+def _date(when: str) -> str:
+    if not re.match(r"^\d{4}-\d{2}-\d{2}", when or ""):
+        raise LifecycleError("when must start with a date (YYYY-MM-DD)")
+    return when[:10]
+
+
+def reject(alias_next: str, reason: str, when: str, lc: Lifecycle, inv: Inventory) -> tuple[Lifecycle, Inventory, list[str]]:
+    """The reject change (design section 8): `<alias>-next` leaves the eval gateway, so the node frees the memory, and
+    the candidate's catalog entry becomes `rejected` with the reason, so the watcher does not offer this build again.
+    A newer revision of the same model is a new candidate. Refuses a model that serves a live alias: that is a revert."""
+    if not alias_next.endswith(NEXT):
+        raise LifecycleError("reject a -next route: a live alias is reverted, not rejected")
+    reason = (reason or "").strip()
+    if not reason:
+        raise LifecycleError("say why: the reason is what keeps the build from being offered again by accident")
+    nxt = next((r for r in inv.routes if r.alias == alias_next), None)
+    if nxt is None:
+        raise LifecycleError(f"no route {alias_next}")
+    e = lc.by_model(nxt.model)
+    if e is None:
+        raise LifecycleError(f"{nxt.model} is not in the catalog")
+    live = sorted(r.alias for r in inv.routes if r.model == nxt.model and not r.alias.endswith(NEXT))
+    if live:
+        raise LifecycleError(f"{nxt.model} serves {', '.join(live)}: rejecting it would leave a live alias on a rejected "
+                             "build. Revert that alias first")
+    others = sorted(r.alias for r in inv.routes if r.model == nxt.model and r.alias != alias_next)
+    rej = {"reason": reason[:400], "date": _date(when), "alias": alias_next[: -len(NEXT)]}
+    if e.source.revision:
+        rej["revision"] = e.source.revision
+    from .nodes import inventory_to_doc, parse_inventory
+    new_inv = parse_inventory(inventory_to_doc(inv))
+    new_inv.routes = [x for x in new_inv.routes if x.model != nxt.model or x.alias not in [alias_next] + others]
+    out = merge(lc, Lifecycle([replace(e, stage="rejected", rejection=rej, pending={})]))
+    notes = [f"{alias_next} leaves the eval gateway; remove {nxt.model}'s files from {nxt.node} once nothing there needs them",
+             f"{nxt.model} is marked rejected: {rej['reason']}"]
+    if others:
+        notes.append(f"{', '.join(others)} also routed it on the eval gateway and leave with it")
+    if e.source.revision:
+        notes.append(f"the watcher offers {e.source.ref} again only at a revision other than {e.source.revision[:12]}")
+    return out, new_inv, notes
+
+
+def revert(alias: str, reason: str, when: str, lc: Lifecycle, inv: Inventory) -> tuple[Lifecycle, Inventory, list[str]]:
+    """The revert change (design sections 7 and 8): `<alias>` goes back to what it served before its last promotion
+    (promotion.previous), and the demoted build becomes `rejected` with the breach as the reason. The operator merges
+    it; nothing here reverts on its own. Refuses when there is no previous route on record (a promotion recorded
+    before promotion.previous existed, or a brand-new alias), or when the demoted build also serves another live alias."""
+    reason = (reason or "").strip()
+    if not reason:
+        raise LifecycleError("say why: the reason is recorded on the build that is demoted")
+    live = next((r for r in inv.routes if r.alias == alias), None)
+    if live is None or alias.endswith(NEXT):
+        raise LifecycleError(f"no live alias {alias}")
+    cur = lc.by_model(live.model)
+    if cur is None or not cur.serves(alias):
+        raise LifecycleError(f"{alias} serves {live.model}, which has no promotion for {alias} on record: nothing to revert to")
+    prev = (cur.promotion or {}).get("previous")
+    if not isinstance(prev, dict) or not prev.get("model"):
+        raise LifecycleError(f"the promotion of {live.model} to {alias} records no previous route (it was made before promotions recorded one, or "
+                             f"{alias} was new): route {alias} by hand, through the change it needs")
+    others = sorted(r.alias for r in inv.routes if r.model == live.model and r.alias != alias and not r.alias.endswith(NEXT))
+    if others:
+        raise LifecycleError(f"{live.model} also serves {', '.join(others)}: a revert would leave those on a rejected "
+                             "build. Re-point them first")
+    pe = lc.by_model(prev["model"])
+    if pe is None:
+        raise LifecycleError(f"{prev['model']}, the previous model, is no longer in the catalog")
+    if pe.stage == "rejected":
+        raise LifecycleError(f"{prev['model']}, the previous model, was itself rejected: there is no good build to go back to")
+    try:
+        size = float(prev["sizeGiB"]) if prev.get("sizeGiB") is not None else None
+    except (TypeError, ValueError):
+        size = None
+    back = Route(alias, str(prev["node"]), str(prev["endpoint"]), str(prev["model"]), str(prev.get("kind", live.kind)),
+                 str(prev.get("provider", "")), dict(prev.get("params") or {}), dict(prev.get("modelInfo") or {}), size)
+    rej = {"reason": reason[:400], "date": _date(when), "alias": alias, "demoted": True}
+    if cur.source.revision:
+        rej["revision"] = cur.source.revision
+    demoted = replace(cur, stage="rejected", rejection=rej)
+    # the previous build is promoted again; if the promotion marked it retired, it is restored, files and all
+    restored = replace(pe, stage="promoted")
+    notes = [f"{alias} goes back to {prev['model']} on {prev['node']}/{prev['endpoint']}",
+             f"{live.model} is marked rejected: {rej['reason']}"]
+    if pe.stage == "retired":
+        notes.append(f"{prev['model']} was marked retired at the promotion and is promoted again: its files must be on "
+                     f"{prev['node']} before this merges (put them back first if they were removed)")
+    if not (pe.serves(alias) or pe.adopted):
+        notes.append(f"{prev['model']} carries no promotion for {alias} and no adopted date: the gate will say so")
+    from .nodes import inventory_to_doc, parse_inventory
+    new_inv = parse_inventory(inventory_to_doc(inv))
+    new_inv.routes = [x for x in new_inv.routes if x.alias != alias] + [back]
+    new_inv = parse_inventory(inventory_to_doc(new_inv))
+    return merge(lc, Lifecycle([demoted, restored])), new_inv, notes

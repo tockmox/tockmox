@@ -327,6 +327,8 @@ def lifecycle_doc(**extra):
             "coding": {"alias": "ops-agent-30b", "priority": 4, "residency": "on-demand"}}}],
         "activeProfile": "weekday",
         "frontier": {"providers": {"anthropic": {"keyEnv": "ANTHROPIC_API_KEY"}}},
+        # The reference site chose three independent pieces of evidence (it sets 3 explicitly); the default is 1.
+        "promotion": {"requiredPasses": 3},
     }
     d.update(extra)
     return d
@@ -352,14 +354,17 @@ def write_report(tmp_path, candidates, sources=None, generated=None):
 
 
 def verdict_record(model, alias, verdict="pass", run="r1", date="2026-10-07", klass="chat", incumbent="", revision="",
-                   eval_version="v1", grader="rule"):
-    """A REQ-0045 comparative verdict record (proposed AC-45.9), as the eval runner would write it."""
+                   eval_version="v1", grader="rule", sampling=None, extras=None):
+    """A REQ-0045 comparative verdict record (proposed AC-45.9), as the eval runner would write it. Each run gets
+    its own sampling seed unless `sampling` is given, so separate runs are separate evidence (TM-1248)."""
     d = {"schema": "comparative-verdict/1", "run_id": run, "date": date, "class": klass, "alias": alias,
          "candidate": {"model": model, **({"revision": revision} if revision else {})},
          "eval_set": {"id": f"{klass}-set", "version": eval_version}, "grader": grader,
          "criterion": "design-6/" + klass, "verdict": verdict, "results": [], "methodology": "m.md"}
     if incumbent:
         d["incumbent"] = {"model": incumbent}
+    d["sampling"] = sampling if sampling is not None else {"seed": run}
+    d.update(extras or {})
     return json.dumps(d)
 
 
