@@ -289,6 +289,44 @@ llama-server and the other OpenAI-compatible engines) to an endpoint with no
 `auth.secretRef` is given the placeholder `api_key: no-auth`, which the engine
 ignores. Ollama routes need none and get none.
 
+## Models on this node
+
+A node's page in the [UI](tockmox-ui.md) opens with **Models on this node**:
+every route that points at the node, grouped under the engine endpoint that
+serves it (the engine, its port and whether its blackbox probe answers). Each
+row is one deployment: the alias, the model, the catalog build it is pinned to,
+its tunings, the memory it is planned at, and whether it is live or a `-next`
+candidate. The alias links to its page on the Models page (a candidate links to
+its plan), and the Models page links every local route back to its node.
+
+The tunings are read from the route, never from the engine:
+
+| Column | Read from | When the route does not state it |
+| --- | --- | --- |
+| Context | `modelInfo.max_input_tokens`, `params.num_ctx` (Ollama) or `params.max_input_tokens` | the engine's default, where this page documents one |
+| Slots | nothing yet: a route records no slot count, and the fit plans one slot | not reported |
+| Max output | `params.max_tokens` or `params.max_completion_tokens` | the engine's default, where documented |
+| Thinking | `params.extra_body.chat_template_kwargs.enable_thinking` (On or Off) | the model template's own setting, not guessed per model |
+
+A value shown as **default** is the engine's own and the route does not state
+it: for mlx-lm the context has no setting and the output length is the
+request's, and for llama-server the context is the model's full trained
+context. **Engine default, not reported** means the route does not state it and
+Tockmox does not know what the engine does. Any other route parameter, except
+the key and the tags, sits under "More settings" on the row.
+
+**Planned** is the memory the deployment holds at its worst moment, from the
+same arithmetic the fit checks use: weights, plus the cache for context times
+slots, plus engine overhead. A route that does not state its context is planned
+at the fit default (8K tokens) and one slot, and the cell says so. Two aliases
+on one model on one endpoint cost one copy, and on an on-demand engine (Ollama,
+LM Studio) only the largest model counts. The memory bar above the table shows
+the pinned deployments, the candidate in stripes and what is free, in GiB, with
+a dashed line at the node's usable memory: its measured wired limit when a
+result recorded one, else the figure set under `modelLifecycle.recommend`, else
+the node type's planning fraction. A deployment whose size is not known is
+listed with "size unknown" and left out of the bar, with a note.
+
 ## Monitoring the nodes
 
 With `inferenceNodes.monitoring.enabled`, and the observability layer's
