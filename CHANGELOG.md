@@ -521,6 +521,18 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Changed
 
+- **The Models Inbox is one scannable row per candidate, with the detail on
+  demand.** `/models/inbox` shows the reason tag, the model and one sentence,
+  the node where it fits best with its predicted speed, the size, one primary
+  action (Evaluate, or Review PR #N once an admit PR is open) and a small menu
+  for Snooze 30 days, Dismiss and the upstream page. Open a row for the fit on
+  each node, the licence, the self-reported hints and the admit PR. Filter
+  chips split All, Local, Frontier, Snoozed and Dismissed (`?show=`), and the
+  snoozed and dismissed candidates now have their own views in place of the
+  hidden list at the foot. The per-source "Answered" rows are one quiet source
+  health line at the foot. Plain HTML, no JavaScript; every button still only
+  renders a change.
+
 - **The candidate page draws a run as a pipeline of stages, and has a Re-run
   button (TM-1301).** `/models/c/<alias>` now shows the latest run as connected
   boxes with an arrow between each (Control, Smoke, Perf, Prefill, Tool calls,

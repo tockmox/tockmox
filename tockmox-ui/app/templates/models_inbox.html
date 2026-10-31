@@ -1,78 +1,116 @@
 {% extends "base.html" %}
-{% from "macros.html" import badge, source_line %}
+{% from "macros.html" import badge %}
 {% block title %}Models inbox{% endblock %}
 {% block main %}
 <p><a href="/models">Models</a></p>
 <div class="page-head">
   <div><h1>Inbox</h1>
-  <p class="lede">What the watcher found that is worth a decision: a new build of a model you run, another quantisation, a newer model in a family, a new hosted model, or a hosted model that is being retired. <strong>Nothing here changes anything.</strong> Evaluate shows the change that admits a candidate to the eval gateway, where no agent can call it; Snooze and Dismiss show a change to <code>modelLifecycle.inbox</code>. Each ends in a change you review and commit.</p></div>
+  <p class="lede">What the watcher found that is worth a decision. <strong>Nothing here changes anything.</strong> Evaluate shows the change that admits a candidate to the eval gateway, where no agent can call it; Snooze and Dismiss show a change to <code>modelLifecycle.inbox</code>. Each ends in a change you review and commit.</p></div>
   <div class="page-actions"><a class="btn-ghost" href="/models/budget">Budget</a></div>
 </div>
 
 {% if inbox_why %}<p class="warnbox">{{ badge("warning", "Inbox settings") }} {{ inbox_why }}. Fix <code>modelLifecycle.inbox</code> in the values; until then nothing is hidden and Snooze and Dismiss are off.</p>{% endif %}
 
-<section class="panel" aria-labelledby="watch-h">
-  <h2 id="watch-h">Upstream</h2>
-  {% if reading.reason == "not configured" %}
-  <p>{{ badge("unknown", "Not watching") }} No watcher report is configured, so this page cannot say whether anything is newer. The watcher is off until you turn it on (<code>modelLifecycle.watch.enabled</code>) and point this page at its report (<code>modelLifecycle.reportFile</code>).</p>
-  {% else %}
-  <p>{{ source_line(reading) }}</p>
-  {% if reading.data %}<p class="muted">Report written {{ reading.data.generated_at }}.{% if reading.state == "unknown" %} It may be out of date or incomplete, so an empty list below does not mean nothing is new.{% endif %}</p>{% endif %}
-  {% endif %}
-</section>
+<nav class="chips inbox-filters" aria-label="Filter the inbox">
+  {% for key, label in [("all", "All"), ("local", "Local"), ("frontier", "Frontier"), ("snoozed", "Snoozed"), ("dismissed", "Dismissed")] %}
+  <a href="/models/inbox{% if key != 'all' %}?show={{ key }}{% endif %}"{% if view == key %} aria-current="page"{% endif %}>{{ label }} <span class="n">{{ counts[key] }}<span class="visually-hidden"> candidates</span></span></a>
+  {% endfor %}
+</nav>
 
-<section class="panel" aria-labelledby="cards-h">
-  <h2 id="cards-h">To decide <span class="muted">({{ cards|length }})</span></h2>
+<section class="panel flush inbox-rows" aria-labelledby="cards-h">
+  <h2 id="cards-h">{{ view_title }} <span class="muted">({{ cards|length }})</span></h2>
   {% if cards %}
-  <ul class="cands inbox">
+  <div class="inbox-cols" aria-hidden="true"><span>Why</span><span>Candidate</span><span>Best fit</span><span>Size</span><span></span></div>
+  <ul role="list" class="inbox-list">
   {% for k in cards %}{% set c = k.c %}
-    <li>
-      <p><span class="badge st-info">{{ k.reason }}</span> <code>{{ c.model }}</code>{% if c.size_gib is not none %} <span class="muted">about {{ c.size_gib }} GiB (estimate)</span>{% endif %}{% if c.when %} <span class="muted">· {{ c.when[:10] }}</span>{% endif %}</p>
-      <p class="muted">{{ c.detail }}{% if c.url %} · <a href="{{ c.url }}" rel="noopener noreferrer">upstream page</a>{% endif %}</p>
-      {% if c.pr %}<p>An admit change is already open for this: <a href="{{ c.pr }}" rel="noopener noreferrer">the pull request</a><span class="visually-hidden"> for {{ c.model }}</span>.</p>{% endif %}
-      {% if k.retire %}<p>{{ badge(k.retire.badge, k.retire.text) }}</p>{% endif %}
-      {% if k.hosted and c.kind != "deprecation" %}<p>{{ badge("unknown", "Hosted: public data only") }} <span class="muted">{{ held }}</span></p>{% endif %}
-      {% if not k.hosted %}
-      <p class="chips-row">
-        {% for f in k.fits %}{{ badge(f.state, "Fit: " ~ f.text) }} {% else %}{{ badge("unknown", "Fit: Unknown") }} <span class="muted">there are no inference nodes in the inventory</span>{% endfor %}
-      </p>
-      <p>{{ badge(k.licence.state, k.licence.word) }}{% if k.licence.text %} <span class="muted">{{ k.licence.text }}</span>{% endif %}</p>
-      {% if k.hint %}<p class="muted">Self-reported on the model card, a hint and not a measurement: {{ k.hint }}. Whether it suits this workload is what the evaluation measures.</p>{% endif %}
-      {% endif %}
-      {% if c.kind == "deprecation" %}
-        {% if k.replacement %}
-        <p>Replacement named: <code>{{ k.replacement.model }}</code>. {{ held }}</p>
-        {% endif %}
-      {% endif %}
-      <div class="page-actions">
-        {% if c.kind == "deprecation" %}
+    <li class="inbox-row">
+      <details class="inbox-exp">
+        <summary class="inbox-line">
+          <span class="in-why"><span class="visually-hidden">Why: </span><span class="badge st-info">{{ k.reason }}</span></span>
+          <span class="in-cand"><span class="in-chev" aria-hidden="true"></span><code>{{ c.model }}</code><span class="in-sentence">{{ c.detail }}</span>
+            {% if k.retire %}<span class="in-retire">{{ badge(k.retire.badge, k.retire.text) }}</span>{% endif %}</span>
+          <span class="in-fit"><span class="visually-hidden">Best fit: </span>
+            {%- if k.hosted %}<span class="muted">hosted, no node</span>
+            {%- elif k.best %}{{ k.best.node.name }} <span class="m">· {{ k.best.fit }}{% if k.best.tps %} · ~{{ k.best.tps|round|int }} tok/s<span class="visually-hidden"> predicted</span>{% endif %}</span>
+            {%- elif k.fits %}<span class="muted">not sized yet</span>
+            {%- else %}<span class="muted">no inference nodes</span>{% endif %}</span>
+          <span class="in-size"><span class="visually-hidden">Size: </span>{% if c.size_gib is not none %}{{ "%.1f"|format(c.size_gib) }} GiB{% else %}<span class="muted">n/a</span>{% endif %}</span>
+        </summary>
+        <div class="in-detail">
+          {% if not k.hosted %}
+          <div class="in-block"><span class="in-h">Fit on each node <span class="in-sub">(the model alone, weights plus cache; speeds are predicted from bandwidth, not measured)</span></span>
+            <p class="chips-row">
+              {% for f in k.fits %}<span class="fchip">{{ badge(f.state, "Fit: " ~ f.text) }}<span class="m">{% if f.gib is not none %}model {{ "%.1f"|format(f.gib) }} GiB · {% endif %}{{ f.plan }}{% if f.tps %} · ~{{ f.tps|round|int }} tok/s predicted{% endif %}</span></span>{% else %}{{ badge("unknown", "Fit: Unknown") }} <span class="muted">there are no inference nodes in the inventory</span>{% endfor %}
+            </p>
+          </div>
+          <div class="in-line"><span class="in-h">Licence</span> {{ badge(k.licence.state, k.licence.word) }}{% if k.licence.text %} <span class="muted">{{ k.licence.text }}</span>{% endif %}</div>
+          {% if k.hints %}
+          <div class="in-block"><span class="in-h">Hints <span class="in-sub">(from the model card, a hint and not a measurement: whether it suits this workload is what the evaluation measures)</span></span>
+            <p class="chips-row">{% for h in k.hints %}<span class="hint">Self-reported <em>{{ h }}</em></span>{% endfor %}</p>
+          </div>
+          {% endif %}
+          {% elif c.kind != "deprecation" %}
+          <div class="in-line">{{ badge("unknown", "Hosted: public data only") }} <span class="muted">{{ held }}</span></div>
+          {% endif %}
+          {% if c.kind == "deprecation" %}
+            {% if k.replacement %}
+            <div class="in-line"><span class="in-h">Replacement</span> <span>Replacement named: <code>{{ k.replacement.model }}</code>. <span class="muted">{{ held }}</span></span></div>
+            {% if k.replacement.entry %}<div class="in-line"><span class="muted">The replacement is already in the catalog (stage {{ k.replacement.entry.stage }}): <a href="/models/m/{{ k.replacement.entry.id|urlencode }}">see it</a>.</span></div>{% endif %}
+            {% else %}
+            <div class="in-line"><span class="muted">The report names no replacement. Name one under <code>modelLifecycle.watch.providers.{{ c.subject }}.replacements</code>.</span></div>
+            {% endif %}
+          {% endif %}
+          <div class="in-line"><span class="in-h">Admit PR</span>
+            {% if c.pr %}{{ badge("warning", "Open") }} <a href="{{ c.pr }}" rel="noopener noreferrer">{% if k.pr_n %}#{{ k.pr_n }}{% else %}the pull request{% endif %}<span class="visually-hidden"> for {{ c.model }}</span></a> <span class="muted">An admit change is already open for this: it is waiting for your review.</span>
+            {% else %}<span class="muted">None open.</span>{% endif %}</div>
+          <p class="muted in-meta">{{ k.reason }}: {{ k.reason_why }}.{% if c.when %} Upstream date: {{ c.when[:10] }}.{% endif %}{% if c.size_gib is not none %} The size is the watcher's estimate.{% endif %}</p>
+        </div>
+      </details>
+      <div class="in-acts">
+        {% if k.hidden %}
+          <span class="muted in-status">{% if k.hidden.state == "snoozed" %}Snoozed, back on {{ k.hidden.date }}{% else %}Dismissed{% if k.hidden.date %} {{ k.hidden.date }}{% endif %}{% endif %}</span>
+        {% elif c.pr %}
+          <a class="btn" href="{{ c.pr }}" rel="noopener noreferrer">{% if k.pr_n %}Review PR #{{ k.pr_n }}{% else %}Review the PR{% endif %}<span class="visually-hidden"> for {{ c.model }}</span></a>
+        {% elif c.kind == "deprecation" %}
           {% if k.replacement and not k.replacement.entry %}
           <form method="post" action="/models/propose" class="inline"><input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="cid" value="{{ c.id }}"><button class="btn" type="submit">Evaluate the replacement<span class="visually-hidden"> {{ k.replacement.model }}</span></button></form>
-          {% elif k.replacement %}<span class="muted">The replacement is already in the catalog (stage {{ k.replacement.entry.stage }}): <a href="/models/m/{{ k.replacement.entry.id|urlencode }}">see it</a>.</span>
-          {% else %}<span class="muted">The report names no replacement. Name one under <code>modelLifecycle.watch.providers.{{ c.subject }}.replacements</code>.</span>{% endif %}
+          {% elif k.replacement %}<a class="btn-ghost" href="/models/m/{{ k.replacement.entry.id|urlencode }}">See the replacement</a>
+          {% else %}<span class="muted in-status">No replacement named</span>{% endif %}
         {% else %}
-        <form method="post" action="/models/propose" class="inline"><input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="cid" value="{{ c.id }}"><button class="btn" type="submit">Evaluate<span class="visually-hidden"> {{ c.model }}</span></button></form>
+          <form method="post" action="/models/propose" class="inline"><input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="cid" value="{{ c.id }}"><button class="btn" type="submit">Evaluate<span class="visually-hidden"> {{ c.model }}</span></button></form>
         {% endif %}
-        {% if not inbox_why %}
-        <form method="post" action="/models/inbox/snooze" class="inline"><input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="cid" value="{{ c.id }}"><button class="btn-ghost" type="submit">Snooze {{ days }} days<span class="visually-hidden"> {{ c.model }}</span></button></form>
-        <form method="post" action="/models/inbox/dismiss" class="inline"><input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="cid" value="{{ c.id }}"><button class="btn-ghost" type="submit">Dismiss<span class="visually-hidden"> {{ c.model }}</span></button></form>
+        {% if c.url or (not inbox_why and not k.hidden) %}
+        <details class="in-menu">
+          <summary class="btn-ghost in-more" aria-label="More actions for {{ c.model }}"><span aria-hidden="true">&hellip;</span></summary>
+          <div class="in-menu-list">
+            {% if not inbox_why and not k.hidden %}
+            <form method="post" action="/models/inbox/snooze"><input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="cid" value="{{ c.id }}"><button class="in-item" type="submit">Snooze {{ days }} days<span class="visually-hidden"> {{ c.model }}</span></button></form>
+            <form method="post" action="/models/inbox/dismiss"><input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="cid" value="{{ c.id }}"><button class="in-item" type="submit">Dismiss<span class="visually-hidden"> {{ c.model }}</span></button></form>
+            {% endif %}
+            {% if c.url %}<a class="in-item in-up" href="{{ c.url }}" rel="noopener noreferrer">Upstream page<span class="visually-hidden"> for {{ c.model }}</span></a>{% endif %}
+          </div>
+        </details>
         {% endif %}
       </div>
     </li>
   {% endfor %}
   </ul>
-  {% elif reading.state == "unknown" %}<p class="empty">{{ badge("unknown", "Unknown") }} Nothing is listed, but the report is missing, old or incomplete, so this is not a statement that nothing is new.</p>
-  {% else %}<p class="empty">Nothing to decide. Everything the watcher found is already handled.</p>{% endif %}
+  {% if view in ("snoozed", "dismissed") %}<p class="muted in-foot">To bring one back, delete its line from <code>modelLifecycle.inbox</code> in the values.{% if view == "snoozed" %} A snooze also ends on its own date.{% endif %}</p>{% endif %}
+  {% elif view == "all" and health.not_configured %}<p class="empty">{{ badge("unknown", "Unknown") }} Nothing is listed because no watcher report is configured.</p>
+  {% elif view == "all" and reading.state == "unknown" %}<p class="empty">{{ badge("unknown", "Unknown") }} Nothing is listed, but the report is missing, old or incomplete, so this is not a statement that nothing is new.</p>
+  {% elif view == "all" %}<p class="empty">Nothing to decide. Everything the watcher found is already handled.</p>
+  {% else %}<p class="empty">Nothing here.{% if view in ("local", "frontier") and counts.all %} The other candidates are under <a href="/models/inbox">All</a>.{% endif %}</p>{% endif %}
 </section>
 
-{% if snoozed or dismissed %}
-<section class="panel" aria-labelledby="hid-h">
-  <h2 id="hid-h">Hidden</h2>
-  <details><summary>{{ snoozed|length }} snoozed, {{ dismissed|length }} dismissed</summary>
-    {% if snoozed %}<h3>Snoozed</h3><ul class="plain">{% for c, until in snoozed %}<li><code>{{ c.model }}</code> <span class="muted">{{ c.detail }} · back on {{ until }}</span></li>{% endfor %}</ul>{% endif %}
-    {% if dismissed %}<h3>Dismissed</h3><ul class="plain">{% for c, d in dismissed %}<li><code>{{ c.model }}</code> <span class="muted">{{ c.detail }}{% if d %} · dismissed {{ d }}{% endif %}</span></li>{% endfor %}</ul>{% endif %}
-    <p class="muted">To bring one back, delete its line from <code>modelLifecycle.inbox</code> in the values.</p>
-  </details>
-</section>
-{% endif %}
+<p class="srcline" id="source-health">
+  {{ badge(health.state) }}
+  {% if health.not_configured %}<span>Not watching. No watcher report is configured, so this page cannot say whether anything is newer. The watcher is off until you turn it on (<code>modelLifecycle.watch.enabled</code>) and point this page at its report (<code>modelLifecycle.reportFile</code>).</span>
+  {% else %}
+  {% if health.ok %}<span>{{ health.ok|join(", ") }} answered {% if health.ago %}{{ health.ago }}{% else %}at {{ health.at }}{% endif %}.</span>{% endif %}
+  {% if health.failed %}<span>Not every upstream answered: {% for name, why in health.failed %}{{ name }}{% if why %} ({{ why }}){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}{% if health.ago %}, in the report from {{ health.ago }}{% endif %}.</span>{% endif %}
+  {% if health.reason %}<span>{{ health.reason }}. It may be out of date or incomplete, so an empty list does not mean nothing is new.</span>{% endif %}
+  {% if not health.ok and not health.failed and not health.reason %}<span>No report has been read yet.</span>{% endif %}
+  {% endif %}
+  <span>Fit is the model alone on each node; speeds are predicted from bandwidth, not measured.</span>
+</p>
 {% endblock %}

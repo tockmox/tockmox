@@ -16,7 +16,7 @@ eval gateway, and promoting it to the production gateway after enough passing co
   POST /models/promote-hosted
   GET  /models/recommend?node=<id>  per alias class, a shortlist for one node (AC-48.14). A hypothesis list: it admits nothing
   POST /models/recommend/admit      the same change as /models/propose, for one row of that list ("Admit for evaluation")
-  GET  /models/inbox                what the watcher found, as cards: reason, fit per node, licence, a model card's own results
+  GET  /models/inbox                what the watcher found, one row per candidate (TM-1300): reason, best fit, size, one action; details open under the row
                                     as a labelled hint, and Evaluate / Snooze 30 days / Dismiss (TM-1258, TM-1265)
   POST /models/inbox/snooze         the values change that snoozes one candidate (modelLifecycle.inbox.snoozed); writes nothing
   POST /models/inbox/dismiss        the same for modelLifecycle.inbox.dismissed
@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import copy
 import datetime
+import re
 
 import yaml
 from fastapi import Form, Request
@@ -374,8 +375,15 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
     HOSTED_HELD = ("Hosted candidates are admitted to the eval gateway tagged open: the eval runner sends them public eval sets "
                    "only, and the eval gateway refuses them anything tagged above open (the data-class rails, TM-1249).")
 
+    def ctx_label(tokens):
+        """8192 -> "8K": the context a fit was planned at."""
+        return f"{tokens // 1024}K" if tokens and tokens % 1024 == 0 else f"{tokens:,}"
+
     def fit_chips(c, rep, results):
-        """One chip per node for a local candidate, from fit v2 (fit_compat): {node, state, text}. A candidate with no size is Unknown."""
+        """One chip per node for a local candidate, from fit v2 (fit_compat): {node, state, text, fit, gib, plan, tps}. `state` is the
+        badge state, `fit` the word (fits, tight, over, unknown), `plan` the context x slots the fit was planned at, `tps` the
+        PREDICTED single-stream decode speed (bandwidth over bytes read, fit.py), None when it cannot be said. A candidate with no
+        size is Unknown."""
         if c.source.kind not in ("huggingface", "ollama"):
             return []
         rec = (rep.sizes if rep else {}).get(c.source.ref) if c.source.kind == "huggingface" else None
@@ -386,27 +394,53 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         kind = rc._kind_of(opt)
         live = next((r for r in inv.routes if entry and r.model == entry.model and not r.alias.endswith(ml.NEXT)), None)
         need = fx.route_need(live) if live else fx.Need()
+        plan = f"{ctx_label(need.context_tokens)} x {need.slots}"
         cfg, _why = rec_config()
         sizes = rc.sizes_by_model(L.lifecycle, rep)
         out = []
         for n in inv.nodes:
             eps = rc._compatible(n, opt, kind)
             if not eps:
-                out.append({"node": n, "state": "unknown", "text": f"no endpoint on {n.name} can serve this build"})
+                out.append({"node": n, "state": "unknown", "fit": "unknown", "gib": None, "plan": plan, "tps": None,
+                            "text": f"no endpoint on {n.name} can serve this build"})
                 continue
             facts = dict(facts_for(n.id))
             if not facts.get("wired_limit_mib"):
                 facts.update(rc.facts_from_results(results, n.id))
-            op = ((cfg.nodes.get(n.id) or {}).get("wiredLimitGiB") if cfg else None)
-            if op:
-                facts["operator_usable_gib"] = op
+            nc = (cfg.nodes.get(n.id) or {}) if cfg else {}
+            if nc.get("wiredLimitGiB"):
+                facts["operator_usable_gib"] = nc["wiredLimitGiB"]
             f = fx.fit_compat(n, inv.routes_on(n.id), est, eps[0][1], sizes=sizes, facts=facts, need=need, new_record=rec)
             if f.state == "unknown" or f.new_gib is None or f.usable_gib is None:
                 why = "its size is not known" if f.new_gib is None else "the node's memory is not known"
-                out.append({"node": n, "state": "unknown", "text": f"{n.name}: Unknown, {why}"})
-            else:
-                out.append({"node": n, "state": FIT_BADGE[f.state], "text": f"{n.name}: {f.state}, {f.total:.0f} of {f.usable_gib:.0f} GiB planned"})
+                out.append({"node": n, "state": "unknown", "fit": "unknown", "gib": f.new_gib, "plan": plan, "tps": None,
+                            "text": f"{n.name}: Unknown, {why}"})
+                continue
+            tps = None
+            if kind == "chat":
+                chip = n.hardware.get("chip")
+                bw, _bw_from = fx.bandwidth_for(str((chip.value if chip else "") or ""), nc.get("bandwidthGBps"))
+                tps = fx.predict_decode_tps(bw, rec, est, nc.get("eta"))[0]
+            out.append({"node": n, "state": FIT_BADGE[f.state], "fit": f.state, "gib": f.new_gib, "plan": plan, "tps": tps,
+                        "text": f"{n.name}: {f.state}, {f.total:.0f} of {f.usable_gib:.0f} GiB planned"})
         return out
+
+    FIT_ORDER = {"fits": 0, "tight": 1, "over": 2, "unknown": 3}
+
+    def best_fit(fits):
+        """The node where the candidate fits best: fits beats tight beats over; a tie goes to the higher predicted speed, then to
+        the inventory's order. None when no node can say (every chip is Unknown) or there are no nodes."""
+        known = [(i, f) for i, f in enumerate(fits) if f["fit"] != "unknown"]
+        if not known:
+            return None
+        i, f = min(known, key=lambda x: (FIT_ORDER[x[1]["fit"]], -(x[1]["tps"] if x[1]["tps"] is not None else -1.0), x[0]))
+        return f
+
+    def pr_number(url):
+        """7 for https://forge.example/o/r/pull/7 (or /pulls/7, /merge_requests/7); else the last number in the path, else None."""
+        path = url.split("?")[0].split("#")[0]
+        m = re.search(r"/(?:pulls?|merge_requests)/(\d+)", path) or re.search(r"(\d+)/?$", path)
+        return m.group(1) if m else None
 
     def licence_chip(c, rep):
         cfg, why = rec_config()
@@ -418,17 +452,22 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         return {"state": {"allowed": "ok", "exception": "warning", "outside": "critical"}.get(lic, "unknown"),
                 "word": f"Licence: {name}", "text": "" if lic == "allowed" else text}
 
-    def inbox_cards(rep, shown):
+    def inbox_cards(rep, shown, hidden=None):
+        """One dict per candidate for the row template. `hidden` maps a candidate id to {"state": snoozed | dismissed, "date": ...}
+        for the Snoozed and Dismissed views, where a row carries no action."""
         results = load_results()[0]
+        hidden = hidden or {}
         cards = []
         for c in shown:
             hosted = c.source.kind == "hosted"
+            fits = [] if hosted else fit_chips(c, rep, results)
             card = {"c": c, "reason": ib.REASONS[c.kind][0], "reason_why": ib.REASONS[c.kind][1], "hosted": hosted,
-                    "fits": [] if hosted else fit_chips(c, rep, results), "licence": None if hosted else licence_chip(c, rep),
-                    "hint": None, "retire": None, "replacement": None}
+                    "fits": fits, "best": best_fit(fits), "licence": None if hosted else licence_chip(c, rep),
+                    "hints": [], "retire": None, "replacement": None, "pr_n": pr_number(c.pr) if c.pr else None,
+                    "hidden": hidden.get(c.id)}
             rec = (rep.sizes if rep else {}).get(c.source.ref) if c.source.kind == "huggingface" else None
             if rec and rec.eval_results:
-                card["hint"] = "; ".join(f"{x['name'] or 'metric'} {x['value']}" + (f" on {x['dataset']}" if x['dataset'] else "") for x in rec.eval_results[:4])
+                card["hints"] = [f"{x['name'] or 'metric'} {x['value']}" + (f" on {x['dataset']}" if x['dataset'] else "") for x in rec.eval_results[:4]]
             if c.kind == "deprecation":
                 card["retire"] = retire_note(c.when)
                 if c.replacement:
@@ -438,16 +477,48 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         cards.sort(key=lambda k: (INBOX_RANK[k["c"].kind], (k["retire"] or {}).get("date") or "9999", k["c"].model))
         return cards
 
+    def ago_text(stamp):
+        """"6 min ago" for the report's generatedAt; "" when it cannot be read."""
+        try:
+            t = datetime.datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return ""
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=datetime.timezone.utc)
+        n = int((_now() - t).total_seconds())
+        return "just now" if n < 60 else f"{n // 60} min ago" if n < 3600 else f"{n // 3600} h ago" if n < 86400 else f"{n // 86400} days ago"
+
+    def source_health(rep):
+        """The one quiet line at the foot of the Inbox: which upstreams answered in the watcher's last report and when, which did
+        not, and the reading's own reason when the report is old, missing or empty. `state` is that line's badge."""
+        srcs = rep.data.sources if rep.data else {}
+        ok = [k for k, v in srcs.items() if v.get("ok")]
+        failed = [(k, str(v.get("reason", "") or "")) for k, v in srcs.items() if not v.get("ok")]
+        state = rep.state if rep.state in ("unknown", "critical") else ("unknown" if failed else "ok")
+        return {"state": state, "ok": ok, "failed": failed, "ago": ago_text(rep.data.generated_at) if rep.data else "",
+                "at": rep.data.generated_at if rep.data else "", "not_configured": rep.reason == "not configured",
+                "reason": rep.reason if rep.state in ("unknown", "critical") and not failed else ""}
+
+    INBOX_VIEWS = {"all": "To decide", "local": "To decide, local", "frontier": "To decide, frontier", "snoozed": "Snoozed", "dismissed": "Dismissed"}
+
     @app.get("/models/inbox")
-    def models_inbox(request: Request):
+    def models_inbox(request: Request, show: str = ""):
         u, deny = admin(request)
         if deny:
             return deny
         rep = src_report.read()
         inbox, inbox_why = inbox_cfg()
         cands, snoozed, dismissed = ib.split(rep.data.candidates if rep.data else [], inbox, today())
-        return render(request, "models_inbox.html", u, reading=rep, cards=inbox_cards(rep.data, cands), snoozed=snoozed, dismissed=dismissed,
-                      inbox_why=inbox_why, held=HOSTED_HELD, days=ib.SNOOZE_DAYS, watch_on=L.watch_enabled)
+        view = show if show in INBOX_VIEWS else "all"
+        local = [c for c in cands if c.source.kind != "hosted"]
+        frontier = [c for c in cands if c.source.kind == "hosted"]
+        counts = {"all": len(cands), "local": len(local), "frontier": len(frontier), "snoozed": len(snoozed), "dismissed": len(dismissed)}
+        shown = {"all": cands, "local": local, "frontier": frontier, "snoozed": [c for c, _u in snoozed], "dismissed": [c for c, _d in dismissed]}[view]
+        hidden = {**{c.id: {"state": "snoozed", "date": until} for c, until in snoozed},
+                  **{c.id: {"state": "dismissed", "date": d} for c, d in dismissed}} if view in ("snoozed", "dismissed") else {}
+        return render(request, "models_inbox.html", u, reading=rep, cards=inbox_cards(rep.data, shown, hidden), view=view,
+                      view_title=INBOX_VIEWS[view], counts=counts, health=source_health(rep), inbox_why=inbox_why,
+                      held=HOSTED_HELD, days=ib.SNOOZE_DAYS, watch_on=L.watch_enabled)
 
     def inbox_change(request, u, kind, cid, fmt):
         rep = src_report.read()

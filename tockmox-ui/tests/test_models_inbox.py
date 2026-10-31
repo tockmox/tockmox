@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1258 (the Inbox), TM-1265 (the retirement countdown): the watcher's candidates as cards with a reason, a fit per node, a
-licence and a labelled hint; Evaluate, Snooze and Dismiss each render a change and write nothing; a snoozed or dismissed
-candidate is hidden here, on the Models page, in the watcher's report and in the PR opener's plan."""
+"""TM-1258 (the Inbox), TM-1265 (the retirement countdown), TM-1300 (Inbox revision 2): the watcher's candidates as one scannable
+row each (reason, model and one sentence, best fit, size, one primary action, a menu) with the per-node fit, licence, labelled hints
+and admit PR open under the row; filters split local and frontier and show snoozed and dismissed; source health is one line at the
+foot. Evaluate, Snooze and Dismiss each render a change and write nothing; a snoozed or dismissed candidate is hidden from the
+default view, the Models page, the watcher's report and the PR opener's plan."""
 import datetime
 import html
 import json
@@ -58,7 +60,7 @@ def test_every_new_page_is_admin_only_and_posts_need_the_csrf_token(tmp_path):
 def test_no_report_says_not_watching_and_offers_nothing(tmp_path):
     c, u = page_client(tmp_path)
     t = text(c.get("/models/inbox"))
-    assert "Not watching" in t and "Evaluate" not in t and "Nothing to decide" not in t.replace("Nothing to decide.", "") + "x" or True
+    assert "Not watching" in t and 'class="inbox-row"' not in t and "/models/propose" not in t
     assert "To decide" in t and "(0)" in t
 
 
@@ -76,32 +78,103 @@ def test_a_fresh_empty_report_says_nothing_to_decide(tmp_path):
 
 def test_a_report_where_a_source_did_not_answer_is_unknown(tmp_path):
     c, u = page_client(tmp_path, candidates=[], sources={"huggingface": {"ok": False, "reason": "unreachable"}})
-    assert "not every upstream answered" in text(c.get("/models/inbox"))
+    assert "Not every upstream answered: huggingface (unreachable)" in text(c.get("/models/inbox"))
 
 
-# ------------------------------------------------------------ one card per reason
+# ------------------------------------------------------------ one row per candidate
+
+def rows_of(t):
+    """The <li> rows of the list, as text: one per candidate."""
+    return t.split('<ul role="list" class="inbox-list">')[1].split("</ul>")[0].split('<li class="inbox-row">')[1:]
+
+
+def row_of(t, model):
+    """The one row that names `model`."""
+    return next(li for li in rows_of(t) if f"<code>{model}</code>" in li)
+
+
+def detail_of(row):
+    """What opens under the row."""
+    return row.split('class="in-detail"')[1].split('<div class="in-acts">')[0]
+
+
+def acts_of(row):
+    return row.split('<div class="in-acts">')[1]
+
+
+def models_in(t):
+    return re.findall(r"<code>([^<]+)</code><span class=\"in-sentence\"", t)
+
 
 @pytest.mark.parametrize("kind,tag", [("revision", "New revision"), ("quant", "Other quant"), ("successor", "Successor"),
                                       ("frontier", "Hosted, new"), ("deprecation", "Hosted, retiring")])
 def test_each_reason_has_its_tag(tmp_path, kind, tag):
     c, u = page_client(tmp_path, candidates=[CANDIDATES[kind]])
     t = text(c.get("/models/inbox"))
-    assert f'<span class="badge st-info">{tag}</span>' in t and CANDIDATES[kind]["model"] in t
-    assert f'name="cid" value="{CANDIDATES[kind]["id"]}"' in t
+    rows = rows_of(t)
+    assert len(rows) == 1 and f'<span class="badge st-info">{tag}</span>' in rows[0] and f"<code>{CANDIDATES[kind]['model']}</code>" in rows[0]
+    assert CANDIDATES[kind]["detail"] in rows[0].split('class="in-detail"')[0]          # the one sentence is on the row, not under it
+    assert f'name="cid" value="{CANDIDATES[kind]["id"]}"' in rows[0]
 
 
-def test_a_local_candidate_has_a_fit_chip_per_node_a_licence_and_a_labelled_hint(tmp_path):
-    sizes = {NEW_Q: size_rec(NEW_Q, 17.0, "apache-2.0", evals=[{"name": "MMLU", "value": "0.81", "dataset": "mmlu"}])}
-    c, u = page_client(tmp_path, candidates=[CANDIDATES["quant"]], sizes=sizes)
+def test_the_page_has_real_headings_a_list_role_and_no_inline_script_or_handler(tmp_path):
+    c, u = page_client(tmp_path, candidates=ALL)
     t = text(c.get("/models/inbox"))
-    assert "Fit: Alpha: fits" in t and "Fit: Beta: " in t                    # one chip per node, from fit v2
-    assert "Licence: apache-2.0" in t
-    assert "Self-reported on the model card, a hint and not a measurement: MMLU 0.81 on mmlu" in t
+    assert t.count("<h1>") == 1 and '<h2 id="cards-h">' in t and 'role="list"' in t and 'aria-label="Filter the inbox"' in t
+    assert "<script" not in t.lower() and not re.search(r"\son[a-z]+\s*=", t) and "style=" not in t.lower()
+    for row in rows_of(t):                                                     # menu and expander are native, so the keyboard works
+        assert row.count("<details") == 2 and row.count("<summary") == 2 and "aria-label=\"More actions for " in row
 
 
-def card_of(t, model):
-    """The one <li> card that names `model`."""
-    return next(li for li in t.split("<li>") if f"<code>{model}</code>" in li)
+def test_a_row_is_scannable_and_its_details_hold_fit_per_node_licence_and_self_reported_hints(tmp_path):
+    sizes = {NEW_Q: size_rec(NEW_Q, 17.0, "apache-2.0", evals=[{"name": "MMLU", "value": "0.81", "dataset": "mmlu"}])}
+    c, u = page_client(tmp_path, candidates=[dict(CANDIDATES["quant"], sizeGiB=17.0)], sizes=sizes)
+    t = text(c.get("/models/inbox"))
+    row = row_of(t, NEW_Q)
+    line, detail = row.split('class="in-detail"')[0], detail_of(row)
+    assert "Other quant" in line and "another quantisation of example-org/Example-27B" in line and "17.0 GiB" in line
+    assert re.search(r"Alpha <span class=\"m\">· fits · ~\d+ tok/s", line)           # the best node, its state and a predicted speed
+    for chip in ("Fit: Alpha: fits", "Fit: Beta: ", "Licence: apache-2.0", "Self-reported <em>MMLU 0.81 on mmlu</em>"):
+        assert chip in detail and chip not in line
+    assert detail.count('class="fchip"') == 2 and re.search(r"model \d+\.\d GiB · 32K x 1 · ~\d+ tok/s predicted", detail)   # GiB, context x slots, speed
+    assert "a hint and not a measurement" in detail and "Admit PR" in detail and "None open" in detail
+
+
+def test_the_best_fit_is_fits_over_tight_over_over_and_then_the_faster_node(tmp_path):
+    cq = dict(CANDIDATES["quant"], sizeGiB=17.0)
+    sizes = {NEW_Q: size_rec(NEW_Q, 17.0)}
+    c, u = page_client(tmp_path, candidates=[cq], sizes=sizes)
+    line = row_of(text(c.get("/models/inbox")), NEW_Q).split('class="in-detail"')[0]
+    assert "Alpha <span" in line and "Beta <span" not in line                  # both fit: Alpha is faster
+    inv = inventory_doc()
+    inv["nodes"][0]["hardware"]["memory_gib"]["value"] = 16                    # Alpha is now too small, and still the faster chip
+    c, u = page_client(tmp_path, candidates=[cq], sizes=sizes, inventory=inv)
+    t = text(c.get("/models/inbox"))
+    line, detail = row_of(t, NEW_Q).split('class="in-detail"')[0], detail_of(row_of(t, NEW_Q))
+    assert "Beta <span" in line and "· tight ·" in line and "Alpha <span" not in line                # tight beats over, though Alpha is faster
+    assert "Fit: Alpha: over" in detail and "Fit: Beta: tight" in detail
+    small = dict(CANDIDATES["quant"], sizeGiB=12.0)
+    c, u = page_client(tmp_path, candidates=[small], sizes={NEW_Q: size_rec(NEW_Q, 12.0)}, inventory=inv)
+    t = text(c.get("/models/inbox"))
+    line, detail = row_of(t, NEW_Q).split('class="in-detail"')[0], detail_of(row_of(t, NEW_Q))
+    assert "Beta <span" in line and "· fits ·" in line and "Alpha <span" not in line                # fits beats over, though Alpha is faster
+    assert "Fit: Alpha: over" in detail and "Fit: Beta: fits" in detail
+    big = dict(CANDIDATES["successor"], sizeGiB=400.0)
+    c, u = page_client(tmp_path, candidates=[big], sizes={SUCC: size_rec(SUCC, 400.0)})
+    line = row_of(text(c.get("/models/inbox")), SUCC).split('class="in-detail"')[0]
+    assert re.search(r"Alpha <span class=\"m\">· over", line) and "400.0 GiB" in line   # nothing fits: the best of the overs, said as over
+
+
+def test_an_unsized_candidate_says_not_sized_yet_a_hosted_one_says_no_node_and_no_size_is_n_a(tmp_path):
+    mystery = cand("quant", "example-org/Mystery-model")
+    rec = size_rec(mystery["model"], 1.0)
+    for k in ("sizeBytes", "paramsB"):
+        rec.pop(k, None)
+    c, u = page_client(tmp_path, candidates=[mystery, CANDIDATES["frontier"]], sizes={mystery["model"]: rec})
+    t = text(c.get("/models/inbox"))
+    m, h = row_of(t, mystery["model"]), row_of(t, HOSTED_NEW)
+    assert "not sized yet" in m.split('class="in-detail"')[0] and 'class="muted">n/a</span>' in m
+    assert "hosted, no node" in h.split('class="in-detail"')[0] and 'class="muted">n/a</span>' in h and "tok/s" not in h
 
 
 def test_fit_says_over_when_it_does_not_fit_and_unknown_when_it_cannot_say(tmp_path):
@@ -112,11 +185,9 @@ def test_fit_says_over_when_it_does_not_fit_and_unknown_when_it_cannot_say(tmp_p
         sizes[mystery["model"]].pop(k, None)
     c, u = page_client(tmp_path, candidates=[big, mystery], sizes=sizes)
     t = text(c.get("/models/inbox"))
-    big_card = card_of(t, big["model"])
-    big_fit = big_card.split('class="chips-row"')[1].split("</p>")[0]
+    big_fit = detail_of(row_of(t, big["model"])).split('class="chips-row"')[1].split("</p>")[0]
     assert "Fit: Alpha: over" in big_fit and "Fit: Beta: over" in big_fit and big_fit.count("st-critical") == 2 and "st-ok" not in big_fit
-    mystery_card = card_of(t, mystery["model"])
-    fit_part = mystery_card.split('class="chips-row"')[1].split("</p>")[0]
+    fit_part = detail_of(row_of(t, mystery["model"])).split('class="chips-row"')[1].split("</p>")[0]
     assert "Fit: Alpha: Unknown, its size is not known" in fit_part and "Fit: Beta: Unknown" in fit_part
     assert "st-ok" not in fit_part and "st-unknown" in fit_part and "fits" not in fit_part
 
@@ -126,36 +197,107 @@ def test_a_licence_off_the_allow_list_is_a_problem_and_no_licence_is_unknown(tmp
     sizes = {a["model"]: size_rec(a["model"], 5.0, "cc-by-nc-4.0"), b["model"]: size_rec(b["model"], 5.0, "")}
     c, u = page_client(tmp_path, candidates=[a, b], sizes=sizes)
     t = text(c.get("/models/inbox"))
-    ca, cb = card_of(t, a["model"]), card_of(t, b["model"])
+    ca, cb = detail_of(row_of(t, a["model"])), detail_of(row_of(t, b["model"]))
     assert "Licence: cc-by-nc-4.0" in ca and "is not on this site's allow list" in ca
     assert "Licence: unknown" in cb and "not on the allow list until it is" in cb
 
 
-def test_a_hosted_card_says_the_data_class_rails_give_it_public_data_only(tmp_path):
+def test_a_hosted_row_says_the_data_class_rails_give_it_public_data_only_in_its_details(tmp_path):
     c, u = page_client(tmp_path, candidates=[CANDIDATES["frontier"]])
     t = text(c.get("/models/inbox"))
-    assert "Hosted: public data only" in t and "the data-class rails, TM-1249" in t and "Fit:" not in t
+    row = row_of(t, HOSTED_NEW)
+    line, detail = row.split('class="in-detail"')[0], detail_of(row)
+    assert "Hosted: public data only" in detail and "the data-class rails, TM-1249" in detail and "Fit:" not in t
+    assert "the data-class rails" not in line and "Licence" not in detail          # no node, no licence chip for a hosted model
 
 
-def test_an_open_admit_pr_is_linked_and_a_non_https_link_is_not(tmp_path):
+def test_an_open_admit_pr_replaces_evaluate_with_review_pr_and_a_non_https_link_is_not_linked(tmp_path):
     a = dict(CANDIDATES["quant"], pr="https://forge.example/o/r/pull/7")
     b = dict(CANDIDATES["successor"], pr="javascript:alert(1)")
     c, u = page_client(tmp_path, candidates=[a, b])
     t = text(c.get("/models/inbox"))
-    assert 'href="https://forge.example/o/r/pull/7"' in t and "An admit change is already open" in t
-    assert "javascript:" not in t and t.count("An admit change is already open") == 1
+    ra, rb = row_of(t, NEW_Q), row_of(t, SUCC)
+    assert 'href="https://forge.example/o/r/pull/7"' in acts_of(ra) and "Review PR #7" in acts_of(ra)
+    assert "Evaluate" not in acts_of(ra).split('class="in-menu"')[0] and "/models/propose" not in ra       # the PR is the one primary action
+    assert "Admit PR" in detail_of(ra) and "Open" in detail_of(ra) and "#7" in detail_of(ra) and "waiting for your review" in detail_of(ra)
+    assert "Evaluate" in rb and "/models/propose" in rb and "Review PR" not in rb                            # a bad link is dropped, Evaluate stays
+    assert "javascript:" not in t and t.count("pull/7") == 2                                                 # the button and the detail line
 
 
-# ------------------------------------------------------------ snoozed and dismissed are filtered
+def test_each_row_has_one_primary_action_and_a_menu_with_snooze_dismiss_and_the_upstream_page(tmp_path):
+    cq = dict(CANDIDATES["quant"], url="https://huggingface.co/example-org/Example-27B-8bit")
+    c, u = page_client(tmp_path, candidates=[cq])
+    t = text(c.get("/models/inbox"))
+    acts = acts_of(row_of(t, NEW_Q))
+    primary, menu = acts.split('<details class="in-menu">')
+    assert primary.count("<button") == 1 and "Evaluate" in primary and 'action="/models/propose"' in primary
+    assert 'aria-label="More actions for ' + NEW_Q in menu and "Snooze 30 days" in menu and "Dismiss" in menu
+    assert 'action="/models/inbox/snooze"' in menu and 'action="/models/inbox/dismiss"' in menu and menu.count(f'name="csrf" value="{u.csrf}"') == 2
+    assert 'href="https://huggingface.co/example-org/Example-27B-8bit"' in menu and "Upstream page" in menu
+    assert "Upstream page" not in text(page_client(tmp_path, candidates=[CANDIDATES["quant"]])[0].get("/models/inbox"))      # no link, no item
 
-def test_snoozed_and_dismissed_are_hidden_and_listed_under_hidden(tmp_path):
+
+# ------------------------------------------------------------ filters, snoozed and dismissed
+
+def filter_counts(t):
+    nav = t.split('aria-label="Filter the inbox"')[1].split("</nav>")[0]
+    return {m[0]: int(m[1]) for m in re.findall(r'<a href="[^"]*"[^>]*>(\w+) <span class="n">(\d+)', nav)}, re.findall(r'aria-current="page">(\w+)', nav)
+
+
+def filter_fixture(tmp_path):
+    inbox = {"snoozed": [{"id": CANDIDATES["quant"]["id"], "until": day(10)}], "dismissed": [{"id": CANDIDATES["successor"]["id"], "date": day(-3)}]}
+    return page_client(tmp_path, candidates=ALL, inbox=inbox)
+
+
+def test_the_all_filter_lists_every_live_candidate_and_counts_each_filter(tmp_path):
+    c, u = filter_fixture(tmp_path)
+    t = text(c.get("/models/inbox"))
+    counts, current = filter_counts(t)
+    assert counts == {"All": 3, "Local": 1, "Frontier": 2, "Snoozed": 1, "Dismissed": 1} and current == ["All"]
+    assert set(models_in(t)) == {REPO, HOSTED_NEW, HOSTED_OLD} and NEW_Q not in t.split('id="cards-h"')[1] and SUCC not in t.split('id="cards-h"')[1]
+    assert "To decide" in t and "(3)" in t.split('id="cards-h"')[1]
+    assert filter_counts(text(c.get("/models/inbox?show=nonsense")))[1] == ["All"]                       # an unknown filter is All
+
+
+def test_the_local_and_frontier_filters_split_by_where_the_model_runs(tmp_path):
+    c, u = filter_fixture(tmp_path)
+    t = text(c.get("/models/inbox?show=local"))
+    assert models_in(t) == [REPO] and filter_counts(t)[1] == ["Local"] and "To decide, local" in t and "(1)" in t
+    t = text(c.get("/models/inbox?show=frontier"))
+    assert sorted(models_in(t)) == sorted([HOSTED_NEW, HOSTED_OLD]) and filter_counts(t)[1] == ["Frontier"] and "To decide, frontier" in t
+    assert filter_counts(t)[0]["All"] == 3                                      # the counts do not change with the filter
+
+
+def test_the_snoozed_filter_lists_what_is_snoozed_with_its_date_and_no_actions(tmp_path):
+    c, u = filter_fixture(tmp_path)
+    t = text(c.get("/models/inbox?show=snoozed"))
+    assert models_in(t) == [NEW_Q] and filter_counts(t)[1] == ["Snoozed"]
+    row = row_of(t, NEW_Q)
+    assert f"Snoozed, back on {day(10)}" in acts_of(row) and "Fit: Alpha" in detail_of(row)           # still expandable
+    assert "/models/propose" not in row and "/models/inbox/snooze" not in row and "Evaluate" not in row
+    assert "To bring one back, delete its line from modelLifecycle.inbox" in plain(c.get("/models/inbox?show=snoozed"))
+
+
+def test_the_dismissed_filter_lists_what_is_dismissed(tmp_path):
+    c, u = filter_fixture(tmp_path)
+    t = text(c.get("/models/inbox?show=dismissed"))
+    assert models_in(t) == [SUCC] and filter_counts(t)[1] == ["Dismissed"] and "Dismissed " + day(-3) in acts_of(row_of(t, SUCC))
+    assert "/models/propose" not in t and "/models/inbox/dismiss" not in t and "To bring one back" in t
+
+
+def test_an_empty_filter_says_nothing_here(tmp_path):
+    c, u = page_client(tmp_path, candidates=[CANDIDATES["quant"]])
+    for show in ("frontier", "snoozed", "dismissed"):
+        t = text(c.get(f"/models/inbox?show={show}"))
+        assert "Nothing here." in t and "<li" not in t.split('id="cards-h"')[1].split('id="source-health"')[0]
+
+
+def test_snoozed_and_dismissed_are_hidden_from_the_default_view_and_the_models_page(tmp_path):
     inbox = {"snoozed": [{"id": CANDIDATES["quant"]["id"], "until": day(10)}], "dismissed": [{"id": CANDIDATES["successor"]["id"], "date": day(-3)}]}
     c, u = page_client(tmp_path, candidates=[CANDIDATES["quant"], CANDIDATES["successor"], CANDIDATES["revision"]], inbox=inbox)
     t = text(c.get("/models/inbox"))
-    cards = t.split('id="cards-h"')[1].split('id="hid-h"')[0]
+    cards = t.split('id="cards-h"')[1]
     assert "To decide" in t and "(1)" in cards and REPO in cards and NEW_Q not in cards and SUCC not in cards
-    hidden = t.split('id="hid-h"')[1]
-    assert "1 snoozed, 1 dismissed" in hidden and NEW_Q in hidden and f"back on {day(10)}" in hidden and SUCC in hidden
     m = text(c.get("/models"))
     assert "2 candidate(s) are snoozed or dismissed" in m and "Inbox (1)" in m and NEW_Q not in m.split('id="next-h"')[0]
 
@@ -164,16 +306,55 @@ def test_a_snooze_that_has_run_out_offers_the_candidate_again(tmp_path):
     inbox = {"snoozed": [{"id": CANDIDATES["quant"]["id"], "until": day(-1)}]}
     c, u = page_client(tmp_path, candidates=[CANDIDATES["quant"]], inbox=inbox)
     t = text(c.get("/models/inbox"))
-    assert NEW_Q in t.split('id="cards-h"')[1] and 'id="hid-h"' not in t
+    assert models_in(t) == [NEW_Q] and filter_counts(t)[0]["Snoozed"] == 0 and "Nothing here." in text(c.get("/models/inbox?show=snoozed"))
 
 
 def test_a_malformed_inbox_is_shown_and_refuses_snooze_and_dismiss(tmp_path):
     c, u = page_client(tmp_path, candidates=[CANDIDATES["quant"]], inbox={"snoozed": [{"id": "x", "until": "soon"}]})
     t = text(c.get("/models/inbox"))
     assert "modelLifecycle.inbox.snoozed[0].until must be a date" in t and "Snooze 30 days" not in t and "Evaluate" in t
+    assert "Dismiss<" not in t.split('id="cards-h"')[1]
     r = c.post("/models/inbox/snooze", data={"csrf": u.csrf, "cid": CANDIDATES["quant"]["id"]})
     assert r.status_code == 400 and "cannot be extended" in r.text
     assert "Inbox settings" in c.get("/models").text
+
+
+# ------------------------------------------------------------ source health, one line at the foot
+
+def foot_of(t):
+    return plain_html(t.split('id="source-health"')[1].split("</p>")[0])
+
+
+def plain_html(fragment):
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html.unescape(fragment))).strip()
+
+
+def test_source_health_is_one_line_after_the_list_and_names_who_answered_and_when(tmp_path):
+    c, u = page_client(tmp_path, candidates=[CANDIDATES["quant"]], generated=iso(delta_s=-360),
+                       sources={"huggingface": {"ok": True}, "ollama": {"ok": True}, "anthropic": {"ok": True}})
+    t = text(c.get("/models/inbox"))
+    assert t.count('id="source-health"') == 1 and t.index('id="source-health"') > t.index("</ul>") and 'id="watch-h"' not in t
+    foot = foot_of(t)
+    assert "OK" in foot and "huggingface, ollama, anthropic answered 6 min ago." in foot
+    assert foot.count("answered") == 1 and "Not every upstream answered" not in foot and "predicted from bandwidth" in foot
+
+
+def test_source_health_names_the_source_that_failed_and_the_report_it_failed_in(tmp_path):
+    c, u = page_client(tmp_path, candidates=[CANDIDATES["quant"]], generated=iso(delta_s=-3 * 3600),
+                       sources={"huggingface": {"ok": False, "reason": "unreachable"}, "anthropic": {"ok": True}})
+    foot = foot_of(text(c.get("/models/inbox")))
+    assert "Unknown" in foot and "Not every upstream answered: huggingface (unreachable), in the report from 3 h ago." in foot
+    assert "anthropic answered 3 h ago." in foot
+
+
+def test_a_stale_report_and_a_missing_one_are_said_in_the_same_line(tmp_path):
+    c, u = page_client(tmp_path, candidates=[], generated="2026-01-01T00:00:00Z")
+    foot = foot_of(text(c.get("/models/inbox")))
+    assert "Unknown" in foot and "the watcher may have stopped" in foot and "may be out of date or incomplete" in foot
+    c, u = page_client(tmp_path)
+    t = text(c.get("/models/inbox"))
+    foot = foot_of(t)
+    assert "Not watching" in foot and "modelLifecycle.reportFile" in foot and "Nothing is listed because no watcher report is configured" in t
 
 
 # ------------------------------------------------------------ the three buttons
@@ -263,6 +444,24 @@ def test_the_inbox_card_for_a_retiring_model_counts_down_and_offers_the_replacem
     r = c.post("/models/propose", data={"csrf": u.csrf, "cid": CANDIDATES["deprecation"]["id"]})
     t2 = text(r)
     assert r.status_code == 200 and f"Admit {HOSTED_NEW} for evaluation" in t2 and "eval gateway" in t2 and "endpoint_tier: external" in t2
+
+
+def test_a_retiring_row_keeps_its_action_wording_shows_the_countdown_on_the_row_and_the_replacement_under_it(tmp_path):
+    c, u = page_client(tmp_path, candidates=[retiring(day(12))])
+    row = row_of(text(c.get("/models/inbox")), HOSTED_OLD)
+    line, detail = row.split('class="in-detail"')[0], detail_of(row)
+    assert "retires in 12 days" in line and "hosted, no node" in line
+    assert f"Replacement named: <code>{HOSTED_NEW}</code>" in detail and "the data-class rails, TM-1249" in detail
+    assert "Evaluate the replacement" in acts_of(row) and 'action="/models/propose"' in acts_of(row)
+    pr = dict(retiring(day(12)), pr="https://forge.example/o/r/pull/12")                     # the replacement's admit PR is already open
+    c, u = page_client(tmp_path, candidates=[pr])
+    row = row_of(text(c.get("/models/inbox")), HOSTED_OLD)
+    assert "Review PR #12" in acts_of(row) and "Evaluate the replacement" not in row and "#12" in detail_of(row)
+    lc = hosted_lifecycle()
+    lc["catalog"].append({"id": "example-model-9", "model": HOSTED_NEW, "stage": "candidate", "source": {"kind": "hosted", "ref": HOSTED_NEW}})
+    c, u = page_client(tmp_path, candidates=[retiring(day(12))], lifecycle=lc)
+    row = row_of(text(c.get("/models/inbox")), HOSTED_OLD)
+    assert "See the replacement" in acts_of(row) and "/models/m/example-model-9" in acts_of(row) and "Evaluate the replacement" not in row
 
 
 def test_a_retired_model_reads_retired_and_a_missing_replacement_is_said(tmp_path):
