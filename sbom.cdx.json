@@ -268,9 +268,9 @@
     {
       "description": "Helm chart dependency of tockmox-ai",
       "name": "open-webui",
-      "purl": "pkg:generic/helm/open-webui@17.4.0",
+      "purl": "pkg:generic/helm/open-webui@17.5.0",
       "type": "application",
-      "version": "17.4.0"
+      "version": "17.5.0"
     },
     {
       "description": "Helm chart dependency of tockmox-ai",
