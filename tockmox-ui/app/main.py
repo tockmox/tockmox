@@ -574,11 +574,12 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
 
     # ------------------------------------------------------------ inference nodes (REQ-0047)
 
-    nodes_routes.register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_inodes, prober, APP_VERSION)
+    src_report = ModelReportSource(s.lifecycle.report_file, s.lifecycle.report_max_age_s)
+    nodes_routes.register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_inodes, prober, APP_VERSION,
+                          src_report=src_report)
 
     # ------------------------------------------------------------ model lifecycle (REQ-0048)
 
-    src_report = ModelReportSource(s.lifecycle.report_file, s.lifecycle.report_max_age_s)
     src_demand = DemandSource(s.prometheus_url, s.lifecycle.demand_query, s.source_timeout_s, tp.prometheus)
     src_verdicts = VerdictSource(s.lifecycle.verdicts_dir, s.lifecycle.verdicts_repo_path)
     models_routes.register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report, src_demand, APP_VERSION,

@@ -61,6 +61,22 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **A node's page lists the models it serves, with a memory bar, and the Models
+  page links back (TM-1299).** `/nodes/<id>` opens with "Models on this node":
+  per engine endpoint (with its probe state), each deployment's alias, model,
+  catalog build, context window, slots, max output tokens, thinking on or off,
+  the memory it is planned at, and whether it is live or a `-next` candidate.
+  Tunings come from the route; a value it does not state shows the engine's
+  default labelled "default" where the docs give one, else "engine default, not
+  reported", never a guess. Planned memory is the fit checks' own arithmetic, so
+  the page and the fit agree. A bar shows the pinned models, the candidate in
+  stripes and what is free, in GiB, with a line at the node's usable memory; a
+  deployment of unknown size is listed and left out of the bar with a note.
+  Every alias links to its page, and every local route on `/models` links to its
+  node. The deployment rows are one module, `app/deployments.py`, for the Models
+  page to reuse. `docs/administration/inference-nodes.md`, "Models on this
+  node".
+
 - **Data-class rails for evaluations: eval data above public never reaches a
   route that is not local.** The eval runner tags every request with its eval
   set's class (`open`, `internal` or `restricted`; a row in `cases.jsonl` may

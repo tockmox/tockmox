@@ -286,3 +286,39 @@ ol.legs li { counter-increment: leg; } ol.legs li::before { content: counter(leg
   .in-menu-list { top: 44px; right: auto; left: 0; }
   .in-detail { padding-left: 0; }
 }
+
+/* TM-1299: node models and memory bar */
+.membar-wrap { padding: 1rem 1rem 1.1rem; border-bottom: 1px solid var(--tx-border); }
+.membar-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: .6rem; gap: .25rem 1rem; flex-wrap: wrap; }
+.membar-top strong { font-size: var(--fs-3); font-variant-numeric: tabular-nums; }
+.membar { display: block; width: 100%; height: 64px; font-size: var(--fs-1); font-variant-numeric: tabular-nums; overflow: visible; }
+.membar .bar-bg { fill: var(--tx-bg); stroke: var(--tx-border); }
+.membar .seg .fill { fill: var(--tx-emerald-400); }
+.membar .seg.candidate .fill { fill: url(#membar-stripes); }
+.membar .stripe-a { fill: rgba(240, 131, 63, .95); }
+.membar .stripe-b { fill: rgba(240, 131, 63, .55); }
+.membar .label-bg { fill: rgba(10, 13, 11, .88); }
+.membar .seg-text { fill: #0a0d0b; font-weight: 600; }
+.membar .seg-text.on-dark { fill: #f2f4f1; }
+.membar .gap { stroke: var(--tx-bg); stroke-width: 2; }
+.membar .free-text { fill: var(--tx-text-muted); }
+.membar .usable-line { stroke: var(--tx-text); stroke-width: 2; stroke-dasharray: 4 3; }
+.membar .tick { fill: var(--tx-text-muted); font-size: var(--fs-0); }
+.membar .tick.usable { fill: var(--tx-text); }
+.legend { display: flex; flex-wrap: wrap; gap: .4rem 1.5rem; margin: .4rem 0 0; padding: 0; list-style: none; font-size: var(--fs-1); }
+.legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: .4rem; vertical-align: -1px; }
+.legend .l1 { background: var(--tx-emerald-400); }
+.legend .l3 { background: repeating-linear-gradient(135deg, rgba(240, 131, 63, .95) 0 4px, rgba(240, 131, 63, .55) 4px 8px); }
+.legend .l4 { border: 1px solid var(--tx-steel-500); }
+table.models-on tr.ep th { background: var(--tx-surface-raised); padding-top: .65rem; padding-bottom: .65rem; font-weight: 400; }
+table.models-on tr.ep .epn { font-weight: 700; font-size: var(--fs-3); margin-right: .5rem; }
+table.models-on tr.cand > th { border-left: 3px solid var(--tx-trim); }
+table.models-on tr.more td { padding-top: 0; }
+table.models-on .tag { font-size: var(--fs-0); text-transform: uppercase; letter-spacing: .04em; border: 1px solid var(--tx-border); border-radius: 3px; padding: 0 .3rem; }
+table.models-on { table-layout: fixed; min-width: 1120px; }
+table.models-on .c-alias { width: 11.5rem; } table.models-on .c-model { width: auto; } table.models-on .c-build { width: 5.5rem; }
+table.models-on .c-tune { width: 7.5rem; } table.models-on .c-think { width: 7rem; } table.models-on .c-plan { width: 7.5rem; } table.models-on .c-state { width: 10.5rem; }
+table.models-on tbody th[scope="row"], table.models-on td code { overflow-wrap: anywhere; }
+table.models-on tbody th[scope="row"] a { white-space: nowrap; }
+table.models-on td:nth-child(3) code { white-space: nowrap; }
+table.models-on td.num { white-space: normal; }

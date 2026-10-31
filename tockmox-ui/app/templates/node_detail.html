@@ -7,6 +7,86 @@
 {% if health and health.why %}<p class="muted">{{ health.why }}</p>{% elif not health %}<p class="muted">{{ reading.reason or "no reading" }}</p>{% endif %}
 {% if health and health.disagree %}<p class="warnbox">{{ badge("warning", "Check this") }} {{ health.disagree }}.</p>{% endif %}
 
+{#- TM-1299: the models this node serves, per engine endpoint, and its memory against what is planned. -#}
+{% macro tune(x) -%}
+{%- if x.source == "route" -%}{{ x.text }}
+{%- elif x.source == "default" -%}<span class="muted"{% if x.note %} title="{{ x.note }}"{% endif %}>{{ x.text }}{% if x.label %} <span class="tag">{{ x.label }}</span>{% endif %}</span>
+{%- else -%}<span class="muted">{{ x.text }}</span>{%- endif -%}
+{%- endmacro %}
+{% set bar = models.bar %}
+{% set ndep = models.deployments|length %}
+<section class="panel flush" aria-labelledby="models-h">
+  <div class="panel-head"><h2 id="models-h">Models on this node</h2>
+    <span class="muted small">{{ ndep }} deployment{{ "s" if ndep != 1 }} on {{ models.groups|length }} endpoint{{ "s" if models.groups|length != 1 }} &middot; each alias links to its page</span></div>
+  {% for n in models.notes %}<p class="muted small">{{ n }}</p>{% endfor %}
+  {% if bar.total_gib %}
+  <div class="membar-wrap">
+    <div class="membar-top"><span><strong>{{ bar.planned_gib }} GiB</strong> <span class="muted">planned of {{ bar.total_gib|round(1) }} GiB</span></span>
+      <span class="muted small">Pinned models and the candidate, against what is free</span></div>
+    <svg class="membar" role="img" width="100%" height="64" focusable="false"
+         aria-label="Memory on {{ node.name }}: {% for sg in bar.segments %}{{ sg.alias }} {{ sg.gib }}{% if sg.kind == 'candidate' %} (candidate){% endif %}, {% endfor %}free {{ bar.free_gib }} GiB of {{ bar.total_gib|round(1) }}{% if bar.usable.gib %}; usable {{ bar.usable.gib }} GiB{% endif %}">
+      <defs><pattern id="membar-stripes" width="16" height="16" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="8" height="16" class="stripe-a"/><rect x="8" width="8" height="16" class="stripe-b"/></pattern></defs>
+      <rect x="0" y="0" width="100%" height="34" class="bar-bg"/>
+      {% for sg in bar.segments %}
+      <svg x="{{ sg.x }}%" y="0" width="{{ sg.pct }}%" height="34" class="seg {{ sg.kind }}">
+        <rect width="100%" height="100%" class="fill"/>
+        {% if sg.kind == "candidate" %}<rect x="8" y="7" width="{{ (sg.alias|length + (sg.gib|string|length) + 8) * 7 }}" height="20" rx="3" class="label-bg"/>{% endif %}
+        <text x="{{ 15 if sg.kind == "candidate" else 10 }}" y="22" class="seg-text{% if sg.kind == "candidate" %} on-dark{% endif %}">{{ sg.alias }} &middot; {{ sg.gib }} GiB</text>
+        <line x1="100%" x2="100%" y1="0" y2="34" class="gap"/>
+        <title>{{ sg.alias }}: {{ sg.gib }} GiB{% if sg.kind == "candidate" %} (candidate){% endif %}</title>
+      </svg>
+      {% endfor %}
+      {% if bar.free_gib %}<text x="100%" y="22" dx="-12" text-anchor="end" class="free-text">Free {{ bar.free_gib }} GiB</text>{% endif %}
+      {% if bar.usable_pct is not none %}<line x1="{{ bar.usable_pct }}%" x2="{{ bar.usable_pct }}%" y1="0" y2="40" class="usable-line"/>{% endif %}
+      <text x="0" dx="6" y="55" class="tick">0</text>
+      {% if bar.usable_pct is not none %}<text x="{{ bar.usable_pct }}%" dx="{{ -6 if bar.usable_pct > 80 else 6 }}" y="55" text-anchor="{{ 'end' if bar.usable_pct > 80 else 'start' }}" class="tick usable">{{ bar.usable.gib }} GiB usable ({{ (bar.usable.gib / bar.total_gib * 100)|round|int }}%)</text>{% endif %}
+      <text x="100%" dx="-6" y="55" text-anchor="end" class="tick">{{ bar.scale_gib|round(1) }} GiB</text>
+    </svg>
+    <ul class="legend">
+      <li><i class="l1"></i>Pinned, serving {{ bar.pinned_gib }} GiB</li>
+      <li><i class="l3"></i>Candidate (-next) {{ bar.candidate_gib }} GiB</li>
+      <li><i class="l4"></i>Free {{ bar.free_gib }} GiB</li>
+      {% if models.in_use_gib is not none %}<li class="muted">Measured in use now: {{ models.in_use_gib }} GiB (node metrics)</li>{% endif %}
+    </ul>
+    <p class="muted small">{{ bar.usable.line }}.</p>
+    {% if bar.over_total %}<p>{{ badge("critical", "Over the node's memory") }} What is planned is more than the node has.</p>
+    {% elif bar.over_usable %}<p>{{ badge("warning", "Over usable memory") }} What is planned is more than this node should fill ({{ bar.usable.gib }} GiB).</p>{% endif %}
+    {% if bar.left_out %}<p class="muted small">Not in the bar: {% for a, why in bar.left_out %}<code>{{ a }}</code> ({{ why }}){% if not loop.last %}; {% endif %}{% endfor %}.</p>{% endif %}
+  </div>
+  {% else %}
+  <p class="muted">This node has no memory figure, so there is no bar. Planned on it: {{ bar.planned_gib }} GiB.{% if bar.left_out %} Not counted: {% for a, why in bar.left_out %}<code>{{ a }}</code> ({{ why }}){% if not loop.last %}; {% endif %}{% endfor %}.{% endif %}</p>
+  {% endif %}
+  <div class="table-wrap" role="region" aria-labelledby="models-cap" tabindex="0">
+  <table class="models-on">
+    <caption id="models-cap" class="visually-hidden">Deployments on {{ node.name }}, by engine endpoint</caption>
+    <colgroup><col class="c-alias"><col class="c-model"><col class="c-build"><col class="c-tune"><col class="c-tune"><col class="c-tune"><col class="c-think"><col class="c-plan"><col class="c-state"></colgroup>
+    <thead><tr><th scope="col">Alias</th><th scope="col">Model</th><th scope="col">Build</th><th scope="col" class="num">Context</th><th scope="col" class="num">Slots</th><th scope="col" class="num">Max output</th><th scope="col">Thinking</th><th scope="col" class="num">Planned (GiB)</th><th scope="col">State</th></tr></thead>
+    {% for g in models.groups %}{% set ds = g.deployments %}
+    <tbody>
+      <tr class="ep"><th scope="rowgroup" colspan="9"><span class="epn">{{ g.engine }} :{{ g.endpoint.port }}</span>
+        {{ badge(g.state, {"ok": "Listening", "critical": "Not answering", "warning": "Check this"}.get(g.state, "Not measured")) }}
+        <span class="muted small">{% if ds %}serves {{ ds|length }} deployment{{ "s" if ds|length != 1 }}{% if ds|selectattr("is_candidate", "equalto", false)|list|length == 0 %}, on the eval gateway where no agent can call it{% endif %}{% else %}serves no model yet{% endif %}{% if g.why and g.state in ("critical", "warning") %} &middot; {{ g.why }}{% endif %}</span></th></tr>
+      {% for d in ds %}
+      <tr{% if d.is_candidate %} class="cand"{% endif %}>
+        <th scope="row">{% if d.is_candidate %}<a href="/models/c/{{ d.alias[:-5]|urlencode }}"><code>{{ d.alias }}</code></a><div class="muted small">for <a href="/models/a/{{ d.alias[:-5]|urlencode }}"><code>{{ d.alias[:-5] }}</code></a></div>{% else %}<a href="/models/a/{{ d.alias|urlencode }}"><code>{{ d.alias }}</code></a>{% endif %}</th>
+        <td><code>{{ d.model }}</code></td>
+        <td>{% if d.build %}<code title="{{ d.build_full }}">{{ d.build }}</code>{% else %}<span class="muted">not pinned</span>{% endif %}</td>
+        <td class="num">{{ tune(d.tunings.context) }}</td>
+        <td class="num">{{ tune(d.tunings.slots) }}</td>
+        <td class="num">{{ tune(d.tunings.max_output) }}</td>
+        <td>{{ tune(d.tunings.thinking) }}</td>
+        <td class="num">{% if d.size_unknown %}<span class="muted">size unknown</span>{% elif d.shares_with %}<span class="muted">with <code>{{ d.shares_with }}</code></span>{% else %}{{ d.planned_gib }}<div class="muted small">at {{ d.planned_at }}</div>{% endif %}{% if d.bar_note and not d.shares_with and not d.size_unknown %}<div class="muted small">not in the bar</div>{% endif %}</td>
+        <td>{% if d.is_candidate %}<span class="badge st-planned"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8.5" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="3 2.2"/></svg><span>Candidate -next</span></span>{% else %}{{ badge("ok", "Live") }}{% endif %}</td>
+      </tr>
+      {% if d.more %}<tr class="more"><td colspan="9"><details><summary>More settings for <code>{{ d.alias }}</code></summary><dl class="facts">{% for k, v in d.more.items() %}<div><dt>{{ k }}</dt><dd><code>{{ v }}</code></dd></div>{% endfor %}</dl></details></td></tr>{% endif %}
+      {% endfor %}
+    </tbody>
+    {% else %}<tbody><tr><td colspan="9">This node has no engine endpoints.</td></tr></tbody>{% endfor %}
+  </table>
+  </div>
+  <p class="muted small">Planned memory is weights plus the cache for context x slots, plus engine overhead, from the routes as recorded, the same arithmetic as the fit checks. A route that does not state its context is planned at the fit default context (8K) and at one slot unless a slot count is on record, and the cell says so. A candidate counts while its -next route exists. <b>default</b> means the route does not state it and the engine's own setting applies; <b>engine default, not reported</b> means Tockmox does not know what that is. Hover a default for what it is.</p>
+</section>
+
 <section class="panel" aria-labelledby="hw-h">
   <h2 id="hw-h">Hardware</h2>
   <dl class="facts">
