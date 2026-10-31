@@ -16,11 +16,20 @@ Sources, all read-only:
   OpenRouter     GET  /api/v1/models                              keyless cross-vendor list (+expiration_date)
   Anthropic      GET  /v1/models                                  when a key is configured
   OpenAI         GET  /v1/models                                  when a key is configured (+shutdown_date)
+  LiteLLM        GET  raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
+                                                                   list prices (TM-1298), see below
 
 Inbox (TM-1258): a candidate whose id is in modelLifecycle.inbox.dismissed, or in .snoozed with a date still ahead, is left out of
 the report (and so is not sized). A retiring hosted model carries `replacement` when the provider's listing names one or the site
 does (watch.providers.<name>.replacements: {retiring id: replacement id}); a candidate keeps the `pr` link the PR opener recorded
 for it in the previous report.
+
+Prices (TM-1298): providers publish no price API, so each hosted model the catalog or the gateway names is priced from
+LiteLLM's price map, the file the gateway itself prices spend with. The report's `prices` holds, per "provider/model", the
+list price per 1M tokens in and out and the day it was read; `priceSource` says whether the read worked. A read that fails
+keeps the last good value under its original date (stale: true), so the page says "last read <date>" and never shows an old
+price as today's. A model the map does not price is absent, which the page reads as unknown. Off with
+modelLifecycle.watch.prices.enabled: false (sites that want no request to that host).
 
 Sizes (AC-48.14, fit v2), for every catalogued Hugging Face model, every Hugging Face candidate in this report and
 every operator-named seed (modelLifecycle.recommend.seeds), at most watch.sizes.maxRepos (default 80) per run:
@@ -49,8 +58,10 @@ import yaml
 from . import fit as fitmod
 from . import inbox as inboxmod
 from . import models as ml
+from . import prices as pricesmod
 
-WATCH_HOSTS = frozenset({"huggingface.co", "registry.ollama.ai", "openrouter.ai", "api.anthropic.com", "api.openai.com"})
+WATCH_HOSTS = frozenset({"huggingface.co", "registry.ollama.ai", "openrouter.ai", "api.anthropic.com", "api.openai.com",
+                         "raw.githubusercontent.com"})
 MAX_BYTES = 4 << 20
 UA = "tockmox-model-watcher"
 
@@ -71,7 +82,7 @@ class Fetcher:
         if u.scheme != "https" or u.hostname not in self.hosts:
             raise Refused(f"{u.hostname}: not a watched host")
 
-    def _read(self, url, headers):
+    def _read(self, url, headers, cap=MAX_BYTES):
         self.calls.append(("GET", url))
         with self.c.stream("GET", url, headers=headers or {}) as r:
             if r.status_code in (301, 302, 303, 307, 308):
@@ -81,11 +92,11 @@ class Fetcher:
             buf = b""
             for ch in r.iter_bytes():
                 buf += ch
-                if len(buf) > MAX_BYTES:
+                if len(buf) > cap:
                     raise Refused("answer over the cap")
         return 200, "", buf
 
-    def json(self, url, headers=None, follow_cache_hop=False):
+    def json(self, url, headers=None, follow_cache_hop=False, cap=MAX_BYTES):
         """GET and parse. Never follows a redirect, with ONE named exception (follow_cache_hop, used only for a
         file at /<repo>/resolve/<sha>/<file>): Hugging Face answers that with a 307 to
         /api/resolve-cache/models/... on the SAME host (measured 2026-10-21), so the hop is followed once, and only when
@@ -93,7 +104,7 @@ class Fetcher:
         a CDN included, is refused like every other redirect: the fence is the host list, and a hop that stays
         inside it does not widen it."""
         self._check(url)
-        status, loc, buf = self._read(url, headers)
+        status, loc, buf = self._read(url, headers, cap)
         if status != 200:
             u0 = urlsplit(url)
             hop = urlsplit(urljoin(url, loc)) if loc else None
@@ -101,7 +112,7 @@ class Fetcher:
                     and hop.path.startswith("/api/resolve-cache/")):
                 raise Refused(f"redirect to {(hop.hostname or '?') if hop else '?'} not followed")
             self._check(urljoin(url, loc))
-            status, _loc, buf = self._read(urljoin(url, loc), headers)
+            status, _loc, buf = self._read(urljoin(url, loc), headers, cap)
             if status != 200:
                 raise Refused("a second redirect is not followed")
         return json.loads(buf)
@@ -285,7 +296,26 @@ def collect_sizes(cfg: dict, lc, cands, f: "Fetcher", now: str) -> tuple[dict, l
     return sizes, gaps
 
 
-def run(cfg: dict, f: Fetcher, env=os.environ, now=None) -> dict:
+def collect_prices(cfg: dict, model_ids, f: "Fetcher", day: str, previous: dict | None = None) -> tuple[dict, dict]:
+    """The report's `prices` and `priceSource` (TM-1298). ({}, {}) when price reading is off or there is no hosted model to price.
+    A failed read is recorded with its reason, and the previous report's price for each model is kept under its own date."""
+    w = (((cfg.get("modelLifecycle") or {}).get("watch") or {}).get("prices")) or {}
+    ids = sorted(set(model_ids))
+    if w.get("enabled", True) is False or not ids:
+        return {}, {}
+    old = (previous or {}).get("prices") if isinstance((previous or {}).get("prices"), dict) else {}
+    try:
+        price_map = f.json(pricesmod.PRICE_MAP_URL, cap=pricesmod.MAX_MAP_BYTES)
+        if not isinstance(price_map, dict):
+            raise ValueError("not a JSON object")
+        return pricesmod.collect(price_map, ids, day), {"ok": True, "reason": "", "readAt": day}
+    except Exception as ex:  # noqa: BLE001 - recorded, and the last good prices stay
+        kept = pricesmod.carry({}, old, ids, ok=False)
+        last = max((p.get("readAt", "") for p in kept.values()), default="")
+        return kept, {"ok": False, "reason": _why(ex) if not isinstance(ex, ValueError) else f"unusable answer ({ex})", "readAt": last}
+
+
+def run(cfg: dict, f: Fetcher, env=os.environ, now=None, previous: dict | None = None) -> dict:
     lc = ml.parse(cfg.get("modelLifecycle") or {})
     w = (cfg.get("modelLifecycle") or {}).get("watch") or {}
     quant_authors = tuple(w.get("quantAuthors") or ("mlx-community", "lmstudio-community", "unsloth", "bartowski"))
@@ -396,7 +426,9 @@ def run(cfg: dict, f: Fetcher, env=os.environ, now=None) -> dict:
             uniq.append(c)
     ts = stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
     sizes, size_gaps = collect_sizes(cfg, lc, uniq, f, ts)
+    prices, price_source = collect_prices(cfg, [f"{p}/{m}" for p, ms in known.items() for m in ms], f, ts[:10], previous)
     return {"schema": 1, "generatedAt": ts, "sources": sources, "gaps": gaps, "sizes": sizes, "sizeGaps": size_gaps,
+            **({"prices": prices, "priceSource": price_source} if price_source else {}),
             "candidates": [{"id": c.id, "kind": c.kind, "subject": c.subject, "model": c.model, "source": c.source.as_dict(),
                             "detail": c.detail, "url": c.url, **({"sizeGiB": c.size_gib} if c.size_gib is not None else {}),
                             **({"replacement": c.replacement} if c.replacement else {}),
@@ -436,8 +468,9 @@ def main(argv):
     if not w.get("enabled", False):
         print("watcher is off (modelLifecycle.watch.enabled is false); nothing fetched", file=sys.stderr)
         return 0
-    doc = run(cfg, Fetcher(timeout=float(w.get("timeoutSeconds", 10))))
-    carry_pr_links(doc, read_previous(argv[2]))
+    previous = read_previous(argv[2])
+    doc = run(cfg, Fetcher(timeout=float(w.get("timeoutSeconds", 10))), previous=previous)
+    carry_pr_links(doc, previous)
     write_atomic(argv[2], doc)
     bad = [k for k, v in doc["sources"].items() if not v["ok"]]
     print(f"{len(doc['candidates'])} candidate(s); sources ok: {sorted(k for k, v in doc['sources'].items() if v['ok'])}"

@@ -5,6 +5,13 @@
 {% set state_icon = kit.state_icon %}{% set state_word = kit.state_word %}{% set badge = kit.badge %}
 {% set source_line = kit.source_line %}{% set fold_summary = kit.fold_summary %}
 
+{# One tuning of a deployment (deployments.Tuning): a value the route states, or the engine default labelled as one (D4). #}
+{% macro tune(x) -%}
+{%- if x.source == "route" -%}{{ x.text }}
+{%- elif x.source == "default" -%}<span class="muted"{% if x.note %} title="{{ x.note }}"{% endif %}>{{ x.text }}{% if x.label %} <span class="tag">{{ x.label }}</span>{% endif %}</span>
+{%- else -%}<span class="muted">{{ x.text }}</span>{%- endif -%}
+{%- endmacro %}
+
 {% macro argo_badge(value, kind) -%}
 {%- set good = (kind == "sync" and value == "Synced") or (kind == "health" and value == "Healthy") -%}
 {%- set bad = value in ("Degraded", "Missing") -%}
@@ -65,4 +72,9 @@
   </li>
   {% endfor %}
 </ul>
+{%- endmacro %}
+
+{#- a figure nobody recorded: "unknown", with why on hover and for a screen reader (TM-1298) -#}
+{% macro unknown(why) -%}
+<span class="muted help" title="{{ why }}">unknown<span class="visually-hidden">: {{ why }}</span></span>
 {%- endmacro %}

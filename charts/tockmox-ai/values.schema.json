@@ -1150,6 +1150,45 @@
           "properties": {
             "providers": {
               "type": "object"
+            },
+            "keepGenerations": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 3,
+              "description": "Pinned generations a hosted family keeps (claude-sonnet-5-5, claude-sonnet-5, claude-sonnet-4-5), each under an alias that never moves; the family alias (claude-sonnet) follows the current one and moves only through a promotion PR. A generation leaves when its provider retires it or when a promotion would exceed this number, always through a PR."
+            },
+            "prices": {
+              "type": "object",
+              "propertyNames": {
+                "pattern": "^[^\\s]+$"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "inPer1M",
+                  "outPer1M",
+                  "date"
+                ],
+                "properties": {
+                  "inPer1M": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "List price in US dollars per 1M input tokens."
+                  },
+                  "outPer1M": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "List price in US dollars per 1M output tokens."
+                  },
+                  "date": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                    "description": "The day the site read this price (YYYY-MM-DD). Quote it."
+                  }
+                }
+              },
+              "description": "Prices the site states for hosted models, keyed by provider/model. They win over the watcher's LiteLLM price map and are labelled 'set by this site' (TM-1298)."
             }
           },
           "not": {
@@ -1277,6 +1316,16 @@
             },
             "resources": {
               "type": "object"
+            },
+            "prices": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Read LiteLLM's price map from raw.githubusercontent.com on each watcher run (default true while the watcher is on)."
+                }
+              }
             }
           }
         },
@@ -1546,6 +1595,29 @@
             },
             "resources": {
               "type": "object"
+            }
+          }
+        },
+        "budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Hosted spend as the Models and Budget pages read it from Prometheus (TM-1258, TM-1298). Read by the Tockmox UI.",
+          "properties": {
+            "spendQuery": {
+              "type": "string",
+              "description": "PromQL: measured USD per alias or model. The window in its [..] is the window the page names."
+            },
+            "spendByCallerQuery": {
+              "type": "string",
+              "description": "PromQL: USD per caller and model (labels such as api_key_alias, team_alias, model) for the top callers by cost."
+            },
+            "usdPerRequest": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number",
+                "minimum": 0
+              },
+              "description": "An estimate per alias, labelled as one on the Budget page."
             }
           }
         }

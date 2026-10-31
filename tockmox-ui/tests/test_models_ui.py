@@ -35,7 +35,10 @@ def test_models_page_lists_catalog_and_candidates(world, tmp_path):
     c, app, s, u = admin(world, tmp_path)
     t = c.get("/models").text
     assert "Promotion gate passes" in t and "mlx-community/Qwen3.8-27B-4bit" in t
-    assert "Newer models in families you run" in t and "New hosted models" in t and "Hosted models being retired" in t
+    # the per-kind boxes moved to the Inbox (TM-1300); the Models page keeps one Needs-you row that counts them (TM-1296)
+    assert "4 new candidates" in t and 'href="/models/inbox"' in t and "Needs you" in t
+    inbox = c.get("/models/inbox").text
+    assert "Successor" in inbox and "Hosted, new" in inbox and "Hosted, retiring" in inbox and "New revision" in inbox
     assert "javascript:" not in t                                     # only https links from a report are rendered
     assert "Routed but not in the catalog" in t                       # e.g. local-fast's model
 
@@ -121,7 +124,7 @@ def test_promote_counts_then_refuses_then_accepts(world, tmp_path):
     c, app, s = make_client(world, _with_next_config(tmp_path, _pass(0), _pass(1)))
     u = login_as(c, s, ["tockmox-admins"])
     t = c.get("/models").text
-    assert "Comparisons in progress" in t and "2 of 3" in t
+    assert "Needs you" in t and "2 of 3 passing comparisons" in t and "See the count" in t      # the comparison table became a Needs-you row
     assert "2 of 3" in c.get("/models/promote?alias=local-agent-next").text
     bad = c.post("/models/promote", data={"csrf": u.csrf, "alias": "local-agent-next"})
     assert bad.status_code == 400 and "Not promoted" in bad.text and "2 of 3" in bad.text

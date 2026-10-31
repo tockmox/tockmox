@@ -7,6 +7,7 @@ probe's fences (REQ-0047 AC-47.3): nothing is read from an address the probe wou
 Run from tockmox-ui/: python -m pytest tests
 """
 import datetime
+import re
 import socket
 import sys
 from pathlib import Path
@@ -240,35 +241,67 @@ def studio_node(digest=OLLAMA_NEW):
     return node
 
 
-def test_models_reads_unknown_until_checked_then_shows_drift_as_a_finding(tmp_path):
+def drift_section(t):
+    """The node page's build check, from its heading to the next section."""
+    return t.split('id="builds-h"', 1)[1].split('id="hw-h"', 1)[0]
+
+
+def test_the_node_page_reads_unknown_until_checked_then_shows_drift_as_a_finding(tmp_path):
+    node = studio_node()
+    c, u = models_client(tmp_path, node)
+    t = c.get("/nodes/studio").text
+    s = drift_section(t)
+    assert "Builds on this node" in t and "Not checked" in s and "Drift" not in s
+    assert 'name="next" value="studio"' in s and 'action="/models/builds"' in s
+    assert node.requests == []                                     # GET /nodes/<id> never reaches a node
+    r = c.post("/models/builds", data={"csrf": u.csrf, "next": "studio"})
+    assert r.status_code == 303 and r.headers["location"] == "/nodes/studio#builds-h"
+    s = drift_section(c.get("/nodes/studio").text)
+    assert "Build drift" in s and f"serves qwen3-coder:30b build {'b' * 12}" in s
+    assert "does not report which build it loaded" in s            # the mlx-lm pin reads Unknown, with why
+    assert {req.method for req in node.requests} == {"GET"}
+
+
+def test_the_models_page_shows_the_build_state_briefly_and_links_to_the_node_page(tmp_path):
     node = studio_node()
     c, u = models_client(tmp_path, node)
     t = c.get("/models").text
-    assert "Builds on the nodes" in t and "Not checked" in t and "Drift" not in t
-    assert node.requests == []                                     # GET /models never reaches a node
-    r = c.post("/models/builds", data={"csrf": u.csrf})
-    assert r.status_code == 303
+    assert "Build not checked" in t and 'href="/nodes/studio#builds-h"' in t
+    assert "Builds on the nodes" not in t and "Pinned build against the build" not in t     # the table is on the node page
+    c.post("/models/builds", data={"csrf": u.csrf})
     t = c.get("/models").text
-    assert "Build drift" in t and f"serves qwen3-coder:30b build {'b' * 12}" in t
-    assert "does not report which build it loaded" in t            # the mlx-lm pin reads Unknown, with why
-    assert {req.method for req in node.requests} == {"GET"}
+    assert "Serves another build" in t and "Build unknown" in t          # ops-agent-30b drifted, local-medium reads Unknown
+    assert "Pinned build against the build" not in t and 'action="/models/builds"' not in t
+    # a drift is an exception: it is on the Needs-you strip, with its action going to the node page
+    strip = t.split('id="needs-h"', 1)[1].split("</section>", 1)[0]
+    assert "Build drift" in strip and "1 route on" in re.sub(r"<[^>]+>", "", strip) and 'href="/nodes/studio#builds-h"' in strip
+
+
+def test_the_check_goes_back_to_where_it_was_asked_from(tmp_path):
+    node = studio_node()
+    c, u = models_client(tmp_path, node)
+    assert c.post("/models/builds", data={"csrf": u.csrf, "next": "nope"}).headers["location"] == "/nodes/studio#builds-h"   # the first node with a pin
+    assert c.post("/models/builds", data={"csrf": u.csrf, "next": "//evil.example"}).headers["location"] == "/nodes/studio#builds-h"
 
 
 def test_the_pinned_build_reads_current(tmp_path):
     node = studio_node(OLLAMA_OLD)
     c, u = models_client(tmp_path, node)
     c.post("/models/builds", data={"csrf": u.csrf})
+    s = drift_section(c.get("/nodes/studio").text)
+    assert "Holds the pinned build" in s and "Build drift" not in s
     t = c.get("/models").text
-    assert "Holds the pinned build" in t and "Build drift" not in t
+    assert "Holds the pinned build" in t and "Build drift" not in t        # nothing on the strip either
 
 
 def test_with_probing_off_the_check_says_so_and_reads_unknown(tmp_path):
     node = studio_node()
     c, u = models_client(tmp_path, node, probe=False)
-    t = c.get("/models").text
-    assert "probing is off" in t and 'action="/models/builds"' not in t
+    s = drift_section(c.get("/nodes/studio").text)
+    assert "probing is off" in s and 'action="/models/builds"' not in s
+    assert 'action="/models/builds"' not in c.get("/models").text
     c.post("/models/builds", data={"csrf": u.csrf})
-    assert node.requests == [] and "Build drift" not in c.get("/models").text
+    assert node.requests == [] and "Build drift" not in c.get("/models").text and "Build drift" not in drift_section(c.get("/nodes/studio").text)
 
 
 def test_the_build_check_is_admin_only_and_needs_csrf(tmp_path):
@@ -284,8 +317,9 @@ def test_an_old_check_does_not_vouch_for_today(tmp_path, monkeypatch):
     node = studio_node(OLLAMA_OLD)
     c, u = models_client(tmp_path, node)
     c.post("/models/builds", data={"csrf": u.csrf})
-    from app import models_routes
-    later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=models_routes.BUILD_CHECK_MAX_AGE_S + 60)
-    monkeypatch.setattr(models_routes, "_now", lambda: later)
-    t = c.get("/models").text
-    assert "Holds the pinned build" not in t and "last checked over" in t
+    from app import build_checks
+    later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=build_checks.MAX_AGE_S + 60)
+    monkeypatch.setattr(build_checks, "_now", lambda: later)
+    s = drift_section(c.get("/nodes/studio").text)
+    assert "Holds the pinned build" not in s and "last checked over" in s
+    assert "Holds the pinned build" not in c.get("/models").text

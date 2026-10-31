@@ -30,14 +30,17 @@ now be evaluated), and promoting it (it can now be used).
 """
 from __future__ import annotations
 
+import datetime
 import fnmatch
 import hashlib
 import json
 import copy
+import datetime
 import re
 from dataclasses import dataclass, field, replace
 
 from . import fit as fitmod
+from . import frontier as fz
 from . import nodes as nm
 from . import verdict_stats as vs
 from .nodes import ALIAS_RE, ID_RE, Inventory, NodeError, Route, estimate_size_gib, fit, loading
@@ -49,6 +52,7 @@ SOURCE_KINDS = ("huggingface", "ollama", "modelkit", "hosted")
 TRACKS = ("revision", "quants", "successors", "deprecation")
 CANDIDATE_KINDS = ("revision", "quant", "successor", "frontier", "deprecation", "digest")
 RESIDENCY = ("pinned", "on-demand")
+DEFAULT_KEEP_GENERATIONS = 3     # TM-1297, ruling D2 (2026-10-30)
 NEXT = "-next"
 # The verdict class of a re-placement (the same model on another node). A re-placement measures the platform, not
 # the model, so one passing comparison is the default; it applies ONLY to a re-placement (Lifecycle.required_for).
@@ -91,6 +95,7 @@ class Entry:
     pending: dict = field(default_factory=dict)     # {revision, seen}: a newer build proposed for evaluation
     links: list = field(default_factory=list)       # [{title, url}] the operator adds: release notes, license ... https only
     rejection: dict = field(default_factory=dict)   # stage rejected: {reason, date, revision?, alias?, demoted?}
+    retirement: dict = field(default_factory=dict)  # stage retired, when a change recorded why (TM-1297): {reason, date}
 
     def serves(self, alias: str) -> bool:
         p = self.promotion or {}
@@ -115,6 +120,8 @@ class Entry:
             d["links"] = [dict(x) for x in self.links]
         if self.rejection:
             d["rejection"] = dict(self.rejection)
+        if self.retirement:
+            d["retirement"] = dict(self.retirement)
         return d
 
 
@@ -138,11 +145,15 @@ class Lifecycle:
     catalog: list[Entry] = field(default_factory=list)
     profiles: list[Profile] = field(default_factory=list)
     frontier_providers: dict = field(default_factory=dict)   # provider -> {"keyEnv": ...}
+    frontier_prices: dict = field(default_factory=dict)      # TM-1298: "provider/model" -> {inPer1M, outPer1M, date}: a price the site states
     active_profile: str = ""
     required_passes: int = 1                                 # TM-1248 (ruling E1, 2026-10-29): counts independent evidence keys, not reruns; was 3 reruns
     required_by_class: dict = field(default_factory=dict)    # class slug -> passes (REQ-0045 class 3 proposal: 1)
     eval_gateway_entries: list = field(default_factory=list)        # hosted entries a change adds (not serialised)
-    production_gateway_entries: list = field(default_factory=list)  # hosted entries a promotion adds (not serialised)
+    production_gateway_entries: list = field(default_factory=list)  # hosted entries a promotion adds, or replaces by model_name (not serialised)
+    production_gateway_removed: list = field(default_factory=list)  # model_names a change removes from the production gateway (not serialised)
+    keep_generations: int = DEFAULT_KEEP_GENERATIONS                # TM-1297 (ruling D2): pinned generations a hosted family keeps
+    keep_generations_set: bool = False                              # written in the values, so a change writes it back
 
     def required_for(self, klass: str, replacement: bool = False) -> int:
         """Passes needed for a promotion in `klass`. The operator's own per-class number always wins. Otherwise a
@@ -160,6 +171,10 @@ class Lifecycle:
 
     def by_model(self, model: str) -> Entry | None:
         return next((e for e in self.catalog if e.model == model), None)
+
+    def by_ref(self, ref: str) -> Entry | None:
+        """The catalog entry for a hosted `provider/model`: by the id routes call it, else by its source."""
+        return self.by_model(ref) or next((e for e in self.catalog if e.source.ref == ref), None)
 
     def profile(self, pid: str) -> Profile | None:
         return next((p for p in self.profiles if p.id == pid), None)
@@ -211,6 +226,45 @@ def _passes(v, where) -> int:
     return v
 
 
+def _price(v, where: str) -> float:
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v in (float("inf"), float("-inf")) or v < 0:
+        raise LifecycleError(f"{where} must be a number of dollars, zero or more")
+    return float(v)
+
+
+def parse_prices(raw) -> dict:
+    """modelLifecycle.frontier.prices (TM-1298): the list price the SITE states for a hosted model, per 1M tokens in and out, with
+    the date it read it. {"anthropic/claude-sonnet-5-5": {inPer1M: 3.0, outPer1M: 15.0, date: "2026-10-30"}}. It wins over the
+    watcher's price map and is labelled "set by this site". A price with no date, a negative one, or one that is not a number is
+    refused: a figure with no date is not a fact the page can show."""
+    if raw in (None, {}):
+        return {}
+    if not isinstance(raw, dict):
+        raise LifecycleError("frontier.prices must map a model (provider/model) to {inPer1M, outPer1M, date}")
+    out = {}
+    for model, p in raw.items():
+        where = f"frontier.prices.{model}"
+        if not isinstance(model, str) or not model.strip() or any(c.isspace() for c in model):
+            raise LifecycleError("frontier.prices: a model id is the provider-prefixed id, without spaces (anthropic/claude-sonnet-5-5)")
+        if not isinstance(p, dict) or set(p) - {"inPer1M", "outPer1M", "date"}:
+            raise LifecycleError(f"{where} takes inPer1M, outPer1M and date, and nothing else")
+        missing = [k for k in ("inPer1M", "outPer1M", "date") if k not in p]
+        if missing:
+            raise LifecycleError(f"{where} is missing {', '.join(missing)}")
+        day = p["date"]
+        if isinstance(day, datetime.date):               # an unquoted 2026-10-30 in YAML is a date, not a string
+            day = day.isoformat()
+        try:
+            if not isinstance(day, str) or not re.match(r"^\d{4}-\d{2}-\d{2}$", day):
+                raise ValueError
+            datetime.date.fromisoformat(day)
+        except ValueError:
+            raise LifecycleError(f"{where}.date must be the day the price was read (YYYY-MM-DD)") from None
+        out[model] = {"inPer1M": _price(p["inPer1M"], f"{where}.inPer1M"), "outPer1M": _price(p["outPer1M"], f"{where}.outPer1M"),
+                      "date": day}
+    return out
+
+
 def parse(doc: dict | None) -> Lifecycle:
     doc = doc or {}
     lc = Lifecycle()
@@ -252,10 +306,14 @@ def parse(doc: dict | None) -> Lifecycle:
                 raise LifecycleError(f"catalog {eid}: a rejected model records rejection.reason and rejection.date (YYYY-MM-DD)")
         elif rej:
             raise LifecycleError(f"catalog {eid}: rejection is set but the stage is {stage}")
+        ret = raw.get("retirement") or {}
+        if ret and not (isinstance(ret, dict) and str(ret.get("reason", "")).strip()
+                        and re.match(r"^\d{4}-\d{2}-\d{2}$", str(ret.get("date", "")))):
+            raise LifecycleError(f"catalog {eid}: retirement records reason and date (YYYY-MM-DD)")
         lc.catalog.append(Entry(eid, model, _source(raw.get("source"), f"catalog {eid}"),
                                 str(raw.get("family", "")), str(raw.get("baseModel", "")), str(raw.get("quant", "")),
                                 size, stage, track, dict(raw.get("promotion") or {}), adopted, dict(pend),
-                                _links(raw.get("links"), f"catalog {eid}"), dict(rej)))
+                                _links(raw.get("links"), f"catalog {eid}"), dict(rej), dict(ret)))
     pids = set()
     for raw in doc.get("profiles") or []:
         pid = str(raw.get("id", ""))
@@ -282,6 +340,13 @@ def parse(doc: dict | None) -> Lifecycle:
         raise LifecycleError("frontier.tags is withdrawn: a new hosted model lands on the eval gateway tagged open alone "
                              "(TM-1249), and its production data-class tags are chosen when it is promoted")
     lc.frontier_providers = dict(fr.get("providers") or {})
+    if "keepGenerations" in fr:
+        k = fr["keepGenerations"]
+        if isinstance(k, bool) or not isinstance(k, int) or k < 1:
+            raise LifecycleError("frontier.keepGenerations must be a whole number of 1 or more: it is how many generations of a "
+                                 "hosted family stay available, and 0 would drop them all")
+        lc.keep_generations, lc.keep_generations_set = k, True
+    lc.frontier_prices = parse_prices(fr.get("prices"))
     pr = doc.get("promotion") or {}
     if not isinstance(pr, dict):
         raise LifecycleError("promotion must be a mapping")
@@ -306,8 +371,15 @@ def to_doc(lc: Lifecycle) -> dict:
                           "residency": c.residency} for c in p.classes}} for p in lc.profiles]
     if lc.active_profile:
         d["activeProfile"] = lc.active_profile
+    frontier = {}
     if lc.frontier_providers:
-        d["frontier"] = {"providers": lc.frontier_providers}
+        frontier["providers"] = lc.frontier_providers
+    if lc.keep_generations_set:
+        frontier["keepGenerations"] = lc.keep_generations
+    if lc.frontier_prices:
+        frontier["prices"] = {k: dict(v) for k, v in lc.frontier_prices.items()}
+    if frontier:
+        d["frontier"] = frontier
     d["promotion"] = {"requiredPasses": lc.required_passes}
     if lc.required_by_class:
         d["promotion"]["requiredPassesByClass"] = dict(lc.required_by_class)
@@ -631,6 +703,9 @@ class Report:
     sizes: dict = field(default_factory=dict)  # repo -> fit.SizeRecord: what the watcher read of each model's files and config
     size_gaps: list = field(default_factory=list)   # repos it could not size, and why (kept apart from `gaps`: a model that
                                                     # cannot be sized is not "watched for nothing", and must not turn the report amber)
+    prices: dict = field(default_factory=dict)      # TM-1298: "provider/model" -> {inPer1M, outPer1M, readAt, stale}: LiteLLM's price map, as read
+    price_source: dict = field(default_factory=dict)   # {} = the watcher did not read prices; else {ok, reason, readAt}. Apart from `sources`:
+                                                       # a price map that did not answer must not turn the candidates Unknown
 
 
 def parse_report(d: dict) -> Report:
@@ -650,7 +725,31 @@ def parse_report(d: dict) -> Report:
     gaps = [str(g)[:200] for g in (d.get("gaps") or [])[:200]]
     sizes, bad = fitmod.parse_sizes(d.get("sizes"))
     size_gaps = [str(g)[:200] for g in (d.get("sizeGaps") or [])[:500]] + bad[:50]
-    return Report(str(d.get("generatedAt", "")), dict(d.get("sources") or {}), cands, gaps, sizes, size_gaps)
+    prices, price_source = parse_report_prices(d.get("prices"), d.get("priceSource"))
+    return Report(str(d.get("generatedAt", "")), dict(d.get("sources") or {}), cands, gaps, sizes, size_gaps, prices, price_source)
+
+
+_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def parse_report_prices(raw, source) -> tuple[dict, dict]:
+    """The report's `prices` and `priceSource`. An entry that is not two non-negative numbers and a date is dropped (so that model
+    reads unknown), never repaired: the page shows a price only with the day it was read."""
+    prices = {}
+    if isinstance(raw, dict):
+        for model, p in list(raw.items())[:2000]:
+            if not (isinstance(model, str) and isinstance(p, dict) and isinstance(p.get("readAt"), str) and _DAY.match(p["readAt"])):
+                continue
+            try:
+                prices[model[:200]] = {"inPer1M": _price(p.get("inPer1M"), "price"), "outPer1M": _price(p.get("outPer1M"), "price"),
+                                       "readAt": p["readAt"], "stale": p.get("stale") is True}
+            except LifecycleError:
+                continue
+    src = {}
+    if isinstance(source, dict):
+        src = {"ok": source.get("ok") is True, "reason": str(source.get("reason", ""))[:200],
+               "readAt": str(source.get("readAt", "")) if _DAY.match(str(source.get("readAt", ""))) else ""}
+    return prices, src
 
 
 # ---------------------------------------------------------------- detectors (pure; the watcher feeds them)
@@ -1181,9 +1280,64 @@ def promote(alias_next: str, verdicts, lc: Lifecycle, inv: Inventory) -> tuple[L
         f"{alias} serves {nxt.model} on the production gateway with this change; {alias_next} leaves the eval gateway"]
 
 
-def promote_hosted(entry_id: str, alias: str, tags, verdicts, lc: Lifecycle, gateway_names=()) -> tuple[Lifecycle, list[str]]:
+def _gateway_entries(gateway) -> list[dict]:
+    """The production gateway's own entries (dicts) from whatever a caller passes: a model_list, or (older callers) a
+    set of names, which carries no entries."""
+    return [g for g in (gateway or ()) if isinstance(g, dict)]
+
+
+def _gateway_names(gateway) -> set:
+    return {str(g.get("model_name", "")) if isinstance(g, dict) else str(g) for g in (gateway or ())}
+
+
+def _hosted_entry(model: str, name: str, keyenv: str, tags, eid: str, base: dict | None = None) -> dict:
+    """A production gateway entry for a hosted model under `name`. With `base` (an entry that already carries the name),
+    everything the operator wrote on it stays and only the model, key, tags and catalog link are set."""
+    out = copy.deepcopy(base) if base else {"model_name": name, "litellm_params": {}, "model_info": {"endpoint_tier": "external"}}
+    lp = out.setdefault("litellm_params", {})
+    lp["model"] = model
+    if not base or fz.hosted_model(base).split("/", 1)[0] != model.split("/", 1)[0]:
+        lp["api_key"] = f"os.environ/{keyenv}"
+    lp["tags"] = list(tags)
+    out.setdefault("model_info", {})["tockmox_catalog"] = eid
+    return out
+
+
+def gateway_after(gateway, lc: Lifecycle) -> list[dict]:
+    """The production gateway's model_list after a change that carries `lc.production_gateway_entries` (added, or replacing
+    the entry of the same model_name) and `lc.production_gateway_removed`. Every other entry, a pinned generation among
+    them, comes through as the very same dict. The UI shows the entries; this is what committing them makes."""
+    out, replaced = [], {str(x["model_name"]): x for x in lc.production_gateway_entries}
+    done = set()
+    for g in gateway or ():
+        name = str(g.get("model_name", "")) if isinstance(g, dict) else ""
+        if name in lc.production_gateway_removed:
+            continue
+        if name in replaced and name not in done:
+            out.append(replaced[name])
+            done.add(name)
+        elif name not in replaced:
+            out.append(g)
+    out += [x for n, x in replaced.items() if n not in done]
+    return out
+
+
+def _today_iso(when: str) -> str:
+    return _date(when) if when else datetime.date.today().isoformat()
+
+
+def promote_hosted(entry_id: str, alias: str, tags, verdicts, lc: Lifecycle, gateway=(), when: str = "") -> tuple[Lifecycle, list[str]]:
     """A hosted candidate onto the production gateway as `alias`, with the data-class tags the operator chose
-    now, after enough passing comparisons against what `alias` serves today (or against nothing, if new)."""
+    now, after enough passing comparisons against what `alias` serves today (or against nothing, if new).
+
+    `gateway` is the production gateway's model_list (dicts), or just its names.
+
+    TM-1297 (rulings D1 and D2): when `alias` is the model's FAMILY alias (claude-sonnet for claude-sonnet-5-5) the
+    promotion keeps generations. It adds the generation's pinned alias (claude-sonnet-5-5, which never moves), points the
+    family alias at the same model (the only entry whose model changes), and never touches another pinned entry. When
+    that leaves the family with more than lc.keep_generations pinned generations, the oldest one's entry is removed and
+    its catalog entry is marked retired ("fell off keepGenerations"), with a note: it is a change a person commits, never
+    something that happens on its own. Any other `alias` is promoted the way it always was."""
     e = lc.entry(entry_id)
     if e is None or e.source.kind != "hosted":
         raise LifecycleError(f"{entry_id!r} is not a hosted model in the catalog")
@@ -1191,22 +1345,132 @@ def promote_hosted(entry_id: str, alias: str, tags, verdicts, lc: Lifecycle, gat
         raise LifecycleError(f"{e.model} is {e.stage}, not a candidate")
     if not ALIAS_RE.match(alias or "") or alias.endswith(NEXT):
         raise LifecycleError(f"{alias!r} is not an alias the production gateway can serve")
+    if fz.has_family(e.model) and alias == fz.generation_alias(e.model):
+        raise LifecycleError(f"{alias} is the pinned alias of {e.model}: it never moves, and it is added for you. Promote under the "
+                             f"family alias, {fz.family_of(e.model)}")
     tags = [t for t in (tags or []) if t]
     if not tags or not all(TAG_RE.match(t) for t in tags):
         raise LifecycleError("choose at least one data-class tag: they are what the gateway's policy routes on")
     counted, klass, req, cnotes = _passed(alias, e.model, verdicts, lc, "", None)
     provider = e.model.split("/", 1)[0]
     keyenv = (lc.frontier_providers.get(provider) or {}).get("keyEnv", f"{provider.upper()}_API_KEY")
+    family_flow = fz.has_family(e.model) and alias == fz.family_of(e.model)
+    entries = _gateway_entries(gateway)
+    old_target, gen = "", fz.generation_alias(e.model)
+    adds, removed, retired_entries, extra_notes = [], [], [], []
+    if family_flow:
+        existing_gen = next((g for g in entries if g.get("model_name") == gen), None)
+        if existing_gen is not None and fz.hosted_model(existing_gen) != e.model:
+            raise LifecycleError(f"{gen} is already on the production gateway and serves {fz.hosted_model(existing_gen) or 'something else'}: "
+                                 "a pinned generation alias never moves, so it is not rewritten. Remove or rename that entry by hand first")
+        fam_entry = next((g for g in entries if g.get("model_name") == alias), None)
+        if fam_entry is not None and not fz.hosted_model(fam_entry):
+            raise LifecycleError(f"{alias} on the production gateway does not route a hosted model, so it is not a family alias")
+        old_target = fz.hosted_model(fam_entry) if fam_entry else ""
+        new_gen = existing_gen or _hosted_entry(e.model, gen, keyenv, tags, e.id)
+        if existing_gen is None:
+            adds.append(new_gen)
+        else:
+            extra_notes.append(f"{gen} is already on the production gateway and stays exactly as it is")
+        if fam_entry is None:
+            adds.append(_hosted_entry(e.model, alias, keyenv, tags, e.id))
+            extra_notes.append(f"{alias} is new: it is the family alias and follows the current generation")
+        elif old_target != e.model:
+            adds.append(_hosted_entry(e.model, alias, keyenv, tags, e.id, fam_entry))
+            old_tags = (fam_entry.get("litellm_params") or {}).get("tags") or []
+            extra_notes.append(f"{alias} moves from {old_target} to {e.model}; this is the only existing entry whose model changes. "
+                               f"Replace the {alias} entry, do not add a second one")
+            if sorted(old_tags) != sorted(tags):
+                extra_notes.append(f"{alias} carried the tags {', '.join(old_tags) or 'none'} and now carries {', '.join(tags)}")
+            if old_target and fz.version_of(old_target) > fz.version_of(e.model):
+                extra_notes.append(f"{e.model} is older than {old_target}, the generation {alias} follows now: this moves {alias} back")
+        else:
+            extra_notes.append(f"{alias} already points at {e.model}")
+        # keepGenerations (ruling D2): the family's pinned generations once this is merged, newest first
+        gens = fz.pinned_generations([x for x in entries if x.get("model_name") != gen], alias, lc)
+        gens.append(fz.Generation(gen, e.model, new_gen, e))
+        gens = fz.newest_first(gens, lambda x: x.model, lambda x: getattr(x.catalog, "adopted", "") or "")
+        keep = lc.keep_generations
+        day = _today_iso(when)
+        eligible = [g for g in gens if g.model != e.model]          # never the one being promoted, which the family alias now follows
+        while len(gens) > keep and eligible:
+            drop = eligible.pop()                                   # the oldest
+            gens.remove(drop)
+            removed.append(drop.alias)
+            if drop.catalog is not None:
+                retired_entries.append(replace(drop.catalog, stage="retired",
+                                               retirement={"reason": "fell off keepGenerations", "date": day}))
+            extra_notes.append(
+                f"{alias} keeps {keep} generation(s) (modelLifecycle.frontier.keepGenerations): {drop.alias} falls off the end of the list. "
+                f"Its entry is removed from the production gateway" + (f" and its catalog entry {drop.catalog.id} is marked retired "
+                f"(fell off keepGenerations, {day})" if drop.catalog is not None else " (it has no catalog entry to mark)"))
+            extra_notes.append(f"anything that calls {drop.alias} by name will fail once this merges: the UI cannot see who calls it, so "
+                               "move those callers to a newer generation first")
+    else:
+        adds.append({"model_name": alias, "litellm_params": {"model": e.model, "api_key": f"os.environ/{keyenv}", "tags": list(tags)},
+                     "model_info": {"endpoint_tier": "external", "tockmox_catalog": e.id}})
+    extra = {"tags": list(tags)}
+    if family_flow:
+        extra.update(generation=gen, date=_today_iso(when))
     promoted = Entry(e.id, e.model, e.source, e.family, e.base_model, e.quant, e.size_gib, "promoted", e.track,
-                     _record(alias, "", klass, req, counted, tags=list(tags)))
-    out = merge(lc, Lifecycle([promoted]))
-    out.production_gateway_entries = [{"model_name": alias, "litellm_params": {"model": e.model, "api_key": f"os.environ/{keyenv}",
-                                       "tags": list(tags)}, "model_info": {"endpoint_tier": "external", "tockmox_catalog": e.id}}]
+                     _record(alias, old_target, klass, req, counted, **extra))
+    out = merge(lc, Lifecycle([promoted] + retired_entries))
+    out.production_gateway_entries = adds
+    out.production_gateway_removed = removed
     notes = list(cnotes) + [f"tagged {', '.join(tags)}: the gateway's policy decides which data may reach it",
                             f"remove {e.model.split('/', 1)[1]} from the eval gateway once this is live"]
-    if alias in set(gateway_names):
+    if family_flow:
+        notes += extra_notes
+    elif alias in _gateway_names(gateway):
         notes.append(f"the production gateway already has {alias}: replace that entry, or the gateway will spread {alias}'s "
                      "traffic across both")
+    return out, notes
+
+
+def retire_generation(alias: str, lc: Lifecycle, gateway, when: str = "", provider_date: str = "", replacement: str = "") -> tuple[Lifecycle, list[str]]:
+    """The retire change for a pinned generation its provider is retiring (TM-1297): the pinned entry leaves the production
+    gateway and its catalog entry becomes retired, with the reason and the date. `provider_date` is the date the watcher
+    read; `replacement` is the model the watcher names, used only to say what to promote.
+
+    Refuses to retire the generation the family alias points at: that would leave the family alias calling a model that is
+    gone. The refusal says which generation to promote first. Refuses anything that is not a pinned generation alias; a
+    family alias is moved by a promotion, never removed here."""
+    entries = _gateway_entries(gateway)
+    g = next((x for x in entries if x.get("model_name") == alias), None)
+    if g is None:
+        raise LifecycleError(f"the production gateway has no entry {alias}")
+    if fz.is_family_entry(g):
+        raise LifecycleError(f"{alias} is a family alias, not a generation: it is moved by a promotion and is not retired. "
+                             "Retire the generation the provider is withdrawing")
+    if not fz.is_pinned_entry(g):
+        raise LifecycleError(f"{alias} is not a pinned generation alias (a pinned alias is named exactly as its hosted model, "
+                             "for example claude-sonnet-5-5), so there is no generation to retire here")
+    model = fz.hosted_model(g)
+    family = fz.family_of(model)
+    fam_entry = next((x for x in entries if x.get("model_name") == family and fz.is_family_entry(x)), None)
+    if fam_entry is not None and fz.hosted_model(fam_entry) == model:
+        cands = fz.newest_first([c for c in lc.catalog if c.source.kind == "hosted" and c.stage == "candidate" and fz.has_family(c.source.ref)
+                                 and fz.family_of(c.source.ref) == family and c.source.ref != model],
+                                lambda c: c.source.ref, lambda c: c.adopted)
+        if cands:
+            which = f"promote {cands[0].source.ref} first (catalog entry {cands[0].id}, /models/promote-hosted?entry={cands[0].id})"
+        elif replacement:
+            which = f"promote {replacement} first (the watcher names it as the replacement; admit it for evaluation from the Inbox if it is not a candidate yet)"
+        else:
+            which = f"promote a newer generation of {family} first (none is a candidate in the catalog; admit one from the Inbox)"
+        raise LifecycleError(f"{family} currently points at {model}. Retiring {alias} would leave {family} calling a model that is gone: {which}, "
+                             f"then retire {alias}")
+    day = _today_iso(when)
+    e = lc.by_ref(model)
+    reason = "retired by its provider" + (f" ({provider_date[:10]})" if provider_date else "")
+    adds = [replace(e, stage="retired", retirement={"reason": reason, "date": day})] if e is not None else []
+    out = merge(lc, Lifecycle(adds))
+    out.production_gateway_entries = []
+    out.production_gateway_removed = [alias]
+    notes = [f"{alias} leaves the production gateway; {family} is not touched" + (f" and still points at {fz.hosted_model(fam_entry)}" if fam_entry else ""),
+             (f"{model}'s catalog entry {e.id} is marked retired ({reason}, {day})" if e is not None else
+              f"{model} has no catalog entry, so nothing is marked retired"),
+             f"anything that calls {alias} by name will fail once this merges: the UI cannot see who calls it, so move those callers to a newer generation first"]
     return out, notes
 
 
@@ -1260,6 +1524,7 @@ def merge(base: Lifecycle, add: Lifecycle) -> Lifecycle:
     res = parse(to_doc(out))
     res.eval_gateway_entries = list(base.eval_gateway_entries) + list(add.eval_gateway_entries)
     res.production_gateway_entries = list(base.production_gateway_entries) + list(add.production_gateway_entries)
+    res.production_gateway_removed = list(base.production_gateway_removed) + list(add.production_gateway_removed)
     return res
 
 
@@ -1638,7 +1903,7 @@ def revert(alias: str, reason: str, when: str, lc: Lifecycle, inv: Inventory) ->
         rej["revision"] = cur.source.revision
     demoted = replace(cur, stage="rejected", rejection=rej)
     # the previous build is promoted again; if the promotion marked it retired, it is restored, files and all
-    restored = replace(pe, stage="promoted")
+    restored = replace(pe, stage="promoted", retirement={})
     notes = [f"{alias} goes back to {prev['model']} on {prev['node']}/{prev['endpoint']}",
              f"{live.model} is marked rejected: {rej['reason']}"]
     if pe.stage == "retired":

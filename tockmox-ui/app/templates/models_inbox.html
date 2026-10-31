@@ -79,6 +79,7 @@
         {% else %}
           <form method="post" action="/models/propose" class="inline"><input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="cid" value="{{ c.id }}"><button class="btn" type="submit">Evaluate<span class="visually-hidden"> {{ c.model }}</span></button></form>
         {% endif %}
+        {% if k.retire_alias and not k.hidden %}<form method="post" action="/models/a/{{ k.retire_alias|urlencode }}/retire" class="inline"><input type="hidden" name="csrf" value="{{ user.csrf }}"><button class="btn-ghost" type="submit" title="Retire {{ k.retire_alias }}">Retire<span class="visually-hidden"> {{ k.retire_alias }} (shows the change)</span></button></form>{% endif %}
         {% if c.url or (not inbox_why and not k.hidden) %}
         <details class="in-menu">
           <summary class="btn-ghost in-more" aria-label="More actions for {{ c.model }}"><span aria-hidden="true">&hellip;</span></summary>

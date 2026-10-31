@@ -10,7 +10,8 @@ which shows the site-values change for the admin to commit (AC-47.8).
   GET  /nodes/import          import from the gateway's route list (no network)
   POST /nodes/import          the same, from a pasted model_list
   GET  /nodes/<id>            one node: the models it serves per endpoint with their tunings, planned memory and a memory bar
-                              (TM-1299); `?model=&endpoint=&alias=` previews a placement and its fit
+                              (TM-1299), the builds it holds against the ones the catalog pins and the check that reads them
+                              (TM-1296); `?model=&endpoint=&alias=` previews a placement and its fit
   POST /nodes/change          the generated change (also format=yaml as a download); a newly enrolled node's
                               ai-nodes/<id>/ai-node.yaml skeleton comes with it (format=ai-node&ai_node=<id>)
 """
@@ -25,15 +26,19 @@ from fastapi import Form, Request
 from fastapi.responses import PlainTextResponse, Response
 
 from . import deployments as dp
+from . import models as mdl
 from . import nodes as nm
+from .build_checks import BuildChecks
 from .probe import Prober, Refused
 
 MAX_DRAFT = 256 * 1024
 MAX_PASTE = 256 * 1024
 
 
-def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_nodes, prober: Prober, app_version, src_report=None):
+def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_nodes, prober: Prober, app_version, src_report=None,
+             build_checks=None):
     ns = s.nodes
+    checks = build_checks if build_checks is not None else BuildChecks(prober)
 
     def admin(request):
         u = user_of(request)
@@ -216,7 +221,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_nodes,
             preview = _placement_preview(n, inv, model, endpoint, alias, kind, size)
         return render(request, "node_detail.html", u, node=n, kind_=n.kind, health=health.get(n.id), reading=reading,
                       routes=inv.routes_on(n.id), fit=nm.fit(n, inv.routes_on(n.id), 0.0), preview=preview,
-                      models=_models_on(n, inv, health.get(n.id)),
+                      models=_models_on(n, inv, health.get(n.id)), builds=_builds_on(n, inv),
                       engines=nm.ENGINES, form={"model": model, "endpoint": endpoint, "alias": alias, "kind": kind, "size": size})
 
     def _models_on(n, inv, node_health):
@@ -236,6 +241,12 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_nodes,
         mem = (node_health or {}).get("memory")
         return {"groups": groups, "deployments": deps, "bar": dp.memory_bar(n, deps, usable), "notes": fi["notes"],
                 "in_use_gib": mem["used_gib"] if mem and mem.get("used_gib") is not None else None}
+
+    def _builds_on(n, inv):
+        """The build check for this node's pinned routes (TM-0934, moved here from /models by TM-1296): pinned against the build
+        the node holds, per route, the findings, and when it was last read."""
+        rows = [x for x in checks.rows(s.lifecycle.lifecycle, inv) if x.node == n.id]
+        return {"rows": rows, "findings": mdl.drift_findings(rows), "probe_on": checks.probe_on, "checked_at": checks.at}
 
     def _placement_preview(n, inv, model, endpoint, alias, kind, size):
         errors = []

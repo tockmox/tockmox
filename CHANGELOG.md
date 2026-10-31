@@ -61,6 +61,56 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **The Models page now shows what each hosted model costs: its list price,
+  what the gateway spent on it, and how often it was called, and anything it
+  cannot source reads unknown, never an estimate (TM-1298).** Each Frontier
+  row has a price per 1M tokens in and out with the day it was read, a Spend
+  column and a Calls column, and a footer naming where the prices came from.
+  The watcher reads LiteLLM's price map (the file the gateway prices spend
+  with) once per run and records each hosted model's price in the report
+  (`prices`, `priceSource`); a failed read keeps the last good price under its
+  original date and the page says "last read". The price is labelled "LiteLLM
+  price map", with no version number. A site states its own with
+  `modelLifecycle.frontier.prices` (`inPer1M`, `outPer1M`, `date`), which wins
+  and reads "set by this site"; a negative price or one with no date is
+  refused when the chart renders. Spend and calls come from the queries the
+  Budget page already uses, and each header names the window its query covers
+  ("Spend (7 d)"). New optional `modelLifecycle.budget.spendByCallerQuery` adds
+  a top-five callers by cost table to each family row. The family alias page
+  (`/models/a/claude-sonnet`) shows the same figures per pinned generation,
+  counts calls made through the floating alias on the current generation, and
+  lists the top callers across the family. What it costs: the
+  watcher now reaches one more host, `raw.githubusercontent.com` (one GET per
+  run; the NetworkPolicy already allows HTTPS out, so it does not change), and
+  `modelLifecycle.budget` is now a closed schema (`spendQuery`,
+  `spendByCallerQuery`, `usdPerRequest`). Set
+  `modelLifecycle.watch.prices.enabled: false` to make no such request; prices
+  then read unknown unless the site states them.
+
+- **A hosted family keeps several generations: a floating family alias,
+  pinned generation aliases, and `modelLifecycle.frontier.keepGenerations`
+  (TM-1297).** Promoting a hosted model under its family alias
+  (`claude-sonnet`) now renders a change that adds the pinned alias
+  (`claude-sonnet-5-5`, the model name without the provider, which never
+  moves) and points the family alias at the same model. The family alias is
+  the only existing entry whose model changes; another pinned entry is never
+  rewritten. A family keeps `keepGenerations` pinned generations (new value,
+  a whole number of 1 or more, default 3; the schema refuses 0). When a
+  promotion would exceed it, the same change removes the oldest generation's
+  entry and marks its catalog entry `retired` (new `retirement: {reason,
+  date}` key, "fell off keepGenerations"), with a note that callers pinned to
+  it must move first. A generation its provider retires gets a retire change
+  from the Inbox row and the alias page: it removes the pinned entry and marks
+  the catalog entry retired, and it refuses the generation the family alias
+  points at until a newer one is promoted. `/models/a/<family>` shows what the
+  family alias points at, the generations kept with their status and
+  countdown, and how to pin one; a pinned alias page says it never moves.
+  Nothing is written by the UI, and nothing leaves on its own: every change is
+  a PR you review. Each generation's row shows its price, spend and calls
+  (TM-1298). Any alias that is not a family alias is promoted as
+  before. `docs/administration/model-lifecycle.md`, "Keeping several frontier
+  generations".
+
 - **A node's page lists the models it serves, with a memory bar, and the Models
   page links back (TM-1299).** `/nodes/<id>` opens with "Models on this node":
   per engine endpoint (with its probe state), each deployment's alias, model,
@@ -536,6 +586,27 @@ costs you, with the reasoning in the documentation rather than here.
   See `docs/administration/namespace-guard.md`.
 
 ### Changed
+
+- **The Models page opens with what needs you, then local models by node, then
+  frontier models by provider, and build drift moved to the node page
+  (TM-1296).** `/models` now starts with a Needs-you strip that lists only
+  exceptions, each with one action: candidates waiting in the Inbox, a hosted
+  model being retired, a candidate short of its passing count or ready to
+  promote, an evaluation in progress and the leg it is on, and a node serving a
+  build the catalog does not pin. With nothing to do, the strip is not drawn.
+  Local models are grouped by inference node, with alias, model, build,
+  engine and port, context, slots, max output and thinking per deployment; a
+  setting the route does not state shows the engine default, labelled as one.
+  A `-next` candidate sits under its alias, marked. Frontier models are grouped
+  by provider and family (`claude-sonnet`, `gpt`), with price, spend and calls
+  per model (TM-1298). The catalog and the upstream sources fold
+  to one line each. The new-revision, quant and successor boxes, "Comparisons
+  in progress" and "Builds on the nodes" are gone from `/models`: the Inbox and
+  the Needs-you rows carry the first four, and the build table and its "Check
+  builds on the nodes" button are now on `/nodes/<id>` ("Builds on this node").
+  `POST /models/builds` is unchanged and takes an optional `next=<node id>` to
+  say which node page to return to (`docs/administration/model-lifecycle.md`,
+  "The Models page" and "Tunings").
 
 - **The Models Inbox is one scannable row per candidate, with the detail on
   demand.** `/models/inbox` shows the reason tag, the model and one sentence,

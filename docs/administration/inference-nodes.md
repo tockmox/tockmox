@@ -299,6 +299,12 @@ its tunings, the memory it is planned at, and whether it is live or a `-next`
 candidate. The alias links to its page on the Models page (a candidate links to
 its plan), and the Models page links every local route back to its node.
 
+The same page holds the **build check**: the build each pinned model is held at
+in git, against the build the node serves, per route. Build drift moved here from
+the Models page, next to the build it is about; the Models page shows only a
+short state per deployment and a Needs-you row when a node has drifted. See
+[the build on the node](model-lifecycle.md#the-build-on-the-node).
+
 The tunings are read from the route, never from the engine:
 
 | Column | Read from | When the route does not state it |

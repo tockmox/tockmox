@@ -814,6 +814,11 @@ modelLifecycle:
     enabled: false
     image: ""
     schedule: "17 6 * * *"
+    # List prices for hosted models (TM-1298): the watcher reads LiteLLM's price map (the file the gateway prices spend with)
+    # from raw.githubusercontent.com, once per run, and records each hosted model's price with the day it was read. On while
+    # the watcher is on; set enabled: false for a site that wants no request to that host (prices then read unknown unless
+    # frontier.prices states them).
+    #   prices: {enabled: false}
     pullRequests:
       enabled: false
     secrets:
@@ -869,6 +874,26 @@ modelLifecycle:
   productionKeys: {}
   frontier:
     providers: {}
+    # How many generations of one hosted family stay available (TM-1297). Each is served under
+    # a pinned alias that never moves (claude-sonnet-5-5), and the family alias (claude-sonnet)
+    # follows the current one and moves only through a promotion PR. A generation leaves when its
+    # provider retires it (the watcher's countdown, then a retire PR) or when a promotion would
+    # leave the family with more than this many: that PR removes the oldest and says so. Never
+    # silently, never by the UI. A whole number of 1 or more.
+    keepGenerations: 3
+    # A price the SITE states for a hosted model (TM-1298), per 1M tokens in and out, with the day you read it. It wins over
+    # the watcher's price (LiteLLM's price map) and the Models page labels it "set by this site". Quote the date. A negative
+    # price, a missing date or an extra key is refused when the chart renders; a model with no price reads unknown, never 0.
+    #   prices:
+    #     anthropic/claude-sonnet-5-5: {inPer1M: 3.0, outPer1M: 15.0, date: "2026-10-30"}
+    prices: {}
+  # What the Models page shows for hosted spend (TM-1258, TM-1298); the UI reads these queries from the Prometheus it already
+  # uses. Each figure is shown over the window its query names ([7d] reads "7 d"), so a [30d] query reads "30 d".
+  #   budget:
+  #     spendQuery: 'sum by (model_group) (increase(litellm_spend_metric_total[7d]))'   # measured USD per alias or model
+  #     spendByCallerQuery: 'sum by (api_key_alias, team_alias, model) (increase(litellm_spend_metric_total[7d]))'   # top callers by cost
+  #     usdPerRequest: {big-hosted-chat: 0.012}      # the Budget page's estimate per alias, labelled as one
+  # demandQuery (requests per model_group) gives the Models page's calls column; its default window is 7d.
   evalGateway:
     enabled: false
     allowedClients: []

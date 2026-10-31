@@ -45,6 +45,7 @@ from . import capabilities as capmod
 from . import telemetry
 from . import views
 from .auth import IDT_MAX_BYTES, OIDC, Sessions, User
+from .build_checks import BuildChecks
 from .config import Settings, load
 from .notes import ReleaseNotes
 from .probe import Prober
@@ -575,15 +576,16 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
     # ------------------------------------------------------------ inference nodes (REQ-0047)
 
     src_report = ModelReportSource(s.lifecycle.report_file, s.lifecycle.report_max_age_s)
+    build_checks = BuildChecks(prober)       # the last build check: read by POST /models/builds, shown on the node pages (TM-1296)
     nodes_routes.register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_inodes, prober, APP_VERSION,
-                          src_report=src_report)
+                          src_report=src_report, build_checks=build_checks)
 
     # ------------------------------------------------------------ model lifecycle (REQ-0048)
 
     src_demand = DemandSource(s.prometheus_url, s.lifecycle.demand_query, s.source_timeout_s, tp.prometheus)
     src_verdicts = VerdictSource(s.lifecycle.verdicts_dir, s.lifecycle.verdicts_repo_path)
     models_routes.register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report, src_demand, APP_VERSION,
-                           src_verdicts, prober)
+                           src_verdicts, prober, build_checks=build_checks)
 
     # ------------------------------------------------------------ platform management (DESIGN-2026-10-23)
 

@@ -1,11 +1,125 @@
 {% extends "base.html" %}
-{% from "macros.html" import badge, source_line %}
+{% from "macros.html" import badge, source_line, unknown %}
 {% block title %}{{ alias }}{% endblock %}
 {% block main %}
 <p><a href="/models">Models</a></p>
 <h1><code>{{ alias }}</code></h1>
-{% if hosted %}
+{% if family %}
+{% if error %}<p>{{ badge("critical", "Not retired") }} {{ error }}</p>{% endif %}
+<p class="lede">A floating alias for the <code>{{ alias }}</code> family{% if family.target %} on {{ family.target.split("/")[0] }}{% endif %}. It follows the current generation, so callers that use it move when a promotion is merged. {{ badge("ok", "promoted") }}</p>
+
+<section class="panel" aria-labelledby="now-h">
+  <h2 id="now-h">What it points to now</h2>
+  <div class="fam-point">
+    <div class="fam-from"><span class="fam-lbl">Floating alias</span><span class="fam-v">{{ alias }}</span></div>
+    <span class="fam-ar" aria-hidden="true">&rarr;</span>
+    <div class="fam-to"><span class="fam-lbl">Current generation</span><span class="fam-v">{% if now.generation %}<a href="/models/a/{{ now.generation|urlencode }}">{{ now.generation }}</a>{% else %}{{ family.target.split("/")[-1] }}{% endif %}</span></div>
+  </div>
+  <dl class="facts">
+    <div><dt>Model</dt><dd>{% if now.entry %}<a href="/models/m/{{ now.entry.id|urlencode }}"><code>{{ family.target }}</code></a>{% else %}<code>{{ family.target }}</code>{% endif %}</dd></div>
+    <div><dt>Since</dt><dd>{{ now.since or "date not recorded" }}{% if now.pr %} (<a href="{{ now.pr }}" rel="noopener noreferrer">the promotion PR</a>){% else %} <span class="muted">(no PR recorded)</span>{% endif %}</dd></div>
+    {% if now["from"] %}<div><dt>Moved from</dt><dd><code>{{ now["from"] }}</code></dd></div>{% endif %}
+    {% set nc = fin.costs.get(family.target) %}
+    <div><dt>Price per 1M tokens, in / out</dt><dd>{% if nc and nc.price_known %}{{ nc.price_text }} <span class="muted small">{{ nc.price_note }}</span>{% else %}{{ unknown(nc.reasons.price if nc else "no price is recorded for this model") }}{% endif %}</dd></div>
+  </dl>
+  {% if not now.ours %}<p class="muted small">{{ family.target }} has no pinned alias on the production gateway, so it is not listed below. A promotion under <code>{{ alias }}</code> adds the pinned alias with it.</p>{% endif %}
+</section>
+
+<section class="panel flush" aria-labelledby="gens-h">
+  <div class="panel-head"><h2 id="gens-h">Generations kept</h2><span class="muted small">up to {{ family.keep }} per family (<code>modelLifecycle.frontier.keepGenerations</code>)</span></div>
+  {% if family.over %}<p class="warnbox">{{ badge("warning", "Over the limit") }} {{ family.generations|length }} pinned generations are on the gateway and {{ family.keep }} are kept. The next promotion under <code>{{ alias }}</code> removes the oldest, in a change you review.</p>{% endif %}
+  <div class="table-wrap" role="region" aria-labelledby="gens-cap" tabindex="0">
+  <table class="gens">
+    <caption id="gens-cap" class="visually-hidden">Pinned generations of {{ alias }}, newest first</caption>
+    <thead><tr><th scope="col">Pinned alias</th><th scope="col" class="num">Price per 1M tokens, in / out</th><th scope="col" class="num">{{ fin.spend_head }}</th><th scope="col" class="num">{{ fin.calls_head }}</th><th scope="col">Status</th></tr></thead>
+    <tbody>
+    {% for g in family.generations %}
+      <tr>
+        <th scope="row" class="gen-alias"><a href="/models/a/{{ g.alias|urlencode }}"><code>{{ g.alias }}</code></a><span class="gen-sub"><code>{{ g.model }}</code></span></th>
+        {%- set c = fin.costs[g.alias] %}
+        <td class="num">{% if c.price_known %}{{ c.price_text }}<span class="sub">{{ c.price_note }}</span>{% else %}{{ unknown(c.reasons.price) }}{% endif %}</td>
+        <td class="num">{% if c.spend is not none %}{{ c.spend_text }}{% else %}{{ unknown(c.reasons.spend) }}{% endif %}</td>
+        <td class="num">{% if c.calls is not none %}{{ c.calls_text }}{% else %}{{ unknown(c.reasons.calls) }}{% endif %}</td>
+        <td>{% if g.current %}{{ badge("ok", "Current") }}{% elif g.retire %}{{ badge(g.retire.badge, "Retiring") }} <span class="muted small">{{ g.retire.text }}</span>{% else %}<span class="muted">Kept</span>{% endif %}
+          {% if g.current and g.retire %}<div>{{ badge(g.retire.badge, g.retire.text) }}</div><div class="muted small">Promote a newer generation before this one can be retired.</div>{% endif %}
+          {% if g.retire and not g.current %}<form method="post" action="/models/a/{{ g.alias|urlencode }}/retire" class="inline"><input type="hidden" name="csrf" value="{{ user.csrf }}"><button class="btn-ghost" type="submit">Show the retire change<span class="visually-hidden"> for {{ g.alias }}</span></button></form>{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="empty">No pinned generation of {{ alias }} is on the production gateway yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="panel-foot">{{ fin.price_footer }} Spend and calls are the gateway's own counts for each pinned alias over the window in each heading; the current generation's row also counts calls made through <code>{{ alias }}</code>. A price is the provider's list price, not what was paid. A figure nobody recorded reads unknown, never an estimate.</div>
+</section>
+
+{% if fin.callers is not none %}
+<section class="panel flush" aria-labelledby="callers-h">
+  <div class="panel-head"><h2 id="callers-h">{{ fin.caller_head }}</h2><span class="muted small">every generation of {{ alias }}, and {{ alias }} itself</span></div>
+  {% if fin.callers.callers %}
+  <div class="table-wrap" role="region" aria-labelledby="callers-cap" tabindex="0">
+  <table>
+    <caption id="callers-cap" class="visually-hidden">The callers that spent most on the {{ alias }} family, by cost</caption>
+    <thead><tr><th scope="col">Caller</th><th scope="col" class="num">Cost</th></tr></thead>
+    <tbody>{% for x in fin.callers.callers %}<tr><th scope="row"><span title="from the {{ x.label or 'spend' }} label">{{ x.caller }}</span></th><td class="num">{{ x.text }}</td></tr>{% endfor %}</tbody>
+  </table>
+  </div>
+  {% else %}<p class="empty">unknown: {{ fin.callers.reason }}</p>{% endif %}
+</section>
+{% endif %}
+
+{% if family.left %}
+<section class="panel flush" aria-labelledby="left-h">
+  <div class="panel-head"><h2 id="left-h">Generations that left</h2><span class="muted small">retired in the catalog</span></div>
+  <div class="table-wrap" role="region" aria-labelledby="left-cap" tabindex="0">
+  <table>
+    <caption id="left-cap" class="visually-hidden">Generations of {{ alias }} that left the list</caption>
+    <thead><tr><th scope="col">Model</th><th scope="col">Why</th><th scope="col">When</th></tr></thead>
+    <tbody>{% for x in family.left %}<tr><th scope="row"><a href="/models/m/{{ x.id|urlencode }}"><code>{{ x.source.ref }}</code></a></th><td>{{ (x.retirement or {}).reason or "not recorded" }}</td><td>{{ (x.retirement or {}).date or "not recorded" }}</td></tr>{% endfor %}</tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="panel" aria-labelledby="pin-h">
+  <h2 id="pin-h">Pin a generation</h2>
+  <div class="callout">
+    <p>Callers that need a fixed model call a pinned alias directly{% if family.generations %}, for example <code>{{ (family.generations|last).alias if family.generations|length > 1 else family.generations[0].alias }}</code>{% endif %}. That alias never moves. <code>{{ alias }}</code> follows the current generation, so it changes when a promotion is merged, and only then.</p>
+    <pre class="snip" tabindex="0"><code>model = "{{ (family.generations|last).alias if family.generations else alias ~ '-1' }}"   # pinned: stays on this generation
+model = "{{ alias }}"{{ " " * 4 }}# floating: today {{ now.generation or family.target.split("/")[-1] }}</code></pre>
+  </div>
+</section>
+
+<section class="panel" aria-labelledby="promo-h">
+  <h2 id="promo-h">Promotion record</h2>
+  {% if promo %}
+  <p>{% if promo.class %}Class {{ promo.class }}{% endif %}{% if promo.required %}, {{ promo.required }} passing comparison(s) required, {{ promo.evidence|length if promo.evidence is iterable and promo.evidence is not string else 0 }} on record{% endif %}{% if promo.from %}. Moved from <code>{{ promo.from }}</code>{% endif %}.</p>
+  {% if promo.evidence is iterable and promo.evidence is not string and promo.evidence %}
+  <div class="table-wrap" role="region" aria-labelledby="ev-cap" tabindex="0">
+  <table>
+    <caption id="ev-cap" class="visually-hidden">Comparisons the promotion rests on</caption>
+    <thead><tr><th scope="col">Run</th><th scope="col">Date</th><th scope="col">Graded by</th><th scope="col">File</th></tr></thead>
+    <tbody>{% for x in promo.evidence %}<tr><th scope="row">{% if x.runId %}<a href="/models/v/{{ x.runId|urlencode }}"><code>{{ x.runId }}</code></a>{% else %}<span class="muted">not recorded</span>{% endif %}</th><td>{{ x.date or "not recorded" }}</td><td>{{ x.grader or "not recorded" }}</td><td><code>{{ x.path }}</code></td></tr>{% endfor %}</tbody>
+  </table>
+  </div>
+  {% endif %}
+  {% elif now.entry and now.entry.adopted %}<p class="empty">In service since before it was catalogued (adopted {{ now.entry.adopted }}). No comparison is on record.</p>
+  {% else %}<p class="empty">No promotion record.</p>{% endif %}
+  <p class="muted small">A family alias moves only through a promotion. Moving it back is a promotion of an earlier generation, which stays callable under its pinned alias meanwhile.</p>
+</section>
+{% elif hosted %}
+{% if error %}<p>{{ badge("critical", "Not retired") }} {{ error }}</p>{% endif %}
 <p class="lede">Routes to the hosted model <code>{{ hosted.model }}</code> through the production gateway.{% if e %} The catalog has it at stage {{ badge({"promoted": "ok", "candidate": "warning", "retired": "unknown", "rejected": "critical"}[e.stage], e.stage) }}.{% else %} The catalog has no entry for this model.{% endif %}</p>
+{% if pinned %}
+<section class="panel" aria-labelledby="pinned-h">
+  <h2 id="pinned-h">Pinned generation</h2>
+  <div class="callout">
+    <p><code>{{ alias }}</code> is a generation of the <a href="/models/a/{{ pinned.family|urlencode }}"><code>{{ pinned.family }}</code></a> family and <strong>never moves</strong>: it stays on <code>{{ hosted.model }}</code>, so an agent tuned against it keeps getting this model.
+    {% if pinned.current %}<code>{{ pinned.family }}</code> follows it today.{% elif pinned.target %}<code>{{ pinned.family }}</code> follows <code>{{ pinned.target }}</code> today, not this one.{% else %}The family alias <code>{{ pinned.family }}</code> is not on the production gateway.{% endif %}
+    It leaves only when its provider retires it, or when a promotion pushes it off the end of the list (<code>modelLifecycle.frontier.keepGenerations</code>), always through a change you review.</p>
+  </div>
+</section>
+{% endif %}
 <section class="panel" aria-labelledby="ret-h">
   <h2 id="ret-h">Retirement</h2>
   {% if retire %}
@@ -14,6 +128,10 @@
   {% if retire.replacement %}<p>Replacement named: <code>{{ retire.replacement }}</code>. It is offered for evaluation in <a href="/models/inbox">the Inbox</a>; a hosted candidate is evaluated on public eval sets only (the data-class rails, TM-1249).</p>
   <form method="post" action="/models/propose" class="inline"><input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="cid" value="{{ retire.candidate }}"><button class="btn-ghost" type="submit">Evaluate the replacement<span class="visually-hidden"> {{ retire.replacement }}</span></button></form>
   {% else %}<p class="muted">The report names no replacement.</p>{% endif %}
+  {% if pinned %}
+  <form method="post" action="/models/a/{{ alias|urlencode }}/retire" class="inline"><input type="hidden" name="csrf" value="{{ user.csrf }}"><button class="btn" type="submit">Show the retire change</button></form>
+  <p class="muted small">Removes <code>{{ alias }}</code> from the production gateway and marks the model retired in the catalog. It refuses while <code>{{ pinned.family }}</code> still points here: promote a newer generation first.</p>
+  {% endif %}
   {% elif reading and reading.reason == "not configured" %}<p>{{ badge("unknown", "Unknown") }} No watcher report is configured, so nothing says whether this model is being retired.</p>
   {% elif reading and reading.state == "unknown" %}<p>{{ badge("unknown", "Unknown") }} The watcher's report is missing, old or incomplete, so nothing says whether this model is being retired. {{ source_line(reading) }}</p>
   {% else %}<p class="empty">The watcher's report lists no retirement for this model.</p>{% endif %}
