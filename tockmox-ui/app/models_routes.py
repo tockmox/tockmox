@@ -3,14 +3,18 @@
 change to commit, and the two that matter are the two approvals Jeff ruled on: admitting a candidate to the
 eval gateway, and promoting it to the production gateway after enough passing comparisons.
 
-  GET  /models                      the catalog, the watcher's candidates, comparisons in progress, the gate
+  GET  /models                      the landing page (TM-1296): Needs you (exceptions, one action each), Local models by inference
+                                    node with their tunings, Frontier models by provider and family; the catalog and the upstream
+                                    sources fold to one line each
   POST /models/propose              admit a candidate: catalog entry at stage candidate + <alias>-next (eval gateway)
   GET  /models/evaluate             start an evaluation: the request the REQ-0045 runner picks up
   POST /models/evaluate
   GET  /models/promote?alias=       what the verdicts say for a -next route, and the promotion when there are enough
   POST /models/promote
   GET  /models/v/<runId>            one comparison: the label, the numbers, how it was run, what it cites, whether it counted
-  GET  /models/a/<alias>            one live alias: what it serves, its promotion record, and the revert
+  GET  /models/a/<alias>            one live alias: what it serves, its promotion record, and the revert. A hosted family alias
+                                    (claude-sonnet) shows the generations kept under it; a pinned generation alias says it never moves (TM-1297)
+  POST /models/a/<alias>/retire     the change that retires a pinned generation its provider is withdrawing (TM-1297); writes nothing
   POST /models/a/<alias>/revert     the revert change (alias back to promotion.previous), for a person to review and commit
   GET  /models/promote-hosted?entry=  the same for a hosted candidate, choosing its alias and data-class tags
   POST /models/promote-hosted
@@ -26,13 +30,15 @@ eval gateway, and promoting it to the production gateway after enough passing co
   POST /models/v/<runId>/reject     the reject change for a fail, worse or tradeoff comparison (reason required); writes nothing
   GET  /models/profiles             workload profiles -> a residency plan per node, and the engine configs
   POST /models/builds               read which build each node holds for the pinned models it serves (TM-0934),
-                                    through the probe's fences; the result lives in memory and goes stale
+                                    through the probe's fences; the result lives in memory and goes stale. The result is shown on
+                                    the node page (/nodes/<id>#builds-h); `next=<node id>` says which one to go back to
 """
 from __future__ import annotations
 
 import copy
 import datetime
 import re
+from urllib.parse import quote
 
 import yaml
 from fastapi import Form, Request
@@ -40,17 +46,18 @@ from fastapi.responses import PlainTextResponse, RedirectResponse, Response
 
 from . import budget as bg
 from . import candidate as cd
+from . import deployments as dp
 from . import fit as fx
+from . import frontier as fr
+from . import frontier as fz
+from . import frontier_cost as fc
 from . import inbox as ib
 from . import models as ml
 from . import nodes as nm
 from . import recommend as rc
 from . import results as rs
 from . import verdict_stats as vst
-from .probe import Refused
-
-# A build check is a reading like any other: an old one does not vouch for today (AC-48.4's rule).
-BUILD_CHECK_MAX_AGE_S = 3600
+from .build_checks import BuildChecks
 
 
 def _now():
@@ -58,12 +65,13 @@ def _now():
 
 
 def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report, src_demand, app_version, src_verdicts=None,
-             prober=None, node_facts=None):
+             prober=None, node_facts=None, build_checks=None):
     """node_facts(node_id) -> {"wired_limit_mib": float} from the node's live metrics, or {}. Optional. Without it the wired
-    limit is read from the newest capability-result/1 that recorded one, and failing that the node's planning fraction is used."""
+    limit is read from the newest capability-result/1 that recorded one, and failing that the node's planning fraction is used.
+    build_checks is the last build check, shared with the node pages (they show it, TM-1296); one is made when none is given."""
     L = s.lifecycle
     inv = s.nodes.inventory
-    builds = {"at": None, "readings": {}}       # the last build check, in memory only (the UI writes nothing)
+    checks = build_checks if build_checks is not None else BuildChecks(prober)     # in memory only (the UI writes nothing)
 
     def admin(request):
         u = user_of(request)
@@ -120,9 +128,6 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
                         **progress(alias, r.model, e.source.revision if e else "", live.model if live else "", vs, move)})
         return out
 
-    def probe_on():
-        return prober is not None and prober.enabled
-
     def today():
         return _now().date()
 
@@ -148,39 +153,126 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
     # the spend source rides the demand source's URL, timeout and transport: one Prometheus, one set of fences
     spend_src = (bg.SpendSource(src_demand.url, budget_cfg["spendQuery"], src_demand.timeout, src_demand.transport)
                  if budget_cfg["spendQuery"] and hasattr(src_demand, "url") else None)
+    caller_src = (bg.CallerSpendSource(src_demand.url, budget_cfg["spendByCallerQuery"], src_demand.timeout, src_demand.transport)
+                  if budget_cfg["spendByCallerQuery"] and hasattr(src_demand, "url") else None)
 
-    def drift_rows():
-        if not probe_on():
-            return ml.build_drift(L.lifecycle, inv, {}, "probing is off: set inferenceNodes.probe.allowedCidrs to read the nodes")
-        at = builds["at"]
-        if at is None:
-            return ml.build_drift(L.lifecycle, inv, {}, "not checked yet")
-        age = (_now() - at).total_seconds()
-        if age > BUILD_CHECK_MAX_AGE_S or age < -60:
-            return ml.build_drift(L.lifecycle, inv, {}, f"last checked over {BUILD_CHECK_MAX_AGE_S // 60} minutes ago: check again")
-        return ml.build_drift(L.lifecycle, inv, builds["readings"])
+    def cost_heads():
+        """The column heads for spend, calls and top callers, with the window each query names ("Spend (7 d)"), or none."""
+        win = bg.window_text
+        return {"spend_head": f"Spend ({win(budget_cfg['spendQuery'])})" if win(budget_cfg["spendQuery"]) else "Spend",
+                "calls_head": f"Calls ({win(s.lifecycle.demand_query)})" if win(s.lifecycle.demand_query) else "Calls",
+                "caller_head": (f"Top callers by cost ({win(budget_cfg['spendByCallerQuery'])})"
+                                if win(budget_cfg["spendByCallerQuery"]) else "Top callers by cost")}
 
     @app.post("/models/builds")
-    def models_builds(request: Request, csrf: str = Form("")):
+    def models_builds(request: Request, csrf: str = Form(""), back: str = Form("", alias="next")):
+        """Read the builds on the nodes. The result is shown on the node page, so the redirect goes back to the node the form
+        came from (`next`), or to the first node that has a pinned route, or to /models."""
         u, deny = admin(request)
         if deny:
             return deny
         if not csrf_ok(u, csrf):
             return PlainTextResponse("bad request", status_code=400)
-        if probe_on():
-            readings = {}
-            for _e, r in ml.drift_targets(L.lifecycle, inv):
-                key = (r.node, r.endpoint)
-                n = inv.node(r.node)
-                ep = n.endpoint(r.endpoint) if n else None
-                if key in readings or ep is None:
-                    continue
-                try:
-                    readings[key] = prober.read_builds(ep.url, ep.engine)
-                except Refused as ex:
-                    readings[key] = str(ex)
-            builds["readings"], builds["at"] = readings, _now()
-        return RedirectResponse("/models#builds-h", status_code=303)
+        checks.run(L.lifecycle, inv)
+        node = back if inv.node(back) is not None else next((r.node for _e, r in ml.drift_targets(L.lifecycle, inv)), "")
+        return RedirectResponse(f"/nodes/{node}#builds-h" if node else "/models", status_code=303)
+
+    # ------------------------------------------------------------ the landing page (TM-1296)
+
+    def upstream_line(rep):
+        """The one line the upstream sources fold to: its badge, a title that says how many answered and when, and who."""
+        h = source_health(rep)
+        if h["not_configured"]:
+            return {"state": "unknown", "word": "Not watching", "title": "Upstream sources: not watching", "names": "", "health": h}
+        total = len(h["ok"]) + len(h["failed"])
+        if h["reason"] or not total:
+            return {"state": h["state"], "word": "Unknown", "title": "Upstream sources: no current report", "names": h["reason"], "health": h}
+        if h["failed"]:
+            title = f"Upstream sources: {len(h['ok'])} of {total} answered"
+            word = "No answer"
+        else:
+            title = f"Upstream sources: {len(h['ok'])} answered"
+            word = "Answered"
+        if h["ago"]:
+            title += f", last {h['ago']}"
+        return {"state": h["state"], "word": word, "title": title, "names": ", ".join(h["ok"] + [k for k, _w in h["failed"]]), "health": h}
+
+    def catalog_line(cat, gate):
+        """The one line the catalog folds to: its state (the promotion gate's) and how many entries are in each stage."""
+        counts = {}
+        for row in cat:
+            counts[row["entry"].stage] = counts.get(row["entry"].stage, 0) + 1
+        parts = [f"{counts[k]} {k}" for k in ("promoted", "candidate", "retired", "rejected") if counts.get(k)]
+        return {"state": "critical" if gate else "ok", "word": "Problem" if gate else "OK", "n": len(cat), "parts": ", ".join(parts)}
+
+    def run_items(runs):
+        """One item per alias whose newest run is still in progress: the alias, the run's state, and which leg it is on."""
+        out, seen = [], set()
+        now = _now()
+        for r in runs:
+            base = str(r.get("alias", ""))
+            base = base[: -len(ml.NEXT)] if base.endswith(ml.NEXT) else base
+            if not base or base in seen:
+                continue
+            seen.add(base)
+            if r.get("state") not in cd.IN_PROGRESS:
+                continue
+            st = cd.strip(r, now)
+            legs = st["legs"]
+            at = next((i for i, l in enumerate(legs) if l["state"] == "running"), None)
+            out.append({"alias": base, "state": st["state"], "word": st["state_word"], "stale": st["stale"], "ago": st["updated_ago"],
+                        "leg": f"leg {at + 1} of {len(legs)} ({legs[at]['word']})" if at is not None else "", "run_id": st["run_id"]})
+        return out
+
+    def needs_you(*, gate, drift, inbox_why, inbox_count, frontier, nexts, runs, vr):
+        """The exceptions, each with its one action. Healthy things do not appear: with none the list is empty and the page
+        draws nothing. {kind, state, word, action, href, ...the facts the row's sentence names}."""
+        items = []
+        if gate:
+            items.append({"kind": "gate", "state": "critical", "word": "Gate fails", "problems": gate, "action": "See the catalog",
+                          "href": "#catalog"})
+        by_node = {}
+        for x in drift:
+            if x.state == "drift":
+                by_node.setdefault(x.node, []).append(x)
+        for nid, rows_ in by_node.items():
+            items.append({"kind": "drift", "state": "critical", "word": "Build drift", "node": nid, "n": len(rows_),
+                          "action": "See the drift", "href": f"/nodes/{nid}#builds-h"})
+        for grp in frontier:
+            for fam in grp["families"]:
+                for r in fam["rows"]:
+                    rt = r["retire"]
+                    if not rt:
+                        continue
+                    if rt.get("replacement"):
+                        action, href = "Evaluate the replacement", "/models/inbox"
+                    elif r["aliases"]:
+                        action, href = "Open the alias", f"/models/a/{r['aliases'][0]}"
+                    else:
+                        action, href = "Open the Inbox", "/models/inbox"
+                    items.append({"kind": "retiring", "state": rt["badge"], "word": "Retired" if rt["state"] == "retired" else "Retiring",
+                                  "model": r["model"], "text": rt["text"], "action": action, "href": href})
+        if inbox_why:
+            items.append({"kind": "inbox_settings", "state": "warning", "word": "Inbox settings", "text": inbox_why,
+                          "action": "Open the Inbox", "href": "/models/inbox"})
+        if inbox_count:
+            items.append({"kind": "inbox", "state": "warning", "word": f"{inbox_count} new", "n": inbox_count, "action": "Review",
+                          "href": "/models/inbox"})
+        untrusted = vr is not None and vr.state != "ok"
+        for x in nexts:
+            alias = x["route"].alias
+            if x["ready"]:
+                items.append({"kind": "ready", "state": "ok", "word": "Ready to promote", "alias": alias, "action": "Promote",
+                              "href": f"/models/promote?alias={quote(alias)}"})
+            else:
+                n = len(x["counted"])
+                items.append({"kind": "count", "state": "warning" if n else "unknown", "word": f"{n} of {x['required']}", "alias": alias,
+                              "n": n, "required": x["required"], "untrusted": untrusted, "action": "See the count",
+                              "href": f"/models/promote?alias={quote(alias)}"})
+        for r in runs:
+            items.append({"kind": "running", "state": "warning", "word": r["word"], "spin": r["state"] == "running", "alias": r["alias"] + ml.NEXT,
+                          "run": r, "action": "Watch", "href": f"/models/c/{quote(r['alias'])}"})
+        return items
 
     @app.get("/models")
     def models_index(request: Request):
@@ -192,21 +284,63 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         cat, unc = rows()
         inbox, inbox_why = inbox_cfg()
         cands, snoozed, dismissed = ib.split(rep.data.candidates if rep.data else [], inbox, today())
-        groups = {k: [c for c in cands if c.kind == k] for k in ("revision", "digest", "quant", "successor", "frontier", "deprecation")}
         rmap = ib.retire_map(rep.data, today())
         for row in cat:
             row["retire"] = ib.retire_for(rmap, row["entry"].model, row["entry"].source.ref)
             if row["retire"]:
                 row["retire"] = {**row["retire"], "badge": ib.retire_state(row["retire"])}
             row["hosted_aliases"] = hosted_by_model.get(row["entry"].source.ref, []) if row["entry"].source.kind == "hosted" else []
-        hosted = [e for e in L.lifecycle.catalog if e.source.kind == "hosted" and e.stage == "candidate"]
-        drift = drift_rows()
-        return render(request, "models.html", u, catalog=cat, uncatalogued=unc, reading=rep, groups=groups,
-                      watch_on=L.watch_enabled, gate=ml.check_promotions(L.lifecycle, inv),
-                      gate_notes=ml.promotion_notes(L.lifecycle), nexts=next_rows(vs), hosted=hosted,
-                      verdict_reading=vr, lc=L.lifecycle, drift=drift, drift_findings=ml.drift_findings(drift),
-                      probe_on=probe_on(), checked_at=builds["at"], nodes=inv.nodes, inbox_count=len(cands), hidden_count=len(snoozed) + len(dismissed),
-                      inbox_why=inbox_why, retire_note=retire_note)
+        gate = ml.check_promotions(L.lifecycle, inv)
+        drift = checks.rows(L.lifecycle, inv)
+        nexts = next_rows(vs)
+        runs, _runs_problem = cd.read_runs(cd.status_dir(L.raw))
+        running = run_items(runs)
+
+        # Local models: one card per node, its deployments with their tunings (deployments.py, TM-1299)
+        fi = dp.fit_inputs_for(L, rep.data)
+        deps = dp.deployment_rows(inv, L.lifecycle, fi)
+        nexts_by = {x["route"].alias: x for x in nexts}
+        drift_by = {x.alias: x for x in drift}
+        cards = []
+        for n in inv.nodes:
+            mine = [d for d in deps if d.node == n.id]
+            bases = []
+            for d in mine:
+                b = d.alias[: -len(ml.NEXT)] if d.is_candidate else d.alias
+                if b not in bases:
+                    bases.append(b)
+            mine.sort(key=lambda d: (bases.index(d.alias[: -len(ml.NEXT)] if d.is_candidate else d.alias), d.is_candidate))
+            cards.append({"node": n, "kind": n.kind["name"], "bar": dp.memory_bar(n, mine, dp.usable_for_node(n, fi)),
+                          "rows": [{"d": d, "next": nexts_by.get(d.alias), "drift": drift_by.get(d.alias)} for d in mine]})
+        counts = {"deployments": len(deps), "nodes": len(inv.nodes), "candidates": sum(1 for d in deps if d.is_candidate),
+                  "serving": sum(1 for d in deps if not d.is_candidate)}
+
+        # Frontier models: hosted entries by provider and family
+        def retire_of(*ids):
+            r = ib.retire_for(rmap, *ids)
+            return {**r, "badge": ib.retire_state(r)} if r else None
+        groups = fr.frontier_groups(L.lifecycle, hosted_by_model, retire_of)
+        fcount = {"models": sum(g["count"] for g in groups), "families": sum(len(g["families"]) for g in groups), "providers": len(groups)}
+        # what each hosted model costs (TM-1298): list price from the site or the watcher's price map; spend and calls from the gateway's
+        # own metrics, over the window each query names. Nothing is read when there is no hosted model to show.
+        fin = {"costs": {}, "price_footer": "", "callers": None}
+        if fcount["models"]:
+            cost_models = {r["id"]: r["aliases"] for g in groups for fam in g["families"] for r in fam["rows"]}
+            fin["costs"] = fc.costs_for(L.lifecycle, rep.data, spend_src.read() if spend_src is not None else None, src_demand.read(),
+                                        cost_models, spend_query=budget_cfg["spendQuery"], demand_query=s.lifecycle.demand_query)
+            fin["price_footer"] = fc.price_footer(fin["costs"])
+            if caller_src is not None:
+                reading = caller_src.read()
+                fin["callers"] = {(g["provider"], fam["family"]): fc.top_callers(
+                    reading, {k for r in fam["rows"] for k in fc.model_keys(r["id"], r["aliases"])}, query=budget_cfg["spendByCallerQuery"])
+                    for g in groups for fam in g["families"]}
+        fin.update(cost_heads())
+
+        items = needs_you(gate=gate, drift=drift, inbox_why=inbox_why, inbox_count=len(cands), frontier=groups, nexts=nexts, runs=running, vr=vr)
+        return render(request, "models.html", u, catalog=cat, uncatalogued=unc, reading=rep, gate=gate, gate_notes=ml.promotion_notes(L.lifecycle),
+                      nexts=nexts, verdict_reading=vr, lc=L.lifecycle, cards=cards, counts=counts, groups=groups, fcount=fcount, fin=fin,
+                      items=items, upstream=upstream_line(rep), cat_line=catalog_line(cat, gate), drift_by=drift_by, checked_at=checks.at,
+                      probe_on=checks.probe_on, nodes=inv.nodes, inbox_count=len(cands), hidden_count=len(snoozed) + len(dismissed))
 
     def _change(request, u, new_lc, new_inv, notes, title, fmt, form_fields, path, raw=None):
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -228,6 +362,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         derived = nm.Inventory(new_inv.nodes, [r for r in new_inv.routes if r.alias in changed or r.alias in bases])
         return render(request, "models_change.html", u, title=title, notes=notes, text=text,
                       eval_hosted=dump(new_lc.eval_gateway_entries), prod_hosted=dump(new_lc.production_gateway_entries),
+                      prod_removed=list(new_lc.production_gateway_removed),
                       model_list=nm.model_list_yaml(derived) if [r for r in nm.gateway_routes(derived) if r.alias in changed] else "",
                       eval_list=nm.model_list_yaml(derived, "eval") if nm.gateway_routes(derived, "eval") else "",
                       form_fields=form_fields, values_file=s.nodes.values_file, path=path)
@@ -463,13 +598,15 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
             fits = [] if hosted else fit_chips(c, rep, results)
             card = {"c": c, "reason": ib.REASONS[c.kind][0], "reason_why": ib.REASONS[c.kind][1], "hosted": hosted,
                     "fits": fits, "best": best_fit(fits), "licence": None if hosted else licence_chip(c, rep),
-                    "hints": [], "retire": None, "replacement": None, "pr_n": pr_number(c.pr) if c.pr else None,
+                    "hints": [], "retire": None, "retire_alias": "", "replacement": None, "pr_n": pr_number(c.pr) if c.pr else None,
                     "hidden": hidden.get(c.id)}
             rec = (rep.sizes if rep else {}).get(c.source.ref) if c.source.kind == "huggingface" else None
             if rec and rec.eval_results:
                 card["hints"] = [f"{x['name'] or 'metric'} {x['value']}" + (f" on {x['dataset']}" if x['dataset'] else "") for x in rec.eval_results[:4]]
             if c.kind == "deprecation":
                 card["retire"] = retire_note(c.when)
+                card["retire_alias"] = next((str(g["model_name"]) for g in gateway_list() if fz.is_pinned_entry(g)
+                                             and fz.hosted_model(g) == c.model), "")            # TM-1297: a pinned generation can be retired from here
                 if c.replacement:
                     e = L.lifecycle.by_model(c.replacement)
                     card["replacement"] = {"model": c.replacement, "entry": e}
@@ -741,6 +878,12 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         return _change(request, u, new_lc, new_inv, notes, f"Promote {row['alias']} to {row['route'].model}", fmt,
                        {"alias": alias}, "/models/promote")
 
+    def family_note(e, target):
+        """What promoting hosted entry `e` under `target` does when `target` is its family alias (TM-1297), else None."""
+        if not (fz.has_family(e.model) and target == fz.family_of(e.model)):
+            return None
+        return {"family": target, "generation": fz.generation_alias(e.model), "keep": L.lifecycle.keep_generations}
+
     @app.get("/models/promote-hosted")
     def models_promote_hosted_form(request: Request, entry: str = "", target: str = ""):
         u, deny = admin(request)
@@ -750,8 +893,10 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         if e is None or e.source.kind != "hosted" or e.stage != "candidate":
             return render(request, "error.html", u, status_code=404, title="Not found", message="That is not a hosted candidate.")
         vr, vs = verdicts()
+        target = target or (fz.family_of(e.model) if fz.has_family(e.model) else "")      # TM-1297: a family's floating alias is the default
         prog = progress(target, e.model, vs=vs) if target and nm.ALIAS_RE.match(target) else None
-        return render(request, "models_promote_hosted.html", u, e=e, target=target, prog=prog, error=None, verdict_reading=vr)
+        return render(request, "models_promote_hosted.html", u, e=e, target=target, prog=prog, error=None, verdict_reading=vr,
+                      fam=family_note(e, target))
 
     @app.post("/models/promote-hosted")
     def models_promote_hosted(request: Request, csrf: str = Form(""), entry: str = Form(""), target: str = Form(""),
@@ -768,12 +913,13 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         prog = progress(target, e.model, vs=vs) if target and nm.ALIAS_RE.match(target) else None
         if vr is not None and vr.state != "ok":
             return render(request, "models_promote_hosted.html", u, e=e, target=target, prog=prog, verdict_reading=vr, status_code=400,
-                          error=f"Not every verdict file could be read ({vr.reason}), so the count cannot be trusted.")
+                          error=f"Not every verdict file could be read ({vr.reason}), so the count cannot be trusted.", fam=family_note(e, target))
         try:
-            new_lc, notes = ml.promote_hosted(entry, target, [t.strip() for t in tags.split(",")], vs, L.lifecycle, gateway_names())
+            new_lc, notes = ml.promote_hosted(entry, target, [t.strip() for t in tags.split(",")], vs, L.lifecycle, gateway_list(),
+                                              today().isoformat())
         except ml.LifecycleError as ex:
             return render(request, "models_promote_hosted.html", u, e=e, target=target, prog=prog, error=str(ex),
-                          verdict_reading=vr, status_code=400)
+                          verdict_reading=vr, status_code=400, fam=family_note(e, target))
         return _change(request, u, new_lc, inv, notes, f"Promote {e.model} as {target}", fmt,
                        {"entry": entry, "target": target, "tags": tags}, "/models/promote-hosted")
 
@@ -919,21 +1065,93 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
             rv = {"ok": False, "why": str(ex)}
         return live, L.lifecycle.by_model(live.model), rv
 
+    def retire_info(model, entry=None):
+        """The watcher's countdown for a hosted model, with its badge state, or None."""
+        rep = src_report.read()
+        r = ib.retire_for(ib.retire_map(rep.data, today()), model, entry.model if entry else "")
+        return rep, ({**r, "badge": ib.retire_state(r)} if r else None)
+
+    def pinned_note(alias, h):
+        """For a hosted alias that is a pinned generation (claude-sonnet-5-5): its family and whether the family follows it."""
+        g = next((x for x in gateway_list() if x.get("model_name") == alias), None)
+        if g is None or not fz.is_pinned_entry(g):
+            return None
+        family = fz.family_of(h["model"])
+        fam = next((x for x in gateway_list() if x.get("model_name") == family and fz.is_family_entry(x)), None)
+        return {"family": family, "has_family_alias": fam is not None, "current": fam is not None and fz.hosted_model(fam) == h["model"],
+                "target": fz.hosted_model(fam) if fam else ""}
+
+    def family_page(request, u, alias, error=None, status_code=200):
+        rep = src_report.read()
+        rmap = ib.retire_map(rep.data, today())
+        fv = fz.family_view(gateway_list(), L.lifecycle, alias, rmap, ib.retire_for)
+        cur = next((g for g in fv.generations if g.current), None)
+        e = L.lifecycle.by_ref(fv.target)
+        promo = (e.promotion if e else {}) or {}
+        ev = [x.get("date") for x in (promo.get("evidence") or []) if isinstance(x, dict) and x.get("date")] if isinstance(promo.get("evidence"), list) else []
+        pr = str(promo.get("pr", "") or "")
+        now = {"model": fv.target, "generation": cur.alias if cur else "", "entry": e, "since": promo.get("date") or (max(ev) if ev else ""),
+               "pr": pr if pr.startswith("https://") else "", "from": promo.get("from") or "",
+               "ours": bool(cur)}
+        for g in fv.generations:
+            g.retire = ({**g.retire, "badge": ib.retire_state(g.retire)} if g.retire else None)
+        # what each generation costs (TM-1298), keyed by its pinned alias: two pinned aliases may route one model, and the
+        # current generation's row also counts the calls made through the floating alias
+        spend, demand = (spend_src.read() if spend_src is not None else None), src_demand.read()
+        fin = {**cost_heads(), "costs": {}, "price_footer": "", "callers": None}
+        for g in fv.generations:
+            via = [g.alias, alias] if g.current else [g.alias]
+            c = fc.costs_for(L.lifecycle, rep.data, spend, demand, {g.model: via}, spend_query=budget_cfg["spendQuery"],
+                             demand_query=s.lifecycle.demand_query)[g.model]
+            fin["costs"][g.alias] = c
+        if fv.target not in fin["costs"]:
+            fin["costs"][fv.target] = fc.costs_for(L.lifecycle, rep.data, None, None, {fv.target: []})[fv.target]
+        listed = [fin["costs"][g.alias] for g in fv.generations]
+        fin["price_footer"] = fc.price_footer({c.model: c for c in listed}) if listed else ""
+        if caller_src is not None:
+            keys = {alias, *(k for g in fv.generations for k in fc.model_keys(g.model, [g.alias]))}
+            fin["callers"] = fc.top_callers(caller_src.read(), keys, query=budget_cfg["spendByCallerQuery"])
+        return render(request, "models_alias.html", u, alias=alias, live=None, e=e, promo=promo, prev=None, revert={"ok": False, "why": ""},
+                      error=error, reason="", hosted=None, retire=None, reading=rep, family=fv, now=now, pinned=None, fin=fin,
+                      status_code=status_code)
+
     def alias_page(request, u, alias, error=None, reason="", status_code=200):
         av = alias_view(alias)
         if av is None:
+            if fz.family_view(gateway_list(), L.lifecycle, alias) is not None:
+                return family_page(request, u, alias, error, status_code)
             h = hosted_alias(alias)
             if h is None:
                 return render(request, "error.html", u, status_code=404, title="Not found", message="There is no such live alias.")
-            rep = src_report.read()
-            r = ib.retire_for(ib.retire_map(rep.data, today()), h["model"], h["entry"].model if h["entry"] else "")
+            rep, r = retire_info(h["model"], h["entry"])
             return render(request, "models_alias.html", u, alias=alias, live=None, e=h["entry"], promo={}, prev=None, revert={"ok": False, "why": ""},
-                          error=None, reason="", hosted=h, retire=({**r, "badge": ib.retire_state(r)} if r else None), reading=rep,
+                          error=error, reason="", hosted=h, retire=r, reading=rep, family=None, now=None, pinned=pinned_note(alias, h),
                           status_code=status_code)
         live, e, rv = av
         promo = (e.promotion if e else {}) or {}
         return render(request, "models_alias.html", u, alias=alias, live=live, e=e, promo=promo, prev=promo.get("previous"),
-                      revert=rv, error=error, reason=reason, status_code=status_code, hosted=None, retire=None, reading=None)
+                      revert=rv, error=error, reason=reason, status_code=status_code, hosted=None, retire=None, reading=None,
+                      family=None, now=None, pinned=None)
+
+    @app.post("/models/a/{alias}/retire")
+    def models_retire(request: Request, alias: str, csrf: str = Form(""), fmt: str = Form("")):
+        """The retire change for a pinned generation its provider retires: its entry leaves the production gateway and its
+        catalog entry is marked retired. Refuses the generation the family alias points at. Writes nothing."""
+        u, deny = admin(request)
+        if deny:
+            return deny
+        if not csrf_ok(u, csrf):
+            return PlainTextResponse("bad request", status_code=400)
+        h = hosted_alias(alias)
+        if h is None:
+            return bad(request, u, "There is no such hosted alias.", 404)
+        _rep, r = retire_info(h["model"], h["entry"])
+        try:
+            new_lc, notes = ml.retire_generation(alias, L.lifecycle, gateway_list(), today().isoformat(), (r or {}).get("date", ""),
+                                                 (r or {}).get("replacement", ""))
+        except ml.LifecycleError as ex:
+            return alias_page(request, u, alias, error=str(ex), status_code=400)
+        return _change(request, u, new_lc, inv, notes, f"Retire {alias}", fmt, {}, f"/models/a/{alias}/retire")
 
     @app.get("/models/a/{alias}")
     def models_alias(request: Request, alias: str):

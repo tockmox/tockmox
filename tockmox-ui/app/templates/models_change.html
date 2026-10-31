@@ -4,13 +4,15 @@
 <h1>{{ title }}</h1>
 <p class="lede">Nothing has changed yet. Commit this to <code>{{ values_file }}</code> in your site repository; Argo CD applies it.</p>
 {% if notes %}<section class="panel" aria-labelledby="n-h"><h2 id="n-h">Before you commit</h2><ul>{% for n in notes %}<li>{{ n }}</li>{% endfor %}</ul></section>{% endif %}
-{% if model_list or prod_hosted %}
+{% if model_list or prod_hosted or prod_removed %}
 <section class="panel steps" aria-labelledby="ml-h">
   <h2 id="ml-h">What the production gateway will get</h2>
   <p>What agents can call. Nothing reaches it without a promotion.</p>
 {% if model_list %}<pre tabindex="0"><code>{{ model_list }}</code></pre>{% endif %}
-{% if prod_hosted %}<p>Hosted models are not on a node: add this to the production gateway's <code>model_list</code>.</p>
+{% if prod_hosted %}<p>Hosted models are not on a node: add this to the production gateway's <code>model_list</code>. An entry whose <code>model_name</code> is already there replaces that entry; every other entry stays as it is.</p>
 <pre tabindex="0"><code>{{ prod_hosted }}</code></pre>{% endif %}
+{% if prod_removed %}<p>Remove {{ "this entry" if prod_removed|length == 1 else "these entries" }} from the production gateway's <code>model_list</code> (by <code>model_name</code>).</p>
+<ul>{% for n in prod_removed %}<li><code>{{ n }}</code></li>{% endfor %}</ul>{% endif %}
 </section>
 {% endif %}
 {% if eval_list or eval_hosted %}

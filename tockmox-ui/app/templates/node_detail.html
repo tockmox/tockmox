@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import badge, source_line %}
+{% from "macros.html" import badge, source_line, tune %}
 {% block title %}{{ node.name }}{% endblock %}
 {% block main %}
 <h1>{{ node.name }}</h1>
@@ -8,11 +8,6 @@
 {% if health and health.disagree %}<p class="warnbox">{{ badge("warning", "Check this") }} {{ health.disagree }}.</p>{% endif %}
 
 {#- TM-1299: the models this node serves, per engine endpoint, and its memory against what is planned. -#}
-{% macro tune(x) -%}
-{%- if x.source == "route" -%}{{ x.text }}
-{%- elif x.source == "default" -%}<span class="muted"{% if x.note %} title="{{ x.note }}"{% endif %}>{{ x.text }}{% if x.label %} <span class="tag">{{ x.label }}</span>{% endif %}</span>
-{%- else -%}<span class="muted">{{ x.text }}</span>{%- endif -%}
-{%- endmacro %}
 {% set bar = models.bar %}
 {% set ndep = models.deployments|length %}
 <section class="panel flush" aria-labelledby="models-h">
@@ -85,6 +80,36 @@
   </table>
   </div>
   <p class="muted small">Planned memory is weights plus the cache for context x slots, plus engine overhead, from the routes as recorded, the same arithmetic as the fit checks. A route that does not state its context is planned at the fit default context (8K) and at one slot unless a slot count is on record, and the cell says so. A candidate counts while its -next route exists. <b>default</b> means the route does not state it and the engine's own setting applies; <b>engine default, not reported</b> means Tockmox does not know what that is. Hover a default for what it is.</p>
+</section>
+
+{#- TM-1296: the build each pinned model is held at, against what the node serves. Moved here from the Models page, next to the routes it is about. -#}
+<section class="panel" aria-labelledby="builds-h">
+  <h2 id="builds-h">Builds on this node <span class="muted small" title="Git holds the build each model is pinned to; the node holds the one it actually serves. For every pinned Ollama or Hugging Face model, this asks the node serving it (Ollama's digest from /api/tags, llama-server's Hugging Face snapshot from its model path) and compares. When it cannot tell, it says Unknown and why.">pinned in git vs. served on the node{% if builds.checked_at %} &middot; last checked {{ builds.checked_at.strftime("%Y-%m-%d %H:%M UTC") }}{% elif builds.probe_on %} &middot; not checked yet{% endif %}</span></h2>
+  {% if builds.findings %}
+  <p>{{ badge("critical", "Build drift") }} {{ builds.findings|length }} route(s) serve a build the catalog does not pin. Pull the pinned build on the node, or record the node's build as the entry's <code>pending</code> one and evaluate it.</p>
+  <ul>{% for f in builds.findings %}<li>{{ f }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if builds.rows %}
+  <div class="table-wrap" role="region" aria-labelledby="builds-cap" tabindex="0">
+  <table>
+    <caption id="builds-cap">Pinned build against the build on {{ node.name }}, per route</caption>
+    <thead><tr><th scope="col">Route</th><th scope="col">Model</th><th scope="col">Pinned</th><th scope="col">On the node</th><th scope="col">State</th></tr></thead>
+    <tbody>
+    {% for x in builds.rows %}
+      <tr><th scope="row"><code>{{ x.alias }}</code><br><span class="muted">{{ x.endpoint }}</span></th>
+        <td><code>{{ x.entry.model }}</code></td>
+        <td><code title="{{ x.pinned }}">{{ x.pinned[:7] }}</code></td>
+        <td>{% if x.actual %}<code title="{{ x.actual }}">{{ x.actual[:7] }}</code>{% if x.how %}<br><span class="muted">{{ x.how }}</span>{% endif %}{% else %}<span class="muted">unknown</span>{% endif %}</td>
+        <td>{% if x.state == "current" %}{{ badge("ok", "Holds the pinned build") }}{% elif x.state == "drift" %}{{ badge("critical", "Drift") }}{% else %}{{ badge("unknown", "Unknown" if builds.checked_at else "Not checked") }}<br><span class="muted">{{ x.reason }}</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<p class="empty">No catalogued Ollama or Hugging Face model with a pinned revision is routed to this node, so there is nothing to compare.</p>{% endif %}
+  {% if builds.probe_on %}
+  {% if builds.rows %}<form method="post" action="/models/builds" class="inline"><input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="next" value="{{ node.id }}"><button class="btn-ghost" type="submit">Check builds on the nodes</button></form>{% endif %}
+  {% if builds.checked_at %}<p class="muted small">A check older than an hour reads Unknown. The check reads every node, not only this one.</p>{% endif %}
+  {% else %}<p>{{ badge("unknown", "Not checked") }} Reading a node is a request to it, so it rides the probe's fences, and probing is off: set <code>inferenceNodes.probe.allowedCidrs</code> to the range your inference nodes live in.</p>{% endif %}
 </section>
 
 <section class="panel" aria-labelledby="hw-h">

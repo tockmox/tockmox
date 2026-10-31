@@ -6,9 +6,15 @@
 <p class="lede">A hosted candidate sits on the eval gateway tagged <code>open</code> alone, for public eval data. Promoting it puts it on the production gateway under an alias, with the tags you choose here, after enough passing comparisons for that alias.</p>
 {% if verdict_reading is not none %}<p>{{ source_line(verdict_reading) }}</p>{% endif %}
 {% if error %}<p>{{ badge("critical", "Not promoted") }} {{ error }}</p>{% endif %}
+{% if fam %}
+<section class="panel callout" aria-labelledby="fam-h">
+  <h2 id="fam-h">Under the family alias <code>{{ fam.family }}</code></h2>
+  <p>This keeps generations. It adds the pinned alias <code>{{ fam.generation }}</code>, which never moves, and points <code>{{ fam.family }}</code> at this model: the only entry whose model changes. Another pinned generation is never rewritten. A family keeps {{ fam.keep }} generation(s); if this makes one more, the change also removes the oldest and says so.</p>
+</section>
+{% endif %}
 <form method="get" action="/models/promote-hosted" class="panel">
   <input type="hidden" name="entry" value="{{ e.id }}">
-  <label for="target">The alias it would serve</label>
+  <label for="target">The alias it would serve <span class="muted">(a family alias such as <code>claude-sonnet</code> keeps generations; any other name is promoted as one alias)</span></label>
   <input id="target" name="target" type="text" value="{{ target }}" autocomplete="off" required>
   <button class="btn-ghost" type="submit">Count the comparisons</button>
 </form>

@@ -16,9 +16,11 @@ LEG_WORDS = {
     "control": "Known-bad control",
     "smoke": "Smoke",
     "perf": "Performance",
+    "perf_incumbent": "Performance, incumbent",
     "prefill": "Long-context prefill",
     "tool_reliability": "Tool-call reliability",
     "quality": "Quality",
+    "quality_incumbent": "Quality, incumbent",
 }
 RUN_WORDS = {"queued": "Queued", "waiting": "Waiting", "running": "Running", "done": "Done", "aborted": "Aborted", "failed": "Failed"}
 LEG_STATE_WORDS = {"queued": "Queued", "running": "Running", "done": "Done", "failed": "Failed", "skipped": "Skipped"}

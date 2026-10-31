@@ -151,7 +151,8 @@ modelLifecycle:
   `retired`, or `rejected` (a build that failed its evaluation or was reverted,
   with `rejection: {reason, date}`: nothing may route it, on either gateway, and
   the watcher offers the model again only at another revision). Absent means
-  `promoted`.
+  `promoted`. A hosted generation that left the list carries
+  `retirement: {reason, date}`.
 - **`adopted`** is how a model that was already serving enters the catalog,
   written once. Every later change to its alias goes through an evaluation.
 - **`source.kind`** is `huggingface`, `ollama` or `hosted`. A `hosted` entry's
@@ -189,6 +190,60 @@ The eval gateway filters by tag, so only public eval data reaches it (see "The
 data-class rails" below). Data-class tags on the production gateway decide which
 requests may leave the site, and choosing them is part of promoting the model. A promoted hosted model is an ordinary hand-written entry in
 `litellm.proxy_config.model_list`, with the tags you chose.
+
+### Keeping several frontier generations
+
+A hosted model costs nothing until it is called, so a family can keep more than
+one generation on the production gateway. Each generation has its own pinned
+alias, and the family has one floating alias:
+
+- **A generation alias is pinned.** `claude-sonnet-5-5` is the model name with
+  the provider dropped, and it always serves `anthropic/claude-sonnet-5-5`. It
+  never moves. An agent you tuned against that generation calls it by name and
+  is never changed underneath.
+- **The family alias floats.** `claude-sonnet` follows the current generation.
+  Only a promotion moves it. Callers that use the family alias get the newer
+  model when you merge that promotion, and not before.
+- **`keepGenerations` says how many.** `modelLifecycle.frontier.keepGenerations`
+  is a whole number of 1 or more, and defaults to 3. It counts the pinned
+  generations of one family. The schema refuses 0.
+
+```yaml
+modelLifecycle:
+  frontier:
+    keepGenerations: 3
+```
+
+Promote a hosted candidate under its family alias (the Models page offers it
+by default). The change it renders adds the pinned alias, points the family
+alias at the same model, and leaves every other entry as it is. The family
+alias is the only existing entry whose model changes. The family is the model
+name without the provider or the version: `claude-sonnet-5-5` and
+`claude-sonnet-4-5` are `claude-sonnet`, `gpt-5.1` is `gpt`, and
+`gemini-2.5-pro` is `gemini-pro`. A name this cannot read is its own family and
+is promoted as a single alias.
+
+A generation leaves in one of two ways, and both are a change you review and
+commit. Nothing is removed on its own:
+
+1. **Its provider retires it.** The watcher's countdown shows on the Inbox row
+   and on the alias page. Both offer the retire change, which removes the pinned
+   entry and marks the catalog entry `retired` with the reason and the date.
+   The UI refuses to retire the generation the family alias points at, because
+   that would leave the family alias calling a model that is gone. It says which
+   generation to promote first.
+2. **It falls off the list.** When a promotion would leave the family with more
+   than `keepGenerations` pinned generations, the same change also removes the
+   oldest one (by the version in its name, never the one being promoted) and
+   marks its catalog entry `retired` with the reason `fell off keepGenerations`
+   and the date. The change says so in its notes.
+
+The UI cannot see who calls a generation by name. Before you merge a change
+that removes one, move the callers pinned to it to a newer generation, or their
+requests will fail.
+
+Price and spend per generation are not shown yet; the alias page says "not
+recorded yet" rather than estimating.
 
 ## Promoting
 
@@ -413,8 +468,9 @@ value.
 
 The watcher is the one part of Tockmox that reaches the internet on its own. It
 reads Hugging Face, the Ollama registry, OpenRouter, and the Anthropic and
-OpenAI model lists for what is newer than your catalog, writes a report, and
-changes nothing. With `pullRequests` on, its PR opener turns the report into
+OpenAI model lists for what is newer than your catalog, reads LiteLLM's price map
+for the list price of each hosted model ([Frontier cost](#frontier-cost)), writes
+a report, and changes nothing. With `pullRequests` on, its PR opener turns the report into
 **one pull request at a time** on your site repo: an admit PR for a new
 candidate, and a promotion PR once the verdict records reach
 `promotion.requiredPasses`. Merging the admit PR is the first approval; merging
@@ -456,6 +512,37 @@ The render refuses the watcher when neither is set, pull requests to GitHub with
 neither an App nor a token, and pull requests to Forgejo with no token Secret.
 Leave it off on an air-gapped site.
 
+### What the watcher reads for prices
+
+Providers publish no price API, so the watcher reads the one dated, recorded
+source the gateway itself prices spend with: LiteLLM's price map, a single JSON
+file at
+`https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json`.
+It is one GET per run, to a host the watcher's allowlist now names
+(`raw.githubusercontent.com`, the sixth). The chart's NetworkPolicy already
+allows HTTPS to the internet, so no policy changes. The answer is capped at 16 MiB
+(the file is about 3 MB), and a redirect is not followed.
+
+For every hosted model the catalog or the gateway names, the watcher looks the id up
+in the map: the exact `provider/model` key, then LiteLLM's `gemini/` prefix for a
+`google/` id, then the unprefixed key (`claude-sonnet-5-5`, `gpt-5.1`), which counts
+only when its own `litellm_provider` is that provider. It converts dollars per token
+to dollars per 1M tokens and writes `prices` and `priceSource` to the report:
+
+```json
+"prices": {"anthropic/claude-sonnet-5-5": {"inPer1M": 3.0, "outPer1M": 15.0,
+           "source": "LiteLLM price map", "readAt": "2026-10-30"}},
+"priceSource": {"ok": true, "reason": "", "readAt": "2026-10-30"}
+```
+
+A model the map does not price is left out, and the page reads it as unknown. The
+base rate is the figure: a higher rate past some context length is not read. When a
+run cannot read the map, `priceSource` says why, and each model keeps its last good
+price under its **original** date, marked `stale`, so the page says "last read
+2026-10-20" and never shows an old price as today's. A price failure does not turn the
+report's candidates Unknown. Set `modelLifecycle.watch.prices.enabled` to `false` to
+make no request to that host; prices then read unknown unless the site states them.
+
 ### What the watcher reads for fit
 
 The watcher also reads what the UI needs to say whether a model fits a node. The
@@ -489,6 +576,60 @@ turns the duty off.
 For GGUF repos with several quantisations the watcher sizes only the one the
 catalog entry's `quant` names, and sizes nothing when it names none: the sum of
 every quantisation is not a file anyone loads.
+
+## The Models page
+
+The Models page (`/models`) is where the section starts. It answers the
+questions an operator asks, in this order, and sends the detail to the pages
+that own it. It is read only: every action renders a change for you to commit.
+
+**Needs you.** One strip at the top, exceptions only, each row with one action.
+A row appears for: candidates waiting in the [Inbox](#the-inbox-the-candidate-page-and-the-budget)
+(*Review*), a hosted model its provider is retiring, with the countdown (*Evaluate
+the replacement*, or *Open the alias* when the report names no replacement), a
+`-next` candidate short of its passing count (*See the count*), one that has
+enough and is ready to promote (*Promote*), an evaluation in progress with the leg
+it is on (*Watch*), a node serving a build the catalog does not pin (*See the
+drift*), a malformed `modelLifecycle.inbox` and a promotion gate that fails. When
+nothing needs you the strip is not drawn at all.
+
+**Local models.** One card per inference node: the node id (a link to its
+page), its type, the memory planned on it against its total, and a table with
+one row per deployment: alias, model, pinned build, engine and port, context,
+slots, max output, thinking and state. A `-next` candidate sits under the alias
+it competes for, marked as a candidate. The state is *Serving* or *Candidate
+-next*, with a short line for the build check (*Holds the pinned build*, *Serves
+another build*, *Build unknown* or *Build not checked*) that links to the node's
+page, where the check lives.
+
+**Frontier models.** Hosted models grouped by provider, then by family. A family
+is the model id with its version removed, so `anthropic/claude-sonnet-5-5` and
+`anthropic/claude-sonnet-5` sit together under `claude-sonnet`. When no part of a
+name reads as a version, the family is the model id itself. Each row shows the
+stage (promoted, candidate, or not in the catalog), the retirement countdown when
+the watcher has one, and the gateway alias that routes it. The row also shows the
+list price, spend and calls, described under [Frontier cost](#frontier-cost).
+
+**Catalog and upstream sources.** Each folds to one line at the foot of the page
+and opens on demand: the catalog with its promotion gate, and the watcher's
+sources with when they last answered. The catalog line opens by itself when the
+gate fails.
+
+### Tunings
+
+Every deployment shows the settings its route applies. **Context** is the
+largest prompt the route accepts (`modelInfo.max_input_tokens`, or `num_ctx`
+for Ollama). **Slots** is how many requests the engine serves at once; Tockmox
+keeps no slot count per route, so it reads "engine default, not reported".
+**Max output** is the most tokens one answer may have (`max_tokens`).
+**Thinking** is whether the model reasons before it answers
+(`chat_template_kwargs.enable_thinking`, On or Off).
+
+A value the route states is shown as it is. When the route does not state it,
+the page shows what the engine does by default, labelled as a default, and hovering
+it says what that is. When Tockmox does not know the engine's default it says
+"engine default, not reported" and guesses nothing. Any other route parameter is
+under "More settings" on the node page.
 
 ## The Inbox, the candidate page and the budget
 
@@ -606,6 +747,54 @@ New values keys: `modelLifecycle.inbox.snoozed`, `modelLifecycle.inbox.dismissed
 `modelLifecycle.watch.providers.<provider>.replacements`. `modelLifecycle` is an
 experimental block, so they need no chart change.
 
+### Frontier cost
+
+On the Models page each hosted model shows its list price, what the gateway spent
+on it, and how often it was called. Each figure says where it came from, and a
+figure nobody has reads **unknown**, with the reason on hover. It is never 0 and
+never an estimate passed off as a fact.
+
+- **Price per 1M tokens, in / out.** The provider's list price with the day it was
+  read. It comes from the watcher's report ("LiteLLM price map, read 2026-10-30";
+  "last read 2026-10-20" when the latest read failed and an earlier price is kept),
+  or from your values, which win ("set by this site", with your date). The footer
+  under the table names the sources. It is the list price, not what you paid:
+  discounts, caching and batch rates are not in it, and it is not multiplied into
+  the spend figure.
+- **Spend and Calls.** Spend is `modelLifecycle.budget.spendQuery` and calls is
+  `modelLifecycle.demandQuery`, both read from Prometheus. Each header names the
+  window the query itself covers, read from its `[7d]`: a 7-day query reads
+  "Spend (7 d)", a `[30d]` query reads "Spend (30 d)". Nothing is relabelled
+  "this month". Set `[30d]` in both queries to see 30 days. A series is matched to
+  a model by the gateway aliases that route to it, then by the model id with or
+  without its provider. A model with no series, or a query that did not answer,
+  reads unknown.
+
+```yaml
+modelLifecycle:
+  frontier:
+    prices:                                   # optional: wins over the price map
+      anthropic/claude-sonnet-5-5: {inPer1M: 3.0, outPer1M: 15.0, date: "2026-10-30"}
+  demandQuery: 'sum by (model_group) (increase(litellm_deployment_success_responses_total[30d]))'
+  budget:
+    spendQuery: 'sum by (model_group) (increase(litellm_spend_metric_total[30d]))'
+    spendByCallerQuery: 'sum by (api_key_alias, model) (increase(litellm_spend_metric_total[30d]))'   # optional
+```
+
+`frontier.prices` takes a number of dollars (zero or more) for `inPer1M` and
+`outPer1M` and the day you read the price (`date`, quoted, `YYYY-MM-DD`), nothing
+else. A negative price, a missing date or an extra key is refused when the chart
+renders and when the UI starts. A change the UI generates keeps your prices.
+
+`budget.spendByCallerQuery` is optional. Each series must carry the model and who
+called: LiteLLM's `litellm_spend_metric` labels spend with `model` and with the
+key and team labels (`api_key_alias`, `team_alias`, `team`, `user`, `end_user`,
+`hashed_api_key`), and the first one a series has names the caller. Check the labels
+your gateway version exposes. When it is set, each family row on the Models page
+opens a table of the five callers that spent most on that family, over the window the
+query names. Without it there is no table. A caller with no label at all is listed
+as "no key alias or team", because the spend is real and has no name.
+
 ### -next routes carry the live alias's tags
 
 A candidate admitted for evaluation is a node route, so it is written with
@@ -617,9 +806,11 @@ untagged deployment serves no data class.
 
 Git holds the build each model is pinned to (`source.revision`); the node holds
 the one it actually serves, and nothing stops someone pulling a different one
-by hand. The UI's `/models` page compares the two, under "Builds on the
-nodes", for every catalogued Ollama or Hugging Face model with a pinned
-revision that a route serves:
+by hand. The UI compares the two on the node's page (`/nodes/<id>`), under
+"Builds on this node", for every catalogued Ollama or Hugging Face model with a
+pinned revision that a route serves. The Models page shows each deployment's
+build state in one short line that links there, and a drift is a row in its
+Needs-you strip:
 
 | Engine | What the node reports | Read from |
 |---|---|---|
@@ -639,7 +830,8 @@ Reading a node is a request to it, so it rides the probe's fences
 ([inference nodes](inference-nodes.md)): nothing is read with
 `inferenceNodes.probe.allowedCidrs` empty, and only an address inside that range
 is asked, over fixed GET paths, following no redirect. The check runs when an
-admin presses "Check the nodes now"; a page load never reaches a node. The
+admin presses "Check builds on the nodes" on a node's page; a page load never
+reaches a node. The
 result lives in the UI's memory, and a check older than an hour reads Unknown
 again. The watcher does not make this comparison: its policy keeps it off the
 LAN by design.

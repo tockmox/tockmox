@@ -4,14 +4,15 @@ SPDX-License-Identifier: Apache-2.0
 The model watcher and its PR opener (REQ-0048, TM-0930, TM-0920). OFF by default: modelLifecycle.watch.enabled.
 
 The watcher is the one part of Tockmox that reaches the internet on its own: it reads Hugging Face, the Ollama
-registry, OpenRouter, and the Anthropic and OpenAI model lists, writes a report, and changes nothing. The opener
+registry, OpenRouter, the Anthropic and OpenAI model lists, and LiteLLM's price map (list prices for hosted models,
+TM-1298; raw.githubusercontent.com, off with watch.prices.enabled: false), writes a report, and changes nothing. The opener
 (modelLifecycle.watch.pullRequests.enabled) turns that report into ONE pull request at a time on the site repo.
 Both live in the Tockmox UI image, which ships as source (TM-0902): the site builds it and names it here.
 
 One CronJob, no Kubernetes authority (no service-account token), and a NetworkPolicy of its own:
   ingress   none
   egress    DNS to kube-system; HTTPS (443) to the internet, EXCEPT every private, link-local, shared and loopback
-            range, so the pod can reach the five upstream hosts and the forge API but not the cluster, the LAN or a
+            range, so the pod can reach the six upstream hosts and the forge API but not the cluster, the LAN or a
             cloud metadata address; plus modelLifecycle.watch.egress.extra (for example an in-cluster Forgejo).
             NetworkPolicy cannot name hosts; the code's own host allowlist (WATCH_HOSTS) narrows it further.
 The pod carries tockmox.com/isolated, so the policy layer's namespace-wide ingress allows skip it.

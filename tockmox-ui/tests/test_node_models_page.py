@@ -115,8 +115,10 @@ def test_the_existing_sections_are_kept(tmp_path):
 def test_the_models_page_links_each_local_deployment_to_its_node(tmp_path):
     c, _ = models_client(tmp_path, inventory=inventory())
     t = c.get("/models").text
-    assert t.count('href="/nodes/alpha"') >= 1                          # the candidate's row, and the catalog's routes column
-    assert re.search(r'<code>local-medium-next</code>.*?<a href="/nodes/alpha">alpha</a>', t, re.S)
-    assert '(<a href="/nodes/alpha">alpha</a>)' in t                    # the catalog's routes column
+    # TM-1296: one card per node, headed by a link to the node page, with the node's deployments (the candidate's too) inside it
+    card = re.search(r'<section class="panel flush" aria-labelledby="node-alpha-h">.*?</section>', t, re.S).group(0)
+    assert '<a class="nm" href="/nodes/alpha"><code>alpha</code></a>' in card and "Node details" in card
+    assert re.search(r'<code>local-medium-next</code>', card) and "<code>local-embed</code>" not in card
+    assert '(<a href="/nodes/alpha">alpha</a>)' in t                    # the catalog fold's routes column
     # a node link is a real page
     assert c.get("/nodes/alpha").status_code == 200

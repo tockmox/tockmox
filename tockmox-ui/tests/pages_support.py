@@ -51,11 +51,18 @@ def size_rec(ref, gib=17.0, lic="apache-2.0", fmt="mlx", evals=(), revision=REV)
                          fmt, False, tuple(evals), (), "2026-10-29T00:00:00Z").as_dict()
 
 
-def write_report(tmp_path, candidates, *, generated=None, sources=None, sizes=None, gaps=()):
+def write_report(tmp_path, candidates, *, generated=None, sources=None, sizes=None, gaps=(), prices=None, price_source=None):
+    """The watcher's report. `prices` ({model: {inPer1M, outPer1M, readAt[, stale]}}) and `price_source` ({ok, reason, readAt}) are
+    TM-1298's sections; left out, the report is one from a watcher that did not read prices."""
     p = tmp_path / "report.json"
-    p.write_text(json.dumps({"schema": 1, "generatedAt": generated or iso(),
-                             "sources": sources if sources is not None else {"huggingface": {"ok": True}, "anthropic": {"ok": True}},
-                             "candidates": list(candidates), "gaps": list(gaps), "sizes": sizes or {}}))
+    doc = {"schema": 1, "generatedAt": generated or iso(),
+           "sources": sources if sources is not None else {"huggingface": {"ok": True}, "anthropic": {"ok": True}},
+           "candidates": list(candidates), "gaps": list(gaps), "sizes": sizes or {}}
+    if prices is not None:
+        doc["prices"] = prices
+    if price_source is not None:
+        doc["priceSource"] = price_source
+    p.write_text(json.dumps(doc))
     return str(p)
 
 
@@ -93,14 +100,15 @@ def prom(demand=None, spend=None, fail=False):
 
 
 def page_client(tmp_path, *, candidates=None, report=None, lifecycle=None, inventory=None, gateway=None, status_dir=None,
-                prometheus=None, groups=None, sizes=None, generated=None, sources=None, **lc_extra):
+                prometheus=None, groups=None, sizes=None, generated=None, sources=None, prices=None, price_source=None, **lc_extra):
     """An admin client with a watcher report (when `candidates` is given), run statuses and a Prometheus. Returns (client, user)."""
     inv = inventory or inventory_doc()
     if gateway:
         inv = {**inv, "gateway": {"modelList": gateway}}
     lcd = dict(lifecycle or lifecycle_doc())
     if candidates is not None:
-        lcd["reportFile"] = report or write_report(tmp_path, candidates, sizes=sizes, generated=generated, sources=sources)
+        lcd["reportFile"] = report or write_report(tmp_path, candidates, sizes=sizes, generated=generated, sources=sources,
+                                                   prices=prices, price_source=price_source)
     if status_dir:
         lcd["statusDir"] = str(status_dir)
     lcd.update(lc_extra)
