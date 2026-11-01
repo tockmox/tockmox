@@ -377,11 +377,11 @@ def console(tmp_path, actions=None, groups=("tockmox-admins",), down=False, auth
         if req.url.path == "/v1/identity/users":         # as app.actions_service serves it
             if not svc.cfg.on("recovery-link"):
                 return httpx.Response(404, json={"error": "the identity actions are not turned on here"})
-            try:
-                return httpx.Response(200, json={"users": svc.authentik.users(), "userGroup": svc.cfg.user_group,
-                                                 "adminGroup": svc.admin_group})
-            except act.Refused as e:
-                return httpx.Response(503, json={"error": str(e)})
+            people, why = svc.authentik.users()
+            if why:
+                return httpx.Response(503, json={"error": why})
+            return httpx.Response(200, json={"users": people, "userGroup": svc.cfg.user_group,
+                                             "adminGroup": svc.admin_group})
         return httpx.Response(404)
 
     doc = yaml.safe_load((Path(__file__).resolve().parent.parent / "config.example.yaml").read_text())

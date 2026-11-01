@@ -315,3 +315,38 @@ def test_review_d8_a_link_on_another_address_is_refused(tmp_path):
     s.authentik.transport = httpx.MockTransport(internal_host)
     code, out = go(s, intent("recovery-link", 7, "dawn"))
     assert code == 403 and "another address than https://auth.int.example.com" in out["reason"] and "secret" not in out
+
+
+# ---------------------------------------------------------------- CodeQL on PR #136 (py/stack-trace-exposure): the
+# Identity page's reason is fixed words and a status code, never an exception's text
+
+def _identity_api(tmp_path, ak=None, **identity):
+    from fastapi.testclient import TestClient
+    from app.actions_service import create_service
+    tf = tmp_path / "ak-token"
+    tf.write_text(TOKEN + "\n")
+    a = dict(copy.deepcopy(base.ACTIONS), namespace="tockmox-ai",
+             identity=dict({"enabled": True, "tokenFile": str(tf)}, **identity))
+    app = create_service({"oidc": {"issuer": base.ISS}, "actions": a})
+    if ak is not None:
+        app.state.service.authentik.transport = httpx.MockTransport(ak)
+    return TestClient(app)
+
+
+def test_codeql_the_user_list_says_why_in_fixed_words(tmp_path):
+    c = _identity_api(tmp_path, tokenFile=str(tmp_path / "missing"))
+    r = c.get("/v1/identity/users")
+    assert r.status_code == 503 and r.json() == {"error": "no Authentik account is configured for identity actions "
+                                                           "(tockmoxUi.actions.identity, and sso.consoleActions in the identity layer)"}
+    c = _identity_api(tmp_path, lambda req: httpx.Response(403, json={"detail": "Traceback (most recent call last): secret"}))
+    r = c.get("/v1/identity/users")
+    assert r.status_code == 503 and r.json() == {"error": "Authentik refused the user list (403)"}
+
+    def boom(req):
+        raise httpx.ConnectError("connect failed to 10.0.0.9:9000 with internal detail", request=req)
+    c = _identity_api(tmp_path, boom)
+    r = c.get("/v1/identity/users")
+    assert r.status_code == 503 and r.json() == {"error": "Authentik did not answer"}
+    c = _identity_api(tmp_path, Authentik().handler)
+    r = c.get("/v1/identity/users")
+    assert r.status_code == 200 and {p["username"] for p in r.json()["users"]} >= {"dawn", "jeff"}

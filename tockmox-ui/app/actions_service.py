@@ -157,14 +157,27 @@ class Authentik:
         self.public_origin = (public_origin or url).rstrip("/")
         self.known = frozenset({user_group, *recovery_groups})
 
-    def _c(self):
+    NOT_CONFIGURED = ("no Authentik account is configured for identity actions (tockmoxUi.actions.identity, and "
+                      "sso.consoleActions in the identity layer)")
+    TOKEN_EMPTY = "the identity actions' Authentik token is empty"
+
+    def _token(self) -> str:
         if not (self.url and self.token_file and os.path.exists(self.token_file)):
-            raise act.Refused("no Authentik account is configured for identity actions (tockmoxUi.actions.identity, and "
-                              "sso.consoleActions in the identity layer)")
+            return ""
         with open(self.token_file, encoding="utf-8") as fh:
-            tok = fh.read().strip()
-        if not tok:
-            raise act.Refused("the identity actions' Authentik token is empty")
+            return fh.read().strip()
+
+    def unready(self) -> str:
+        """Why no call can be made, in fixed words, or "" (the Identity page says it without an exception's text)."""
+        if not (self.url and self.token_file and os.path.exists(self.token_file)):
+            return self.NOT_CONFIGURED
+        return "" if self._token() else self.TOKEN_EMPTY
+
+    def _c(self):
+        why = self.unready()
+        if why:
+            raise act.Refused(why)
+        tok = self._token()
         return httpx.Client(base_url=self.url + "/api/v3", timeout=self.timeout, transport=self.transport,
                             headers={"Authorization": "Bearer " + tok, "Accept": "application/json"})
 
@@ -195,20 +208,25 @@ class Authentik:
         p["recoverable"], p["why_not"] = not why, why
         return p
 
-    def users(self) -> list[dict]:
+    def users(self) -> tuple[list[dict], str]:
+        """(people, "") or ([], why). The why is fixed words and Authentik's status code, never an exception's text:
+        it goes back over HTTP to the UI (CodeQL py/stack-trace-exposure on the first PR of this endpoint)."""
+        why = self.unready()
+        if why:
+            return [], why
         out, page = [], 1
         with self._c() as c:
             while len(out) < self.MAX_USERS:
                 r = c.get("/core/users/", params={"page": page, "page_size": self.PAGE, "include_roles": "false",
                                                   "ordering": "username"})
                 if r.status_code >= 300:
-                    raise self._err(r, "the user list")
+                    return [], f"Authentik refused the user list ({r.status_code})"
                 j = r.json()
                 out += [self.person(u) for u in j.get("results") or [] if u.get("type") in ("internal", "external")]
                 if not (j.get("pagination") or {}).get("next"):
                     break
                 page += 1
-        return out
+        return out, ""
 
     def user(self, c, pk: int, username: str) -> dict:
         r = c.get(f"/core/users/{pk}/", params={"include_roles": "false"})
@@ -568,11 +586,13 @@ def create_service(doc: dict, transports: dict | None = None, now=time.time) -> 
         if not svc.cfg.on("recovery-link"):
             return JSONResponse({"error": "the identity actions are not turned on here"}, status_code=404)
         try:
-            return {"users": svc.authentik.users(), "userGroup": svc.cfg.user_group, "adminGroup": svc.admin_group}
-        except act.Refused as e:
-            return JSONResponse({"error": str(e)}, status_code=503)
-        except Exception as e:  # noqa: BLE001
-            return JSONResponse({"error": f"Authentik did not answer ({type(e).__name__})"}, status_code=503)
+            people, why = svc.authentik.users()
+        except Exception:  # noqa: BLE001 - a transport failure; its text stays in this pod (CodeQL py/stack-trace-exposure)
+            log.warning("identity users: Authentik did not answer", exc_info=True)
+            people, why = [], "Authentik did not answer"
+        if why:
+            return JSONResponse({"error": why}, status_code=503)
+        return {"users": people, "userGroup": svc.cfg.user_group, "adminGroup": svc.admin_group}
 
     return app
 
