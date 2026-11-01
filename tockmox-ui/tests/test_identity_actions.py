@@ -177,6 +177,19 @@ def test_authentiks_own_refusal_is_reported(tmp_path):
     assert rows[0]["result"] == "failed"
 
 
+def test_tm1356_authentiks_own_words_reach_the_log_not_the_caller(tmp_path, caplog, capsys):
+    ak = Authentik()
+    ak.granted = set()
+    s, ak, _ = service(tmp_path, ak)
+    with caplog.at_level("WARNING", logger="tockmox.actions"):
+        code, out = go(s, intent("recovery-link", 7, "dawn"))
+    words = "You do not have permission to perform this action."
+    assert code == 403 and out["reason"] == "Authentik refused the recovery link (403)"
+    rows, _ = s.activity.read()
+    assert words not in json.dumps(out) + json.dumps(rows) + capsys.readouterr().out
+    assert words in caplog.text
+
+
 def test_an_identity_action_needs_a_recent_sign_in(tmp_path):
     s, ak, _ = service(tmp_path)
     code, out = go(s, intent("add-member", 9, "kid"), auth_time=time.time() - 3600)

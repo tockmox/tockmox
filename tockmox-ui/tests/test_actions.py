@@ -595,3 +595,59 @@ def test_review_7_a_target_that_is_not_an_object_is_a_400_not_a_crash(tmp_path):
     for t in ("[1]", "5", '"x"'):
         r = c.post("/actions/go", data={"csrf": csrf, "kind": "test-alert", "target": t, "key": act.new_key()})
         assert r.status_code == 400, t
+
+
+# ---------------------------------------------------------------- TM-1356: no upstream text in a reason
+
+SENTINEL = "UPSTREAM-BODY-7f3a"
+
+
+def _upstream_says(kind, tmp_path):
+    """A service whose one upstream for `kind` answers an error carrying SENTINEL in its body."""
+    if kind == "run-job":
+        s, _, kube = service()
+        real = kube.handler
+
+        def refuse(req):
+            if req.url.path.endswith("/jobs") and req.method == "POST":
+                return httpx.Response(403, json={"message": f"jobs is forbidden: {SENTINEL}"})
+            return real(req)
+        s.kube.transport = httpx.MockTransport(refuse)
+        return s, act.intent("run-job", {"namespace": "tockmox-ai", "name": "tockmox-model-watch"}, {}, "a"), {}
+    if kind == "silence":
+        s, am, _ = service()
+        real = am.handler
+
+        def refuse(req):
+            if req.url.path == "/api/v2/silences" and req.method == "POST":
+                return httpx.Response(400, text=f"bad matcher: {SENTINEL}")
+            return real(req)
+        s.tp_am = httpx.MockTransport(refuse)
+        return s, silence_intent(), {}
+    tok = tmp_path / "argocd-token"
+    tok.write_text("t")
+    s, _, _ = service(actions=dict(ACTIONS, argocd={"enabled": True, "url": "http://argocd.test", "tokenFile": str(tok)}))
+    s.tp_argo = httpx.MockTransport(lambda req: httpx.Response(500, text=f"rpc error: {SENTINEL}"))
+    return s, act.intent("sync", {"app": "forgejo"}, {}, "a"), {"auth_time": time.time() - 60}
+
+
+@pytest.mark.parametrize("kind, status", [("run-job", "403"), ("silence", "400"), ("sync", "500")])
+def test_tm1356_an_upstream_error_body_reaches_the_log_not_the_caller(kind, status, tmp_path, caplog, capsys):
+    s, it, extra = _upstream_says(kind, tmp_path)
+    with caplog.at_level("WARNING", logger="tockmox.actions"):
+        code, out = s.handle({"intent": it, "id_token": token(act.nonce_for(it), **extra)})
+    assert code == 403 and out["result"] == "refused"
+    assert SENTINEL not in json.dumps(out) and status in out["reason"]
+    rows, _ = s.activity.read()
+    assert rows and SENTINEL not in json.dumps(rows)
+    audit = [x for x in capsys.readouterr().out.splitlines() if '"tockmox.action"' in x]
+    assert audit and SENTINEL not in "".join(audit)
+    assert SENTINEL in caplog.text
+    # Alertmanager and Argo CD lines name the intent; the Kubernetes client is shared and names the method and path,
+    # and the audit line written for the same request names the intent.
+    assert kind == "run-job" or it["key"] in caplog.text
+
+
+def test_tm1356_a_refusal_carries_its_reason_as_an_attribute():
+    e = act.Refused("the sign-in was not made for this action")
+    assert e.reason == str(e) == "the sign-in was not made for this action"
