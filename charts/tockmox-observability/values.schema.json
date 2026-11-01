@@ -667,6 +667,35 @@
     },
     "knowledge": {
       "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "siteForge": {
+      "type": "object",
+      "description": "Tockmox-owned block: siteForge. Set by the installer when site.forge is built-in: renders the alerts that watch the built-in forge's off-site copy (TockmoxSiteRepositoryCopyBehind) and its absence (TockmoxSiteRepositoryNoOffsiteCopy). The forge itself is installed by tockmox-install.sh bootstrap-forge, never by Argo CD.",
+      "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-11-01",
+      "x-tockmox-stability-rerule": "0.10.0",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "The site's repository is on the built-in forge."
+        },
+        "namespace": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+          "description": "The forge's namespace (bootstrap-forge --namespace)."
+        },
+        "release": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+          "description": "The forge's Helm release name; the off-site CronJob is <release>-offsite."
+        },
+        "copyBehindMinutes": {
+          "type": "integer",
+          "minimum": 5,
+          "description": "Minutes without a successful off-site copy before TockmoxSiteRepositoryCopyBehind fires."
+        }
+      }
     }
   },
   "additionalProperties": false,

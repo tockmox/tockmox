@@ -1,0 +1,123 @@
+# The built-in forge's off-site copy ... TM-1337.
+#
+# DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
+#
+# charts/tockmox-observability/templates/site-forge-rules.yaml, rendered with
+# siteForge.enabled (ci/values-all-on.yaml), defaults namespace and release
+# tockmox-forge and a 15-minute window. The off-site CronJob exits 0 only when the
+# destination holds the forge's current main, so its last success IS the signal.
+#
+#   1  A copy that keeps succeeding never fires CopyBehind.
+#   2  A copy that stops succeeding fires CopyBehind once 15 minutes have passed
+#      since its last success (plus the rule's for: 1m), not before.
+#   3  A CronJob that has never succeeded fires once it is older than 15 minutes.
+#   4  A forge with no off-site CronJob fires NoOffsiteCopy after 15 minutes; the
+#      same forge WITH the CronJob does not.
+#   5  The scrape guard: with no kube-state-metrics series for the namespace,
+#      neither rule fires (a dead kube-state-metrics alerts on its own).
+
+evaluation_interval: 1m
+
+tests:
+  # 1 and 2: last success advances every minute for 10 minutes, then freezes at
+  # t=10m (600 s). Behind once time() - 600 > 900, i.e. after t=25m; for: 1m -> 26m.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="tockmox-forge",cronjob="tockmox-forge-offsite"}'
+        values: '0+60x10 600x30'
+      - series: 'kube_cronjob_created{namespace="tockmox-forge",cronjob="tockmox-forge-offsite"}'
+        values: '0x40'
+      - series: 'kube_namespace_status_phase{namespace="tockmox-forge",phase="Active"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: TockmoxSiteRepositoryCopyBehind
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: TockmoxSiteRepositoryCopyBehind
+        exp_alerts: []
+      - eval_time: 27m
+        alertname: TockmoxSiteRepositoryCopyBehind
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tockmox_component: site-repository
+              namespace: tockmox-forge
+              cronjob: tockmox-forge-offsite
+            exp_annotations:
+              summary: "The site repository's off-site copy is more than 15 minutes behind"
+              description: "The off-site copy job tockmox-forge/tockmox-forge-offsite has not succeeded for more than 15 minutes, so the off-site copy may not hold the forge's current main. Until it does, a rebuild from the copy would lose the changes since the last success. Its log names the reason: kubectl -n tockmox-forge logs -l app.kubernetes.io/name=tockmox-forge-offsite --tail=20"
+
+  # 3: created at t=0, never succeeded: no series for last success at all.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_created{namespace="tockmox-forge",cronjob="tockmox-forge-offsite"}'
+        values: '0x30'
+      - series: 'kube_namespace_status_phase{namespace="tockmox-forge",phase="Active"}'
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: TockmoxSiteRepositoryCopyBehind
+        exp_alerts: []
+      - eval_time: 18m
+        alertname: TockmoxSiteRepositoryCopyBehind
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tockmox_component: site-repository
+              namespace: tockmox-forge
+              cronjob: tockmox-forge-offsite
+            exp_annotations:
+              summary: "The site repository's off-site copy is more than 15 minutes behind"
+              description: "The off-site copy job tockmox-forge/tockmox-forge-offsite has not succeeded for more than 15 minutes, so the off-site copy may not hold the forge's current main. Until it does, a rebuild from the copy would lose the changes since the last success. Its log names the reason: kubectl -n tockmox-forge logs -l app.kubernetes.io/name=tockmox-forge-offsite --tail=20"
+
+  # 4a: the forge runs, no off-site CronJob: NoOffsiteCopy after for: 15m.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="tockmox-forge",deployment="tockmox-forge"}'
+        values: '1x30'
+      - series: 'kube_namespace_status_phase{namespace="tockmox-forge",phase="Active"}'
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: TockmoxSiteRepositoryNoOffsiteCopy
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: TockmoxSiteRepositoryNoOffsiteCopy
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tockmox_component: site-repository
+            exp_annotations:
+              summary: "No off-site copy: losing this cluster loses the site's history"
+              description: "The site repository lives on the built-in forge in tockmox-forge and no off-site destination is set, so a lost cluster cannot be rebuilt from a copy. Add one by re-running tockmox-install.sh bootstrap-forge with --offsite-s3-* or --offsite-git. Snooze or dismiss this from the console's Site repository part if you keep a copy some other way."
+
+  # 4b: the same forge WITH the CronJob: no NoOffsiteCopy.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="tockmox-forge",deployment="tockmox-forge"}'
+        values: '1x30'
+      - series: 'kube_cronjob_info{namespace="tockmox-forge",cronjob="tockmox-forge-offsite",schedule="* * * * *"}'
+        values: '1x30'
+      - series: 'kube_namespace_status_phase{namespace="tockmox-forge",phase="Active"}'
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: TockmoxSiteRepositoryNoOffsiteCopy
+        exp_alerts: []
+
+  # 5: the scrape guard. A frozen success and a CronJob-less forge, but no
+  # namespace series: kube-state-metrics is not being read; neither rule fires.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="tockmox-forge",cronjob="tockmox-forge-offsite"}'
+        values: '0x30'
+      - series: 'kube_deployment_status_replicas_available{namespace="tockmox-forge",deployment="tockmox-forge"}'
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: TockmoxSiteRepositoryCopyBehind
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: TockmoxSiteRepositoryNoOffsiteCopy
+        exp_alerts: []

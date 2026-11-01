@@ -325,7 +325,7 @@ def place(stack: Stack, readings: dict, pipeline=(), stale_apps=(), since=lambda
                 parts.append(Part(id=f"layer-{lay}", name=f"tockmox-{lay}", band=b.id, layer=lay, auto=True,
                                   about=f"The {lay} layer as Argo CD reports it"))
         bands.append((b, parts))
-    side = list(stack.side)
+    side = [p for p in stack.side if deployed(p.when)]     # `when` holds for the side too (site-repository)
 
     # Site apps: every application that is no Tockmox layer and that no part claims.
     declared = side + [p for _, ps in bands for p in ps]

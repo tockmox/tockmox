@@ -138,3 +138,9 @@ alertPack:
     enabled: true
     latency:
       exemptModelRegex: "(local|ops)-.*"
+
+# tockmox-observability: the built-in forge's off-site copy alerts (siteForge, off
+# unless the installer wrote site.forge: built-in), so tests/rules/site-repository.yaml
+# runs against the rendered rules.
+siteForge:
+  enabled: true
