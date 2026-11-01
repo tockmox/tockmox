@@ -173,6 +173,8 @@ class ApplicationsSource(Source):
             first = srcs[0] if srcs else {}
             out.append({
                 "name": it["metadata"]["name"],
+                # Where it deploys, so Status can place an alert from that namespace on this app's part (TM-1305).
+                "namespace": str((spec.get("destination") or {}).get("namespace") or ""),
                 "repo": str(first.get("repoURL", "")),
                 "path": str(first.get("path", "")),
                 "revision": str(first.get("targetRevision", "")),
@@ -312,6 +314,7 @@ class PrometheusSource(_HttpSource):
             raise ValueError("query failed")
         res = doc["data"]["result"]
         targets = [{"job": r["metric"].get("job", "?"), "instance": r["metric"].get("instance", "?"),
+                    "namespace": r["metric"].get("namespace", ""),
                     "up": r["value"][1] == "1"} for r in res]
         return targets
 
@@ -360,6 +363,8 @@ class AlertmanagerSource(_HttpSource):
             ann = a.get("annotations", {})
             out.append({"name": lab.get("alertname", "?"), "severity": lab.get("severity", ""),
                         "namespace": lab.get("namespace", ""),
+                        # A rule may name the part it is about outright (TM-1305, app/stack.yaml).
+                        "component": lab.get("tockmox_component", ""),
                         "summary": ann.get("summary") or ann.get("description", ""),
                         "startsAt": a.get("startsAt", "")})
         order = {"critical": 0, "warning": 1}

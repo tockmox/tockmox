@@ -42,6 +42,7 @@ from . import nodes_routes
 from . import platform as platform_mod
 from . import redirects
 from . import sources as sources_mod
+from . import stack as stack_mod
 from . import status_api
 from . import capabilities as capmod
 from . import telemetry
@@ -228,6 +229,8 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         # configured nodes join the verdict (AC-47.7); none configured, nothing to say
         app.state.sources["inference_nodes"] = src_inodes
 
+    the_stack = stack_mod.load(site=s.stack_site)
+
     # ------------------------------------------------------------ helpers
 
     def user_of(request: Request) -> User | None:
@@ -291,9 +294,7 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         groups = nav.rail(sec, u.is_admin, platform_on(), admin_tabs=tabs)   # an admin sees every installed feature
         out["rail"], out["rail_item"] = groups, nav.rail_current(groups, path) if groups else None
         if u.is_admin:
-            r = readings()
-            rows = views.problems(r, list(sources_mod.pipeline_alerts(s.alertmanager_heartbeat)))
-            out["health"] = nav.health(verdict(x.state for x in r.values()), rows)
+            out["health"] = stack_mod.pill(placed(readings()))     # parts, not signals (TM-1305)
         page = nav.help_for(path)
         out["help_href"] = nav.docs_href(s.docs_url, repo_link, page) if page else None
         if footer:
@@ -329,6 +330,12 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
     def readings():
         return {k: v.read() for k, v in app.state.sources.items()
                 if k != "posture"}
+
+    def placed(r):
+        """Every signal on its part of the stack (TM-1305, app/stack.py)."""
+        apps = r["apps"].data if r.get("apps") is not None and r["apps"].data else []
+        return stack_mod.place(the_stack, r, sources_mod.pipeline_alerts(s.alertmanager_heartbeat),
+                               {a["name"] for a in src_apps.stale(apps)}, since=views.since)
 
     def running_version(apps_reading):
         # Stale data never vouches for the running version (fresh-eyes review,
@@ -456,20 +463,60 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
                       target=_latest_target(ver.get("version")) if ver else None,
                       pipeline=list(sources_mod.pipeline_alerts(s.alertmanager_heartbeat)))
 
-    @app.get("/status", response_class=HTMLResponse)
-    def status(request: Request):
+    def goto_for(u: User, pv) -> list[dict]:
+        """The drawer's "Go to" buttons: only what the part declares and the viewer can open."""
+        groups = set(u.groups)
+        out = []
+        argo = s.app("argocd")
+        apps = [x["what"].removesuffix(" application") for x in pv.signals if x["source"] == "apps"]
+        if argo and argo.visible_to(groups) and apps and pv.part.source != "apps":
+            first = next((x["what"].removesuffix(" application") for x in pv.wrong if x["source"] == "apps"), apps[0])
+            out.append({"label": "Argo CD app", "href": f"{argo.url.rstrip('/')}/applications/{s.argocd_namespace}/{quote(first)}", "ext": True})
+        for kind, val in pv.part.goto:
+            if kind == "app":
+                a = s.app(val)
+                if a and a.visible_to(groups):
+                    out.append({"label": a.name, "href": a.url, "ext": True})
+            elif kind == "grafana":
+                g = s.app("grafana")
+                if g and g.visible_to(groups):
+                    out.append({"label": "Grafana board", "href": f"{g.url.rstrip('/')}/d/{quote(val)}", "ext": True})
+        if pv.part.runbook:
+            out.append({"label": "Runbook", "href": nav.docs_href(s.docs_url, docs_repo_link(), pv.part.runbook), "ext": False})
+        return out
+
+    def status_page(request: Request, pid: str | None):
         u = user_of(request)
         if not u:
             return need_login(request)
         if not u.is_admin:
             return forbidden(request, u)
         r = readings()
+        pl = placed(r)
+        sel = None
+        if pid is not None:
+            sel = pl.by_id.get(pid)
+            if sel is None:
+                return render(request, "error.html", u, status_code=404, title="No such part",
+                              message=f"The stack has no part called {pid!r} on this install.")
+        view = "list" if request.query_params.get("view") == "list" else "stack"
+        only = request.query_params.get("only") == "problems"
         g = s.app("grafana")
         return render(request, "status.html", u, readings=r, verdict=verdict(x.state for x in r.values()),
                       now=time.time(), heartbeat=s.alertmanager_heartbeat or "Watchdog",
                       pipeline=list(sources_mod.pipeline_alerts(s.alertmanager_heartbeat)),
-                      hb_purpose=sources_mod.HEARTBEAT_PURPOSE,
+                      hb_purpose=sources_mod.HEARTBEAT_PURPOSE, placed=pl, sel=sel, view=view, only=only,
+                      goto=goto_for(u, sel) if sel else [], stack_summary=stack_mod.summary(pl),
                       grafana=g if g and g.visible_to(set(u.groups)) else None)
+
+    @app.get("/status", response_class=HTMLResponse)
+    def status(request: Request):
+        return status_page(request, None)
+
+    @app.get("/status/{pid}", response_class=HTMLResponse)
+    def status_part(request: Request, pid: str):
+        # The drawer for one part, server-rendered, so it opens and deep-links without JavaScript (TM-1305).
+        return status_page(request, pid)
 
     def _latest_target(cur):
         st = checker.state

@@ -382,8 +382,8 @@ the page on a narrow screen):
 
 The right-hand side of the bar holds three things:
 
-- **The health pill** (administrators): the worst state and the counts, on
-  every page, linking to Status.
+- **The health pill** (administrators): the worst state and how many parts
+  of the stack need a look, on every page, linking to Status.
 - **Help:** the documentation, the page of it that explains the page you are
   on, what this build contains, the recovery page, a problem report, and
   About. A dot on the button means a newer release is in the verified feed.
@@ -404,6 +404,93 @@ private window starts on System. The one script the UI loads,
 the header menus; it comes from the UI's own origin, like everything else.
 Without JavaScript the pages render dark, the menus still open, and the
 Appearance control is not shown.
+
+## Status: the stack
+
+**Status** draws the platform as the stack it is. Your own applications are at
+the top, what you provide (the cluster nodes, any inference nodes) at the
+bottom, and the Tockmox layers in between, in the order Argo CD deploys them
+(the sync waves). Argo CD runs down the side, because it reconciles every band.
+
+Every signal the UI reads sits on exactly one **part**: an Argo CD application,
+a firing alert, a scrape target that stopped answering, a node that is not
+ready. So four signals about one failing backup make one part that needs a
+look, and the counts on Status, on the health pill and in the page summary are
+parts, not signals. A part's border and fill carry its worst state, always with
+its shape and, in the drawer and the list, its word.
+
+- **Open a part** to see what is wrong, what else was checked, which sources
+  answered and when, and where to go next (its Argo CD application, its Grafana
+  board, its runbook; a console that is not configured, or that you cannot
+  open, is not offered). The drawer has its own address, `/status/<part>`, so
+  you can link to it, and it works without JavaScript.
+- **List** shows the same parts as a table, worst first. **Only problems**
+  folds the OK parts in each band to a count.
+- **Unplaced**, at the top when it holds anything, collects signals no part
+  claims. Nothing is hidden for want of a rule.
+- **A part reads Unknown, never OK, when nothing reports on it** or when the
+  source it depends on did not answer. Without the Alertmanager heartbeat, for
+  example, every part judged by its alerts reads Unknown.
+- A band or part your install does not deploy (a layer you declined, Workflows
+  off) is absent. While Argo CD cannot be read, every band shows, as Unknown.
+
+Below the stack, **Sources, as read** folds what each source said, as before.
+
+### How a signal finds its part
+
+The stack is data: `app/stack.yaml` in the UI image. In order:
+
+1. **An Argo CD application** goes to the part whose `apps` pattern matches its
+   name, else to the part that claims its Tockmox layer, else to its band's own
+   layer part. Any other application is one of your apps: it gets a part of its
+   own in **Site apps**, and an application whose name extends another's with a
+   dash joins it (`forgejo-backup` under `forgejo`).
+2. **An alert** goes to the part its `tockmox_component` label names, else to
+   the part whose `alerts` pattern matches its name, else by its `namespace`
+   (a site app claims the namespace it deploys to; each band claims its
+   layers' namespaces), else to Unplaced.
+3. **A scrape target** goes by its job pattern, then its namespace, else to
+   Metrics.
+4. **Nodes** and **inference nodes** go to their parts in Hosts.
+
+To place an alert from your own rules, give it the label
+`tockmox_component: <part>`; the part names are the `id` values in
+`app/stack.yaml` (a site app's part is `site-<name>`).
+
+### Extending it for your site
+
+Add `stack:` to the UI's configuration (`tockmoxUi.config.stack` in the AI
+layer's values). Parts added to an existing band by its `id` join it, and one
+with an existing part's `id` replaces it; a new band goes under Site apps.
+
+```yaml
+tockmoxUi:
+  config:
+    stack:
+      bands:
+        - id: platform
+          parts:
+            - id: dns
+              name: DNS
+              alerts: ["CoreDNS*"]
+              runbook: operations/troubleshooting.md
+        - id: addons
+          name: Add-ons
+          sub: installed on their own
+          parts:
+            - id: backup-target
+              name: Off-site backups
+              alerts: ["OffsiteBackup*"]
+              namespaces: [offsite-backup]
+```
+
+A part takes `id`, `name`, `apps`, `alerts`, `namespaces`, `jobs` (patterns,
+matched with `*` and `?`), `layer`, `source` (`nodes`, `inference_nodes`,
+`prometheus` or `apps`), `when` (`[layer, kind, name regex]`, to show the part
+only when that layer deploys that workload), `goto` (`app`: a console id from
+`apps`; `grafana`: a board UID), `runbook` (a page under `docs/`) and `about`.
+A malformed `stack:` stops the UI at start with the reason, rather than on the
+first visit to Status.
 
 ## The capabilities page
 

@@ -8,10 +8,10 @@
     "static/fonts/source-sans-3-latin-700-normal.woff2": "ae35266f2ab0d5314ff9a04127931eb26c793e4f1269bb240046d4d2db4b7bb1",
     "static/kit-base.css": "7390edf92e853ab275f0b6a4bd997a167d62576c03181ebf6e8800bf93f7af0a",
     "static/kit.css": "1309e801d5e764945257a5eadabeb811288d1676a192543cf32c82df835d7129",
-    "static/shell.js": "9ceae9bfb37939f9ac37a1b1897feff08dbed3728eda942552fec9dd0b0357c4",
+    "static/shell.js": "afbb8daee42a77d5d2c2bdbac97be6b150f1f007435f0aea11b06ae9942651ef",
     "static/tockmox-tokens.css": "ec1fac9d7b7cee0b8a12136525b830c72ef0ca09c6ce2ac02602ea9a289c7623",
     "templates/kit/macros.html": "471faa6b4b9923f5b4694be85620c61b472aa4df969120f2cb7052b9697f812b",
     "templates/kit/shell.html": "9625328c18962d387484fb8817a332ece923178747a9cbfa3b0ca30f02009001"
   },
-  "version": "0.4.0"
+  "version": "0.4.1"
 }

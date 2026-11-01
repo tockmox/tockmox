@@ -403,3 +403,64 @@ pre.snip { margin: .5rem 0 0; font-size: 13px; }
 /* TM-1298: the family alias page's figures and its footnote */
 table.gens .sub { display: block; margin-top: .15rem; color: var(--tx-text-muted); font-size: var(--fs-1); font-weight: 400; }
 .panel-foot { padding: .65rem 1rem .8rem; border-top: 1px solid var(--tx-border); color: var(--tx-text-muted); font-size: var(--fs-1); }
+
+/* ------------------------------------------------------------ Status: the stack (TM-1305)
+   A part's border and fill carry its worst state, always with the shape and a word (in the drawer, the list,
+   and the chip's accessible name). OK parts stay quiet: a plain chip with a green tick. */
+.stack-tools { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1.25rem; margin: 1rem 0; }
+.seg { display: inline-flex; border: 1px solid var(--tx-border); border-radius: var(--tx-radius-sm); overflow: hidden; }
+.seg a { padding: .35rem .9rem; color: var(--tx-text); text-decoration: none; font-weight: 600; }
+.seg a[aria-current] { background: var(--tx-surface-raised); box-shadow: inset 0 -2px 0 var(--tx-trim); }
+.toggle { display: inline-flex; align-items: center; gap: .5rem; color: var(--tx-text); text-decoration: none; }
+.toggle .track { width: 2.1rem; height: 1.15rem; border-radius: 999px; border: 1px solid var(--tx-border); background: var(--tx-surface); position: relative; }
+.toggle .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: .85rem; height: .85rem; border-radius: 50%; background: var(--tx-text-muted); }
+.toggle.on .track { background: var(--tx-trim); border-color: var(--tx-trim); }
+.toggle.on .track::after { left: auto; right: 2px; background: var(--tx-bg); }
+.legend { display: flex; gap: 1rem; margin: 0 0 0 auto; padding: 0; font-size: var(--fs-1); }
+.legend li { display: inline-flex; align-items: center; gap: .3rem; background: none; color: var(--tx-text-muted); }
+.legend li .ico, .stack .ico, .drawer .sigs .ico { width: 1.05em; height: 1.05em; flex: none; }
+.legend li.st-ok .ico, .part.st-ok .ico, .sigs .st-ok .ico { color: var(--st-ok); }
+.legend li.st-warning .ico, .part.st-warning .ico, .sigs .st-warning .ico { color: var(--st-warning); }
+.legend li.st-critical .ico, .part.st-critical .ico, .sigs .st-critical .ico { color: var(--st-critical); }
+.legend li.st-unknown .ico, .part.st-unknown .ico, .sigs .st-unknown .ico { color: var(--st-unknown); }
+
+.stack-wrap { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
+.stack-wrap.with-drawer { grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem); }
+.stack { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr); gap: .6rem; }
+.bands { display: grid; gap: .6rem; }
+.band { display: grid; grid-template-columns: 11rem minmax(0, 1fr); border: 1px solid var(--tx-border); border-radius: var(--tx-radius-md); background: var(--tx-surface); color: var(--tx-text); }
+.band.st-warning { border-color: var(--st-warning); } .band.st-critical { border-color: var(--st-critical); }
+.band.st-unknown { border-color: var(--st-unknown); border-style: dashed; }
+.band-head { padding: .75rem 1rem; border-right: 1px solid var(--tx-border); display: flex; flex-direction: column; justify-content: center; gap: .15rem; }
+.band-head h2 { font-size: var(--fs-2); margin: 0; }
+.band .parts { display: flex; flex-wrap: wrap; gap: .45rem; padding: .7rem .8rem; margin: 0; align-content: center; }
+.part { display: inline-flex; align-items: center; gap: .4rem; min-height: 36px; padding: .2rem .7rem; border: 1px solid var(--tx-border); border-radius: var(--tx-radius-sm); background: var(--tx-surface-raised); color: var(--tx-text); text-decoration: none; font-weight: 600; }
+.part.st-ok { background: var(--tx-surface-raised); color: var(--tx-text); }
+.part.st-warning { background: var(--st-warning-soft); border-color: var(--st-warning); color: var(--tx-text); }
+.part.st-critical { background: var(--st-critical-soft); border-color: var(--st-critical); color: var(--tx-text); }
+.part.st-unknown { background: var(--st-unknown-soft); border: 1px dashed var(--st-unknown); color: var(--tx-text); }
+.part:hover { border-color: var(--tx-trim); }
+.part[aria-current] { outline: 2px solid var(--tx-trim); outline-offset: 2px; }
+.part .n { font-weight: 400; font-size: var(--fs-1); color: var(--tx-text-muted); font-variant-numeric: tabular-nums; }
+.band .folded { align-self: center; padding: 0 .3rem; }
+.stack .side { writing-mode: vertical-rl; transform: rotate(180deg); justify-content: center; padding: .8rem .2rem; min-height: 0; border-radius: var(--tx-radius-md); }
+.stack .side .side-in { display: inline-flex; align-items: center; gap: .4rem; }
+.stack .side .ico { transform: rotate(90deg); }
+.drawer { position: sticky; top: 1rem; padding: 1rem 1.1rem; }
+.drawer-top { display: flex; justify-content: space-between; align-items: center; }
+.drawer h2 { margin: .5rem 0 .2rem; }
+.drawer h3 { font-size: var(--fs-1); text-transform: uppercase; letter-spacing: .06em; color: var(--tx-text-muted); margin: 1.1rem 0 .4rem; padding-top: .8rem; border-top: 1px solid var(--tx-border); }
+.drawer .sigs li { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: .5rem; align-items: start; background: none; color: var(--tx-text); margin: 0 0 .5rem; }
+.drawer .sigs .d { display: block; }
+.drawer .goto { display: flex; flex-wrap: wrap; gap: .5rem; }
+.parts-table td .badge { font-size: var(--fs-1); }
+@media (max-width: 860px) {
+  .stack-wrap.with-drawer { grid-template-columns: minmax(0, 1fr); }
+  .drawer { position: static; order: -1; }
+  .band { grid-template-columns: minmax(0, 1fr); }
+  .band-head { border-right: 0; border-bottom: 1px solid var(--tx-border); padding: .55rem .8rem; }
+  .stack { grid-template-columns: minmax(0, 1fr); }
+  .stack .side { writing-mode: horizontal-tb; transform: none; justify-content: flex-start; padding: .45rem .8rem; }
+  .stack .side .ico { transform: none; }
+  .legend { margin-left: 0; }
+}

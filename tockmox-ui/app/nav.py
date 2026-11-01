@@ -56,7 +56,7 @@ def sections(is_admin: bool, platform_on: bool, user_tabs=()) -> list[Item]:
     non-admin may open (absent, not locked: a section a user cannot open is not shown)."""
     out = [Item("Home", "/")]
     if is_admin:
-        out += [Item("Status", "/status"), Item("AI", "/models", ("/models", "/nodes")),
+        out += [Item("Status", "/status", ("/status",)), Item("AI", "/models", ("/models", "/nodes")),
                 Item("Platform", platform_home(platform_on),
                      ("/platform", "/capabilities", "/upgrade", "/version", "/tabs"))]
     else:

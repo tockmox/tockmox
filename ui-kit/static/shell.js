@@ -8,6 +8,7 @@
       page renders the dark default, which is what every Tockmox page did before 0.9.0.
    2. After load: the Appearance control (System / Light / Dark) and the header menus (<details>):
       Escape or a click elsewhere closes an open menu and returns focus to its button.
+   3. Arrow keys within a [data-roving] list of links.
    Every storage access is wrapped: a blocked store means "follow the system", never an error. */
 (function () {
   "use strict";
@@ -81,6 +82,22 @@
     document.addEventListener("click", function (ev) {
       var inside = ev.target.closest ? ev.target.closest("details.menu-d") : null;
       closeMenus(inside);
+    });
+    // Roving arrows (kit 0.4.1): inside a [data-roving] list, the arrow keys move between its links; Tab
+    // still moves in reading order. Status uses it for each band of the stack (TM-1305).
+    document.addEventListener("keydown", function (ev) {
+      var keys = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
+      if (!(ev.key in keys) || ev.altKey || ev.ctrlKey || ev.metaKey) { return; }
+      var list = ev.target.closest ? ev.target.closest("[data-roving]") : null;
+      if (!list || ev.target.tagName !== "A") { return; }
+      var links = list.querySelectorAll("a[href]");
+      for (var i = 0; i < links.length; i++) {
+        if (links[i] === ev.target) {
+          var next = links[i + keys[ev.key]];
+          if (next) { next.focus(); ev.preventDefault(); }
+          return;
+        }
+      }
     });
     document.addEventListener("keydown", function (ev) {
       if (ev.key !== "Escape") { return; }
