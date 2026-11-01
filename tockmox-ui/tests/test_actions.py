@@ -595,3 +595,75 @@ def test_review_7_a_target_that_is_not_an_object_is_a_400_not_a_crash(tmp_path):
     for t in ("[1]", "5", '"x"'):
         r = c.post("/actions/go", data={"csrf": csrf, "kind": "test-alert", "target": t, "key": act.new_key()})
         assert r.status_code == 400, t
+
+
+
+# ---------------------------------------------------------------- the lab run (a k3s lab cluster, 2026-11-01): the
+# first start crashed on int("tcp://10.43.x.x:8081"), Kubernetes' service-link variable for the Service tockmox-actions.
+# Explicit container env wins over a service link, so the risk is a variable the code reads with a default and the
+# chart does not set. The scan covers every literal name any module in app/ reads, against every Service the AI
+# layer's templates name.
+
+import pathlib
+import re
+
+_REPO = pathlib.Path(__file__).resolve().parents[2]
+_READS = re.compile(r"""(?:environ\.get|getenv|environ\[)\(?\s*["']([A-Z][A-Z0-9_]+)["']""")
+
+
+def _service_names() -> set:
+    out = set()
+    for f in (_REPO / "charts" / "tockmox-ai" / "templates").glob("*.yaml"):
+        out |= set(re.findall(r"(?m)^kind: Service\s*\nmetadata:\s*\n\s+name: ([a-z0-9-]+)\s*$", f.read_text()))
+    return out
+
+
+def _is_service_link(var: str, services: set) -> bool:
+    for s in services:
+        p = re.escape(s.upper().replace("-", "_"))
+        if re.fullmatch(p + r"_(SERVICE_HOST|SERVICE_PORT(_[A-Z0-9_]+)?|PORT(_\d+_(TCP|UDP|SCTP)(_PROTO|_PORT|_ADDR)?)?)", var):
+            return True
+    return False
+
+
+def _env_reads() -> set:
+    app = _REPO / "tockmox-ui" / "app"
+    names = set()
+    for f in app.glob("*.py"):
+        names |= set(_READS.findall(f.read_text()))
+    return names | {svcmod.CONFIG_ENV, svcmod.LISTEN_PORT_ENV}
+
+
+def test_lab_no_variable_the_code_reads_is_a_service_link_name():
+    services = _service_names()
+    assert {"tockmox-ui", "tockmox-actions"} <= services, services       # the scan sees the Services
+    assert _is_service_link("TOCKMOX_ACTIONS_PORT", services)            # and the predicate can go red: the old name
+    assert _is_service_link("TOCKMOX_UI_PORT_8080_TCP_ADDR", services)
+    assert not _is_service_link("TOCKMOX_ACTIONS_LISTEN_PORT", services)
+    reads = _env_reads()
+    assert "TOCKMOX_UI_CONFIG" in reads and "TOCKMOX_ACTIONS_LISTEN_PORT" in reads   # the scan sees the reads
+    assert not {v for v in reads if _is_service_link(v, services)}
+
+
+def _start(tmp_path, monkeypatch, listen=None):
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text(yaml.safe_dump({"oidc": {"issuer": ISS}, "actions": dict(copy.deepcopy(ACTIONS), namespace="tockmox-ai")}))
+    monkeypatch.setenv("TOCKMOX_ACTIONS_CONFIG", str(cfg))
+    monkeypatch.setenv("TOCKMOX_ACTIONS_PORT", "tcp://10.43.116.205:8081")      # what Kubernetes sets
+    if listen is None:
+        monkeypatch.delenv("TOCKMOX_ACTIONS_LISTEN_PORT", raising=False)
+    else:
+        monkeypatch.setenv("TOCKMOX_ACTIONS_LISTEN_PORT", listen)
+    seen = {}
+    import uvicorn
+    monkeypatch.setattr(uvicorn, "run", lambda app, **kw: seen.update(kw))
+    svcmod.main()
+    return seen["port"]
+
+
+def test_lab_main_starts_with_the_service_link_variable_set(tmp_path, monkeypatch):
+    assert _start(tmp_path, monkeypatch) == 8081
+
+
+def test_lab_main_listens_where_its_own_variable_says(tmp_path, monkeypatch):
+    assert _start(tmp_path, monkeypatch, listen="9000") == 9000

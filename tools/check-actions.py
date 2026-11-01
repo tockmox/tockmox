@@ -16,7 +16,9 @@ WHAT IT ASSERTS:
      Two forms the API server's CEL refuses or mis-evaluates are refused here too (both found on a k3s lab cluster,
      2026-11-01): `request.subResource` read without has() (absent on the main resource, so every restart errored),
      and `has(x) ? x : {}` on a typed object (it does not type-check, and an expression that does not compile denies).
-  4. Only the UI reaches it: its NetworkPolicy admits ingress from the tockmox-ui pod and nothing else.
+  4. Only the UI reaches it: its NetworkPolicy admits ingress from the tockmox-ui pod and nothing else. Its pod has
+     service links off (Kubernetes would set TOCKMOX_ACTIONS_PORT=tcp://... for its own Service; a k3s lab cluster,
+     2026-11-01, crashed on it).
   5. Off means absent: with every kind off, nothing called tockmox-actions renders and the UI's config has no
      `actions` block; with argocd turned on and no account, the render fails with the reason.
   6. THE IDENTITY KINDS' TOKEN (TM-1315) is mounted into tockmox-actions and into no pod of the UI.
@@ -132,6 +134,11 @@ def check_on(docs) -> list:
         conds = " ".join(c["expression"] for c in v["spec"].get("matchConditions") or [])
         if "system:serviceaccount:tockmox-ai:tockmox-actions" not in conds or v["spec"].get("failurePolicy") != "Fail":
             errs.append(f"3: {pol} does not match exactly the tockmox-actions identity, or fails open")
+    dep = next((d for d in docs if d["kind"] == "Deployment" and d["metadata"]["name"] == "tockmox-actions"), None)
+    if dep is None:
+        errs.append("4: the on render has no tockmox-actions Deployment")
+    elif dep["spec"]["template"]["spec"].get("enableServiceLinks") is not False:
+        errs.append("4: tockmox-actions has service links on: TOCKMOX_ACTIONS_PORT would be tcp://<ip>:8081 in its pod")
     np = next((d for d in docs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == "tockmox-actions"), None)
     if np is None:
         errs.append("4: tockmox-actions has no NetworkPolicy")
@@ -294,6 +301,10 @@ def selftest(docs) -> int:
         v = next(x for x in d if x["kind"] == "ValidatingAdmissionPolicy" and x["metadata"]["name"] == "tockmox-actions-restart-deployments")
         v["spec"]["validations"][0]["expression"] = "request.operation == 'UPDATE' && request.subResource == ''"
 
+    def links_on(d):
+        x = next(y for y in d if y["kind"] == "Deployment" and y["metadata"]["name"] == "tockmox-actions")
+        x["spec"]["template"]["spec"].pop("enableServiceLinks", None)
+
     def leaks(d):
         d.append({"kind": "Deployment", "metadata": {"name": "tockmox-actions"}})
 
@@ -317,6 +328,7 @@ def selftest(docs) -> int:
     planted("the jobs policy unbound", no_vap, check_on, "3:")
     planted("request.subResource read without has()", bare_subresource, check_on, "3:")
     planted("ingress from any namespace", open_ingress, check_on, "4:")
+    planted("service links on for tockmox-actions", links_on, check_on, "4:")
     planted("an object rendered with every kind off", leaks, check_off, "5:")
     rc, iddocs = render(ON, IDENTITY_ON)
     rc2, layer = render(CONSOLE_ON, chart=ID_CHART, release="tockmox-identity", ns="tockmox-authentik")

@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """tockmox-actions: the one process that acts (TM-1311, TM-1313). The Tockmox UI stays write-free.
 
-    python -m app.actions_service            reads TOCKMOX_ACTIONS_CONFIG (default /etc/tockmox-actions/config.yaml)
+    python -m app.actions_service            reads TOCKMOX_ACTIONS_CONFIG (default /etc/tockmox-actions/config.yaml) and
+                                             listens on TOCKMOX_ACTIONS_LISTEN_PORT (default 8081)
 
 A separate Deployment on the UI's image, with its own ServiceAccount and one narrow credential per kind: Alertmanager
 (by NetworkPolicy) for silences and the test alert; a Role that creates Jobs only in the run-now allowlist's
@@ -52,6 +53,8 @@ log = logging.getLogger("tockmox.actions")
 SA = "/var/run/secrets/kubernetes.io/serviceaccount"
 ACTIVITY_MAX = 300
 TOKEN_MAX_AGE = 600           # an ID token older than this is not a fresh confirmation, whatever its exp says
+CONFIG_ENV = "TOCKMOX_ACTIONS_CONFIG"
+LISTEN_PORT_ENV = "TOCKMOX_ACTIONS_LISTEN_PORT"
 
 
 def _iso(ts: float) -> str:
@@ -599,11 +602,14 @@ def create_service(doc: dict, transports: dict | None = None, now=time.time) -> 
 
 def main():
     logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    path = os.environ.get("TOCKMOX_ACTIONS_CONFIG", "/etc/tockmox-actions/config.yaml")
+    path = os.environ.get(CONFIG_ENV, "/etc/tockmox-actions/config.yaml")
     with open(path, encoding="utf-8") as fh:
         doc = yaml.safe_load(fh) or {}
     import uvicorn
-    uvicorn.run(create_service(doc), host="0.0.0.0", port=int(os.environ.get("TOCKMOX_ACTIONS_PORT", "8081")),
+    # Not TOCKMOX_ACTIONS_PORT: Kubernetes sets that, for the Service named tockmox-actions, to tcp://<ip>:8081 in
+    # every pod of the namespace (a k3s lab cluster, 2026-11-01: the first start crashed on int("tcp://...")). The
+    # chart also turns service links off for this pod.
+    uvicorn.run(create_service(doc), host="0.0.0.0", port=int(os.environ.get(LISTEN_PORT_ENV, "8081")),
                 log_level="warning", access_log=False)
 
 
