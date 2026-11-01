@@ -39,6 +39,11 @@
 #      this installer holds the admin credential.
 #   6. give ArgoCD its read credential as a repository Secret, and the console's
 #      change identity as a Secret in the forge namespace
+#   6b. with an off-site destination (optional): a CronJob that copies main every
+#      minute (a git bundle to an S3-compatible bucket) or verifies the forge's push
+#      mirror (a git remote), and the first copy written and read back before this
+#      run reports done. Without one, the observability layer raises the persistent
+#      "No off-site copy" alert, which the console can snooze or silence like any other
 #   7. write the RECOVERY KIT: the forge's own secrets (app.ini, which carries
 #      SECRET_KEY, INTERNAL_TOKEN and the JWT secrets a restore needs) plus your
 #      sealing-key backup, as ONE encrypted file, kept off the cluster. Its format,
@@ -69,8 +74,8 @@
 # the last HTTP status and the last ERROR body (a success body can carry a token,
 # so it is never written), and a trap removes it on every exit path.
 #
-# WHAT THIS DOES NOT DO (yet, each its own card): the off-site copy after every
-# merge (TM-1337); rebuild and forge repair (TM-1338); Authentik sign-in and the
+# WHAT THIS DOES NOT DO (yet, each its own card): the nightly forge dump (TM-1337);
+# rebuild and forge repair (TM-1338); Authentik sign-in and the
 # approvers mapping (TM-1336); upgrades (TM-1342). Proven on one single-node k3s
 # lab cluster only; nothing here has been run against a multi-node cluster.
 # ============================================================================
@@ -88,6 +93,8 @@ ORG="tockmox"
 REPO="site"
 BOT_READ="tockmox-argocd"
 BOT_CHANGE="tockmox-changes"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BOT_OFFSITE="tockmox-offsite"   # reads main for the off-site copy; nothing else
 APPROVERS_TEAM="approvers"
 KIT_MARKER="# tockmox-recovery-kit v1"
 PBKDF2_ITER=600000
@@ -129,6 +136,19 @@ the encrypted recovery kit.
                          bootstrap-secrets, folded into the kit as it is
   --no-sealing-key-backup  write the kit without it, and say so loudly
 
+ Off-site copy. Optional; without one the console raises "No off-site copy" until you
+ add one (re-run with these flags). At most one destination.
+  --offsite-s3-endpoint URL   an S3-compatible endpoint, path-style (https://s3.example.com)
+  --offsite-s3-bucket NAME    the bucket; a versioned or object-locked one keeps every
+                              earlier copy even if someone rewrites history
+  --offsite-s3-prefix P       keys go under P/ (default: none)
+  --offsite-s3-region R       default us-east-1
+  --offsite-s3-credentials F  two lines: the access key id, then the secret key
+  --offsite-s3-ca FILE        a CA bundle for the endpoint, if it is private
+  --offsite-git URL           an https git remote that receives main after every merge
+                              (protect its main from force pushes)
+  --offsite-git-credentials F two lines: the user, then a token that can push
+
  Forge
   --namespace NS         default ${FORGE_NS_DEFAULT} (the in-cluster address names it;
                          change it only if you also change every Application)
@@ -149,6 +169,8 @@ USAGE
 SITE=""; CONTEXT=""; CONTEXT_GIVEN=false; YES_CONTEXT=""; YES_SERVER=""; NO_PROMPT=false
 KIT_OUT=""; AGE_RECIPIENT=""; PASSFILE=""; SEAL_BACKUP=""; NO_SEAL_BACKUP=false
 FORGE_NS="$FORGE_NS_DEFAULT"; CHART_REF="$CHART_REF_DEFAULT"; CHART_VERSION="$CHART_VERSION_DEFAULT"
+OS_S3_ENDPOINT=""; OS_S3_BUCKET=""; OS_S3_PREFIX=""; OS_S3_REGION="us-east-1"; OS_S3_CREDS=""; OS_S3_CA=""
+OS_GIT_URL=""; OS_GIT_CREDS=""
 IMAGE_REGISTRY=""; STORAGE_CLASS=""; ARGO_NS="argocd"; AI_NS="tockmox-ai"; WAIT_SECONDS=300; DRY_RUN=false
 
 while [[ $# -gt 0 ]]; do
@@ -170,6 +192,14 @@ while [[ $# -gt 0 ]]; do
     --storage-class) STORAGE_CLASS="${2:?--storage-class needs a name}"; shift 2 ;;
     --argocd-namespace) ARGO_NS="${2:?--argocd-namespace needs a name}"; shift 2 ;;
     --ai-namespace) AI_NS="${2:?--ai-namespace needs a name}"; shift 2 ;;
+    --offsite-s3-endpoint) OS_S3_ENDPOINT="${2:?--offsite-s3-endpoint needs a URL}"; shift 2 ;;
+    --offsite-s3-bucket) OS_S3_BUCKET="${2:?--offsite-s3-bucket needs a name}"; shift 2 ;;
+    --offsite-s3-prefix) OS_S3_PREFIX="${2?--offsite-s3-prefix needs a value}"; shift 2 ;;
+    --offsite-s3-region) OS_S3_REGION="${2:?--offsite-s3-region needs a value}"; shift 2 ;;
+    --offsite-s3-credentials) OS_S3_CREDS="${2:?--offsite-s3-credentials needs a file}"; shift 2 ;;
+    --offsite-s3-ca) OS_S3_CA="${2:?--offsite-s3-ca needs a file}"; shift 2 ;;
+    --offsite-git) OS_GIT_URL="${2:?--offsite-git needs a URL}"; shift 2 ;;
+    --offsite-git-credentials) OS_GIT_CREDS="${2:?--offsite-git-credentials needs a file}"; shift 2 ;;
     --wait-seconds) WAIT_SECONDS="${2:?--wait-seconds needs a number}"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -247,6 +277,44 @@ elif ! $NO_SEAL_BACKUP; then
        If you keep that backup elsewhere on purpose, say so with --no-sealing-key-backup."
 fi
 
+# ---- the off-site copy: everything about it is checked before the cluster is touched
+# two_lines FILE WHAT -> refuses unless FILE is readable, outside the site, and has two non-empty lines
+two_lines() {
+  local f="$1" what="$2" a
+  [[ -r "$f" && -s "$f" ]] || die "cannot read $what $f, or it is empty"
+  a="$(abspath "$f")" || die "cannot resolve $what $f"
+  case "$a" in "$SITE"/*) die "$what is inside the site repository ($SITE), which is pushed to the forge. Put it elsewhere." ;; esac
+  [[ "$(grep -c . "$f")" -ge 2 ]] || die "$what $f must have two lines (an id, then its secret)"
+  [[ -z "$(sed -n '1,2{/["\\]/p;}' "$f")" ]] || die "$what $f contains a quote or a backslash, which cannot be passed safely"
+  printf '%s' "$a"
+}
+OFFSITE=""
+if [[ -n "$OS_S3_ENDPOINT$OS_S3_BUCKET$OS_S3_CREDS$OS_S3_CA$OS_S3_PREFIX" ]]; then OFFSITE="bucket"; fi
+if [[ -n "$OS_GIT_URL$OS_GIT_CREDS" ]]; then
+  [[ -z "$OFFSITE" ]] || die "give one off-site destination, a bucket OR a git remote, not both"
+  OFFSITE="git"
+fi
+case "$OFFSITE" in
+  bucket)
+    [[ "$OS_S3_ENDPOINT" =~ ^https?://[^/[:space:]]+$ ]] || die "--offsite-s3-endpoint must be http(s)://host[:port] with no path: '$OS_S3_ENDPOINT'"
+    [[ "$OS_S3_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || die "--offsite-s3-bucket is not a bucket name: '$OS_S3_BUCKET'"
+    [[ -z "$OS_S3_PREFIX" || "$OS_S3_PREFIX" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$ ]] || die "--offsite-s3-prefix must be path segments with no leading or trailing slash: '$OS_S3_PREFIX'"
+    [[ "$OS_S3_REGION" =~ ^[a-z0-9-]+$ ]] || die "--offsite-s3-region is not a region name: '$OS_S3_REGION'"
+    [[ -n "$OS_S3_CREDS" ]] || die "--offsite-s3-credentials FILE is required with a bucket"
+    OS_S3_CREDS="$(two_lines "$OS_S3_CREDS" --offsite-s3-credentials)" || exit 1
+    if [[ -n "$OS_S3_CA" ]]; then [[ -r "$OS_S3_CA" && -s "$OS_S3_CA" ]] || die "cannot read --offsite-s3-ca $OS_S3_CA"; fi
+    [[ "$OS_S3_ENDPOINT" == https://* || -n "$OS_S3_CA" ]] || warn "the off-site endpoint is plain http: the copy and its key pair cross the network unencrypted"
+    OFFSITE_WHERE="$OS_S3_ENDPOINT/$OS_S3_BUCKET${OS_S3_PREFIX:+/$OS_S3_PREFIX}" ;;
+  git)
+    [[ "$OS_GIT_URL" =~ ^https://[^@[:space:]]+$ ]] || die "--offsite-git must be an https URL with no credentials in it: '$OS_GIT_URL'"
+    [[ -n "$OS_GIT_CREDS" ]] || die "--offsite-git-credentials FILE is required with a git remote"
+    OS_GIT_CREDS="$(two_lines "$OS_GIT_CREDS" --offsite-git-credentials)" || exit 1
+    OFFSITE_WHERE="$OS_GIT_URL" ;;
+  *) OFFSITE_WHERE="" ;;
+esac
+OFFSITE_SCRIPT="$HERE/forge-offsite-copy.sh"
+[[ -z "$OFFSITE" || -r "$OFFSITE_SCRIPT" ]] || die "missing $OFFSITE_SCRIPT, which the off-site CronJob runs"
+
 # ---- tools
 need() { command -v "$1" >/dev/null 2>&1 || die "missing: $1 ... $2"; }
 need kubectl "talks to the cluster"
@@ -276,6 +344,8 @@ if $DRY_RUN; then
   info "install or adopt the forge; fence its port to ArgoCD (${ARGO_NS}), the AI layer (${AI_NS}) and its own namespace"
   info "create ${ORG}/${REPO}, ${BOT_READ}, ${BOT_CHANGE}, team ${APPROVERS_TEAM}"
   info "push ${SITE} as main; protect main; write the ArgoCD repository Secret in ${ARGO_NS}"
+  if [[ -n "$OFFSITE" ]]; then info "off-site copy (${OFFSITE}) to ${OFFSITE_WHERE}: a CronJob every minute, then the first copy written and read back"
+  else info "no off-site copy (the console will raise No off-site copy until one is set)"; fi
   info "write the recovery kit to ${KIT_OUT}"
   exit 0
 fi
@@ -423,8 +493,8 @@ kubectl "${K[@]}" -n "$FORGE_NS" rollout status deploy/"$RELEASE" --timeout="${W
   || die "the forge did not become ready within ${WAIT_SECONDS}s"
 
 # The fence. Applied on every run, so an adopted forge gets it too. Ingress only:
-# the forge makes no outbound call of its own (OFFLINE_MODE; the off-site copy's
-# egress is TM-1337's). Pods are named by label AND namespace, so a pod that copies
+# the policy does not limit egress (the push mirror and the off-site CronJob reach a
+# destination you choose). Pods are named by label AND namespace, so a pod that copies
 # a label in some other namespace gets nothing. Measured 2026-11-01 on a lab cluster
 # (k3s, kube-router): a repo-server-labelled pod in the ArgoCD namespace and a pod
 # in the forge namespace connect; an unlabelled pod there and a repo-server-
@@ -547,6 +617,7 @@ mkuser() {  # name
 }
 mkuser "$BOT_READ"
 mkuser "$BOT_CHANGE"
+mkuser "$BOT_OFFSITE"
 
 # Teams carry the permissions, so a token is never broader than its team.
 mkteam() {  # name permission user...
@@ -562,7 +633,7 @@ mkteam() {  # name permission user...
   local u; for u in "$@"; do api PUT "/teams/$id/members/$u" >/dev/null; expect "adding $u to team $t" 204; done
   ok "team $t ($perm)${*:+: $*}"
 }
-mkteam readers read "$BOT_READ"
+mkteam readers read "$BOT_READ" "$BOT_OFFSITE"
 mkteam changes write "$BOT_CHANGE"
 mkteam "$APPROVERS_TEAM" write
 
@@ -672,6 +743,139 @@ secret_apply "$FORGE_NS" "${RELEASE}-change-bot" "" \
   url="http://${RELEASE}-http.${FORGE_NS}.svc.cluster.local:3000" repository="$ORG/$REPO"
 ok "change identity ${FORGE_NS}/${RELEASE}-change-bot (opens changes; cannot approve them)"
 
+# ---------------------------------------------------------------- off-site copy
+# A CronJob in the forge namespace, every minute, running install/forge-offsite-copy.sh
+# in the forge's own image (git and curl are already in it, so the air-gap set gains
+# nothing). It exits 0 only when the destination holds the forge's current main, and
+# the observability layer alerts when it has not succeeded for 15 minutes: the job's
+# success IS the health signal (kube_cronjob_status_last_successful_time), so no new
+# scrape target and no hole in the forge's NetworkPolicy. For a git remote the forge's
+# own push mirror pushes on every commit and the job only verifies.
+if [[ -n "$OFFSITE" ]]; then
+  say "The off-site copy"
+  IMAGE="$(kubectl "${K[@]}" -n "$FORGE_NS" get deploy "$RELEASE" -o jsonpath='{.spec.template.spec.containers[?(@.name=="forgejo")].image}')"
+  [[ -n "$IMAGE" ]] || die "cannot read the forge's image from deploy/$RELEASE"
+  TOKEN_OFFSITE="$(mktoken "$BOT_OFFSITE" read:repository)"
+  [[ -n "$TOKEN_OFFSITE" ]] || die "minting a token for $BOT_OFFSITE returned none"
+  revoke_old "$BOT_OFFSITE" "bootstrap-$STAMP"
+  if [[ "$OFFSITE" == bucket ]]; then
+    secret_apply "$FORGE_NS" "${RELEASE}-offsite" "" forge-username="$BOT_OFFSITE" forge-token="$TOKEN_OFFSITE" \
+      s3-access-key-id="$(sed -n 1p "$OS_S3_CREDS")" s3-secret-access-key="$(sed -n 2p "$OS_S3_CREDS")"
+    ENV_YAML="                - { name: MODE, value: bucket }
+                - { name: S3_ENDPOINT, value: \"$OS_S3_ENDPOINT\" }
+                - { name: S3_BUCKET, value: \"$OS_S3_BUCKET\" }
+                - { name: S3_PREFIX, value: \"$OS_S3_PREFIX\" }
+                - { name: S3_REGION, value: \"$OS_S3_REGION\" }"
+  else
+    secret_apply "$FORGE_NS" "${RELEASE}-offsite" "" forge-username="$BOT_OFFSITE" forge-token="$TOKEN_OFFSITE" \
+      git-username="$(sed -n 1p "$OS_GIT_CREDS")" git-password="$(sed -n 2p "$OS_GIT_CREDS")"
+    ENV_YAML="                - { name: MODE, value: git }
+                - { name: GIT_REMOTE_URL, value: \"$OS_GIT_URL\" }"
+    # The push mirror: main only, on every commit, with an hourly retry. Recreated on
+    # each run so a rotated remote token takes effect; the remote's own rule against
+    # force pushes is what turns a rewritten history into a refusal and an alert.
+    for name in $(api GET "/repos/$ORG/$REPO/push_mirrors" | grep -o '"remote_name":"[^"]*"' | cut -d'"' -f4 || true); do
+      api DELETE "/repos/$ORG/$REPO/push_mirrors/$name" >/dev/null
+      [[ "$(status)" == 204 ]] || warn "could not remove the older push mirror $name (HTTP $(status))"
+    done
+    api POST "/repos/$ORG/$REPO/push_mirrors" "{\"remote_address\":\"$OS_GIT_URL\",\"remote_username\":\"$(sed -n 1p "$OS_GIT_CREDS")\",\"remote_password\":\"$(sed -n 2p "$OS_GIT_CREDS")\",\"interval\":\"1h0m0s\",\"sync_on_commit\":true,\"branch_filter\":\"main\"}" >/dev/null
+    expect "creating the push mirror to $OS_GIT_URL (a remote on a private address needs the forge's migrations.ALLOW_LOCALNETWORKS)" 200 201
+    api POST "/repos/$ORG/$REPO/push_mirrors-sync" >/dev/null; expect "starting the first push to $OS_GIT_URL" 200 204
+    ok "push mirror: main goes to $OS_GIT_URL on every commit"
+  fi
+  CA_VOL=""; CA_MOUNT=""; CA_ENV=""
+  if [[ -n "$OS_S3_CA" ]]; then
+    kubectl "${K[@]}" -n "$FORGE_NS" create configmap "${RELEASE}-offsite-ca" --from-file=ca.crt="$OS_S3_CA" \
+      --dry-run=client -o yaml | kubectl "${K[@]}" apply -f - >/dev/null
+    CA_VOL="            - { name: ca, configMap: { name: ${RELEASE}-offsite-ca } }"
+    CA_MOUNT="                - { name: ca, mountPath: /run/offsite-ca, readOnly: true }"
+    CA_ENV="                - { name: S3_CA_FILE, value: /run/offsite-ca/ca.crt }"
+  fi
+  kubectl "${K[@]}" -n "$FORGE_NS" create configmap "${RELEASE}-offsite-script" \
+    --from-file=forge-offsite-copy.sh="$OFFSITE_SCRIPT" --dry-run=client -o yaml \
+    | kubectl "${K[@]}" apply -f - >/dev/null
+  kubectl "${K[@]}" apply -f - >/dev/null <<CRON || die "could not apply the off-site CronJob"
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ${RELEASE}-offsite
+  namespace: ${FORGE_NS}
+  labels:
+    app.kubernetes.io/name: ${RELEASE}-offsite
+    app.kubernetes.io/managed-by: tockmox-install
+spec:
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 600
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: ${RELEASE}-offsite
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            # The Secret's files are root's; group 1000 with mode 0440 is what lets the
+            # copy read them (measured: 0400 without fsGroup failed every run on the lab).
+            fsGroup: 1000
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: copy
+              image: ${IMAGE}
+              command: [/bin/sh, /opt/offsite/forge-offsite-copy.sh]
+              env:
+${ENV_YAML}
+${CA_ENV}
+                - { name: FORGE_URL, value: "http://${RELEASE}-http.${FORGE_NS}.svc.cluster.local:3000" }
+                - { name: REPO, value: "${ORG}/${REPO}" }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: [ALL] }
+              resources:
+                requests: { cpu: 10m, memory: 32Mi }
+                limits: { memory: 256Mi }
+              volumeMounts:
+                - { name: script, mountPath: /opt/offsite, readOnly: true }
+                - { name: secrets, mountPath: /run/offsite, readOnly: true }
+                - { name: tmp, mountPath: /tmp }
+${CA_MOUNT}
+          volumes:
+            - { name: script, configMap: { name: ${RELEASE}-offsite-script } }
+            - { name: secrets, secret: { secretName: ${RELEASE}-offsite, defaultMode: 0440 } }
+            - { name: tmp, emptyDir: { sizeLimit: 1Gi } }
+${CA_VOL}
+CRON
+  ok "CronJob ${FORGE_NS}/${RELEASE}-offsite: every minute, ${OFFSITE} to ${OFFSITE_WHERE}"
+  # The first copy, now, while you watch: written AND read back, or this run fails.
+  FIRST="${RELEASE}-offsite-first-$(date -u +%H%M%S)"; FIRST_OK=false
+  for try in 1 2 3; do
+    kubectl "${K[@]}" -n "$FORGE_NS" create job "$FIRST-$try" --from="cronjob/${RELEASE}-offsite" >/dev/null
+    if kubectl "${K[@]}" -n "$FORGE_NS" wait --for=condition=complete "job/$FIRST-$try" --timeout=180s >/dev/null 2>&1; then
+      ok "first off-site copy: $(kubectl "${K[@]}" -n "$FORGE_NS" logs "job/$FIRST-$try" 2>/dev/null | tail -1)"
+      FIRST_OK=true; break
+    fi
+    FIRST_OK=false
+    warn "off-site copy attempt $try did not succeed: $(kubectl "${K[@]}" -n "$FORGE_NS" logs "job/$FIRST-$try" 2>/dev/null | tail -2 | tr '\n' ' ')"
+    # A push mirror pushes asynchronously; give it a moment before checking again.
+    sleep 10
+  done
+  $FIRST_OK || die "the off-site copy could not be written and read back. The CronJob stays and retries every
+       minute, and the console will alert; fix the destination and re-run this command.
+       Look at: kubectl --context $CTX -n $FORGE_NS logs -l app.kubernetes.io/name=${RELEASE}-offsite --tail=20"
+fi
+
 # ---------------------------------------------------------------- recovery kit
 say "The recovery kit"
 POD="$(kubectl "${K[@]}" -n "$FORGE_NS" get pod -l "app.kubernetes.io/instance=$RELEASE" -o jsonpath='{.items[0].metadata.name}')"
@@ -695,6 +899,8 @@ kit_stream() {
   printf 'repository: %s\n' "$REPO_URL"
   printf 'forge: release %s, namespace %s, chart %s %s\n' "$RELEASE" "$FORGE_NS" "$CHART_REF" "$CHART_VERSION"
   printf 'site main at kit time: %s\n' "$LOCAL_HEAD"
+  if [[ -n "$OFFSITE" ]]; then printf 'off-site copy: %s %s (its credentials are NOT in this kit)\n' "$OFFSITE" "$OFFSITE_WHERE"
+  else printf 'off-site copy: none\n'; fi
   printf 'sealing-key backup: %s\n' "$([[ -n "$SEAL_BACKUP" ]] && echo included || echo 'NOT included (--no-sealing-key-backup)')"
   printf '=== app.ini\n'
   kubectl "${K[@]}" -n "$FORGE_NS" exec "$POD" -c forgejo -- cat /data/gitea/conf/app.ini
@@ -724,7 +930,11 @@ fi
 # ---------------------------------------------------------------- done
 say "Done"
 ok "the built-in forge holds ${ORG}/${REPO}; ArgoCD reads it at ${REPO_URL}"
-warn "no off-site copy is set yet: until one is, losing this cluster loses the site's history.
-       Until then, keep a clone of the site repository somewhere that is not this cluster."
+if [[ -n "$OFFSITE" ]]; then
+  ok "off-site copy: ${OFFSITE} to ${OFFSITE_WHERE}, checked every minute; the console alerts after 15 minutes behind"
+else
+  warn "no off-site copy is set: until one is, losing this cluster loses the site's history, and the
+       console says so (No off-site copy) until you add one: re-run with --offsite-s3-* or --offsite-git."
+fi
 info "next: kubectl --context $CTX apply -f $SITE/bootstrap/root.yaml"
 info "keep the recovery kit somewhere that is not this cluster and not any off-site bucket"

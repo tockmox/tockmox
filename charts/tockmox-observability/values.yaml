@@ -1445,3 +1445,12 @@ alloy:
           }
           forward_to = [loki.write.default.receiver]
         }
+
+# The built-in forge's alerts (experimental). The installer sets enabled: true in
+# site/values/observability.yaml when site.forge is built-in; the forge itself is
+# installed by `tockmox-install.sh bootstrap-forge`, never by Argo CD.
+siteForge:
+  enabled: false
+  namespace: tockmox-forge
+  release: tockmox-forge
+  copyBehindMinutes: 15

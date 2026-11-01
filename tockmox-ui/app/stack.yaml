@@ -39,6 +39,15 @@ side:
     alerts: ["TockmoxArgoCD*", "ArgoCD*"]
     goto: {grafana: tockmox-argocd}
     runbook: administration/argocd.md
+  # The built-in forge (site.forge: built-in, TM-1337), when the observability layer
+  # renders its rules. Its alerts carry tockmox_component: site-repository; Silence on
+  # this part is how "No off-site copy" is snoozed or dismissed.
+  - id: site-repository
+    name: Site repository
+    about: The built-in forge that holds your site, and its off-site copy.
+    alerts: ["TockmoxSiteRepository*"]
+    namespaces: [tockmox-forge]
+    when: [[observability, PrometheusRule, "tockmox-site-repository$"]]
 
 bands:
   - id: site

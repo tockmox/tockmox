@@ -1,0 +1,103 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+THE BUILT-IN FORGE'S OFF-SITE COPY, WATCHED BY WHAT IT SHOULD SAY (TM-1337).
+
+The site repository can live on a forge inside the cluster (site.forge:
+built-in; `tockmox-install.sh bootstrap-forge` installs it, never Argo CD).
+Then the cluster holds the only live copy of its own source of truth, and the
+off-site copy is what makes a rebuild possible. Two rules, rendered only when
+the installer set `siteForge.enabled`:
+
+  TockmoxSiteRepositoryCopyBehind   the off-site CronJob (<release>-offsite)
+      has not SUCCEEDED for copyBehindMinutes. The job exits 0 only when the
+      destination holds the forge's current main (a bundle read back from the
+      bucket, or the git remote's main equal to the forge's), so "no success"
+      covers every way the copy can be wrong: the destination unreachable, a
+      key revoked, a force push the remote refused, the job not scheduling.
+      Reading the job's success through kube-state-metrics needs no scrape of
+      the forge and no hole in its NetworkPolicy.
+
+  TockmoxSiteRepositoryNoOffsiteCopy   the forge runs and there is no off-site
+      CronJob at all: no destination was given. Q3 (2026-10-31) ruled the
+      destination optional, with a persistent warning instead; this is it. It
+      stays until a destination exists, and the console's Silence on the Site
+      repository part snoozes or dismisses it like any other alert.
+
+THE SCRAPE GUARD (`count(kube_namespace_status_phase...)`) is the same arm the
+resilience rules use: a dead kube-state-metrics, which alerts on its own, must
+not read as "no off-site copy" or as a copy that stopped.
+*/ -}}
+{{- $sf := .Values.siteForge | default dict -}}
+{{- $stack := include "tockmox.appEnabled" (dict "ctx" $ "app" "kubePrometheusStack") -}}
+{{- if and $sf.enabled $stack }}
+{{- $ns := $sf.namespace | default "tockmox-forge" -}}
+{{- $release := $sf.release | default "tockmox-forge" -}}
+{{- $cron := printf "%s-offsite" $release -}}
+{{- $mins := int ($sf.copyBehindMinutes | default 15) -}}
+# SPDX-License-Identifier: Apache-2.0
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tockmox-site-repository
+  namespace: {{ .Values.namespaces.monitoring }}
+  annotations:
+    # Sync wave 1: after the operator Deployment (wave 0) that serves the
+    # admission webhook. check-upgrade-safety.sh F4 asserts it.
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  groups:
+    - name: tockmox.site-repository
+      rules:
+        - alert: TockmoxSiteRepositoryCopyBehind
+          # A CronJob that has never succeeded has no last-successful series;
+          # the second arm covers it once the CronJob is older than the window.
+          expr: >-
+            (
+              (time() - max by (namespace, cronjob) (kube_cronjob_status_last_successful_time{namespace={{ $ns | quote }}, cronjob={{ $cron | quote }}})) > {{ mul $mins 60 }}
+              or
+              (
+                (time() - max by (namespace, cronjob) (kube_cronjob_created{namespace={{ $ns | quote }}, cronjob={{ $cron | quote }}})) > {{ mul $mins 60 }}
+                unless on (namespace, cronjob)
+                kube_cronjob_status_last_successful_time{namespace={{ $ns | quote }}, cronjob={{ $cron | quote }}}
+              )
+            )
+            and on ()
+            (count(kube_namespace_status_phase{namespace={{ $ns | quote }}}) > 0)
+          for: 1m
+          labels:
+            severity: warning
+            tockmox_component: site-repository
+          annotations:
+            summary: "The site repository's off-site copy is more than {{ $mins }} minutes behind"
+            description: >-
+              The off-site copy job {{ $ns }}/{{ $cron }} has not succeeded for
+              more than {{ $mins }} minutes, so the off-site copy may not hold
+              the forge's current main. Until it does, a rebuild from the copy
+              would lose the changes since the last success. Its log names the
+              reason: kubectl -n {{ $ns }} logs -l app.kubernetes.io/name={{ $cron }} --tail=20
+        - alert: TockmoxSiteRepositoryNoOffsiteCopy
+          expr: >-
+            (
+              max(kube_deployment_status_replicas_available{namespace={{ $ns | quote }}, deployment={{ $release | quote }}}) > 0
+              unless on ()
+              max(kube_cronjob_info{namespace={{ $ns | quote }}, cronjob={{ $cron | quote }}})
+            )
+            and on ()
+            (count(kube_namespace_status_phase{namespace={{ $ns | quote }}}) > 0)
+          for: 15m
+          labels:
+            severity: warning
+            tockmox_component: site-repository
+          annotations:
+            summary: "No off-site copy: losing this cluster loses the site's history"
+            description: >-
+              The site repository lives on the built-in forge in {{ $ns }} and
+              no off-site destination is set, so a lost cluster cannot be
+              rebuilt from a copy. Add one by re-running
+              tockmox-install.sh bootstrap-forge with --offsite-s3-* or
+              --offsite-git. Snooze or dismiss this from the console's Site
+              repository part if you keep a copy some other way.
+{{- end }}

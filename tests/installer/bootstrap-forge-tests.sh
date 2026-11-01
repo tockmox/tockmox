@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Sourced by run.sh. Groups F1-F10: install/bootstrap-forge.sh (TM-1335).
+# Sourced by run.sh. Groups F1-F17: install/bootstrap-forge.sh (TM-1335, TM-1337).
 #
 # HERMETIC, and deliberately narrow: every case here is a REFUSAL, and the
 # assertion that matters in each is that the refusal came before any write to a
@@ -101,3 +101,56 @@ fs_case f10
 fs_run --site "$D/site" --kit-out "$D/kits/k" --passphrase-file "$D/inputs/pass" --sealing-key-backup "$D/inputs/seal.enc" --dry-run "${FS_OK[@]}"
 assert_artifact "F10 a dry run exits clean with a plan" "echo $FS_STATUS; grep -c 'Plan (dry run, nothing changed)' '$D/out/stdout'" "$(printf '0\n1')"
 assert_artifact "F10 ... writes nothing to the cluster and no kit" "fs_writes; [ -e '$D/kits/k' ] && echo kit || echo no-kit" "$(printf '0\nno-kit')"
+
+# F11. The generator, site.forge: built-in: every Application names the forge,
+# nothing carries the placeholder, and the observability layer gets the off-site
+# copy's alerts (TM-1337). The external route gets none of that.
+FG="$FS/gen-built-in"; mkdir -p "$FG"
+sed 's|^  name: ci-interactive|  name: ci-interactive\n  forge: built-in|' "$PARITY_CFG" > "$FG/tockmox.yaml"
+run_config "$FG" --config tockmox.yaml --no-cluster
+assert_artifact "F11 site.forge: built-in generates cleanly" "echo $CONFIG_STATUS" "0"
+assert_artifact "F11 ... with no placeholder left anywhere" \
+  "{ grep -rl PLACEHOLDER_SITE_REPO_URL '$FG/tockmox-site' || true; } | wc -l | tr -d ' '" "0"
+assert_artifact "F11 ... root.yaml names the forge's in-cluster address" \
+  "grep -c '$FORGE_URL' '$FG/tockmox-site/bootstrap/root.yaml'" "1"
+assert_artifact "F11 ... and the observability layer turns on the off-site copy's alerts" \
+  "python3 -c 'import yaml,sys; print(yaml.safe_load(open(sys.argv[1]))[\"siteForge\"][\"enabled\"])' '$FG/tockmox-site/site/values/observability.yaml'" "True"
+assert_artifact "F11 the external route carries no siteForge key" \
+  "grep -c '^siteForge:' '$SITE_C/tockmox-site/site/values/observability.yaml' || true" "0"
+
+# F12-F16. The off-site copy's flags are refused before any cluster write.
+os_run() { fs_run --site "$D/site" --kit-out "$D/kits/k" --passphrase-file "$D/inputs/pass" --sealing-key-backup "$D/inputs/seal.enc" "${FS_OK[@]}" "$@"; }
+fs_case f12; printf 'GKexample\nsecretexample\n' > "$D/inputs/s3"; printf 'bot\ntoken\n' > "$D/inputs/git"
+os_run --offsite-s3-endpoint https://s3.example.com --offsite-s3-bucket site-copy --offsite-s3-credentials "$D/inputs/s3" \
+  --offsite-git https://git.example.com/me/site.git --offsite-git-credentials "$D/inputs/git"
+assert_artifact "F12 two off-site destinations at once are refused" \
+  "echo $FS_STATUS; fs_err | grep -c 'not both'" "$(printf '1\n1')"
+assert_artifact "F12 ... before any write to the cluster" "fs_writes" "0"
+
+fs_case f13; printf 'GKexample\nsecretexample\n' > "$D/site/s3-creds"
+os_run --offsite-s3-endpoint https://s3.example.com --offsite-s3-bucket site-copy --offsite-s3-credentials "$D/site/s3-creds"
+assert_artifact "F13 a credentials file inside the site repository is refused (it would be pushed)" \
+  "echo $FS_STATUS; fs_err | grep -c 'inside the site repository'" "$(printf '1\n1')"
+
+fs_case f14; printf 'GKexample\n' > "$D/inputs/s3"
+os_run --offsite-s3-endpoint https://s3.example.com --offsite-s3-bucket site-copy --offsite-s3-credentials "$D/inputs/s3"
+assert_artifact "F14 a one-line credentials file is refused" \
+  "echo $FS_STATUS; fs_err | grep -c 'must have two lines'" "$(printf '1\n1')"
+
+fs_case f15; printf 'bot\ntoken\n' > "$D/inputs/git"
+os_run --offsite-git 'https://bot:token@git.example.com/me/site.git' --offsite-git-credentials "$D/inputs/git"
+assert_artifact "F15 a git URL carrying credentials is refused" \
+  "echo $FS_STATUS; fs_err | grep -c 'no credentials in it'" "$(printf '1\n1')"
+
+fs_case f16; printf 'GKexample\nsecretexample\n' > "$D/inputs/s3"
+os_run --offsite-s3-endpoint https://s3.example.com/path --offsite-s3-bucket site-copy --offsite-s3-credentials "$D/inputs/s3"
+assert_artifact "F16 an endpoint with a path is refused (the bucket is its own flag)" \
+  "echo $FS_STATUS; fs_err | grep -c 'with no path'" "$(printf '1\n1')"
+
+# F17. A dry run with a destination plans the copy and writes nothing.
+fs_case f17; printf 'GKexample\nsecretexample\n' > "$D/inputs/s3"
+os_run --offsite-s3-endpoint https://s3.example.com --offsite-s3-bucket site-copy --offsite-s3-prefix lab/site \
+  --offsite-s3-credentials "$D/inputs/s3" --dry-run
+assert_artifact "F17 a dry run names the off-site copy it would make" \
+  "echo $FS_STATUS; grep -c 'off-site copy (bucket) to https://s3.example.com/site-copy/lab/site' '$D/out/stdout'" "$(printf '0\n1')"
+assert_artifact "F17 ... and writes nothing to the cluster" "fs_writes" "0"

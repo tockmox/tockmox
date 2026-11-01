@@ -197,6 +197,23 @@ def test_a_part_whose_component_is_not_deployed_is_absent_not_locked():
     assert "object-store" in pl.by_id and "reboots" not in pl.by_id
 
 
+def test_the_site_repository_part_shows_only_with_the_built_in_forges_rules():
+    # TM-1337: the observability layer renders tockmox-site-repository only for site.forge: built-in.
+    assert "site-repository" not in place(readings()).by_id
+    apps = [layer(x) for x in ALL if x != "observability"] + [
+        layer("observability", resources=[("PrometheusRule", "tockmox-site-repository")])]
+    pl = place(readings(apps))
+    assert pl.by_id["site-repository"].state == "ok"
+
+
+def test_no_off_site_copy_lands_on_the_site_repository_part():
+    apps = [layer(x) for x in ALL if x != "observability"] + [
+        layer("observability", resources=[("PrometheusRule", "tockmox-site-repository")])]
+    pl = place(readings(apps, alerts=[alert("TockmoxSiteRepositoryNoOffsiteCopy", comp="site-repository")]))
+    assert pl.by_id["site-repository"].state == "warning"
+    assert "unplaced" not in pl.by_id
+
+
 def test_inference_nodes_appear_only_when_the_source_is_configured():
     assert "inference-nodes" not in place(readings()).by_id
     rd = readings()

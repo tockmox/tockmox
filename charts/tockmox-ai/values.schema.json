@@ -1739,7 +1739,6 @@
             }
           }
         },
-
         "actions": {
           "type": "object",
           "additionalProperties": false,
@@ -2020,6 +2019,9 @@
     },
     "agentEgress": {
       "description": "Not this layer's key. Owned by the policy layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "siteForge": {
+      "description": "Not this layer's key. Owned by the observability layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
     }
   },
   "additionalProperties": false,

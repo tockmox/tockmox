@@ -900,6 +900,17 @@ apps: {}
 EOF
     fi
   done
+  # The built-in forge's alerts live in the observability layer (TM-1337): the
+  # off-site copy falling behind, and no off-site copy at all.
+  if [[ "$SITE_FORGE" == built-in && " ${LAYERS_ON[*]} " == *" observability "* ]]; then
+    cat >> "$SITE_PATH/site/values/observability.yaml" <<EOF
+
+# site.forge is built-in: alert when its off-site copy falls behind, and while
+# there is none (snooze or dismiss that one from the console's Site repository part).
+siteForge:
+  enabled: true
+EOF
+  fi
 
   mkdir -p "$SITE_PATH/bootstrap/applications"
   wave() { case "$1" in crds) echo 0;; policy) echo 1;; platform) echo 2;;

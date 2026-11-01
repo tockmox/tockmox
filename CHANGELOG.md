@@ -71,8 +71,16 @@ costs you, with the reasoning in the documentation rather than here.
   names the forge's in-cluster address; `tockmox-install.sh bootstrap-forge`
   installs Forgejo 15 LTS, publishes the site, protects `main` (one approval,
   no direct pushes), gives ArgoCD a read-only token and writes an encrypted
-  recovery kit. No off-site copy, rebuild or console sign-in yet; the default
-  stays `external`.
+  recovery kit. No rebuild or console sign-in yet; the default stays
+  `external`.
+
+- **Experimental: the built-in forge's off-site copy, and an alert when there
+  is none.** `bootstrap-forge --offsite-s3-*` copies `main` as a git bundle to
+  an S3-compatible bucket every minute, read back before it counts;
+  `--offsite-git` uses a push mirror and checks it. Copies more than 15
+  minutes behind fire `TockmoxSiteRepositoryCopyBehind`; no destination fires
+  `TockmoxSiteRepositoryNoOffsiteCopy`, which the console's new Site repository
+  part can silence. New key: `siteForge` (observability).
 
 - **The Models page now shows what each hosted model costs: its list price,
   what the gateway spent on it, and how often it was called, and anything it
