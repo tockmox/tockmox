@@ -13,13 +13,22 @@
 {% else %}
 <div class="table-wrap" tabindex="0" role="region" aria-labelledby="act-cap">
 <table>
-  <caption id="act-cap">The last {{ rows | length }} action{{ "s" if rows | length != 1 }}, newest first</caption>
+  <caption id="act-cap">The last {{ rows | length }} action{{ "s" if rows | length != 1 }}, newest first. Times in {{ site.timezone }}.</caption>
   <thead><tr><th scope="col">When</th><th scope="col">Who</th><th scope="col">Action</th><th scope="col">Result</th></tr></thead>
   <tbody>
   {% for r in rows %}
-  <tr><td><time datetime="{{ r.at | iso }}">{{ r.at | local }}</time></td><td>{{ r.who }}</td><th scope="row">{{ r.summary }}</th>
-    <td>{{ badge("ok", "Done") if r.result == "done" else badge("warning", r.result) }} {{ r.detail }}{% if r.ref %} <code>{{ r.ref | join(", ") }}</code>{% endif %}
-      {%- if r.kind == "silence" and expire_on and r.until and r.until > now %}{% for sid in r.ref %} · <a href="/actions/confirm?kind=expire&amp;silence={{ sid | urlencode }}">Expire</a>{% endfor %}{% endif %}</td></tr>
+  {#- The lab walk (2026-11-01): a silence's result read "until 2026-11-01T22:25:27.000Z" plus two raw ids, and
+      offered Expire on silences already expired. Silences and expiries now say when in the site's zone and show no
+      ids (Loki keeps them); other results show a ref only when the detail does not already name it; Expire is
+      offered only for a silence Alertmanager still holds. -#}
+  {%- set silenceish = r.kind in ("silence", "expire") %}
+  {%- set refs = [] if silenceish else (r.ref | reject("in", r.detail or "") | list) %}
+  <tr><td><time datetime="{{ r.at | iso }}">{{ r.at | local(zone=true) }}</time></td><td>{{ r.who }}</td><th scope="row">{{ r.summary }}</th>
+    <td>{{ badge("ok", "Done") if r.result == "done" else badge("warning", r.result) }}
+      {%- if r.kind == "silence" and r.result == "done" and r.until %} until <time datetime="{{ r.until | iso }}">{{ r.until | local(zone=true) }}</time>
+      {%- elif r.kind == "expire" and r.result == "done" %} {{ r.detail.split(" · ")[0] if r.detail else "expired" }}
+      {%- else %} {{ r.detail }}{% endif %}{% if refs %} <code>{{ refs | join(", ") }}</code>{% endif %}
+      {%- if r.kind == "silence" and expire_on %}{% for sid in r.ref if sid in active %} · <a href="/actions/confirm?kind=expire&amp;silence={{ sid | urlencode }}">Expire</a>{% endfor %}{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table>

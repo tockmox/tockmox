@@ -5,7 +5,13 @@
 <section class="panel confirm" aria-labelledby="result-h">
   <h1 id="result-h">{% if ok %}{{ badge("ok", "Done") }} {{ (out.summary if out else "") or (d.summary if d else "Done") }}{% else %}{{ badge("warning", "Not done") }} {{ d.summary if d else "The action" }} did not happen{% endif %}</h1>
   {% if ok %}
-  <p>{% if out.repeat %}This was already done (the same confirmation arrived twice), so nothing ran again.{% if out.kind == "recovery-link" %} The link was shown once, when it was made; make a new one if it was not kept.{% endif %} {% endif %}{{ out.detail }}{% if out.ref %} · <code>{{ out.ref | join(", ") }}</code>{% endif %}</p>
+  {#- The lab walk (2026-11-01): silences read "until 2026-11-01T22:25:27.000Z · <two raw ids>". Words and the site's
+      zone instead; a ref only when the detail does not already name it, and never a silence id (Loki keeps them). -#}
+  {%- set refs = [] if out.kind in ("silence", "expire") else ((out.ref or []) | reject("in", out.detail or "") | list) %}
+  <p>{% if out.repeat %}This was already done (the same confirmation arrived twice), so nothing ran again.{% if out.kind == "recovery-link" %} The link was shown once, when it was made; make a new one if it was not kept.{% endif %} {% endif %}
+    {%- if out.kind == "silence" and out.until %}Until <time datetime="{{ out.until | iso }}">{{ out.until | local(zone=true) }}</time>.
+    {%- elif out.kind == "expire" %}{{ (out.detail or "expired").split(" · ")[0] | capitalize }}.
+    {%- else %}{{ out.detail }}{% endif %}{% if refs %} · <code>{{ refs | join(", ") }}</code>{% endif %}</p>
   {% if secret %}
   {#- TM-1315: shown here once. It is in no record, no log line and no replay; this page is sent no-store. -#}
   <label for="secret">The link, to send them <span class="muted small">(shown once: it is not kept anywhere)</span></label>

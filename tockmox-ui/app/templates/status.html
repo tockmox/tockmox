@@ -87,13 +87,13 @@
   <h3>What is wrong</h3>
   {% if sel.wrong %}
   <ul class="plain sigs">
-    {% for x in sel.wrong %}<li class="st-{{ x.state }}">{{ state_icon(x.state) }}<span><span class="visually-hidden">{{ state_word(x.state) }}: </span><strong>{% if x.href %}<a href="{{ x.href }}">{{ x.what }}</a>{% else %}{{ x.what }}{% endif %}</strong>{% if x.detail %}<span class="muted small d">{{ x.detail }}</span>{% endif %}{% if x.silenced %}<span class="small d silenced">Silenced by {{ x.silenced.by }}{% if x.silenced.until %} until <time datetime="{{ x.silenced.until | iso }}">{{ x.silenced.until | local }}</time>{% endif %}</span>{% endif %}</span><span class="muted small num">{{ x.since }}</span></li>{% endfor %}
+    {% for x in sel.wrong %}<li class="st-{{ x.state }}">{{ state_icon(x.state) }}<span><span class="visually-hidden">{{ state_word(x.state) }}: </span><strong>{% if x.href %}<a href="{{ x.href }}">{{ x.what }}</a>{% else %}{{ x.what }}{% endif %}</strong>{% if x.detail %}<span class="muted small d">{{ x.detail }}</span>{% endif %}{% if x.silenced %}<span class="small d silenced">Silenced by {{ x.silenced.by }}{% if x.silenced.until %} until <time datetime="{{ x.silenced.until | iso }}">{{ x.silenced.until | local(zone=true) }}</time>{% endif %}</span>{% endif %}</span><span class="muted small num">{{ x.since }}</span></li>{% endfor %}
   </ul>
   {% elif sel.state == "unknown" %}<p class="small">{{ badge("unknown") }} {{ sel.reason }}</p>
   {% else %}<p class="small">Nothing is wrong.</p>{% endif %}
   {% if actions or silences %}<h3>Actions</h3>
   {% if actions %}<p class="goto acts">{% for a in actions %}<a class="btn-ghost" href="{{ a.href }}">{{ a.label }}</a>{% endfor %}</p>{% endif %}
-  {% if silences and expire_on %}<ul class="plain small">{% for x in silences %}<li>Silenced by {{ x.by }}{% if x.until %} until <time datetime="{{ x.until | iso }}">{{ x.until | local }}</time>{% endif %}: {{ x.alerts | unique | join(", ") }} · <a href="/actions/confirm?kind=expire&amp;part={{ sel.part.id | urlencode }}&amp;silence={{ x.id | urlencode }}">Expire</a></li>{% endfor %}</ul>{% endif %}
+  {% if silences and expire_on %}<ul class="plain small">{% for x in silences %}<li>Silenced by {{ x.by }}{% if x.until %} until <time datetime="{{ x.until | iso }}">{{ x.until | local(zone=true) }}</time>{% endif %}: {{ x.alerts | unique | join(", ") }} · <a href="/actions/confirm?kind=expire&amp;part={{ sel.part.id | urlencode }}&amp;silence={{ x.id | urlencode }}">Expire</a></li>{% endfor %}</ul>{% endif %}
   {% endif %}
   {% if sel_trend %}<h3>Last 7 days</h3>{{ trend(sel_trend, compact=true) }}{% endif %}
   {% set okays = sel.signals | selectattr("state", "equalto", "ok") | list %}
