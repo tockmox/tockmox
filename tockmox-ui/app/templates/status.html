@@ -56,7 +56,7 @@
   </table>
   </div>
 {% else %}
-  <div class="stack">
+  <div class="layer-stack">
     {% for sp in placed.side %}
     <a class="side part st-{{ sp.state }}" href="/status/{{ sp.id }}{{ qs }}"{% if sel and sel.id == sp.id %} aria-current="true"{% endif %}><span class="side-in">{{ state_icon(sp.state) }}<span class="pn">{{ sp.part.name }}</span>{% if sp.count %}<span class="n">{{ sp.count }}</span>{% endif %}</span><span class="visually-hidden">: {{ state_word(sp.state) }}, beside every band</span></a>
     {% endfor %}

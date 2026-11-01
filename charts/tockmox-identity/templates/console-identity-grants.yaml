@@ -132,10 +132,21 @@ spec:
                   token_failed = None
                   try:
                       if key:
-                          _, made = Token.objects.update_or_create(identifier="tockmox-console-actions", defaults={
-                              "user": acct, "intent": TokenIntents.INTENT_API, "expiring": False, "key": key,
-                              "description": "The Tockmox console's identity actions (TM-1315); kept by the tockmox-console-identity-grants CronJob"})
-                          print("console token: %s" % ("made" if made else "set"))
+                          # Written only when it differs: a save every run put a "model updated" event in Authentik's
+                          # log every five minutes (the lab run, 2026-11-01).
+                          want = {"user": acct, "intent": TokenIntents.INTENT_API, "expiring": False, "key": key,
+                                  "description": "The Tockmox console's identity actions (TM-1315); kept by the tockmox-console-identity-grants CronJob"}
+                          tok = Token.objects.filter(identifier="tockmox-console-actions").first()
+                          if tok is None:
+                              Token.objects.create(identifier="tockmox-console-actions", **want)
+                              print("console token: made")
+                          elif any(getattr(tok, f) != v for f, v in want.items()):
+                              for f, v in want.items():
+                                  setattr(tok, f, v)
+                              tok.save()
+                              print("console token: set")
+                          else:
+                              print("console token: unchanged")
                       else:
                           gone, _ = Token.objects.filter(identifier="tockmox-console-actions").delete()
                           print("console token: none (TOCKMOX_CONSOLE_ACTIONS_TOKEN is empty here; %d removed)" % gone)

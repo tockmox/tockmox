@@ -363,3 +363,36 @@ def test_codeql_the_user_list_says_why_in_fixed_words(tmp_path):
     c = _identity_api(tmp_path, Authentik().handler)
     r = c.get("/v1/identity/users")
     assert r.status_code == 200 and {p["username"] for p in r.json()["users"]} >= {"dawn", "jeff"}
+
+
+# ---------------------------------------------------------------- the lab run's look at the pages (2026-11-01)
+
+def test_lab_the_confirm_page_names_no_length_over_a_choice_of_lengths(tmp_path):
+    c, *_ = wire(tmp_path)
+    t = c.get("/actions/confirm?kind=recovery-link&user=7&username=dawn").text
+    assert "for as long as you choose below" in t and "good once and for 24 hours" not in t
+    assert "You may be asked to sign in again" in t                       # the step-up, said before the click
+    it = act.intent("recovery-link", {"user": 7, "username": "dawn"}, {"hours": 72}, "a")
+    assert "three days" in act.describe(it)["effect"]                     # the record still names the length chosen
+
+
+def test_lab_the_identity_actions_are_pills(tmp_path):
+    c, *_ = wire(tmp_path)
+    t = c.get("/platform/identity").text
+    assert 'class="pill" href="/actions/confirm?kind=recovery-link' in t
+    assert 'class="pill danger" href="/actions/confirm?kind=remove-member' in t
+    assert '<tr role="row">' in t and 'role="rowheader"' in t                  # still a table when a phone shows cards
+    css = (Path(__file__).resolve().parents[1] / "app" / "static" / "app.css").read_text()
+    assert re.search(r"\.row-acts \.pill\s*\{", css)
+
+
+def test_lab_no_page_layout_rule_takes_the_class_every_form_uses():
+    css = (Path(__file__).resolve().parents[1] / "app" / "static" / "app.css").read_text()
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    rules = re.findall(r"([^{}]+)\{([^{}]*)\}", css)                          # inner rules of @media blocks too
+    for sel, body in rules:
+        for s in sel.split(","):
+            s = s.strip()
+            if re.search(r"(?<![\w-])\.stack(?![\w-])", s) and not s.startswith("form.stack"):
+                assert not re.search(r"grid|flex|columns|display:\s*table", body), f"{s} lays out every form.stack: {body.strip()}"
+    assert re.search(r"details\.menu-d\s*\{[^}]*margin-top:\s*0", css)     # the top bar's menus line up with the pill

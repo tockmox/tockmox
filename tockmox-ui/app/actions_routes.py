@@ -148,7 +148,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
             it = act.check(cfg, act.intent(kind, target, draft, u.sub))
         except act.Refused as e:
             return nope(request, u, f"This action cannot be offered: {e}.", 409)
-        d = act.describe(it, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime(ts)))
+        d = act.describe(it, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime(ts)), choosing=True)
         return render(request, "action_confirm.html", u, kind=kind, d=d, target_json=json.dumps(target, sort_keys=True),
                       key=it["key"], back=back, step_up=act.step_up(kind), max_age_min=cfg.step_up_max_age // 60,
                       choices=SILENCE_CHOICES, recovery_choices=RECOVERY_CHOICES, target=target)
