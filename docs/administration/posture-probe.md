@@ -109,8 +109,8 @@ docker build -t registry.example.com/tockmox/posture-probe:0.1.0 addons/posture-
 docker push registry.example.com/tockmox/posture-probe:0.1.0
 ```
 
-The image is the Python standard library on `python:3.12-alpine` and nothing
-else: no package is installed at build time and nothing is fetched at run time.
+The image is the Python standard library on `python:3.15-alpine` (pinned by
+digest in the Dockerfile) and nothing else: no package is installed at build time and nothing is fetched at run time.
 It runs as user 65534 with a read-only root filesystem.
 
 ## Install it

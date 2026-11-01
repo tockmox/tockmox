@@ -9,7 +9,8 @@
 # dark site mirrors one base image. Alpine for the same reason the other
 # Tockmox-built images use it: a smaller base with fewer unused packages for a
 # scanner to flag.
-FROM python:3.15-alpine
+# Pinned by digest (the multi-arch index) as well as by tag; Renovate moves both together.
+FROM python:3.15-alpine@sha256:20a82dbc2783112ddb91d1534603f802d222a3e63e593cd002eb2ac534e70211
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /srv
 COPY posture_probe ./posture_probe

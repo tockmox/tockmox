@@ -43,11 +43,15 @@ Tag the image with the Tockmox version it was built from, so the image and the
 charts move together and the running version the UI reports is the one you
 deployed. Any OCI builder that reads a Dockerfile works (`podman build`,
 `buildah bud`, a CI job in your own forge); nothing in the build reaches a
-Tockmox service. The build does fetch the Python packages in
+Tockmox service. The build does fetch the Python packages pinned in
 `tockmox-ui/requirements.txt` from your package index, so a dark site needs a
 mirror of that index or an image built on a connected machine and carried in.
+That file is a lockfile compiled from `tockmox-ui/requirements.in` with a hash
+for every package file, and the build installs it with `--require-hashes`: a
+mirror has to serve the same files PyPI does, because pip refuses any file whose
+hash the lockfile does not list.
 
-The image is built on `python:3.14-alpine`. It was `python:3.12-slim` until
+The image is built on `python:3.15-alpine`, pinned by digest in the Dockerfile. It was `python:3.12-slim` until
 0.8.0-rc1, and that base scanned 44 High findings in Debian packages with no fix
 available, so a registry that refuses images with High findings (Harbor's
 "prevent vulnerable images") refused it. The image carries no pip either: pip

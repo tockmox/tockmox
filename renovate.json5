@@ -89,11 +89,15 @@
   // it is, which is the prompt.
   mise: { enabled: false },
 
-  // The gates' Python lockfile (tools/requirements-gates.txt, hashed) is
-  // regenerated from tools/requirements-gates.in with the uv command written at
-  // the top of the lockfile.
+  // The two Python lockfiles, both hashed, each regenerated from the .in file
+  // beside it with the uv command written at the top of the lockfile: the
+  // gates' (tools/requirements-gates.txt) and the Tockmox UI image's
+  // (tockmox-ui/requirements.txt, installed with --require-hashes).
   "pip-compile": {
-    managerFilePatterns: ["/^tools/requirements-gates\\.txt$/"],
+    managerFilePatterns: [
+      "/^tools/requirements-gates\\.txt$/",
+      "/^tockmox-ui/requirements\\.txt$/",
+    ],
   },
 
   customManagers: [

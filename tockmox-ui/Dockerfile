@@ -10,9 +10,10 @@
 # docs/administration/tockmox-ui.md has the build, the push and the upgrade.
 # Alpine, not slim (TM-1012): python:3.12-slim scanned 44 unfixed High (Debian trixie base packages, none
 # fixable), and a registry that blocks pulls at High (Harbor's prevent_vul, a common setting) refuses the image.
-# The UI's wheels (cryptography, pydantic-core) ship musllinux builds, so nothing
-# compiles. /etc/ssl/certs/ca-certificates.crt, which the chart's trust-bundle initContainer reads, is present.
-FROM python:3.15-alpine
+# The UI's packages ship musllinux wheels, except PyYAML, which has no cp315 wheel yet and installs from its
+# sdist. /etc/ssl/certs/ca-certificates.crt, which the chart's trust-bundle initContainer reads, is present.
+# The base is pinned by digest (the multi-arch index) as well as by tag; Renovate moves both together.
+FROM python:3.15-alpine@sha256:20a82dbc2783112ddb91d1534603f802d222a3e63e593cd002eb2ac534e70211
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /srv
 COPY tockmox-ui/requirements.txt .
@@ -21,8 +22,11 @@ COPY tockmox-ui/requirements.txt .
 # (pip 26.2.1) those scanned 4 High (urllib3 2.7.0 twice, msgpack 1.1.2, setuptools 70.3.0; fixed upstream,
 # not in pip's copies), and a registry that refuses High refused the image (TM-1012, the reference site's
 # first rc1 build, 2026-10-11). `apk upgrade` takes the base's pending Alpine fixes (zlib, Medium, that day).
+# requirements.txt is a lockfile compiled from requirements.in with a hash for every file, so pip installs
+# exactly the versions it names and refuses any file whose hash it does not list; --no-deps because the
+# lockfile already names every dependency.
 RUN apk upgrade --no-cache \
- && pip install --no-cache-dir -r requirements.txt \
+ && pip install --no-cache-dir --require-hashes --no-deps -r requirements.txt \
  && pip uninstall -y pip \
  && rm -rf /usr/local/lib/python3.*/ensurepip
 COPY tockmox-ui/app ./app

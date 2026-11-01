@@ -587,6 +587,21 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Changed
 
+- **The Tockmox UI image installs its Python packages from a hashed lockfile, and
+  both Python base images are pinned by digest.** `tockmox-ui/requirements.txt`
+  is now a lockfile compiled with uv from the new `tockmox-ui/requirements.in`
+  (which keeps the version floors), with a SHA-256 for every package file, and
+  the Dockerfile installs it with `--require-hashes --no-deps`: a build installs
+  exactly the versions the tag names and refuses any file whose hash is not
+  listed. Until now the file carried floors only, so a build took whatever the
+  package index served that day, and scanners that read a floor as the
+  installed version reported advisories the built image did not carry.
+  `tockmox-ui/Dockerfile` and `addons/posture-probe/Dockerfile` pin
+  `python:3.15-alpine` by its multi-arch digest; Renovate moves the tag, the
+  digest and the lockfile. A package mirror for a dark site must serve the same
+  files as PyPI. Nothing to do on upgrade. docs/administration/tockmox-ui.md,
+  "Build the image".
+
 - **Platform Management groups what waits on you, filters its cases, and shows the organization one team at a time (TM-1308, epic TM-1303).** On the Overview, the cases waiting on you are grouped by what fired and what they ask, with the hosts counted: thirteen cases for one alert on six hosts are one row, "13 on 6 hosts", which opens the Cases page filtered to exactly those thirteen; a case with no alert name, or alone in its group, stays its own row. The Cases page takes `team`, `state`, `wait`, `alert` and `ask` filters (a form on the page, and the links from the Overview), says how many of how many it shows, and shows nothing, never everything, for a value it does not know. The teams' tables move from the Overview to a new **Organization** page in the Platform rail (`/platform/organization?team=<id>`): one team at a time, active roles in a table, roles not started folded to one line; the Overview keeps one line per team. **Capabilities** in the rail carries a warning when a switch and what is deployed disagree, and Unknown when Argo CD does not answer. Release notes on About and Platform › Updates render through one macro. Nothing to do on upgrade. docs/administration/platform-management.md, "The pages".
 
 - **Home answers "is it working?" in one sentence from the stack, and Status, AI and Platform draw trends (TM-1306, TM-1307, TM-1310, epic TM-1303).** For administrators, Home opens with **Everything is running.** or the worst part named with what is wrong, up to two chips that open those parts on Status, and the stack strip: one cell per band with its state and how many parts are OK, linking to that band. Members see the verdict as before. Status, AI › Models, AI › Inference nodes and Platform Management draw small trend panels (Status: the last 24 hours of alerts firing, scrape targets up, consoles reachable, the busiest node's memory, the fullest volume, the next certificate expiry; AI: calls, latency, errors and hosted spend through the gateway, engines healthy and restarting per node; Platform: days since a passing restore drill, alerts), and a part's drawer shows its own last 7 days. The panels are drawn by the UI as SVG with a text alternative, not embedded, so no Grafana, CSP or NetworkPolicy setting changes; each title links to its Grafana board. A query that fails, returns nothing or has gone stale reads **Unknown** with the reason, never a flat line at zero. The expressions live once, in `app/panels.yaml`; the new **Tockmox / Status** board (uid `tockmox-status`) is generated from the same file by `tools/gen-dashboard-status.py`, and a gate in `check-all.sh` keeps them equal. Prometheus is read once a minute per panel at most. Tockmox the gnome now appears at a few moments, one per screen (Home's verdict, the header of a page with nothing wrong, About, sign-in, and a new page for an address that does not exist), as decoration with `alt=""`. Nothing to do on upgrade. docs/administration/tockmox-ui.md, "Home", "Trends" and "The mascot".

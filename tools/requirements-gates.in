@@ -15,4 +15,4 @@ pytest
 # tools/check-namespace-guard.sh evaluates the guard's CEL with this exact release.
 cel-python==0.1.5
 # The Tockmox UI's tests and tools/check-ai-node-render.sh import the UI's packages.
--r ../tockmox-ui/requirements.txt
+-r ../tockmox-ui/requirements.in
