@@ -1,0 +1,371 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# What each gate reads, so a pull request runs only the gates its changes can affect (TM-1288).
+# tools/gate-plan.py applies it; check-all.sh --changed-from REF asks for it; a run with no
+# arguments, every push to main and the nightly run ignore it and run every gate.
+#
+# THE RULES, in the order they apply:
+#   1. A changed path under `always_full` runs every gate.
+#   2. A gate listed under `gates` runs when a changed path matches one of its inputs.
+#   3. A gate NOT listed runs on every pull request. Listing one is an opt-in to skipping it.
+#
+# An input is a path glob: `*` stays inside a directory, `**` crosses them, a trailing `/` means
+# everything under that directory, and `@render` stands for the render class below. Declare too
+# much rather than too little: an extra input costs a few seconds on some pull requests, a missing
+# one lets a change through that the nightly full run then catches a day late.
+#
+# WHAT IS LISTED. The gates that cost five seconds or more in the 2026-10-30 measurement (most of
+# check-all's time); every quick gate stays unlisted and always runs. Each list is the gate's script,
+# the files its code names (data files, fixtures, the pages it executes or reads), and @render when
+# it renders the charts. tools/lib/ is under always_full, so a shared helper is never missed.
+#
+# KEEPING IT TRUE. `check-all.sh` runs `gate-plan.py check-inputs`: a key that no longer names a
+# gate, a class nobody uses and an input that matches no tracked file are each a failure, so a
+# renamed gate or a moved fixture cannot quietly narrow a selection. When you give a gate a new
+# input (a fixture, a docs page it reads, a data file), add it here in the same change.
+
+always_full:
+  - tools/check-all.sh
+  - tools/gate-plan.py
+  - tools/gate-inputs.yaml
+  - tools/lib/
+  - tools/toolchain.sh
+  - tools/helm-deps.sh
+  - tools/test-helm-deps.sh
+  - tools/requirements-gates.in
+  - tools/requirements-gates.txt
+  - mise.toml
+  - mise.lock
+  - .github/workflows/check-all.yaml
+
+classes:
+  # Everything a helm render of a layer reads: the charts, CI's values and overlays, the profiles,
+  # and the installer that writes a site's values.
+  render:
+    - charts/
+    - ci/
+    - profiles/
+    - install/
+
+gates:
+  # 494 s
+  tools/check-upgrade-safety.sh --selftest:
+    - '@render'
+    - docs/deployment/upgrade.md
+    - tests/installer/lib/shims/kubectl
+    - tools/check-upgrade-safety.sh
+    - tools/publish-docs.sh
+  # 252 s
+  tools/check-sa-tokens.sh --selftest:
+    - '@render'
+    - tests/installer/lib/shims/kubectl
+    - tests/rules/tockmox-ui.yaml
+    - tools/check-sa-tokens.sh
+  # 212 s
+  tools/check-forward-auth.sh --selftest:
+    - '@render'
+    - tools/check-forward-auth.sh
+  # 135 s
+  tools/check-coredns-ha.sh --selftest:
+    - '@render'
+    - tools/check-coredns-ha.sh
+  # 130 s
+  tools/check-cloud-egress.sh --selftest:
+    - '@render'
+    - tools/check-cloud-egress.sh
+  # 97 s
+  tools/check-storage-policy.sh:
+    - '@render'
+    - tools/check-storage-policy.sh
+  # 76 s
+  tools/check-namespace-guard.sh --selftest:
+    - '@render'
+    - tools/check-namespace-guard.sh
+  # 60 s
+  tools/check-upgrade-safety.sh:
+    - '@render'
+    - docs/deployment/upgrade.md
+    - tests/installer/lib/shims/kubectl
+    - tools/check-upgrade-safety.sh
+    - tools/publish-docs.sh
+  # 59 s
+  tools/check-platform-seams.sh --selftest:
+    - '@render'
+    - tools/check-platform-seams.sh
+  # 56 s
+  tools/check-tockmox-ui-tests.sh:
+    - '@render'
+    - tockmox-ui/
+    - ui-kit/
+    - ai-node/
+    - tools/
+    - CHANGELOG.md
+  # 56 s
+  tools/check-memory-limits.sh --selftest:
+    - '@render'
+    - tools/check-memory-limits.sh
+    - tools/memory-limits-residue.txt
+  # 52 s
+  tools/check-notify-and-drill.sh --selftest:
+    - '@render'
+    - docs/operations/monitoring.md
+    - tests/installer/lib/shims/kubectl
+    - tools/check-notify-and-drill.sh
+  # 52 s
+  tools/check-policy-selects.sh:
+    - '@render'
+    - tools/check-policy-selects.sh
+    - tools/policy-selects-exceptions.txt
+  # 52 s
+  tools/check-capabilities.sh:
+    - '@render'
+    - tools/check-capabilities.sh
+  # 47 s
+  tools/check-immutable-fields.sh:
+    - '@render'
+    - CHANGELOG.md
+    - addons/
+    - docs/administration/values-contract.md
+    - tools/check-immutable-fields.sh
+    - tools/check-values-tiers.sh
+    - tools/immutable-fields-allow.txt
+  # 46 s
+  tools/check-posture-probe.sh --selftest:
+    - '@render'
+    - addons/posture-probe/
+    - tools/check-posture-probe.sh
+  # 40 s
+  tools/gen-images.sh --check:
+    - '@render'
+    - images.txt
+    - tools/gen-images.sh
+  # 39 s
+  tools/check-ingress-tls.sh:
+    - '@render'
+    - tools/check-ingress-tls.sh
+  # 38 s
+  tools/check-namespace-guard.sh:
+    - '@render'
+    - tools/check-namespace-guard.sh
+  # 36 s
+  tools/check-platform-seams.sh:
+    - '@render'
+    - tools/check-platform-seams.sh
+  # 35 s
+  tools/check-cnpg-operator-reach.sh:
+    - '@render'
+    - tools/check-cnpg-operator-reach.sh
+  # 35 s
+  tools/check-rbac-aggregation-allowlist.sh:
+    - '@render'
+    - tools/check-rbac-aggregation-allowlist.sh
+  # 34 s
+  tools/check-cnpg-netpol.sh:
+    - '@render'
+    - tools/check-cnpg-netpol.sh
+  # 34 s
+  tools/check-netpol-selectors.sh:
+    - '@render'
+    - tools/check-netpol-selectors.sh
+  # 34 s
+  tests/installer/run.sh:
+    - '@render'
+    - tests/installer/
+    - tests/installer/fixtures/interactive-answers.txt
+    - tests/installer/fixtures/parity.yaml
+    - tests/installer/lib/shims/kubectl
+    - tests/installer/run.sh
+    - tools/publish-docs.sh
+  # 33 s
+  tools/check-forward-auth.sh:
+    - '@render'
+    - tools/check-forward-auth.sh
+  # 28 s
+  tools/check-loki-ha.sh --selftest:
+    - '@render'
+    - tools/check-loki-ha.sh
+  # 28 s
+  tools/check-values-typos.sh --selftest:
+    - '@render'
+    - tools/check-values-typos.sh
+  # 26 s
+  tools/check-site-follows-product.sh --selftest:
+    - '@render'
+    - tools/check-site-follows-product.sh
+  # 26 s
+  tools/check-sa-tokens.sh:
+    - '@render'
+    - tests/installer/lib/shims/kubectl
+    - tests/rules/tockmox-ui.yaml
+    - tools/check-sa-tokens.sh
+  # 23 s
+  tools/check-pod-security.sh:
+    - '@render'
+    - tools/check-pod-security.sh
+  # 22 s
+  tools/check-immutable-fields.sh --selftest:
+    - '@render'
+    - CHANGELOG.md
+    - addons/
+    - docs/administration/values-contract.md
+    - tools/check-immutable-fields.sh
+    - tools/check-values-tiers.sh
+    - tools/immutable-fields-allow.txt
+  # 20 s
+  tools/check-capability-monitors.sh --selftest:
+    - '@render'
+    - tools/check-capability-monitors.sh
+  # 19 s
+  tools/check-gateway-default.sh --selftest:
+    - '@render'
+    - docs/administration/secrets.md
+    - tests/installer/lib/shims/kubectl
+    - tests/installer/lib/shims/kubeseal
+    - tools/check-gateway-default.sh
+    - tools/mint-secrets.sh
+  # 18 s
+  tools/check-capability-monitors.sh:
+    - '@render'
+    - tools/check-capability-monitors.sh
+  # 18 s
+  tools/check-cloud-egress.sh:
+    - '@render'
+    - tools/check-cloud-egress.sh
+  # 18 s
+  tools/check-policy-selects.sh --selftest:
+    - '@render'
+    - tools/check-policy-selects.sh
+    - tools/policy-selects-exceptions.txt
+  # 15 s
+  tools/check-resilient-profile.sh --selftest:
+    - '@render'
+    - tools/check-resilient-profile.sh
+  # 14 s
+  tools/check-notify-and-drill.sh:
+    - '@render'
+    - docs/operations/monitoring.md
+    - tests/installer/lib/shims/kubectl
+    - tools/check-notify-and-drill.sh
+  # 14 s
+  tools/check-inference-nodes.sh:
+    - '@render'
+    - docs/administration/external-integrations.md
+    - docs/administration/inference-nodes.md
+    - docs/administration/model-lifecycle.md
+    - docs/administration/tockmox-ui.md
+    - docs/deployment/install.md
+    - docs/deployment/upgrade.md
+    - tests/golden/
+    - tests/golden/inference-nodes.yaml
+    - tests/rules/tockmox-ui.yaml
+    - tockmox-ui/app/nodes.py
+    - tools/check-alert-rules.sh
+    - tools/check-inference-nodes.sh
+    - tools/mint-secrets.sh
+  # 14 s
+  tools/check-garage-block-size.sh:
+    - '@render'
+    - tools/check-garage-block-size.sh
+  # 14 s
+  tools/check-kured-gate.sh --selftest:
+    - '@render'
+    - docs/operations/monitoring.md
+    - tools/check-kured-gate.sh
+    - tools/kured-gate.txt
+  # 13 s
+  tools/check-resilient-profile.sh:
+    - '@render'
+    - tools/check-resilient-profile.sh
+  # 12 s
+  tools/check-addon-manifest.sh --selftest:
+    - '@render'
+    - addons/
+    - addons/README.md
+    - addons/posture-probe/
+    - docs/administration/posture-probe.md
+    - tests/executed-docs/README.md
+    - tests/installer/README.md
+    - tools/check-addon-manifest.sh
+    - tools/check-posture-probe.sh
+  # 11 s
+  tools/check-identity-seams.sh --selftest:
+    - '@render'
+    - docs/administration/secrets.md
+    - tests/installer/lib/shims/kubectl
+    - tests/installer/lib/shims/kubeseal
+    - tools/check-identity-seams.sh
+    - tools/mint-secrets.sh
+  # 10 s
+  tools/check-memory-limits.sh:
+    - '@render'
+    - tools/check-memory-limits.sh
+    - tools/memory-limits-residue.txt
+  # 10 s
+  tools/check-coredns-ha.sh:
+    - '@render'
+    - tools/check-coredns-ha.sh
+  # 10 s
+  tools/check-identity-seams.sh:
+    - '@render'
+    - docs/administration/secrets.md
+    - tests/installer/lib/shims/kubectl
+    - tests/installer/lib/shims/kubeseal
+    - tools/check-identity-seams.sh
+    - tools/mint-secrets.sh
+  # 10 s
+  tools/check-values-typos.sh:
+    - '@render'
+    - tools/check-values-typos.sh
+  # 10 s
+  tools/check-kubeconform.sh:
+    - '@render'
+    - tools/check-kubeconform.sh
+  # 7 s
+  tests/executed-docs/pages-no-cluster.sh:
+    - '@render'
+    - docs/administration/capabilities.md
+    - docs/administration/configuration.md
+    - docs/administration/customising.md
+    - docs/administration/platform-management.md
+    - docs/administration/values-contract.md
+    - docs/deployment/verify.md
+    - sbom.cdx.json
+    - tests/executed-docs/
+    - tests/executed-docs/pages-no-cluster.sh
+    - tests/installer/lib/shims/kubectl
+  # 7 s
+  tools/check-immutable-fields.sh --perturb-images:
+    - '@render'
+    - CHANGELOG.md
+    - addons/
+    - docs/administration/values-contract.md
+    - tools/check-immutable-fields.sh
+    - tools/check-values-tiers.sh
+    - tools/immutable-fields-allow.txt
+  # 7 s
+  tools/check-monitor-targets.sh --selftest:
+    - '@render'
+    - tools/check-monitor-targets.sh
+  # 7 s
+  tools/check-no-ghost-policies.sh:
+    - '@render'
+    - tools/check-no-ghost-policies.sh
+  # 6 s
+  tools/check-gateway-default.sh:
+    - '@render'
+    - docs/administration/secrets.md
+    - tests/installer/lib/shims/kubectl
+    - tests/installer/lib/shims/kubeseal
+    - tools/check-gateway-default.sh
+    - tools/mint-secrets.sh
+  # 5 s
+  tools/check-airgap.sh:
+    - '@render'
+    - tools/check-airgap.sh
+  # 5 s
+  tools/check-loki-ha.sh:
+    - '@render'
+    - tools/check-loki-ha.sh
+  # 7 s
+  "inline:helm-lint-all-layer-charts-both-value-sets":
+    - '@render'

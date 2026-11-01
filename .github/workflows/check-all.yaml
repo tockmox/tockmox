@@ -23,6 +23,14 @@
 # check-all.sh then refuses to start unless the tools on PATH match mise.toml.
 # Gates needing a tool installed nowhere here (promtool, gitleaks, the MkDocs
 # venv) report SKIPPED, as on a laptop; ci.yaml runs those.
+#
+# SPLIT AND SCOPED (TM-1288, TM-1289). The gates run on three shards at once, balanced by measured
+# seconds, and a pull request runs only the gates whose declared inputs it changed (plus every gate
+# that declares none; tools/gate-inputs.yaml). A push to main or release-*, the nightly schedule
+# and a manual run run every gate. The job named check-all-linux, the one required check, waits for
+# the shards and passes only when all of them passed and every gate was reported exactly once.
+# The vendored subcharts are cached on the Chart.lock files and pip's downloads on the gates'
+# lockfile (TM-1286); a miss is a cold run, never a different one.
 name: check-all
 on:
   pull_request:
@@ -31,6 +39,10 @@ on:
     # tagged on a release-branch commit, and a pull_request run tests a merge
     # commit, not that one.
     branches: [main, 'release-*']
+  schedule:
+    # Nightly, every gate: what catches an input a declaration in tools/gate-inputs.yaml forgot.
+    - cron: '41 8 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -43,22 +55,29 @@ env:
   # is the prompt to re-measure it.
   SHELLCHECK_VERSION: "0.11.0"
   SHELLCHECK_SHA256: "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"  # shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz
+  CHECK_ALL_SHARDS: "3"
 
 concurrency:
   group: check-all-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  check-all-linux:
+  check-all-shard:
+    name: check-all (shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # Three entries, matching CHECK_ALL_SHARDS above.
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # check-values-tiers and check-immutable-fields compare against the
-          # previous release tag; without tags they report that half skipped.
+          # previous release tag; without tags they report that half skipped. The
+          # pull request's own change is HEAD^1..HEAD, which needs both parents.
           fetch-depth: 0
-
       - name: read the tool pins from mise.toml
         shell: bash -euo pipefail {0}
         run: |
@@ -66,11 +85,9 @@ jobs:
           v="$(sed -n 's/^  KUBECONFORM_SHA256: "\([^"]*\)".*/\1/p' .github/workflows/ci.yaml | head -1)"
           [ -n "$v" ] || { echo "::error::KUBECONFORM_SHA256 not found in ci.yaml's env block"; exit 1; }
           echo "KUBECONFORM_SHA256=$v" | tee -a "$GITHUB_ENV"
-
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: ${{ env.HELM_VERSION }}
-
       - name: kubeconform and jq
         shell: bash -euo pipefail {0}
         run: |
@@ -79,12 +96,18 @@ jobs:
           tar -xzf kubeconform.tar.gz kubeconform && sudo install -m755 kubeconform /usr/local/bin/
           rm -f kubeconform kubeconform.tar.gz
           command -v jq >/dev/null || sudo apt-get install -y -q jq
-
+      # The vendored subcharts, keyed on every Chart.lock: a hit makes helm-deps.sh offline (it checks
+      # each subchart against its Chart.lock version before trusting it); a miss fetches as before.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: charts/*/charts
+          key: subcharts-${{ hashFiles('charts/*/Chart.lock') }}
+      # pip's download cache, keyed on the gates' lockfile. --require-hashes still checks every file.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pip
+          key: pip-gates-${{ runner.os }}-${{ hashFiles('tools/requirements-gates.txt') }}
       - name: the gates' Python packages, from the lockfile
-        # PyYAML, cel-python (tools/check-namespace-guard.sh), jsonschema,
-        # pytest and the Tockmox UI's packages, at the versions and hashes in
-        # tools/requirements-gates.txt. The venv goes first on PATH, so every
-        # gate's python3 is this one.
         shell: bash -euo pipefail {0}
         run: |
           python3 -m venv build/gates-venv
@@ -94,12 +117,50 @@ jobs:
           echo "helm:        $(helm version --short)"
           echo "kubeconform: $(kubeconform -v)"
           echo "python:      $(build/gates-venv/bin/python --version) PyYAML $(build/gates-venv/bin/python -c 'import yaml; print(yaml.__version__)')"
-
       - name: every static gate, on Linux
         shell: bash -euo pipefail {0}
         env:
           TOCKMOX_UI_PYTHON: build/gates-venv/bin/python
-        run: bash tools/check-all.sh
+          CHECK_ALL_SHARD: ${{ matrix.shard }}/3
+          CHECK_ALL_RESULTS: build/check-all-results-${{ matrix.shard }}.tsv
+        run: |
+          # A pull request's checkout is the merge commit: HEAD^1 is the base it merges into, so
+          # HEAD^1..HEAD is exactly the pull request's change. Anything else runs every gate.
+          args=()
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] && git rev-parse -q --verify HEAD^2 >/dev/null; then
+            args=(--changed-from HEAD^1)
+          fi
+          bash tools/check-all.sh "${args[@]}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: check-all-results-${{ matrix.shard }}
+          path: build/check-all-results-${{ matrix.shard }}.tsv
+          retention-days: 14
+
+  # The required check. Its name is what main's ruleset requires, so it stays check-all-linux.
+  check-all-linux:
+    needs: [check-all-shard]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: check-all-results-*
+          path: build/results
+          merge-multiple: true
+      - name: every shard passed and every gate was reported once
+        shell: bash -euo pipefail {0}
+        env:
+          SHARDS_RESULT: ${{ needs.check-all-shard.result }}
+        run: |
+          bash tools/check-all.sh --list > build/gates.tsv
+          rc=0
+          python3 tools/gate-plan.py aggregate --list build/gates.tsv build/results/*.tsv || rc=$?
+          [ "$SHARDS_RESULT" = success ] || { echo "::error::the shards finished as: $SHARDS_RESULT"; rc=1; }
+          exit "$rc"
 
   shellcheck-advisory:
     # ADVISORY (TM-0847): reports what a change ADDS against

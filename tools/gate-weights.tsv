@@ -1,0 +1,127 @@
+# Measured seconds per gate key (median of 10 check-all-linux PR runs, 2026-10-30), for
+# tools/gate-plan.py's shard balance. Data, not a gate: a stale number only makes the shards
+# less even, and a gate with no line weighs 10 s. Refresh from full runs' results:
+#   tools/gate-plan.py weights build/check-all-results.tsv... > tools/gate-weights.tsv
+inline:every-documented-block-is-accounted-for	0
+inline:every-layer-renders-against-ci-values-site-minimal-yaml	3
+inline:every-tool-is-executable	0
+inline:helm-lint-all-layer-charts-both-value-sets	7
+tests/agent-egress/render.sh	2
+tests/content-logging/render.sh	2
+tests/executed-docs/pages-no-cluster.sh	7
+tests/executed-docs/pages-no-cluster.sh --selftest	4
+tests/installer/run.sh	34
+tests/knowledge/render.sh	4
+tools/check-action-pins.sh	0
+tools/check-action-pins.sh --selftest	1
+tools/check-addon-manifest.sh	1
+tools/check-addon-manifest.sh --selftest	12
+tools/check-ai-node-render.sh	1
+tools/check-ai-node-render.sh --selftest	3
+tools/check-ai-node.sh	0
+tools/check-ai-node.sh --selftest	0
+tools/check-airgap-manifest.sh	0
+tools/check-airgap-manifest.sh --selftest	3
+tools/check-airgap.sh	5
+tools/check-alert-rules.sh --selftest	3
+tools/check-capabilities.sh	52
+tools/check-capabilities.sh --selftest	3
+tools/check-capability-monitors.sh	18.5
+tools/check-capability-monitors.sh --selftest	20
+tools/check-cloud-egress.sh	18
+tools/check-cloud-egress.sh --selftest	130.5
+tools/check-cnpg-netpol.sh	34.5
+tools/check-cnpg-operator-reach.sh	35
+tools/check-coredns-ha.sh	10
+tools/check-coredns-ha.sh --selftest	135
+tools/check-dashboard-panels.sh	0
+tools/check-doc-claims.sh	4
+tools/check-doc-claims.sh --selftest	1
+tools/check-docs-links.sh	0
+tools/check-docs-offline.sh --selftest	0
+tools/check-docs-site-contents.sh --selftest	0
+tools/check-docs-style.sh	0
+tools/check-forward-auth.sh	33
+tools/check-forward-auth.sh --selftest	212.5
+tools/check-frontmatter.sh	0
+tools/check-garage-block-size.sh	13.5
+tools/check-gateway-default.sh	5.5
+tools/check-gateway-default.sh --selftest	19
+tools/check-harness-context.sh	0
+tools/check-harness-context.sh --selftest	1
+tools/check-health-watch.sh	3
+tools/check-identity-seams.sh	10
+tools/check-identity-seams.sh --selftest	11
+tools/check-immutable-fields.sh	47
+tools/check-immutable-fields.sh --perturb-images	7
+tools/check-immutable-fields.sh --selftest	22.5
+tools/check-inference-nodes.sh	14
+tools/check-ingress-tls.sh	39
+tools/check-kubeconform.sh	9.5
+tools/check-kubeconform.sh --selftest	1
+tools/check-kured-gate.sh	4
+tools/check-kured-gate.sh --selftest	13.5
+tools/check-lan-cidr-overlap.sh	2
+tools/check-litellm-compromise.sh	2
+tools/check-litellm-compromise.sh --selftest	2
+tools/check-litellm-hooks.sh	2
+tools/check-loki-ha.sh	5
+tools/check-loki-ha.sh --selftest	27.5
+tools/check-memory-limits.sh	10.5
+tools/check-memory-limits.sh --selftest	56
+tools/check-model-jobs-reach.sh	1
+tools/check-monitor-targets.sh	4
+tools/check-monitor-targets.sh --selftest	7
+tools/check-namespace-guard.sh	38
+tools/check-namespace-guard.sh --selftest	76.5
+tools/check-netpol-selectors.sh	34.5
+tools/check-no-ghost-policies.sh	7
+tools/check-no-published-images.sh	0
+tools/check-no-published-images.sh --selftest	1
+tools/check-no-site-specifics.sh	0
+tools/check-notify-and-drill.sh	14.5
+tools/check-notify-and-drill.sh --selftest	52.5
+tools/check-pasteable-blocks.sh	1
+tools/check-pipe-grep-q.py	1
+tools/check-pipe-grep-q.py --selftest	0
+tools/check-platform-seams.sh	35.5
+tools/check-platform-seams.sh --selftest	59
+tools/check-pod-security.sh	23
+tools/check-policy-gate.sh	4
+tools/check-policy-selects.sh	52.5
+tools/check-policy-selects.sh --selftest	17.5
+tools/check-posture-probe.sh	3
+tools/check-posture-probe.sh --selftest	45.5
+tools/check-rbac-aggregation-allowlist.sh	35
+tools/check-release-bars.sh	0
+tools/check-release-bars.sh --selftest	1
+tools/check-resilient-profile.sh	13
+tools/check-resilient-profile.sh --selftest	15
+tools/check-sa-tokens.sh	26
+tools/check-sa-tokens.sh --selftest	252.5
+tools/check-site-follows-product.sh	3.5
+tools/check-site-follows-product.sh --selftest	26.5
+tools/check-sso-bindings.sh	1
+tools/check-storage-policy.sh	97
+tools/check-tockmox-ui-tests.sh	56.5
+tools/check-trust-wiring.sh	4
+tools/check-upgrade-safety.sh	60.5
+tools/check-upgrade-safety.sh --selftest	494
+tools/check-values-duplicate-keys.sh	0
+tools/check-values-tiers.sh	2
+tools/check-values-typos.sh	10
+tools/check-values-typos.sh --selftest	27.5
+tools/gen-dashboard-overview.py --check	0
+tools/gen-docs-index.sh --check	0
+tools/gen-docs-index.sh --selftest	1
+tools/gen-images.sh --check	40
+tools/gen-platform-catalog-doc.py --check	0
+tools/gen-sbom.sh --check	0
+tools/helm-deps.sh --selftest	1
+tools/lib/extract-images.sh --selftest	0
+tools/lib/tool-runs.sh --selftest	0
+tools/mint-secrets.sh --selftest	0
+tools/publish-docs.sh --selftest	1.5
+tools/render-counts.sh	1.5
+tools/render-counts.sh --selftest	1
+tools/stamp-docs.sh --check	0

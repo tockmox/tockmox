@@ -198,63 +198,82 @@ PY
 }
 
 if [ "${1:-}" = "--selftest" ]; then
-  out=$(bash tools/check-upgrade-safety.sh --mutate-presync 2>&1) && { echo "selftest FAIL: F1 passed with the migrations Job as a PreSync hook"; exit 1; }
+  # Every mutant is its own process rendering into its own mktemp copy, so they all run at once
+  # first (SELFTEST_JOBS at a time, default the CPU count; 1 runs them one by one, as before), and
+  # the judging below reads their results in the order it always has. A mutant missing from this
+  # list still runs, on demand, inside mut(): the list only decides what is precomputed.
+  sdir=$(mktemp -d); trap 'rm -rf "$tmp" "$sdir"' EXIT
+  sjobs="${SELFTEST_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)}"
+  case "$sjobs" in ''|*[!0-9]*|0) sjobs=1 ;; esac
+  mut() {  # mut --mutate-X: print that mutant's output and return its exit status
+    if [ -e "$sdir/$1.rc" ]; then cat "$sdir/$1.out"; return "$(cat "$sdir/$1.rc")"; fi
+    bash tools/check-upgrade-safety.sh "$1" 2>&1
+  }
+  if [ "$sjobs" -gt 1 ]; then
+    for m in presync hashname nohook wave guard seam ub-hooksync ub-rolesecrets ub-nowait ub-failok ub-alwaysbackup ub-failopen-cluster ub-failopen-workload ub-unknownimage ub-wrongcluster ub-createfail sync cron default placeholder rulewave webhookphase failpolicy patchphase ingresswave ns-missing ns-twice; do
+      while [ "$(jobs -rp | wc -l | tr -d ' ')" -ge "$sjobs" ]; do sleep 0.2; done
+      ( set +e; bash tools/check-upgrade-safety.sh "--mutate-$m" > "$sdir/--mutate-$m.out" 2>&1
+        echo "$?" > "$sdir/--mutate-$m.rc.tmp"; mv "$sdir/--mutate-$m.rc.tmp" "$sdir/--mutate-$m.rc" ) &
+    done
+    wait
+  fi
+  out=$(mut --mutate-presync) && { echo "selftest FAIL: F1 passed with the migrations Job as a PreSync hook"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F1: .*not a Sync hook' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F1 assertion goes red when the migrations Job is a PreSync hook (the CNPG deadlock)"
-  out=$(bash tools/check-upgrade-safety.sh --mutate-hashname 2>&1) && { echo "selftest FAIL: F1 passed with a hash-named Job"; exit 1; }
+  out=$(mut --mutate-hashname) && { echo "selftest FAIL: F1 passed with a hash-named Job"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F1: .*named after a hash' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F1 assertion goes red when the migrations Job is hash-named again"
-  out=$(bash tools/check-upgrade-safety.sh --mutate-nohook 2>&1) && { echo "selftest FAIL: F1 passed with the hook annotations gone"; exit 1; }
+  out=$(mut --mutate-nohook) && { echo "selftest FAIL: F1 passed with the hook annotations gone"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F1: .*not a Sync hook' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F1 assertion goes red when the Job carries no hook (it would wedge on the next image bump)"
-  out=$(bash tools/check-upgrade-safety.sh --mutate-wave 2>&1) && { echo "selftest FAIL: F1 passed with the CNPG Cluster in an earlier wave than the Job"; exit 1; }
+  out=$(mut --mutate-wave) && { echo "selftest FAIL: F1 passed with the CNPG Cluster in an earlier wave than the Job"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F1: .*sync wave' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F1 assertion goes red when the Cluster and the Job are not in one wave"
-  out=$(bash tools/check-upgrade-safety.sh --mutate-guard 2>&1) && { echo "selftest FAIL: F1 passed with the migrationJob.enabled refusal removed"; exit 1; }
+  out=$(mut --mutate-guard) && { echo "selftest FAIL: F1 passed with the migrationJob.enabled refusal removed"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F1: .*enabled=false (no migration at all) renders' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F1 assertion goes red when a render with no migrations Job is accepted"
-  out=$(bash tools/check-upgrade-safety.sh --mutate-seam 2>&1) && { echo "selftest FAIL: F1b passed with a subchart that drops jobAnnotations"; exit 1; }
+  out=$(mut --mutate-seam) && { echo "selftest FAIL: F1b passed with a subchart that drops jobAnnotations"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F1b: ' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F1b assertion goes red when the subchart no longer puts jobAnnotations on the Job"
   for ub in "ub-hooksync:F7: .*is not a PreSync hook" "ub-rolesecrets:F7: .*Role" "ub-nowait:F7: .*completed" "ub-failok:F7: .*failed Backup" \
             "ub-alwaysbackup:F7: .*no version change" "ub-failopen-cluster:F7: .*cannot be asked" "ub-failopen-workload:F7: .*cannot be asked" \
             "ub-unknownimage:F7: .*cannot be read" "ub-wrongcluster:F7: .*wrong Cluster" "ub-createfail:F7: .*refused"; do
     name="${ub%%:*}"; want="${ub#*:}"
-    out=$(bash tools/check-upgrade-safety.sh "--mutate-$name" 2>&1) && { echo "selftest FAIL: F7 passed on the $name mutant"; exit 1; }
+    out=$(mut "--mutate-$name") && { echo "selftest FAIL: F7 passed on the $name mutant"; exit 1; }
     printf '%s' "$out" | grep -E "FAIL $want" >/dev/null || { echo "selftest FAIL: $name: wrong message: $out"; exit 1; }
     echo "selftest ok: the F7 assertions go red on the $name mutant"
   done
-  out=$(bash tools/check-upgrade-safety.sh --mutate-sync 2>&1) && { echo "selftest FAIL: F3b passed with garage.web.syncAtInstall off"; exit 1; }
+  out=$(mut --mutate-sync) && { echo "selftest FAIL: F3b passed with garage.web.syncAtInstall off"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F3b' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F3b assertion goes red when the install-time sync is off"
-  out=$(bash tools/check-upgrade-safety.sh --mutate-cron 2>&1) && { echo "selftest FAIL: F3 passed with concurrencyPolicy Allow"; exit 1; }
+  out=$(mut --mutate-cron) && { echo "selftest FAIL: F3 passed with concurrencyPolicy Allow"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F3: .*concurrencyPolicy' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F3 assertion goes red when a sync CronJob allows concurrent runs"
-  out=$(bash tools/check-upgrade-safety.sh --mutate-default 2>&1) && { echo "selftest FAIL: F3d passed with a sync CronJob in the default render"; exit 1; }
+  out=$(mut --mutate-default) && { echo "selftest FAIL: F3d passed with a sync CronJob in the default render"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F3d: a default render has sync CronJob' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F3d assertion goes red when the default render has a docs-side sync CronJob"
-  out=$(bash tools/check-upgrade-safety.sh --mutate-placeholder 2>&1) && { echo "selftest FAIL: F3d passed with the docs site off (no placeholder)"; exit 1; }
+  out=$(mut --mutate-placeholder) && { echo "selftest FAIL: F3d passed with the docs site off (no placeholder)"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F3d: .*placeholder' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F3d assertion goes red when the placeholder page is not rendered"
-  out=$(bash tools/check-upgrade-safety.sh --mutate-rulewave 2>&1) && { echo "selftest FAIL: F4 passed with the PrometheusRule waves removed"; exit 1; }
+  out=$(mut --mutate-rulewave) && { echo "selftest FAIL: F4 passed with the PrometheusRule waves removed"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F4: .*sync-wave' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F4 assertion goes red when a PrometheusRule has no sync wave"
-  out=$(bash tools/check-upgrade-safety.sh --mutate-webhookphase 2>&1) && { echo "selftest FAIL: F4 passed with the webhook configurations not hooks"; exit 1; }
+  out=$(mut --mutate-webhookphase) && { echo "selftest FAIL: F4 passed with the webhook configurations not hooks"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F4: .*is not an ArgoCD PreSync hook' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F4 assertion goes red when a webhook configuration is not a PreSync hook"
-  out=$(bash tools/check-upgrade-safety.sh --mutate-failpolicy 2>&1) && { echo "selftest FAIL: F4 passed with failurePolicy Fail"; exit 1; }
+  out=$(mut --mutate-failpolicy) && { echo "selftest FAIL: F4 passed with failurePolicy Fail"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F4: .*failurePolicy' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F4 assertion goes red when failurePolicy is changed from the upstream Ignore"
-  out=$(bash tools/check-upgrade-safety.sh --mutate-patchphase 2>&1) && { echo "selftest FAIL: F4 passed with the patch Job in PostSync"; exit 1; }
+  out=$(mut --mutate-patchphase) && { echo "selftest FAIL: F4 passed with the patch Job in PostSync"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F4: .*patch Job' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F4 assertion goes red when the caBundle patch Job is left in PostSync"
-  out=$(bash tools/check-upgrade-safety.sh --mutate-ingresswave 2>&1) && { echo "selftest FAIL: F5 passed with the Ingress waves removed"; exit 1; }
+  out=$(mut --mutate-ingresswave) && { echo "selftest FAIL: F5 passed with the Ingress waves removed"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F5: .*Ingress' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F5 assertion goes red when an Ingress shares a wave with, or precedes, the LoadBalancer Service"
-  out=$(bash tools/check-upgrade-safety.sh --mutate-ns-missing 2>&1) && { echo "selftest FAIL: F6 passed with a copy target nobody creates"; exit 1; }
+  out=$(mut --mutate-ns-missing) && { echo "selftest FAIL: F6 passed with a copy target nobody creates"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F6: .*does not exist' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F6 assertion goes red when a namespaced object targets a namespace no earlier layer creates"
-  out=$(bash tools/check-upgrade-safety.sh --mutate-ns-twice 2>&1) && { echo "selftest FAIL: F6 passed with a Namespace owned by two layers"; exit 1; }
+  out=$(mut --mutate-ns-twice) && { echo "selftest FAIL: F6 passed with a Namespace owned by two layers"; exit 1; }
   printf '%s' "$out" | grep 'FAIL F6: .*two layers' >/dev/null || { echo "selftest FAIL: wrong message: $out"; exit 1; }
   echo "selftest ok: the F6 assertion goes red when two layers both render one Namespace"
   exit 0
