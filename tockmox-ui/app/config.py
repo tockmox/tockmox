@@ -87,6 +87,7 @@ class Settings:
     capabilities: tuple = ()               # ((name, configured_on), ...) as the AI layer resolved them (TM-1017)
     oidc_end_session: bool = True          # Sign out also ends the identity provider's session (TM-1014)
     oidc_post_logout_url: str = ""         # sent as post_logout_redirect_uri only when set (the issuer may refuse an unregistered one)
+    stack_site: dict | None = None         # the site's additions to app/stack.yaml (TM-1305); checked at start
 
     def app(self, app_id: str) -> App | None:
         for a in self.apps:
@@ -340,7 +341,20 @@ def parse(doc: dict) -> Settings:
         # URLs here lose would turn a registered "https://ui.example/" into a refused logout.
         oidc_post_logout_url=(_check_url(str(oidc["postLogoutRedirectUrl"]), "oidc.postLogoutRedirectUrl") and str(oidc["postLogoutRedirectUrl"]))
         if oidc.get("postLogoutRedirectUrl") else "",
+        stack_site=_parse_stack(doc.get("stack")),
     )
+
+
+def _parse_stack(raw):
+    """The site's `stack:` additions, refused at start when malformed rather than on the first Status."""
+    if not raw:
+        return None
+    from . import stack as stack_mod
+    try:
+        stack_mod.load(site=raw)
+    except (stack_mod.StackError, TypeError, AttributeError, ValueError) as e:
+        raise ConfigError(f"stack: {e}") from e
+    return dict(raw)
 
 
 def load(path: str | None = None) -> Settings:

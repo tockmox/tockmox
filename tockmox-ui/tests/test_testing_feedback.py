@@ -71,7 +71,7 @@ def test_tockmox_heartbeat_is_alive_not_a_firing_row(tmp_path, world):
     rows = t.split("<tbody>")[-1]
     assert "TockmoxHeartbeat" not in rows.split("</tbody>")[0].replace("Alive", "")  # not a row in the firing table
     assert "<code>TockmoxHeartbeat</code> is firing, as it always should" in t
-    assert "KubePodNotReady" in t
+    assert "KubePodNotReady" in admin(tmp_path, world).get("/status/unplaced").text   # TM-1305: on its part's drawer
     assert "Active, not silenced, not inhibited: 1" in t
 
 

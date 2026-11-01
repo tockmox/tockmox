@@ -42,9 +42,9 @@ def test_a_failing_group_folds_as_its_healthy_part_with_a_pointer(tmp_path, worl
     t = admin(tmp_path, world).get("/status").text
     rest = _everything_else(t)
     n = len(world.apps)
-    assert f"{n - 1} of {n} applications · 1 in Problems above" in rest
+    assert f"{n - 1} of {n} applications · 1 shown in the stack above" in rest
     assert "st-critical" not in rest.split("</summary>")[0], "a fold row wears a Problem badge"
-    assert "broken" in t.split('id="healthy-h"', 1)[0], "the failing app is not a Problems row"
+    assert '<span class="pn">Broken</span>' in t.split('id="healthy-h"', 1)[0], "the failing app is not on the stack above"
 
 
 def test_source_lines_have_no_space_before_the_colon(tmp_path, world):
@@ -59,7 +59,7 @@ def test_source_lines_have_no_space_before_the_colon(tmp_path, world):
 def test_the_alerting_pipeline_line_says_where_the_firing_alerts_are(tmp_path, world):
     world.alerts.append({"labels": {"alertname": "KubePodNotReady", "severity": "warning"}, "annotations": {"summary": "x"}})
     rest = _everything_else(admin(tmp_path, world).get("/status").text)
-    assert "1 firing, listed above" in rest
+    assert "1 firing, shown in the stack above" in rest
 
 
 def test_one_time_format_just_now_then_compact():

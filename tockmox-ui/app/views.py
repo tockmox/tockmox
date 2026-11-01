@@ -41,6 +41,11 @@ def _since(iso: str) -> str:
     return f"{d // 86400}d"
 
 
+def since(iso: str) -> str:
+    """How long a signal has been true, for the stack drawer ('41m', '2d')."""
+    return _since(iso)
+
+
 def problems(readings: dict, pipeline: list | None = None) -> list[dict]:
     """Every non-healthy fact as a row: state, what (and where it links), kind, detail, since, action.
     A source that did not answer is a row too: absence is never green."""

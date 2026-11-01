@@ -1,35 +1,110 @@
 {% extends "base.html" %}
-{% from "macros.html" import badge, argo_badge, source_line, problems_table, fold_summary %}
+{% from "macros.html" import badge, argo_badge, source_line, problems_table, fold_summary, state_icon, state_word %}
 {% block title %}Status{% endblock %}
 {% block main %}
 {# Exceptions first (TM-1127): the problems open the page as rows; every healthy group folds to one
    row with its count and source line, and opens to the full list. Sync and Health stay two facts. #}
-{% set probs = problems(readings, pipeline) %}
+{#- TM-1305 (specs/tockmox-ui/SPEC.md section 5): the platform drawn as the stack it is. Every signal sits on one
+    part (app/stack.py, app/stack.yaml), so four signals about one backup count once. A part opens its drawer at
+    /status/<part>, server-rendered: it works and deep-links without JavaScript. The sources, as read, fold below. -#}
+{%- set qbits = [] -%}
+{%- if view == "list" %}{% set _ = qbits.append("view=list") %}{% endif -%}
+{%- if only %}{% set _ = qbits.append("only=problems") %}{% endif -%}
+{%- set qs = ("?" ~ qbits|join("&")) if qbits else "" -%}
+{%- set here = "/status/" ~ sel.id if sel else "/status" -%}
+{%- macro chip(pv) -%}
+<a class="part st-{{ pv.state }}" href="/status/{{ pv.id }}{{ qs }}"{% if sel and sel.id == pv.id %} aria-current="true"{% endif %}>{{ state_icon(pv.state) }}<span class="pn">{{ pv.part.name }}</span>{% if pv.count %}<span class="n">{{ pv.count }}</span>{% endif %}<span class="visually-hidden">: {{ state_word(pv.state) }}</span></a>
+{%- endmacro -%}
 <div class="page-head">
-  <div class="verdict-row">
-    {{ badge(verdict, verdict_text[verdict][0], lg=true) }}
-    <div>
-      <h1>Platform status</h1>
-      <p class="muted small">{{ sources_sentence(readings) }} <span class="help" title="Synced means Argo CD applied what git says; Healthy means it came up. Both are shown, never merged.">What Synced and Healthy mean</span></p>
-    </div>
+  <div>
+    <h1>Status</h1>
+    <p class="muted">{{ stack_summary }} {{ sources_sentence(readings) }}</p>
   </div>
   {% if grafana %}<div class="page-actions"><a class="btn-ghost" href="{{ grafana.url }}/" rel="noopener" target="_blank">Open Grafana<span class="visually-hidden"> (opens in a new tab)</span></a></div>{% endif %}
 </div>
 
-<section class="panel flush" aria-labelledby="problems-h">
-  <div class="panel-head"><h2 id="problems-h">Problems</h2><span class="muted small">{{ probs|length }} item{{ "" if probs|length == 1 else "s" }}</span></div>
-  {% if probs %}{{ problems_table(probs) }}{% else %}<p class="empty">Nothing is reporting a problem.</p>{% endif %}
-</section>
+<div class="stack-tools">
+  <nav class="seg" aria-label="View">
+    <a href="{{ here }}{% if only %}?only=problems{% endif %}"{% if view == "stack" %} aria-current="page"{% endif %}>Stack</a>
+    <a href="{{ here }}?view=list{% if only %}&amp;only=problems{% endif %}"{% if view == "list" %} aria-current="page"{% endif %}>List</a>
+  </nav>
+  <a class="toggle{% if only %} on{% endif %}" href="{{ here }}{% if not only %}?only=problems{% if view == 'list' %}&amp;view=list{% endif %}{% elif view == 'list' %}?view=list{% endif %}"><span class="track" aria-hidden="true"></span>Only problems<span class="visually-hidden">: {{ "on" if only else "off" }}</span></a>
+  <ul class="legend plain" aria-label="Legend">{% for st in ("ok", "warning", "critical", "unknown") %}<li class="st-{{ st }}">{{ state_icon(st) }}{{ state_word(st) }}</li>{% endfor %}</ul>
+</div>
 
+<div class="stack-wrap{% if sel %} with-drawer{% endif %}">
+<div class="stack-main">
+{% if view == "list" %}
+  <div class="table-wrap" role="region" aria-labelledby="parts-cap" tabindex="0">
+  <table class="parts-table">
+    <caption id="parts-cap">Parts of the stack{% if only %}, problems only{% endif %}</caption>
+    <thead><tr><th scope="col">State</th><th scope="col">Part</th><th scope="col">Band</th><th scope="col">What is wrong</th><th scope="col">Since</th></tr></thead>
+    <tbody>
+    {% for pv in placed.ranked() if not only or pv.state != "ok" %}
+      {% set w = pv.wrong %}
+      <tr><td>{{ badge(pv.state) }}</td><th scope="row"><a href="/status/{{ pv.id }}{{ qs }}">{{ pv.part.name }}</a>{% if pv.count %} <span class="muted small">{{ pv.count }}</span>{% endif %}</th>
+        <td>{{ pv.band_name }}</td>
+        <td>{% if w %}{{ w[0].what }}{% if w|length > 1 %} <span class="muted small">and {{ w|length - 1 }} more</span>{% endif %}{% elif pv.state == "unknown" %}<span class="muted">{{ pv.reason }}</span>{% else %}<span class="muted">–</span>{% endif %}</td>
+        <td class="num muted">{{ (w | map(attribute="since") | select | first) if (w | map(attribute="since") | select | list) else "–" }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+{% else %}
+  <div class="stack">
+    {% for sp in placed.side %}
+    <a class="side part st-{{ sp.state }}" href="/status/{{ sp.id }}{{ qs }}"{% if sel and sel.id == sp.id %} aria-current="true"{% endif %}><span class="side-in">{{ state_icon(sp.state) }}<span class="pn">{{ sp.part.name }}</span>{% if sp.count %}<span class="n">{{ sp.count }}</span>{% endif %}</span><span class="visually-hidden">: {{ state_word(sp.state) }}, beside every band</span></a>
+    {% endfor %}
+    <div class="bands">
+    {% for bv in placed.bands %}
+      {% set shown = bv.parts | rejectattr("state", "equalto", "ok") | list if only else bv.parts %}
+      {% set folded = bv.parts | length - shown | length %}
+      <section class="band st-{{ bv.state }}" aria-labelledby="band-{{ bv.band.id }}">
+        <div class="band-head"><h2 id="band-{{ bv.band.id }}">{{ bv.band.name }}</h2>
+          {%- set meta = [] %}{% if bv.band.sub %}{% set _ = meta.append(bv.band.sub) %}{% endif %}{% if bv.band.wave %}{% set _ = meta.append(("waves " if "-" in bv.band.wave else "wave ") ~ bv.band.wave) %}{% endif %}
+          {%- if meta %}<span class="muted small">{{ meta | join(" · ") }}</span>{% endif %}</div>
+        <ul class="parts plain" data-roving>
+          {% for pv in shown %}<li>{{ chip(pv) }}</li>{% endfor %}
+          {% if folded %}<li class="folded muted small">{{ folded }} OK</li>{% endif %}
+        </ul>
+      </section>
+    {% endfor %}
+    </div>
+  </div>
+{% endif %}
+</div>
+{% if sel %}
+<aside class="drawer panel" aria-labelledby="drawer-h">
+  <div class="drawer-top">{{ badge(sel.state) }}<a class="close" href="/status{{ qs }}">Close<span class="visually-hidden"> {{ sel.part.name }}</span></a></div>
+  <h2 id="drawer-h">{{ sel.part.name }}</h2>
+  {%- set meta = [sel.band_name] %}{% if sel.part.namespaces %}{% set _ = meta.append("namespace " ~ sel.part.namespaces|join(", ")) %}{% endif %}{% if sel.part.about %}{% set _ = meta.append(sel.part.about) %}{% endif %}
+  <p class="muted small">{{ meta | join(" · ") }}</p>
+  <h3>What is wrong</h3>
+  {% if sel.wrong %}
+  <ul class="plain sigs">
+    {% for x in sel.wrong %}<li class="st-{{ x.state }}">{{ state_icon(x.state) }}<span><span class="visually-hidden">{{ state_word(x.state) }}: </span><strong>{% if x.href %}<a href="{{ x.href }}">{{ x.what }}</a>{% else %}{{ x.what }}{% endif %}</strong>{% if x.detail %}<span class="muted small d">{{ x.detail }}</span>{% endif %}</span><span class="muted small num">{{ x.since }}</span></li>{% endfor %}
+  </ul>
+  {% elif sel.state == "unknown" %}<p class="small">{{ badge("unknown") }} {{ sel.reason }}</p>
+  {% else %}<p class="small">Nothing is wrong.</p>{% endif %}
+  {% set okays = sel.signals | selectattr("state", "equalto", "ok") | list %}
+  {% if okays %}<h3>Also checked</h3><ul class="plain small">{% for x in okays[:8] %}<li>{{ x.what }} <span class="muted">{{ x.detail }}</span></li>{% endfor %}{% if okays|length > 8 %}<li class="muted">and {{ okays|length - 8 }} more</li>{% endif %}</ul>{% endif %}
+  <h3>Sources</h3>
+  <p class="small">{% for d in sel.deps %}{% set r = readings[d] %}{% if not loop.first %} · {% endif %}<strong>{{ r.source }}</strong> <span class="muted">answered {{ r.age_text() }}</span>{% else %}<span class="muted">None: nothing reports on this part.</span>{% endfor %}</p>
+  {% if sel.part.alerts %}<p class="small muted">Watches alerts {% for a in sel.part.alerts %}<code>{{ a }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% if sel.part.namespaces %} and any alert in {% for n in sel.part.namespaces %}<code>{{ n }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}.</p>{% endif %}
+  {% if goto %}<h3>Go to</h3>
+  <p class="goto">{% for gt in goto %}<a class="btn-ghost" href="{{ gt.href }}" rel="noopener"{% if gt.ext %} target="_blank"{% endif %}>{{ gt.label }}{% if gt.ext %}<span class="visually-hidden"> (opens in a new tab)</span>{% endif %}</a>{% endfor %}</p>{% endif %}
+</aside>
+{% endif %}
+</div>
 <section class="panel flush" aria-labelledby="healthy-h">
-  <div class="panel-head"><h2 id="healthy-h">Everything else</h2><span class="muted small">folded; open a row for every item</span></div>
+  <div class="panel-head"><h2 id="healthy-h">Sources, as read</h2><span class="muted small">what each source said, folded; open a row for every item</span></div>
 
   {% set ar = readings["apps"] %}
   {% set ok_apps = (ar.data or []) | selectattr("sync", "equalto", "Synced") | selectattr("health", "equalto", "Healthy") | list %}
   {% set bad_apps = (ar.data or []) | length - ok_apps | length %}
   <details class="fold">
     {{ fold_summary("unknown" if ar.state == "unknown" else "ok", none if ar.state == "unknown" else "Synced · Healthy",
-                    ((ok_apps|length ~ " of " ~ ar.data|length ~ " applications · " ~ bad_apps ~ " in Problems above") if bad_apps else (ar.data|length ~ " applications")) if ar.data else "Applications", ar) }}
+                    ((ok_apps|length ~ " of " ~ ar.data|length ~ " applications · " ~ bad_apps ~ " shown in the stack above") if bad_apps else (ar.data|length ~ " applications")) if ar.data else "Applications", ar) }}
     <div class="fold-body">
     {% if ar.data %}
     <div class="fold-tools"><span class="muted small">Revision is shown where it is not a branch head; <code>main</code> says nothing.</span></div>
@@ -53,7 +128,7 @@
   {% set bad_nodes = (nr.data or []) | length - ready_nodes | length %}
   <details class="fold">
     {{ fold_summary("unknown" if nr.state == "unknown" else "ok", none if nr.state == "unknown" else "Ready",
-                    ((ready_nodes|length ~ " of " ~ nr.data|length ~ " nodes · " ~ bad_nodes ~ " in Problems above") if bad_nodes else (nr.data|length ~ " nodes")) if nr.data else "Nodes", nr) }}
+                    ((ready_nodes|length ~ " of " ~ nr.data|length ~ " nodes · " ~ bad_nodes ~ " shown in the stack above") if bad_nodes else (nr.data|length ~ " nodes")) if nr.data else "Nodes", nr) }}
     <div class="fold-body">
     {% if nr.data %}
     <div class="table-wrap" role="region" aria-labelledby="nodes-cap" tabindex="0">
@@ -75,7 +150,7 @@
   {% set down = (pr.data or []) | rejectattr("up") | list %}
   <details class="fold">
     {{ fold_summary("unknown" if pr.state == "unknown" else "ok", none if pr.state == "unknown" else "Up",
-                    ((pr.data|length - down|length) ~ " of " ~ pr.data|length ~ " scrape targets" ~ ((" · " ~ down|length ~ " in Problems above") if down else "")) if pr.data else "Scrape targets", pr) }}
+                    ((pr.data|length - down|length) ~ " of " ~ pr.data|length ~ " scrape targets" ~ ((" · " ~ down|length ~ " shown in the stack above") if down else "")) if pr.data else "Scrape targets", pr) }}
     <div class="fold-body">
     {% if down %}
     <ul class="plain fold-list">{% for t in down[:25] %}<li>{{ badge("warning", "Down") }} <code>{{ t.job }}</code> {{ t.instance }}</li>{% endfor %}</ul>
@@ -92,12 +167,12 @@
   {% set real = (am.data or []) | rejectattr("name", "in", pipeline) | list %}
   <details class="fold">
     {{ fold_summary("ok" if hb_on else am.state, "Alive" if hb_on else none, "Alerting pipeline", am,
-                    note=((real|length ~ " firing, listed above") if real else "nothing firing") if am.state != "unknown" else none) }}
+                    note=((real|length ~ " firing, shown in the stack above") if real else "nothing firing") if am.state != "unknown" else none) }}
     <div class="fold-body">
       <p class="small">{% if hb_on %}{{ badge("ok", "Alive") }} <code>{{ heartbeat }}</code> is firing, as it always should: alerts can reach a person.{% else %}{{ badge("unknown", "Silent") }} <code>{{ heartbeat }}</code> is not firing, so nothing shows alerts can arrive.{% endif %}</p>
       {% for name, why in hb_purpose.items() if name != heartbeat %}{% if (am.data or []) | selectattr("name", "equalto", name) | list %}
       <p class="small">{{ badge("ok", "Alive") }} <code>{{ name }}</code> is firing, as it always should: {{ why }}.</p>{% endif %}{% endfor %}
-      <p class="muted small">Active, not silenced, not inhibited: {{ real|length }}. Firing alerts other than the heartbeats are problems and are listed above.</p>
+      <p class="muted small">Active, not silenced, not inhibited: {{ real|length }}. Firing alerts other than the heartbeats are problems and are shown in the stack above.</p>
     </div>
   </details>
 
@@ -106,7 +181,7 @@
   <details class="fold">
     {% set bad_inodes = (inr.data or []) | length - healthy_inodes | length %}
     {{ fold_summary("unknown" if inr.state == "unknown" else "ok", none if inr.state == "unknown" else "Healthy",
-                    (healthy_inodes|length ~ " of " ~ inr.data|length ~ " inference nodes" ~ ((" · " ~ bad_inodes ~ " in Problems above") if bad_inodes else "")) if inr.data else "Inference nodes", inr) }}
+                    (healthy_inodes|length ~ " of " ~ inr.data|length ~ " inference nodes" ~ ((" · " ~ bad_inodes ~ " shown in the stack above") if bad_inodes else "")) if inr.data else "Inference nodes", inr) }}
     <div class="fold-body">
     {% if inr.data %}
     <ul class="plain fold-list">{% for x in inr.data %}<li>{{ badge(x.state if inr.fetched_at else "unknown") }} <a href="/nodes/{{ x.id }}">{{ x.name or x.id }}</a>{% if x.why %}<span class="muted">: {{ x.why }}</span>{% endif %}</li>{% endfor %}</ul>

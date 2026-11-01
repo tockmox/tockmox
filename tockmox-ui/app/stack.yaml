@@ -1,0 +1,203 @@
+# SPDX-License-Identifier: Apache-2.0
+# The stack Status draws (TM-1305; specs/tockmox-ui/SPEC.md section 5 in the planning repo).
+#
+# DATA, no code. Bands are listed top to bottom as the page shows them: your apps on top, what you
+# provide at the bottom, the layers in between in deploy order (their sync waves). Argo CD runs down
+# the side because it reconciles every band.
+#
+# HOW A SIGNAL FINDS ITS PART, in this order (app/stack.py):
+#   Argo CD application  a part's `apps` glob; else the part that claims the application's layer
+#                        (`layer:`); else the band's own layer part; else, not a Tockmox layer, a
+#                        site app in the `site_apps` band (forgejo-backup groups under forgejo).
+#   alert                its `tockmox_component` label naming a part id; a part's `alerts` glob;
+#                        a part's `namespaces` (a site app claims its destination namespace); a
+#                        band's `namespaces` (the band's layer part); else "Unplaced".
+#   scrape target        a part's `jobs` glob; then namespaces as for an alert; else the part whose
+#                        `source` is prometheus (Metrics); else "Unplaced".
+#   node, inference node the part whose `source` names that reading.
+# "Unplaced" shows at the top when it holds anything, so nothing hides.
+#
+# A part with nothing that reports on it reads Unknown, never OK. `when` hides a part whose
+# component the install does not deploy, judged from the layer application's resources the way the
+# capabilities page judges it (kind, name regex); while Argo CD cannot be read, the part shows.
+#
+# `goto` adds the drawer's buttons; one whose console is not configured, or not visible to the
+# viewer, is not shown. `runbook` is a docs page, relative to docs/.
+#
+# A site extends this with `stack:` in the UI's values (rendered into its config): parts added to a
+# band by its id (a part with an existing id replaces it), or new bands, which go under your apps.
+version: 1
+
+side:
+  - id: argocd
+    name: Argo CD
+    about: GitOps. Reconciles every band.
+    source: apps
+    apps: [site-apps, site-secrets, argocd*]
+    namespaces: [argocd]
+    alerts: ["TockmoxArgoCD*", "ArgoCD*"]
+    goto: {grafana: tockmox-argocd}
+    runbook: administration/argocd.md
+
+bands:
+  - id: site
+    name: Site apps
+    sub: yours, not Tockmox
+    site_apps: true
+
+  - id: services
+    name: Services
+    wave: 5
+    layers: [ai, devops, selfcheck]
+    namespaces: [tockmox-ai, tockmox-devops, tockmox-selfcheck]
+    parts:
+      - id: model-gateway
+        name: Model gateway
+        layer: ai
+        alerts: ["TockmoxLiteLLM*", "TockmoxModelGatewayDatabaseUnbacked"]
+        when: [[ai, Deployment, "litellm$"]]
+        goto: {app: llm}
+        runbook: administration/model-lifecycle.md
+      - id: chat-console
+        name: Chat console
+        alerts: ["OpenWebUI*", "TockmoxOpenWebUI*"]
+        when: [[ai, StatefulSet, "open-webui$"], [ai, Deployment, "open-webui$"]]
+        goto: {app: chat}
+      - id: tockmox-ui
+        name: Tockmox UI
+        alerts: ["TockmoxUI*"]
+        runbook: administration/tockmox-ui.md
+      - id: workflows
+        name: Workflows
+        layer: devops
+        alerts: ["ArgoWorkflows*", "TockmoxWorkflow*"]
+        when: [[devops, Deployment, "workflow-controller$"]]
+        goto: {app: workflows, grafana: tockmox-argo-workflows}
+      - id: self-check
+        name: Self-check
+        layer: selfcheck
+        alerts: ["TockmoxSelfCheck*", "TockmoxConsole*"]
+        runbook: operations/monitoring.md
+
+  - id: identity
+    name: Identity
+    wave: 4
+    layers: [identity]
+    namespaces: [tockmox-authentik, tockmox-diagnostic]
+    parts:
+      - id: authentik
+        name: Authentik
+        layer: identity
+        alerts: ["Authentik*", "TockmoxAuthentikDown"]
+        goto: {grafana: tockmox-authentik}
+        runbook: administration/identity.md
+      - id: identity-database
+        name: Identity database
+        alerts: ["TockmoxAuthentikBackup*", "TockmoxIdentityDatabaseUnbacked"]
+        runbook: operations/backup-restore.md
+
+  - id: observability
+    name: Observability
+    sub: with exporters
+    wave: 3
+    layers: [observability, exporters]
+    namespaces: [tockmox-monitoring, tockmox-node-agents]
+    parts:
+      - id: metrics
+        name: Metrics
+        layer: observability
+        source: prometheus
+        alerts: ["Prometheus*", "TockmoxTargetsDown", "TockmoxPrometheus*"]
+        goto: {grafana: tockmox-overview}
+        runbook: operations/monitoring.md
+      - id: alerting
+        name: Alerting to phone
+        alerts: ["Alertmanager*", "TockmoxNotification*", "TockmoxNtfy*"]
+        goto: {app: ntfy, grafana: tockmox-alert-delivery}
+        runbook: operations/monitoring.md
+      - id: logs
+        name: Logs
+        alerts: ["TockmoxLoki*", "Loki*", "Alloy*"]
+      - id: dashboards
+        name: Dashboards
+        alerts: ["Grafana*"]
+        goto: {app: grafana}
+      - id: hardware-telemetry
+        name: Hardware telemetry
+        layer: exporters
+        alerts: ["Smartctl*", "TockmoxSmart*", "SNMP*", "TockmoxSNMP*"]
+        when: [[exporters, DaemonSet, "smartctl-exporter"], [exporters, Deployment, "snmp-exporter$"]]
+
+  - id: platform
+    name: Platform
+    wave: 2
+    layers: [platform]
+    namespaces: [tockmox-platform]
+    parts:
+      - id: storage
+        name: Storage
+        alerts: ["TockmoxLonghorn*", "Longhorn*", "TockmoxPersistentVolume*"]
+        goto: {app: longhorn, grafana: tockmox-storage-contract}
+        runbook: administration/storage.md
+      - id: ingress
+        name: Ingress
+        alerts: ["Traefik*", "TockmoxTraefik*"]
+        goto: {grafana: tockmox-traefik}
+      - id: certificates
+        name: Certificates
+        alerts: ["TockmoxCertificate*", "CertManager*"]
+        goto: {grafana: tockmox-cert-manager}
+        runbook: administration/tls-and-trust.md
+      - id: load-balancer
+        name: Load balancer
+        alerts: ["MetalLB*", "TockmoxMetalLB*"]
+        goto: {grafana: tockmox-metallb}
+        runbook: administration/load-balancing.md
+      - id: databases
+        name: Databases
+        alerts: ["TockmoxCNPG*", "CNPG*", "TockmoxWalArchiveBacklog"]
+        runbook: operations/backup-restore.md
+      - id: object-store
+        name: Object store
+        alerts: ["Garage*", "TockmoxGarage*"]
+        when: [[platform, StatefulSet, "garage$"]]
+      - id: restore-drills
+        name: Restore drills
+        alerts: ["TockmoxRestoreDrill*", "TockmoxResilient*"]
+        goto: {grafana: tockmox-backup-proof}
+        runbook: operations/backup-restore.md
+      - id: reboots
+        name: Reboots
+        alerts: ["Kured*", "TockmoxKured*"]
+        when: [[platform, DaemonSet, "kured$"]]
+
+  - id: foundation
+    name: Foundation
+    wave: "0-1"
+    layers: [crds, policy]
+    parts:
+      - id: crds
+        name: CRDs
+        layer: crds
+      - id: network-policy
+        name: Network policy
+        layer: policy
+      - id: admission-guardrails
+        name: Admission guardrails
+        alerts: ["ClusterAdminBindingAttempt", "StaticSATokenRotationOverdue", "TockmoxAdmission*"]
+        goto: {grafana: tockmox-admission}
+
+  - id: hosts
+    name: Hosts
+    sub: what you provide
+    parts:
+      - id: cluster-nodes
+        name: Cluster nodes
+        source: nodes
+        alerts: ["KubeNode*", "Node*"]
+        runbook: operations/troubleshooting.md
+      - id: inference-nodes
+        name: Inference nodes
+        source: inference_nodes
+        alerts: ["TockmoxAiNode*"]
+        runbook: administration/inference-nodes.md
