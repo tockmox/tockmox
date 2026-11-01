@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}Activity · Platform{% endblock %}
+{% block main %}
+{#- TM-1311 (spec section 7): what was done from the console, by whom, and how it ended. Loki holds the full record
+    (one "tockmox.action" line per intent, refusals too); this is the last 300 that ran. -#}
+<h1>Activity</h1>
+<p class="lede">What was done from the console, by whom, and how it ended. Every attempt, refused ones too, is also one <code>tockmox.action</code> line in Loki.</p>
+{% if err %}
+<p class="panel quiet">{{ badge("unknown", "Unknown") }} The record could not be read: {{ err }}. That is not the same as nothing having been done.</p>
+{% elif not rows %}
+<p class="panel quiet">Nothing has been done from the console yet.</p>
+{% else %}
+<div class="table-wrap" tabindex="0" role="region" aria-labelledby="act-cap">
+<table>
+  <caption id="act-cap">The last {{ rows | length }} action{{ "s" if rows | length != 1 }}, newest first</caption>
+  <thead><tr><th scope="col">When</th><th scope="col">Who</th><th scope="col">Action</th><th scope="col">Result</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr><td><time datetime="{{ r.at | iso }}">{{ r.at | local }}</time></td><td>{{ r.who }}</td><th scope="row">{{ r.summary }}</th>
+    <td>{{ badge("ok", "Done") if r.result == "done" else badge("warning", r.result) }} {{ r.detail }}{% if r.ref %} <code>{{ r.ref | join(", ") }}</code>{% endif %}
+      {%- if r.kind == "silence" and expire_on and r.until and r.until > now %}{% for sid in r.ref %} · <a href="/actions/confirm?kind=expire&amp;silence={{ sid | urlencode }}">Expire</a>{% endfor %}{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

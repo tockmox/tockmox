@@ -18,7 +18,9 @@ Route map (DESIGN-2026-10-04-tockmox-ui.md §2):
 
 There is deliberately no route that writes to the cluster, to git, to the gateway or to a node.
 The one route that opens a connection to an address an admin typed is POST /nodes/probe,
-and it is off until the operator names a range (app/probe.py).
+and it is off until the operator names a range (app/probe.py). Actions (TM-1311, app/actions_routes.py)
+do not change that: the UI posts an intent, with the ID token the issuer minted for it, to the separate
+tockmox-actions service, which holds the credentials and acts (app/actions_service.py).
 """
 from __future__ import annotations
 
@@ -35,6 +37,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from . import actions_routes
 from . import feed as feedmod
 from . import models_routes
 from . import nav
@@ -149,6 +152,7 @@ class Transports:
     probe: httpx.BaseTransport | None = None      # inference-node probe (REQ-0047)
     ledger: httpx.BaseTransport | None = None     # agent ledger (Platform Management)
     specialists: httpx.BaseTransport | None = None  # the specialist host: Service Desk and index (Platform Management)
+    actions: httpx.BaseTransport | None = None    # the tockmox-actions service (TM-1311)
     resolver: object = None                       # DNS for the probe; None = socket.getaddrinfo
 
 
@@ -292,7 +296,8 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         docs_home = (s.docs_url.rstrip("/") + "/") if s.docs_url else repo_link
         out = {"docs_home": docs_home, "sections": [], "section_item": None, "rail": [], "rail_item": None,
                "health": None, "help_href": None, "newer": None, "version_short": "", "initials": "",
-               "report_href": f"{s.docs_repo_url.rstrip('/')}/issues", "first_name": ""}
+               "report_href": f"{s.docs_repo_url.rstrip('/')}/issues", "first_name": "",
+               "test_alert": bool(u is not None and u.is_admin and s.actions and s.actions.on("test-alert"))}
         if u is None:
             return out
         tabs = tabs_for(u)
@@ -308,7 +313,8 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
                 cap_state = "unknown"          # Argo CD did not answer: absence is not green
             else:
                 cap_state = "warning" if any(not x["agree"] for x in cap_rows) else None
-        groups = nav.rail(sec, u.is_admin, platform_on(), admin_tabs=tabs, capabilities_state=cap_state)
+        groups = nav.rail(sec, u.is_admin, platform_on(), admin_tabs=tabs, capabilities_state=cap_state,
+                          activity=bool(s.actions and s.actions.any))
         out["rail"], out["rail_item"] = groups, nav.rail_current(groups, path) if groups else None
         if u.is_admin:
             out["health"] = stack_mod.pill(placed(readings()))     # parts, not signals (TM-1305)
@@ -373,6 +379,27 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         if p is None:
             return None
         return charts_mod.read(ranger, p, pv.part.namespaces, charts_mod.board_href(grafana_for(u), p))
+
+    cron_cache = {"t": 0.0, "v": None}
+
+    def cron_known():
+        """The CronJobs Prometheus knows (kube-state-metrics), so Run now is offered only for one that exists. None
+        when Prometheus cannot say: the button shows, and the service says so if the CronJob is gone."""
+        if not (s.actions and s.actions.on("run-job")) or not s.prometheus_url:
+            return None
+        if time.time() - cron_cache["t"] < 60:
+            return cron_cache["v"]
+        v = None
+        try:
+            with httpx.Client(base_url=s.prometheus_url, timeout=s.source_timeout_s, transport=tp.prometheus) as c:
+                r = c.get("/api/v1/query", params={"query": "kube_cronjob_info"})
+                r.raise_for_status()
+                v = {(x["metric"].get("namespace", ""), x["metric"].get("cronjob", ""))
+                     for x in r.json()["data"]["result"]}
+        except Exception:  # noqa: BLE001
+            v = None
+        cron_cache.update(t=time.time(), v=v)
+        return v
 
     def placed(r):
         """Every signal on its part of the stack (TM-1305, app/stack.py)."""
@@ -440,6 +467,12 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
 
     @app.get("/auth/callback")
     def callback(request: Request, code: str = "", state: str = "", error: str = ""):
+        # An action's confirmation comes back here too (the one redirect URI the issuer knows): its own cookie and
+        # state say so (TM-1311, app/actions_routes.py); anything else is a sign-in.
+        fin = getattr(app.state, "action_finish", None)
+        done = fin(request, code, state, error) if fin else None
+        if done is not None:
+            return done
         raw = request.cookies.get(sessions.login_cookie)
         try:
             st = sessions.l.loads(raw or "", max_age=600)
@@ -553,6 +586,9 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
                       pipeline=list(sources_mod.pipeline_alerts(s.alertmanager_heartbeat)),
                       hb_purpose=sources_mod.HEARTBEAT_PURPOSE, placed=pl, sel=sel, view=view, only=only,
                       goto=goto_for(u, sel) if sel else [], stack_summary=stack_mod.summary(pl),
+                      actions=actions_routes.part_actions(s.actions, sel, cron_known()) if sel else [],
+                      silences=actions_routes.silences_on(sel) if sel else [],
+                      expire_on=bool(s.actions and s.actions.on("expire")),
                       status_trends=trends("status", u), sel_trend=part_trend(sel, u) if sel else None,
                       grafana=g if g and g.visible_to(set(u.groups)) else None)
 
@@ -725,6 +761,8 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
 
     src_report = ModelReportSource(s.lifecycle.report_file, s.lifecycle.report_max_age_s)
     build_checks = BuildChecks(prober)       # the last build check: read by POST /models/builds, shown on the node pages (TM-1296)
+    actions_routes.register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, oidc,
+                            lambda: placed(readings()), transport=tp.actions)
     nodes_routes.register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_inodes, prober, APP_VERSION,
                           src_report=src_report, build_checks=build_checks)
 

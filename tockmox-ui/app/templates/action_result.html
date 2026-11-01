@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}{% if ok %}Done{% else %}Not done{% endif %}{% endblock %}
+{% block main %}
+<section class="panel confirm" aria-labelledby="result-h">
+  <h1 id="result-h">{% if ok %}{{ badge("ok", "Done") }} {{ (out.summary if out else "") or (d.summary if d else "Done") }}{% else %}{{ badge("warning", "Not done") }} {{ d.summary if d else "The action" }} did not happen{% endif %}</h1>
+  {% if ok %}
+  <p>{% if out.repeat %}This was already done (the same confirmation arrived twice), so nothing ran again. {% endif %}{{ out.detail }}{% if out.ref %} · <code>{{ out.ref | join(", ") }}</code>{% endif %}</p>
+  {% else %}
+  <p>Why: {{ reason }}.</p>
+  {% endif %}
+  <p><a class="btn" href="{{ back }}">Back</a> <a class="btn-ghost" href="/platform/activity">Activity</a></p>
+</section>
+{% endblock %}

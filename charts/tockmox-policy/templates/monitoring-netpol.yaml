@@ -317,6 +317,36 @@ spec:
         - protocol: TCP
           port: 9093
 ---
+# tockmox-actions (tockmox-ai, TM-1311) -> Alertmanager :9093 only: console silences, expiring them, and the test
+# alert. Its own egress policy (templates/tockmox-actions.yaml) allows exactly this, and it is the one pod that takes
+# Alertmanager's write API on purpose. Not conditional on the AI layer's actions switches, for the reason above:
+# inert unless a pod with BOTH tockmox-actions' name label and tockmox.com/isolated runs in the AI namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  name: allow-from-tockmox-actions
+  namespace: {{ .Values.namespaces.monitoring }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: alertmanager
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.namespaces.ai }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: tockmox-actions
+              tockmox.com/isolated: "true"
+      ports:
+        - protocol: TCP
+          port: 9093
+---
 # The model jobs (tockmox-ai, REQ-0048): the eval runner's scheduler reads Prometheus for its quiet-window check
 # (no production traffic on a node before it measures), and the production health watch reads it to compare a
 # promoted model with the one it replaced, then posts to ntfy on a breach. Prometheus :9090 for both, ntfy :80 and

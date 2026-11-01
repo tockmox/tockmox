@@ -283,8 +283,8 @@ class Placed:
         return next((s for s in _ORDER if s in states), UNKNOWN)
 
 
-def _sig(source, state, what, detail="", since="", href=None):
-    return {"source": source, "state": state, "what": what, "detail": detail, "since": since, "href": href}
+def _sig(source, state, what, detail="", since="", href=None, **extra):
+    return {"source": source, "state": state, "what": what, "detail": detail, "since": since, "href": href, **extra}
 
 
 def place(stack: Stack, readings: dict, pipeline=(), stale_apps=(), since=lambda iso: "") -> Placed:
@@ -401,7 +401,10 @@ def place(stack: Stack, readings: dict, pipeline=(), stale_apps=(), since=lambda
         sev = x.get("severity", "")
         if n in pipeline or sev in ("info", "none"):
             continue
-        sig = _sig("alertmanager", CRIT if sev == "critical" else WARN, n, x.get("summary", ""), since(x.get("startsAt", "")))
+        ns = x.get("namespace") or ""
+        # alert and namespace: what a silence from the drawer names (TM-1313); silenced: the console's mark
+        sig = _sig("alertmanager", CRIT if sev == "critical" else WARN, n, x.get("summary", ""), since(x.get("startsAt", "")),
+                   alert=n, namespace=ns, silenced=x.get("silenced"))
         comp = x.get("component") or ""
         pid = comp if comp in views else None
         pid = pid or next((p.id for p in order if _glob(n, p.alerts)), None)

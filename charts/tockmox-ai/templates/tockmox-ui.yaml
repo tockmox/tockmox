@@ -5,7 +5,8 @@ The Tockmox UI (TM-0920, Jeff 2026-10-07: package it with 0.8.0). OFF by default
 
 The UI ships as source (TM-0902): the site builds its image and names it in tockmoxUi.image. It reads the cluster
 (nodes, Argo CD applications), Prometheus and Alertmanager, and this chart's inferenceNodes and modelLifecycle
-blocks; it never changes anything itself, so every action ends in YAML an admin commits.
+blocks; it never changes anything itself. Actions from the console (TM-1311) go to the separate tockmox-actions
+Deployment (templates/tockmox-actions.yaml), which holds the credentials; the UI keeps the read-only RBAC below.
 
 Its NetworkPolicy is the point of shipping it here. The pod carries tockmox.com/isolated, so the policy layer's
 namespace-wide allows skip it, and this policy is the whole of what it may do:
@@ -140,6 +141,14 @@ specialist index. Its token (caller client/tockmox-ui, reads only) is the site's
 {{- $catCm := (($ui.platformCatalog | default dict).configMap) | default "" -}}
 {{- if and $platOn $catCm -}}
 {{- $_ := set $plat "catalogFile" "/etc/tockmox-ui/platform-catalog/catalog.yaml" -}}
+{{- end -}}
+{{- /* ACTIONS (TM-1311): which buttons the UI offers, from the same block the tockmox-actions service reads
+(templates/_actions.tpl), and where that service is. The UI itself still holds no write credential. */ -}}
+{{- $actionsOn := ne (include "tockmox.actionsOn" .) "" -}}
+{{- if $actionsOn -}}
+{{- $acts := include "tockmox.actions" . | fromYaml -}}
+{{- $_ := set $acts "url" (printf "http://tockmox-actions.%s.svc:8081" .Release.Namespace) -}}
+{{- $_ := set $cfg "actions" $acts -}}
 {{- end -}}
 {{- $cfgText := $cfg | toYaml -}}
 {{- $api := $np.apiServer | default list -}}
@@ -500,6 +509,14 @@ spec:
             matchLabels: { kubernetes.io/metadata.name: {{ $trNs }} }
           podSelector:
             matchLabels: { app.kubernetes.io/name: traefik }
+    {{- if $actionsOn }}
+    # tockmox-actions: the intent and the ID token go there; the UI acts on nothing itself
+    - to:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: tockmox-actions }
+      ports:
+        - { port: 8081, protocol: TCP }
+    {{- end }}
     {{- if $probe }}
     - to:
         {{- range $probe }}

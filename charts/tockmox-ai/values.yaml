@@ -1052,6 +1052,25 @@ tockmoxUi:
   # a site's own catalog from a ConfigMap, key catalog.yaml. Empty uses the product's default catalog.
   platformCatalog:
     configMap: ""
+  # Actions from the console (TM-1311, TM-1313; experimental; docs/administration/tockmox-ui.md, "Taking action").
+  # A separate tockmox-actions Deployment acts; the UI stays write-free. Each kind is on by default when this
+  # install can do it with what Tockmox ships; argocd needs the site's Argo CD account. Off means absent.
+  actions:
+    silence:
+      enabled: true                      # 1h, 4h, 24h or 7 days, reason required; needs observability
+    testAlert:
+      enabled: true                      # one TockmoxTestAlert down the alert path; needs observability
+    runJob:
+      enabled: true                      # the AI layer's own CronJobs (drill, watchers, scheduler, key check)
+      allow: []                          # plus yours: [{namespace: forgejo, name: forgejo-backup, part: forgejo}]
+    restart:
+      enabled: true                      # the AI layer's consoles: the gateway, the chat console, this UI
+      allow: []                          # plus yours: [{namespace: tockmox-monitoring, kind: Deployment, name: tockmox-observability-grafana, part: dashboards}]
+    argocd:
+      enabled: false                     # needs url and tokenSecret: an Argo CD local account with get and sync only
+      url: ""                            # http://argocd-server.argocd.svc
+      tokenSecret: ""                    # a Secret in this namespace, key token
+    resources: {}
 
 open-webui:
   # The console image, pinned AHEAD of the subchart: open-webui chart 17.0.0 is

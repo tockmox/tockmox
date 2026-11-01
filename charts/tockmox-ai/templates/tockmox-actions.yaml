@@ -1,0 +1,488 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+tockmox-actions (TM-1311, TM-1313; specs/tockmox-ui/SPEC.md section 7 in the planning repo; DESIGN-2026-10-11's rule:
+writes outside the UI pod). The Tockmox UI stays write-free: it posts an intent, with the ID token the issuer minted
+for that intent, to this Deployment on the UI's own image (python -m app.actions_service), which checks the token
+itself and does the one thing the intent names with one narrow credential per kind:
+
+  silence, testAlert   Alertmanager's API, reached by this NetworkPolicy, nothing else
+  runJob               a Role per allowlisted namespace: get on the allowlisted CronJobs by name, create on Jobs;
+                       the tockmox-actions-jobs ValidatingAdmissionPolicy admits a Job from this identity only when it
+                       is owned by an allowlisted CronJob and carries tockmox.com/run-now
+  restart              a Role per allowlisted namespace: get and patch on the allowlisted Deployments and StatefulSets
+                       by name; the tockmox-actions-restart-* policies refuse an update from this identity that
+                       changes the pod spec, the template's labels, finalizers or owners, an annotation other than
+                       kubectl.kubernetes.io/restartedAt, the workload's labels or annotations, replicas, the
+                       selector, the rollout settings, or a StatefulSet's volume claims, their retention or ordinals.
+                       Type-checked on a k3s lab cluster (status.typeChecking empty): a typed object compared with {} in
+                       a ternary does not compile, so presence and value are compared apart
+  argocd               the site's Argo CD local account (get and sync on applications), a Secret this chart mounts;
+                       a sync can never change an Application's source because the account cannot update one
+  the record           create on ConfigMaps in this namespace, get and update on its own one by name
+                       (tockmox-actions-activity), which the Activity page reads through this service
+
+WHAT IS STILL TRUSTED, plainly: a Job is created from the CronJob's own template, but the admission policy cannot
+compare the Job with its CronJob, so a compromised tockmox-actions pod could run a pod of its choosing in an
+allowlisted namespace, as any ServiceAccount there, inside that namespace's Pod Security level. That is why run-now is
+allowlisted by namespace and name, and why the pod takes input only from the UI pod and acts only on a token the
+issuer signed.
+
+Off means absent: with no kind on, none of this renders, and the UI shows no buttons.
+*/ -}}
+{{- $ui := .Values.tockmoxUi | default dict -}}
+{{- if and $ui.enabled (ne (include "tockmox.actionsOn" .) "") -}}
+{{- $act := include "tockmox.actions" . | fromYaml -}}
+{{- /* its own objects live beside the UI, in the release namespace; the allowlists name their own namespaces */ -}}
+{{- $aiNs := .Release.Namespace -}}
+{{- $ns := .Values.namespaces | default dict -}}
+{{- $monNs := $ns.monitoring | default "tockmox-monitoring" -}}
+{{- $trNs := $ns.traefik | default "tockmox-platform" -}}
+{{- $np := $ui.networkPolicy | default dict -}}
+{{- $cfg := $ui.config | default dict -}}
+{{- $argoNs := ((($cfg.sources | default dict).kubernetes | default dict).argocdNamespace) | default "argocd" -}}
+{{- $sa := printf "system:serviceaccount:%s:tockmox-actions" $aiNs -}}
+{{- $ar := ($ui.actions | default dict).argocd | default dict -}}
+{{- $svcActions := deepCopy $act -}}
+{{- $_ := set $svcActions "namespace" $aiNs -}}
+{{- if $act.argocd.enabled -}}{{- $_ := set $svcActions.argocd "tokenFile" "/etc/tockmox-actions/argocd/token" -}}{{- end -}}
+{{- $svcCfg := dict
+      "oidc" (dict "issuer" $cfg.oidc.issuer "clientId" ($cfg.oidc.clientId | default "tockmox-ui"))
+      "roles" (dict "adminGroup" ((($cfg.roles | default dict).adminGroup) | default "tockmox-admins"))
+      "sources" (dict "alertmanager" (dict "url" (printf "http://tockmox-observability-kube-alertmanager.%s.svc:9093" $monNs)))
+      "actions" $svcActions -}}
+{{- $cfgText := $svcCfg | toYaml -}}
+{{- /* namespace -> names, per verb, for the Roles */ -}}
+{{- $jobNs := dict -}}
+{{- if $act.runJob.enabled -}}
+{{- range $act.runJob.allow -}}{{- $_ := set $jobNs .namespace (append (get $jobNs .namespace | default list) .name) -}}{{- end -}}
+{{- end -}}
+{{- $depNs := dict -}}{{- $stsNs := dict -}}{{- $wlNs := dict -}}
+{{- if $act.restart.enabled -}}
+{{- range $act.restart.allow -}}
+{{- $_ := set $wlNs .namespace true -}}
+{{- if eq (.kind | default "Deployment") "StatefulSet" -}}{{- $_ := set $stsNs .namespace (append (get $stsNs .namespace | default list) .name) -}}
+{{- else -}}{{- $_ := set $depNs .namespace (append (get $depNs .namespace | default list) .name) -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- $api := $np.apiServer | default list -}}
+{{- if and (not $api) ((.Values.global | default dict).lanCIDR) -}}
+{{- $api = list (dict "cidr" .Values.global.lanCIDR "port" 6443) -}}
+{{- end -}}
+{{- $ingOn := or (not (hasKey ($ui.ingress | default dict) "enabled")) ($ui.ingress | default dict).enabled -}}
+{{- $expectCa := and (ne ((.Values.global | default dict).certIssuer | default "") "") $ingOn -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-actions
+  namespace: {{ $aiNs }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tockmox-actions-record
+  namespace: {{ $aiNs }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+rules:
+  - { apiGroups: [""], resources: [configmaps], verbs: [create] }
+  - { apiGroups: [""], resources: [configmaps], resourceNames: [tockmox-actions-activity], verbs: [get, update] }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tockmox-actions-record
+  namespace: {{ $aiNs }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: tockmox-actions-record }
+subjects:
+  - { kind: ServiceAccount, name: tockmox-actions, namespace: {{ $aiNs }} }
+{{- range $n, $names := $jobNs }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tockmox-actions-run-now
+  namespace: {{ $n }}
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+rules:
+  - { apiGroups: [batch], resources: [cronjobs], resourceNames: {{ $names | uniq | toJson }}, verbs: [get] }
+  - { apiGroups: [batch], resources: [jobs], verbs: [create] }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tockmox-actions-run-now
+  namespace: {{ $n }}
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: tockmox-actions-run-now }
+subjects:
+  - { kind: ServiceAccount, name: tockmox-actions, namespace: {{ $aiNs }} }
+{{- end }}
+{{- range $n, $_ := $wlNs }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tockmox-actions-restart
+  namespace: {{ $n }}
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+rules:
+  {{- with get $depNs $n }}
+  - { apiGroups: [apps], resources: [deployments], resourceNames: {{ . | uniq | toJson }}, verbs: [get, patch] }
+  {{- end }}
+  {{- with get $stsNs $n }}
+  - { apiGroups: [apps], resources: [statefulsets], resourceNames: {{ . | uniq | toJson }}, verbs: [get, patch] }
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tockmox-actions-restart
+  namespace: {{ $n }}
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: tockmox-actions-restart }
+subjects:
+  - { kind: ServiceAccount, name: tockmox-actions, namespace: {{ $aiNs }} }
+{{- end }}
+{{- if $jobNs }}
+{{- $allowed := list }}{{- range $n, $names := $jobNs }}{{- range $names }}{{- $allowed = append $allowed (printf "%s/%s" $n .) }}{{- end }}{{- end }}
+---
+# A Job from this identity is one owned by an allowlisted CronJob and labelled as a run-now, or it is refused.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: tockmox-actions-jobs
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - { apiGroups: [batch], apiVersions: [v1], operations: [CREATE, UPDATE], resources: [jobs] }
+  matchConditions:
+    - name: from-tockmox-actions
+      expression: "request.userInfo.username == '{{ $sa }}'"
+  validations:
+    - expression: "request.operation == 'CREATE'"
+      message: "tockmox-actions may create a Job, never change one"
+    - expression: >-
+        has(object.metadata.ownerReferences) && size(object.metadata.ownerReferences) == 1 &&
+        object.metadata.ownerReferences[0].kind == 'CronJob' &&
+        (request.namespace + '/' + object.metadata.ownerReferences[0].name) in {{ $allowed | uniq | toJson }}
+      message: "a Job from tockmox-actions must be owned by an allowlisted CronJob (tockmoxUi.actions.runJob)"
+    - expression: >-
+        has(object.metadata.labels) && 'tockmox.com/run-now' in object.metadata.labels &&
+        object.metadata.labels['tockmox.com/run-now'] == 'true'
+      message: "a Job from tockmox-actions carries tockmox.com/run-now"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: tockmox-actions-jobs
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  policyName: tockmox-actions-jobs
+  validationActions: [Deny]
+{{- end }}
+{{- if $wlNs }}
+{{- range $kind := list "deployments" "statefulsets" }}
+---
+# An update from this identity changes nothing but the pod template's restartedAt annotation, or it is refused.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: tockmox-actions-restart-{{ $kind }}
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - { apiGroups: [apps], apiVersions: [v1], operations: [CREATE, UPDATE, DELETE], resources: [{{ $kind }}, {{ $kind }}/scale] }
+  matchConditions:
+    - name: from-tockmox-actions
+      expression: "request.userInfo.username == '{{ $sa }}'"
+  variables:
+    - name: newAnn
+      expression: "has(object.spec.template.metadata.annotations) ? object.spec.template.metadata.annotations : {}"
+    - name: oldAnn
+      expression: "has(oldObject.spec.template.metadata.annotations) ? oldObject.spec.template.metadata.annotations : {}"
+  validations:
+    # request.subResource is ABSENT on a request to the main resource, so read it with has() (a k3s lab cluster,
+    # 2026-11-01: `request.subResource == ''` errored "no such key" and refused every restart)
+    - expression: "request.operation == 'UPDATE' && (!has(request.subResource) || request.subResource == '')"
+      message: "tockmox-actions may only restart a workload, never create, delete or scale one"
+    - expression: >-
+        variables.newAnn.all(k, k == 'kubectl.kubernetes.io/restartedAt' || (k in variables.oldAnn && variables.oldAnn[k] == variables.newAnn[k])) &&
+        variables.oldAnn.all(k, k == 'kubectl.kubernetes.io/restartedAt' || (k in variables.newAnn && variables.newAnn[k] == variables.oldAnn[k]))
+      message: "tockmox-actions may change only the kubectl.kubernetes.io/restartedAt annotation of the pod template"
+    - expression: "object.spec.template.spec == oldObject.spec.template.spec"
+      message: "tockmox-actions may not change the pod spec"
+    - expression: >-
+        (has(object.spec.template.metadata.labels) ? object.spec.template.metadata.labels : {}) ==
+        (has(oldObject.spec.template.metadata.labels) ? oldObject.spec.template.metadata.labels : {})
+      message: "tockmox-actions may not change the pod template's labels"
+    - expression: >-
+        (has(object.metadata.labels) ? object.metadata.labels : {}) == (has(oldObject.metadata.labels) ? oldObject.metadata.labels : {}) &&
+        (has(object.metadata.annotations) ? object.metadata.annotations : {}) == (has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {})
+      message: "tockmox-actions may not change the workload's labels or annotations"
+    - expression: >-
+        object.spec.selector == oldObject.spec.selector &&
+        (has(object.spec.replicas) == has(oldObject.spec.replicas)) && (!has(object.spec.replicas) || object.spec.replicas == oldObject.spec.replicas) &&
+        (has(object.spec.minReadySeconds) == has(oldObject.spec.minReadySeconds)) && (!has(object.spec.minReadySeconds) || object.spec.minReadySeconds == oldObject.spec.minReadySeconds) &&
+        (has(object.spec.revisionHistoryLimit) == has(oldObject.spec.revisionHistoryLimit)) && (!has(object.spec.revisionHistoryLimit) || object.spec.revisionHistoryLimit == oldObject.spec.revisionHistoryLimit)
+      message: "tockmox-actions may not change replicas, the selector or the rollout settings"
+    - expression: >-
+        (has(object.spec.template.metadata.finalizers) ? object.spec.template.metadata.finalizers : []) ==
+        (has(oldObject.spec.template.metadata.finalizers) ? oldObject.spec.template.metadata.finalizers : []) &&
+        (has(object.spec.template.metadata.ownerReferences) ? object.spec.template.metadata.ownerReferences : []) ==
+        (has(oldObject.spec.template.metadata.ownerReferences) ? oldObject.spec.template.metadata.ownerReferences : [])
+      message: "tockmox-actions may not change the pod template's metadata"
+    {{- if eq $kind "deployments" }}
+    - expression: >-
+        (has(object.spec.paused) == has(oldObject.spec.paused)) && (!has(object.spec.paused) || object.spec.paused == oldObject.spec.paused) &&
+        (has(object.spec.strategy) == has(oldObject.spec.strategy)) && (!has(object.spec.strategy) || object.spec.strategy == oldObject.spec.strategy) &&
+        (has(object.spec.progressDeadlineSeconds) == has(oldObject.spec.progressDeadlineSeconds)) && (!has(object.spec.progressDeadlineSeconds) || object.spec.progressDeadlineSeconds == oldObject.spec.progressDeadlineSeconds)
+      message: "tockmox-actions may not pause a Deployment or change its strategy"
+    {{- else }}
+    - expression: >-
+        (has(object.spec.updateStrategy) == has(oldObject.spec.updateStrategy)) && (!has(object.spec.updateStrategy) || object.spec.updateStrategy == oldObject.spec.updateStrategy) &&
+        (has(object.spec.podManagementPolicy) == has(oldObject.spec.podManagementPolicy)) && (!has(object.spec.podManagementPolicy) || object.spec.podManagementPolicy == oldObject.spec.podManagementPolicy) &&
+        object.spec.serviceName == oldObject.spec.serviceName
+      message: "tockmox-actions may not change a StatefulSet's update strategy or service"
+    - expression: >-
+        (has(object.spec.persistentVolumeClaimRetentionPolicy) == has(oldObject.spec.persistentVolumeClaimRetentionPolicy)) && (!has(object.spec.persistentVolumeClaimRetentionPolicy) || object.spec.persistentVolumeClaimRetentionPolicy == oldObject.spec.persistentVolumeClaimRetentionPolicy) &&
+        (has(object.spec.ordinals) == has(oldObject.spec.ordinals)) && (!has(object.spec.ordinals) || object.spec.ordinals == oldObject.spec.ordinals) &&
+        (has(object.spec.volumeClaimTemplates) == has(oldObject.spec.volumeClaimTemplates)) && (!has(object.spec.volumeClaimTemplates) || object.spec.volumeClaimTemplates == oldObject.spec.volumeClaimTemplates)
+      message: "tockmox-actions may not change a StatefulSet's volume claims, their retention or its ordinals"
+    {{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: tockmox-actions-restart-{{ $kind }}
+  labels:
+    {{- include "tockmox.labels" $ | nindent 4 }}
+spec:
+  policyName: tockmox-actions-restart-{{ $kind }}
+  validationActions: [Deny]
+{{- end }}
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tockmox-actions
+  namespace: {{ $aiNs }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+{{ $cfgText | indent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tockmox-actions
+  namespace: {{ $aiNs }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tockmox-actions
+spec:
+  # One replica: the in-flight guard against a double click is per process, and the record is one ConfigMap.
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 0, maxUnavailable: 1 }
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-actions
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tockmox-actions
+        app.kubernetes.io/part-of: tockmox
+        tockmox.com/isolated: "true"
+      annotations:
+        checksum/config: {{ $cfgText | sha256sum | trunc 16 | quote }}
+    spec:
+      serviceAccountName: tockmox-actions
+      # Needs the API for run-now, restart and its record (the Roles above). Gate allowlist in tools/check-sa-tokens.sh.
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile: { type: RuntimeDefault }
+      initContainers:
+        # The same trust bundle as the UI (templates/tockmox-ui.yaml): the issuer is reached over HTTPS, and its
+        # signing keys are what every intent is checked against.
+        - name: tockmox-trust-bundle
+          image: {{ $ui.image | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: TOCKMOX_EXPECT_CA, value: {{ ternary "true" "false" $expectCa | quote }} }
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              ca=/tockmox-ca/ca.crt
+              if [ "${TOCKMOX_EXPECT_CA:-false}" = "true" ]; then
+                i=0
+                while [ ! -s "$ca" ]; do
+                  i=$((i + 1))
+                  if [ "$i" -gt 60 ]; then
+                    echo "FATAL: $ca is still absent after 300s; without it no intent can be verified. Exiting so kubelet retries."
+                    exit 1
+                  fi
+                  sleep 5
+                done
+              fi
+              cat /etc/ssl/certs/ca-certificates.crt > /trust/ca-bundle.crt
+              if [ -s "$ca" ]; then cat "$ca" >> /trust/ca-bundle.crt; fi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 32Mi }
+          volumeMounts:
+            - { name: tockmox-trust, mountPath: /trust }
+            - { name: tockmox-ca, mountPath: /tockmox-ca, readOnly: true }
+      containers:
+        - name: actions
+          image: {{ $ui.image | quote }}
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "app.actions_service"]
+          env:
+            - { name: TOCKMOX_ACTIONS_CONFIG, value: /etc/tockmox-actions/config.yaml }
+            - { name: SSL_CERT_FILE, value: /etc/tockmox/trust/ca-bundle.crt }
+            - { name: REQUESTS_CA_BUNDLE, value: /etc/tockmox/trust/ca-bundle.crt }
+          ports:
+            - { name: http, containerPort: 8081 }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            {{- toYaml ((($ui.actions | default dict).resources) | default (dict "requests" (dict "cpu" "10m" "memory" "64Mi") "limits" (dict "memory" "192Mi"))) | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/tockmox-actions/config.yaml, subPath: config.yaml, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+            - { name: tockmox-trust, mountPath: /etc/tockmox/trust, readOnly: true }
+            {{- if $act.argocd.enabled }}
+            - { name: argocd, mountPath: /etc/tockmox-actions/argocd, readOnly: true }
+            {{- end }}
+      volumes:
+        - name: tockmox-trust
+          emptyDir: { sizeLimit: 4Mi }
+        - name: tockmox-ca
+          secret:
+            secretName: tockmox-ui-tls
+            optional: true
+            items: [{ key: ca.crt, path: ca.crt }]
+        - name: config
+          configMap: { name: tockmox-actions }
+        - name: tmp
+          emptyDir: { sizeLimit: 16Mi }
+        {{- if $act.argocd.enabled }}
+        # optional: a missing Secret is an Argo CD action the service refuses with the reason, never a stuck pod
+        - name: argocd
+          secret:
+            secretName: {{ $ar.tokenSecret | quote }}
+            optional: true
+            items: [{ key: token, path: token }]
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tockmox-actions
+  namespace: {{ $aiNs }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: tockmox-actions
+  ports:
+    - { name: http, port: 8081, targetPort: http }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tockmox-actions
+  namespace: {{ $aiNs }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: tockmox-actions
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # The UI pod only: nothing else in the cluster can hand this service an intent.
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: tockmox-ui }
+      ports:
+        - { port: 8081, protocol: TCP }
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+      ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }
+    {{- range $api }}
+    - to:
+        - ipBlock: { cidr: {{ .cidr | quote }} }
+      ports:
+        - { port: {{ .port | default 6443 }}, protocol: TCP }
+    {{- end }}
+    {{- if or $act.silence.enabled $act.testAlert.enabled }}
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $monNs }} }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: alertmanager }
+      ports:
+        - { port: 9093, protocol: TCP }
+    {{- end }}
+    # The issuer, served through Traefik: its discovery document and signing keys.
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $trNs }} }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: traefik }
+    {{- if $act.argocd.enabled }}
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $argoNs }} }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: argocd-server }
+      ports:
+        - { port: 8080, protocol: TCP }
+    {{- end }}
+    {{- with $np.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

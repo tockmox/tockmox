@@ -1738,6 +1738,126 @@
               "type": "string"
             }
           }
+        },
+
+        "actions": {
+          "type": "object",
+          "additionalProperties": false,
+          "x-tockmox-stability": "experimental",
+          "x-tockmox-stability-ruled": "2026-10-31",
+          "description": "Actions from the console (TM-1311, TM-1313): the separate tockmox-actions Deployment that silences, runs an allowlisted CronJob now, restarts an allowlisted workload, sends a test alert and, with the site's Argo CD account, refreshes or syncs. Each kind is on by default when Tockmox ships what it needs; argocd waits for the site's account. Off means the button is absent. See docs/administration/tockmox-ui.md, \"Taking action\".",
+          "properties": {
+            "silence": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "testAlert": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "runJob": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "allow": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "namespace",
+                      "name"
+                    ],
+                    "properties": {
+                      "namespace": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+                      },
+                      "name": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+                      },
+                      "part": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "description": "Added to the AI layer's own scheduled jobs. A namespace outside the AI layer must exist: a Role is rendered there."
+                }
+              }
+            },
+            "restart": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "allow": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "namespace",
+                      "name"
+                    ],
+                    "properties": {
+                      "namespace": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+                      },
+                      "kind": {
+                        "enum": [
+                          "Deployment",
+                          "StatefulSet"
+                        ]
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "part": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "description": "Added to the AI layer's consoles. A namespace outside the AI layer must exist: a Role is rendered there."
+                }
+              }
+            },
+            "argocd": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "url": {
+                  "type": "string"
+                },
+                "tokenSecret": {
+                  "type": "string",
+                  "description": "A Secret in the AI namespace, key token: an Argo CD local account allowed get and sync on applications, nothing else."
+                }
+              }
+            },
+            "resources": {
+              "type": "object"
+            }
+          }
         }
       }
     },

@@ -34,6 +34,7 @@
           {% if shell.help_href %}<a href="{{ shell.help_href }}" rel="noopener">Help for this page</a>{% endif %}
           <a href="/about#notes">What's in this build</a>
           <a href="/recovery">If something is down</a>
+          {% if shell.test_alert %}<a href="/actions/confirm?kind=test-alert&amp;back={{ path | urlencode }}">Send a test alert to your phone</a>{% endif %}
           <a href="{{ shell.report_href }}" rel="noopener">Report a problem</a>
           <hr>
           {% if shell.newer and user.is_admin %}<a class="notice" href="/platform/updates">Tockmox {{ shell.newer }} is available</a>{% endif %}

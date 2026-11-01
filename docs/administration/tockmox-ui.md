@@ -18,8 +18,10 @@ tockmox:
 The Tockmox UI is the admin console for [inference nodes](inference-nodes.md)
 and [model lifecycle](model-lifecycle.md). It shows each node's health, imports
 an existing gateway's routes, proposes and promotes models, and generates the
-values change for each of those. **It never changes anything itself**: every
-action ends in YAML that an admin commits.
+values change for each of those. **It never changes anything itself.** A change
+Git owns ends in YAML that an admin commits; the few runtime actions (a silence,
+a job run now, a restart, a test alert) go to a separate service that holds the
+credentials ([Taking action](#taking-action)).
 
 > **Experimental in 0.8.0, and off by default.** The values keys may change
 > before they are marked stable.
@@ -264,7 +266,9 @@ the internet at all, and the render check holds that.
 their namespace; with [Platform Management](platform-management.md) on, list on
 Argo CronWorkflows as well. No Secrets and no writes. The Role and RoleBinding live in the
 Argo CD namespace, so the Application that installs the AI layer must be allowed
-to create them there.
+to create them there. With actions on, the UI also reaches the `tockmox-actions`
+pod on 8081, and nothing about its own authority changes
+([Taking action](#taking-action)).
 
 ### When sign-in is unavailable
 
@@ -378,7 +382,7 @@ the page on a narrow screen):
 | Section | Pages |
 |---|---|
 | AI | Models, Inbox, Budget, Profiles; Inference nodes |
-| Platform | Overview, Cases, Organization, Schedule and Specialists when Platform Management is on; Capabilities, the features you installed (such as Security posture), Updates |
+| Platform | Overview, Cases, Organization, Schedule and Specialists when Platform Management is on; Capabilities, the features you installed (such as Security posture), Updates, and Activity when actions are on |
 
 The right-hand side of the bar holds three things:
 
@@ -534,6 +538,111 @@ only when that layer deploys that workload), `goto` (`app`: a console id from
 A malformed `stack:` stops the UI at start with the reason, rather than on the
 first visit to Status.
 
+## Taking action
+
+> **Experimental, new in 0.9.0.** Each kind is switched by
+> `tockmoxUi.actions.<kind>.enabled`.
+
+Where something is wrong you can act from the page that shows it. A part's
+drawer on Status gains **Actions**; Help gains **Send a test alert to your
+phone**. Every action opens a confirm panel that names the target, what will
+happen and how to undo it, and lands in **Platform › Activity**.
+
+| Kind | What it does | On by default |
+|---|---|---|
+| `silence` | Silences a part's firing alerts for 1 hour, 4 hours, 24 hours or 7 days, with a reason; **Expire** ends it early. The alerts stay on Status, marked "Silenced by *name* until *time*": a silence stops the phone, not the problem | yes, with observability |
+| `runJob` | Runs one Job now from an allowlisted CronJob, as its schedule would | yes: the AI layer's restore drill, model watcher, health watch, eval scheduler and console key check |
+| `restart` | A rollout restart of an allowlisted Deployment or StatefulSet | yes: the model gateway, the chat console and this UI |
+| `testAlert` | One warning, `TockmoxTestAlert`, down the same path as every other alert; it resolves after five minutes | yes, with observability |
+| `argocd` | Refresh or sync an Argo CD application | no: needs your Argo CD account (below) |
+
+Off means absent: a kind that is off has no button, and the service refuses it.
+The alerts that prove the alert path works (`Watchdog`, `TockmoxHeartbeat`,
+`TockmoxSelfCheckStale`, and `InfoInhibitor`) are never silenced. A silence names
+alerts by name and namespace, so it also quiets the same alert in that namespace
+on another part; the confirm panel says so.
+
+**How it works.** The UI stays write-free. Confirming an action sends your
+browser through the identity provider with an OIDC nonce made from the action
+itself, so the ID token that comes back authorizes that one action and no
+other. The UI hands the action and the token to a separate Deployment,
+`tockmox-actions`, which checks the token itself: the issuer's signature, the
+UI's client as audience, issued in the last ten minutes, your membership of the
+admin group, and the nonce. With a live sign-in the round trip is a redirect you
+do not see. **Sync and restart ask you to sign in again** when your last sign-in
+was more than five minutes ago (`max_age`). Each action carries an idempotency
+key, so a double click or a replayed confirmation does nothing twice. With the
+identity provider down nobody can sign in, so no action runs; the way in then is
+`kubectl` from an admin machine ([recovery](../operations/troubleshooting.md)).
+
+**What `tockmox-actions` holds**, one narrow grant per kind, all in
+`templates/tockmox-actions.yaml`:
+
+- Alertmanager's API, by NetworkPolicy, for silences and the test alert.
+- In each run-now namespace, `get` on the allowlisted CronJobs by name and
+  `create` on Jobs. The `tockmox-actions-jobs` admission policy admits a Job from
+  this identity only when it is owned by an allowlisted CronJob.
+- In each restart namespace, `get` and `patch` on the allowlisted workloads by
+  name. The `tockmox-actions-restart-*` admission policies refuse any change
+  from this identity but the pod template's `kubectl.kubernetes.io/restartedAt`
+  annotation.
+- `create` on ConfigMaps in its own namespace and `get`/`update` on its record,
+  `tockmox-actions-activity`, which **Activity** reads (the last 300 actions).
+- Only the UI pod may reach it.
+
+**What is still trusted, plainly:** a Job is created from its CronJob's own
+template, but the admission policy cannot compare the two, so a compromised
+`tockmox-actions` pod could run a pod of its choice in an allowlisted namespace,
+within that namespace's Pod Security level. Keep the run-now allowlist to
+namespaces you would trust with that.
+
+**Adding your own.** Name the namespace (it must exist: a Role is rendered
+there) and, so the button appears on the right part, the part's id:
+
+```yaml
+tockmoxUi:
+  actions:
+    runJob:
+      allow:
+        - { namespace: forgejo, name: forgejo-backup, part: forgejo }
+    restart:
+      allow:
+        - { namespace: tockmox-monitoring, kind: Deployment, name: tockmox-observability-grafana, part: dashboards }
+```
+
+An entry without `part` appears on the parts that list its namespace.
+
+**Argo CD refresh and sync** need an Argo CD local account that may get and
+sync applications and nothing else, so a sync can never change an Application's
+source. Create it in Argo CD (`accounts.tockmox-actions: apiKey` in
+`argocd-cm`, and in `argocd-rbac-cm`
+`p, role:tockmox-actions, applications, get, */*, allow` and
+`p, role:tockmox-actions, applications, sync, */*, allow` with
+`g, tockmox-actions, role:tockmox-actions`), generate its token
+(`argocd account generate-token --account tockmox-actions`), store it in a
+Secret in the AI namespace with the key `token`, and set:
+
+```yaml
+tockmoxUi:
+  actions:
+    argocd:
+      enabled: true
+      url: http://argocd-server.argocd.svc
+      tokenSecret: tockmox-actions-argocd
+```
+
+The render fails with the reason when `enabled` is set without both.
+
+**The record.** Every attempt, refused ones too, is one JSON line on the
+service's log, which Loki keeps:
+
+```text
+{"action":"silence","detail":"until 2026-10-31T21:42:00.000Z","event":"tockmox.action","key":"…","ref":["…"],"result":"done","sub":"…","target":{…},"who":"Jeff"}
+```
+
+Find them in Grafana's Explore with
+`{namespace="tockmox-ai", container="actions"} |= "tockmox.action"`.
+
 ## The capabilities page
 
 `/capabilities` (admins) lists each capability, one switch for a whole story
@@ -659,7 +768,8 @@ covers it.
 ## Upgrading
 
 The UI keeps no state of its own: no database, nothing written in the pod, and a
-session is a signed cookie. What survives an upgrade is yours and is not touched
+session is a signed cookie. The one record actions keep lives in a ConfigMap
+`tockmox-actions` writes. What survives an upgrade is yours and is not touched
 by it:
 
 | State | Where | On upgrade |
@@ -668,6 +778,7 @@ by it:
 | the OIDC client secret | Secret `tockmox-sso-tockmox-ui` (or `tockmoxUi.secrets.oidcClient`) | kept |
 | the UI's configuration | `tockmoxUi.config` in your site values, rendered into a ConfigMap | re-rendered from your values; a change restarts the pod |
 | the watcher's report | volume `tockmox-model-watch-report`, when `modelLifecycle.watch.enabled` | kept while the watcher stays enabled; it is re-derived on the watcher's next run if lost |
+| the actions record | ConfigMap `tockmox-actions-activity`, which `tockmox-actions` creates (Argo CD does not track it) | kept; the last 300 actions, and their idempotency keys |
 
 So an upgrade of the UI is: build the image from the new tag, push it, and set
 `tockmoxUi.image` to it in the same commit that moves the charts' revision. The

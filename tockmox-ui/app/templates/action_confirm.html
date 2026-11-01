@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}{{ d.title }}{% endblock %}
+{% block main %}
+{#- TM-1311 (spec section 7): every action names its target, its effect and its undo, and asks once more. -#}
+<p class="crumb"><a href="{{ back }}">Back</a></p>
+<section class="panel confirm" aria-labelledby="confirm-h">
+  <h1 id="confirm-h">{{ d.title }}</h1>
+  <dl class="confirm-facts">
+    <dt>Target</dt><dd>{{ d.target }}</dd>
+    <dt>What happens</dt><dd>{{ d.effect }}</dd>
+    <dt>Undo</dt><dd>{{ d.undo }}</dd>
+  </dl>
+  <form method="post" action="/actions/go" class="stack">
+    <input type="hidden" name="csrf" value="{{ user.csrf }}">
+    <input type="hidden" name="kind" value="{{ kind }}">
+    <input type="hidden" name="target" value="{{ target_json }}">
+    <input type="hidden" name="key" value="{{ key }}">
+    <input type="hidden" name="back" value="{{ back }}">
+    {% if kind == "silence" %}
+    <fieldset>
+      <legend>For</legend>
+      {% for h, label in choices %}<label class="choice"><input type="radio" name="hours" value="{{ h }}" required{% if h == 4 %} checked{% endif %}> {{ label }}</label>{% endfor %}
+    </fieldset>
+    <label for="reason">Why <span class="muted small">(required; Alertmanager keeps it with the silence)</span></label>
+    <textarea id="reason" name="reason" rows="2" maxlength="300" required></textarea>
+    {% endif %}
+    <p class="muted small">{% if step_up %}This one asks you to sign in again when your last sign-in was more than {{ max_age_min }} minutes ago.{% else %}Confirming passes through your sign-in, so the action carries your name.{% endif %} It lands in <a href="/platform/activity">Activity</a>.</p>
+    <p class="confirm-acts"><a class="btn-ghost" href="{{ back }}">Cancel</a> <button class="btn" type="submit">{{ d.title | replace("?", "") }}</button></p>
+  </form>
+</section>
+{% endblock %}

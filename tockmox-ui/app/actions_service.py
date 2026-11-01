@@ -1,0 +1,437 @@
+# SPDX-License-Identifier: Apache-2.0
+"""tockmox-actions: the one process that acts (TM-1311, TM-1313). The Tockmox UI stays write-free.
+
+    python -m app.actions_service            reads TOCKMOX_ACTIONS_CONFIG (default /etc/tockmox-actions/config.yaml)
+
+A separate Deployment on the UI's image, with its own ServiceAccount and one narrow credential per kind: Alertmanager
+(by NetworkPolicy) for silences and the test alert; a Role that creates Jobs only in the run-now allowlist's
+namespaces; a Role that patches only the restart allowlist's workloads, bounded by a ValidatingAdmissionPolicy to the
+restartedAt annotation; and, when the site gives it one, an Argo CD account with get and sync only.
+
+API (reachable from the UI pod only, by NetworkPolicy):
+  POST /v1/intents   {"intent": {...}, "id_token": "..."}   carry out one intent; 200 with the result
+  GET  /v1/activity  the last actions, newest first
+  GET  /healthz
+
+Nothing is trusted from the caller but what the identity provider signed. Each intent arrives with an ID token the
+issuer minted for THIS intent (its nonce is actions.nonce_for(intent)); the service checks the signature, issuer,
+audience (the UI's client), expiry, that it was issued in the last ten minutes, the admin group, the nonce, and for a
+step-up kind auth_time within actions.stepUpMaxAgeSeconds. The intent's idempotency key makes a replay, or a double
+click, do nothing twice: the first result is returned again.
+
+Audit: one JSON line per intent on stdout (`"event": "tockmox.action"`: the person's sub and name, the action, the
+target, the result, the reference it made), which Loki keeps, and a row in the activity ConfigMap the Activity page
+reads.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import secrets
+import ssl
+import sys
+import threading
+import time
+from datetime import datetime, timezone
+
+import httpx
+import jwt
+import yaml
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
+
+from . import actions as act
+from .auth import OIDC
+
+log = logging.getLogger("tockmox.actions")
+SA = "/var/run/secrets/kubernetes.io/serviceaccount"
+ACTIVITY_MAX = 300
+TOKEN_MAX_AGE = 600           # an ID token older than this is not a fresh confirmation, whatever its exp says
+
+
+def _iso(ts: float) -> str:
+    return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+class Kube:
+    """The few verbs the allowlists need, against the API server, with this pod's token."""
+
+    def __init__(self, url="https://kubernetes.default.svc", token_file=SA + "/token", ca_file=SA + "/ca.crt",
+                 timeout=8.0, transport=None):
+        self.url, self.token_file, self.ca_file, self.timeout, self.transport = url, token_file, ca_file, timeout, transport
+
+    def _c(self):
+        verify = True
+        if self.transport is None and os.path.exists(self.ca_file):
+            verify = ssl.create_default_context(cafile=self.ca_file)
+        h = {}
+        if os.path.exists(self.token_file):
+            with open(self.token_file, encoding="utf-8") as fh:
+                h["Authorization"] = "Bearer " + fh.read().strip()
+        return httpx.Client(base_url=self.url, timeout=self.timeout, verify=verify, headers=h, transport=self.transport)
+
+    def call(self, method, path, body=None, ctype="application/json", allow_404=False):
+        """The answer's JSON; None for a 404 only when the caller asked (a GET for something that may not exist)."""
+        with self._c() as c:
+            r = c.request(method, path, content=None if body is None else json.dumps(body),
+                          headers={"Content-Type": ctype} if body is not None else {})
+        if r.status_code == 404 and allow_404:
+            return None
+        if r.status_code >= 400:
+            msg = ""
+            try:
+                msg = r.json().get("message", "")
+            except Exception:  # noqa: BLE001
+                pass
+            raise act.Refused(f"the Kubernetes API answered {r.status_code}{': ' + msg[:300] if msg else ''}")
+        return r.json()
+
+
+class Activity:
+    """The last ACTIVITY_MAX actions, newest first, in one ConfigMap this service creates and owns. Its idempotency
+    keys outlive a restart for the same reason."""
+
+    def __init__(self, kube: Kube, namespace: str, name: str):
+        self.kube, self.ns, self.name = kube, namespace, name
+        self.lock = threading.Lock()
+
+    def _path(self, named=True):
+        return f"/api/v1/namespaces/{self.ns}/configmaps" + (f"/{self.name}" if named else "")
+
+    def read(self) -> tuple[list, dict | None]:
+        cm = self.kube.call("GET", self._path(), allow_404=True)
+        if cm is None:
+            return [], None
+        try:
+            rows = json.loads((cm.get("data") or {}).get("activity.json") or "[]")
+        except ValueError:
+            rows = []
+        return (rows if isinstance(rows, list) else []), cm
+
+    def find(self, key: str) -> dict | None:
+        rows, _ = self.read()
+        return next((r for r in rows if r.get("key") == key), None)
+
+    def add(self, row: dict):
+        with self.lock:
+            for _ in range(3):
+                rows, cm = self.read()
+                rows = ([row] + [r for r in rows if r.get("key") != row.get("key")])[:ACTIVITY_MAX]
+                data = {"activity.json": json.dumps(rows, separators=(",", ":"))}
+                try:
+                    if cm is None:
+                        self.kube.call("POST", self._path(False), {
+                            "apiVersion": "v1", "kind": "ConfigMap",
+                            "metadata": {"name": self.name, "namespace": self.ns,
+                                         "labels": {"app.kubernetes.io/name": "tockmox-actions",
+                                                    "app.kubernetes.io/part-of": "tockmox"}},
+                            "data": data})
+                    else:
+                        cm["data"] = data           # resourceVersion kept: a concurrent write is a 409, retried
+                        self.kube.call("PUT", self._path(), cm)
+                    return
+                except act.Refused as e:
+                    if "409" not in str(e):
+                        raise
+            raise act.Refused("the activity record kept changing underneath; the action ran but its row may be missing")
+
+
+class Service:
+    def __init__(self, doc: dict, transports: dict | None = None, now=time.time):
+        tp = transports or {}
+        self.cfg = act.parse(doc.get("actions"))
+        oidc = doc.get("oidc") or {}
+        self.issuer = str(oidc.get("issuer", "")).rstrip("/")
+        self.client_id = str(oidc.get("clientId", "tockmox-ui"))
+        self.admin_group = str((doc.get("roles") or {}).get("adminGroup", "tockmox-admins"))
+        src = doc.get("sources") or {}
+        self.am_url = str((src.get("alertmanager") or {}).get("url", "")).rstrip("/")
+        kube = src.get("kubernetes") or {}
+        self.timeout = float(src.get("timeoutSeconds", 8))
+        self.oidc = OIDC(self.issuer, self.client_id, "", "", timeout=self.timeout, transport=tp.get("oidc"))
+        self.kube = Kube(str(kube.get("url", "https://kubernetes.default.svc")).rstrip("/"),
+                         str(kube.get("tokenFile", SA + "/token")), str(kube.get("caFile", SA + "/ca.crt")),
+                         self.timeout, tp.get("kube"))
+        self.tp_am, self.tp_argo = tp.get("alertmanager"), tp.get("argocd")
+        self.now = now
+        if not self.cfg.namespace:
+            raise ValueError("actions.namespace: the namespace the activity record lives in is required")
+        if not self.issuer:
+            raise ValueError("oidc.issuer is required: every intent is checked against the issuer's own signature")
+        self.activity = Activity(self.kube, self.cfg.namespace, self.cfg.activity_configmap)
+        self.inflight: set = set()
+        self.inflight_lock = threading.Lock()
+        self.seen: dict = {}            # key -> (nonce, row, at): this process's memory, for a record that lost a row
+
+    # ------------------------------------------------------------ who is asking
+
+    def verify(self, it: dict, id_token: str) -> dict:
+        if not id_token or len(id_token) > 16384:
+            raise act.Refused("no ID token came with the intent")
+        try:
+            d = self.oidc.discovery()
+            claims = jwt.decode(id_token, self.oidc._key_for(id_token), algorithms=["RS256", "ES256", "EdDSA"],
+                                audience=self.client_id, issuer=d["issuer"], leeway=30,
+                                options={"require": ["exp", "iat", "sub", "aud", "iss", "nonce"]})
+        except act.Refused:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise act.Refused(f"the ID token could not be verified ({type(e).__name__})") from e
+        now = self.now()
+        if claims.get("nonce") != act.nonce_for(it):
+            raise act.Refused("the sign-in was not made for this action")
+        if claims["sub"] != it.get("sub"):
+            raise act.Refused("the intent names a different person than the sign-in")
+        if now - float(claims["iat"]) > TOKEN_MAX_AGE:
+            raise act.Refused("the confirmation is too old; confirm again")
+        groups = claims.get("groups")
+        if not isinstance(groups, list):
+            raise act.Refused("the ID token names no groups; the identity provider must include the groups claim in it")
+        if self.admin_group not in groups:
+            raise act.Refused("only platform administrators may act from the console")
+        if act.step_up(it["kind"]):
+            at = claims.get("auth_time")
+            if not isinstance(at, (int, float)) or now - float(at) > self.cfg.step_up_max_age + 30:
+                raise act.Refused(f"this action needs a sign-in from the last {self.cfg.step_up_max_age // 60} minutes")
+        return claims
+
+    # ------------------------------------------------------------ the kinds
+
+    def _am(self):
+        if not self.am_url:
+            raise act.Refused("no Alertmanager is configured")
+        return httpx.Client(base_url=self.am_url, timeout=self.timeout, transport=self.tp_am)
+
+    def do_silence(self, it, who):
+        t, p = it["target"], it["params"]
+        start = self.now()
+        end = start + int(p["hours"]) * 3600
+        ids = []
+        with self._am() as c:
+            try:
+                for m in act.silence_matchers(t):
+                    r = c.post("/api/v2/silences", json={
+                        "matchers": m, "startsAt": _iso(start), "endsAt": _iso(end),
+                        "createdBy": f"{who}{act.CREATED_BY_SUFFIX}",
+                        "comment": f"{str(p['reason']).strip()} [tockmox-action {it['key']}]"})
+                    if r.status_code >= 300:
+                        raise act.Refused(f"Alertmanager refused the silence ({r.status_code}): {r.text[:200]}")
+                    ids.append(str(r.json().get("silenceID", "")))
+            except Exception:
+                for sid in ids:                     # all or none: expire what was made before the failure
+                    try:
+                        c.delete(f"/api/v2/silence/{sid}")
+                    except Exception:  # noqa: BLE001 - the audit line names them either way
+                        log.warning("could not expire partial silence %s", sid)
+                raise
+        return {"ref": ids, "until": end, "detail": f"until {_iso(end)}"}
+
+    def do_expire(self, it, who):
+        sid = it["target"]["silence"]
+        with self._am() as c:
+            r = c.get(f"/api/v2/silence/{sid}")
+            if r.status_code == 404:
+                raise act.Refused("Alertmanager has no such silence")
+            r.raise_for_status()
+            s = r.json()
+            if not str(s.get("createdBy", "")).endswith(act.CREATED_BY_SUFFIX):
+                raise act.Refused("that silence was not made from the console; expire it in Alertmanager")
+            if (s.get("status") or {}).get("state") == "expired":
+                return {"ref": [sid], "detail": "already expired"}
+            r = c.delete(f"/api/v2/silence/{sid}")
+            if r.status_code >= 300:
+                raise act.Refused(f"Alertmanager did not expire it ({r.status_code})")
+        return {"ref": [sid], "detail": "expired"}
+
+    def do_run_job(self, it, who):
+        ns, name = it["target"]["namespace"], it["target"]["name"]
+        cj = self.kube.call("GET", f"/apis/batch/v1/namespaces/{ns}/cronjobs/{name}", allow_404=True)
+        if cj is None:
+            raise act.Refused(f"there is no CronJob {ns}/{name}")
+        jt = (cj.get("spec") or {}).get("jobTemplate") or {}
+        suffix = secrets.token_hex(3)
+        jname = f"{name[:63 - 8]}-run-{suffix}"[:63]
+        meta = jt.get("metadata") or {}
+        labels = dict(meta.get("labels") or {})
+        labels["tockmox.com/run-now"] = "true"
+        ann = dict(meta.get("annotations") or {})
+        ann.update({"cronjob.kubernetes.io/instantiate": "manual", "tockmox.com/requested-by": who,
+                    "tockmox.com/action": it["key"]})
+        job = {"apiVersion": "batch/v1", "kind": "Job",
+               "metadata": {"name": jname, "namespace": ns, "labels": labels, "annotations": ann,
+                            "ownerReferences": [{"apiVersion": "batch/v1", "kind": "CronJob", "name": name,
+                                                 "uid": cj["metadata"]["uid"], "controller": True}]},
+               "spec": jt.get("spec") or {}}
+        self.kube.call("POST", f"/apis/batch/v1/namespaces/{ns}/jobs", job)
+        return {"ref": [jname], "detail": f"Job {jname} started"}
+
+    def _argo(self):
+        if not (self.cfg.argocd_url and self.cfg.argocd_token_file and os.path.exists(self.cfg.argocd_token_file)):
+            raise act.Refused("no Argo CD account is configured for actions (actions.argocd)")
+        with open(self.cfg.argocd_token_file, encoding="utf-8") as fh:
+            tok = fh.read().strip()
+        return httpx.Client(base_url=self.cfg.argocd_url, timeout=self.timeout, transport=self.tp_argo,
+                            headers={"Authorization": "Bearer " + tok})
+
+    def do_refresh(self, it, who):
+        app = it["target"]["app"]
+        with self._argo() as c:
+            r = c.get(f"/api/v1/applications/{app}", params={"refresh": "normal"})
+            if r.status_code >= 300:
+                raise act.Refused(f"Argo CD did not refresh it ({r.status_code})")
+        return {"ref": [app], "detail": "refresh requested"}
+
+    def do_sync(self, it, who):
+        app = it["target"]["app"]
+        with self._argo() as c:
+            r = c.post(f"/api/v1/applications/{app}/sync", json={"prune": False, "dryRun": False})
+            if r.status_code >= 300:
+                raise act.Refused(f"Argo CD did not start a sync ({r.status_code}): {r.text[:200]}")
+        return {"ref": [app], "detail": "sync started"}
+
+    def do_restart(self, it, who):
+        t = it["target"]
+        plural = {"Deployment": "deployments", "StatefulSet": "statefulsets"}[t["kind"]]
+        patch = {"spec": {"template": {"metadata": {"annotations": {
+            "kubectl.kubernetes.io/restartedAt": datetime.fromtimestamp(self.now(), timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}}}}}
+        r = self.kube.call("PATCH", f"/apis/apps/v1/namespaces/{t['namespace']}/{plural}/{t['name']}", patch,
+                           ctype="application/strategic-merge-patch+json", allow_404=True)
+        if r is None:
+            raise act.Refused(f"there is no {t['kind']} {t['namespace']}/{t['name']}")
+        return {"ref": [t["name"]], "detail": "restart started"}
+
+    def do_test_alert(self, it, who):
+        start = self.now()
+        alert = {"labels": {"alertname": "TockmoxTestAlert", "severity": "warning", "namespace": self.cfg.namespace,
+                            "tockmox_test": "true"},
+                 "annotations": {"summary": f"Test alert from the Tockmox console, sent by {who}",
+                                 "description": "Sent from the Tockmox UI to prove the alert path reaches this phone. "
+                                                "It resolves by itself after five minutes. Nothing is wrong."},
+                 "startsAt": _iso(start), "endsAt": _iso(start + 300)}
+        with self._am() as c:
+            r = c.post("/api/v2/alerts", json=[alert])
+            if r.status_code >= 300:
+                raise act.Refused(f"Alertmanager refused the test alert ({r.status_code})")
+        return {"ref": [], "detail": "sent; resolves in five minutes"}
+
+    # ------------------------------------------------------------ one intent
+
+    def handle(self, body) -> tuple[int, dict]:
+        if not isinstance(body, dict):
+            return 400, {"result": "refused", "reason": "not an intent"}
+        it, tok = body.get("intent"), str(body.get("id_token") or "")
+        who, sub = "", ""
+        try:
+            act.check(self.cfg, it)
+            claims = self.verify(it, tok)
+            sub = claims["sub"]
+            who = str(claims.get("name") or claims.get("preferred_username") or sub)[:80]
+            with self.inflight_lock:                                # two clicks at once: the second does nothing
+                if it["key"] in self.inflight:
+                    raise act.Refused("this action is already running; its result will be in Activity")
+                self.inflight.add(it["key"])
+            try:
+                return self._once(it, sub, who)
+            finally:
+                with self.inflight_lock:
+                    self.inflight.discard(it["key"])
+        except act.Refused as e:
+            self.audit(it if isinstance(it, dict) else {}, sub, who, "refused", [], str(e))
+            return 403, {"result": "refused", "reason": str(e)}
+        except Exception as e:  # noqa: BLE001 - the result is in words, never a stack trace to the browser
+            log.warning("action failed: %s: %s", type(e).__name__, e)
+            self.audit(it if isinstance(it, dict) else {}, sub, who, "failed", [], type(e).__name__)
+            return 502, {"result": "failed", "reason": f"the action did not complete ({type(e).__name__})"}
+
+    def _once(self, it, sub, who) -> tuple[int, dict]:
+        """Carry out a verified intent once. The key is RESERVED in the record before anything is done (no record,
+        no action), and a key is bound to the intent it was first used for: the same key with another intent is
+        refused, a replay of the same intent returns its first result."""
+        nonce = act.nonce_for(it)
+        now = self.now()
+        self.seen = {k: v for k, v in self.seen.items() if now - v[2] < 3600}
+        prior = self.activity.find(it["key"]) or (self.seen.get(it["key"]) or (None, None, 0))[1]
+        if prior is not None:
+            if prior.get("nonce") != nonce:
+                raise act.Refused("that idempotency key belongs to another action")
+            if prior.get("result") == "running":
+                raise act.Refused("this action is already running; its result will be in Activity")
+            self.audit(it, sub, who, "repeat", prior.get("ref") or [], "already " + str(prior.get("result")))
+            return 200, dict(prior, repeat=True)
+        d = act.describe(it, fmt_time=_iso)
+        row = {"key": it["key"], "nonce": nonce, "at": now, "sub": sub, "who": who, "kind": it["kind"],
+               "target": it["target"], "summary": d["summary"], "result": "running", "detail": "", "ref": [],
+               "until": None}
+        try:
+            self.activity.add(row)
+        except Exception as e:  # noqa: BLE001 - fail closed: an action that cannot be recorded is not run
+            raise act.Refused(f"the action could not be recorded first ({type(e).__name__}), so it was not run") from e
+        self.seen[it["key"]] = (nonce, row, now)
+        try:
+            res = getattr(self, "do_" + it["kind"].replace("-", "_"))(it, who)
+        except Exception as e:
+            reason = str(e) if isinstance(e, act.Refused) else type(e).__name__
+            self._finish(dict(row, result="failed", detail=reason[:300]))
+            raise
+        row = dict(row, result="done", detail=res.get("detail", ""), ref=res.get("ref") or [], until=res.get("until"))
+        self.audit(it, sub, who, "done", row["ref"], row["detail"])
+        self._finish(row)
+        return 200, row
+
+    def _finish(self, row):
+        self.seen[row["key"]] = (row["nonce"], row, row["at"])
+        try:
+            self.activity.add(row)
+        except Exception as e:  # noqa: BLE001 - it ran (or failed): the reserved row stays, and the log line is the record
+            log.warning("activity row not updated: %s: %s", type(e).__name__, e)
+            row["detail"] += " (Activity may still say running: " + type(e).__name__ + ")"
+
+    def audit(self, it, sub, who, result, ref, detail):
+        line = {"event": "tockmox.action", "sub": sub, "who": who, "action": it.get("kind", ""),
+                "target": it.get("target", {}), "key": it.get("key", ""), "result": result, "ref": ref,
+                "detail": str(detail)[:300]}
+        print(json.dumps(line, separators=(",", ":"), sort_keys=True), flush=True)
+
+
+def create_service(doc: dict, transports: dict | None = None, now=time.time) -> FastAPI:
+    svc = Service(doc, transports, now)
+    app = FastAPI(title="tockmox-actions", docs_url=None, redoc_url=None, openapi_url=None)
+    app.state.service = svc
+
+    @app.get("/healthz", response_class=PlainTextResponse)
+    def healthz():
+        return "ok"
+
+    @app.post("/v1/intents")
+    async def intents(request: Request):
+        try:
+            body = await request.json()
+        except Exception:  # noqa: BLE001
+            return JSONResponse({"result": "refused", "reason": "not JSON"}, status_code=400)
+        code, out = svc.handle(body)
+        return JSONResponse(out, status_code=code)
+
+    @app.get("/v1/activity")
+    def activity(limit: int = 50):
+        try:
+            rows, _ = svc.activity.read()
+        except Exception as e:  # noqa: BLE001
+            return JSONResponse({"error": f"the activity record could not be read ({type(e).__name__})"}, status_code=503)
+        return {"rows": rows[:max(1, min(limit, ACTIVITY_MAX))]}
+
+    return app
+
+
+def main():
+    logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    path = os.environ.get("TOCKMOX_ACTIONS_CONFIG", "/etc/tockmox-actions/config.yaml")
+    with open(path, encoding="utf-8") as fh:
+        doc = yaml.safe_load(fh) or {}
+    import uvicorn
+    uvicorn.run(create_service(doc), host="0.0.0.0", port=int(os.environ.get("TOCKMOX_ACTIONS_PORT", "8081")),
+                log_level="warning", access_log=False)
+
+
+if __name__ == "__main__":
+    main()

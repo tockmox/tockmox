@@ -354,21 +354,46 @@ class AlertmanagerSource(_HttpSource):
         self.heartbeat = heartbeat
 
     def fetch(self):
-        doc = self._get("/api/v2/alerts", {"active": "true", "silenced": "false", "inhibited": "false"})
+        # Silenced alerts too (TM-1313): one silenced from the console STAYS on Status, marked "silenced by
+        # <name> until <time>", because a silence stops the phone, not the problem. One a person silenced in
+        # Alertmanager itself is left out, as before.
+        doc = self._get("/api/v2/alerts", {"active": "true", "silenced": "true", "inhibited": "false"})
         if not isinstance(doc, list):
             raise ValueError("not a list")
+        silenced = [a for a in doc if (a.get("status") or {}).get("silencedBy")]
+        ours = self._console_silences() if silenced else {}
         out = []
         for a in doc:
             lab = a.get("labels", {})
             ann = a.get("annotations", {})
+            by = [ours[i] for i in ((a.get("status") or {}).get("silencedBy") or []) if i in ours]
+            if (a.get("status") or {}).get("silencedBy") and not by:
+                continue
             out.append({"name": lab.get("alertname", "?"), "severity": lab.get("severity", ""),
                         "namespace": lab.get("namespace", ""),
                         # A rule may name the part it is about outright (TM-1305, app/stack.yaml).
                         "component": lab.get("tockmox_component", ""),
                         "summary": ann.get("summary") or ann.get("description", ""),
-                        "startsAt": a.get("startsAt", "")})
+                        "startsAt": a.get("startsAt", ""),
+                        "silenced": max(by, key=lambda x: x["until"] or 0) if by else None})
         order = {"critical": 0, "warning": 1}
         return sorted(out, key=lambda x: (order.get(x["severity"], 2), x["name"]))
+
+    def _console_silences(self) -> dict:
+        """id -> {id, by, until} for the active silences made from the console (app/actions.py). A failed read
+        returns none, so those alerts are left out as before rather than shown without their mark."""
+        from .actions import CREATED_BY_SUFFIX
+        try:
+            doc = self._get("/api/v2/silences", {})
+        except Exception:  # noqa: BLE001
+            return {}
+        out = {}
+        for x in doc if isinstance(doc, list) else []:
+            cb = str(x.get("createdBy", ""))
+            if (x.get("status") or {}).get("state") == "active" and cb.endswith(CREATED_BY_SUFFIX):
+                out[str(x.get("id"))] = {"id": str(x.get("id")), "by": cb[:-len(CREATED_BY_SUFFIX)],
+                                         "until": _parse_ts(x.get("endsAt"))}
+        return out
 
     def evaluate(self, alerts):
         if self.heartbeat and not any(a["name"] == self.heartbeat for a in alerts):

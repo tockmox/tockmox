@@ -105,17 +105,22 @@ class OIDC:
             self._jwks = None
         return self._disc
 
-    def begin(self) -> tuple[str, dict]:
+    def begin(self, nonce: str | None = None, max_age: int | None = None) -> tuple[str, dict]:
+        """The authorization request. An action (app/actions.py) passes its own nonce, which binds the sign-in to
+        that one intent, and max_age for a step-up kind, which makes the issuer ask again after that many seconds."""
         # Fresh, not cached: a cached discovery document sends the browser to an IdP
         # that is down, where it meets the proxy's bare 503 instead of our recovery
         # page. Found in the lab (TM-0901, 2026-10-05, run D10).
         d = self.discovery(fresh=True)
         verifier = _b64(secrets.token_bytes(32))
-        st = {"state": secrets.token_urlsafe(24), "nonce": secrets.token_urlsafe(24), "verifier": verifier}
+        st = {"state": secrets.token_urlsafe(24), "nonce": nonce or secrets.token_urlsafe(24), "verifier": verifier}
         q = {"response_type": "code", "client_id": self.client_id, "redirect_uri": self.redirect_url,
              "scope": self.scopes, "state": st["state"], "nonce": st["nonce"],
              "code_challenge": _b64(hashlib.sha256(verifier.encode()).digest()),
              "code_challenge_method": "S256"}
+        if max_age is not None:
+            q["max_age"] = str(int(max_age))
+            st["max_age"] = int(max_age)
         return d["authorization_endpoint"] + "?" + urlencode(q), st
 
     def end_session_url(self, post_logout_redirect: str = "", id_token_hint: str = "") -> str | None:
