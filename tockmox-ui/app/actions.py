@@ -66,7 +66,14 @@ GROUP_NAME = re.compile(r"[^\s][^\n]{0,79}")
 
 
 class Refused(ValueError):
-    """An intent this side will not carry out, with the reason in words."""
+    """An intent this side will not carry out, with the reason in words.
+
+    `reason` is the sentence written at the raise site for a person to read, and the only part of a refusal that goes
+    back to a caller. Text read from an upstream response never goes in it; that goes to the log (TM-1356)."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = str(reason)
 
 
 @dataclass(frozen=True)

@@ -91,7 +91,9 @@ class Kube:
                 msg = r.json().get("message", "")
             except Exception:  # noqa: BLE001
                 pass
-            raise act.Refused(f"the Kubernetes API answered {r.status_code}{': ' + msg[:300] if msg else ''}")
+            if msg:                                     # the API's own words are for the operator, not the caller
+                log.warning("Kubernetes API %s %s answered %s: %s", method, path, r.status_code, str(msg)[:300])
+            raise act.Refused(f"the Kubernetes API answered {r.status_code}")
         return r.json()
 
 
@@ -192,7 +194,9 @@ class Authentik:
             detail = str(j.get("detail") or j.get("non_field_errors") or "")[:200]
         except Exception:  # noqa: BLE001
             pass
-        return act.Refused(f"Authentik refused {what} ({r.status_code}){': ' + detail if detail else ''}")
+        if detail:                                  # Authentik's own words are for the operator, not the caller
+            log.warning("Authentik refused %s (%s): %s", what, r.status_code, detail)
+        return act.Refused(f"Authentik refused {what} ({r.status_code})")
 
     def person(self, u: dict) -> dict:
         """One user as the Identity page and the checks see them. `groups_obj` is direct membership only, so a group
@@ -365,7 +369,8 @@ class Service:
                         "createdBy": f"{who}{act.CREATED_BY_SUFFIX}",
                         "comment": f"{str(p['reason']).strip()} [tockmox-action {it['key']}]"})
                     if r.status_code >= 300:
-                        raise act.Refused(f"Alertmanager refused the silence ({r.status_code}): {r.text[:200]}")
+                        log.warning("Alertmanager refused a silence for %s (%s): %s", it["key"], r.status_code, r.text[:200])
+                        raise act.Refused(f"Alertmanager refused the silence ({r.status_code})")
                     ids.append(str(r.json().get("silenceID", "")))
             except Exception:
                 for sid in ids:                     # all or none: expire what was made before the failure
@@ -436,7 +441,8 @@ class Service:
         with self._argo() as c:
             r = c.post(f"/api/v1/applications/{app}/sync", json={"prune": False, "dryRun": False})
             if r.status_code >= 300:
-                raise act.Refused(f"Argo CD did not start a sync ({r.status_code}): {r.text[:200]}")
+                log.warning("Argo CD did not start a sync of %s for %s (%s): %s", app, it["key"], r.status_code, r.text[:200])
+                raise act.Refused(f"Argo CD did not start a sync ({r.status_code})")
         return {"ref": [app], "detail": "sync started"}
 
     def do_restart(self, it, who):
@@ -498,9 +504,9 @@ class Service:
             finally:
                 with self.inflight_lock:
                     self.inflight.discard(it["key"])
-        except act.Refused as e:
-            self.audit(it if isinstance(it, dict) else {}, sub, who, "refused", [], str(e))
-            return 403, {"result": "refused", "reason": str(e)}
+        except act.Refused as e:                    # e.reason: the sentence written for a person, never str(e)
+            self.audit(it if isinstance(it, dict) else {}, sub, who, "refused", [], e.reason)
+            return 403, {"result": "refused", "reason": e.reason}
         except Exception as e:  # noqa: BLE001 - the result is in words, never a stack trace to the browser
             log.warning("action failed: %s: %s", type(e).__name__, e)
             self.audit(it if isinstance(it, dict) else {}, sub, who, "failed", [], type(e).__name__)
@@ -533,7 +539,7 @@ class Service:
         try:
             res = getattr(self, "do_" + it["kind"].replace("-", "_"))(it, who)
         except Exception as e:
-            reason = str(e) if isinstance(e, act.Refused) else type(e).__name__
+            reason = e.reason if isinstance(e, act.Refused) else type(e).__name__
             self._finish(dict(row, result="failed", detail=reason[:300]))
             raise
         row = dict(row, result="done", detail=res.get("detail", ""), ref=res.get("ref") or [], until=res.get("until"))
