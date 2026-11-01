@@ -721,3 +721,55 @@ def test_lab_main_starts_with_the_service_link_variable_set(tmp_path, monkeypatc
 
 def test_lab_main_listens_where_its_own_variable_says(tmp_path, monkeypatch):
     assert _start(tmp_path, monkeypatch, listen="9000") == 9000
+
+
+# ---------------------------------------------------------------- the lab walk (2026-11-01): times, ids, stale Expire
+
+def test_lab_walk_a_silence_reads_in_words_in_the_sites_zone_and_expire_follows_alertmanager(tmp_path):
+    c, csrf, idp, am, kube, sent = console(tmp_path)
+    pid, _ = drawer_of(c, am)
+    t = c.get(f"/actions/confirm?kind=silence&part={pid}").text
+    form = {k: v.replace("&#34;", '"').replace("&quot;", '"')
+            for k, v in re.findall(r'<input type="hidden" name="([a-z]+)" value="([^"]*)"', t)}
+    r = c.post("/actions/go", data=dict(form, hours="1", reason="lab walk"))
+    q = parse_qs(urlsplit(r.headers["location"]).query)
+    idp.next_claims = {"nonce": q["nonce"][0]}
+    r = c.get(f"/auth/callback?code=c&state={q['state'][0]}")
+    sid = next(iter(am.silences))
+    assert r.status_code == 200 and "Until <time" in r.text and " UTC</time>" in r.text
+    assert sid not in r.text and ".000Z" not in r.text                     # no raw id, no ISO stamp in the words
+    a = c.get("/platform/activity").text
+    assert "Times in UTC." in a and " UTC</time>" in a and "until <time" in a
+    assert f"kind=expire&amp;silence={sid}" in a and f"<code>{sid}" not in a
+    am.silences[sid]["status"] = {"state": "expired"}                       # ended elsewhere (Status, or amtool)
+    a = c.get("/platform/activity").text
+    assert "kind=expire" not in a                                            # no Expire on a silence that is gone
+
+
+def test_lab_walk_a_result_names_its_ref_once():
+    from jinja2 import Environment
+    env = Environment(autoescape=True)
+    tpl = env.from_string('{{ (ref | reject("in", detail) | list) | join(",") }}')
+    assert tpl.render(ref=["job-1"], detail="Job job-1 started") == ""      # "Job x started · x" said x twice
+    assert tpl.render(ref=["dawn"], detail="added") == "dawn"
+
+
+def test_lab_walk_no_markdown_in_the_confirm_words():
+    for kind, target in (("restart", {"namespace": "n", "kind": "Deployment", "name": "w"}),):
+        d = act.describe(act.intent(kind, target, {}, "a"))
+        assert "`" not in " ".join(str(v) for v in d.values())
+
+
+def test_lab_walk_the_sites_zone_is_checked_at_start(tmp_path):
+    from app import config
+    doc = yaml.safe_load((Path(__file__).resolve().parent.parent / "config.example.yaml").read_text())
+    (tmp_path / "cs").write_text("x")
+    (tmp_path / "ss").write_text("s" * 40)
+    doc["oidc"]["clientSecretFile"] = str(tmp_path / "cs")
+    doc["session"]["secretFile"] = str(tmp_path / "ss")
+    assert config.parse(copy.deepcopy(doc)).timezone == "UTC"
+    doc.setdefault("site", {})["timezone"] = "America/Chicago"
+    assert config.parse(copy.deepcopy(doc)).timezone == "America/Chicago"
+    doc["site"]["timezone"] = "Mars/Olympus"
+    with pytest.raises(config.ConfigError, match="site.timezone"):
+        config.parse(doc)

@@ -89,6 +89,7 @@ class Settings:
     oidc_post_logout_url: str = ""         # sent as post_logout_redirect_uri only when set (the issuer may refuse an unregistered one)
     stack_site: dict | None = None         # the site's additions to app/stack.yaml (TM-1305); checked at start
     actions: object = None                 # app/actions.Config (TM-1311): which kinds this console may ask for
+    timezone: str = "UTC"                  # the site's zone (global.timezone), for times people read (the lab walk, 2026-11-01)
 
     def app(self, app_id: str) -> App | None:
         for a in self.apps:
@@ -212,6 +213,16 @@ def _parse_lifecycle(raw: dict, inventory) -> LifecycleSettings:
                              str(raw.get("demandQuery", LifecycleSettings.demand_query)), bool(w.get("enabled", False)), dict(raw),
                              str(raw.get("verdictsDir", "") or ""), paths["verdictsRepoPath"], paths["evalRequestsRepoPath"],
                              dict(pages), dict(regs))
+
+
+def _parse_tz(raw) -> str:
+    from zoneinfo import ZoneInfo
+    tz = str(raw or "UTC")
+    try:
+        ZoneInfo(tz)
+    except Exception as e:  # noqa: BLE001 - ZoneInfoNotFoundError, ValueError on a path-like name
+        raise ConfigError(f"site.timezone {tz!r} is not a time zone (an IANA name such as America/Chicago)") from e
+    return tz
 
 
 def _parse_capabilities(raw) -> tuple:
@@ -343,6 +354,7 @@ def parse(doc: dict) -> Settings:
         oidc_post_logout_url=(_check_url(str(oidc["postLogoutRedirectUrl"]), "oidc.postLogoutRedirectUrl") and str(oidc["postLogoutRedirectUrl"]))
         if oidc.get("postLogoutRedirectUrl") else "",
         stack_site=_parse_stack(doc.get("stack")),
+        timezone=_parse_tz(site.get("timezone", "UTC")),
         actions=_parse_actions(doc.get("actions")),
     )
 

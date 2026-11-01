@@ -181,13 +181,16 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         from datetime import datetime, timezone
         return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if ts else ""
 
-    def _local(ts, tz="UTC"):
+    def _local(ts, tz=None, zone=False):
+        """A time people read, in the site's zone (site.timezone) unless a page names another; zone=True adds the
+        zone's abbreviation (the lab walk, 2026-11-01: Activity said 21:25 at 15:25 in Chicago, with no zone)."""
         from datetime import datetime
         from zoneinfo import ZoneInfo
         if not ts:
             return ""
-        d = datetime.fromtimestamp(ts, ZoneInfo(tz))
-        return d.strftime("%a %d %b %H:%M") if abs(time.time() - ts) > 86400 * 5 else d.strftime("%a %H:%M")
+        d = datetime.fromtimestamp(ts, ZoneInfo(tz or s.timezone))
+        out = d.strftime("%a %d %b %H:%M") if abs(time.time() - ts) > 86400 * 5 else d.strftime("%a %H:%M")
+        return out + d.strftime(" %Z") if zone else out
 
     def _rel(ts):
         """'in 3h 10m' or '2d 4h ago': relative time, paired with the absolute one in <time>."""
@@ -763,7 +766,8 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
     src_report = ModelReportSource(s.lifecycle.report_file, s.lifecycle.report_max_age_s)
     build_checks = BuildChecks(prober)       # the last build check: read by POST /models/builds, shown on the node pages (TM-1296)
     actions_routes.register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, oidc,
-                            lambda: placed(readings()), transport=tp.actions)
+                            lambda: placed(readings()), transport=tp.actions,
+                            active_silences=lambda: src_am._console_silences())
     nodes_routes.register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_inodes, prober, APP_VERSION,
                           src_report=src_report, build_checks=build_checks)
 

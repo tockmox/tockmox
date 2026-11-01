@@ -107,6 +107,12 @@ site's UI said "No apps are assigned to your account" because it set no tockmoxU
 {{- $_ := set $cfg "apps" $derived -}}
 {{- end -}}
 {{- $siteCfg := $cfg.site | default dict -}}
+{{- /* Times people read (Activity, a silence's end) in the site's zone: global.timezone unless the UI's config names
+    one (the lab walk, 2026-11-01). */ -}}
+{{- if not (hasKey $siteCfg "timezone") -}}
+{{- $_ := set $siteCfg "timezone" (((.Values.global | default dict).timezone) | default "UTC") -}}
+{{- $_ := set $cfg "site" $siteCfg -}}
+{{- end -}}
 {{- if and (not (hasKey $siteCfg "docsUrl")) $dom (include "tockmox.appEnabled" (dict "ctx" $ "app" "docs")) -}}
 {{- $_ := set $siteCfg "docsUrl" (printf "https://docs.%s" $dom) -}}
 {{- $_ := set $cfg "site" $siteCfg -}}

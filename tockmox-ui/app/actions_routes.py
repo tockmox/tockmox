@@ -84,8 +84,15 @@ def silences_on(pv) -> list[dict]:
     return sorted(by.values(), key=lambda r: r.get("until") or 0)
 
 
-def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, oidc, placed_now, transport=None):
+def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, oidc, placed_now, transport=None,
+             active_silences=lambda: {}):
     cfg: act.Config = s.actions or act.Config()
+
+    def site_time(ts):
+        """A time in the confirm and result words, in the site's zone with its abbreviation (site.timezone)."""
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        return datetime.fromtimestamp(ts, ZoneInfo(s.timezone)).strftime("%H:%M %Z")
     cookie = ACT_COOKIE if s.secure_cookies else DEV_ACT_COOKIE
 
     def admin(request):
@@ -148,7 +155,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
             it = act.check(cfg, act.intent(kind, target, draft, u.sub))
         except act.Refused as e:
             return nope(request, u, f"This action cannot be offered: {e}.", 409)
-        d = act.describe(it, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime(ts)), choosing=True)
+        d = act.describe(it, fmt_time=site_time, choosing=True)
         return render(request, "action_confirm.html", u, kind=kind, d=d, target_json=json.dumps(target, sort_keys=True),
                       key=it["key"], back=back, step_up=act.step_up(kind), max_age_min=cfg.step_up_max_age // 60,
                       choices=SILENCE_CHOICES, recovery_choices=RECOVERY_CHOICES, target=target)
@@ -225,7 +232,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
             return done("action_result.html", 502, ok=False, reason="the identity provider's answer could not be verified", d=None)
         if claims.get("sub") != u.sub:
             return done("action_result.html", 403, ok=False, reason="you signed in as someone else than this session", d=None)
-        d = act.describe(it, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime(ts)))
+        d = act.describe(it, fmt_time=site_time)
         try:
             with httpx.Client(base_url=cfg.url, timeout=max(s.source_timeout_s, 10), transport=transport) as c:
                 r = c.post("/v1/intents", json={"intent": it, "id_token": claims.get("_id_token", "")})
@@ -255,8 +262,14 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
                 rows = r.json().get("rows") or []
         except Exception as e:  # noqa: BLE001
             err = f"the actions service did not answer ({type(e).__name__})"
+        active = set()
+        if cfg.on("expire") and any(r.get("kind") == "silence" for r in rows):
+            try:
+                active = set(active_silences())        # a failed read offers no Expire here; Status still does
+            except Exception:  # noqa: BLE001
+                active = set()
         return render(request, "platform_activity.html", u, rows=rows, err=err, now=time.time(),
-                      expire_on=cfg.on("expire"))
+                      expire_on=cfg.on("expire"), active=active)
 
     @app.get("/platform/identity")
     def identity(request: Request):

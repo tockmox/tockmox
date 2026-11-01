@@ -295,7 +295,7 @@ def describe(it: dict, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime
     if k == "restart":
         name = f"{t.get('namespace')}/{t.get('name')}"
         return {"title": f"Restart {t.get('name')}?", "summary": f"Restarted {t.get('name')}", "target": f"{t.get('kind')} {name}",
-                "effect": "Replaces its pods one at a time, as `kubectl rollout restart` does. Nothing else about it changes.",
+                "effect": "Replaces its pods one at a time, as kubectl rollout restart does. Nothing else about it changes.",
                 "undo": "Nothing to undo: the new pods run the same configuration."}
     if k == "recovery-link":
         u, h = t.get("username", ""), int(p.get("hours", 24))
@@ -309,14 +309,17 @@ def describe(it: dict, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime
     if k == "add-member":
         u = t.get("username", "")
         return {"title": f"Add {u} to the user group?", "summary": f"Added {u} to the user group", "target": u,
-                "effect": f"{u} joins the user group, so the consoles open to users let them in on their next sign-in. "
+                "effect": f"{u} joins the user group, so the consoles open to users let them in on their next sign-in "
+                          "(Authentik can take up to five minutes to notice: it caches its access decisions). "
                           "Administrators are not changed by this: that group is set in Git.",
                 "undo": f"Remove {u} from the user group, here."}
     if k == "remove-member":
         u = t.get("username", "")
         return {"title": f"Remove {u} from the user group?", "summary": f"Removed {u} from the user group", "target": u,
                 "effect": f"{u} leaves the user group, so the consoles open to users stop letting them in at their next "
-                          "sign-in. A session already open in a console lasts until it ends. Their account stays.",
+                          "sign-in, within five minutes (Authentik caches its access decisions that long). A session "
+                          "already open in a console lasts until it ends. They can still sign in to Authentik itself; "
+                          "to stop that, deactivate the account in Authentik's admin console.",
                 "undo": f"Add {u} to the user group again, here."}
     if k == "test-alert":
         return {"title": "Send a test alert to your phone?", "summary": "Sent a test alert",
