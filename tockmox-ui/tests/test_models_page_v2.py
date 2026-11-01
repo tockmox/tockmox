@@ -376,7 +376,7 @@ def test_the_page_draws_without_inline_styles_scripts_or_handlers(tmp_path):
     c, u = rich_client(tmp_path)
     r = c.get("/models")
     main = r.text.split("<main", 1)[1].split("</main>", 1)[0]
-    assert "style=" not in main and "<script" not in main and not re.search(r"\son[a-z]+=", main)
+    assert "style=" not in main and "<script" not in _noshell(main) and not re.search(r"\son[a-z]+=", main)
     assert "script-src 'self'" in r.headers["content-security-policy"]
 
 
@@ -386,3 +386,10 @@ def test_a_stale_run_is_flagged_on_the_strip(tmp_path):
     write_status(sdir, status(state="running", updated=iso(delta_s=-3 * 3600), legs=[leg("control", "running")]))
     items = strip_items(c.get("/models").text)
     assert "it may have stopped" in plain(items["running"])
+
+
+def _noshell(t):
+    """The page minus the kit's one same-origin script (shell.js: theme and header menus, TM-1304); any
+    other script tag is still a failure."""
+    import re as _re
+    return _re.sub(r'<script src="/static/kit/shell\.js[^"]*"></script>', "", t)

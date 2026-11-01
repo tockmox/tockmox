@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}About Tockmox{% endblock %}
+{% block main %}
+{# Help > About (TM-1304): what is running here and what this build contains, for everyone signed in. Checking
+   for and taking an update is an admin task on Platform > Updates. The notes fold by section, so a long
+   Unreleased block is three lines until opened. #}
+<div class="page-head">
+  <div><h1>About Tockmox</h1><p class="lede">An on-premises platform for private AI and the operations around it, run from your own Git repository.</p></div>
+  {% if user.is_admin %}<div class="page-actions"><a class="btn-ghost" href="/platform/updates">Updates</a></div>{% endif %}
+</div>
+
+<section class="stats" aria-label="This site">
+  <div class="stat">
+    <div class="label">Running</div>
+    {% if ver.state == "single" %}
+    <div class="value">Tockmox {{ ver.version }}</div><div class="sub">on {{ ver.layers|length }} layer{{ "" if ver.layers|length == 1 else "s" }}</div>
+    {% elif ver.state == "floating" %}
+    <div class="value"><code title="{{ ver.ref }}">{{ ver.ref[:12] }}</code></div><div class="sub">A commit, not a release: this site tracks Tockmox's source between tags.</div>
+    {% elif ver.state == "mixed" %}
+    <div class="value">{{ badge("warning", "Mixed versions") }}</div><div class="sub">{{ ver.revisions|join(", ") }}</div>
+    {% else %}
+    <div class="value">{{ badge("unknown", "Unknown") }}</div><div class="sub">{{ ver.reason or "Argo CD could not be read." }}</div>
+    {% endif %}
+  </div>
+  <div class="stat">
+    <div class="label">This site</div>
+    <div class="value">{{ site.site_name or "Unnamed" }}</div><div class="sub">{{ site.domain }}</div>
+  </div>
+  <div class="stat">
+    <div class="label">Licences</div>
+    <div class="value">Apache-2.0</div><div class="sub">Code. Documentation is CC BY 4.0.</div>
+  </div>
+</section>
+
+<section class="panel" aria-labelledby="help-h">
+  <h2 id="help-h">Help</h2>
+  <ul class="plain">
+    <li><a href="{{ shell.docs_home }}" rel="noopener">Documentation</a>{% if not site.docs_url %} <span class="muted small">(the source repository, at the version you run)</span>{% endif %}</li>
+    {% if site.docs_url %}<li><a href="{{ docs_repo_link }}" rel="noopener">The same documentation in the source repository</a> <span class="muted small">at the version you run, for when this site's docs are down</span></li>{% endif %}
+    <li><a href="/recovery">If something is down</a> <span class="muted small">works without signing in</span></li>
+    <li><a href="{{ shell.report_href }}" rel="noopener">Report a problem</a></li>
+  </ul>
+  <p class="muted small">This console reads the platform and, where a page offers it, opens a change for you to review. Changes to configuration always arrive as a pull request in your site repository.</p>
+</section>
+
+<section class="panel notes" aria-labelledby="notes-h" id="notes">
+  <h2 id="notes-h">What's in this build{% if notes and notes.version != "Unreleased" %} ({{ notes.version }}{% if notes.date %}, {{ notes.date }}{% endif %}){% endif %}</h2>
+  {% if notes and notes_of_build %}<p class="muted small">No release tag names what is running, so these are the notes bundled with this build{% if notes.version == "Unreleased" %}, for a release not tagged yet{% endif %}.</p>{% endif %}
+  {% if notes %}
+    {% set ns = namespace(open=false, ul=false) %}
+    {% for kind, text in notes.blocks %}
+      {% if kind == "h" %}
+        {% if ns.ul %}</ul>{% set ns.ul = false %}{% endif %}
+        {% if ns.open %}</details>{% endif %}
+        <details class="fold"><summary><span class="fold-title">{{ text }}</span><span></span><span></span><span class="chev" aria-hidden="true"></span></summary>
+        {% set ns.open = true %}
+      {% elif kind == "li" %}
+        {% if not ns.ul %}<ul>{% set ns.ul = true %}{% endif %}<li>{{ text }}</li>
+      {% else %}
+        {% if ns.ul %}</ul>{% set ns.ul = false %}{% endif %}<p>{{ text }}</p>
+      {% endif %}
+    {% endfor %}
+    {% if ns.ul %}</ul>{% endif %}
+    {% if ns.open %}</details>{% endif %}
+  {% else %}
+    <p class="empty">No notes are bundled with this build.</p>
+  {% endif %}
+</section>
+{% endblock %}

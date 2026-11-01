@@ -93,7 +93,8 @@ def test_status_links_grafana_directly(tmp_path, world):
 def test_home_links_the_docs_on_the_platform_and_on_github_at_the_release(tmp_path, world):
     c = admin(tmp_path, world, tweak=lambda d: d["site"].update({"docsUrl": "https://docs.int.example.com"}))
     t = c.get("/").text
-    assert 'href="https://docs.int.example.com/"' in t
+    assert 'href="https://docs.int.example.com/"' in t                       # footer and Help > Documentation
+    t = c.get("/about").text                                                  # TM-1304: the GitHub copy moved to About
     assert 'href="https://github.com/tockmox/tockmox/tree/v0.8.0/docs"' in t
 
 
@@ -238,8 +239,9 @@ def test_app_tiles_open_the_short_link_they_show(tmp_path, world):
 
 
 def test_inference_nodes_tab_is_named_in_full(tmp_path, world):
-    t = admin(tmp_path, world).get("/").text
-    assert ">Inference Nodes</a>" in t and ">Nodes</a>" not in t
+    # TM-1304: Inference nodes is a page in the AI section's rail, named in full there.
+    t = admin(tmp_path, world).get("/models").text
+    assert ">Inference nodes</a>" in t and ">Nodes</a>" not in t
 
 
 NOTES = """# Changelog
@@ -259,7 +261,7 @@ def test_release_notes_show_on_a_build_that_tracks_a_commit(tmp_path, world):
         a["spec"]["source"]["targetRevision"] = "0244662843d5949446176f4efd60ab7aac231430"
     (tmp_path / "CHANGELOG.md").write_text(NOTES)
     from tests.test_status_api import make_client
-    t = make_client(tmp_path, world, groups=["tockmox-admins"], notes_path=str(tmp_path / "CHANGELOG.md")).get("/version").text
+    t = make_client(tmp_path, world, groups=["tockmox-admins"], notes_path=str(tmp_path / "CHANGELOG.md")).get("/platform/updates").text
     assert "Release notes this build carries" in t and "The first public release." in t
     assert "<strong>AI</strong>" in t and "commits/main" not in t
     assert "No notes bundled" not in t
@@ -268,7 +270,7 @@ def test_release_notes_show_on_a_build_that_tracks_a_commit(tmp_path, world):
 def test_release_notes_on_a_tag_still_come_from_that_tag(tmp_path, world):
     (tmp_path / "CHANGELOG.md").write_text(NOTES.replace("[Unreleased]", "[0.8.0] ... 2026-10-20", 1))
     from tests.test_status_api import make_client
-    t = make_client(tmp_path, world, groups=["tockmox-admins"], notes_path=str(tmp_path / "CHANGELOG.md")).get("/version").text
+    t = make_client(tmp_path, world, groups=["tockmox-admins"], notes_path=str(tmp_path / "CHANGELOG.md")).get("/platform/updates").text
     assert "Release notes for 0.8.0 (2026-10-20)" in t
 
 
@@ -340,6 +342,6 @@ def test_update_check_on_a_commit_says_the_feed_verified_and_what_is_newest(tmp_
     (tmp_path / "releases.json.sig").write_bytes(_b64.b64encode(k.sign(body)))
     c = admin(tmp_path, world, tweak=lambda d: d.update({"updateCheck": {
         "enabled": True, "feedUrl": f"file://{tmp_path}/releases.json", "publicKeys": [pub]}}))
-    t = c.get("/version").text
+    t = c.get("/platform/updates").text
     assert "Feed verified" in t and "Tockmox <strong>0.8.0</strong>" in t and "nothing to compare" in t
     assert "Up to date" not in t
