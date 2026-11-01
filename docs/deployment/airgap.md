@@ -464,6 +464,20 @@ sealed-secrets by hand, it takes the archive and a mirror for the image:
 you mirrored the rest. Like ArgoCD's, it is not in `images.txt`. This path has
 not been run in an air-gapped environment.
 
+**If you use the built-in forge** (`site.forge: built-in`, experimental), it is
+one more prerequisite of the same kind: `bootstrap-forge` installs it beside
+ArgoCD, never through it, so its chart and image are not in `images.txt` either.
+Pull chart 17.3.2 from `oci://code.forgejo.org/forgejo-helm/forgejo` (Forgejo
+15.0.11, the long-term-support line) and mirror its one image,
+`code.forgejo.org/forgejo/forgejo:15.0.11-rootless`, to
+`YOUR_REGISTRY/forgejo/forgejo:15.0.11-rootless` (the chart's other image,
+`busybox`, belongs to its `helm test` hook, which an install never runs). Then
+give both to the command: `--chart ./forgejo-17.3.2.tgz --image-registry
+YOUR_REGISTRY`. The off-site copy job runs in that same image, so it needs
+nothing more. The forge then serves your site repository inside the boundary,
+which is step 5's second repository. This path has not been run in an
+air-gapped environment.
+
 **Success condition:** the same ones
 [fresh-install](fresh-install.md#6-install-argocd) gives for a connected
 install. Nothing about the checks changes; only where the chart came from does.
