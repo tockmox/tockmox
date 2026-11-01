@@ -140,7 +140,7 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .key-band { display: inline-block; width: 1.4rem; height: .35rem; margin: 0 .3rem 0 .6rem; background: var(--rail-live); opacity: .55; vertical-align: .15rem; }
 .team-block { margin: 1.25rem 0 1.75rem; }
 .team-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .25rem 1rem; margin-bottom: .35rem; }
-.team-head h3 { font-size: 1.3rem; margin: 0; }
+.team-head h2, .team-head h3 { font-size: 1.3rem; margin: 0; }
 .team-head p { flex-basis: 100%; margin: 0; }
 .flow { list-style: none; counter-reset: step; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .5rem; padding: 0; margin: .75rem 0 1rem; }
 .flow li { counter-increment: step; position: relative; padding: .55rem .7rem .55rem 2.3rem; background: var(--tx-surface); border: 1px solid var(--tx-border); border-radius: var(--tx-radius-sm); font-size: .9rem; color: var(--tx-text-muted); }
@@ -520,3 +520,15 @@ table.gens .sub { display: block; margin-top: .15rem; color: var(--tx-text-muted
 .trend .no-data { margin: .6rem 0; font-size: var(--fs-1); color: var(--tx-text-muted); min-height: 2.6rem; }
 .trend .src-s { margin: 0; }
 .trend.compact { border: 0; padding: 0; background: none; }
+
+/* ------------------------------------------------------------ Platform (TM-1308) */
+.team-lines { display: grid; gap: .4rem; margin: .5rem 0 1rem; padding: 0; }
+.team-line { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .75rem; padding: .55rem .8rem; border: 1px solid var(--tx-border); border-radius: var(--tx-radius-sm); background: var(--tx-surface); color: var(--tx-text); text-decoration: none; }
+.team-line:hover { border-color: var(--tx-trim); }
+.team-line .tn { font-weight: 700; }
+.filters { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: flex-end; margin: .75rem 0; }
+.filters label { display: flex; flex-direction: column; gap: .2rem; font-size: var(--fs-1); color: var(--tx-text-muted); }
+.filters select { min-height: 36px; }
+table.grouped td.num { white-space: nowrap; }
+.rail .rs { margin-left: auto; display: inline-flex; } .rail .rs .ico { width: 1em; height: 1em; }
+.rail .rs.st-warning { color: var(--st-warning); background: none; }

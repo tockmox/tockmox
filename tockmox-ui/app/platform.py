@@ -826,7 +826,7 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
             return render(request, "error.html", u, status_code=503, title="Platform Management is unavailable",
                           message=reason)
         for path in ("/platform", "/platform/schedule", "/platform/agents/{aid}", "/platform/cases",
-                     "/platform/cases/{rid}", "/platform/specialists"):
+                     "/platform/cases/{rid}", "/platform/specialists", "/platform/organization"):
             app.get(path)(broken)
         return None
     tp = transports
@@ -905,7 +905,22 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
         return render(request, "platform_overview.html", u, readings=r, views=views, teams=teams,
                       org_state=verdict, org_why=why, unowned=unowned, waiting=waiting, rota=rail,
                       ledger_on=srcs["ledger"].configured(), desk=dr, case_counts=platform_cases.summarize(rows),
-                      yours=yours, **common(u))
+                      yours=yours, groups=platform_cases.group_cases(yours), **common(u))
+
+    @app.get("/platform/organization")
+    def organization(request: Request, team: str = ""):
+        # TM-1308: the roles, one team at a time; the Overview keeps each team to one line.
+        u, deny = guard(request)
+        if deny:
+            return deny
+        t = cat.team(team) if team else (cat.teams[0] if cat.teams else None)
+        if team and t is None:
+            return render(request, "error.html", u, status_code=404, title="Not found",
+                          message="There is no such team in this platform's organization.")
+        r, views, unowned = snapshot()
+        by = {v.agent.id: v for v in views}
+        sel = {"team": t, "lead": by[t.lead.id], "members": [by[m.id] for m in t.members]} if t else None
+        return render(request, "platform_organization.html", u, readings=r, sel=sel, teams=cat.teams, **common(u))
 
     @app.get("/platform/schedule")
     def schedule(request: Request):

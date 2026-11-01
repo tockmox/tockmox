@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, state_icon, source_line %}
+{% from "platform_macros.html" import sched_badge, mode_tag, when, practice_badge %}
+{% block title %}Organization · Platform Management{% endblock %}
+{% block main %}
+{#- TM-1308 (spec section 8): the roles, one team at a time; roles not started yet fold to one line. -#}
+<h1>Organization</h1>
+<p class="lede">The platform's virtual organization, one team at a time. Two facts per role, never merged: how its practice is doing (live signals and scheduled jobs) and how its agent is doing (agent runs).</p>
+<ol class="flow" aria-label="How work moves between the teams">
+  <li><span>Run notices</span> an incident and restores service</li>
+  <li><span>Run learns</span> why it keeps happening</li>
+  <li><span>Change plans</span> the lasting fix</li>
+  <li><span>Change gates</span> it, tests it and ships it</li>
+  <li><span>Improve checks</span> the platform is getting better</li>
+</ol>
+<nav class="chips" aria-label="Teams">
+  {% for tm in teams %}<a href="/platform/organization?team={{ tm.id }}"{% if sel and sel.team.id == tm.id %} aria-current="page"{% endif %}>{{ tm.name }}</a>{% endfor %}
+</nav>
+{% if sel %}{% set t = sel %}
+{% set everyone = [t.lead] + t.members %}
+{% set active = everyone | rejectattr("practice_state", "equalto", "planned") | list %}
+{% set not_started = everyone | selectattr("practice_state", "equalto", "planned") | list %}
+  <section class="team-block" aria-labelledby="team-{{ t.team.id }}">
+    <div class="team-head">
+      <h2 id="team-{{ t.team.id }}">{{ t.team.name }}</h2>
+      {{ practice_badge(t.lead.practice_state) }}
+      <p class="muted">{{ t.team.purpose }}</p>
+    </div>
+    {% if active %}
+    <div class="table-wrap" tabindex="0" role="region" aria-labelledby="team-{{ t.team.id }}">
+    <table class="team">
+      <thead><tr><th scope="col">Role</th><th scope="col">Practice</th><th scope="col">Agent</th><th scope="col">Mode</th><th scope="col">Scheduled work</th><th scope="col">Next run</th></tr></thead>
+      <tbody>
+      {% for v in active %}
+      {% set live = v.schedules | selectattr("source", "equalto", "cluster") | list %}
+      {% set planned = v.schedules | rejectattr("source", "equalto", "cluster") | list %}
+      {% set bad = live | selectattr("state", "in", ["failed", "missed", "late", "stuck", "unknown", "never", "paused"]) | list %}
+      <tr class="{{ 'lead' if v.agent.is_lead else 'reports' }}">
+        <th scope="row"><a class="agent-name" href="/platform/agents/{{ v.agent.id }}">{{ v.agent.name }}</a>
+          <span class="ref">{% if v.agent.is_lead %}Leads {{ t.team.name }}. {% endif %}{{ v.agent.reference.itil }}</span></th>
+        <td>{{ practice_badge(v.practice_state) }}<span class="why">{{ v.practice_reason | sentence }}</span></td>
+        <td>{{ badge(v.agent_state, v.agent_word) }}</td>
+        <td>{{ mode_tag(v.agent) }}</td>
+        <td>{% if live %}{{ live | length }} deployed{% if bad %}, <strong>{{ bad | length }} not on schedule</strong>{% endif %}{% else %}<span class="muted">none deployed</span>{% endif %}
+            {%- if planned %}<br><span class="muted">{{ planned | length }} planned</span>{% endif %}</td>
+        <td>{{ when(v.next_run, tz) }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}<p class="panel quiet">No role on this team has a live check or a scheduled job yet.</p>{% endif %}
+  </section>
+  {% if not_started %}
+  <details class="fold">
+    <summary><span class="badge st-unknown"><span>Not started</span></span><span class="fold-title">{{ not_started | length }} role{{ "s" if not_started | length != 1 }} with no live check or scheduled job yet</span><span></span><span class="chev" aria-hidden="true"></span></summary>
+    <div class="fold-body"><ul class="plain fold-list">{% for v in not_started %}<li><a href="/platform/agents/{{ v.agent.id }}">{{ v.agent.name }}</a> <span class="muted">· {{ v.agent.reference.itil }} · {{ mode_tag(v.agent) }}</span></li>{% endfor %}</ul></div>
+  </details>
+  {% endif %}
+{% else %}
+<p class="panel quiet">This platform's catalog has no teams.</p>
+{% endif %}
+{% endblock %}

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import badge, source_line %}
+{% from "macros.html" import badge, source_line, release_notes %}
 {% block title %}Updates{% endblock %}
 {% block main %}
 {# One answer, then evidence (TM-1127): what runs, what is newest, when it was checked, as a band of
@@ -54,16 +54,6 @@
 <section class="panel notes" aria-labelledby="notes-h">
   <h2 id="notes-h">{% if notes and notes_of_build %}Release notes this build carries{% if notes.version != "Unreleased" %} ({{ notes.version }}){% endif %}{% else %}Release notes{% if notes %} for {{ notes.version }}{% if notes.date %} ({{ notes.date }}){% endif %}{% endif %}{% endif %}</h2>
   {% if notes and notes_of_build %}<p class="muted small">No single release tag names what is running, so these are the notes bundled with this build{% if notes.version == "Unreleased" %}, for a release that has not been tagged yet{% endif %}.</p>{% endif %}
-  {% if notes %}
-    {% set ns = namespace(open=false) %}
-    {% for kind, text in notes.blocks %}
-      {% if kind == "li" and not ns.open %}<ul>{% set ns.open = true %}{% endif %}
-      {% if kind != "li" and ns.open %}</ul>{% set ns.open = false %}{% endif %}
-      {% if kind == "h" %}<h3>{{ text }}</h3>{% elif kind == "li" %}<li>{{ text }}</li>{% else %}<p>{{ text }}</p>{% endif %}
-    {% endfor %}
-    {% if ns.open %}</ul>{% endif %}
-  {% else %}
-    <p class="empty">No notes bundled for this version.</p>
-  {% endif %}
+  {{ release_notes(notes, "No notes bundled for this version.") }}
 </section>
 {% endblock %}

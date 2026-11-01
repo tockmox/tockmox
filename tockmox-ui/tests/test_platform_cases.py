@@ -141,7 +141,7 @@ def test_the_overview_lists_the_cases_waiting_on_you(world):
     c, _ = cases_client(world)
     t = c.get("/platform").text
     part = t.split('id="needs-you-cases"')[1].split('id="needs-you-ledger"')[0]
-    assert "INC-0002" in part and "CHG-0001" in part and "PRB-0001" not in part
+    assert "INC-0002" in part and "CHG-0001" in part and "PRB-0001" not in part   # single-case groups name the case
     assert "Service Desk" in t.split('id="pm-sources"')[1]
 
 

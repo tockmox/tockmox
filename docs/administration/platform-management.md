@@ -88,6 +88,16 @@ missing ConfigMap), or `timezone` names no known zone, the rest of the UI keeps
 working and `/platform` answers 503 with the reason, for administrators.
 Nothing on it reads healthy.
 
+## The pages
+
+Platform has a rail (TM-1308): **Overview** (the verdict, one line per team,
+what waits on you, the next 24 hours), **Cases**, **Organization** (every role,
+one team at a time; roles with no live check or scheduled job yet fold under
+**Not started**), **Schedule**, **Specialists**, then **Capabilities** (with a
+warning on the rail when a capability's switch and what is deployed disagree),
+each installed feature, and **Updates** (the update check, the upgrade steps,
+and the release notes folded by section).
+
 ## How the page decides
 
 - **Absence is not green.** A schedule that never ran, a number Prometheus did
@@ -133,7 +143,16 @@ problem, change and known error, with an enforced lifecycle and a timeline.
   past its role's time budget), then the cases closed in the last 30 days. Each
   row says who it waits on (you, an agent, the accountable role, or the open
   record it links to, followed down the chain), since when, and which agents
-  worked it. `?role=<role id>` narrows it to one role.
+  worked it. `?role=<role id>` narrows it to one role; `team`, `state` (`open`
+  or `closed`), `wait` (who it waits on), `alert` and `ask` (the ask, or the
+  reason when there is none) narrow it further, and the page says how many of
+  how many it shows. `-` matches an empty value. A value the page does not
+  know, such as a state other than `open` or `closed`, matches nothing.
+- On the **Overview**, the cases waiting on you are grouped by what fired (the
+  alert name) and what they ask, with the hosts counted: thirteen cases for one
+  alert on six hosts are one row, "13 on 6 hosts", which opens the Cases page
+  filtered to exactly those thirteen. A case with no alert name, or alone in its
+  group, is its own row and opens the case.
 - Each role's page gains **Its cases** (the ones it is accountable for, plus the
   ones one of its agents worked) and **Agents that do its work**.
 - `/platform/cases/<id>` shows the record's facts, the rest of its case, and every

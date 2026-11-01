@@ -378,7 +378,7 @@ the page on a narrow screen):
 | Section | Pages |
 |---|---|
 | AI | Models, Inbox, Budget, Profiles; Inference nodes |
-| Platform | Overview, Cases, Schedule and Specialists when Platform Management is on; Capabilities, the features you installed (such as Security posture), Updates |
+| Platform | Overview, Cases, Organization, Schedule and Specialists when Platform Management is on; Capabilities, the features you installed (such as Security posture), Updates |
 
 The right-hand side of the bar holds three things:
 
