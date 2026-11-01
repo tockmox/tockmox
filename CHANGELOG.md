@@ -63,6 +63,14 @@ costs you, with the reasoning in the documentation rather than here.
 
 - **The console can act: silence a part's alerts, run a scheduled job now, restart a console, send a test alert, and with your Argo CD account refresh or sync (TM-1311, TM-1313, epic TM-1303; experimental).** A part's drawer on Status gains **Actions**, Help gains **Send a test alert to your phone**, and **Platform › Activity** lists what was done, by whom and how it ended. Every action opens a confirm panel naming the target, the effect and the undo. The UI stays write-free: confirming sends your browser through the identity provider with an OIDC nonce made from that one action, and a new Deployment, `tockmox-actions`, checks the issuer's token itself (signature, audience, freshness, the admin group, the nonce) before it acts with one narrow credential per kind: Alertmanager by NetworkPolicy; Jobs created only from allowlisted CronJobs; a patch of allowlisted Deployments and StatefulSets that ValidatingAdmissionPolicies bound to the `restartedAt` annotation; and an Argo CD account with get and sync only, which you provide. Sync and restart ask for a fresh sign-in after five minutes (`max_age`); an idempotency key, reserved before anything runs, makes a double click or a replay do nothing twice; one `tockmox.action` JSON line per attempt goes to the log, and the last 300 actions to a ConfigMap Activity reads. A console silence keeps its alerts on Status, marked "Silenced by *name* until *time*"; a silence made in Alertmanager itself still hides them, as before. Switched per kind under `tockmoxUi.actions`, on by default for what Tockmox ships (silences and the test alert with observability; run-now for the AI layer's own CronJobs; restart for the gateway, the chat console and the UI) and off for Argo CD until you configure its account. Off means the button is absent. With the UI on, two things render that did not: the `tockmox-actions` Deployment, its Roles and three admission policies, and the policy layer's `allow-from-tockmox-actions` rule at Alertmanager. docs/administration/tockmox-ui.md, "Taking action".
 
+- **Experimental: the installer can run the site repository for you, on a
+  forge inside the cluster.** Set `site.forge: built-in` and every Application
+  names the forge's in-cluster address; `tockmox-install.sh bootstrap-forge`
+  installs Forgejo 15 LTS, publishes the site, protects `main` (one approval,
+  no direct pushes), gives ArgoCD a read-only token and writes an encrypted
+  recovery kit. No off-site copy, rebuild or console sign-in yet; the default
+  stays `external`.
+
 - **The Models page now shows what each hosted model costs: its list price,
   what the gateway spent on it, and how often it was called, and anything it
   cannot source reads unknown, never an estimate (TM-1298).** Each Frontier

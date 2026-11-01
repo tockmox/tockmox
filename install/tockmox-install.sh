@@ -68,6 +68,10 @@ One subcommand DOES write to a cluster, and only when you name it:
   bootstrap-secrets  install or reuse the sealed-secrets controller, export its
                      key encrypted, and seal your credentials into the site.
                      Run '$0 bootstrap-secrets --help'.
+  bootstrap-forge    (site.forge: built-in) install the built-in forge beside
+                     ArgoCD, create the site repository in it, push the site,
+                     give ArgoCD its read credential, and write the encrypted
+                     recovery kit. Run '$0 bootstrap-forge --help'.
   publish-docs       AFTER the platform layer is Healthy: build the product docs
                      from this checkout and upload them to the docs bucket
                      (tools/publish-docs.sh, which takes the same arguments:
@@ -320,6 +324,14 @@ if [[ "${1:-}" == "bootstrap-secrets" ]]; then
   shift
   exec bash "$SELF/bootstrap-secrets.sh" "$@"
 fi
+# The built-in forge (TM-1335). A cluster-writing step for the same
+# reason bootstrap-secrets is one: the forge holds the repository ArgoCD reads, so it
+# must exist before the GitOps loop can read anything, which makes it a prerequisite
+# installed out of band and never an Application synced from the repository it holds.
+if [[ "${1:-}" == "bootstrap-forge" ]]; then
+  shift
+  exec bash "$SELF/bootstrap-forge.sh" "$@"
+fi
 
 # publish-docs is the install's last step (TM-0807), and it is a subcommand for the
 # same reason bootstrap-secrets is: this script applies nothing and waits for
@@ -398,7 +410,7 @@ need() {  # value, human name
 }
 
 # ---------------------------------------------------------------- gather
-declare SITE_NAME SITE_PATH TM_REV TM_REPO
+declare SITE_NAME SITE_PATH TM_REV TM_REPO SITE_FORGE
 declare G_INT G_ISSUER G_LAN G_CLUSTER G_SVC G_TZ G_REG G_SC G_LSC
 declare ARGO_NS ARGO_AUTO ARGO_HEAL
 declare -a LAYERS_ON=()
@@ -480,6 +492,7 @@ if [[ -n "$CONFIG" ]]; then
        block style. See install/README or tests/installer/fixtures/parity.yaml."
   fi
   SITE_NAME=$(yget site.name "$CONFIG");         SITE_PATH=$(yget site.path "$CONFIG")
+  SITE_FORGE=$(yget site.forge "$CONFIG")
   TM_REV=$(yget tockmox.revision "$CONFIG");     TM_REPO=$(yget tockmox.repoURL "$CONFIG")
   G_INT=$(yget global.internalDomain "$CONFIG"); G_ISSUER=$(yget global.certIssuer "$CONFIG")
   # TM-0497, 2026-09-11. A config file that OMITS certIssuer gets the shipped
@@ -520,6 +533,7 @@ else
   DEF_SC="$(default_storage_class)"
   ask SITE_NAME "Deployment name"                     ""              true
   ask SITE_PATH "Write site repo to"                  "./tockmox-site"
+  ask SITE_FORGE "Site repository: built-in (Tockmox runs it) or external (yours)" "external"
   ask TM_REV    "Tockmox release (a tag, not a branch)" "v${VERSION}"
   TM_REPO="https://github.com/tockmox/tockmox.git"
   printf '\n'
@@ -539,6 +553,18 @@ else
 fi
 
 SITE_PATH="${SITE_PATH:-./tockmox-site}"; TM_REV="${TM_REV:-v$VERSION}"
+# site.forge decides where the site repository lives (TM-1335).
+#   external   today's route: you create the repository on your own forge, and the
+#              generated files carry PLACEHOLDER_SITE_REPO_URL until you point them at it
+#   built-in   `bootstrap-forge` installs a forge beside ArgoCD and creates the
+#              repository in it; every Application names its IN-CLUSTER address,
+#              which is the same on every site and after every rebuild, so nothing
+#              is left to replace and nothing outside the cluster resolves it
+# The default stays external until the install pages lead with the built-in route
+# (TM-1344): a default that changes ahead of its documentation is a trap.
+SITE_FORGE="${SITE_FORGE:-external}"
+FORGE_NS="tockmox-forge"
+FORGE_REPO_URL="http://tockmox-forge-http.${FORGE_NS}.svc.cluster.local:3000/tockmox/site.git"
 TM_REPO="${TM_REPO:-https://github.com/tockmox/tockmox.git}"
 G_CLUSTER="${G_CLUSTER:-10.42.0.0/16}"; G_SVC="${G_SVC:-10.43.0.0/16}"
 # Reasoning for both classes is on default_storage_class() above.
@@ -555,6 +581,11 @@ need "$G_LAN"     "global.lanCIDR"
 # stays Pending forever is a worse failure than a question.
 need "$ADDR_POOL" "addressPool.range"
 [[ "$SITE_NAME" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "site.name must be lowercase alphanumeric and hyphens: '$SITE_NAME'"
+case "$SITE_FORGE" in
+  built-in) SITE_REPO_URL_OUT="$FORGE_REPO_URL" ;;
+  external) SITE_REPO_URL_OUT="PLACEHOLDER_SITE_REPO_URL" ;;
+  *) die "site.forge must be built-in or external, not '$SITE_FORGE'" ;;
+esac
 for cidr in "$G_LAN" "$G_CLUSTER" "$G_SVC"; do
   [[ "$cidr" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$ ]] || die "not a CIDR: '$cidr'"
 done
@@ -603,6 +634,7 @@ info "internal      ${G_INT}"
 info "lan           ${G_LAN}"
 info "layers        ${LAYERS_ON[*]}"
 info "site repo     ${SITE_PATH}"
+info "forge         ${SITE_FORGE}"
 [[ -n "$G_REG" ]] && info "registry      ${G_REG} (air-gapped)"
 
 # ---------------------------------------------------------------- prereqs
@@ -926,7 +958,7 @@ spec:
         valueFiles:
           - \$site/site/values/global.yaml
           - \$site/site/values/${l}.yaml
-    - repoURL: PLACEHOLDER_SITE_REPO_URL
+    - repoURL: ${SITE_REPO_URL_OUT}
       targetRevision: main
       ref: site
   syncPolicy:
@@ -982,7 +1014,7 @@ spec:
     server: https://kubernetes.default.svc
     namespace: default
   source:
-    repoURL: PLACEHOLDER_SITE_REPO_URL
+    repoURL: ${SITE_REPO_URL_OUT}
     targetRevision: main
     path: secrets
     directory:
@@ -1023,7 +1055,7 @@ spec:
     server: https://kubernetes.default.svc
     namespace: default
   source:
-    repoURL: PLACEHOLDER_SITE_REPO_URL
+    repoURL: ${SITE_REPO_URL_OUT}
     targetRevision: main
     path: apps
     directory:
@@ -1066,7 +1098,7 @@ spec:
     server: https://kubernetes.default.svc
     namespace: ${ARGO_NS}
   source:
-    repoURL: PLACEHOLDER_SITE_REPO_URL
+    repoURL: ${SITE_REPO_URL_OUT}
     targetRevision: main
     path: bootstrap/applications
   syncPolicy:
@@ -1097,10 +1129,20 @@ Generated by tockmox-install.sh v${VERSION}.
 
 ## Before you apply
 
-\`bootstrap/root.yaml\` and \`bootstrap/applications/*.yaml\` contain **PLACEHOLDER_SITE_REPO_URL**.
+$(if [[ "$SITE_FORGE" == built-in ]]; then cat <<'BI'
+This site lives in the **built-in forge**. Its Applications already name the
+forge's in-cluster address, so there is nothing to replace. Run
+`tockmox-install.sh bootstrap-forge --site <this directory>`: it installs the
+forge, creates the repository, pushes this directory and gives ArgoCD its read
+credential. Then apply `bootstrap/root.yaml`.
+BI
+else cat <<'EX'
+`bootstrap/root.yaml` and `bootstrap/applications/*.yaml` contain **PLACEHOLDER_SITE_REPO_URL**.
 Push this directory to a git repository, then replace that placeholder with its
 URL. ArgoCD reads your values from that repo, so it must be reachable from the
 cluster.
+EX
+fi)
 
 ## Upgrading Tockmox
 
@@ -1152,11 +1194,20 @@ else
   # bootstrap/ and wrong about the repository ... and step 3 below, which named
   # only root.yaml and applications/*.yaml, left the README holding a stale
   # placeholder on every install.
-  ph=$(grep -rl PLACEHOLDER_SITE_REPO_URL "$SITE_PATH" 2>/dev/null | wc -l | tr -d ' ')
+  # `|| true`: a built-in-forge site has no placeholder, and grep finding nothing
+  # exits 1, which pipefail turns into the installer dying after it succeeded.
+  ph=$( { grep -rl PLACEHOLDER_SITE_REPO_URL "$SITE_PATH" 2>/dev/null || true; } | wc -l | tr -d ' ')
 fi
+if [[ "$SITE_FORGE" == built-in ]]; then
+  ph=0
+  ok "site.forge is built-in: every Application names the built-in forge's in-cluster address,"
+  info "  ${FORGE_REPO_URL}"
+  info "  so there is no placeholder to replace and no repository for you to create."
+else
 warn "The generated site carries PLACEHOLDER_SITE_REPO_URL in ${ph} files."
 warn "ArgoCD reads your values over git, so it cannot work until that points at"
 warn "a repository your cluster can reach. Only you know where that is."
+fi
 printf '\n'
 # `-b main`: a bare `git init` names the branch from init.defaultBranch, which a
 # stock git leaves unset, so the branch is `master` and the `git push -u origin
@@ -1178,6 +1229,17 @@ if [[ " ${LAYERS_ON[*]} " == *" policy "* ]]; then
   info "     $0 --print-netpol-node-sources --context YOUR_KUBECONTEXT >> $SITE_PATH/site/values/policy.yaml"
   info "    No per-node podCIDR on your CNI? Set apps.platform_netpol.enabled=false there instead."
 fi
+if [[ "$SITE_FORGE" == built-in ]]; then
+info "1. install the built-in forge and publish this site to it (writes to a CLUSTER; confirms"
+info "   the context first; needs ArgoCD installed, and runs after step 0 so the sealed"
+info "   credentials are in what it pushes):"
+info "     $0 bootstrap-forge --site $SITE_PATH --kit-out RECOVERY_KIT_FILE --age-recipient AGE_PUBLIC_KEY \\"
+info "       --sealing-key-backup KEYFILE"
+info "   It writes the recovery kit: the forge's secrets and your sealing-key backup in one"
+info "   encrypted file. Keep it off this cluster and away from any off-site copy."
+info "2. (nothing: the repository is created for you)"
+info "3. (nothing: the Applications already name the forge)"
+else
 info "1. cd $SITE_PATH && git init -b main && git add -A && git commit -m 'initial'"
 info "2. push it somewhere the cluster can reach"
 info "3. replace PLACEHOLDER_SITE_REPO_URL everywhere it appears:"
@@ -1197,6 +1259,7 @@ info "       sed \"s|PLACEHOLDER_SITE_REPO_URL|\$SITE_REPO_URL|g\" \"\$f\" > \"\
 info "     done"
 info "   That is bootstrap/root.yaml, bootstrap/applications/*.yaml and README.md."
 info "   (run it after step 1, since git grep needs the repository to exist)"
+fi
 info "4. kubectl apply -f $SITE_PATH/bootstrap/root.yaml"
 info "5. watch it land: kubectl -n ${ARGO_NS} get applications -w"
 info "6. when tockmox-platform is Synced and Healthy, publish the product docs from this"
