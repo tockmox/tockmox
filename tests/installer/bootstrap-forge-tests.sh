@@ -10,7 +10,7 @@
 # forge script makes before it writes anything and fail loudly on anything else.
 #
 # WHAT THIS IS NOT. Nothing here installs a forge, talks to its API or pushes a
-# site. That path was run for real on 2026-10-31 against lab-k3s-01 in throwaway
+# site. That path was run for real on 2026-10-31 against a lab k3s cluster in throwaway
 # namespaces (TM-1335's Log: install, repository, users, teams, tokens, push,
 # the rule on main read back, ArgoCD's credential cloning main from inside the
 # cluster, the kit opened with its passphrase and refused with a wrong one, and a
@@ -87,7 +87,7 @@ assert_artifact "F7 an empty --context is refused" "echo $FS_STATUS; fs_err | gr
 # F8. A confirmation that does not match is not a confirmation.
 fs_case f8
 fs_run --site "$D/site" --kit-out "$D/kits/k" --passphrase-file "$D/inputs/pass" --sealing-key-backup "$D/inputs/seal.enc" \
-  --yes-context prod-k3s-home --yes-server https://192.0.2.10:6443 --no-prompt
+  --yes-context some-other-cluster --yes-server https://192.0.2.10:6443 --no-prompt
 assert_artifact "F8 a mismatched --yes-context is refused" "echo $FS_STATUS; fs_err | grep -c 'does not match the context in use'" "$(printf '1\n1')"
 assert_artifact "F8 ... before any write to the cluster" "fs_writes" "0"
 

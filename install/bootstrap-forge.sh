@@ -425,7 +425,7 @@ kubectl "${K[@]}" -n "$FORGE_NS" rollout status deploy/"$RELEASE" --timeout="${W
 # The fence. Applied on every run, so an adopted forge gets it too. Ingress only:
 # the forge makes no outbound call of its own (OFFLINE_MODE; the off-site copy's
 # egress is TM-1337's). Pods are named by label AND namespace, so a pod that copies
-# a label in some other namespace gets nothing. Measured 2026-11-01 on lab-k3s-01
+# a label in some other namespace gets nothing. Measured 2026-11-01 on a lab cluster
 # (k3s, kube-router): a repo-server-labelled pod in the ArgoCD namespace and a pod
 # in the forge namespace connect; an unlabelled pod there and a repo-server-
 # labelled pod in `default` are refused; the forge's own probes keep it Ready. A
