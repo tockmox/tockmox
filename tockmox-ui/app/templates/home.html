@@ -1,35 +1,40 @@
 {% extends "base.html" %}
-{% from "macros.html" import badge, state_icon, app_icon, source_line, problems_table, app_tiles %}
-{% block title %}{{ verdict_text[verdict][0] }}{% endblock %}
+{% from "macros.html" import badge, state_icon, state_word, app_icon, source_line, app_tiles, mascot %}
+{% block title %}{% if home %}{{ "Everything is running" if home.state == "ok" else "Needs a look" }}{% else %}{{ verdict_text[verdict][0] }}{% endif %}{% endblock %}
 {% block main %}
-{# Exceptions first (TM-1127). The verdict is one sentence; the problems are rows that link to
-   their page; everything healthy folds to one line. Sources that did not answer are problems too. #}
-{% set probs = problems(readings, pipeline) %}
-<section class="verdict-row" aria-labelledby="verdict-h">
-  {{ badge(verdict, verdict_text[verdict][0], lg=true) }}
+{#- TM-1307 (specs/tockmox-ui/SPEC.md section 4): administrators get one sentence from the same part states as Status
+    (app/stack.py home), up to two chips to the parts that need a look, and the stack strip. Members keep the verdict
+    for their own apps. The Needs attention table and the version left Home (TM-1304, TM-1307). -#}
+{% if user.is_admin and home %}
+<section class="verdict-row home-verdict" aria-labelledby="verdict-h">
+  {{ mascot("all-clear" if home.state == "ok" else "puzzled", 76) }}
   <div>
-    <h1 id="verdict-h">{{ verdict_sentence(verdict, probs, readings) }}</h1>
-    {% if user.is_admin %}
-    <p class="muted small">{{ sources_sentence(readings) }} <a href="/status">Full status</a></p>
-    {% else %}
-    <p class="muted small">{{ verdict_text[verdict][1] }}</p>
+    <h1 id="verdict-h">{{ home.sentence }}</h1>
+    <p class="muted small">{{ badge(home.state) }} {{ sources_sentence(readings) }} <a href="/status">Status</a></p>
+    {% if home.chips %}
+    <p class="chips">{% for pv in home.chips %}<a class="part st-{{ pv.state }}" href="/status/{{ pv.id }}">{{ state_icon(pv.state) }}<span class="pn">{{ pv.part.name }}</span><span class="visually-hidden">: {{ state_word(pv.state) }}</span></a>{% endfor %}</p>
     {% endif %}
   </div>
 </section>
 
-{% if user.is_admin and probs %}
-<section class="panel flush" aria-labelledby="needs-h">
-  <div class="panel-head"><h2 id="needs-h">Needs attention</h2><span class="muted small">{{ probs|length }} item{{ "" if probs|length == 1 else "s" }}</span></div>
-  {{ problems_table(probs) }}
+<nav class="strip" aria-label="The stack, bottom to top">
+  <ol class="plain">
+    {% for c in home.strip %}
+    <li><a class="cell st-{{ c.state }}" href="{{ c.href }}">{{ state_icon(c.state) }}<span class="cn">{{ c.name }}</span><span class="cv">{{ c.ok }}/{{ c.total }}</span><span class="visually-hidden">: {{ state_word(c.state) }}, {{ c.ok }} of {{ c.total }} parts OK</span></a></li>
+    {% endfor %}
+    {% for c in home.side %}
+    <li class="side-cell"><a class="cell st-{{ c.state }}" href="{{ c.href }}">{{ state_icon(c.state) }}<span class="cn">{{ c.name }}</span>{% if c.count %}<span class="cv">{{ c.count }}</span>{% endif %}<span class="visually-hidden">: {{ state_word(c.state) }}</span></a></li>
+    {% endfor %}
+  </ol>
+</nav>
+{% else %}
+<section class="verdict-row" aria-labelledby="verdict-h">
+  {{ badge(verdict, verdict_text[verdict][0], lg=true) }}
+  <div>
+    <h1 id="verdict-h">{{ verdict_sentence(verdict, problems(readings, pipeline), readings) }}</h1>
+    <p class="muted small">{{ verdict_text[verdict][1] }}</p>
+  </div>
 </section>
-{% endif %}
-
-{% if user.is_admin %}
-<p class="healthy-line">
-  {{ badge("ok", "Healthy") }}
-  {%- for part in healthy_parts(readings, pipeline) %}<span>{{ part }}</span>{% if not loop.last %}<span class="sep">·</span>{% endif %}{% endfor %}
-  {#- The version moved to the footer and Help > About (TM-1304, R1). #}
-</p>
 {% endif %}
 
 <section aria-labelledby="apps-h">

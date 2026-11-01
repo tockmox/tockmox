@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import badge, source_line %}
+{% from "macros.html" import badge, source_line, trend_row %}
 {% block title %}Inference Nodes{% endblock %}
 {% block main %}
 <h1>Inference Nodes</h1>
@@ -10,6 +10,7 @@
 </ul>
 {% if not probe_on %}<p class="muted">Probing is off, so nodes are added from the gateway's route list or by typing their endpoints. To let this page ask a node what it serves, set <code>inferenceNodes.probe.allowedCidrs</code> to the range your nodes live in.</p>{% endif %}
 
+{{ trend_row(trend_panels("ai-nodes"), "Inference nodes, last 24 hours") }}
 {% if rows %}
 <p>{{ source_line(reading) }}</p>
 <ul class="nodes">

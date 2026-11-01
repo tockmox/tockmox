@@ -78,3 +78,40 @@
 {% macro unknown(why) -%}
 <span class="muted help" title="{{ why }}">unknown<span class="visually-hidden">: {{ why }}</span></span>
 {%- endmacro %}
+
+{# TM-1310: the mascot at a moment (specs/tockmox-ui/SPEC.md section 11). One per screen, never in the top bar, menus,
+   tables, rail, drawer or charts; alt="" because the words beside him say everything. Sizes: 56 in a section header,
+   76 beside the verdict, up to 160 on an empty state or a full-page error. 2x WebP from the UI's own origin. #}
+{% macro mascot(pose, size=76) -%}
+<img class="mascot m{{ size }}" src="/static/mascot/tockmox-pose-{{ pose }}-192.webp" srcset="/static/mascot/tockmox-pose-{{ pose }}-192.webp 1x, /static/mascot/tockmox-pose-{{ pose }}-384.webp 2x" width="{{ size }}" height="{{ size }}" alt="" decoding="async" data-pose="{{ pose }}">
+{%- endmacro %}
+
+{# TM-1306: one trend panel from panels.yaml, drawn server-side. The SVG is decoration (aria-hidden); the sentence
+   under it is the text alternative and carries every number. Unknown reads Unknown with its reason, never a
+   flat line at zero. The title links to the Grafana board that explains it, when the viewer can open Grafana. #}
+{% macro trend(v, compact=false) -%}
+<figure class="trend st-{{ v.state }}{% if compact %} compact{% endif %}" data-panel="{{ v.id }}">
+  <figcaption><span class="tt">{% if v.href %}<a href="{{ v.href }}" rel="noopener" target="_blank">{{ v.panel.title }}<span class="visually-hidden"> (opens Grafana in a new tab)</span></a>{% else %}{{ v.panel.title }}{% endif %}</span>
+    <span class="tv">{{ state_icon(v.state) }}<span>{% if v.last is not none %}{{ chart_fmt(v.last, v.panel.unit) }}{% else %}Unknown{% endif %}</span></span></figcaption>
+  {% if v.series %}
+  <svg viewBox="0 0 {{ v.svg.w }} {{ v.svg.h }}" preserveAspectRatio="none" aria-hidden="true" focusable="false" class="spark">
+    {% if v.svg.thr_y is defined %}<line class="thr" x1="0" x2="{{ v.svg.w }}" y1="{{ v.svg.thr_y }}" y2="{{ v.svg.thr_y }}"/>{% endif %}
+    {% for ln in v.svg.lines %}{% if ln.dot %}<circle class="s{{ ln.n }}" cx="{{ ln.last[0] }}" cy="{{ ln.last[1] }}" r="2.5"/>{% else %}<polyline class="s{{ ln.n }}" points="{{ ln.d }}"/>{% endif %}{% endfor %}
+  </svg>
+  {% if v.last is none %}<p class="no-data">{{ v.reason }}</p>{% endif %}
+  {% if v.series|length > 1 %}<ul class="legend-s plain">{% for ln in v.svg.lines %}<li class="s{{ ln.n }}"><span class="sw" aria-hidden="true"></span>{{ ln.name }} {{ chart_fmt(ln.value, v.panel.unit) }}</li>{% endfor %}{% if v.hidden %}<li>and {{ v.hidden }} more</li>{% endif %}</ul>{% endif %}
+  {% else %}
+  <p class="no-data">{{ v.reason }}</p>
+  {% endif %}
+  <p class="visually-hidden">{{ chart_alt(v) }}</p>
+  <p class="src-s small muted">Prometheus · last {{ v.panel.range }}</p>
+</figure>
+{%- endmacro %}
+
+{% macro trend_row(panels, label) -%}
+{% if panels %}
+<section class="trends" aria-label="{{ label }}">
+  {% for v in panels %}{{ trend(v) }}{% endfor %}
+</section>
+{% endif %}
+{%- endmacro %}

@@ -405,6 +405,48 @@ the header menus; it comes from the UI's own origin, like everything else.
 Without JavaScript the pages render dark, the menus still open, and the
 Appearance control is not shown.
 
+## Home
+
+For administrators, Home opens with one sentence built from the same parts as
+Status: **Everything is running.** when every part is OK, or the worst part named
+with what is wrong with it ("Forgejo has a problem: forgejo-backup application
+(Synced · Degraded). Everything else is running."), with up to two chips that
+open those parts on Status. Under it, **the stack strip**: one cell per band,
+bottom of the stack on the left, each with its state and how many of its parts
+are OK, linking to that band on Status, and Argo CD at the end. Then your apps.
+Members see the verdict for the platform and their apps, as before.
+
+## Trends
+
+Status, AI › Models, AI › Inference nodes and Platform Management draw small
+trend panels from the same Prometheus the pages already read: on Status, the
+last 24 hours of alerts firing, scrape targets up, consoles reachable, the
+busiest node's memory, the fullest volume and the next certificate expiry; on
+AI, calls per day, latency, errors and hosted spend through the model gateway,
+and engines healthy and restarting per node; on Platform, the days since a
+restore drill passed. A part's drawer on Status shows its own last 7 days.
+
+- Each panel's title links to the Grafana board that explains it, when you can
+  open Grafana. The panels are drawn by the UI, not embedded, so no Grafana,
+  CSP or NetworkPolicy setting changes.
+- A query that fails or returns nothing reads **Unknown** with the reason,
+  never a flat line at zero.
+- The expressions live once, in `app/panels.yaml` in the image; the
+  **Tockmox / Status** board in Grafana is generated from the same file
+  ([monitoring](../operations/monitoring.md)).
+- Panels read Prometheus once a minute at most, at a coarse step (15 minutes for
+  24 hours, 2 hours for 7 days). Administrators only.
+
+## The mascot
+
+Tockmox the gnome appears at a few moments, one at a time: beside Home's
+sentence (thumbs-up when everything runs, puzzled when something does not), in
+the header of Status, Models and Platform Management when nothing there is
+wrong, on About, on the sign-in page and on a page that does not exist. Never in
+the top bar, menus, tables, the rail, the drawer or a chart. The images are
+decoration (`alt=""`), served from the UI's own origin, and do not move when
+your system asks for reduced motion.
+
 ## Status: the stack
 
 **Status** draws the platform as the stack it is. Your own applications are at

@@ -71,6 +71,7 @@ label.check { font-weight: 400; display: flex; align-items: center; min-height: 
 .docs-links a { display: inline-flex; align-items: center; gap: .45rem; }
 .signin-hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 1rem; padding: 2rem 1rem; }
 .signin-hero img { width: min(320px, 70vw); height: auto; }
+.signin-hero img.mascot { width: 160px; height: 160px; }
 
 /* ---- older page shapes still in use (platform overview, upgrade, posture) ---- */
 .verdict { display: flex; gap: 1rem; align-items: flex-start; padding: 1rem 1.15rem; border-radius: var(--tx-radius-lg, 10px); background: var(--tx-surface); border: 1px solid var(--tx-border); border-left: 3px solid currentColor; }
@@ -464,3 +465,58 @@ table.gens .sub { display: block; margin-top: .15rem; color: var(--tx-text-muted
   .stack .side .ico { transform: none; }
   .legend { margin-left: 0; }
 }
+
+
+/* ------------------------------------------------------------ the mascot at a moment (TM-1310, spec section 11)
+   One per screen; 56 in a section header, 76 beside the verdict, 160 on a full-page error or the sign-in page.
+   At most a one-time fade, and none under reduced motion. */
+.mascot { flex: none; object-fit: contain; }
+.mascot.m56 { width: 56px; height: 56px; } .mascot.m76 { width: 76px; height: 76px; } .mascot.m160 { width: 160px; height: 160px; }
+@media (prefers-reduced-motion: no-preference) { .mascot { animation: mascot-in .4s ease-out 1; } }
+@keyframes mascot-in { from { opacity: 0; } to { opacity: 1; } }
+.titled { display: flex; align-items: center; gap: .85rem; min-width: 0; }
+.error-page { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; padding: 1.5rem 0; }
+@media (max-width: 600px) { .mascot.m76 { width: 56px; height: 56px; } .mascot.m160 { width: 112px; height: 112px; } }
+
+/* ------------------------------------------------------------ Home: verdict, chips, the stack strip (TM-1307) */
+.home-verdict { align-items: center; }
+.home-verdict .chips { display: flex; flex-wrap: wrap; gap: .45rem; margin: .5rem 0 0; }
+.strip ol { display: flex; flex-wrap: wrap; gap: .4rem; margin: 1rem 0 1.5rem; padding: 0; }
+.strip .cell { display: inline-flex; align-items: center; gap: .4rem; min-height: 40px; padding: .3rem .75rem; border: 1px solid var(--tx-border); border-radius: var(--tx-radius-sm); background: var(--tx-surface); color: var(--tx-text); text-decoration: none; font-weight: 600; }
+.strip .cell .ico { width: 1.05em; height: 1.05em; }
+.strip .cell.st-ok { background: var(--tx-surface); color: var(--tx-text); } .strip .cell.st-ok .ico { color: var(--st-ok); }
+.strip .cell.st-warning { background: var(--st-warning-soft); border-color: var(--st-warning); color: var(--tx-text); } .strip .cell.st-warning .ico { color: var(--st-warning); }
+.strip .cell.st-critical { background: var(--st-critical-soft); border-color: var(--st-critical); color: var(--tx-text); } .strip .cell.st-critical .ico { color: var(--st-critical); }
+.strip .cell.st-unknown { background: var(--st-unknown-soft); border: 1px dashed var(--st-unknown); color: var(--tx-text); } .strip .cell.st-unknown .ico { color: var(--st-unknown); }
+.strip .cell:hover { border-color: var(--tx-trim); }
+.strip .cv { font-weight: 400; font-size: var(--fs-1); color: var(--tx-text-muted); font-variant-numeric: tabular-nums; }
+.strip .side-cell { margin-left: auto; }
+@media (max-width: 860px) { .strip ol { flex-direction: column; } .strip .side-cell { margin-left: 0; } .strip .cell { width: 100%; } }
+
+/* ------------------------------------------------------------ trend panels (TM-1306) */
+:root { --ch-0: #6FB3DD; --ch-1: #E0A43A; --ch-2: #C77DDB; --ch-3: #4FC1A0; --ch-4: #E8838C; --ch-5: #B8C0C8; }
+[data-theme="light"] { --ch-0: #1F6FA8; --ch-1: #8F5D00; --ch-2: #7E3A98; --ch-3: #1A7059; --ch-4: #A8323F; --ch-5: #555F68; }
+.trends { display: grid; grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr)); gap: .6rem; margin: 1rem 0; }
+.trend { margin: 0; padding: .6rem .75rem .5rem; border: 1px solid var(--tx-border); border-radius: var(--tx-radius-md); background: var(--tx-surface); color: var(--tx-text); min-width: 0; }
+.trend.st-warning { border-color: var(--st-warning); } .trend.st-critical { border-color: var(--st-critical); }
+.trend.st-unknown { border-style: dashed; border-color: var(--st-unknown); }
+.trend figcaption { display: flex; justify-content: space-between; gap: .5rem; align-items: baseline; font-size: var(--fs-1); }
+.trend .tt { font-weight: 600; min-width: 0; }
+.trend .tv { display: inline-flex; align-items: center; gap: .3rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.trend .tv .ico { width: 1em; height: 1em; }
+.trend.st-ok .tv .ico { color: var(--st-ok); } .trend.st-warning .tv .ico { color: var(--st-warning); }
+.trend.st-critical .tv .ico { color: var(--st-critical); } .trend.st-unknown .tv .ico { color: var(--st-unknown); }
+.trend .spark { display: block; width: 100%; height: 56px; margin: .35rem 0 .15rem; overflow: visible; }
+.trend .spark polyline { fill: none; stroke-width: 1.75; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.trend .spark .thr { stroke: var(--tx-text-muted); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; opacity: .7; }
+.trend circle { stroke-width: 0; } .trend circle.s0 { fill: var(--ch-0); } .trend circle.s1 { fill: var(--ch-1); } .trend circle.s2 { fill: var(--ch-2); }
+.trend .s0 { stroke: var(--ch-0); } .trend .s1 { stroke: var(--ch-1); } .trend .s2 { stroke: var(--ch-2); }
+.trend .s3 { stroke: var(--ch-3); } .trend .s4 { stroke: var(--ch-4); } .trend .s5 { stroke: var(--ch-5); }
+.trend .legend-s { display: flex; flex-wrap: wrap; gap: .15rem .7rem; margin: .2rem 0 0; padding: 0; font-size: var(--fs-0, .8rem); color: var(--tx-text-muted); }
+.trend .legend-s li { display: inline-flex; align-items: center; gap: .3rem; }
+.trend .legend-s .sw { width: .8rem; height: 2px; display: inline-block; }
+.trend .legend-s .s0 .sw { background: var(--ch-0); } .trend .legend-s .s1 .sw { background: var(--ch-1); } .trend .legend-s .s2 .sw { background: var(--ch-2); }
+.trend .legend-s .s3 .sw { background: var(--ch-3); } .trend .legend-s .s4 .sw { background: var(--ch-4); } .trend .legend-s .s5 .sw { background: var(--ch-5); }
+.trend .no-data { margin: .6rem 0; font-size: var(--fs-1); color: var(--tx-text-muted); min-height: 2.6rem; }
+.trend .src-s { margin: 0; }
+.trend.compact { border: 0; padding: 0; background: none; }

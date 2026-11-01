@@ -225,6 +225,8 @@ def test_a_site_adds_a_part_and_a_band():
     {"bands": 5},
     {"bands": [{"id": "x", "parts": [{"id": "y", "when": 5}]}]},
     {"bands": [{"id": "x", "parts": [{"id": "y", "alerts": {"a": 1}}]}]},
+    {"bands": [{"id": "x", "parts": [{"id": "y", "alerts": ["A*"], "trend": "part-volum"}]}]},   # TM-1306: a typo
+    {"bands": [{"id": "x", "parts": [{"id": "y", "alerts": ["A*"], "trend": "alerts-firing"}]}]},  # not a part panel
 ])
 def test_a_malformed_site_stack_stops_the_ui_at_start(tmp_path, bad):
     with pytest.raises(ConfigError):

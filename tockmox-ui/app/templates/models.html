@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import badge, source_line, tune, unknown %}
+{% from "macros.html" import badge, source_line, tune, unknown, mascot, trend_row %}
 {% block title %}Models{% endblock %}
 {#- TM-1296, revision 2: Needs you, Local models by inference node, Frontier models by provider and family; the catalog and the
     upstream sources fold to one line each. Build drift is on the node page. -#}
@@ -9,13 +9,14 @@
 {%- endmacro %}
 {% block main %}
 <div class="page-head">
-  <div><h1>Models</h1><p class="lede">What the platform runs, on your nodes and from providers, and the few things that need a decision. <span class="help" title="A new model is admitted to the eval gateway as a -next route beside the live alias, where no agent can call it. After {{ lc.required_passes }} passing comparisons against the current model{% if lc.required_by_class %} (per class: {% for k, v in lc.required_by_class.items() %}{{ k }} {{ v }}{% if not loop.last %}, {% endif %}{% endfor %}){% endif %} it is promoted and the alias moves on the production gateway. Each step is a change you commit.">How admission and promotion work</span></p></div>
+  <div class="titled">{% if not items %}{{ mascot("conjuring", 56) }}{% endif %}<div><h1>Models</h1><p class="lede">What the platform runs, on your nodes and from providers, and the few things that need a decision. <span class="help" title="A new model is admitted to the eval gateway as a -next route beside the live alias, where no agent can call it. After {{ lc.required_passes }} passing comparisons against the current model{% if lc.required_by_class %} (per class: {% for k, v in lc.required_by_class.items() %}{{ k }} {{ v }}{% if not loop.last %}, {% endif %}{% endfor %}){% endif %} it is promoted and the alias moves on the production gateway. Each step is a change you commit.">How admission and promotion work</span></p></div></div>
   <div class="page-actions">
     <a class="btn-ghost" href="/models/inbox">Inbox{% if inbox_count %} ({{ inbox_count }}){% endif %}</a>
     <a class="btn-ghost" href="/models/budget">Budget</a>
     <a class="btn-ghost" href="/models/profiles">Workload profiles</a>
   </div>
 </div>
+{{ trend_row(trend_panels("ai-models"), "The model gateway, last 7 days") }}
 {% if hidden_count %}<p class="muted">{{ hidden_count }} candidate(s) are snoozed or dismissed and not listed here: <a href="/models/inbox">the Inbox</a> shows them.</p>{% endif %}
 
 {% if items %}
