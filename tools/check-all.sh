@@ -52,10 +52,52 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-pass=0; fail=0; skipped=0
-failed_names=""
+# WHICH GATES, AND WHERE (TM-1288, TM-1289). With no arguments every gate runs, as it always has.
+#
+#   --changed-from REF   run only the gates whose declared inputs (tools/gate-inputs.yaml) changed
+#                        since REF, plus every gate that declares none. A change to the runner, the
+#                        planner, the declarations or the toolchain runs everything.
+#   --shard I/N          run only this shard's share, split by measured seconds (tools/gate-weights.tsv);
+#                        N shards' results together are one unsharded run.
+#   --list               print the registered gates (ordinal, key, serial flag, name) and run nothing.
+#
+# Each run writes one row per gate to build/check-all-results.tsv (CHECK_ALL_RESULTS to move it):
+# ordinal, key, status (pass, fail, skip, timeout, unselected, othershard), exit code, seconds, name.
+# tools/gate-plan.py holds the selection and shard rules and their selftest.
+LIST_ONLY=0
+CHANGED_FROM="${CHECK_ALL_CHANGED_FROM:-}"
+SHARD="${CHECK_ALL_SHARD:-}"
+RESULTS="${CHECK_ALL_RESULTS:-build/check-all-results.tsv}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --list) LIST_ONLY=1 ;;
+    --changed-from) [ $# -ge 2 ] || { echo "check-all.sh: --changed-from needs a git ref" >&2; exit 1; }
+                    CHANGED_FROM="$2"; shift ;;
+    --shard) [ $# -ge 2 ] || { echo "check-all.sh: --shard needs I/N" >&2; exit 1; }
+             SHARD="$2"; shift ;;
+    -h|--help) sed -n '/^# WHICH GATES/,/^LIST_ONLY=/p' "$0" | sed '$d'; exit 0 ;;
+    *) echo "check-all.sh: unknown argument: $1 (try --help)" >&2; exit 1 ;;
+  esac
+  shift
+done
+
+pass=0; fail=0; skipped=0; unselected=0; othershard=0
+failed_names=""; unselected_names=""
+gate_ord=0; GATE_SERIAL=0
 
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# A gate's key names it in tools/gate-inputs.yaml and tools/gate-weights.tsv: the script and its
+# arguments (`tools/check-x.sh --selftest`), or `inline:<name>` for a gate written inline here.
+gate_key() {
+  local name="$1"; shift
+  case "${1:-}" in bash|python3|sh) shift ;; esac
+  if [ "${1:-}" = "-c" ]; then
+    printf 'inline:%s' "$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-60 | sed 's/-$//')"
+  else
+    printf '%s' "$*"
+  fi
+}
 
 # GATES RUN IN PARALLEL (TM-1021, Jeff 2026-10-11: "let's absolutely run the gates in parallel").
 # One run was about 45 minutes on a 2-CPU runner, gate after gate, while every gate is an
@@ -141,18 +183,56 @@ tally() {
   esac
 }
 
+# One results row: ordinal, key, status, exit code, seconds, name.
+result_row() {
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" "$6" >> "$SLOTS/results"
+}
+status_of() {
+  case "$1" in 0) echo pass ;; 2) echo skip ;; 124) [ "$GATE_TIMEOUT" -gt 0 ] && echo timeout || echo fail ;; *) echo fail ;; esac
+}
+
+# The plan's decision for this gate: run, unselected or othershard. No plan: run.
+gate_decision() {
+  [ -n "$PLAN" ] || { echo run; return 0; }
+  if [ "${PLAN_KEY[$1]:-}" != "$2" ]; then
+    echo "check-all.sh: gate $1 is '$2' now and '${PLAN_KEY[$1]:-<none>}' in the plan; the two passes disagree" >&2
+    echo run; return 0
+  fi
+  echo "${PLAN_DEC[$1]}"
+}
+
 run_gate() {
   local name="$1"; shift
-  local rc=0
+  local rc=0 key serial="$GATE_SERIAL"
+  gate_ord=$((gate_ord + 1))
+  key="$(gate_key "$name" "$@")"
+  if [ "$LIST_ONLY" = 1 ]; then
+    printf '%s\t%s\t%s\t%s\n' "$gate_ord" "$key" "$serial" "$name"
+    return 0
+  fi
+  case "$(gate_decision "$gate_ord" "$key")" in
+    unselected)
+      unselected=$((unselected + 1)); unselected_names="${unselected_names}
+  - ${name}"
+      result_row "$gate_ord" "$key" unselected - - "$name"
+      return 0 ;;
+    othershard)
+      othershard=$((othershard + 1))
+      result_row "$gate_ord" "$key" othershard - - "$name"
+      return 0 ;;
+  esac
   if [ "$JOBS" -le 1 ]; then
     printf '\n=== %s ===\n' "$name"
+    local t0; t0=$(date +%s)
     "$@" || rc=$?
     tally "$name" "$rc"
+    result_row "$gate_ord" "$key" "$(status_of "$rc")" "$rc" "$(( $(date +%s) - t0 ))" "$name"
     return 0
   fi
   nslot=$((nslot + 1))
   local slot; slot="$SLOTS/$(printf '%04d' "$nslot")"
   printf '%s\n' "$name" > "$slot.name"
+  printf '%s\t%s\n' "$gate_ord" "$key" > "$slot.key"
   while [ "$(jobs -rp | wc -l | tr -d ' ')" -ge "$JOBS" ]; do sleep 0.2; done
   (
     t0=$(date +%s)
@@ -171,27 +251,46 @@ barrier() {
   [ "$JOBS" -le 1 ] || wait
 }
 
-# A gate that must not overlap any other (see the note at the top).
+# A gate that must not overlap any other (see the note at the top). The planner keeps every
+# serial gate on one shard, so a gate that reads what another serial gate wrote still finds it.
 serial_gate() {
   barrier
+  GATE_SERIAL=1
   run_gate "$@"
+  GATE_SERIAL=0
   barrier
 }
 
 skip_gate() {
+  local key; key="skip:$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-60 | sed 's/-$//')"
+  gate_ord=$((gate_ord + 1))
+  if [ "$LIST_ONLY" = 1 ]; then
+    printf '%s\t%s\t0\t%s\n' "$gate_ord" "$key" "$1"
+    return 0
+  fi
+  case "$(gate_decision "$gate_ord" "$key")" in
+    unselected|othershard)
+      result_row "$gate_ord" "$key" othershard - - "$1"
+      othershard=$((othershard + 1))
+      return 0 ;;
+  esac
   if [ "$JOBS" -le 1 ]; then
     printf '\n=== %s ===\n  SKIPPED: %s\n' "$1" "$2"
     skipped=$((skipped + 1))
+    result_row "$gate_ord" "$key" skip 2 0 "$1"
     return 0
   fi
   nslot=$((nslot + 1))
   local slot; slot="$SLOTS/$(printf '%04d' "$nslot")"
   printf '%s\n' "$1" > "$slot.name"
+  printf '%s\t%s\n' "$gate_ord" "$key" > "$slot.key"
   printf '  SKIPPED: %s\n' "$2" > "$slot.log"
   echo 0 > "$slot.secs"
   echo 2 > "$slot.rc"
 }
 
+PLAN=""
+if [ "$LIST_ONLY" = 0 ]; then
 echo "Tockmox static gates, run locally."
 echo "Repository: $(pwd)"
 
@@ -253,9 +352,37 @@ if [ -x tools/helm-deps.sh ]; then
   }
 fi
 
+
+# ------------------------------------------------------------- the plan (TM-1288, TM-1289)
+# Only when asked: the gates are listed by a second pass of this script that runs nothing, the
+# planner decides, and each run_gate below asks the plan before it runs. A changed-path list that
+# cannot be made (an unknown ref, a shallow clone) means a full run, said here, never a guess.
+if [ -n "$CHANGED_FROM" ] || [ -n "$SHARD" ]; then
+  plan_args=(plan --list "$SLOTS/list.tsv" --out "$SLOTS/plan.tsv")
+  CHECK_ALL_CHANGED_FROM="" CHECK_ALL_SHARD="" bash tools/check-all.sh --list > "$SLOTS/list.tsv" \
+    || { echo "check-all.sh: could not list the gates"; exit 1; }
+  if [ -n "$CHANGED_FROM" ]; then
+    if git --no-optional-locks rev-parse -q --verify "${CHANGED_FROM}^{commit}" >/dev/null 2>&1 \
+       && { git --no-optional-locks diff --name-only "$CHANGED_FROM" -- && git --no-optional-locks ls-files --others --exclude-standard; } > "$SLOTS/changed.txt" 2>/dev/null; then
+      plan_args+=(--changed "$SLOTS/changed.txt")
+    else
+      printf '\nNo changed-path list from %s (unknown ref or no history); every gate runs.\n' "$CHANGED_FROM"
+    fi
+  fi
+  [ -n "$SHARD" ] && plan_args+=(--shard "$SHARD")
+  printf '\n=== which gates run ===\n'
+  python3 tools/gate-plan.py "${plan_args[@]}" || { echo "check-all.sh: the gate planner failed; nothing ran"; exit 1; }
+  PLAN="$SLOTS/plan.tsv"
+  PLAN_KEY=(); PLAN_DEC=()
+  while IFS=$'\t' read -r p_ord p_key p_dec _; do
+    PLAN_KEY[p_ord]="$p_key"; PLAN_DEC[p_ord]="$p_dec"
+  done < "$PLAN"
+fi
+fi
+
 # ---------------------------------------------------------------------- gates
-TREE_BEFORE="$(tree_fingerprint)"
-[ "$JOBS" -le 1 ] || printf '\nRunning the gates %s at a time (CHECK_ALL_JOBS=1 for one at a time).\n' "$JOBS"
+[ "$LIST_ONLY" = 1 ] || TREE_BEFORE="$(tree_fingerprint)"
+[ "$JOBS" -le 1 ] || [ "$LIST_ONLY" = 1 ] || printf '\nRunning the gates %s at a time (CHECK_ALL_JOBS=1 for one at a time).\n' "$JOBS"
 run_gate "every copy of a tool pin says what mise.toml says" bash tools/toolchain.sh --drift
 run_gate "the toolchain checks go red on a planted mismatch" bash tools/toolchain.sh --selftest
 run_gate "every tool is executable" bash -c '
@@ -427,6 +554,13 @@ run_gate "no Job keeps its name when its image changes inside one version (TM-10
 run_gate "every ServiceMonitor and PodMonitor selects something the layers render (TM-1025)" bash tools/check-monitor-targets.sh
 run_gate "the monitor-targets gate goes red on an unlabelled Service, a missing port and an unmatched PodMonitor (TM-1025)" bash tools/check-monitor-targets.sh --selftest
 run_gate "the immutable-field gate goes red on a changed Job template (TM-0754)" bash tools/check-immutable-fields.sh --selftest
+# The gate planner (TM-1288, TM-1289): its rules hold on fixtures, and the declarations in
+# tools/gate-inputs.yaml name gates this script registers and paths the tree has, so a renamed gate
+# or a moved fixture cannot quietly narrow what a pull request runs.
+run_gate "the gate planner selects, shards and aggregates by its rules, and goes red on a broken partition (TM-1288)" \
+  python3 tools/gate-plan.py --selftest
+run_gate "every gate-input declaration names a registered gate and a tracked path (TM-1288)" \
+  python3 tools/gate-plan.py check-inputs
 run_gate "every action is SHA-pinned and every CI download is checksummed (TM-0592)" bash tools/check-action-pins.sh
 run_gate "the action-pin gate goes red on a moving tag and an unchecked download (TM-0592)" bash tools/check-action-pins.sh --selftest
 run_gate "observability off: refused without the profile, zero monitors with it, bring-your-own renders (TM-0825)" bash tools/check-capability-monitors.sh
@@ -566,6 +700,7 @@ run_gate "kubeconform -strict over every layer's render (TM-0584)" bash tools/ch
 run_gate "the kubeconform gate goes red on an unknown field, a wrong type and empty input (TM-0584)" bash tools/check-kubeconform.sh --selftest
 
 # --------------------------------------------------------------------- result
+[ "$LIST_ONLY" = 1 ] && exit 0
 if [ "$JOBS" -gt 1 ]; then
   barrier
   for f in "$SLOTS"/*.name; do
@@ -577,6 +712,8 @@ if [ "$JOBS" -gt 1 ]; then
     [ -e "$b.rc" ] || echo "  (no exit status recorded: the gate's runner died)"
     [ "$rc" = 124 ] && [ "$GATE_TIMEOUT" -gt 0 ] && n="$n (TIMEOUT after ${GATE_TIMEOUT} s)"
     tally "$n" "$rc"
+    IFS=$'\t' read -r k_ord k_key < "$b.key"
+    result_row "$k_ord" "$k_key" "$(status_of "$rc")" "$rc" "$(cat "$b.secs" 2>/dev/null || echo -)" "$(cat "$f")"
   done
   printf '\nSlowest gates:\n'
   for f in "$SLOTS"/*.secs; do printf '%6ss  %s\n' "$(cat "$f")" "$(cat "${f%.secs}.name")"; done | sort -rn | head -5
@@ -589,13 +726,26 @@ if [ "$TREE_BEFORE" != "$TREE_AFTER" ]; then
   fail=$((fail + 1)); failed_names="${failed_names}
   - the checkout is unchanged by the gates"
 fi
+mkdir -p "$(dirname "$RESULTS")"
+{ printf 'ord\tkey\tstatus\trc\tseconds\tname\n'; sort -n "$SLOTS/results" 2>/dev/null; } > "$RESULTS"
+if [ "$unselected" -gt 0 ]; then
+  printf '\nNot run, because none of their declared inputs changed since %s (tools/gate-inputs.yaml):%s\n' \
+    "$CHANGED_FROM" "$unselected_names"
+fi
 printf '\n----------------------------------------------------------------\n'
 printf '%s passed, %s failed, %s skipped\n' "$pass" "$fail" "$skipped"
+[ "$unselected" -gt 0 ] && printf '%s not selected (inputs unchanged)\n' "$unselected"
+[ "$othershard" -gt 0 ] && printf '%s on other shards (%s)\n' "$othershard" "$SHARD"
+printf 'Results: %s\n' "$RESULTS"
 if [ "$fail" -ne 0 ]; then
   printf 'FAILED:%s\n' "$failed_names"
   exit 1
 fi
-echo "All runnable static gates passed."
+if [ "$unselected" -gt 0 ] || [ "$othershard" -gt 0 ]; then
+  echo "All selected static gates passed. A run with no arguments runs every gate."
+else
+  echo "All runnable static gates passed."
+fi
 echo
 echo "Not covered here, and not passed by this run: DCO sign-off, full-history"
 echo "secret scanning, and every documented path in tests/executed-docs/."

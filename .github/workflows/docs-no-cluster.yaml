@@ -87,6 +87,11 @@ jobs:
           echo "ssh-keygen: $(ssh -V 2>&1)"
           echo "python:     $(python3 --version) PyYAML $(python3 -c 'import yaml; print(yaml.__version__)')"
 
+      # Subcharts keyed on every Chart.lock (TM-1286): a hit makes helm-deps.sh offline.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: charts/*/charts
+          key: subcharts-${{ hashFiles('charts/*/Chart.lock') }}
       - name: chart dependencies
         shell: bash -euo pipefail {0}
         run: bash tools/helm-deps.sh

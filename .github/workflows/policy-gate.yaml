@@ -41,18 +41,37 @@ jobs:
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: ${{ env.HELM_VERSION }}
+      # Subcharts keyed on every Chart.lock (TM-1286): a hit makes helm-deps.sh offline.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: charts/*/charts
+          key: subcharts-${{ hashFiles('charts/*/Chart.lock') }}
       - name: vendored chart dependencies
         run: bash tools/helm-deps.sh
       - name: the config invariant refuses every bad config by name
         run: bash tools/check-policy-gate.sh
+      # The LiteLLM venv (TM-1286), keyed on the ai layer's Chart.lock (which moves with the vendored
+      # LiteLLM) and the runner's Python. The install step below still checks the version it finds.
+      - id: py
+        run: echo "v=$(python3 -c 'import sys; print(sys.version.split()[0])')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/litellm
+          key: litellm-venv-${{ runner.os }}-py${{ steps.py.outputs.v }}-${{ hashFiles('charts/tockmox-ai/Chart.lock') }}
       - name: install LiteLLM at the vendored version
         run: |
           ver="$(helm show chart charts/tockmox-ai/charts/litellm-helm-*.tgz | sed -n 's/^appVersion: *//p' | tr -d '"')"
           test -n "$ver" || { echo "::error::could not read the vendored LiteLLM appVersion"; exit 1; }
-          python3 -m venv "$RUNNER_TEMP/litellm"
-          "$RUNNER_TEMP/litellm/bin/pip" install --quiet "litellm[proxy]==${ver}"
+          have="$("$RUNNER_TEMP/litellm/bin/python" -c 'import importlib.metadata as m; print(m.version("litellm"))' 2>/dev/null || true)"
+          if [ "$have" = "$ver" ]; then
+            echo "LiteLLM ${ver}, from the cached venv"
+          else
+            rm -rf "$RUNNER_TEMP/litellm"
+            python3 -m venv "$RUNNER_TEMP/litellm"
+            "$RUNNER_TEMP/litellm/bin/pip" install --quiet "litellm[proxy]==${ver}"
+            echo "LiteLLM ${ver}"
+          fi
           echo "LITELLM_BIN=$RUNNER_TEMP/litellm/bin/litellm" >> "$GITHUB_ENV"
-          echo "LiteLLM ${ver}"
       - name: the forced failure - local backend down, nothing reaches external
         run: bash tests/policy-gate/run.sh
       # TM-0991. The key policy's unit tests, then the same LiteLLM with a real Postgres (the runner image's own

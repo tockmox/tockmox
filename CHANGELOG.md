@@ -589,20 +589,22 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Changed
 
-- **The Tockmox UI image installs its Python packages from a hashed lockfile, and
-  both Python base images are pinned by digest.** `tockmox-ui/requirements.txt`
-  is now a lockfile compiled with uv from the new `tockmox-ui/requirements.in`
-  (which keeps the version floors), with a SHA-256 for every package file, and
-  the Dockerfile installs it with `--require-hashes --no-deps`: a build installs
-  exactly the versions the tag names and refuses any file whose hash is not
-  listed. Until now the file carried floors only, so a build took whatever the
-  package index served that day, and scanners that read a floor as the
-  installed version reported advisories the built image did not carry.
-  `tockmox-ui/Dockerfile` and `addons/posture-probe/Dockerfile` pin
-  `python:3.15-alpine` by its multi-arch digest; Renovate moves the tag, the
-  digest and the lockfile. A package mirror for a dark site must serve the same
-  files as PyPI. Nothing to do on upgrade. docs/administration/tockmox-ui.md,
+- **The Tockmox UI image installs its Python packages from a hashed lockfile,
+  and both Python base images are pinned by digest.** `tockmox-ui/requirements.txt`
+  is now a uv-compiled lockfile (the floors moved to `requirements.in`),
+  installed with `--require-hashes`, so a build installs exactly the versions
+  the tag names. Both Dockerfiles pin `python:3.15-alpine` by digest; Renovate
+  moves the digest and the lockfile. A dark site's package mirror must serve
+  PyPI's files. Nothing to do on upgrade. docs/administration/tockmox-ui.md,
   "Build the image".
+
+- **`tools/check-all.sh` can run only what a change touches, or one share of
+  the gates.** `--changed-from REF` runs the gates whose declared inputs
+  (`tools/gate-inputs.yaml`) changed since REF, plus every gate that declares
+  none; `--shard I/N` runs one of N parts balanced by measured time; every run
+  writes `build/check-all-results.tsv`. With no arguments it runs every gate,
+  as before. CI scopes and shards pull requests and runs every gate on pushes
+  and nightly. Nothing to do on upgrade. CONTRIBUTING.md.
 
 - **Platform Management groups what waits on you, filters its cases, and shows the organization one team at a time (TM-1308, epic TM-1303).** On the Overview, the cases waiting on you are grouped by what fired and what they ask, with the hosts counted: thirteen cases for one alert on six hosts are one row, "13 on 6 hosts", which opens the Cases page filtered to exactly those thirteen; a case with no alert name, or alone in its group, stays its own row. The Cases page takes `team`, `state`, `wait`, `alert` and `ask` filters (a form on the page, and the links from the Overview), says how many of how many it shows, and shows nothing, never everything, for a value it does not know. The teams' tables move from the Overview to a new **Organization** page in the Platform rail (`/platform/organization?team=<id>`): one team at a time, active roles in a table, roles not started folded to one line; the Overview keeps one line per team. **Capabilities** in the rail carries a warning when a switch and what is deployed disagree, and Unknown when Argo CD does not answer. Release notes on About and Platform › Updates render through one macro. Nothing to do on upgrade. docs/administration/platform-management.md, "The pages".
 
