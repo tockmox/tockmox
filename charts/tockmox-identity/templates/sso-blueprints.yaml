@@ -194,8 +194,9 @@ data:
   # Not add_user or change_user: either lets an account write a user's `groups`,
   # and only superuser groups are guarded (core/api/users.py validate_groups,
   # Authentik 2026.8.5), so the admin group would be one request away.
-  # The token's key is TOCKMOX_CONSOLE_ACTIONS_TOKEN from the
-  # tockmox-console-actions-token Secret (sso.consoleActions in values.yaml).
+  # No token here: the tockmox-console-identity-grants CronJob writes the
+  # account's API token from the tockmox-console-actions-token Secret on every
+  # run (templates/console-identity-grants.yaml says why).
   tockmox-console-identity.yaml: |
     version: 1
     metadata:
@@ -225,21 +226,6 @@ data:
             - !KeyOf console-role
           attributes:
             notes: "The Tockmox console's identity actions (TM-1315). Its role is managed by the tockmox-console-identity blueprint and the tockmox-console-identity-grants CronJob; changes made here are reverted."
-      # Skipped, never an error, while the Secret is absent (review D-9): `!Env`
-      # with no value would fail this entry, and one failed entry stops discovery
-      # for every blueprint.
-      - model: authentik_core.token
-        state: present
-        conditions:
-          - !Env [TOCKMOX_CONSOLE_ACTIONS_TOKEN, ""]
-        identifiers:
-          identifier: tockmox-console-actions
-        attrs:
-          user: !KeyOf console-account
-          intent: api
-          expiring: false
-          key: !Env TOCKMOX_CONSOLE_ACTIONS_TOKEN
-          description: "The Tockmox console's identity actions (TM-1315)"
       - model: authentik_core.group
         state: present
         identifiers:
