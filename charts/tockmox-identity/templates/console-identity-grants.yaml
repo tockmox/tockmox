@@ -21,6 +21,14 @@ made the role, a run says so and exits 0.
 A grant on a user also lets the account set that user's password directly (set_password checks the same permission).
 That is the same reach as the link, on the same people, and never on an administrator.
 
+THE ACCOUNT'S TOKEN is this Job's too: every run sets the API token `tockmox-console-actions` on the service account
+to TOCKMOX_CONSOLE_ACTIONS_TOKEN from the tockmox-console-actions-token Secret, and removes it while that is empty.
+It was the blueprint's (an !Env entry), and a lab run (2026-11-01) showed why that cannot work: turned on and minted in
+one push, the worker started before the Secret was unsealed, so the entry was skipped; a worker restart then read the
+variable, but Authentik does not re-apply a blueprint whose file is unchanged, so the token never appeared. Here it
+appears within one run of the Secret, and a re-minted token replaces the old one the same way. Holding it adds nothing
+to this Job's reach: it already holds the database password (review D-12 had kept it out).
+
 IMAGE AND ENV: the server's, derived exactly as templates/admin-users.yaml derives them (that file says why each
 value comes from where it does). It runs `ak shell` against the database and makes no Kubernetes API call.
 */ -}}
@@ -42,7 +50,7 @@ value comes from where it does). It runs `ak shell` against the database and mak
 {{- $pull := $img.pullPolicy | default $gimg.pullPolicy | default "IfNotPresent" }}
 {{- $srv := $ak.server | default dict }}
 {{- $akg := $ak.global | default dict }}
-{{- /* everything the server gets, less the console's own token: this Job does not need it (review D-12) */ -}}
+{{- /* everything the server gets (the console's token, if a site put it there, is added once below) */ -}}
 {{- $envFrom := list }}
 {{- range (concat ($akg.envFrom | default list) ($srv.envFrom | default list)) }}
 {{- if ne (((.secretRef | default dict).name) | default "") "tockmox-console-actions-token" }}{{- $envFrom = append $envFrom . }}{{- end }}
@@ -99,7 +107,7 @@ spec:
                 - -c
                 - |
                   import os
-                  from authentik.core.models import Group, User, UserTypes
+                  from authentik.core.models import Group, Token, TokenIntents, User, UserTypes
                   from authentik.rbac.models import Role
                   role = Role.objects.filter(name=os.environ["TOCKMOX_CONSOLE_ROLE"]).first()
                   if role is None:
@@ -112,6 +120,28 @@ spec:
                       for u in users:
                           role.remove_perms(perms, obj=u)
                       print("recovery grants: all %d taken back: %s" % (len(users), why))
+
+                  # the account's API token, from the Secret (header: THE ACCOUNT'S TOKEN)
+                  acct = User.objects.filter(username="tockmox-console-actions", type=UserTypes.SERVICE_ACCOUNT).first()
+                  if acct is None:
+                      revoke_all("there is no service account tockmox-console-actions")
+                      raise SystemExit(1)
+                  key = os.environ.get("TOCKMOX_CONSOLE_ACTIONS_TOKEN", "")
+                  # A failed token step does not touch the grants (they reach nothing without the token); the run
+                  # still fails, after the grants, so the Job shows it.
+                  token_failed = None
+                  try:
+                      if key:
+                          _, made = Token.objects.update_or_create(identifier="tockmox-console-actions", defaults={
+                              "user": acct, "intent": TokenIntents.INTENT_API, "expiring": False, "key": key,
+                              "description": "The Tockmox console's identity actions (TM-1315); kept by the tockmox-console-identity-grants CronJob"})
+                          print("console token: %s" % ("made" if made else "set"))
+                      else:
+                          gone, _ = Token.objects.filter(identifier="tockmox-console-actions").delete()
+                          print("console token: none (TOCKMOX_CONSOLE_ACTIONS_TOKEN is empty here; %d removed)" % gone)
+                  except Exception as e:
+                      token_failed = type(e).__name__
+                      print("console token: NOT set, the step failed (%s); the console's identity actions stay refused" % token_failed)
 
                   admin = Group.objects.filter(name=os.environ["TOCKMOX_ADMIN_GROUP"]).first()
                   if admin is None:
@@ -131,6 +161,8 @@ spec:
                       revoke_all("the run failed (%s)" % type(e).__name__)
                       raise
                   print("recovery grants: %d people granted, %d users not (administrators, superusers, service accounts, deactivated)" % (len(keep), len(users) - len(keep)))
+                  if token_failed:
+                      raise SystemExit(1)
               env:
                 {{- with (concat ($akg.env | default list) ($srv.env | default list)) }}
                 {{- toYaml . | nindent 16 }}
@@ -145,6 +177,11 @@ spec:
                 {{- with $envFrom }}
                 {{- toYaml . | nindent 16 }}
                 {{- end }}
+                # TOCKMOX_CONSOLE_ACTIONS_TOKEN (THE ACCOUNT'S TOKEN, above). Optional: while it is absent the run
+                # removes the token and the console's identity actions are refused.
+                - secretRef:
+                    name: tockmox-console-actions-token
+                    optional: true
 ---
 # TM-0759: this workload's own identity, with no token.
 apiVersion: v1

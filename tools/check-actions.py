@@ -25,8 +25,10 @@ WHAT IT ASSERTS:
   7. THE IDENTITY LAYER'S SIDE (tockmox-identity rendered with sso.consoleActions on, and off): the role grants
      `authentik_core.view_user` globally and nothing else; object permissions sit on the user group only, and are
      only view_group, add_user_to_group and remove_user_from_group, each to the console role; the service account is a
-     service account with no groups and exactly the console role; its token does not expire, its key comes from !Env
-     and it is skipped while that is empty; the recovery-grant CronJob runs with no ServiceAccount token, grants
+     service account with no groups and exactly the console role; the blueprint makes no token (the CronJob owns it:
+     an !Env token entry was skipped on a lab run, 2026-11-01, and never re-applied); the CronJob reads the token's
+     Secret, sets a non-expiring API token from it and removes it while empty, and neither Authentik's server nor its
+     worker is given that Secret; the recovery-grant CronJob runs with no ServiceAccount token, grants
      exactly reset_user_password and the recovery endpoint's object-level add_user, excludes groups under the admin
      group and fails closed; the recovery flow signs nobody in and is refused without a link. Off: no console
      blueprint, no CronJob. With identity on, tockmox-actions may reach the issuer's host (Traefik).
@@ -149,9 +151,12 @@ def check_on(docs) -> list:
     return errs
 
 
+TOKEN_SECRET = "tockmox-console-actions-token"
+
+
 def check_identity_mount(docs) -> list:
     errs = []
-    secret = "tockmox-console-actions-token"
+    secret = TOKEN_SECRET
     for d in docs:
         if d["kind"] not in ("Deployment", "StatefulSet", "Job", "CronJob"):
             continue
@@ -215,12 +220,17 @@ def check_identity_layer(docs) -> list:
     aa = (acct[0].get("attrs") or {}) if len(acct) == 1 else {}
     if aa.get("type") != "service_account" or "groups" in aa or aa.get("roles") != ["!KeyOf console-role"]:
         errs.append("7: the console account is not one service account with no groups and only the console role")
-    tok = [e for e in ents if e.get("model") == "authentik_core.token"]
-    ta = (tok[0].get("attrs") or {}) if len(tok) == 1 else {}
-    if ta.get("expiring") is not False or not str(ta.get("key", "")).startswith("!Env ") or ta.get("intent") != "api":
-        errs.append("7: the console token is not one non-expiring API token whose key comes from !Env")
-    if len(tok) == 1 and not tok[0].get("conditions"):
-        errs.append("7: the console token has no condition, so a missing Secret would stop blueprint discovery")
+    if any(e.get("model") == "authentik_core.token" for e in ents):
+        errs.append("7: the console blueprint makes a token: the grants CronJob owns it (an !Env entry is skipped when "
+                    "the worker starts before the Secret, and an unchanged blueprint is never re-applied)")
+    for d in docs:
+        if d["kind"] in ("Deployment", "StatefulSet") and "authentik" in d["metadata"]["name"]:
+            ps_ = d["spec"]["template"]["spec"]
+            cs_ = (ps_.get("containers") or []) + (ps_.get("initContainers") or [])
+            refs = {(e.get("secretRef") or {}).get("name") for c in cs_ for e in c.get("envFrom") or []}
+            refs |= {((e.get("valueFrom") or {}).get("secretKeyRef") or {}).get("name") for c in cs_ for e in c.get("env") or []}
+            if TOKEN_SECRET in refs:
+                errs.append(f"7: Authentik's {d['metadata']['name']} is given the console token: one owner, the grants CronJob")
     rec = blueprint(docs, "tockmox-recovery.yaml")
     if rec is None:
         errs.append("7: sso.recoveryFlow is on by default but the tockmox-recovery blueprint is missing")
@@ -246,6 +256,17 @@ def check_identity_layer(docs) -> list:
             errs.append("7: the recovery-grant CronJob grants something other than the recovery link")
         if "with_descendants()" not in script or "raise SystemExit(1)" not in script or "revoke_all(" not in script:
             errs.append("7: the recovery-grant CronJob does not exclude groups under the admin group, or does not fail closed")
+        refs = {(e.get("secretRef") or {}).get("name") for e in ps["containers"][0].get("envFrom") or []}
+        optional = any((e.get("secretRef") or {}).get("name") == TOKEN_SECRET and (e.get("secretRef") or {}).get("optional") is True
+                       for e in ps["containers"][0].get("envFrom") or [])
+        if TOKEN_SECRET in refs and not optional:
+            errs.append("7: the grants CronJob needs the token's Secret: with it absent no run starts, and no grant is taken back")
+        sets = 'Token.objects.update_or_create(identifier="tockmox-console-actions"'
+        if (TOKEN_SECRET not in refs or sets not in script or '"expiring": False' not in script
+                or "TokenIntents.INTENT_API" not in script or "UserTypes.SERVICE_ACCOUNT" not in script
+                or 'Token.objects.filter(identifier="tockmox-console-actions").delete()' not in script):
+            errs.append("7: the recovery-grant CronJob does not keep the console token: read its Secret, set one "
+                        "non-expiring API token on the service account, remove it while empty")
     return errs
 
 
@@ -351,6 +372,37 @@ def selftest(docs) -> int:
         a[-1] = a[-1].replace("raise SystemExit(1)", "pass")
     planted("the recovery flow signs the person in", signs_in, check_identity_layer, "7:")
     planted("the grants CronJob fails open", fails_open, check_identity_layer, "7:")
+
+    def token_in_blueprint(d):
+        cm = next(x for x in d if x["kind"] == "ConfigMap" and x["metadata"]["name"] == "tockmox-sso-blueprints")
+        cm["data"]["tockmox-console-identity.yaml"] += (
+            "  - model: authentik_core.token\n    identifiers: {identifier: tockmox-console-actions}\n"
+            "    attrs: {key: !Env TOCKMOX_CONSOLE_ACTIONS_TOKEN}\n")
+
+    def cronjob_no_token(d):
+        cj = next(x for x in d if x["kind"] == "CronJob" and x["metadata"]["name"] == "tockmox-console-identity-grants")
+        c = cj["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]
+        c["envFrom"] = [e for e in c["envFrom"] if (e.get("secretRef") or {}).get("name") != TOKEN_SECRET]
+
+    def worker_gets_token(d):
+        w = next(x for x in d if x["kind"] == "Deployment" and "authentik-worker" in x["metadata"]["name"])
+        w["spec"]["template"]["spec"]["containers"][0].setdefault("envFrom", []).append({"secretRef": {"name": TOKEN_SECRET}})
+    planted("the blueprint makes the console token", token_in_blueprint, check_identity_layer, "7:")
+    planted("the grants CronJob does not read the token", cronjob_no_token, check_identity_layer, "7:")
+    planted("the Authentik worker is given the token", worker_gets_token, check_identity_layer, "7:")
+
+    def server_gets_token(d):
+        w = next(x for x in d if x["kind"] == "Deployment" and "authentik-server" in x["metadata"]["name"])
+        w["spec"]["template"]["spec"]["containers"][0].setdefault("env", []).append(
+            {"name": "T", "valueFrom": {"secretKeyRef": {"name": TOKEN_SECRET, "key": "TOCKMOX_CONSOLE_ACTIONS_TOKEN"}}})
+
+    def token_required(d):
+        cj = next(x for x in d if x["kind"] == "CronJob" and x["metadata"]["name"] == "tockmox-console-identity-grants")
+        for e in cj["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]["envFrom"]:
+            if (e.get("secretRef") or {}).get("name") == TOKEN_SECRET:
+                e["secretRef"].pop("optional", None)
+    planted("the Authentik server is given the token by key", server_gets_token, check_identity_layer, "7:")
+    planted("the grants CronJob requires the token's Secret", token_required, check_identity_layer, "7:")
     clean = check_on(iddocs) + check_identity_mount(iddocs) + check_identity_layer(layer)
     print(("  ok    " if not clean else "  FAIL  ") + "the real renders are green" + ("" if not clean else f": {clean}"))
     return 1 if fails or clean else 0

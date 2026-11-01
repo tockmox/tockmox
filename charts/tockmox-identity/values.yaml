@@ -466,17 +466,17 @@ sso:
   # layer). OFF by default: it needs the service account's API token,
   # TOCKMOX_CONSOLE_ACTIONS_TOKEN in a `tockmox-console-actions-token` Secret in
   # THIS namespace, the same value as the AI namespace's (tools/mint-secrets.sh
-  # --with-console-actions writes both halves). Turned on before that Secret
-  # exists, the blueprint skips the token (a condition on it, so discovery is not
-  # stopped) and the console's identity actions are refused until the worker
-  # restarts with it.
+  # --with-console-actions writes both halves). The grants CronJob below sets the
+  # account's token from it on every run, so it may land before or after this
+  # is turned on: the identity actions work from the first run that sees it.
   #
   # What it makes, and what Authentik then enforces (not the console's code):
   #   - a service account, `tockmox-console-actions`, with one role that sees
   #     users and nothing else globally;
   #   - on the user group only: add and remove a member, and see the group.
   #     No permission on the admin group, any other group, flows or brands;
-  #   - a CronJob (every `reconcileSchedule`) that grants that role a recovery
+  #   - a CronJob (every `reconcileSchedule`) that sets the account's token and
+  #     grants that role a recovery
   #     link on each active person who is NOT in the admin group (or a group
   #     under it), not a superuser and not a service account, and takes it back
   #     from everyone else. Someone made an administrator by hand loses it at the
@@ -725,11 +725,6 @@ authentik:
       # tools/mint-secrets.sh --with-tockmox-ui writes both halves.
       - secretRef:
           name: tockmox-sso-tockmox-ui
-          optional: true
-      # TOCKMOX_CONSOLE_ACTIONS_TOKEN for sso.consoleActions (TM-1315), the
-      # console's identity actions. tools/mint-secrets.sh --with-console-actions.
-      - secretRef:
-          name: tockmox-console-actions-token
           optional: true
   blueprints:
     configMaps:

@@ -471,9 +471,10 @@ window the console refuses them itself and the page offers no link.
    ```
 
    Commit the two sealed files from `./secrets/` to your site repository and let
-   them sync. If the next step lands first, nothing breaks: the blueprint skips
-   the token while its variable is empty, and the console's identity actions are
-   refused until the worker restarts with it.
+   them sync. The order does not matter: the
+   `tockmox-console-identity-grants` CronJob sets the service account's token
+   from the Authentik namespace's Secret on every run, and removes it while that
+   Secret is absent.
 2. Turn on both halves:
 
    ```yaml
@@ -488,8 +489,12 @@ window the console refuses them itself and the page offers no link.
          enabled: true
    ```
 
-3. Restart the Authentik worker so it reads the new environment and the
-   blueprint ([why](#a-changed-blueprint-reaches-authentik-when-the-worker-restarts)).
+3. Wait for the CronJob's next run (`sso.consoleActions.reconcileSchedule`,
+   five minutes by default). Its log says `console token: made` (`set` on
+   later runs). The
+   blueprint's own changes reach Authentik when the worker restarts
+   ([why](#a-changed-blueprint-reaches-authentik-when-the-worker-restarts)); the
+   token does not wait for that.
 
 **Success condition:** **Platform › Identity** lists your people; a recovery
 link for a test user opens Authentik's "Choose a new password"; and, with the
