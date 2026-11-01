@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}Identity · Platform{% endblock %}
+{% block main %}
+{#- TM-1315: the people Authentik knows, a recovery link for anyone who is not an administrator, and membership of
+    the user group. Read and done through tockmox-actions; the UI holds no Authentik credential. -#}
+<h1>Identity</h1>
+<p class="lede">Send someone a link to set a new password, or let them into the consoles open to users. Administrators are set in Git (<code>sso.adminUsers</code>); creating, deactivating and recovering an administrator are in {% if admin_url %}<a href="{{ admin_url }}">Authentik's admin console</a>{% else %}Authentik's admin console{% endif %}.</p>
+{% if err %}
+<p class="panel quiet">{{ badge("unknown", "Unknown") }} The people could not be read: {{ err }}.</p>
+{% elif not people %}
+<p class="panel quiet">Authentik lists nobody yet.</p>
+{% else %}
+<div class="table-wrap" tabindex="0" role="region" aria-labelledby="id-cap">
+<table>
+  <caption id="id-cap">{{ people | length }} {{ "person" if people | length == 1 else "people" }}</caption>
+  <thead><tr><th scope="col">User</th><th scope="col">Groups</th><th scope="col">Last sign-in</th><th scope="col">Actions</th></tr></thead>
+  <tbody>
+  {% for p in people %}
+  <tr>
+    <th scope="row">{{ p.username }}{% if p.name and p.name != p.username %} <span class="muted small">{{ p.name }}</span>{% endif %}{% if p.email %}<br><span class="muted small">{{ p.email }}</span>{% endif %}</th>
+    <td>{% set tags = [] %}{% if p.admin %}{% set _ = tags.append("Administrator") %}{% endif %}{% if p.member %}{% set _ = tags.append("User") %}{% endif %}
+      {%- if tags %}{{ tags | join(" · ") }}{% else %}<span class="muted small">No Tockmox group</span>{% endif %}
+      {%- if not p.active %} {{ badge("warning", "Deactivated") }}{% endif %}</td>
+    <td>{% if p.last_login %}<time datetime="{{ p.last_login }}">{{ p.last_login[:10] }}</time>{% else %}<span class="muted small">Never</span>{% endif %}</td>
+    <td>
+      {%- set q = "user=" ~ p.pk ~ "&username=" ~ (p.username | urlencode) -%}
+      {%- if p.recoverable %}<a href="/actions/confirm?kind=recovery-link&amp;{{ q | e }}">Recovery link…</a>{% elif p.why_not and not p.admin and p.active %}<span class="muted small">No link here: {{ p.why_not }}</span>{% endif %}
+      {%- if p.member %} <a href="/actions/confirm?kind=remove-member&amp;{{ q | e }}">Remove from users…</a>{% else %} <a href="/actions/confirm?kind=add-member&amp;{{ q | e }}">Add to users…</a>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

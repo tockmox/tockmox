@@ -206,6 +206,23 @@
       "description": "Tockmox-owned block: sso.",
       "x-tockmox-stability": "stable",
       "properties": {
+        "recoveryFlow": {
+          "type": "boolean",
+          "description": "Ship the tockmox-recovery flow and set it as the default brand's recovery flow (TM-1315). False leaves the brand's recovery flow as it is."
+        },
+        "consoleActions": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "The console's identity actions (TM-1315): a service account, its role and the recovery-grant CronJob. Needs the tockmox-console-actions-token Secret first."
+            },
+            "reconcileSchedule": {
+              "type": "string"
+            }
+          }
+        },
         "adminUsers": {
           "type": "array",
           "items": {

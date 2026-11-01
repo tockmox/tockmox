@@ -146,6 +146,7 @@ its private key encrypted, and seals every credential into your site repository.
   --with-apprise         also mint an empty Apprise config to edit
   --with-tockmox-ui      also mint the Tockmox UI's session key and OIDC client secret
   --with-eval-gateway    also mint the eval gateway's master key
+  --with-console-actions also mint the console's identity-actions token (both halves)
   --ntfy-password-file F read the ntfy password from the first line of F
 
   --dry-run              show the plan and what would be minted; change nothing
@@ -159,7 +160,7 @@ CTRL_NS=""; CTRL_NAME=""; CHART_VERSION="$CHART_VERSION_DEFAULT"
 CHART_REPO="$CHART_REPO_DEFAULT"; CHART_REF=""; IMAGE_REGISTRY=""; WAIT_SECONDS=180
 BACKUP_OUT=""; AGE_RECIPIENT=""; PASSFILE=""; I_HAVE_BACKUP=false
 KEY_BACKUP=""; AGE_IDENTITY=""
-WITH_LITELLM=true; WITH_APPRISE=false; WITH_UI=false; WITH_EVAL=false; NTFY_PASSWORD_FILE=""; DRY_RUN=false
+WITH_LITELLM=true; WITH_APPRISE=false; WITH_UI=false; WITH_EVAL=false; NTFY_PASSWORD_FILE=""; DRY_RUN=false; WITH_CA=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -188,6 +189,7 @@ while [[ $# -gt 0 ]]; do
     --with-apprise) WITH_APPRISE=true; shift ;;
     --with-tockmox-ui) WITH_UI=true; shift ;;
     --with-eval-gateway) WITH_EVAL=true; shift ;;
+    --with-console-actions) WITH_CA=true; shift ;;
     --ntfy-password-file) NTFY_PASSWORD_FILE="${2:?--ntfy-password-file needs a file}"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -327,6 +329,7 @@ $WITH_LITELLM && MINT_ARGS+=(--with-litellm) || MINT_ARGS+=(--without-litellm)
 $WITH_APPRISE && MINT_ARGS+=(--with-apprise)
 $WITH_UI && MINT_ARGS+=(--with-tockmox-ui)
 $WITH_EVAL && MINT_ARGS+=(--with-eval-gateway)
+$WITH_CA && MINT_ARGS+=(--with-console-actions)
 $NO_PROMPT && MINT_ARGS+=(--no-prompt)
 [[ -z "$NTFY_PASSWORD_FILE" ]] || MINT_ARGS+=(--ntfy-password-file "$NTFY_PASSWORD_FILE")
 

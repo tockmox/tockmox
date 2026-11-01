@@ -349,8 +349,9 @@ def test_the_service_will_not_start_without_an_issuer_or_namespace():
 
 # ---------------------------------------------------------------- the console
 
-def console(tmp_path, actions=None, groups=("tockmox-admins",), down=False):
-    """The UI with actions on, its callback wired to a real Service in-process."""
+def console(tmp_path, actions=None, groups=("tockmox-admins",), down=False, authentik=None):
+    """The UI with actions on, its callback wired to a real Service in-process (authentik: a fake Authentik's
+    handler, for the identity kinds, TM-1315)."""
     from fastapi.testclient import TestClient
     from app import config
     from app.auth import Sessions
@@ -358,6 +359,8 @@ def console(tmp_path, actions=None, groups=("tockmox-admins",), down=False):
     idp, am, kube, world = IdP(), AM(), Kube(), World()
     world.alerts = am.alerts
     svc, _, _ = service(actions=actions, am=am, kube=kube, idp=idp)
+    if authentik is not None:
+        svc.authentik.transport = httpx.MockTransport(authentik)
     sent = []
 
     def bridge(req: httpx.Request):
@@ -371,6 +374,14 @@ def console(tmp_path, actions=None, groups=("tockmox-admins",), down=False):
         if req.url.path == "/v1/activity":
             rows, _ = svc.activity.read()
             return httpx.Response(200, json={"rows": rows})
+        if req.url.path == "/v1/identity/users":         # as app.actions_service serves it
+            if not svc.cfg.on("recovery-link"):
+                return httpx.Response(404, json={"error": "the identity actions are not turned on here"})
+            people, why = svc.authentik.users()
+            if why:
+                return httpx.Response(503, json={"error": why})
+            return httpx.Response(200, json={"users": people, "userGroup": svc.cfg.user_group,
+                                             "adminGroup": svc.admin_group})
         return httpx.Response(404)
 
     doc = yaml.safe_load((Path(__file__).resolve().parent.parent / "config.example.yaml").read_text())

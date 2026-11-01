@@ -1070,6 +1070,14 @@ tockmoxUi:
       enabled: false                     # needs url and tokenSecret: an Argo CD local account with get and sync only
       url: ""                            # http://argocd-server.argocd.svc
       tokenSecret: ""                    # a Secret in this namespace, key token
+    identity:
+      # A recovery link for anyone who is not an administrator, and membership of the user group (TM-1315). Needs
+      # sso.consoleActions.enabled in the identity layer and the token Secret both layers share
+      # (tools/mint-secrets.sh --with-console-actions); docs/administration/identity.md, "From the console".
+      enabled: false
+      tokenSecret: tockmox-console-actions-token   # in this namespace, key token
+      apiUrl: ""                         # Authentik's public origin; empty takes the issuer's (reached through Traefik)
+      recoveryGroups: []                 # groups besides the user group a person offered a recovery link may be in
     resources: {}
 
 open-webui:

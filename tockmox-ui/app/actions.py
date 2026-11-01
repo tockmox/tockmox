@@ -19,6 +19,8 @@ Kinds (`actions.<kind>.enabled`; off means absent, never a disabled button):
   argocd      refresh or sync an Argo CD application, through an account with get and sync only (the site's)
   restart     a rollout restart of an allowlisted Deployment or StatefulSet
   testAlert   one test alert down the same path as every other alert, to the phone
+  identity    a recovery link for a person who is not an administrator, and membership of the user group, through a
+              narrow Authentik service account (TM-1315); every one asks for a fresh sign-in
 """
 from __future__ import annotations
 
@@ -39,8 +41,13 @@ KINDS = {
     "sync": ("argocd", "medium", True, "Synced"),
     "restart": ("restart", "medium", True, "Restarted"),
     "test-alert": ("testAlert", "low", False, "Sent a test alert"),
+    "recovery-link": ("identity", "medium", True, "Made a recovery link"),
+    "add-member": ("identity", "medium", True, "Added to the user group"),
+    "remove-member": ("identity", "medium", True, "Removed from the user group"),
 }
-SWITCHES = ("silence", "runJob", "argocd", "restart", "testAlert")
+SWITCHES = ("silence", "runJob", "argocd", "restart", "testAlert", "identity")
+IDENTITY_KINDS = ("recovery-link", "add-member", "remove-member")
+RECOVERY_HOURS = (1, 24, 72)
 # What may never be silenced: the alerts that prove the alert path works. Silencing one hides a dead pipeline.
 NEVER_SILENCE = frozenset({"Watchdog", "TockmoxHeartbeat", "TockmoxSelfCheckStale", "InfoInhibitor"})
 SILENCE_HOURS = (1, 4, 24)
@@ -54,6 +61,8 @@ DNS_NAME = re.compile(r"[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?")
 PART_ID = re.compile(r"[a-z0-9][-a-z0-9_]{0,62}")
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 WORKLOAD_KINDS = ("Deployment", "StatefulSet")
+USERNAME = re.compile(r"[^\x00-\x1f\x7f]{1,150}")   # Authentik's usernames: any text up to 150 (review D-4)
+GROUP_NAME = re.compile(r"[^\s][^\n]{0,79}")
 
 
 class Refused(ValueError):
@@ -69,6 +78,10 @@ class Config:
     workloads: tuple = ()                          # ((namespace, kind, name, part), ...)
     argocd_url: str = ""                           # service side: the Argo CD API
     argocd_token_file: str = ""
+    identity_api: str = ""                         # service side: Authentik's origin (the issuer's, by default)
+    identity_token_file: str = ""
+    user_group: str = "tockmox-users"              # the one group membership actions may change
+    recovery_groups: tuple = ()                    # groups besides the user group a recoverable person may be in
     activity_configmap: str = "tockmox-actions-activity"
     namespace: str = ""                            # service side: where the activity ConfigMap lives
     step_up_max_age: int = STEP_UP_MAX_AGE
@@ -115,6 +128,16 @@ def parse(raw) -> Config:
                              "and optionally a part id")
         wl.append((ns, kind, name, part))
     argo = raw.get("argocd") or {}
+    ident = raw.get("identity") or {}
+    ug = str(ident.get("userGroup", "tockmox-users"))
+    if not GROUP_NAME.fullmatch(ug):
+        raise ValueError("actions.identity.userGroup must be a group name")
+    rg = ident.get("recoveryGroups") or []
+    if not isinstance(rg, list) or not all(isinstance(g, str) and GROUP_NAME.fullmatch(g) for g in rg):
+        raise ValueError("actions.identity.recoveryGroups must be a list of group names")
+    iapi = str(ident.get("apiUrl", "")).rstrip("/")
+    if iapi and not iapi.startswith(("http://", "https://")):
+        raise ValueError("actions.identity.apiUrl must be http:// or https://")
     url = str(raw.get("url", "")).rstrip("/")
     if url and not url.startswith(("http://", "https://")):
         raise ValueError("actions.url must be http:// or https://")
@@ -123,6 +146,8 @@ def parse(raw) -> Config:
         raise ValueError("actions.stepUpMaxAgeSeconds must be between 60 and 900")
     return Config(url=url, enabled=frozenset(on), jobs=tuple(jobs), workloads=tuple(wl),
                   argocd_url=str(argo.get("url", "")).rstrip("/"), argocd_token_file=str(argo.get("tokenFile", "")),
+                  identity_api=iapi, identity_token_file=str(ident.get("tokenFile", "")), user_group=ug,
+                  recovery_groups=tuple(rg),
                   activity_configmap=str(raw.get("activityConfigMap", "tockmox-actions-activity")),
                   namespace=str(raw.get("namespace", "")), step_up_max_age=age)
 
@@ -204,6 +229,15 @@ def check(cfg: Config, it: dict) -> dict:
     elif kind == "test-alert":
         if t or p:
             raise Refused("a test alert takes no target")
+    elif kind in IDENTITY_KINDS:
+        pk, name = t.get("user"), str(t.get("username", ""))
+        if not isinstance(pk, int) or isinstance(pk, bool) or pk < 1 or not USERNAME.fullmatch(name) or set(t) - {"user", "username"}:
+            raise Refused("an identity action names one user, by id and username")
+        if kind == "recovery-link":
+            if p.get("hours") not in RECOVERY_HOURS or set(p) - {"hours"}:
+                raise Refused("a recovery link lasts 1, 24 or 72 hours")
+        elif p:
+            raise Refused("a membership change takes no parameters")
     return it
 
 
@@ -253,6 +287,27 @@ def describe(it: dict, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime
         return {"title": f"Restart {t.get('name')}?", "summary": f"Restarted {t.get('name')}", "target": f"{t.get('kind')} {name}",
                 "effect": "Replaces its pods one at a time, as `kubectl rollout restart` does. Nothing else about it changes.",
                 "undo": "Nothing to undo: the new pods run the same configuration."}
+    if k == "recovery-link":
+        u, h = t.get("username", ""), int(p.get("hours", 24))
+        span = {1: "one hour", 24: "24 hours", 72: "three days"}.get(h, f"{h} hours")
+        return {"title": f"Make a recovery link for {u}?", "summary": f"Made a recovery link for {u}", "target": u,
+                "effect": f"Authentik makes a link, good once and for {span}, that lets {u} set a new password. It is "
+                          f"shown to you once, on the next page, for you to send them. Whoever holds it can take over "
+                          f"the account until it is used or expires, so send it the way you would send a password.",
+                "undo": f"Making another link for {u} replaces this one. To cancel it without a new one, delete the "
+                        f"token in Authentik's admin console (Directory, Tokens and App passwords)."}
+    if k == "add-member":
+        u = t.get("username", "")
+        return {"title": f"Add {u} to the user group?", "summary": f"Added {u} to the user group", "target": u,
+                "effect": f"{u} joins the user group, so the consoles open to users let them in on their next sign-in. "
+                          "Administrators are not changed by this: that group is set in Git.",
+                "undo": f"Remove {u} from the user group, here."}
+    if k == "remove-member":
+        u = t.get("username", "")
+        return {"title": f"Remove {u} from the user group?", "summary": f"Removed {u} from the user group", "target": u,
+                "effect": f"{u} leaves the user group, so the consoles open to users stop letting them in at their next "
+                          "sign-in. A session already open in a console lasts until it ends. Their account stays.",
+                "undo": f"Add {u} to the user group again, here."}
     if k == "test-alert":
         return {"title": "Send a test alert to your phone?", "summary": "Sent a test alert",
                 "target": "the alert path: Alertmanager, the alert bridge, your phone",

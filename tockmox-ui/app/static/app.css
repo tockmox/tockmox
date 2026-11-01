@@ -545,3 +545,5 @@ table.grouped td.num { white-space: nowrap; }
 .drawer .acts { flex-wrap: wrap; }
 .silenced { color: var(--tx-text-muted); }
 .silenced::before { content: "· "; }
+/* TM-1315: a recovery link, shown once, selectable for copying. */
+.confirm input.secret { display: block; width: 100%; box-sizing: border-box; padding: .5rem .6rem; font-family: var(--tx-font-mono, ui-monospace, monospace); font-size: var(--fs-1); }

@@ -6,11 +6,14 @@
 A separate Deployment on the UI's image, with its own ServiceAccount and one narrow credential per kind: Alertmanager
 (by NetworkPolicy) for silences and the test alert; a Role that creates Jobs only in the run-now allowlist's
 namespaces; a Role that patches only the restart allowlist's workloads, bounded by a ValidatingAdmissionPolicy to the
-restartedAt annotation; and, when the site gives it one, an Argo CD account with get and sync only.
+restartedAt annotation; when the site gives it one, an Argo CD account with get and sync only; and, with the identity
+kinds on, an Authentik service account whose role can see users, make a recovery link only for a user the identity
+layer's reconciler has granted it (never an administrator), and change membership of the user group only (TM-1315).
 
 API (reachable from the UI pod only, by NetworkPolicy):
   POST /v1/intents   {"intent": {...}, "id_token": "..."}   carry out one intent; 200 with the result
   GET  /v1/activity  the last actions, newest first
+  GET  /v1/identity/users   the people Authentik knows, for the Identity page (identity kinds on only)
   GET  /healthz
 
 Nothing is trusted from the caller but what the identity provider signed. Each intent arrives with an ID token the
@@ -21,7 +24,8 @@ click, do nothing twice: the first result is returned again.
 
 Audit: one JSON line per intent on stdout (`"event": "tockmox.action"`: the person's sub and name, the action, the
 target, the result, the reference it made), which Loki keeps, and a row in the activity ConfigMap the Activity page
-reads.
+reads. A recovery link is a secret: it goes back to the person who asked, once, in the answer to that intent, and is
+never written to the record, the log line or a replay's answer.
 """
 from __future__ import annotations
 
@@ -137,6 +141,144 @@ class Activity:
             raise act.Refused("the activity record kept changing underneath; the action ran but its row may be missing")
 
 
+class Authentik:
+    """The identity kinds' one credential: an Authentik API token for the service account the identity layer's
+    blueprint makes (sso.consoleActions). What it may do is Authentik's to enforce, not this code's: its role sees
+    users, makes a recovery link only for users the reconciler granted it (no administrator), and adds to or removes
+    from the user group only. The checks here say why in words before Authentik would refuse."""
+
+    PAGE = 200
+    MAX_USERS = 2000
+
+    def __init__(self, url: str, token_file: str, admin_group: str, user_group: str, timeout=8.0, transport=None,
+                 public_origin: str = "", recovery_groups=()):
+        self.url, self.token_file, self.timeout, self.transport = url.rstrip("/"), token_file, timeout, transport
+        self.admin_group, self.user_group = admin_group, user_group
+        self.public_origin = (public_origin or url).rstrip("/")
+        self.known = frozenset({user_group, *recovery_groups})
+
+    NOT_CONFIGURED = ("no Authentik account is configured for identity actions (tockmoxUi.actions.identity, and "
+                      "sso.consoleActions in the identity layer)")
+    TOKEN_EMPTY = "the identity actions' Authentik token is empty"
+
+    def _token(self) -> str:
+        if not (self.url and self.token_file and os.path.exists(self.token_file)):
+            return ""
+        with open(self.token_file, encoding="utf-8") as fh:
+            return fh.read().strip()
+
+    def unready(self) -> str:
+        """Why no call can be made, in fixed words, or "" (the Identity page says it without an exception's text)."""
+        if not (self.url and self.token_file and os.path.exists(self.token_file)):
+            return self.NOT_CONFIGURED
+        return "" if self._token() else self.TOKEN_EMPTY
+
+    def _c(self):
+        why = self.unready()
+        if why:
+            raise act.Refused(why)
+        tok = self._token()
+        return httpx.Client(base_url=self.url + "/api/v3", timeout=self.timeout, transport=self.transport,
+                            headers={"Authorization": "Bearer " + tok, "Accept": "application/json"})
+
+    @staticmethod
+    def _err(r, what):
+        detail = ""
+        try:
+            j = r.json()
+            detail = str(j.get("detail") or j.get("non_field_errors") or "")[:200]
+        except Exception:  # noqa: BLE001
+            pass
+        return act.Refused(f"Authentik refused {what} ({r.status_code}){': ' + detail if detail else ''}")
+
+    def person(self, u: dict) -> dict:
+        """One user as the Identity page and the checks see them. `groups_obj` is direct membership only, so a group
+        nested under the admin group would not read as admin: a recovery link is offered only to a person whose every
+        group is one this side knows (the user group, and identity.recoveryGroups), which fails closed on any other,
+        a nested admin group included (review D-2). Authentik's own grant is the second, independent bound."""
+        groups = sorted({str(g.get("name", "")) for g in (u.get("groups_obj") or []) if isinstance(g, dict)})
+        p = {"pk": u.get("pk"), "username": str(u.get("username", "")), "name": str(u.get("name", "")),
+             "email": str(u.get("email", "")), "active": bool(u.get("is_active")), "type": str(u.get("type", "")),
+             "superuser": bool(u.get("is_superuser")), "admin": self.admin_group in groups,
+             "member": self.user_group in groups, "last_login": u.get("last_login"), "groups": groups}
+        other = [g for g in groups if g not in self.known]
+        why = ("an administrator" if p["admin"] or p["superuser"] else
+               "deactivated" if not p["active"] else
+               f"in {', '.join(other)}, a group the console does not know" if other else "")
+        p["recoverable"], p["why_not"] = not why, why
+        return p
+
+    def users(self) -> tuple[list[dict], str]:
+        """(people, "") or ([], why). The why is fixed words and Authentik's status code, never an exception's text:
+        it goes back over HTTP to the UI (CodeQL py/stack-trace-exposure on the first PR of this endpoint)."""
+        why = self.unready()
+        if why:
+            return [], why
+        out, page = [], 1
+        with self._c() as c:
+            while len(out) < self.MAX_USERS:
+                r = c.get("/core/users/", params={"page": page, "page_size": self.PAGE, "include_roles": "false",
+                                                  "ordering": "username"})
+                if r.status_code >= 300:
+                    return [], f"Authentik refused the user list ({r.status_code})"
+                j = r.json()
+                out += [self.person(u) for u in j.get("results") or [] if u.get("type") in ("internal", "external")]
+                if not (j.get("pagination") or {}).get("next"):
+                    break
+                page += 1
+        return out, ""
+
+    def user(self, c, pk: int, username: str) -> dict:
+        r = c.get(f"/core/users/{pk}/", params={"include_roles": "false"})
+        if r.status_code == 404:
+            raise act.Refused("Authentik has no such user")
+        if r.status_code >= 300:
+            raise self._err(r, "the user")
+        p = self.person(r.json())
+        if p["username"] != username:
+            raise act.Refused(f"user {pk} is now {p['username']!r}, not {username!r}; open the Identity page again")
+        if p["type"] not in ("internal", "external"):
+            raise act.Refused(f"{username} is not a person's account")
+        return p
+
+    def recovery_link(self, pk: int, username: str, hours: int) -> str:
+        with self._c() as c:
+            p = self.user(c, pk, username)
+            if not p["recoverable"]:
+                raise act.Refused(f"{username} is {p['why_not']}; make their recovery link in Authentik's own console")
+            r = c.post(f"/core/users/{pk}/recovery/", json={"token_duration": f"hours={int(hours)}"})
+            if r.status_code >= 300:
+                raise self._err(r, "the recovery link")
+            link = str((r.json() or {}).get("link", ""))
+        # Authentik builds the link from the Host it was asked on: one that is not the issuer's public origin would
+        # be dead (or plain http) in the person's hands (review D-8)
+        if not link.startswith(self.public_origin + "/"):
+            raise act.Refused(f"Authentik made a link on another address than {self.public_origin}; set "
+                              "identity.apiUrl to Authentik's public address (or leave it empty)")
+        return link
+
+    def _group(self, c) -> str:
+        r = c.get("/core/groups/", params={"name": self.user_group, "include_users": "false",
+                                            "include_children": "false", "include_parents": "false"})
+        if r.status_code >= 300:
+            raise self._err(r, "the user group")
+        hit = [g for g in (r.json().get("results") or []) if g.get("name") == self.user_group]
+        if not hit:
+            raise act.Refused(f"the service account cannot see a group named {self.user_group}")
+        return str(hit[0]["pk"])
+
+    def membership(self, pk: int, username: str, add: bool) -> str:
+        with self._c() as c:
+            p = self.user(c, pk, username)
+            if p["member"] == add:
+                return "already a member" if add else "was not a member"
+            gid = self._group(c)
+            r = c.post(f"/core/groups/{gid}/{'add_user' if add else 'remove_user'}/", json={"pk": pk})
+            if r.status_code >= 300:
+                raise self._err(r, "the membership change")
+        return "added" if add else "removed"
+
+
 class Service:
     def __init__(self, doc: dict, transports: dict | None = None, now=time.time):
         tp = transports or {}
@@ -160,6 +302,10 @@ class Service:
         if not self.issuer:
             raise ValueError("oidc.issuer is required: every intent is checked against the issuer's own signature")
         self.activity = Activity(self.kube, self.cfg.namespace, self.cfg.activity_configmap)
+        public = self.issuer.split("/application/")[0]
+        self.authentik = Authentik(self.cfg.identity_api or public, self.cfg.identity_token_file, self.admin_group,
+                                   self.cfg.user_group, self.timeout, tp.get("authentik"), public_origin=public,
+                                   recovery_groups=self.cfg.recovery_groups)
         self.inflight: set = set()
         self.inflight_lock = threading.Lock()
         self.seen: dict = {}            # key -> (nonce, row, at): this process's memory, for a record that lost a row
@@ -315,6 +461,19 @@ class Service:
                 raise act.Refused(f"Alertmanager refused the test alert ({r.status_code})")
         return {"ref": [], "detail": "sent; resolves in five minutes"}
 
+    def do_recovery_link(self, it, who):
+        t = it["target"]
+        link = self.authentik.recovery_link(t["user"], t["username"], int(it["params"]["hours"]))
+        return {"ref": [t["username"]], "detail": f"link made, good once for {it['params']['hours']}h", "secret": link}
+
+    def do_add_member(self, it, who):
+        t = it["target"]
+        return {"ref": [t["username"]], "detail": self.authentik.membership(t["user"], t["username"], True)}
+
+    def do_remove_member(self, it, who):
+        t = it["target"]
+        return {"ref": [t["username"]], "detail": self.authentik.membership(t["user"], t["username"], False)}
+
     # ------------------------------------------------------------ one intent
 
     def handle(self, body) -> tuple[int, dict]:
@@ -377,6 +536,8 @@ class Service:
         row = dict(row, result="done", detail=res.get("detail", ""), ref=res.get("ref") or [], until=res.get("until"))
         self.audit(it, sub, who, "done", row["ref"], row["detail"])
         self._finish(row)
+        if res.get("secret"):                    # to the person who asked, once: never the record, the log or a replay
+            return 200, dict(row, secret=res["secret"])
         return 200, row
 
     def _finish(self, row):
@@ -419,6 +580,19 @@ def create_service(doc: dict, transports: dict | None = None, now=time.time) -> 
         except Exception as e:  # noqa: BLE001
             return JSONResponse({"error": f"the activity record could not be read ({type(e).__name__})"}, status_code=503)
         return {"rows": rows[:max(1, min(limit, ACTIVITY_MAX))]}
+
+    @app.get("/v1/identity/users")
+    def identity_users():
+        if not svc.cfg.on("recovery-link"):
+            return JSONResponse({"error": "the identity actions are not turned on here"}, status_code=404)
+        try:
+            people, why = svc.authentik.users()
+        except Exception:  # noqa: BLE001 - a transport failure; its text stays in this pod (CodeQL py/stack-trace-exposure)
+            log.warning("identity users: Authentik did not answer", exc_info=True)
+            people, why = [], "Authentik did not answer"
+        if why:
+            return JSONResponse({"error": why}, status_code=503)
+        return {"users": people, "userGroup": svc.cfg.user_group, "adminGroup": svc.admin_group}
 
     return app
 

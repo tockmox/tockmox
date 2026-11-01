@@ -46,6 +46,217 @@ data:
           name: {{ .Values.sso.userGroup }}
         attrs:
           is_superuser: false
+{{- if .Values.sso.recoveryFlow }}
+  # TM-1315. A recovery flow reached only through a link an administrator made
+  # (Authentik's "Create recovery link", or the console's Identity page): the
+  # link carries the user, so the flow asks for no username and sends no email.
+  # Choose a password, checked as the password-change flow checks it, and the
+  # flow ends. It does NOT sign the person in: they then sign in as usual, with
+  # their second factor, so a link sent over chat is a password reset and never
+  # a way past MFA. Greenfield-safe: everything it names it creates, and the
+  # brand is matched as the branding blueprint matches it (default: true, for
+  # the first-boot reason given there).
+  tockmox-recovery.yaml: |
+    version: 1
+    metadata:
+      name: tockmox-recovery
+      labels:
+        blueprints.goauthentik.io/description: "Password recovery by a link an administrator made (TM-1315)"
+    entries:
+      - model: authentik_policies_password.passwordpolicy
+        id: recovery-password-policy
+        state: present
+        identifiers:
+          name: tockmox-recovery-password-policy
+        attrs:
+          check_static_rules: true
+          check_zxcvbn: true
+          length_min: 8
+          password_field: password
+          zxcvbn_score_threshold: 2
+          error_message: "Choose a password of 8 characters or more that is not easy to guess."
+      - model: authentik_flows.flow
+        id: recovery-flow
+        state: present
+        identifiers:
+          slug: tockmox-recovery
+        attrs:
+          name: Tockmox recovery
+          title: Choose a new password
+          designation: recovery
+          authentication: none
+          policy_engine_mode: all
+      # Only from a link (review D-3): a link's plan carries the user it was made
+      # for. Without one, the user-write stage would fall back to whoever is
+      # signed in, and set their password without the current one.
+      - model: authentik_policies_expression.expressionpolicy
+        id: recovery-needs-link
+        state: present
+        identifiers:
+          name: tockmox-recovery-needs-link
+        attrs:
+          expression: |
+            return "pending_user" in request.context
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          policy: !KeyOf recovery-needs-link
+          target: !KeyOf recovery-flow
+          order: 0
+        attrs:
+          enabled: true
+          negate: false
+          timeout: 30
+      - model: authentik_stages_prompt.prompt
+        id: recovery-field-password
+        state: present
+        identifiers:
+          name: tockmox-recovery-field-password
+        attrs:
+          field_key: password
+          label: New password
+          type: password
+          required: true
+          placeholder: New password
+          placeholder_expression: false
+          order: 0
+      - model: authentik_stages_prompt.prompt
+        id: recovery-field-password-repeat
+        state: present
+        identifiers:
+          name: tockmox-recovery-field-password-repeat
+        attrs:
+          field_key: password_repeat
+          label: New password, again
+          type: password
+          required: true
+          placeholder: New password, again
+          placeholder_expression: false
+          order: 1
+      - model: authentik_stages_prompt.promptstage
+        id: recovery-prompt
+        state: present
+        identifiers:
+          name: tockmox-recovery-prompt
+        attrs:
+          fields:
+            - !KeyOf recovery-field-password
+            - !KeyOf recovery-field-password-repeat
+          validation_policies:
+            - !KeyOf recovery-password-policy
+      - model: authentik_stages_user_write.userwritestage
+        id: recovery-write
+        state: present
+        identifiers:
+          name: tockmox-recovery-write
+        attrs:
+          user_creation_mode: never_create
+      - model: authentik_flows.flowstagebinding
+        state: present
+        identifiers:
+          target: !KeyOf recovery-flow
+          stage: !KeyOf recovery-prompt
+          order: 10
+        attrs:
+          evaluate_on_plan: true
+          re_evaluate_policies: false
+          policy_engine_mode: any
+          invalid_response_action: retry
+      - model: authentik_flows.flowstagebinding
+        state: present
+        identifiers:
+          target: !KeyOf recovery-flow
+          stage: !KeyOf recovery-write
+          order: 20
+        attrs:
+          evaluate_on_plan: true
+          re_evaluate_policies: false
+          policy_engine_mode: any
+          invalid_response_action: retry
+      - model: authentik_brands.brand
+        state: present
+        identifiers:
+          domain: "authentik-default"
+        attrs:
+          default: true
+          flow_recovery: !KeyOf recovery-flow
+{{- end }}
+{{- if .Values.sso.consoleActions.enabled }}
+  # TM-1315. The console's identity actions, through one service account whose
+  # bounds are Authentik's own permissions, so a compromised tockmox-actions pod
+  # holds no more than this:
+  #   globally   see users (the Identity page, and the user an action names)
+  #   on the user group, that one object only: see it, add a member, remove one
+  #   per user    a recovery link, granted by the tockmox-console-identity-grants
+  #              CronJob to each active person outside the admin group, and
+  #              taken back from everyone else
+  # Nothing on the admin group, any other group, flows, brands, tokens or roles.
+  # Not add_user or change_user: either lets an account write a user's `groups`,
+  # and only superuser groups are guarded (core/api/users.py validate_groups,
+  # Authentik 2026.8.5), so the admin group would be one request away.
+  # The token's key is TOCKMOX_CONSOLE_ACTIONS_TOKEN from the
+  # tockmox-console-actions-token Secret (sso.consoleActions in values.yaml).
+  tockmox-console-identity.yaml: |
+    version: 1
+    metadata:
+      name: tockmox-console-identity
+      labels:
+        blueprints.goauthentik.io/description: "The Tockmox console's identity actions: one narrow service account (TM-1315)"
+    entries:
+      - model: authentik_rbac.role
+        id: console-role
+        state: present
+        identifiers:
+          name: tockmox-console-identity
+        attrs:
+          permissions:
+            - authentik_core.view_user
+      - model: authentik_core.user
+        id: console-account
+        state: present
+        identifiers:
+          username: tockmox-console-actions
+        attrs:
+          name: Tockmox console actions
+          type: service_account
+          path: goauthentik.io/service-accounts
+          is_active: true
+          roles:
+            - !KeyOf console-role
+          attributes:
+            notes: "The Tockmox console's identity actions (TM-1315). Its role is managed by the tockmox-console-identity blueprint and the tockmox-console-identity-grants CronJob; changes made here are reverted."
+      # Skipped, never an error, while the Secret is absent (review D-9): `!Env`
+      # with no value would fail this entry, and one failed entry stops discovery
+      # for every blueprint.
+      - model: authentik_core.token
+        state: present
+        conditions:
+          - !Env [TOCKMOX_CONSOLE_ACTIONS_TOKEN, ""]
+        identifiers:
+          identifier: tockmox-console-actions
+        attrs:
+          user: !KeyOf console-account
+          intent: api
+          expiring: false
+          key: !Env TOCKMOX_CONSOLE_ACTIONS_TOKEN
+          description: "The Tockmox console's identity actions (TM-1315)"
+      - model: authentik_core.group
+        state: present
+        identifiers:
+          name: {{ .Values.sso.userGroup }}
+        attrs:
+          is_superuser: false
+        # app_label.codename: blueprints/schema.json lists bare codenames here, but
+        # 2026.8.5's ak-guardian refuses them ("must be in format
+        # 'app_label.codename'"), found applying this on a k3s lab cluster.
+        permissions:
+          - permission: authentik_core.view_group
+            role: !KeyOf console-role
+          - permission: authentik_core.add_user_to_group
+            role: !KeyOf console-role
+          - permission: authentik_core.remove_user_from_group
+            role: !KeyOf console-role
+{{- end }}
 {{- if .Values.brand.enabled }}
   tockmox-branding.yaml: |
     version: 1

@@ -417,6 +417,103 @@ Their next token refresh or login fails everywhere at once.
 confirm the role they land in. Membership takes effect on the next token
 refresh, so an existing session may keep the old role until it expires.
 
+## From the console
+
+> **Experimental, new in 0.9.0.** Off by default.
+
+The Tockmox console's **Platform › Identity** page lists the people Authentik
+knows and does two things for them, each behind a confirm panel and a fresh
+sign-in (within five minutes), each recorded in **Platform › Activity**:
+
+- **Recovery link**, for a person who is not an administrator and is in no group
+  but the user group (or one named in
+  `tockmoxUi.actions.identity.recoveryGroups`): Authentik makes a
+  link, good once and for 1 hour, 24 hours or 3 days, that lets the person
+  choose a new password. The console shows it to you once, to send them; it is
+  kept in no record and no log line. The link sets a password and ends there:
+  the person then signs in as usual, with their second factor. Making another
+  link replaces the first.
+- **Add to users** and **Remove from users**: membership of the user group
+  (`sso.userGroup`), which is what lets someone into the consoles open to users.
+
+Administrators stay in Git (`sso.adminUsers`, above). Creating, deactivating and
+recovering an administrator stay in Authentik's admin console.
+
+**What Authentik enforces, not the console.** The actions run through one
+Authentik service account, `tockmox-console-actions`, whose role
+(`tockmox-console-identity`) the identity layer's blueprint and one CronJob
+keep narrow:
+
+| It may | Granted by |
+|---|---|
+| See users | the role, globally (`authentik_core.view_user`) |
+| See the user group, add a member, remove one | object permissions on that one group |
+| Make a recovery link for a person | the `tockmox-console-identity-grants` CronJob, per person: active, not a service account, not a superuser, and in neither the admin group nor a group under it. It takes the grant back from everyone else |
+
+Nothing on the admin group or any other group, flows, brands, tokens or roles.
+Creating and deactivating users are not offered because Authentik 2026.8 cannot
+grant them without also letting the account set a user's groups, the admin
+group included. The grant also lets the account set a granted person's password
+directly: the same reach as the link, on the same people.
+
+Someone made an administrator by hand keeps the grant until the CronJob's next
+run (`sso.consoleActions.reconcileSchedule`, five minutes by default); in that
+window the console refuses them itself and the page offers no link.
+
+**Turning it on.**
+
+1. Mint the token, one value in two Secrets named
+   `tockmox-console-actions-token` (the AI namespace's key `token`, the
+   Authentik namespace's key `TOCKMOX_CONSOLE_ACTIONS_TOKEN`):
+
+   ```bash
+   bash tools/mint-secrets.sh --only consoleactions --context <your-cluster>
+   ```
+
+   Commit the two sealed files from `./secrets/` to your site repository and let
+   them sync. If the next step lands first, nothing breaks: the blueprint skips
+   the token while its variable is empty, and the console's identity actions are
+   refused until the worker restarts with it.
+2. Turn on both halves:
+
+   ```yaml
+   # site/values/identity.yaml
+   sso:
+     consoleActions:
+       enabled: true
+   # site/values/ai.yaml
+   tockmoxUi:
+     actions:
+       identity:
+         enabled: true
+   ```
+
+3. Restart the Authentik worker so it reads the new environment and the
+   blueprint ([why](#a-changed-blueprint-reaches-authentik-when-the-worker-restarts)).
+
+**Success condition:** **Platform › Identity** lists your people; a recovery
+link for a test user opens Authentik's "Choose a new password"; and, with the
+service account's token, Authentik refuses the admin group:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  -H "Authorization: Bearer $(kubectl --context <your-cluster> -n tockmox-ai get secret tockmox-console-actions-token -o jsonpath='{.data.token}' | base64 -d)" \
+  -H 'Content-Type: application/json' -d '{"pk": 0}' \
+  "https://auth.<internalDomain>/api/v3/core/groups/<admin-group-uuid>/add_user/"
+```
+
+prints `403`. There is no user 0, so even a wrongly granted account changes
+nothing; a `404` would mean the permission check passed, which is a failure.
+
+**The recovery flow.** Authentik ships no recovery flow, and without one its own
+"Create recovery link" answers "No recovery flow set". The layer ships
+`tockmox-recovery` (choose a password, twice, checked as the password-change
+flow checks it) and sets it as the default brand's recovery flow
+(`sso.recoveryFlow`, on by default). A policy on it refuses it without a link,
+so it asks for no username, sends no email, and cannot be used to change the
+password of whoever is signed in. Set
+`sso.recoveryFlow: false` to keep a recovery flow of your own on the brand.
+
 ## Naming the first admins: `sso.adminUsers`
 
 A fresh install has the two groups and nobody in either. You can add the first
