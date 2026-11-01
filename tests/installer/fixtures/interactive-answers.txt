@@ -14,28 +14,30 @@
 ci-interactive
 #  2 Write site repo to                               default ./tockmox-site
 
-#  3 Tockmox release                                  default v<VERSION>
+#  3 Site repository (built-in or external)        default external
 
-#  4 Internal base domain                             REQUIRED
+#  4 Tockmox release                                  default v<VERSION>
+
+#  5 Internal base domain                             REQUIRED
 int.example.test
-#  5 cert-manager issuer                              default empty
+#  6 cert-manager issuer                              default empty
 
-#  6 LAN/node CIDR                                    REQUIRED
+#  7 LAN/node CIDR                                    REQUIRED
 192.168.77.0/24
-#  7 MetalLB range                                    REQUIRED
+#  8 MetalLB range                                    REQUIRED
 192.168.77.200-192.168.77.210
-#  8 Pod CIDR                                         default 10.42.0.0/16
+#  9 Pod CIDR                                         default 10.42.0.0/16
 
-#  9 Service CIDR                                     default 10.43.0.0/16
+# 10 Service CIDR                                     default 10.43.0.0/16
 
-# 10 Timezone                                         default UTC
+# 11 Timezone                                         default UTC
 
-# 11 Mirror registry                                  default empty
+# 12 Mirror registry                                  default empty
 
-# 12 StorageClass for protected data    DERIVED default: longhorn, via
+# 13 StorageClass for protected data    DERIVED default: longhorn, via
 #    default_storage_class(). THIS IS THE PROMPT THAT CRASHED.
 
-# 13 StorageClass for replaceable data                default local-path
+# 14 StorageClass for replaceable data                default local-path
 
-# 14 ArgoCD namespace                                 default argocd
+# 15 ArgoCD namespace                                 default argocd
 
