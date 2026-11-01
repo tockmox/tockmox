@@ -532,3 +532,16 @@ table.gens .sub { display: block; margin-top: .15rem; color: var(--tx-text-muted
 table.grouped td.num { white-space: nowrap; }
 .rail .rs { margin-left: auto; display: inline-flex; } .rail .rs .ico { width: 1em; height: 1em; }
 .rail .rs.st-warning { color: var(--st-warning); background: none; }
+
+/* TM-1311: actions. The confirm panel names target, effect and undo; nothing here moves on its own. */
+.confirm { max-width: 44rem; }
+.confirm-facts { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1rem; margin: 1rem 0; }
+.confirm-facts dt { font-weight: 600; }
+.confirm-facts dd { margin: 0; }
+.confirm fieldset { border: 0; padding: 0; margin: 0 0 .75rem; display: flex; flex-wrap: wrap; gap: .25rem 1rem; }
+.confirm legend { font-weight: 600; margin-bottom: .25rem; }
+.confirm textarea { width: 100%; }
+.confirm-acts { display: flex; gap: .5rem; flex-wrap: wrap; }
+.drawer .acts { flex-wrap: wrap; }
+.silenced { color: var(--tx-text-muted); }
+.silenced::before { content: "· "; }

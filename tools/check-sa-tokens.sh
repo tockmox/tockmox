@@ -46,6 +46,7 @@ CronJob tockmox-authentik-db-drill # identity restore drill (TM-0788): the same 
 Job     tockmox-authentik-db-upgrade-guard # identity upgrade guard (TM-0788): lists PersistentVolumeClaims in its namespace before a sync and nothing else (list-only Role in authentik-db-upgrade-guard.yaml)
 Job     tockmox-garage-bootstrap   # bootstrap Job: kubectl reads and creates Secrets, patches the Longhorn BackupTarget, starts sync Jobs from CronJobs
 Deployment tockmox-ui              # the Tockmox UI: get/list nodes, and Argo CD applications in their namespace (ClusterRole tockmox-ui-read, Role tockmox-ui-read-applications in tockmox-ui.yaml); first rendered here when the all-on overlay turned it on (TM-1013)
+Deployment tockmox-actions         # console actions (TM-1311): creates Jobs from allowlisted CronJobs, patches the restartedAt annotation of allowlisted workloads (both bounded by ValidatingAdmissionPolicies), keeps its record ConfigMap (Roles in tockmox-actions.yaml)
 Job     tockmox-pre-upgrade-backup # pre-upgrade backup hook (TM-1054): kubectl reads the Deployment or StatefulSet image, creates a CNPG Backup and reads its phase (Role in upgrade-backup.yaml)
 Job     t-gateway-key-*            # console-key Job (TM-0460): kubectl gets, creates or replaces the console's virtual-key Secret and restarts the console's pods on a replaced key (Role in gateway-key.yaml); named after its pod template like the migrations Job
 ALLOW

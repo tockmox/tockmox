@@ -305,8 +305,11 @@ check(uports == {"http": 8080, "metrics": 9464} and uenv.get("TOCKMOX_UI_METRICS
 ing_ports = {p["backend"]["service"]["port"].get("number") for r in find(nodes, "Ingress", "tockmox-ui")["spec"]["rules"] for p in r["http"]["paths"]}
 check(ing_ports == {8080}, "the UI's Ingress routes the app port only, never the metrics port")
 blocks = [p["ipBlock"]["cidr"] for r in ue for p in r.get("to", []) if "ipBlock" in p]
-check(len(ue) == 4 and "0.0.0.0/0" not in blocks and blocks == ["10.0.0.0/16"],
-      "with probing and the update check off, the UI's egress is DNS, the API (lanCIDR:6443), Prometheus/Alertmanager and Traefik; no node, no internet")
+to_actions = [r for r in ue if r.get("to") == [{"podSelector": {"matchLabels": {"app.kubernetes.io/name": "tockmox-actions"}}}]]
+check(len(ue) - len(to_actions) == 4 and "0.0.0.0/0" not in blocks and blocks == ["10.0.0.0/16"]
+      and all(r["ports"] == [{"port": 8081, "protocol": "TCP"}] for r in to_actions),
+      "with probing and the update check off, the UI's egress is DNS, the API (lanCIDR:6443), Prometheus/Alertmanager and Traefik, "
+      "and tockmox-actions on 8081 when actions are on (TM-1311); no node, no internet")
 sys.exit(1 if bad else 0)
 PY
 

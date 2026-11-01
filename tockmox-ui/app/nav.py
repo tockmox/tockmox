@@ -76,7 +76,7 @@ def current(items, path: str):
 
 
 def rail(section: str | None, is_admin: bool, platform_on: bool, admin_tabs=(), inbox_count: int | None = None,
-         capabilities_state: str | None = None) -> list[Group]:
+         capabilities_state: str | None = None, activity: bool = False) -> list[Group]:
     """The page list on the left of a section, or [] when the section has one page (Home, Status)."""
     if not is_admin:
         return []
@@ -105,6 +105,8 @@ def rail(section: str | None, is_admin: bool, platform_on: bool, admin_tabs=(), 
         conf = [Item("Capabilities", "/capabilities", state=capabilities_state)]
         conf += [Item(t.name, f"/tabs/{t.id}") for t in admin_tabs]
         conf.append(Item("Updates", "/platform/updates", ("/upgrade", "/version")))
+        if activity:                    # TM-1311: what was done from the console
+            conf.append(Item("Activity", "/platform/activity"))
         groups.append(Group("Configuration", tuple(conf)))
         return groups
     return []
@@ -149,6 +151,8 @@ HELP_MAP: dict[str, str] = {
     "/platform": "administration/platform-management.md",
     "/platform/organization": "administration/platform-management.md",
     "/platform/updates": "deployment/upgrade.md",
+    "/platform/activity": "administration/tockmox-ui.md",
+    "/actions": "administration/tockmox-ui.md",
     "/upgrade": "deployment/upgrade.md",
     "/tabs/posture": "administration/posture-probe.md",
     "/about": "administration/tockmox-ui.md",
