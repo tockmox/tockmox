@@ -324,6 +324,9 @@ spec:
         checksum/config: {{ $cfgText | sha256sum | trunc 16 | quote }}
     spec:
       serviceAccountName: tockmox-actions
+      # No service-link variables: Kubernetes would set TOCKMOX_ACTIONS_PORT=tcp://<ip>:8081 here for the Service
+      # tockmox-actions below, a name this process once read as its port (a k3s lab cluster, 2026-11-01).
+      enableServiceLinks: false
       # Needs the API for run-now, restart and its record (the Roles above). Gate allowlist in tools/check-sa-tokens.sh.
       automountServiceAccountToken: true
       securityContext:
