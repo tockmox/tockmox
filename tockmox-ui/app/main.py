@@ -314,7 +314,8 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
             else:
                 cap_state = "warning" if any(not x["agree"] for x in cap_rows) else None
         groups = nav.rail(sec, u.is_admin, platform_on(), admin_tabs=tabs, capabilities_state=cap_state,
-                          activity=bool(s.actions and s.actions.any))
+                          activity=bool(s.actions and s.actions.any),
+                          identity=bool(s.actions and s.actions.any and s.actions.on("recovery-link")))
         out["rail"], out["rail_item"] = groups, nav.rail_current(groups, path) if groups else None
         if u.is_admin:
             out["health"] = stack_mod.pill(placed(readings()))     # parts, not signals (TM-1305)

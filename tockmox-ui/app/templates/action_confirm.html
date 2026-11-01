@@ -23,6 +23,11 @@
     </fieldset>
     <label for="reason">Why <span class="muted small">(required; Alertmanager keeps it with the silence)</span></label>
     <textarea id="reason" name="reason" rows="2" maxlength="300" required></textarea>
+    {% elif kind == "recovery-link" %}
+    <fieldset>
+      <legend>Good for</legend>
+      {% for h, label in recovery_choices %}<label class="choice"><input type="radio" name="hours" value="{{ h }}" required{% if h == 24 %} checked{% endif %}> {{ label }}</label>{% endfor %}
+    </fieldset>
     {% endif %}
     <p class="muted small">{% if step_up %}This one asks you to sign in again when your last sign-in was more than {{ max_age_min }} minutes ago.{% else %}Confirming passes through your sign-in, so the action carries your name.{% endif %} It lands in <a href="/platform/activity">Activity</a>.</p>
     <p class="confirm-acts"><a class="btn-ghost" href="{{ back }}">Cancel</a> <button class="btn" type="submit">{{ d.title | replace("?", "") }}</button></p>

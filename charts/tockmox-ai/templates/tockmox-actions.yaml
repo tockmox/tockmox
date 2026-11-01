@@ -19,6 +19,11 @@ itself and does the one thing the intent names with one narrow credential per ki
                        a ternary does not compile, so presence and value are compared apart
   argocd               the site's Argo CD local account (get and sync on applications), a Secret this chart mounts;
                        a sync can never change an Application's source because the account cannot update one
+  identity             an Authentik API token (tockmoxUi.actions.identity.tokenSecret, key token) for the service
+                       account the identity layer's blueprint makes (sso.consoleActions in tockmox-identity). Its role
+                       sees users; a recovery link only for users the identity layer's reconciler grants (never an
+                       administrator, a superuser or a service account); add and remove on the user group only.
+                       Authentik enforces that, and reached through the issuer's own host, it needs no new egress
   the record           create on ConfigMaps in this namespace, get and update on its own one by name
                        (tockmox-actions-activity), which the Activity page reads through this service
 
@@ -46,6 +51,8 @@ Off means absent: with no kind on, none of this renders, and the UI shows no but
 {{- $svcActions := deepCopy $act -}}
 {{- $_ := set $svcActions "namespace" $aiNs -}}
 {{- if $act.argocd.enabled -}}{{- $_ := set $svcActions.argocd "tokenFile" "/etc/tockmox-actions/argocd/token" -}}{{- end -}}
+{{- $idv := ($ui.actions | default dict).identity | default dict -}}
+{{- if $act.identity.enabled -}}{{- $_ := set $svcActions.identity "tokenFile" "/etc/tockmox-actions/identity/token" -}}{{- end -}}
 {{- $svcCfg := dict
       "oidc" (dict "issuer" $cfg.oidc.issuer "clientId" ($cfg.oidc.clientId | default "tockmox-ui"))
       "roles" (dict "adminGroup" ((($cfg.roles | default dict).adminGroup) | default "tockmox-admins"))
@@ -392,6 +399,9 @@ spec:
             {{- if $act.argocd.enabled }}
             - { name: argocd, mountPath: /etc/tockmox-actions/argocd, readOnly: true }
             {{- end }}
+            {{- if $act.identity.enabled }}
+            - { name: identity, mountPath: /etc/tockmox-actions/identity, readOnly: true }
+            {{- end }}
       volumes:
         - name: tockmox-trust
           emptyDir: { sizeLimit: 4Mi }
@@ -409,6 +419,15 @@ spec:
         - name: argocd
           secret:
             secretName: {{ $ar.tokenSecret | quote }}
+            optional: true
+            items: [{ key: token, path: token }]
+        {{- end }}
+        {{- if $act.identity.enabled }}
+        # optional, as above: until tools/mint-secrets.sh --with-console-actions writes it, identity actions are
+        # refused with the reason
+        - name: identity
+          secret:
+            secretName: {{ $idv.tokenSecret | default "tockmox-console-actions-token" | quote }}
             optional: true
             items: [{ key: token, path: token }]
         {{- end }}

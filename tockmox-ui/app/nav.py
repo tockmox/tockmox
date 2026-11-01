@@ -76,7 +76,7 @@ def current(items, path: str):
 
 
 def rail(section: str | None, is_admin: bool, platform_on: bool, admin_tabs=(), inbox_count: int | None = None,
-         capabilities_state: str | None = None, activity: bool = False) -> list[Group]:
+         capabilities_state: str | None = None, activity: bool = False, identity: bool = False) -> list[Group]:
     """The page list on the left of a section, or [] when the section has one page (Home, Status)."""
     if not is_admin:
         return []
@@ -105,6 +105,8 @@ def rail(section: str | None, is_admin: bool, platform_on: bool, admin_tabs=(), 
         conf = [Item("Capabilities", "/capabilities", state=capabilities_state)]
         conf += [Item(t.name, f"/tabs/{t.id}") for t in admin_tabs]
         conf.append(Item("Updates", "/platform/updates", ("/upgrade", "/version")))
+        if identity:                    # TM-1315: recovery links and user-group membership
+            conf.append(Item("Identity", "/platform/identity"))
         if activity:                    # TM-1311: what was done from the console
             conf.append(Item("Activity", "/platform/activity"))
         groups.append(Group("Configuration", tuple(conf)))
@@ -152,6 +154,7 @@ HELP_MAP: dict[str, str] = {
     "/platform/organization": "administration/platform-management.md",
     "/platform/updates": "deployment/upgrade.md",
     "/platform/activity": "administration/tockmox-ui.md",
+    "/platform/identity": "administration/identity.md",
     "/actions": "administration/tockmox-ui.md",
     "/upgrade": "deployment/upgrade.md",
     "/tabs/posture": "administration/posture-probe.md",

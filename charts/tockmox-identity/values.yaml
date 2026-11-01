@@ -452,6 +452,41 @@ sso:
   # blueprint discovery), which is why this is a Job. Usernames only, no
   # whitespace. docs/administration/identity.md.
   adminUsers: []
+  # A RECOVERY FLOW ON THE DEFAULT BRAND (TM-1315). Authentik ships none, so
+  # "Create recovery link" (its admin console, and the Tockmox console's
+  # Identity page) answers "No recovery flow set". True ships `tockmox-recovery`
+  # (choose a password, twice, checked like the password-change flow; it does NOT
+  # sign the person in, so they then sign in as usual with their second factor)
+  # and sets it as the default brand's recovery flow. It runs only from a link an
+  # administrator made (a policy refuses it without one): it asks for no username
+  # and sends no email. False leaves the brand's recovery flow as it is, for a
+  # site that set its own.
+  recoveryFlow: true
+  # THE CONSOLE'S IDENTITY ACTIONS (TM-1315; tockmoxUi.actions.identity in the AI
+  # layer). OFF by default: it needs the service account's API token,
+  # TOCKMOX_CONSOLE_ACTIONS_TOKEN in a `tockmox-console-actions-token` Secret in
+  # THIS namespace, the same value as the AI namespace's (tools/mint-secrets.sh
+  # --with-console-actions writes both halves). Turned on before that Secret
+  # exists, the blueprint skips the token (a condition on it, so discovery is not
+  # stopped) and the console's identity actions are refused until the worker
+  # restarts with it.
+  #
+  # What it makes, and what Authentik then enforces (not the console's code):
+  #   - a service account, `tockmox-console-actions`, with one role that sees
+  #     users and nothing else globally;
+  #   - on the user group only: add and remove a member, and see the group.
+  #     No permission on the admin group, any other group, flows or brands;
+  #   - a CronJob (every `reconcileSchedule`) that grants that role a recovery
+  #     link on each active person who is NOT in the admin group (or a group
+  #     under it), not a superuser and not a service account, and takes it back
+  #     from everyone else. Someone made an administrator by hand loses it at the
+  #     next run; the console refuses an administrator itself in the meantime.
+  # Creating and deactivating users stay in Authentik's console: Authentik 2026.8
+  # cannot give an account those without letting it set a user's groups, the
+  # admin group included. docs/administration/identity.md, "From the console".
+  consoleActions:
+    enabled: false
+    reconcileSchedule: "*/5 * * * *"
   # Launch consoles from the portal in their own tab. Default true: without it
   # authentik navigates the portal tab itself, and the way back to the other
   # consoles is the browser Back button, which after an SSO redirect does not
@@ -690,6 +725,11 @@ authentik:
       # tools/mint-secrets.sh --with-tockmox-ui writes both halves.
       - secretRef:
           name: tockmox-sso-tockmox-ui
+          optional: true
+      # TOCKMOX_CONSOLE_ACTIONS_TOKEN for sso.consoleActions (TM-1315), the
+      # console's identity actions. tools/mint-secrets.sh --with-console-actions.
+      - secretRef:
+          name: tockmox-console-actions-token
           optional: true
   blueprints:
     configMaps:

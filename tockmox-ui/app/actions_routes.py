@@ -7,6 +7,7 @@ confirmation to one intent, and Platform > Activity. Nothing here writes: the in
   POST /actions/go             CSRF, then off to the issuer with nonce = actions.nonce_for(intent)
   (GET /auth/callback)         finish(): the ID token and the intent go to the service; the result is a page
   GET  /platform/activity      what was done, by whom, and how it ended
+  GET  /platform/identity      the people Authentik knows, with a recovery link and user-group membership (TM-1315)
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ ACT_COOKIE = "__Host-tockmox_ui_act"
 DEV_ACT_COOKIE = "tockmox_ui_act"
 COOKIE_MAX = 3800
 SILENCE_CHOICES = ((1, "1 hour"), (4, "4 hours"), (24, "24 hours"), (168, "7 days"))
+RECOVERY_CHOICES = ((1, "1 hour"), (24, "24 hours"), (72, "3 days"))
 
 
 def _back(v: str, default: str = "/status") -> str:
@@ -103,6 +105,9 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
         back = f"/status/{quote(part, safe='')}" if act.PART_ID.fullmatch(part) else _back(q.get("back", ""))
         if kind == "test-alert":
             return {}, _back(q.get("back", ""), "/status"), ""
+        if kind in act.IDENTITY_KINDS:
+            uid = str(q.get("user", ""))
+            return {"user": int(uid) if uid.isdigit() else 0, "username": str(q.get("username", ""))}, "/platform/identity", ""
         if kind in ("run-job",):
             return {"namespace": str(q.get("ns", "")), "name": str(q.get("name", ""))}, back, ""
         if kind in ("refresh", "sync"):
@@ -139,13 +144,14 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
             return nope(request, u, "That action is not turned on here.")
         try:
             target, back, _ = target_for(request, u, kind, request.query_params)
-            it = act.check(cfg, act.intent(kind, target, {"hours": 4, "reason": "-"} if kind == "silence" else {}, u.sub))
+            draft = {"hours": 4, "reason": "-"} if kind == "silence" else {"hours": 24} if kind == "recovery-link" else {}
+            it = act.check(cfg, act.intent(kind, target, draft, u.sub))
         except act.Refused as e:
             return nope(request, u, f"This action cannot be offered: {e}.", 409)
         d = act.describe(it, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime(ts)))
         return render(request, "action_confirm.html", u, kind=kind, d=d, target_json=json.dumps(target, sort_keys=True),
                       key=it["key"], back=back, step_up=act.step_up(kind), max_age_min=cfg.step_up_max_age // 60,
-                      choices=SILENCE_CHOICES, target=target)
+                      choices=SILENCE_CHOICES, recovery_choices=RECOVERY_CHOICES, target=target)
 
     @app.post("/actions/go")
     def go(request: Request, csrf: str = Form(""), kind: str = Form(""), target: str = Form(""), key: str = Form(""),
@@ -169,6 +175,11 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
                 if h not in {c[0] for c in SILENCE_CHOICES}:
                     raise act.Refused("choose how long the silence lasts")
                 params = {"hours": h, "reason": reason.strip()[:300]}
+            elif kind == "recovery-link":
+                h = int(hours) if hours.isdigit() else 0
+                if h not in {c[0] for c in RECOVERY_CHOICES}:
+                    raise act.Refused("choose how long the link lasts")
+                params = {"hours": h}
             it = act.check(cfg, act.intent(kind, t, params, u.sub, key=key))
         except (ValueError, TypeError, act.Refused) as e:
             return nope(request, u, f"Not sent: {e}.", 400)
@@ -223,8 +234,9 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
             return done("action_result.html", 502, ok=False, d=d,
                         reason=f"the actions service did not answer ({type(e).__name__}); nothing is known to have been done")
         ok = out.get("result") == "done"
+        # a recovery link (TM-1315) is shown on this page once; every page here is sent no-store (main.py)
         return done("action_result.html", 200 if ok else (r.status_code or 502), ok=ok, d=d, out=out,
-                    reason=out.get("reason", ""))
+                    reason=out.get("reason", ""), secret=out.get("secret", ""))
 
     app.state.action_finish = finish
 
@@ -245,5 +257,25 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
             err = f"the actions service did not answer ({type(e).__name__})"
         return render(request, "platform_activity.html", u, rows=rows, err=err, now=time.time(),
                       expire_on=cfg.on("expire"))
+
+    @app.get("/platform/identity")
+    def identity(request: Request):
+        u, deny = admin(request)
+        if deny:
+            return deny
+        if not cfg.on("recovery-link"):
+            return nope(request, u, "The identity actions are not turned on here (tockmoxUi.actions.identity).")
+        people, err, groups = [], "", {}
+        try:
+            with httpx.Client(base_url=cfg.url, timeout=max(s.source_timeout_s, 10), transport=transport) as c:
+                r = c.get("/v1/identity/users")
+                j = r.json()
+            if r.status_code >= 300:
+                err = str(j.get("error") or f"the actions service answered {r.status_code}")
+            people, groups = j.get("users") or [], {"user": j.get("userGroup", ""), "admin": j.get("adminGroup", "")}
+        except Exception as e:  # noqa: BLE001
+            err = f"the actions service did not answer ({type(e).__name__})"
+        admin_url = (s.oidc_issuer.split("/application/")[0] + "/if/admin/#/identity/users") if s.oidc_issuer else ""
+        return render(request, "platform_identity.html", u, people=people, err=err, groups=groups, admin_url=admin_url)
 
     return finish

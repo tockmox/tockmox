@@ -1,0 +1,158 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+THE RECOVERY-LINK GRANTS (TM-1315; sso.consoleActions in values.yaml). The console's service account may make a
+recovery link only for a person this CronJob has granted it. Authentik's role model cannot say "everyone outside the
+admin group" (a global permission covers every user, an administrator too), so the grant is per user and kept here:
+every run grants the tockmox-console-identity role `reset_user_password` (and the object-level `add_user` the
+recovery endpoint's POST is checked against) on each user who is
+
+  active, a person (internal or external, never a service account), not a superuser, and in neither the admin group
+  nor any group under it,
+
+and takes both back from every other user. It fails closed (review D-1): with no admin group by that name (a rename,
+or a first boot before the groups blueprint) it takes every grant back and exits 1, and any error part way takes every
+grant back before the Job fails. A user made an administrator by hand keeps the grant until the next run
+(reconcileSchedule, five minutes by default); the console refuses an administrator itself in that window, and the
+Identity page never offers one. The role, the account and the user-group permissions are the blueprint's
+(templates/sso-blueprints.yaml, tockmox-console-identity.yaml); this Job never touches them. Until the blueprint has
+made the role, a run says so and exits 0.
+
+A grant on a user also lets the account set that user's password directly (set_password checks the same permission).
+That is the same reach as the link, on the same people, and never on an administrator.
+
+IMAGE AND ENV: the server's, derived exactly as templates/admin-users.yaml derives them (that file says why each
+value comes from where it does). It runs `ak shell` against the database and makes no Kubernetes API call.
+*/ -}}
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "authentik")) .Values.sso.consoleActions.enabled }}
+{{- $ak := .Values.authentik }}
+{{- $akGlobal := mergeOverwrite (deepCopy (.Values.global | default dict)) (deepCopy ($ak.global | default dict)) }}
+{{- $fullCtx := dict "Values" (dict "global" $akGlobal "nameOverride" ($ak.nameOverride | default "") "fullnameOverride" ($ak.fullnameOverride | default "")) "Chart" (dict "Name" "authentik") "Release" .Release }}
+{{- $cfgSecret := (($ak.authentik | default dict).existingSecret | default dict).secretName | default (include "authentik.fullname" $fullCtx) }}
+{{- $img := (($ak.server | default dict).image | default dict) }}
+{{- $gimg := (($ak.global | default dict).image | default dict) }}
+{{- $depTag := "" }}
+{{- range .Chart.Dependencies }}{{- if eq .Name "authentik" }}{{- $depTag = .Version }}{{- end }}{{- end }}
+{{- $tag := $img.tag | default $gimg.tag | default $depTag }}
+{{- if not (regexMatch "^[0-9]" $tag) }}
+{{- fail (printf "sso.consoleActions: cannot derive the authentik image tag (got %q). Pin the authentik dependency in Chart.yaml to an exact version or set authentik.global.image.tag." $tag) }}
+{{- end }}
+{{- $repo := $img.repository | default $gimg.repository | default "ghcr.io/goauthentik/server" }}
+{{- $digest := $img.digest | default $gimg.digest | default "" }}
+{{- $pull := $img.pullPolicy | default $gimg.pullPolicy | default "IfNotPresent" }}
+{{- $srv := $ak.server | default dict }}
+{{- $akg := $ak.global | default dict }}
+{{- /* everything the server gets, less the console's own token: this Job does not need it (review D-12) */ -}}
+{{- $envFrom := list }}
+{{- range (concat ($akg.envFrom | default list) ($srv.envFrom | default list)) }}
+{{- if ne (((.secretRef | default dict).name) | default "") "tockmox-console-actions-token" }}{{- $envFrom = append $envFrom . }}{{- end }}
+{{- end }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tockmox-console-identity-grants
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.sso.consoleActions.reconcileSchedule | default "*/5 * * * *" | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 240
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 240
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            {{- include "tockmox.labels" . | nindent 12 }}
+            app.kubernetes.io/name: tockmox-console-identity-grants
+        spec:
+          restartPolicy: Never
+          # No Kubernetes API calls: its own ServiceAccount and no token (TM-0759, CIS 5.1.5 and 5.1.6).
+          serviceAccountName: tockmox-console-identity-grants
+          automountServiceAccountToken: false
+          {{- with ($srv.imagePullSecrets | default $akg.imagePullSecrets) }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: grants
+              image: {{ $repo }}:{{ $tag }}{{ if $digest }}@{{ $digest }}{{ end }}
+              imagePullPolicy: {{ $pull }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: { drop: ["ALL"] }
+              resources:
+                requests: { cpu: 100m, memory: 256Mi }
+                limits: { memory: 512Mi }
+              args:
+                - shell
+                - -c
+                - |
+                  import os
+                  from authentik.core.models import Group, User, UserTypes
+                  from authentik.rbac.models import Role
+                  role = Role.objects.filter(name=os.environ["TOCKMOX_CONSOLE_ROLE"]).first()
+                  if role is None:
+                      print("role %s: not made yet (the tockmox-console-identity blueprint has not applied); nothing to do" % os.environ["TOCKMOX_CONSOLE_ROLE"])
+                      raise SystemExit(0)
+                  perms = ["authentik_core.reset_user_password", "authentik_core.add_user"]
+                  users = list(User.objects.exclude_anonymous())
+
+                  def revoke_all(why):
+                      for u in users:
+                          role.remove_perms(perms, obj=u)
+                      print("recovery grants: all %d taken back: %s" % (len(users), why))
+
+                  admin = Group.objects.filter(name=os.environ["TOCKMOX_ADMIN_GROUP"]).first()
+                  if admin is None:
+                      revoke_all("there is no group named %s, so administrators cannot be told apart" % os.environ["TOCKMOX_ADMIN_GROUP"])
+                      raise SystemExit(1)
+                  try:
+                      admin_ids = set(User.objects.filter(groups__in=Group.objects.filter(pk=admin.pk).with_descendants()).values_list("pk", flat=True))
+                      people = (UserTypes.INTERNAL, UserTypes.EXTERNAL)
+                      keep = {u.pk for u in users if u.type in people and u.is_active and u.pk not in admin_ids and not u.is_superuser}
+                      for u in users:
+                          if u.pk not in keep:
+                              role.remove_perms(perms, obj=u)
+                      for u in users:
+                          if u.pk in keep:
+                              role.assign_perms(perms, obj=u)
+                  except BaseException as e:
+                      revoke_all("the run failed (%s)" % type(e).__name__)
+                      raise
+                  print("recovery grants: %d people granted, %d users not (administrators, superusers, service accounts, deactivated)" % (len(keep), len(users) - len(keep)))
+              env:
+                {{- with (concat ($akg.env | default list) ($srv.env | default list)) }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+                - name: TOCKMOX_CONSOLE_ROLE
+                  value: tockmox-console-identity
+                - name: TOCKMOX_ADMIN_GROUP
+                  value: {{ .Values.sso.adminGroup | quote }}
+              envFrom:
+                - secretRef:
+                    name: {{ $cfgSecret }}
+                {{- with $envFrom }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+---
+# TM-0759: this workload's own identity, with no token.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-console-identity-grants
+  namespace: {{ .Values.namespaces.identity }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+{{- end }}

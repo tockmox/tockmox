@@ -1856,6 +1856,28 @@
             },
             "resources": {
               "type": "object"
+            },
+            "identity": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "tokenSecret": {
+                  "type": "string",
+                  "description": "A Secret in the AI namespace, key token: the Authentik API token of the service account the identity layer makes with sso.consoleActions (tools/mint-secrets.sh --with-console-actions)."
+                },
+                "apiUrl": {
+                  "type": "string",
+                  "description": "Authentik's public origin, the one its links are made on. Empty takes the issuer's, reached through Traefik (tockmox-actions' egress allows it); another origin needs tockmoxUi.networkPolicy.extraEgress."
+                },
+                "recoveryGroups": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Groups besides the user group that a person offered a recovery link may be in. A person in any other group, a group nested under the admin group included, is not offered one."
+                }
+              }
             }
           }
         }

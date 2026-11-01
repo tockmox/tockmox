@@ -5,7 +5,13 @@
 <section class="panel confirm" aria-labelledby="result-h">
   <h1 id="result-h">{% if ok %}{{ badge("ok", "Done") }} {{ (out.summary if out else "") or (d.summary if d else "Done") }}{% else %}{{ badge("warning", "Not done") }} {{ d.summary if d else "The action" }} did not happen{% endif %}</h1>
   {% if ok %}
-  <p>{% if out.repeat %}This was already done (the same confirmation arrived twice), so nothing ran again. {% endif %}{{ out.detail }}{% if out.ref %} · <code>{{ out.ref | join(", ") }}</code>{% endif %}</p>
+  <p>{% if out.repeat %}This was already done (the same confirmation arrived twice), so nothing ran again.{% if out.kind == "recovery-link" %} The link was shown once, when it was made; make a new one if it was not kept.{% endif %} {% endif %}{{ out.detail }}{% if out.ref %} · <code>{{ out.ref | join(", ") }}</code>{% endif %}</p>
+  {% if secret %}
+  {#- TM-1315: shown here once. It is in no record, no log line and no replay; this page is sent no-store. -#}
+  <label for="secret">The link, to send them <span class="muted small">(shown once: it is not kept anywhere)</span></label>
+  <input id="secret" class="secret" type="text" value="{{ secret }}" readonly spellcheck="false" autocomplete="off">
+  <p class="muted small">Send it the way you would send a password. It works once; whoever opens it first sets the password.</p>
+  {% endif %}
   {% else %}
   <p>Why: {{ reason }}.</p>
   {% endif %}

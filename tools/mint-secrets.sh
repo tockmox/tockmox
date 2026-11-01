@@ -62,7 +62,7 @@ set -euo pipefail
 # walkthrough, 2026-08-25.
 OUT=secrets
 ONLY=""
-CERT=""; CONTEXT=""; DRY=false; WITH_LITELLM=true; WITH_APPRISE=false; WITH_UI=false; WITH_EVAL=false; YES=false
+CERT=""; CONTEXT=""; DRY=false; WITH_LITELLM=true; WITH_APPRISE=false; WITH_UI=false; WITH_EVAL=false; WITH_CA=false; YES=false
 # kubeseal's OWN default is a Service named `sealed-secrets-controller`, and it
 # is wrong for every install this repository documents: fresh-install.md #7
 # names the Helm release `sealed-secrets`, and the chart names the Service after
@@ -190,19 +190,24 @@ usage: tools/mint-secrets.sh [options]
                      secret (tockmox-ui-session, tockmox-sso-tockmox-ui)
   --with-eval-gateway
                      also mint the eval gateway's master key (tockmox-litellm-eval)
+  --with-console-actions
+                     also mint the API token of the console's identity actions
+                     (tockmox-console-actions-token, in both the AI and the
+                     Authentik namespace: sso.consoleActions, TM-1315)
   --out DIR          output directory, relative to where you run this
                      (default: ./secrets). Run this from your site repository
                      and the sealed files land in that repository.
   --only LIST        mint only these groups, comma separated: authentik, sso,
                      grafana, openwebui, ntfy, litellm, apprise, tockmoxui,
-                     evalgateway. Default: everything this
+                     evalgateway, consoleactions. Default: everything this
                      script mints today. A group is its whole set of files, so
                      `--only sso` mints sso.sealed.yaml and its three per-console
                      halves together and never touches the rest. Pair checks run
                      only for the selected groups. `litellm` and `apprise` in
                      the list stand in for --with-litellm / --with-apprise
                      (a list without `litellm` mints no gateway credential),
-                     and `tockmoxui` and `evalgateway` for the two flags above.
+                     and `tockmoxui`, `evalgateway` and `consoleactions` for the
+                     three flags above.
                      For a site that already owns the other Secrets and needs
                      only the new SSO client secrets, instead of minting
                      everything into a scratch directory and deleting most of it.
@@ -228,6 +233,7 @@ while [ $# -gt 0 ]; do
     --with-apprise) WITH_APPRISE=true; shift ;;
     --with-tockmox-ui) WITH_UI=true; shift ;;
     --with-eval-gateway) WITH_EVAL=true; shift ;;
+    --with-console-actions) WITH_CA=true; shift ;;
     --out) OUT="$2"; shift 2 ;;
     --only) ONLY="$2"; shift 2 ;;
     --dry-run) DRY=true; shift ;;
@@ -246,11 +252,11 @@ done
 # silently select nothing and report an empty success.
 if [ -n "$ONLY" ]; then
   for _g in ${ONLY//,/ }; do
-    case "$_g" in authentik|sso|grafana|openwebui|ntfy|litellm|apprise|tockmoxui|evalgateway) ;;
-      *) echo "unknown --only group '$_g' (authentik, sso, grafana, openwebui, ntfy, litellm, apprise, tockmoxui, evalgateway)" >&2; exit 2 ;;
+    case "$_g" in authentik|sso|grafana|openwebui|ntfy|litellm|apprise|tockmoxui|evalgateway|consoleactions) ;;
+      *) echo "unknown --only group '$_g' (authentik, sso, grafana, openwebui, ntfy, litellm, apprise, tockmoxui, evalgateway, consoleactions)" >&2; exit 2 ;;
     esac
   done
-  WITH_LITELLM=false; WITH_APPRISE=false; WITH_UI=false; WITH_EVAL=false
+  WITH_LITELLM=false; WITH_APPRISE=false; WITH_UI=false; WITH_EVAL=false; WITH_CA=false
 fi
 want() { [ -z "$ONLY" ] && return 0; case ",$ONLY," in *",$1,"*) return 0 ;; esac; return 1; }
 if [ -n "$ONLY" ]; then
@@ -258,6 +264,7 @@ if [ -n "$ONLY" ]; then
   want apprise && WITH_APPRISE=true
   want tockmoxui && WITH_UI=true
   want evalgateway && WITH_EVAL=true
+  want consoleactions && WITH_CA=true
 fi
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing: $1 ... $2" >&2; exit 1; }; }
@@ -306,6 +313,10 @@ want sso && PAIRS="$PAIRS $PAIRS_SSO"
 # The Tockmox UI's client secret, on both sides (TM-0956): the UI reads it in the
 # AI namespace, the identity layer's blueprint reads it in the Authentik one.
 $WITH_UI && PAIRS="$PAIRS sso-tockmox-ui.sealed.yaml:sso-tockmox-ui-authentik.sealed.yaml"
+# The console's identity actions (TM-1315): tockmox-actions holds the token in the
+# AI namespace, the identity layer's blueprint sets it as the service account's
+# key in the Authentik one.
+$WITH_CA && PAIRS="$PAIRS console-actions-token.sealed.yaml:console-actions-token-authentik.sealed.yaml"
 # ONE-WAY PAIRS (TM-0788): b holds a's value, and a b WITHOUT its a is refused
 # like any half pair (minting a would generate a value b does not hold). An a
 # without its b is NOT refused: b is new in 0.9.0, an install minted before it
@@ -841,6 +852,21 @@ else
   if [ -z "$ONLY" ] && { ! $_u1 || ! $_u2; }; then
     NOTMADE="${NOTMADE}tockmox-ui-session and tockmox-sso-tockmox-ui ... not requested. Needed only with tockmoxUi.enabled; re-run with --with-tockmox-ui.\n"
   fi
+fi
+
+# The console's identity actions (TM-1315; sso.consoleActions in the identity
+# layer, tockmoxUi.actions.identity in the AI layer). One value, two Secrets of
+# the same name: key `token` for tockmox-actions, TOCKMOX_CONSOLE_ACTIONS_TOKEN
+# for the blueprint that makes it the service account's API token.
+CA_TOKEN=""
+if $WITH_CA && [ ! -e "$OUT/console-actions-token.sealed.yaml" ]; then CA_TOKEN=$(openssl rand -hex 48); fi
+if $WITH_CA; then
+  have console-actions-token.sealed.yaml tockmox-console-actions-token || \
+  mk console-actions-token.sealed.yaml tockmox-ai tockmox-console-actions-token \
+    --from-literal=token="$CA_TOKEN"
+  have console-actions-token-authentik.sealed.yaml tockmox-console-actions-token || \
+  mk console-actions-token-authentik.sealed.yaml tockmox-authentik tockmox-console-actions-token \
+    --from-literal=TOCKMOX_CONSOLE_ACTIONS_TOKEN="$CA_TOKEN"
 fi
 
 if $WITH_EVAL; then

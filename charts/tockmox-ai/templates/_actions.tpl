@@ -6,7 +6,9 @@ offers) and the tockmox-actions service's (what it will do). One computation, tw
 
 On by default for every kind this layer can do with what Tockmox ships (R10, Jeff 2026-10-31): silences and the test
 alert (Alertmanager, by NetworkPolicy), run-now of the AI layer's own CronJobs, a restart of the AI layer's consoles.
-argocd needs the site's Argo CD account and is on only when its url and tokenSecret are set. Off means absent.
+argocd needs the site's Argo CD account and is on only when its url and tokenSecret are set. identity (TM-1315) needs
+the Authentik service account the identity layer makes with sso.consoleActions, and a token Secret both layers share,
+so it is off until turned on. Off means absent.
 Nothing renders without the UI, its issuer (every intent is checked against the issuer's signature) and the
 Alertmanager-reading observability capability for the Alertmanager kinds.
 */ -}}
@@ -43,6 +45,8 @@ Alertmanager-reading observability capability for the Alertmanager kinds.
 {{- $_ := set $out "runJob" (dict "enabled" (($rj.enabled) | default false) "allow" $jobs) -}}
 {{- $_ := set $out "restart" (dict "enabled" (($rs.enabled) | default false) "allow" $wl) -}}
 {{- $_ := set $out "argocd" (dict "enabled" (($ar.enabled) | default false) "url" ($ar.url | default "")) -}}
+{{- $id := $a.identity | default dict -}}
+{{- $_ := set $out "identity" (dict "enabled" (($id.enabled) | default false) "apiUrl" ($id.apiUrl | default "") "recoveryGroups" ($id.recoveryGroups | default list) "userGroup" (((.Values.sso | default dict).userGroup) | default "tockmox-users")) -}}
 {{- end -}}
 {{- $out | toYaml -}}
 {{- end -}}
