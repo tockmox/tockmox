@@ -7,7 +7,7 @@
     for their own apps. The Needs attention table and the version left Home (TM-1304, TM-1307). -#}
 {% if user.is_admin and home %}
 <section class="verdict-row home-verdict" aria-labelledby="verdict-h">
-  {{ mascot("all-clear" if home.state == "ok" else "puzzled", 76) }}
+  {{ mascot("all-clear" if home.state == "ok" else "puzzled", 128) }}
   <div>
     <h1 id="verdict-h">{{ home.sentence }}</h1>
     <p class="muted small">{{ badge(home.state) }} {{ sources_sentence(readings) }} <a href="/status">Status</a></p>

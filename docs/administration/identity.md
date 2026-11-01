@@ -490,8 +490,8 @@ window the console refuses them itself and the page offers no link.
    ```
 
 3. Wait for the CronJob's next run (`sso.consoleActions.reconcileSchedule`,
-   five minutes by default). Its log says `console token: made` (`set` on
-   later runs). The
+   five minutes by default). Its log says `console token: made` (on later runs
+   `unchanged`, or `set` after a re-mint). The
    blueprint's own changes reach Authentik when the worker restarts
    ([why](#a-changed-blueprint-reaches-authentik-when-the-worker-restarts)); the
    token does not wait for that.

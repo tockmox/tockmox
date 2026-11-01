@@ -419,7 +419,7 @@ table.gens .sub { display: block; margin-top: .15rem; color: var(--tx-text-muted
 .toggle.on .track::after { left: auto; right: 2px; background: var(--tx-bg); }
 .legend { display: flex; gap: 1rem; margin: 0 0 0 auto; padding: 0; font-size: var(--fs-1); }
 .legend li { display: inline-flex; align-items: center; gap: .3rem; background: none; color: var(--tx-text-muted); }
-.legend li .ico, .stack .ico, .drawer .sigs .ico { width: 1.05em; height: 1.05em; flex: none; }
+.legend li .ico, .layer-stack .ico, .drawer .sigs .ico { width: 1.05em; height: 1.05em; flex: none; }
 .legend li.st-ok .ico, .part.st-ok .ico, .sigs .st-ok .ico { color: var(--st-ok); }
 .legend li.st-warning .ico, .part.st-warning .ico, .sigs .st-warning .ico { color: var(--st-warning); }
 .legend li.st-critical .ico, .part.st-critical .ico, .sigs .st-critical .ico { color: var(--st-critical); }
@@ -427,7 +427,9 @@ table.gens .sub { display: block; margin-top: .15rem; color: var(--tx-text-muted
 
 .stack-wrap { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
 .stack-wrap.with-drawer { grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem); }
-.stack { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr); gap: .6rem; }
+/* Was ".stack", the class every form uses (form.stack above): the lab run, 2026-11-01, found the confirm page and
+   the node and onboarding forms squeezed into this grid's 2.6rem first column. */
+.layer-stack { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr); gap: .6rem; }
 .bands { display: grid; gap: .6rem; }
 .band { display: grid; grid-template-columns: 11rem minmax(0, 1fr); border: 1px solid var(--tx-border); border-radius: var(--tx-radius-md); background: var(--tx-surface); color: var(--tx-text); }
 .band.st-warning { border-color: var(--st-warning); } .band.st-critical { border-color: var(--st-critical); }
@@ -444,9 +446,9 @@ table.gens .sub { display: block; margin-top: .15rem; color: var(--tx-text-muted
 .part[aria-current] { outline: 2px solid var(--tx-trim); outline-offset: 2px; }
 .part .n { font-weight: 400; font-size: var(--fs-1); color: var(--tx-text-muted); font-variant-numeric: tabular-nums; }
 .band .folded { align-self: center; padding: 0 .3rem; }
-.stack .side { writing-mode: vertical-rl; transform: rotate(180deg); justify-content: center; padding: .8rem .2rem; min-height: 0; border-radius: var(--tx-radius-md); }
-.stack .side .side-in { display: inline-flex; align-items: center; gap: .4rem; }
-.stack .side .ico { transform: rotate(90deg); }
+.layer-stack .side { writing-mode: vertical-rl; transform: rotate(180deg); justify-content: center; padding: .8rem .2rem; min-height: 0; border-radius: var(--tx-radius-md); }
+.layer-stack .side .side-in { display: inline-flex; align-items: center; gap: .4rem; }
+.layer-stack .side .ico { transform: rotate(90deg); }
 .drawer { position: sticky; top: 1rem; padding: 1rem 1.1rem; }
 .drawer-top { display: flex; justify-content: space-between; align-items: center; }
 .drawer h2 { margin: .5rem 0 .2rem; }
@@ -460,9 +462,9 @@ table.gens .sub { display: block; margin-top: .15rem; color: var(--tx-text-muted
   .drawer { position: static; order: -1; }
   .band { grid-template-columns: minmax(0, 1fr); }
   .band-head { border-right: 0; border-bottom: 1px solid var(--tx-border); padding: .55rem .8rem; }
-  .stack { grid-template-columns: minmax(0, 1fr); }
-  .stack .side { writing-mode: horizontal-tb; transform: none; justify-content: flex-start; padding: .45rem .8rem; }
-  .stack .side .ico { transform: none; }
+  .layer-stack { grid-template-columns: minmax(0, 1fr); }
+  .layer-stack .side { writing-mode: horizontal-tb; transform: none; justify-content: flex-start; padding: .45rem .8rem; }
+  .layer-stack .side .ico { transform: none; }
   .legend { margin-left: 0; }
 }
 
@@ -471,12 +473,12 @@ table.gens .sub { display: block; margin-top: .15rem; color: var(--tx-text-muted
    One per screen; 56 in a section header, 76 beside the verdict, 160 on a full-page error or the sign-in page.
    At most a one-time fade, and none under reduced motion. */
 .mascot { flex: none; object-fit: contain; }
-.mascot.m56 { width: 56px; height: 56px; } .mascot.m76 { width: 76px; height: 76px; } .mascot.m160 { width: 160px; height: 160px; }
+.mascot.m56 { width: 56px; height: 56px; } .mascot.m76 { width: 76px; height: 76px; } .mascot.m128 { width: 128px; height: 128px; } .mascot.m160 { width: 160px; height: 160px; }
 @media (prefers-reduced-motion: no-preference) { .mascot { animation: mascot-in .4s ease-out 1; } }
 @keyframes mascot-in { from { opacity: 0; } to { opacity: 1; } }
 .titled { display: flex; align-items: center; gap: .85rem; min-width: 0; }
 .error-page { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; padding: 1.5rem 0; }
-@media (max-width: 600px) { .mascot.m76 { width: 56px; height: 56px; } .mascot.m160 { width: 112px; height: 112px; } }
+@media (max-width: 600px) { .mascot.m76, .mascot.m128 { width: 76px; height: 76px; } .mascot.m160 { width: 112px; height: 112px; } }
 
 /* ------------------------------------------------------------ Home: verdict, chips, the stack strip (TM-1307) */
 .home-verdict { align-items: center; }
@@ -490,8 +492,9 @@ table.gens .sub { display: block; margin-top: .15rem; color: var(--tx-text-muted
 .strip .cell.st-unknown { background: var(--st-unknown-soft); border: 1px dashed var(--st-unknown); color: var(--tx-text); } .strip .cell.st-unknown .ico { color: var(--st-unknown); }
 .strip .cell:hover { border-color: var(--tx-trim); }
 .strip .cv { font-weight: 400; font-size: var(--fs-1); color: var(--tx-text-muted); font-variant-numeric: tabular-nums; }
-.strip .side-cell { margin-left: auto; }
-@media (max-width: 860px) { .strip ol { flex-direction: column; } .strip .side-cell { margin-left: 0; } .strip .cell { width: 100%; } }
+/* Next to the bands, set off by a rule, not pushed to the far edge (the lab run, 2026-11-01: the gap read as broken). */
+.strip .side-cell { margin-left: .4rem; padding-left: .8rem; border-left: 1px solid var(--tx-border); }
+@media (max-width: 860px) { .strip ol { flex-direction: column; } .strip .side-cell { margin-left: 0; padding-left: 0; border-left: 0; } .strip .cell { width: 100%; } }
 
 /* ------------------------------------------------------------ trend panels (TM-1306) */
 :root { --ch-0: #6FB3DD; --ch-1: #E0A43A; --ch-2: #C77DDB; --ch-3: #4FC1A0; --ch-4: #E8838C; --ch-5: #B8C0C8; }
@@ -546,4 +549,29 @@ table.grouped td.num { white-space: nowrap; }
 .silenced { color: var(--tx-text-muted); }
 .silenced::before { content: "· "; }
 /* TM-1315: a recovery link, shown once, selectable for copying. */
-.confirm input.secret { display: block; width: 100%; box-sizing: border-box; padding: .5rem .6rem; font-family: var(--tx-font-mono, ui-monospace, monospace); font-size: var(--fs-1); }
+.confirm .secret { display: block; resize: none; word-break: break-all; width: 100%; box-sizing: border-box; padding: .5rem .6rem; font-family: var(--tx-font-mono, ui-monospace, monospace); font-size: var(--fs-1); }
+
+/* Row actions as pills (the lab run, 2026-11-01: text links read as prose, not as things to press). */
+.row-acts { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.row-acts .pill { margin-left: 0; padding: .2rem .75rem; min-height: 32px; display: inline-flex; align-items: center; }
+.row-acts .pill.danger { border-color: var(--st-critical); }
+/* The confirm panel's choices, its sign-in note and its buttons. */
+.confirm fieldset label.choice { display: inline-flex; align-items: center; gap: .35rem; white-space: nowrap; }
+.confirm-note { margin: .75rem 0; padding: .6rem .8rem; border-left: 3px solid var(--tx-trim); background: var(--tx-surface-raised); }
+.confirm-acts { margin-top: 1rem; align-items: center; }
+/* The Identity table as cards on a phone: no sideways scroll to reach a row's actions. */
+@media (max-width: 640px) {
+  .id-table caption { display: block; text-align: left; }
+  .id-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .id-table, .id-table tbody, .id-table tr, .id-table th, .id-table td { display: block; width: auto; }
+  .id-table tr { padding: .6rem 0; border-bottom: 1px solid var(--tx-border); }
+  .id-table th, .id-table td { border: 0; padding: .15rem 0; }
+  .id-table td[data-label]::before { content: attr(data-label) ": "; color: var(--tx-text-muted); font-size: var(--fs-1); }
+  .id-table td[data-label="Actions"]::before { content: none; }
+  .id-table td[data-label="Actions"] { padding-top: .4rem; }
+}
+/* The top bar's menus are <details>, and `details` above sets a top margin for page content: it pushed Help and
+   Account below the health pill (the lab run, 2026-11-01). Same height as the menus' 36px, too. */
+details.menu-d { margin-top: 0; }
+.util .hpill { min-height: 36px; }
+.account-line { margin-top: 1.25rem; }

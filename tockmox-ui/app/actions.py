@@ -254,8 +254,10 @@ def _until(hours: int, now: float | None = None) -> float:
     return (now or time.time()) + hours * 3600
 
 
-def describe(it: dict, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime(ts))) -> dict:
-    """Target, effect and undo in words, for the confirm panel and the Activity row."""
+def describe(it: dict, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime(ts)), choosing: bool = False) -> dict:
+    """Target, effect and undo in words, for the confirm panel and the Activity row. choosing: the confirm panel, where
+    the admin still picks how long (a silence, a recovery link), so the words name no length (the lab run, 2026-11-01:
+    "good for 24 hours" over radio buttons offering 1 hour and 3 days)."""
     k, t, p = it["kind"], it.get("target") or {}, it.get("params") or {}
     if k == "silence":
         names = sorted({a["alertname"] for a in t.get("alerts", [])})
@@ -270,7 +272,8 @@ def describe(it: dict, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime
                 "summary": f"Silenced {n} alert{'s' if n != 1 else ''} on {label} for {p.get('hours')}h",
                 "target": f"{', '.join(names)} ({where})",
                 "effect": f"Alertmanager stops notifying for every alert of {'these names' if len(names) != 1 else 'this name'} "
-                          f"in {where} until {until}, on this part or another. They stay on Status, marked silenced.",
+                          f"in {where} {'for as long as you choose below' if choosing else 'until ' + until}, on this part "
+                          f"or another. They stay on Status, marked silenced.",
                 "undo": "Expire the silence, on Status or in Activity."}
     if k == "expire":
         return {"title": "Expire this silence?", "summary": "Expired a silence", "target": t.get("label") or t.get("silence", ""),
@@ -296,7 +299,7 @@ def describe(it: dict, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime
                 "undo": "Nothing to undo: the new pods run the same configuration."}
     if k == "recovery-link":
         u, h = t.get("username", ""), int(p.get("hours", 24))
-        span = {1: "one hour", 24: "24 hours", 72: "three days"}.get(h, f"{h} hours")
+        span = "as long as you choose below" if choosing else {1: "one hour", 24: "24 hours", 72: "three days"}.get(h, f"{h} hours")
         return {"title": f"Make a recovery link for {u}?", "summary": f"Made a recovery link for {u}", "target": u,
                 "effect": f"Authentik makes a link, good once and for {span}, that lets {u} set a new password. It is "
                           f"shown to you once, on the next page, for you to send them. Whoever holds it can take over "

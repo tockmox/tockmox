@@ -12,22 +12,23 @@
 <p class="panel quiet">Authentik lists nobody yet.</p>
 {% else %}
 <div class="table-wrap" tabindex="0" role="region" aria-labelledby="id-cap">
-<table>
+<table class="id-table" role="table">
   <caption id="id-cap">{{ people | length }} {{ "person" if people | length == 1 else "people" }}</caption>
-  <thead><tr><th scope="col">User</th><th scope="col">Groups</th><th scope="col">Last sign-in</th><th scope="col">Actions</th></tr></thead>
-  <tbody>
+  {#- The roles keep it a table for a screen reader when a phone shows it as cards (display: block drops them). -#}
+  <thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">User</th><th scope="col" role="columnheader">Groups</th><th scope="col" role="columnheader">Last sign-in</th><th scope="col" role="columnheader">Actions</th></tr></thead>
+  <tbody role="rowgroup">
   {% for p in people %}
-  <tr>
-    <th scope="row">{{ p.username }}{% if p.name and p.name != p.username %} <span class="muted small">{{ p.name }}</span>{% endif %}{% if p.email %}<br><span class="muted small">{{ p.email }}</span>{% endif %}</th>
-    <td>{% set tags = [] %}{% if p.admin %}{% set _ = tags.append("Administrator") %}{% endif %}{% if p.member %}{% set _ = tags.append("User") %}{% endif %}
+  <tr role="row">
+    <th scope="row" role="rowheader">{{ p.username }}{% if p.name and p.name != p.username %} <span class="muted small">{{ p.name }}</span>{% endif %}{% if p.email %}<br><span class="muted small">{{ p.email }}</span>{% endif %}</th>
+    <td role="cell" data-label="Groups">{% set tags = [] %}{% if p.admin %}{% set _ = tags.append("Administrator") %}{% endif %}{% if p.member %}{% set _ = tags.append("User") %}{% endif %}
       {%- if tags %}{{ tags | join(" · ") }}{% else %}<span class="muted small">No Tockmox group</span>{% endif %}
       {%- if not p.active %} {{ badge("warning", "Deactivated") }}{% endif %}</td>
-    <td>{% if p.last_login %}<time datetime="{{ p.last_login }}">{{ p.last_login[:10] }}</time>{% else %}<span class="muted small">Never</span>{% endif %}</td>
-    <td>
+    <td role="cell" data-label="Last sign-in">{% if p.last_login %}<time datetime="{{ p.last_login }}">{{ p.last_login[:10] }}</time>{% else %}<span class="muted small">Never</span>{% endif %}</td>
+    <td role="cell" data-label="Actions"><div class="row-acts">
       {%- set q = "user=" ~ p.pk ~ "&username=" ~ (p.username | urlencode) -%}
-      {%- if p.recoverable %}<a href="/actions/confirm?kind=recovery-link&amp;{{ q | e }}">Recovery link…</a>{% elif p.why_not and not p.admin and p.active %}<span class="muted small">No link here: {{ p.why_not }}</span>{% endif %}
-      {%- if p.member %} <a href="/actions/confirm?kind=remove-member&amp;{{ q | e }}">Remove from users…</a>{% else %} <a href="/actions/confirm?kind=add-member&amp;{{ q | e }}">Add to users…</a>{% endif %}
-    </td>
+      {%- if p.recoverable %}<a class="pill" href="/actions/confirm?kind=recovery-link&amp;{{ q | e }}">Recovery link</a>{% elif p.why_not and not p.admin and p.active %}<span class="muted small">No link here: {{ p.why_not }}</span>{% endif %}
+      {%- if p.member %} <a class="pill danger" href="/actions/confirm?kind=remove-member&amp;{{ q | e }}">Remove from users</a>{% else %} <a class="pill" href="/actions/confirm?kind=add-member&amp;{{ q | e }}">Add to users</a>{% endif %}
+    </div></td>
   </tr>
   {% endfor %}
   </tbody>

@@ -261,8 +261,8 @@ def check_identity_layer(docs) -> list:
                        for e in ps["containers"][0].get("envFrom") or [])
         if TOKEN_SECRET in refs and not optional:
             errs.append("7: the grants CronJob needs the token's Secret: with it absent no run starts, and no grant is taken back")
-        sets = 'Token.objects.update_or_create(identifier="tockmox-console-actions"'
-        if (TOKEN_SECRET not in refs or sets not in script or '"expiring": False' not in script
+        sets = 'Token.objects.create(identifier="tockmox-console-actions"'
+        if (TOKEN_SECRET not in refs or sets not in script or "tok.save()" not in script or '"expiring": False' not in script
                 or "TokenIntents.INTENT_API" not in script or "UserTypes.SERVICE_ACCOUNT" not in script
                 or 'Token.objects.filter(identifier="tockmox-console-actions").delete()' not in script):
             errs.append("7: the recovery-grant CronJob does not keep the console token: read its Secret, set one "
