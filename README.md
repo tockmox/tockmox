@@ -23,6 +23,7 @@ Local first. Frontier by exception. Built from established infrastructure with i
 
 [![Release](https://img.shields.io/github/v/release/tockmox/tockmox?include_prereleases&sort=semver)](https://github.com/tockmox/tockmox/releases)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/tockmox/tockmox/badge)](https://scorecard.dev/viewer/?uri=github.com/tockmox/tockmox)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/16152/badge)](https://www.bestpractices.dev/projects/16152)
 
 </div>
 
