@@ -27,7 +27,7 @@
 # shard, so the shards' results together are one unsharded run. Gates registered with serial_gate
 # read or build a shared directory, so they all go to one shard together. A gate that does not run
 # (unselected, or skipped by check-all.sh itself) is recorded on shard 1 so its line is reported
-# exactly once.
+# exactly once: shard 1's plan says unselected, every other shard's says othershard.
 #
 # Standard library only, plus PyYAML for the declarations, which check-all.sh already requires.
 import os
@@ -216,7 +216,10 @@ def cmd_plan(argv):
         for g in gates:
             dec, why = sel[g["ord"]]
             s = shard_of[g["ord"]]
-            if dec == "run" and s != i:
+            # Only the gate's own shard reports it; every other shard records othershard. That holds for
+            # an unselected gate too (its shard is 1): written as unselected on every shard, the
+            # aggregate saw it once per shard and went red on every pull request it narrowed.
+            if s != i:
                 dec = "othershard"
             f.write("%d\t%s\t%s\t%d\t%s\n" % (g["ord"], g["key"], dec, s, why))
     runs = sum(1 for g in gates if sel[g["ord"]][0] == "run")
@@ -412,6 +415,28 @@ def selftest():
         expect(not (mine & union), "shard %d/3 runs nothing another shard runs" % i)
         union |= mine
     expect(union == set(range(1, 9)), "the three shards' run sets are the unsharded run set")
+    # A narrowed run (a pull request): across the shards' plans, every gate has exactly one decision
+    # that is not othershard, so the aggregate sees each gate once, unselected ones included.
+    chg = os.path.join(d, "changed")
+    with open(chg, "w") as f:
+        f.write("docs/x/y.md\n")
+    owners = {}
+    for i in (1, 2, 3):
+        out = os.path.join(d, "n%d" % i)
+        old = sys.stdout
+        sys.stdout = open(os.devnull, "w")
+        try:
+            cmd_plan(["--list", lst, "--inputs", inp, "--weights", wts, "--changed", chg, "--shard", "%d/3" % i, "--out", out])
+        finally:
+            sys.stdout.close(); sys.stdout = old
+        with open(out) as f:
+            for r in (l.split("\t") for l in f):
+                if r[2] != "othershard":
+                    owners.setdefault(int(r[0]), []).append((i, r[2]))
+    expect(sorted(owners) == list(range(1, 9)) and all(len(v) == 1 for v in owners.values()),
+           "a narrowed run: every gate, unselected ones included, is reported by exactly one shard")
+    expect(all(v == [(1, "unselected")] for o, v in owners.items() if o in (1, 2, 5, 8)),
+           "a narrowed run: the unselected gates are reported on shard 1 as unselected")
     # aggregate goes red on a gate nobody reported and on a duplicate.
     r1 = os.path.join(d, "r1.tsv")
     with open(r1, "w") as f:
