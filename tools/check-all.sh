@@ -93,7 +93,7 @@ gate_key() {
   local name="$1"; shift
   case "${1:-}" in bash|python3|sh) shift ;; esac
   if [ "${1:-}" = "-c" ]; then
-    printf 'inline:%s' "$(printf '%s' "$name" | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '-' | cut -c1-60 | sed 's/-$//')"
+    printf 'inline:%s' "$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-60 | sed 's/-$//')"
   else
     printf '%s' "$*"
   fi
@@ -262,7 +262,7 @@ serial_gate() {
 }
 
 skip_gate() {
-  local key; key="skip:$(printf '%s' "$1" | tr 'A-Z' 'a-z' | tr -cs 'a-z0-9' '-' | cut -c1-60 | sed 's/-$//')"
+  local key; key="skip:$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-60 | sed 's/-$//')"
   gate_ord=$((gate_ord + 1))
   if [ "$LIST_ONLY" = 1 ]; then
     printf '%s\t%s\t0\t%s\n' "$gate_ord" "$key" "$1"
@@ -374,8 +374,8 @@ if [ -n "$CHANGED_FROM" ] || [ -n "$SHARD" ]; then
   python3 tools/gate-plan.py "${plan_args[@]}" || { echo "check-all.sh: the gate planner failed; nothing ran"; exit 1; }
   PLAN="$SLOTS/plan.tsv"
   PLAN_KEY=(); PLAN_DEC=()
-  while IFS=$'\t' read -r p_ord p_key p_dec p_shard p_why; do
-    PLAN_KEY[$p_ord]="$p_key"; PLAN_DEC[$p_ord]="$p_dec"
+  while IFS=$'\t' read -r p_ord p_key p_dec _; do
+    PLAN_KEY[p_ord]="$p_key"; PLAN_DEC[p_ord]="$p_dec"
   done < "$PLAN"
 fi
 fi

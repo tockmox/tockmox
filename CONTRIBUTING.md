@@ -181,7 +181,7 @@ brew install bash
 ```
 
 Which runs where: `check-all.yaml` runs `check-all.sh` on Linux (bash 5, GNU
-userland) in three shards: on a pull request, the gates whose inputs it changes
+userland) in four shards: on a pull request, the gates whose inputs it changes
 (`tools/gate-inputs.yaml`; `--changed-from origin/main` does the same locally),
 and every gate on each push to `main` and `release-*` and nightly. `portability-macos.yaml` runs the same script on a macOS runner
 (Homebrew bash, BSD `sed`, `grep` and `wc`) weekly and on demand, not on pull

@@ -34,15 +34,16 @@ jobs:
     # GitHub-hosted: free and unlimited on public repos, and safe against fork PRs.
     # Self-hosted runners must never serve pull_request from forks.
     runs-on: ubuntu-latest
-    # THREE PARTS AT ONCE (TM-1289). Every named step below carries `matrix.part` in its `if:` and
-    # runs in exactly one part, split by the time each took in the 2026-10-30 measurement, so the
-    # job takes about a third as long and the named-step count tools/doc-claims.txt pins does not
-    # move. A step added without a part runs in all three: correct, only slower. Keep the render
+    # FOUR PARTS AT ONCE (TM-1289). Every named step below carries `matrix.part` in its `if:` and
+    # runs in exactly one part, split by the time each step took on the first split run (2026-11-01:
+    # the UI's tests and the alert rules each about a part on their own), so the job takes about a
+    # quarter as long and the named-step count tools/doc-claims.txt pins does not
+    # move. A step added without a part runs in all four: correct, only slower. Keep the render
     # counts and the documented-counts steps in one part (the second reads the first's output).
     strategy:
       fail-fast: false
       matrix:
-        part: [a, b, c]
+        part: [a, b, c, d]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
@@ -82,7 +83,7 @@ jobs:
           exit $fail
 
       - name: helm lint (all layer charts)
-        if: ${{ matrix.part == 'c' }}
+        if: ${{ matrix.part == 'd' }}
         # `helm lint` exits 0 on a template fail(), and a pipeline without
         # pipefail reports the LAST command's status. Both bit us: CI was green
         # while tockmox-platform rendered nothing at all.
@@ -134,7 +135,7 @@ jobs:
       - name: every NetworkPolicy selector can actually match
         # Independent of the steps before it. Without this, ONE early
         # failure skips every check after it and a single red X hides nine.
-        if: ${{ !cancelled() && matrix.part == 'c' }}
+        if: ${{ !cancelled() && matrix.part == 'd' }}
         shell: bash -euo pipefail {0}
         run: |
           # A matchLabels value that renders to "" matches NOTHING while
@@ -149,7 +150,7 @@ jobs:
       - name: every aggregated ClusterRole we ship is allowlisted by our own guardrail
         # Independent of the steps before it. Without this, ONE early
         # failure skips every check after it and a single red X hides nine.
-        if: ${{ !cancelled() && matrix.part == 'c' }}
+        if: ${{ !cancelled() && matrix.part == 'd' }}
         shell: bash -euo pipefail {0}
         run: |
           # TM-0505. A stock install on 2026-09-11 logged six admission warnings
@@ -205,7 +206,7 @@ jobs:
       - name: the committed SBOM matches the tree
         # Independent of the steps before it. Without this, ONE early
         # failure skips every check after it and a single red X hides nine.
-        if: ${{ !cancelled() && matrix.part == 'b' }}
+        if: ${{ !cancelled() && matrix.part == 'c' }}
         shell: bash -euo pipefail {0}
         run: |
           # sbom.cdx.json is generated, committed, and timestamp-free, so
@@ -218,7 +219,7 @@ jobs:
 
       - name: the committed images.txt matches the charts
         # Independent of the steps before it, same reasoning as the SBOM step.
-        if: ${{ !cancelled() && matrix.part == 'b' }}
+        if: ${{ !cancelled() && matrix.part == 'c' }}
         shell: bash -euo pipefail {0}
         run: |
           # images.txt is the air-gap mirror list. A Renovate bump of an image
@@ -238,7 +239,7 @@ jobs:
       - name: no duplicate top-level keys in values files
         # Independent of the steps before it. Without this, ONE early
         # failure skips every check after it and a single red X hides nine.
-        if: ${{ !cancelled() && matrix.part == 'c' }}
+        if: ${{ !cancelled() && matrix.part == 'd' }}
         shell: bash -euo pipefail {0}
         run: |
           # YAML keeps the LAST occurrence of a repeated key and silently drops
@@ -267,7 +268,7 @@ jobs:
       - name: storage policy holds on the rendered claims
         # Independent of the steps before it. Without this, ONE early
         # failure skips every check after it and a single red X hides nine.
-        if: ${{ !cancelled() && matrix.part == 'b' }}
+        if: ${{ !cancelled() && matrix.part == 'c' }}
         shell: bash -euo pipefail {0}
         run: |
           # Every claim in this repo sat on local-path for weeks while Longhorn
@@ -280,7 +281,7 @@ jobs:
       - name: every layer renders against a real site's values, not just CI's
         # Independent of the steps before it. Without this, ONE early
         # failure skips every check after it and a single red X hides nine.
-        if: ${{ !cancelled() && matrix.part == 'c' }}
+        if: ${{ !cancelled() && matrix.part == 'd' }}
         shell: bash -euo pipefail {0}
         run: |
           # ci/values.yaml is MORE COMPLETE than any real deployment: it carries
@@ -307,7 +308,7 @@ jobs:
       - name: every capability is a switch that does something
         # Independent of the steps before it. Without this, ONE early
         # failure skips every check after it and a single red X hides nine.
-        if: ${{ !cancelled() && matrix.part == 'c' }}
+        if: ${{ !cancelled() && matrix.part == 'd' }}
         shell: bash -euo pipefail {0}
         run: |
           # A capability that removes no object is decoration, and it fails
@@ -325,7 +326,7 @@ jobs:
       - name: global.imageRegistry redirects every image it claims to
         # Independent of the steps before it. Without this, ONE early
         # failure skips every check after it and a single red X hides nine.
-        if: ${{ !cancelled() && matrix.part == 'b' }}
+        if: ${{ !cancelled() && matrix.part == 'c' }}
         shell: bash -euo pipefail {0}
         run: |
           # Measured 2026-08-15: setting global.imageRegistry redirected 24 of
@@ -343,7 +344,7 @@ jobs:
       - name: no cloud egress in default values
         # Independent of the steps before it. Without this, ONE early
         # failure skips every check after it and a single red X hides nine.
-        if: ${{ !cancelled() && matrix.part == 'a' }}
+        if: ${{ !cancelled() && matrix.part == 'c' }}
         shell: bash -euo pipefail {0}
         run: |
           # This project claims your data does not leave your hardware. The step
@@ -357,7 +358,7 @@ jobs:
       - name: values schema rejects bad input
         # Independent of the steps before it. Without this, ONE early
         # failure skips every check after it and a single red X hides nine.
-        if: ${{ !cancelled() && matrix.part == 'b' }}
+        if: ${{ !cancelled() && matrix.part == 'd' }}
         run: |
           # The schema is a contract. Prove it fails closed, or it is decoration.
           # Sets only an optional global, so the two required ones
@@ -371,7 +372,7 @@ jobs:
       - name: values schema rejects an unknown top-level key or component name
         # Independent of the steps before it. Without this, ONE early
         # failure skips every check after it and a single red X hides nine.
-        if: ${{ !cancelled() && matrix.part == 'b' }}
+        if: ${{ !cancelled() && matrix.part == 'd' }}
         shell: bash -euo pipefail {0}
         run: |
           # The root of every layer schema is closed, and since TM-0404 so is the
@@ -388,7 +389,7 @@ jobs:
       - name: every values key carries a stability tier
         # Independent of the steps before it. Without this, ONE early
         # failure skips every check after it and a single red X hides nine.
-        if: ${{ !cancelled() && matrix.part == 'b' }}
+        if: ${{ !cancelled() && matrix.part == 'd' }}
         shell: bash -euo pipefail {0}
         run: |
           # values-contract.md tells an operator that a `stable` key does not
@@ -510,7 +511,7 @@ jobs:
         #
         # The bump is FIVE edits, not four. A checklist is not a mechanism;
         # this is the mechanism.
-        if: ${{ !cancelled() && matrix.part == 'c' }}
+        if: ${{ !cancelled() && matrix.part == 'd' }}
         shell: bash -euo pipefail {0}
         run: |
           chart=$(awk '/^version:/ {print $2; exit}' charts/tockmox-common/Chart.yaml)
@@ -555,7 +556,7 @@ jobs:
         # .gitignore now lists these names, but gitignore does not affect files
         # already in the index, so the ignore rule alone would not have caught
         # the file it was written for. This does.
-        if: ${{ !cancelled() && matrix.part == 'c' }}
+        if: ${{ !cancelled() && matrix.part == 'd' }}
         shell: bash -euo pipefail {0}
         run: |
           # `git ls-files` and not a filesystem check: an UNTRACKED FETCH_HEAD
@@ -613,7 +614,7 @@ jobs:
         # without any check noticing; TM-0098's close condition is a check that no
         # workflow pushes an image. --selftest first: it proves each push pattern
         # goes red on a fixture, and on one shaped like the deleted docs-image workflow.
-        if: ${{ !cancelled() && matrix.part == 'c' }}
+        if: ${{ !cancelled() && matrix.part == 'd' }}
         shell: bash -euo pipefail {0}
         run: |
           ./tools/check-no-published-images.sh --selftest
@@ -628,7 +629,7 @@ jobs:
         # touched), and each assertion is proven able to fail. The site-contents
         # gate refuses anything that is not static web content; its selftest
         # injects each kind of file it must refuse.
-        if: ${{ !cancelled() && matrix.part == 'c' }}
+        if: ${{ !cancelled() && matrix.part == 'd' }}
         shell: bash -euo pipefail {0}
         run: |
           ./tools/check-docs-site-contents.sh --selftest
@@ -678,7 +679,7 @@ jobs:
 
       - name: docs links resolve
         # Independent step, so a style failure does not hide a link failure.
-        if: ${{ !cancelled() && matrix.part == 'c' }}
+        if: ${{ !cancelled() && matrix.part == 'd' }}
         shell: bash -euo pipefail {0}
         run: |
           # A deployment page landed on 2026-08-18 linked from the docs index
@@ -699,7 +700,7 @@ jobs:
 
       - name: frontmatter contract holds over the docs bundle
         # Independent step, same reason as the two above.
-        if: ${{ !cancelled() && matrix.part == 'c' }}
+        if: ${{ !cancelled() && matrix.part == 'd' }}
         shell: bash -euo pipefail {0}
         run: |
           # Validates every page under docs/ that HAS a frontmatter block, and
@@ -743,7 +744,7 @@ jobs:
       - name: kubeconform rendered output
         # Independent of the steps before it. Without this, ONE early
         # failure skips every check after it and a single red X hides nine.
-        if: ${{ !cancelled() && matrix.part == 'b' }}
+        if: ${{ !cancelled() && matrix.part == 'd' }}
         shell: bash -euo pipefail {0}
         run: |
           curl -fsSL -o kubeconform.tar.gz "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
