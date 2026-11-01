@@ -420,13 +420,13 @@ states: [0-9]+ gates
 page:   docs/usage/what-you-get.md
 claim:  Tockmox-authored boards** ship
 test:   ls charts/tockmox-observability/dashboards/*.json | wc -l | tr -d ' '
-expect: 10
+expect: 11
 states: [A-Za-z]+ Tockmox-authored boards
 
 page:   docs/operations/monitoring.md
 claim:  Tockmox-authored boards** ship under
 test:   ls charts/tockmox-observability/dashboards/*.json | wc -l | tr -d ' '
-expect: 10
+expect: 11
 states: [A-Za-z]+ Tockmox-authored boards
 
 # CONTRIBUTING gained the count on 2026-09-03 when it stopped listing a subset
@@ -605,7 +605,7 @@ why:    same phrase again, in the agent skill that mirrors the troubleshooting t
 class:  Tockmox-authored boards
 match:  [A-Za-z0-9*]+ Tockmox-authored boards
 test:   ls charts/tockmox-observability/dashboards/*.json | wc -l | tr -d ' '
-expect: 10
+expect: 11
 
 class:  schemas
 match:  [A-Za-z0-9*]+ schemas\b
@@ -768,13 +768,13 @@ states: [0-9]+ exemptions
 page:   docs/usage/what-you-get.md
 claim:  rendered resources
 test:   tools/render-counts.sh --read total
-expect: 616
+expect: 617
 states: [0-9]+ rendered resources
 
 page:   docs/architecture.md
 claim:  resources** render with the CI values
 test:   tools/render-counts.sh --read total
-expect: 616
+expect: 617
 states: [0-9]+ resources\*\* render
 
 page:   docs/usage/what-you-get.md
@@ -796,9 +796,9 @@ expect: 234
 states: [0-9]+ \| Traefik, MetalLB
 
 page:   docs/usage/what-you-get.md
-claim:  | observability | 174 | kube-prometheus-stack, Loki
+claim:  | observability | 175 | kube-prometheus-stack, Loki
 test:   tools/render-counts.sh --read observability
-expect: 174
+expect: 175
 states: [0-9]+ \| kube-prometheus-stack, Loki
 
 page:   docs/usage/what-you-get.md

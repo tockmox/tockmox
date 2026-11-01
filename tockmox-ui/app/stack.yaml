@@ -21,7 +21,8 @@
 # component the install does not deploy, judged from the layer application's resources the way the
 # capabilities page judges it (kind, name regex); while Argo CD cannot be read, the part shows.
 #
-# `goto` adds the drawer's buttons; one whose console is not configured, or not visible to the
+# `trend` names the drawer's 7-day panel in panels.yaml (TM-1306); a part with namespaces and no `trend`
+# gets the alerts firing in them. `goto` adds the drawer's buttons; one whose console is not configured, or not visible to the
 # viewer, is not shown. `runbook` is a docs page, relative to docs/.
 #
 # A site extends this with `stack:` in the UI's values (rendered into its config): parts added to a
@@ -53,6 +54,7 @@ bands:
     parts:
       - id: model-gateway
         name: Model gateway
+        trend: part-gateway-errors
         layer: ai
         alerts: ["TockmoxLiteLLM*", "TockmoxModelGatewayDatabaseUnbacked"]
         when: [[ai, Deployment, "litellm$"]]
@@ -75,6 +77,7 @@ bands:
         goto: {app: workflows, grafana: tockmox-argo-workflows}
       - id: self-check
         name: Self-check
+        trend: part-consoles
         layer: selfcheck
         alerts: ["TockmoxSelfCheck*", "TockmoxConsole*"]
         runbook: operations/monitoring.md
@@ -105,6 +108,7 @@ bands:
     parts:
       - id: metrics
         name: Metrics
+        trend: part-scrape
         layer: observability
         source: prometheus
         alerts: ["Prometheus*", "TockmoxTargetsDown", "TockmoxPrometheus*"]
@@ -136,6 +140,7 @@ bands:
     parts:
       - id: storage
         name: Storage
+        trend: part-volume
         alerts: ["TockmoxLonghorn*", "Longhorn*", "TockmoxPersistentVolume*"]
         goto: {app: longhorn, grafana: tockmox-storage-contract}
         runbook: administration/storage.md
@@ -145,6 +150,7 @@ bands:
         goto: {grafana: tockmox-traefik}
       - id: certificates
         name: Certificates
+        trend: part-certs
         alerts: ["TockmoxCertificate*", "CertManager*"]
         goto: {grafana: tockmox-cert-manager}
         runbook: administration/tls-and-trust.md
@@ -163,6 +169,7 @@ bands:
         when: [[platform, StatefulSet, "garage$"]]
       - id: restore-drills
         name: Restore drills
+        trend: part-drill-age
         alerts: ["TockmoxRestoreDrill*", "TockmoxResilient*"]
         goto: {grafana: tockmox-backup-proof}
         runbook: operations/backup-restore.md
@@ -193,6 +200,7 @@ bands:
     parts:
       - id: cluster-nodes
         name: Cluster nodes
+        trend: part-nodes
         source: nodes
         alerts: ["KubeNode*", "Node*"]
         runbook: operations/troubleshooting.md

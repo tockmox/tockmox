@@ -1,0 +1,291 @@
+# SPDX-License-Identifier: Apache-2.0
+# The trend panels the Tockmox UI draws (TM-1306; specs/tockmox-ui/SPEC.md section 6 in the planning repo).
+#
+# DATA, no code. Each panel's PromQL lives here ONCE: app/charts.py draws it server-side as SVG with a text
+# alternative, and tools/gen-dashboard-status.py writes the same expressions into the Tockmox / Status
+# Grafana board (uid tockmox-status), so the console and the board can never disagree about what a number
+# means. Each panel links to the board that explains it.
+#
+# Keys:
+#   id        unique; the board's panel follows it
+#   page      where the UI draws it: status | ai-nodes | ai-models | platform | part (drawer only)
+#   title     a short noun phrase
+#   expr      PromQL. A series per result; `legend` names a label to label it by. A part panel may use
+#             {namespaces}: a regex of the part's namespaces, validated (DNS labels only) before it is used.
+#   unit      percent | count | days | seconds | usd | ratio
+#   range     how far back, like 24h or 7d (the Status row reads 24h, the drawers 7d)
+#   step      the query step (coarse on purpose: one cached query per panel per minute)
+#   warn/crit thresholds for the latest value, in the panel's unit; `below: true` when low is bad
+#   board     the Grafana board UID the panel links to. Omitted: a page panel links to its own panel on
+#             tockmox-status; a part panel (not on that board) links to the top of tockmox-status
+#   describe  the sentence a screen reader hears before the numbers
+#
+# A failed or empty query, or a series whose last sample is older than two steps, reads Unknown with its
+# reason, never a flat zero (ABSENCE IS NOT GREEN). So an expression whose healthy answer is "nothing"
+# (no alert firing, no failed request) says 0 itself with `or vector(0)`, and keeps "no data" for when
+# the thing it counts does not report at all.
+version: 1
+
+panels:
+  # ---------------------------------------------------------------- Status: the 24-hour row
+  - id: alerts-firing
+    page: status
+    title: Alerts firing
+    expr: sum by (severity) (ALERTS{alertstate="firing", alertname!~"Watchdog|TockmoxHeartbeat|InfoInhibitor", severity=~"critical|warning"}) or label_replace(vector(0), "severity", "warning", "", "") or label_replace(vector(0), "severity", "critical", "", "")
+    legend: severity
+    unit: count
+    range: 24h
+    step: 15m
+    warn: 1
+    crit: 1
+    describe: Alerts firing over the last 24 hours, by severity, heartbeats left out.
+
+  - id: scrape-health
+    page: status
+    title: Scrape targets up
+    expr: 100 * avg(up)
+    unit: percent
+    range: 24h
+    step: 15m
+    warn: 99
+    crit: 90
+    below: true
+    describe: The share of Prometheus scrape targets answering, over the last 24 hours.
+
+  - id: consoles-reachable
+    page: status
+    title: Consoles reachable
+    expr: 100 * avg(probe_success{job="tockmox-blackbox"})
+    unit: percent
+    range: 24h
+    step: 15m
+    warn: 99.9
+    crit: 75
+    below: true
+    describe: The share of Tockmox consoles the blackbox probe reached, over the last 24 hours.
+
+  - id: node-pressure
+    page: status
+    title: Busiest node memory
+    expr: 100 * max(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+    unit: percent
+    range: 24h
+    step: 15m
+    warn: 85
+    crit: 95
+    describe: Memory in use on the busiest cluster node, over the last 24 hours.
+
+  - id: fullest-volume
+    page: status
+    title: Fullest volume
+    expr: 100 * max(1 - kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes)
+    unit: percent
+    range: 24h
+    step: 15m
+    warn: 80
+    crit: 90
+    board: tockmox-storage-contract
+    describe: How full the fullest persistent volume is, over the last 24 hours.
+
+  - id: cert-expiry
+    page: status
+    title: Nearest certificate expiry
+    expr: min(certmanager_certificate_expiration_timestamp_seconds - time()) / 86400
+    unit: days
+    range: 24h
+    step: 1h
+    warn: 14
+    crit: 7
+    below: true
+    board: tockmox-cert-manager
+    describe: Days until the next certificate expires, over the last 24 hours.
+
+  # ---------------------------------------------------------------- the drawer: one part's 7 days
+  - id: part-alerts
+    page: part
+    title: Alerts firing for this part
+    expr: count(ALERTS{alertstate="firing", severity=~"critical|warning", namespace=~"{namespaces}"}) or vector(0)
+    unit: count
+    range: 7d
+    step: 2h
+    warn: 1
+    crit: 1
+    describe: Alerts firing in this part's namespaces over the last 7 days.
+
+  - id: part-volume
+    page: part
+    title: Fullest volume, 7 days
+    expr: 100 * max(1 - kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes)
+    unit: percent
+    range: 7d
+    step: 2h
+    warn: 80
+    crit: 90
+    board: tockmox-storage-contract
+    describe: How full the fullest persistent volume was over the last 7 days.
+
+  - id: part-certs
+    page: part
+    title: Nearest certificate expiry, 7 days
+    expr: min(certmanager_certificate_expiration_timestamp_seconds - time()) / 86400
+    unit: days
+    range: 7d
+    step: 2h
+    warn: 14
+    crit: 7
+    below: true
+    board: tockmox-cert-manager
+    describe: Days until the next certificate expires, over the last 7 days.
+
+  - id: part-scrape
+    page: part
+    title: Scrape targets up, 7 days
+    expr: 100 * avg(up)
+    unit: percent
+    range: 7d
+    step: 2h
+    warn: 99
+    crit: 90
+    below: true
+    describe: The share of scrape targets answering over the last 7 days.
+
+  - id: part-consoles
+    page: part
+    title: Consoles reachable, 7 days
+    expr: 100 * avg(probe_success{job="tockmox-blackbox"})
+    unit: percent
+    range: 7d
+    step: 2h
+    warn: 99.9
+    crit: 75
+    below: true
+    describe: The share of consoles the blackbox probe reached over the last 7 days.
+
+  - id: part-nodes
+    page: part
+    title: Busiest node memory, 7 days
+    expr: 100 * max(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)
+    unit: percent
+    range: 7d
+    step: 2h
+    warn: 85
+    crit: 95
+    describe: Memory in use on the busiest node over the last 7 days.
+
+  - id: part-gateway-errors
+    page: part
+    title: Model gateway errors, 7 days
+    expr: 100 * (sum(rate(litellm_proxy_total_requests_metric_total{status_code!~"2.."}[1h])) or vector(0)) / sum(rate(litellm_proxy_total_requests_metric_total[1h]))
+    unit: percent
+    range: 7d
+    step: 2h
+    warn: 5
+    crit: 20
+    describe: The share of model gateway requests that failed, over the last 7 days.
+
+  - id: part-drill-age
+    page: part
+    title: Days since a passing restore drill
+    expr: (time() - max(kube_job_status_completion_time{job_name=~".*restore-drill.*"} and on (namespace, job_name) kube_job_status_succeeded > 0)) / 86400
+    unit: days
+    range: 7d
+    step: 2h
+    warn: 8
+    crit: 15
+    board: tockmox-backup-proof
+    describe: Days since the last restore drill that passed, over the last 7 days.
+
+  # ---------------------------------------------------------------- AI › Inference nodes
+  - id: ai-engines-healthy
+    page: ai-nodes
+    title: Engines healthy
+    expr: sum by (ai_node) (tockmox_ai_node_engine_healthy)
+    legend: ai_node
+    unit: count
+    range: 24h
+    step: 15m
+    warn: 1
+    crit: 1
+    below: true
+    describe: Healthy inference engines per node over the last 24 hours.
+
+  - id: ai-engine-restarts
+    page: ai-nodes
+    title: Engine restarts per hour
+    expr: sum by (ai_node) (increase(tockmox_ai_node_engine_restarts_total[1h]))
+    legend: ai_node
+    unit: count
+    range: 24h
+    step: 1h
+    warn: 1
+    crit: 5
+    describe: Inference engine restarts per hour on each node over the last 24 hours.
+
+  # ---------------------------------------------------------------- AI › Models
+  - id: ai-calls
+    page: ai-models
+    title: Calls per day
+    expr: sum by (requested_model) (increase(litellm_proxy_total_requests_metric_total[1d]))
+    legend: requested_model
+    unit: count
+    range: 7d
+    step: 1d
+    describe: Calls per day through the model gateway, per alias, over the last 7 days.
+
+  - id: ai-latency-p95
+    page: ai-models
+    title: Latency, 95th percentile
+    expr: histogram_quantile(0.95, sum by (le) (rate(litellm_request_total_latency_metric_bucket[1h])))
+    unit: seconds
+    range: 7d
+    step: 2h
+    warn: 30
+    crit: 60
+    describe: The 95th percentile request time through the model gateway over the last 7 days.
+
+  - id: ai-errors
+    page: ai-models
+    title: Error rate
+    expr: 100 * (sum(rate(litellm_proxy_total_requests_metric_total{status_code!~"2.."}[1h])) or vector(0)) / sum(rate(litellm_proxy_total_requests_metric_total[1h]))
+    unit: percent
+    range: 7d
+    step: 2h
+    warn: 5
+    crit: 20
+    describe: The share of gateway requests that failed over the last 7 days.
+
+  - id: ai-spend
+    page: ai-models
+    title: Hosted spend per day
+    expr: sum(increase(litellm_spend_metric_total[1d]))
+    unit: usd
+    range: 7d
+    step: 1d
+    describe: Hosted model spend per day over the last 7 days, as the gateway counts it.
+
+  # ---------------------------------------------------------------- Platform › Overview
+  - id: platform-drill-age
+    page: platform
+    title: Days since a passing restore drill
+    expr: (time() - max by (namespace) (kube_job_status_completion_time{job_name=~".*restore-drill.*"} and on (namespace, job_name) kube_job_status_succeeded > 0)) / 86400
+    legend: namespace
+    unit: days
+    range: 7d
+    step: 2h
+    warn: 8
+    crit: 15
+    board: tockmox-backup-proof
+    describe: Days since the last passing restore drill, per namespace, over the last 7 days.
+
+  - id: platform-alerts
+    page: platform
+    title: Alerts firing
+    expr: sum by (severity) (ALERTS{alertstate="firing", alertname!~"Watchdog|TockmoxHeartbeat|InfoInhibitor", severity=~"critical|warning"}) or label_replace(vector(0), "severity", "warning", "", "") or label_replace(vector(0), "severity", "critical", "", "")
+    legend: severity
+    unit: count
+    range: 7d
+    step: 2h
+    warn: 1
+    crit: 1
+    board: tockmox-alert-delivery
+    describe: Alerts firing over the last 7 days, by severity.

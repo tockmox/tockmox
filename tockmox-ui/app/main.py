@@ -45,6 +45,7 @@ from . import sources as sources_mod
 from . import stack as stack_mod
 from . import status_api
 from . import capabilities as capmod
+from . import charts as charts_mod
 from . import telemetry
 from . import views
 from .auth import IDT_MAX_BYTES, OIDC, Sessions, User
@@ -230,6 +231,14 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         app.state.sources["inference_nodes"] = src_inodes
 
     the_stack = stack_mod.load(site=s.stack_site)
+    # TM-1306: trend panels from the same Prometheus, one cached range query per panel per minute.
+    the_panels = charts_mod.load()
+    for _p in [p for b in the_stack.bands for p in b.parts] + list(the_stack.side):
+        if _p.trend and (_p.trend not in the_panels or the_panels[_p.trend].page != "part"):
+            raise ValueError(f"stack part {_p.id}: trend {_p.trend!r} is not a part panel in panels.yaml")
+    panel_index = {pid: i + 1 for i, pid in enumerate(p for p in the_panels if the_panels[p].page != "part")}
+    ranger = charts_mod.RangeReader(s.prometheus_url, s.source_timeout_s, tp.prometheus)
+    tpl.env.globals.update(chart_alt=charts_mod.alt, chart_fmt=charts_mod.fmt)
 
     # ------------------------------------------------------------ helpers
 
@@ -306,6 +315,8 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         return out
 
     def render(request, name, u: User | None, status_code=200, **ctx):
+        ctx.setdefault("status_code", status_code)
+        ctx.setdefault("pose", None)
         foot = footer_version(u)
         # signed out, the footer links main: no source is read for an anonymous page
         repo_link = docs_repo_link() if u else f"{s.docs_repo_url}/tree/main/docs"
@@ -313,7 +324,8 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
                    platform_on=platform_on(),
                    app_version=APP_VERSION, path=request.url.path, verdict_text=VERDICT_TEXT,
                    footer=foot, asset_v=asset_v, kit_static="/static/kit", docs_repo_link=repo_link,
-                   shell=shell_for(u, request.url.path, foot, repo_link))
+                   shell=shell_for(u, request.url.path, foot, repo_link),
+                   trend_panels=lambda page: trends(page, u))
         return tpl.TemplateResponse(request, name, ctx, status_code=status_code)
 
     def need_login(request: Request):
@@ -330,6 +342,29 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
     def readings():
         return {k: v.read() for k, v in app.state.sources.items()
                 if k != "posture"}
+
+    def grafana_for(u: User | None) -> str:
+        g = s.app("grafana")
+        return g.url if (u is not None and g and g.visible_to(set(u.groups))) else ""
+
+    def trends(page: str, u: User | None, namespaces=()) -> list:
+        """The panels for one page (or one part's drawer panel), read and drawn. Admins only, like every
+        page that shows them."""
+        if u is None or not u.is_admin:
+            return []
+        g = grafana_for(u)
+        return [charts_mod.read(ranger, p, namespaces, charts_mod.board_href(g, p, panel_index.get(p.id)))
+                for p in the_panels.values() if p.page == page]
+
+    def part_trend(pv, u: User | None):
+        """The drawer's 7-day panel: the part's own `trend`, else alerts firing in its namespaces."""
+        if u is None or not u.is_admin:
+            return None
+        pid = pv.part.trend or ("part-alerts" if pv.part.namespaces else "")
+        p = the_panels.get(pid)
+        if p is None:
+            return None
+        return charts_mod.read(ranger, p, pv.part.namespaces, charts_mod.board_href(grafana_for(u), p))
 
     def placed(r):
         """Every signal on its part of the stack (TM-1305, app/stack.py)."""
@@ -457,11 +492,14 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         v = verdict(x.state for x in r.values())
         apps = [a for a in s.apps if a.visible_to(set(u.groups))]
         ver = running_version(r["apps"]) if u.is_admin else None
+        pl = None
         if u.is_admin:
             checker.check()
+            pl = placed(r)                  # TM-1307: Home reads the same part states as Status
         return render(request, "home.html", u, verdict=v, readings=r, apps=apps, version=ver,
                       target=_latest_target(ver.get("version")) if ver else None,
-                      pipeline=list(sources_mod.pipeline_alerts(s.alertmanager_heartbeat)))
+                      pipeline=list(sources_mod.pipeline_alerts(s.alertmanager_heartbeat)),
+                      placed=pl, home=stack_mod.home(pl) if pl is not None else None)
 
     def goto_for(u: User, pv) -> list[dict]:
         """The drawer's "Go to" buttons: only what the part declares and the viewer can open."""
@@ -507,6 +545,7 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
                       pipeline=list(sources_mod.pipeline_alerts(s.alertmanager_heartbeat)),
                       hb_purpose=sources_mod.HEARTBEAT_PURPOSE, placed=pl, sel=sel, view=view, only=only,
                       goto=goto_for(u, sel) if sel else [], stack_summary=stack_mod.summary(pl),
+                      status_trends=trends("status", u), sel_trend=part_trend(sel, u) if sel else None,
                       grafana=g if g and g.visible_to(set(u.groups)) else None)
 
     @app.get("/status", response_class=HTMLResponse)
@@ -720,5 +759,20 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         except redirects.Refused:
             return PlainTextResponse("refused", status_code=400)
         return RedirectResponse(dest, status_code=302)
+
+    # TM-1310: a page that does not exist gets the console's own not-found page (signed in) instead of the framework's
+    # JSON. The status API and static files keep their plain answers.
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    @app.exception_handler(StarletteHTTPException)
+    async def not_found(request: Request, exc: StarletteHTTPException):
+        path = request.url.path
+        if exc.status_code != 404 or path.startswith(("/api/", "/static/")):
+            from fastapi.exception_handlers import http_exception_handler
+            return await http_exception_handler(request, exc)
+        u = user_of(request)
+        return render(request, "error.html", u, status_code=404, title="Not found",
+                      message="There is no page at this address. It may have moved in the new layout: the "
+                              "sections are along the top, and Help has the documentation.")
 
     return app

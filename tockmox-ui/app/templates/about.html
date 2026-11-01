@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% from "macros.html" import badge %}
+{% from "macros.html" import badge, mascot %}
 {% block title %}About Tockmox{% endblock %}
 {% block main %}
 {# Help > About (TM-1304): what is running here and what this build contains, for everyone signed in. Checking
    for and taking an update is an admin task on Platform > Updates. The notes fold by section, so a long
    Unreleased block is three lines until opened. #}
 <div class="page-head">
-  <div><h1>About Tockmox</h1><p class="lede">An on-premises platform for private AI and the operations around it, run from your own Git repository.</p></div>
+  <div class="titled">{{ mascot("at-work", 56) }}<div><h1>About Tockmox</h1><p class="lede">An on-premises platform for private AI and the operations around it, run from your own Git repository.</p></div></div>
   {% if user.is_admin %}<div class="page-actions"><a class="btn-ghost" href="/platform/updates">Updates</a></div>{% endif %}
 </div>
 

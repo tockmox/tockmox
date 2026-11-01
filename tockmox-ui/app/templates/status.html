@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import badge, argo_badge, source_line, problems_table, fold_summary, state_icon, state_word %}
+{% from "macros.html" import badge, argo_badge, source_line, problems_table, fold_summary, state_icon, state_word, mascot, trend, trend_row %}
 {% block title %}Status{% endblock %}
 {% block main %}
 {# Exceptions first (TM-1127): the problems open the page as rows; every healthy group folds to one
@@ -16,12 +16,17 @@
 <a class="part st-{{ pv.state }}" href="/status/{{ pv.id }}{{ qs }}"{% if sel and sel.id == pv.id %} aria-current="true"{% endif %}>{{ state_icon(pv.state) }}<span class="pn">{{ pv.part.name }}</span>{% if pv.count %}<span class="n">{{ pv.count }}</span>{% endif %}<span class="visually-hidden">: {{ state_word(pv.state) }}</span></a>
 {%- endmacro -%}
 <div class="page-head">
-  <div>
-    <h1>Status</h1>
-    <p class="muted">{{ stack_summary }} {{ sources_sentence(readings) }}</p>
+  <div class="titled">
+    {% if placed.state() == "ok" %}{{ mascot("inspecting", 56) }}{% endif %}
+    <div>
+      <h1>Status</h1>
+      <p class="muted">{{ stack_summary }} {{ sources_sentence(readings) }}</p>
+    </div>
   </div>
   {% if grafana %}<div class="page-actions"><a class="btn-ghost" href="{{ grafana.url }}/" rel="noopener" target="_blank">Open Grafana<span class="visually-hidden"> (opens in a new tab)</span></a></div>{% endif %}
 </div>
+
+{{ trend_row(status_trends, "The last 24 hours") }}
 
 <div class="stack-tools">
   <nav class="seg" aria-label="View">
@@ -86,6 +91,7 @@
   </ul>
   {% elif sel.state == "unknown" %}<p class="small">{{ badge("unknown") }} {{ sel.reason }}</p>
   {% else %}<p class="small">Nothing is wrong.</p>{% endif %}
+  {% if sel_trend %}<h3>Last 7 days</h3>{{ trend(sel_trend, compact=true) }}{% endif %}
   {% set okays = sel.signals | selectattr("state", "equalto", "ok") | list %}
   {% if okays %}<h3>Also checked</h3><ul class="plain small">{% for x in okays[:8] %}<li>{{ x.what }} <span class="muted">{{ x.detail }}</span></li>{% endfor %}{% if okays|length > 8 %}<li class="muted">and {{ okays|length - 8 }} more</li>{% endif %}</ul>{% endif %}
   <h3>Sources</h3>

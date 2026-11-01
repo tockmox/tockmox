@@ -54,6 +54,7 @@ class Part:
     goto: tuple = ()                      # ((kind, value), ...): app | grafana
     runbook: str = ""
     about: str = ""
+    trend: str = ""                       # the panels.yaml id of its 7-day drawer panel (TM-1306); else part-alerts
     site: bool = False                    # a site app, not part of Tockmox
     auto: bool = False                    # made by the mapper (a band's layer part, Unplaced, a site app)
 
@@ -88,7 +89,8 @@ def _t(v) -> tuple:
     return (str(v),)
 
 
-_PART_KEYS = {"id", "name", "layer", "apps", "alerts", "namespaces", "jobs", "source", "when", "goto", "runbook", "about"}
+_PART_KEYS = {"id", "name", "layer", "apps", "alerts", "namespaces", "jobs", "source", "when", "goto", "runbook", "about",
+              "trend"}
 _BAND_KEYS = {"id", "name", "sub", "wave", "layers", "namespaces", "parts", "site_apps"}
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 
@@ -124,7 +126,7 @@ def _part(raw: dict, band: str, where: str) -> Part:
                 apps=_t(raw.get("apps")), alerts=_t(raw.get("alerts")), namespaces=_t(raw.get("namespaces")),
                 jobs=_t(raw.get("jobs")), source=src, when=tuple(when),
                 goto=tuple((k, str(goto[k])) for k in ("app", "grafana") if goto.get(k)),
-                runbook=rb, about=str(raw.get("about", "") or ""))
+                runbook=rb, about=str(raw.get("about", "") or ""), trend=str(raw.get("trend", "") or ""))
 
 
 def _band(raw: dict, where: str) -> Band:
@@ -560,3 +562,39 @@ def problem_parts(placed: Placed) -> list:
     """The parts that need a look, worst first (Home's chips, TM-1307)."""
     out = [p for p in placed.all() if p.state != OK]
     return sorted(out, key=lambda p: (RANK[p.state], p.part.name.lower()))
+
+
+# ------------------------------------------------------------ Home (TM-1307)
+
+def _lead(pv: PartView) -> str:
+    """One clause naming what is wrong with a part, from its worst signal."""
+    if pv.state == UNKNOWN and not pv.wrong:
+        return f"{pv.part.name} cannot be checked ({pv.reason.rstrip('.')})" if pv.reason else f"{pv.part.name} cannot be checked"
+    w = pv.wrong[0]
+    detail = f" ({w['detail']})" if w.get("detail") else ""
+    verb = "has a problem" if pv.state == CRIT else ("cannot be checked" if pv.state == UNKNOWN else "needs a look")
+    return f"{pv.part.name} {verb}: {w['what']}{detail}"
+
+
+def home(placed: Placed) -> dict:
+    """Home's verdict sentence, up to two chips, and the stack strip, from the same parts as Status.
+
+    Everything OK: "Everything is running.", no chips. Otherwise the worst part leads, named with its worst
+    signal, then how many others need a look. The strip is one cell per band, bottom of the stack on the left,
+    with its state and how many of its parts are OK; each links to the band on Status."""
+    probs = problem_parts(placed)
+    if not probs:
+        sentence = "Everything is running."
+    else:
+        rest = len(probs) - 1
+        tail = "Everything else is running." if rest == 0 else _n(rest, "other part needs a look.", "other parts need a look.")
+        sentence = _lead(probs[0]) + ". " + tail
+    strip = []
+    for bv in reversed(placed.bands):     # Unplaced, when it holds anything, ends up last: the top, as on Status
+        ok = sum(1 for p in bv.parts if p.state == OK)
+        strip.append({"id": bv.band.id, "name": bv.band.name, "state": bv.state, "ok": ok, "total": len(bv.parts),
+                      "href": f"/status#band-{bv.band.id}"})
+    side = [{"id": p.id, "name": p.part.name, "state": p.state, "count": p.count, "href": f"/status/{p.id}"}
+            for p in placed.side]
+    return {"state": placed.state(), "sentence": sentence, "chips": probs[:2], "strip": strip, "side": side,
+            "unplaced": placed.by_id.get("unplaced")}

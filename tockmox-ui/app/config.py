@@ -349,11 +349,16 @@ def _parse_stack(raw):
     """The site's `stack:` additions, refused at start when malformed rather than on the first Status."""
     if not raw:
         return None
+    from . import charts as charts_mod
     from . import stack as stack_mod
     try:
-        stack_mod.load(site=raw)
+        st = stack_mod.load(site=raw)
     except (stack_mod.StackError, TypeError, AttributeError, ValueError) as e:
         raise ConfigError(f"stack: {e}") from e
+    panels = charts_mod.load()
+    for p in [p for b in st.bands for p in b.parts] + list(st.side):
+        if p.trend and (p.trend not in panels or panels[p.trend].page != "part"):
+            raise ConfigError(f"stack: part {p.id}: trend {p.trend!r} is not a part panel in panels.yaml")
     return dict(raw)
 
 
