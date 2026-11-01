@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% from "macros.html" import badge, source_line %}
-{% block title %}Version{% endblock %}
+{% block title %}Updates{% endblock %}
 {% block main %}
 {# One answer, then evidence (TM-1127): what runs, what is newest, when it was checked, as a band of
    facts; the release notes below. "Not a release" is a fact about this site, not a warning. #}
 <div class="page-head">
-  <div><h1>Version</h1><p class="lede">What is running, what shipped with it, and whether anything newer exists.</p></div>
+  <div><h1>Updates</h1><p class="lede">What is running, whether anything newer exists, and the way to it.</p></div>
   <div class="page-actions">
     {% if feed.enabled %}
     <form method="post" action="/check-updates"><input type="hidden" name="csrf" value="{{ user.csrf }}"><button class="btn-ghost" type="submit">Check now</button></form>

@@ -121,7 +121,7 @@ def test_the_page_has_real_headings_a_list_role_and_no_inline_script_or_handler(
     c, u = page_client(tmp_path, candidates=ALL)
     t = text(c.get("/models/inbox"))
     assert t.count("<h1>") == 1 and '<h2 id="cards-h">' in t and 'role="list"' in t and 'aria-label="Filter the inbox"' in t
-    assert "<script" not in t.lower() and not re.search(r"\son[a-z]+\s*=", t) and "style=" not in t.lower()
+    assert "<script" not in _noshell(t).lower() and not re.search(r"\son[a-z]+\s*=", t) and "style=" not in t.lower()
     for row in rows_of(t):                                                     # menu and expander are native, so the keyboard works
         assert row.count("<details") == 2 and row.count("<summary") == 2 and "aria-label=\"More actions for " in row
 
@@ -581,3 +581,10 @@ def test_the_opener_does_not_plan_a_hidden_candidate_and_records_the_pr_link(tmp
     assert po.record_pr_links(str(rep), {cand_q["id"]: "https://forge.example/o/r/pull/9", "other": "https://x"})
     assert json.loads(rep.read_text())["candidates"][0]["pr"] == "https://forge.example/o/r/pull/9"
     assert ml.parse_report(json.loads(rep.read_text())).candidates[0].pr == "https://forge.example/o/r/pull/9"
+
+
+def _noshell(t):
+    """The page minus the kit's one same-origin script (shell.js: theme and header menus, TM-1304); any
+    other script tag is still a failure."""
+    import re as _re
+    return _re.sub(r'<script src="/static/kit/shell\.js[^"]*"></script>', "", t)

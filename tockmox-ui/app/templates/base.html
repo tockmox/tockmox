@@ -1,48 +1,78 @@
 {% extends "kit/shell.html" %}
-{#- The shell (top bar, tab row, main, footer frame) and its stylesheets come from the vendored kit;
-    this template fills the Tockmox UI's blocks. -#}
+{#- The shell (top bar, main, footer frame), its stylesheets and shell.js come from the vendored kit; this
+    template fills the Tockmox UI's blocks. TM-1304 (specs/tockmox-ui/SPEC.md sections 2-3): four sections,
+    a rail per section, the health pill, Help and account menus on the right, the version in the footer. -#}
+{% from "kit/macros.html" import state_icon, appearance %}
 {% block title %}{{ site.site_name }}{% endblock %}
+{% block title_suffix %}{% if site.site_name %} · {{ site.site_name }}{% else %} · Tockmox{% endif %}{% endblock %}
 {% block head %}
 <link rel="icon" href="/static/brand/tockmox-favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
 {% endblock %}
 {% block brand %}<a class="brand" href="/"><img src="/static/brand/tockmox-lockup-horizontal-white.svg" alt="Tockmox home" width="144" height="36" class="logo-dark"><img src="/static/brand/tockmox-lockup-horizontal-ink.svg" alt="Tockmox home" width="144" height="36" class="logo-light"></a>{% endblock %}
-{% block site %}<span class="site-name"><strong>{{ site.site_name }}</strong></span>{% endblock %}
+{#- The site name left the top bar (R2): it is in the tab title, the footer and About. -#}
+{% block site %}{% endblock %}
 {% block nav %}{% if user %}
     <nav aria-label="Main">
       <ul class="nav">
-        <li><a href="/" {% if path == "/" %}aria-current="page"{% endif %}>Home</a></li>
-        {% if user.is_admin %}
-        <li><a href="/status" {% if path == "/status" %}aria-current="page"{% endif %}>Status</a></li>
-        <li><a href="/version" {% if path in ("/version", "/upgrade") %}aria-current="page"{% endif %}>Version</a></li>
-        <li><a href="/nodes" {% if path.startswith("/nodes") %}aria-current="page"{% endif %}>Inference Nodes</a></li>
-        <li><a href="/models" {% if path.startswith("/models") %}aria-current="page"{% endif %}>Models</a></li>
-        <li><a href="/capabilities" {% if path == "/capabilities" %}aria-current="page"{% endif %}>Capabilities</a></li>
-        {% if platform_on %}<li><a href="/platform" {% if path.startswith("/platform") %}aria-current="page"{% endif %}>Platform</a></li>{% endif %}
-        {% endif %}
-        {% for t in tabs %}
-        <li><a href="/tabs/{{ t.id }}" {% if path == "/tabs/" ~ t.id %}aria-current="page"{% endif %}>{{ t.name }}</a></li>
+        {% for it in shell.sections %}
+        <li><a href="{{ it.href }}"{% if shell.section_item and it.href == shell.section_item.href %} aria-current="page"{% endif %}>{{ it.label }}</a></li>
         {% endfor %}
       </ul>
     </nav>
 {% endif %}{% endblock %}
-{% block who %}{% if user %}
-    <div class="who">
-      <span class="who-name">{{ user.name }}{% if user.is_admin %} <span class="role">admin</span>{% endif %}</span>
-      <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ user.csrf }}"><button class="btn-ghost" type="submit">Sign out</button></form>
+{% block utilities %}{% if user %}
+    <div class="util">
+      {% if shell.health %}
+      <a class="hpill st-{{ shell.health.state }}" href="/status" aria-label="{{ shell.health.label }}">{{ state_icon(shell.health.state) }}
+        {%- for p in shell.health.parts %}{% if not loop.first %}<span class="sep"> · </span>{% endif %}<span{% if not loop.first %} class="long"{% endif %}>{{ p }}</span>{% endfor %}</a>
+      {% endif %}
+      <details class="menu-d">
+        <summary aria-label="Help{% if shell.newer %}: Tockmox {{ shell.newer }} is available{% endif %}">?{% if shell.newer %}<span class="dot" aria-hidden="true"></span>{% endif %}</summary>
+        <div class="menu">
+          <a href="{{ shell.docs_home }}" rel="noopener">Documentation</a>
+          {% if shell.help_href %}<a href="{{ shell.help_href }}" rel="noopener">Help for this page</a>{% endif %}
+          <a href="/about#notes">What's in this build</a>
+          <a href="/recovery">If something is down</a>
+          <a href="{{ shell.report_href }}" rel="noopener">Report a problem</a>
+          <hr>
+          {% if shell.newer and user.is_admin %}<a class="notice" href="/platform/updates">Tockmox {{ shell.newer }} is available</a>{% endif %}
+          <a href="/about">About Tockmox{% if shell.version_short %}<span class="k">{{ shell.version_short }}</span>{% endif %}</a>
+        </div>
+      </details>
+      <details class="menu-d">
+        <summary aria-label="Account: {{ user.name or 'Account' }}"><span class="initials" aria-hidden="true">{{ shell.initials }}</span><span class="who-name">{{ shell.first_name }}</span></summary>
+        <div class="menu">
+          <div class="who-block"><strong>{{ user.name or "Account" }}</strong><span class="muted small">{% if user.is_admin %}Administrator{% else %}Member{% endif %}</span></div>
+          <hr>
+          {{ appearance() }}
+          {% if site.account_url %}<a href="{{ site.account_url }}" rel="noopener">Account and sign-in</a>{% endif %}
+          <hr>
+          <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ user.csrf }}"><button class="mi" type="submit">Sign out</button></form>
+        </div>
+      </details>
     </div>
+{% endif %}{% endblock %}
+{% block rail %}{% if user and shell.rail %}
+<nav class="rail" aria-label="{{ shell.section_item.label if shell.section_item else 'Section' }} pages">
+  {% for g in shell.rail %}
+  <span class="rh">{{ g.heading }}</span>
+  {% for it in g.items %}
+  <a href="{{ it.href }}"{% if shell.rail_item and it.href == shell.rail_item.href %} aria-current="page"{% endif %}>{{ it.label }}{% if it.count %}<span class="n">{{ it.count }}</span>{% endif %}</a>
+  {% endfor %}
+  {% endfor %}
+</nav>
 {% endif %}{% endblock %}
 {% block foot %}
 <footer class="foot">
-  <p>{{ site.site_name }} ·
-    {%- if footer and footer.state == "single" %} Tockmox {{ footer.version }}
-    {%- elif footer and footer.state == "floating" %} Tockmox <code title="{{ footer.ref }}">{{ footer.ref[:12] }}</code> (not a release)
-    {%- elif footer and footer.state == "mixed" %} Tockmox (layers on mixed revisions)
-    {%- else %} Tockmox{% endif %}
-    {%- if footer and footer.newer %} <a class="pill" href="/version">New version available: {{ footer.newer }}</a>{% endif %}
-    · read-only
-    {%- if site.docs_url %} · <a href="{{ site.docs_url }}/" rel="noopener">Documentation</a>{% endif %}
-    · <a href="{{ docs_repo_link }}" rel="noopener">Docs on GitHub</a>
+  <p>{% if site.site_name %}{{ site.site_name }} · {% endif %}
+    {%- if footer and footer.state == "single" %}Tockmox {{ footer.version }}
+    {%- elif footer and footer.state == "floating" %}Tockmox <code title="{{ footer.ref }}">{{ footer.ref[:12] }}</code> <span class="muted">(not a release)</span>
+    {%- elif footer and footer.state == "mixed" %}Tockmox (layers on mixed revisions)
+    {%- else %}Tockmox{% endif %}
+    {%- if footer and footer.newer %} · <a class="pill" href="/platform/updates">{{ footer.newer }} is available</a>{% endif %}
+    · <a href="{{ shell.docs_home if shell else docs_repo_link }}" rel="noopener">Documentation</a>
+    {%- if user and user.is_admin %} · <a href="/status">Status</a>{% endif %}
     · <a href="/recovery">If something is down</a></p>
 </footer>
 {% endblock %}

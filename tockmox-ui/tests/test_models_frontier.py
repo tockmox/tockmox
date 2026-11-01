@@ -428,7 +428,7 @@ def test_the_family_alias_page_shows_where_it_points_the_generations_kept_and_ho
     assert "Pin a generation" in t and "That alias never moves" in t and 'model = "claude-sonnet-4-5"' in t and 'model = "claude-sonnet"' in t
     assert "floating: today claude-sonnet-5-5" in t
     assert "Promotion record" in t and "Class chat" in t and 'href="/models/v/r1"' in r.text
-    assert "style=" not in r.text and "onclick" not in r.text and "<script" not in r.text
+    assert "style=" not in r.text and "onclick" not in r.text and "<script" not in _noshell(r.text)
 
 
 def test_the_family_alias_page_counts_down_a_retiring_generation_and_offers_the_retire_change(tmp_path):
@@ -562,3 +562,10 @@ def test_the_change_carries_keep_generations_when_the_site_wrote_it(tmp_path):
     assert y["modelLifecycle"]["frontier"]["keepGenerations"] == 2
     t = text(c.post("/models/promote-hosted", data={"csrf": u.csrf, "entry": "anthropic-claude-sonnet-6", "target": "claude-sonnet", "tags": "open"}))
     assert "These entries" not in t and t.count("falls off the end of the list") == 2 and "Remove these entries" in t
+
+
+def _noshell(t):
+    """The page minus the kit's one same-origin script (shell.js: theme and header menus, TM-1304); any
+    other script tag is still a failure."""
+    import re as _re
+    return _re.sub(r'<script src="/static/kit/shell\.js[^"]*"></script>', "", t)

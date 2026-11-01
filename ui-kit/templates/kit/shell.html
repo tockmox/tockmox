@@ -7,13 +7,18 @@
     unbranded build swaps in its own file that defines the same --tx-* names), kit_css (an app whose own
     rules live in CSS cascade layers imports kit-base.css below its base layer and kit.css between its
     base and its components here; unlayered, the kit would outrank every rule the app writes), before_top and
-    after_top (notices that must sit above or below the top bar on every page), main_attrs (extra attributes on <main>). -#}
+    after_top (notices that must sit above or below the top bar on every page), main_attrs (extra attributes on <main>).
+    Kit 0.4.0 (TM-1304): shell.js loads first in <head> (theme before first paint, the Appearance control, the header
+    menus); `utilities` is the right-hand side of the top bar (health, Help, account) and defaults to `who`, so an app
+    that fills only `who` renders as before; `rail` is the left-hand page list of a section, and a page that fills it
+    gets the two-column layout. -#}
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}{% endblock %}{% block title_suffix %} · Tockmox{% endblock %}</title>
+<script src="{{ kit_static }}/shell.js{% if asset_v %}?v={{ asset_v }}{% endif %}"></script>
 {% block tokens %}<link rel="stylesheet" href="{{ kit_static }}/tockmox-tokens.css{% if asset_v %}?v={{ asset_v }}{% endif %}">{% endblock %}
 {% block kit_css %}<link rel="stylesheet" href="{{ kit_static }}/kit-base.css{% if asset_v %}?v={{ asset_v }}{% endif %}">
 <link rel="stylesheet" href="{{ kit_static }}/kit.css{% if asset_v %}?v={{ asset_v }}{% endif %}">{% endblock %}
@@ -27,13 +32,16 @@
     {% block brand %}<a class="brand" href="{{ home_href or '/' }}">Tockmox</a>{% endblock %}
     {% block site %}{% if site_name %}<span class="site-name"><strong>{{ site_name }}</strong></span>{% endif %}{% endblock %}
     {% block nav %}{% endblock %}
-    {% block who %}{% endblock %}
+    {% block utilities %}{% block who %}{% endblock %}{% endblock %}
   </div>
 </header>
 {% block after_top %}{% endblock %}
+<div class="page-frame{% if self.rail() | trim %} with-rail{% endif %}">
+{% block rail %}{% endblock %}
 <main id="main" tabindex="-1"{% block main_attrs %}{% endblock %}>
 {% block main %}{% endblock %}
 </main>
+</div>
 {% block foot %}{% endblock %}
 </body>
 </html>

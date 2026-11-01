@@ -4,7 +4,8 @@
 Route map (DESIGN-2026-10-04-tockmox-ui.md §2):
   /            home: verdict + your apps            (signed in)
   /status      per-layer sync/health, nodes, alerts (admins)
-  /version     version, notes, update notice        (admins)
+  /about       what is running, what this build holds (signed in; Help > About)
+  /platform/updates  version, notes, update notice   (admins; /version redirects here)
   /upgrade     instructions + live preflight        (admins; performs nothing)
   /tabs/<id>   first-party feature tabs             (installed features only)
   /models/...  model lifecycle: catalog, watcher candidates, gated promotion, residency (admins; REQ-0048;
@@ -36,6 +37,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from . import feed as feedmod
 from . import models_routes
+from . import nav
 from . import nodes_routes
 from . import platform as platform_mod
 from . import redirects
@@ -95,7 +97,7 @@ def _asset_version(static_dir: str) -> str:
     """A short hash of the stylesheets, appended to their URLs as ?v=, so a new image is a new URL."""
     import hashlib
     h = hashlib.sha256()
-    for rel in ("app.css", "kit/kit-base.css", "kit/kit.css", "kit/tockmox-tokens.css"):
+    for rel in ("app.css", "kit/kit-base.css", "kit/kit.css", "kit/tockmox-tokens.css", "kit/shell.js"):
         try:
             with open(os.path.join(static_dir, rel), "rb") as f:
                 h.update(f.read())
@@ -270,13 +272,47 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
             out["newer"] = lt["version"] if lt else None
         return out
 
+    def platform_on() -> bool:
+        return bool(s.feature("platform") and s.feature("platform").enabled)
+
+    def shell_for(u: User | None, path: str, footer: dict | None, repo_link: str) -> dict:
+        """What the top bar, the rail and the Help menu show on this page (TM-1304, nav.py)."""
+        docs_home = (s.docs_url.rstrip("/") + "/") if s.docs_url else repo_link
+        out = {"docs_home": docs_home, "sections": [], "section_item": None, "rail": [], "rail_item": None,
+               "health": None, "help_href": None, "newer": None, "version_short": "", "initials": "",
+               "report_href": f"{s.docs_repo_url.rstrip('/')}/issues", "first_name": ""}
+        if u is None:
+            return out
+        tabs = tabs_for(u)
+        items = nav.sections(u.is_admin, platform_on(), tabs)
+        sec = nav.section_of(path)
+        out["sections"] = items
+        out["section_item"] = nav.current(items, path)
+        groups = nav.rail(sec, u.is_admin, platform_on(), admin_tabs=tabs)   # an admin sees every installed feature
+        out["rail"], out["rail_item"] = groups, nav.rail_current(groups, path) if groups else None
+        if u.is_admin:
+            r = readings()
+            rows = views.problems(r, list(sources_mod.pipeline_alerts(s.alertmanager_heartbeat)))
+            out["health"] = nav.health(verdict(x.state for x in r.values()), rows)
+        page = nav.help_for(path)
+        out["help_href"] = nav.docs_href(s.docs_url, repo_link, page) if page else None
+        if footer:
+            out["newer"] = footer.get("newer")
+            out["version_short"] = footer.get("version") or (footer.get("ref") or "")[:7]
+        words = (u.name or "").split()
+        out["initials"] = "".join(w[:1] for w in words[:2]).upper() or "?"
+        out["first_name"] = words[0] if words else "Account"
+        return out
+
     def render(request, name, u: User | None, status_code=200, **ctx):
+        foot = footer_version(u)
+        # signed out, the footer links main: no source is read for an anonymous page
+        repo_link = docs_repo_link() if u else f"{s.docs_repo_url}/tree/main/docs"
         ctx.update(request=request, user=u, site=s, tabs=tabs_for(u) if u else [],
-                   platform_on=bool(s.feature("platform") and s.feature("platform").enabled),
+                   platform_on=platform_on(),
                    app_version=APP_VERSION, path=request.url.path, verdict_text=VERDICT_TEXT,
-                   footer=footer_version(u), asset_v=asset_v, kit_static="/static/kit",
-                   # signed out, the footer links main: no source is read for an anonymous page
-                   docs_repo_link=docs_repo_link() if u else f"{s.docs_repo_url}/tree/main/docs")
+                   footer=foot, asset_v=asset_v, kit_static="/static/kit", docs_repo_link=repo_link,
+                   shell=shell_for(u, request.url.path, foot, repo_link))
         return tpl.TemplateResponse(request, name, ctx, status_code=status_code)
 
     def need_login(request: Request):
@@ -459,7 +495,25 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         rd, rows = capability_rows()
         return render(request, "capabilities.html", u, rows=rows, apps_reading=rd)
 
-    @app.get("/version", response_class=HTMLResponse)
+    @app.get("/version")
+    def version_moved(request: Request):
+        # TM-1304: Version split into Help > About (what is running) and Platform > Updates (checking and
+        # upgrading). The old URL keeps working for bookmarks and old links.
+        return RedirectResponse("/platform/updates", status_code=308)
+
+    @app.get("/about", response_class=HTMLResponse)
+    def about(request: Request):
+        """Help > About: what is running and what this build contains, for every signed-in user. The update
+        feed and the upgrade path stay with the admins (Platform > Updates)."""
+        u = user_of(request)
+        if not u:
+            return need_login(request)
+        ver = running_version(src_apps.read())
+        cur = ver.get("version")
+        return render(request, "about.html", u, ver=ver, notes=notes.get(cur) if cur else notes.first(),
+                      notes_of_build=not cur, ui_version=APP_VERSION)
+
+    @app.get("/platform/updates", response_class=HTMLResponse)
     def version(request: Request):
         u = user_of(request)
         if not u:
@@ -484,7 +538,7 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         if not csrf_ok(u, csrf):
             return PlainTextResponse("bad request", status_code=400)
         checker.check(force=True)
-        return RedirectResponse("/version", status_code=303)
+        return RedirectResponse("/platform/updates", status_code=303)
 
     @app.get("/upgrade", response_class=HTMLResponse)
     def upgrade(request: Request, to: str = ""):

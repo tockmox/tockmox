@@ -368,6 +368,43 @@ Source failures are counted but not alerted: the UI reads a source only when a
 page asks for it, so their rate measures page views as much as health. The
 status page and `/api/v1/status` already show a failing source as `unknown`.
 
+## Finding your way around
+
+The top bar has four sections for administrators: **Home**, **Status**, **AI**
+and **Platform**. Everyone else sees Home, plus any feature a non-administrator
+may open. AI and Platform list their pages in a rail on the left (chips above
+the page on a narrow screen):
+
+| Section | Pages |
+|---|---|
+| AI | Models, Inbox, Budget, Profiles; Inference nodes |
+| Platform | Overview, Cases, Schedule and Specialists when Platform Management is on; Capabilities, the features you installed (such as Security posture), Updates |
+
+The right-hand side of the bar holds three things:
+
+- **The health pill** (administrators): the worst state and the counts, on
+  every page, linking to Status.
+- **Help:** the documentation, the page of it that explains the page you are
+  on, what this build contains, the recovery page, a problem report, and
+  About. A dot on the button means a newer release is in the verified feed.
+- **Your account:** Appearance, your sign-in settings, Sign out.
+
+The site's name is in the browser tab title and the footer, not the bar. The
+running version is in the footer and on **Help › About**. The old `/version`
+page is **Platform › Updates** (`/platform/updates`); the old address
+redirects there.
+
+### Appearance
+
+Choose **System**, **Light** or **Dark** in your account menu. System follows
+your computer's setting and is the default. The choice is stored in this
+browser only (`localStorage`, key `tockmox-theme`), so another browser or a
+private window starts on System. The one script the UI loads,
+`/static/kit/shell.js`, applies the choice before the page is drawn and runs
+the header menus; it comes from the UI's own origin, like everything else.
+Without JavaScript the pages render dark, the menus still open, and the
+Appearance control is not shown.
+
 ## The capabilities page
 
 `/capabilities` (admins) lists each capability, one switch for a whole story

@@ -548,7 +548,7 @@ def test_the_frontier_section_has_no_inline_style_script_or_handler(tmp_path):
     t = page(tmp_path, prometheus=prom_h(demand={"frontier-chat": 5}, spend={"frontier-chat": 1.0}, callers=CALLERS),
              budget={"spendQuery": SPEND_Q, "spendByCallerQuery": CALLER_Q}, **MAP_REPORT)
     fp = frontier_of(t)
-    assert "style=" not in fp and "<script" not in fp and not re.search(r"\son[a-z]+\s*=", fp)
+    assert "style=" not in fp and "<script" not in _noshell(fp) and not re.search(r"\son[a-z]+\s*=", fp)
 
 
 def test_a_caller_name_is_escaped(tmp_path):
@@ -602,4 +602,11 @@ def test_the_family_page_with_nothing_configured_reads_unknown_with_why_and_no_c
         assert all(x.startswith("unknown") for x in row[1:4]) and "$0" not in " ".join(row)
     assert "no spend query is configured (modelLifecycle.budget.spendQuery)" in html.unescape(t)
     assert "Top callers by cost" not in t
-    assert "style=" not in t and "onclick" not in t and "<script" not in t
+    assert "style=" not in t and "onclick" not in t and "<script" not in _noshell(t)
+
+
+def _noshell(t):
+    """The page minus the kit's one same-origin script (shell.js: theme and header menus, TM-1304); any
+    other script tag is still a failure."""
+    import re as _re
+    return _re.sub(r'<script src="/static/kit/shell\.js[^"]*"></script>', "", t)

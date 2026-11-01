@@ -28,13 +28,7 @@
 <p class="healthy-line">
   {{ badge("ok", "Healthy") }}
   {%- for part in healthy_parts(readings, pipeline) %}<span>{{ part }}</span>{% if not loop.last %}<span class="sep">·</span>{% endif %}{% endfor %}
-  {%- if version %}<span class="sep">·</span>
-    {%- if version.state == "single" %}<span>Tockmox {{ version.version }}</span>
-    {%- elif version.state == "floating" %}<span>Tockmox tracking <code title="{{ version.ref }}">{{ version.ref[:7] }}</code> <span class="muted">(a branch, not a release)</span></span>
-    {%- elif version.state == "mixed" %}<span>{{ badge("warning", "Mixed versions") }}</span>
-    {%- else %}<span>{{ badge("unknown", "Version unknown") }}</span>{% endif %}
-    {%- if target %}<span class="sep">·</span><a class="link-strong" href="/version">{{ target.version }} is available</a>{% endif %}
-  {%- endif %}
+  {#- The version moved to the footer and Help > About (TM-1304, R1). #}
 </p>
 {% endif %}
 
