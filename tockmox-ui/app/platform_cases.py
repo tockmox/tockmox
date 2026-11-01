@@ -320,6 +320,72 @@ def split(rows):
     return pending, done
 
 
+def group_cases(rows):
+    """Needs-you rows grouped by what fired and what they wait on (TM-1308; spec section 8).
+
+    The key is the alert name (facts.alertname) plus what the case waits on (who, and the ask or the reason); the
+    services become the count. On 2026-10-31, 19 cases read as 5 groups: 13 node-exporter cases on 6 hosts were one
+    row. A case with no alert name is its own group. Each group links to the Cases page filtered to it."""
+    from urllib.parse import urlencode
+    groups: dict = {}
+    for r in rows:
+        alert = str((r.get("facts") or {}).get("alertname") or "")
+        w = r.get("waiting") or {}
+        on, ask = str(w.get("on") or ""), str(w.get("ask") or w.get("reason") or "")
+        key = (alert, on, ask) if alert else ("", r["id"], "")
+        g = groups.setdefault(key, {"alert": alert, "on": on, "ask": w.get("ask") or "", "reason": w.get("reason") or "",
+                                    "cases": [], "hosts": set()})
+        g["cases"].append(r)
+        if r.get("service"):
+            g["hosts"].add(r["service"])
+    out = []
+    for g in groups.values():
+        cs = sorted(g["cases"], key=pending_order)
+        since = [x for x in ((c.get("waiting") or {}).get("since_ts") or c.get("state_since_ts") for c in cs) if x]
+        # the link carries the whole key, "-" for an empty part, so the filtered list is exactly the group
+        q = {"alert": g["alert"], "wait": g["on"] or NONE, "ask": g["ask"] or g["reason"] or NONE}
+        out.append({"alert": g["alert"], "on": g["on"], "ask": g["ask"], "reason": g["reason"], "count": len(cs),
+                    "hosts": sorted(g["hosts"]), "first": cs[0], "cases": cs, "since_ts": min(since) if since else None,
+                    "href": ("/platform/cases?" + urlencode(q)) if len(cs) > 1 else f"/platform/cases/{cs[0]['id']}"})
+    out.sort(key=lambda g: (pending_order(g["first"])[0], g["since_ts"] or 0))
+    return out
+
+
+NONE = "-"   # a filter value meaning "this part is empty", so a group whose case waits on nothing still links exactly
+
+
+def filter_cases(rows, alert="", wait="", ask="", state="", team="", cat=None):
+    """The Cases page's filters: alert name, what it waits on, the ask (or the reason, when there is no ask), open or
+    closed, and team. Unknown values match nothing rather than everything, so a mistyped link shows an empty list and
+    says so. NONE ("-") matches an empty part."""
+    def want(v):
+        return "" if v == NONE else v
+    out = rows
+    if alert:
+        out = [r for r in out if str((r.get("facts") or {}).get("alertname") or "") == want(alert)]
+    if wait:
+        out = [r for r in out if str((r.get("waiting") or {}).get("on") or "") == want(wait)]
+    if ask:
+        out = [r for r in out if str((r.get("waiting") or {}).get("ask") or (r.get("waiting") or {}).get("reason") or "")
+               == want(ask)]
+    if state == "open":
+        out = [r for r in out if not r["closed"]]
+    elif state == "closed":
+        out = [r for r in out if r["closed"]]
+    elif state:
+        return []
+    if team and cat is not None:
+        t = cat.team(team) if hasattr(cat, "team") else None
+        if t is None:
+            return []
+        agents = [t.lead] + list(t.members)
+        mine = set()
+        for a in agents:
+            mine |= {x["id"] for x in role_cases(a, rows)}
+        out = [r for r in out if r["id"] in mine]
+    return out
+
+
 def specialist_roles(cat):
     """specialist id -> [(catalog role id, role name)] in catalog order."""
     out = {}
@@ -349,7 +415,8 @@ def register(app, cat, srcs, guard, render, common):
         return r, ((r.data or {}).get("records") or []) if r.fetched_at is not None else []
 
     @app.get("/platform/cases")
-    def cases(request: Request, role: str = ""):
+    def cases(request: Request, role: str = "", alert: str = "", wait: str = "", ask: str = "", state: str = "",
+              team: str = ""):
         u, deny = guard(request)
         if deny:
             return deny
@@ -359,10 +426,14 @@ def register(app, cat, srcs, guard, render, common):
             return render(request, "error.html", u, status_code=404, title="Not found",
                           message="There is no such role in this platform's organization.")
         shown = role_cases(sel, rows) if sel else rows
-        pending, done = split(shown)
+        # TM-1308: filters, so a grouped row on the Overview opens exactly its cases
+        filters = {k: v for k, v in (("alert", alert), ("wait", wait), ("ask", ask), ("state", state), ("team", team))
+                   if v}
+        filtered = filter_cases(shown, cat=cat, **filters)
+        pending, done = split(filtered)
         return render(request, "platform_cases.html", u, desk=r, desk_on=srcs["desk"].configured(), pending=pending,
-                      done=done, sel=sel, counts=summarize(shown),
-                      roles=[a for a in cat.all() if role_cases(a, rows)], **common(u))
+                      done=done, sel=sel, counts=summarize(filtered), filters=filters, total=len(shown),
+                      teams=list(cat.teams), roles=[a for a in cat.all() if role_cases(a, rows)], **common(u))
 
     @app.get("/platform/cases/{rid}")
     def case(request: Request, rid: str):

@@ -20,6 +20,11 @@ from fastapi.testclient import TestClient
 NOW = time.time()
 
 
+def org_text(c):
+    """TM-1308: the roles moved from the Overview to Organization, one team at a time; read every team."""
+    return "".join(c.get(f"/platform/organization?team={t.id}").text for t in pm.load_catalog().teams)
+
+
 def doc_with_platform(**opts):
     d = base_doc()
     d["features"] = dict(d["features"], platform=dict({"enabled": True, "timezone": "America/Chicago"}, **opts))
@@ -165,8 +170,10 @@ def test_healthy_world_is_ok_and_says_what_is_not_started(world, monkeypatch, pi
     login_as(c, s, ["tockmox-admins"])
     t = c.get("/platform").text
     assert "Every running practice reports healthy" in t, t[:3000]
-    assert "not started yet" in t                     # roles with no live check: said, not hidden
-    assert "Not started" in t
+    assert "not started" in t                         # the team lines count the roles not started (TM-1308)
+    o = org_text(c)
+    assert "not started yet" in o                     # roles with no live check: said, not hidden
+    assert "Not started" in o
 
 
 def test_one_breached_signal_names_itself(world):
@@ -177,7 +184,7 @@ def test_one_breached_signal_names_itself(world):
     c, app, s = client_for(world, doc_with_platform(), cronworkflows=[])
     login_as(c, s, ["tockmox-admins"])
     t = c.get("/platform").text
-    assert "A practice has a problem" in t and "Fullest volume" in t
+    assert "A practice has a problem" in t and "Fullest volume" in org_text(c)
     a = c.get("/platform/agents/capacity").text
     assert "95%" in a and "problem above 90%" in a
 
@@ -296,8 +303,10 @@ def test_ledger_waiting_and_failing(world):
                            ledger=led, cronworkflows=[])
     login_as(c, s, ["tockmox-admins"])
     o = c.get("/platform").text
-    assert "Waiting on you" in o and "Failing" in o
+    org = org_text(c)                                 # the agent column moved to Organization (TM-1308)
+    assert "Waiting on you" in org and "Failing" in org
     assert "https://ui.int.example.com/jobs/j-1" in o
+    assert "SECRET MODEL PROSE" not in org
     assert "SECRET MODEL PROSE" not in o                    # no model output in the admin origin
     a = c.get("/platform/agents/change").text
     assert "SECRET MODEL PROSE" not in a and "j-1" in a

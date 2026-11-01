@@ -104,3 +104,22 @@
 </table>
 </div>
 {%- endmacro %}
+
+{# TM-1308: Needs you, grouped by what fired and what it asks (platform_cases.group_cases). Thirteen cases for one
+   alert on six hosts are one row with count 13; a group opens the Cases page filtered to it. #}
+{% macro case_groups(groups, caption, id, tz, ask_words, wait_words, reason_words) -%}
+<div class="table-wrap" tabindex="0" role="region" aria-labelledby="{{ id }}">
+<table class="cases grouped">
+  <caption>{{ caption }}</caption>
+  <thead><tr><th scope="col">What fired</th><th scope="col">Cases</th><th scope="col">Waiting on</th><th scope="col">Since</th></tr></thead>
+  <tbody>
+  {% for g in groups %}
+  <tr><th scope="row"><a href="{{ g.href }}">{% if g.count > 1 %}<code>{{ g.alert }}</code>{% else %}<code>{{ g.first.id }}</code> {% if g.first.title %}{{ g.first.title }}{% elif g.alert %}{{ g.alert }}{% else %}<span class="muted">title written by {{ "a model" if g.first.title_src == "model" else "a client" }}</span>{% endif %}{% endif %}</a>{% if g.count == 1 and g.alert and g.first.title %} <span class="muted small"><code>{{ g.alert }}</code></span>{% endif %}</th>
+      <td class="num">{{ g.count }}{% if g.hosts | length > 1 %} <span class="muted small">on {{ g.hosts | length }} hosts</span>{% elif g.hosts %} <span class="muted small">{{ g.hosts[0] }}</span>{% endif %}</td>
+      <td>{{ wait_words.get(g.on, "Unknown") }}{% if g.ask %}<span class="why">{{ ask_words.get(g.ask, g.ask | replace("_", " ")) }}</span>{% elif g.reason %}<span class="why">{{ reason_words.get(g.reason, "") }}</span>{% endif %}</td>
+      <td>{{ when(g.since_ts, tz) }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{%- endmacro %}

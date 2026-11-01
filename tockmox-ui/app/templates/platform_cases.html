@@ -27,6 +27,19 @@
   </div>
 </section>
 
+<form class="filters" method="get" action="/platform/cases" aria-label="Filter the cases">
+  {% if sel %}<input type="hidden" name="role" value="{{ sel.id }}">{% endif %}
+  <label>Team <select name="team"><option value="">Every team</option>{% for tm in teams %}<option value="{{ tm.id }}"{% if filters.team == tm.id %} selected{% endif %}>{{ tm.name }}</option>{% endfor %}</select></label>
+  <label>State <select name="state"><option value="">Open and closed</option><option value="open"{% if filters.state == "open" %} selected{% endif %}>Open</option><option value="closed"{% if filters.state == "closed" %} selected{% endif %}>Closed</option></select></label>
+  <label>Waiting on <select name="wait"><option value="">Anyone</option>{% for k, w in wait_words.items() %}<option value="{{ k }}"{% if filters.wait == k %} selected{% endif %}>{{ w }}</option>{% endfor %}{% if filters.wait and filters.wait not in wait_words %}<option value="{{ filters.wait }}" selected>{{ "Nobody named" if filters.wait == "-" else filters.wait }}</option>{% endif %}</select></label>
+  {% if filters.alert %}<input type="hidden" name="alert" value="{{ filters.alert }}">{% endif %}
+  {% if filters.ask %}<input type="hidden" name="ask" value="{{ filters.ask }}">{% endif %}
+  <button class="btn-ghost" type="submit">Filter</button>
+</form>
+{% if filters %}
+<p class="muted small">Showing {{ pending | length + done | length }} of {{ total }} case{{ "s" if total != 1 }}{% if filters.alert %} for <code>{{ filters.alert }}</code>{% endif %}{% if filters.ask and filters.ask != "-" %}, asking: {{ ask_words.get(filters.ask, reason_words.get(filters.ask, filters.ask | replace("_", " "))) }}{% endif %}{% if filters.state and filters.state not in ("open", "closed") %}, state <code>{{ filters.state }}</code> (not a state this page knows){% endif %}. <a href="/platform/cases{% if sel %}?role={{ sel.id }}{% endif %}">Clear the filters</a></p>
+{% endif %}
+
 {% if roles %}
 <nav class="chips" aria-label="Show one role's cases">
   <a href="/platform/cases"{% if not sel %} aria-current="page"{% endif %}>Every role</a>

@@ -115,3 +115,28 @@
 </section>
 {% endif %}
 {%- endmacro %}
+
+
+{# Release notes as folded sections, one per heading (TM-1304 About, TM-1308 Updates). The text is the CHANGELOG's,
+   rendered inline by app/notes.py; no raw markdown reaches the page. #}
+{% macro release_notes(notes, empty="No notes are bundled with this build.") -%}
+  {% if notes %}
+    {% set ns = namespace(open=false, ul=false) %}
+    {% for kind, text in notes.blocks %}
+      {% if kind == "h" %}
+        {% if ns.ul %}</ul>{% set ns.ul = false %}{% endif %}
+        {% if ns.open %}</details>{% endif %}
+        <details class="fold"><summary><span class="fold-title">{{ text }}</span><span></span><span></span><span class="chev" aria-hidden="true"></span></summary>
+        {% set ns.open = true %}
+      {% elif kind == "li" %}
+        {% if not ns.ul %}<ul>{% set ns.ul = true %}{% endif %}<li>{{ text }}</li>
+      {% else %}
+        {% if ns.ul %}</ul>{% set ns.ul = false %}{% endif %}<p>{{ text }}</p>
+      {% endif %}
+    {% endfor %}
+    {% if ns.ul %}</ul>{% endif %}
+    {% if ns.open %}</details>{% endif %}
+  {% else %}
+    <p class="empty">{{ empty }}</p>
+  {% endif %}
+{%- endmacro %}

@@ -16,6 +16,7 @@ class Item:
     href: str
     prefixes: tuple[str, ...] = ()   # paths that light this item up; the longest matching prefix wins
     count: int | None = None
+    state: str | None = None         # a warning the rail shows on the item (TM-1308: Capabilities disagreeing)
 
     def matches(self, path: str) -> int:
         """Length of the longest prefix of `path` this item claims, 0 for none. Exact href counts too."""
@@ -74,7 +75,8 @@ def current(items, path: str):
     return best
 
 
-def rail(section: str | None, is_admin: bool, platform_on: bool, admin_tabs=(), inbox_count: int | None = None) -> list[Group]:
+def rail(section: str | None, is_admin: bool, platform_on: bool, admin_tabs=(), inbox_count: int | None = None,
+         capabilities_state: str | None = None) -> list[Group]:
     """The page list on the left of a section, or [] when the section has one page (Home, Status)."""
     if not is_admin:
         return []
@@ -96,10 +98,11 @@ def rail(section: str | None, is_admin: bool, platform_on: bool, admin_tabs=(), 
             groups.append(Group("Operations", (
                 Item("Overview", "/platform", ("/platform/agents/",)),
                 Item("Cases", "/platform/cases", ("/platform/cases/",)),
+                Item("Organization", "/platform/organization"),
                 Item("Schedule", "/platform/schedule"),
                 Item("Specialists", "/platform/specialists"),
             )))
-        conf = [Item("Capabilities", "/capabilities")]
+        conf = [Item("Capabilities", "/capabilities", state=capabilities_state)]
         conf += [Item(t.name, f"/tabs/{t.id}") for t in admin_tabs]
         conf.append(Item("Updates", "/platform/updates", ("/upgrade", "/version")))
         groups.append(Group("Configuration", tuple(conf)))
@@ -144,6 +147,7 @@ HELP_MAP: dict[str, str] = {
     "/nodes": "administration/inference-nodes.md",
     "/capabilities": "administration/capabilities.md",
     "/platform": "administration/platform-management.md",
+    "/platform/organization": "administration/platform-management.md",
     "/platform/updates": "deployment/upgrade.md",
     "/upgrade": "deployment/upgrade.md",
     "/tabs/posture": "administration/posture-probe.md",

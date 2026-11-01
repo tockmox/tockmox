@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "macros.html" import badge, state_icon, source_line, mascot, trend_row %}
-{% from "platform_macros.html" import sched_badge, mode_tag, rail, when, practice_badge, case_table %}
+{% from "platform_macros.html" import sched_badge, mode_tag, rail, when, practice_badge, case_table, case_groups %}
 {% block title %}Platform Management{% endblock %}
 {% block main %}
 <div class="titled">{% if org_state == "ok" %}{{ mascot("foreman", 56) }}{% endif %}<h1>Platform Management</h1></div>
@@ -24,10 +24,10 @@
   {% if desk.fetched_at is none %}
   <p class="panel quiet">{{ badge("unknown", "Unknown") }} The Service Desk did not answer ({{ desk.reason or "no answer" }}), so this page cannot list the cases waiting on you. That is not the same as none.</p>
   {% elif desk.state != "ok" or case_counts.unknown %}
-  {% if yours %}{{ case_table(yours, (yours | length | string) ~ " case" ~ ("s" if yours | length != 1 else "") ~ " waiting on you or on a person, oldest first.", "needs-you-cases", tz, state_words, type_words, ask_words, by_agent_role) }}{% endif %}
+  {% if yours %}{{ case_groups(groups, (yours | length | string) ~ " case" ~ ("s" if yours | length != 1 else "") ~ " waiting on you or on a person, grouped; oldest first.", "needs-you-cases", tz, ask_words, wait_words, reason_words) }}{% endif %}
   <p class="panel quiet">{{ badge("unknown", "Unknown") }} The desk's answer is incomplete ({{ desk.reason or "some open cases do not say what they wait on" }}), so this list may not be everything waiting on you. <a href="/platform/cases">See every case</a>.</p>
   {% elif yours %}
-  {{ case_table(yours, (yours | length | string) ~ " case" ~ ("s" if yours | length != 1 else "") ~ " waiting on you or on a person, oldest first.", "needs-you-cases", tz, state_words, type_words, ask_words, by_agent_role) }}
+  {{ case_groups(groups, (yours | length | string) ~ " case" ~ ("s" if yours | length != 1 else "") ~ " waiting on you or on a person, as " ~ (groups | length | string) ~ " group" ~ ("s" if groups | length != 1 else "") ~ " by what fired and what it asks; oldest first.", "needs-you-cases", tz, ask_words, wait_words, reason_words) }}
   {% else %}
   <p class="panel quiet">No case waits on you. {{ case_counts.open }} open, {{ case_counts.closed }} closed in the last 30 days: <a href="/platform/cases">see every case</a>.</p>
   {% endif %}
@@ -62,46 +62,16 @@
 </section>
 
 <section aria-labelledby="org">
-  <h2 id="org">The organization</h2>
-  <p class="muted">Two facts per role, never merged: how its practice is doing (live signals and scheduled jobs) and how its agent is doing (agent runs). A role with nothing live yet reads Not started and stays out of the verdict.</p>
-  <ol class="flow" aria-label="How work moves between the teams">
-    <li><span>Run notices</span> an incident and restores service</li>
-    <li><span>Run learns</span> why it keeps happening</li>
-    <li><span>Change plans</span> the lasting fix</li>
-    <li><span>Change gates</span> it, tests it and ships it</li>
-    <li><span>Improve checks</span> the platform is getting better</li>
-  </ol>
+  <h2 id="org">The teams</h2>
+  {#- TM-1308: one line per team here; every role, one team at a time, on Organization. -#}
+  <ul class="team-lines plain">
   {% for t in teams %}
-  <section class="team-block" aria-labelledby="team-{{ t.team.id }}">
-    <div class="team-head">
-      <h3 id="team-{{ t.team.id }}">{{ t.team.name }}</h3>
-      {{ practice_badge(t.lead.practice_state) }}
-      <p class="muted">{{ t.team.purpose }}</p>
-    </div>
-    <div class="table-wrap" tabindex="0" role="region" aria-labelledby="team-{{ t.team.id }}">
-    <table class="team">
-      <thead><tr><th scope="col">Role</th><th scope="col">Practice</th><th scope="col">Agent</th><th scope="col">Mode</th><th scope="col">Scheduled work</th><th scope="col">Next run</th></tr></thead>
-      <tbody>
-      {% for v in [t.lead] + t.members %}
-      {% set live = v.schedules | selectattr("source", "equalto", "cluster") | list %}
-      {% set planned = v.schedules | rejectattr("source", "equalto", "cluster") | list %}
-      {% set bad = live | selectattr("state", "in", ["failed", "missed", "late", "stuck", "unknown", "never", "paused"]) | list %}
-      <tr class="{{ 'lead' if v.agent.is_lead else 'reports' }}">
-        <th scope="row"><a class="agent-name" href="/platform/agents/{{ v.agent.id }}">{{ v.agent.name }}</a>
-          <span class="ref">{% if v.agent.is_lead %}Leads {{ t.team.name }}. {% endif %}{{ v.agent.reference.itil }}</span></th>
-        <td>{{ practice_badge(v.practice_state) }}<span class="why">{{ v.practice_reason | sentence }}</span></td>
-        <td>{{ badge(v.agent_state, v.agent_word) }}</td>
-        <td>{{ mode_tag(v.agent) }}</td>
-        <td>{% if live %}{{ live | length }} deployed{% if bad %}, <strong>{{ bad | length }} not on schedule</strong>{% endif %}{% else %}<span class="muted">none deployed</span>{% endif %}
-            {%- if planned %}<br><span class="muted">{{ planned | length }} planned</span>{% endif %}</td>
-        <td>{{ when(v.next_run, tz) }}</td>
-      </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    </div>
-  </section>
+    {% set roles = [t.lead] + t.members %}
+    {% set n_planned = roles | selectattr("practice_state", "equalto", "planned") | list | length %}
+    <li><a class="team-line" href="/platform/organization?team={{ t.team.id }}">{{ practice_badge(t.lead.practice_state) }}<span class="tn">{{ t.team.name }}</span>
+      <span class="muted small">{{ roles | length }} role{{ "s" if roles | length != 1 }}{% if n_planned %} · {{ n_planned }} not started{% endif %} · {{ t.lead.practice_reason }}</span></a></li>
   {% endfor %}
+  </ul>
 </section>
 
 <section aria-labelledby="rota">

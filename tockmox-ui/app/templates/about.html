@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import badge, mascot %}
+{% from "macros.html" import badge, mascot, release_notes %}
 {% block title %}About Tockmox{% endblock %}
 {% block main %}
 {# Help > About (TM-1304): what is running here and what this build contains, for everyone signed in. Checking
@@ -47,24 +47,6 @@
 <section class="panel notes" aria-labelledby="notes-h" id="notes">
   <h2 id="notes-h">What's in this build{% if notes and notes.version != "Unreleased" %} ({{ notes.version }}{% if notes.date %}, {{ notes.date }}{% endif %}){% endif %}</h2>
   {% if notes and notes_of_build %}<p class="muted small">No release tag names what is running, so these are the notes bundled with this build{% if notes.version == "Unreleased" %}, for a release not tagged yet{% endif %}.</p>{% endif %}
-  {% if notes %}
-    {% set ns = namespace(open=false, ul=false) %}
-    {% for kind, text in notes.blocks %}
-      {% if kind == "h" %}
-        {% if ns.ul %}</ul>{% set ns.ul = false %}{% endif %}
-        {% if ns.open %}</details>{% endif %}
-        <details class="fold"><summary><span class="fold-title">{{ text }}</span><span></span><span></span><span class="chev" aria-hidden="true"></span></summary>
-        {% set ns.open = true %}
-      {% elif kind == "li" %}
-        {% if not ns.ul %}<ul>{% set ns.ul = true %}{% endif %}<li>{{ text }}</li>
-      {% else %}
-        {% if ns.ul %}</ul>{% set ns.ul = false %}{% endif %}<p>{{ text }}</p>
-      {% endif %}
-    {% endfor %}
-    {% if ns.ul %}</ul>{% endif %}
-    {% if ns.open %}</details>{% endif %}
-  {% else %}
-    <p class="empty">No notes are bundled with this build.</p>
-  {% endif %}
+  {{ release_notes(notes, "No notes are bundled with this build.") }}
 </section>
 {% endblock %}

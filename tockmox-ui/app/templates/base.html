@@ -58,7 +58,7 @@
   {% for g in shell.rail %}
   <span class="rh">{{ g.heading }}</span>
   {% for it in g.items %}
-  <a href="{{ it.href }}"{% if shell.rail_item and it.href == shell.rail_item.href %} aria-current="page"{% endif %}>{{ it.label }}{% if it.count %}<span class="n">{{ it.count }}</span>{% endif %}</a>
+  <a href="{{ it.href }}"{% if shell.rail_item and it.href == shell.rail_item.href %} aria-current="page"{% endif %}>{{ it.label }}{% if it.count %}<span class="n">{{ it.count }}</span>{% endif %}{% if it.state %}<span class="rs st-{{ it.state }}">{{ state_icon(it.state) }}<span class="visually-hidden">: {% if it.label == "Capabilities" %}{{ "unknown, Argo CD did not answer" if it.state == "unknown" else "a configured capability is not what is deployed" }}{% else %}{{ it.state }}{% endif %}</span></span>{% endif %}</a>
   {% endfor %}
   {% endfor %}
 </nav>

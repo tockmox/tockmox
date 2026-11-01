@@ -300,7 +300,15 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         sec = nav.section_of(path)
         out["sections"] = items
         out["section_item"] = nav.current(items, path)
-        groups = nav.rail(sec, u.is_admin, platform_on(), admin_tabs=tabs)   # an admin sees every installed feature
+        cap_state = None
+        if u.is_admin and sec == "platform":
+            # TM-1308: a capability whose switch and deployment disagree puts a warning on the rail item
+            cap_rd, cap_rows = capability_rows()
+            if cap_rd.fetched_at is None:
+                cap_state = "unknown"          # Argo CD did not answer: absence is not green
+            else:
+                cap_state = "warning" if any(not x["agree"] for x in cap_rows) else None
+        groups = nav.rail(sec, u.is_admin, platform_on(), admin_tabs=tabs, capabilities_state=cap_state)
         out["rail"], out["rail_item"] = groups, nav.rail_current(groups, path) if groups else None
         if u.is_admin:
             out["health"] = stack_mod.pill(placed(readings()))     # parts, not signals (TM-1305)
