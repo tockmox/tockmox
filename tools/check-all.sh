@@ -269,7 +269,12 @@ skip_gate() {
     return 0
   fi
   case "$(gate_decision "$gate_ord" "$key")" in
-    unselected|othershard)
+    unselected)
+      unselected=$((unselected + 1)); unselected_names="${unselected_names}
+  - ${1}"
+      result_row "$gate_ord" "$key" unselected - - "$1"
+      return 0 ;;
+    othershard)
       result_row "$gate_ord" "$key" othershard - - "$1"
       othershard=$((othershard + 1))
       return 0 ;;
