@@ -99,6 +99,29 @@ costs you, with the reasoning in the documentation rather than here.
   `sso.apps.forge` (identity, off unless the generator turns it on);
   `site.forge: built-in` sites get it on.
 
+- **Experimental: rebuild a built-in-forge site, or repair just its forge, from
+  the off-site copy and the recovery kit (TM-1338).**
+  `tockmox-install.sh --restore-from offsite|file:PATH` takes a cluster that
+  has Argo CD and nothing else. It restores the sealing key before the
+  controller starts, installs the forge, seeds it from the copy, and applies
+  the root Application; no URL is rewritten. `tockmox-install.sh repair-forge`
+  reinstalls only the forge from the copy while everything else keeps running,
+  then waits for Argo CD to compare every Application against the new forge
+  and checks each reads the same revision and health as before. Each refuses before touching a cluster:
+  - a wrong passphrase, a sealing key backup that does not open, or a kit cut
+    short;
+  - a bundle whose SHA-256 does not match, one git will not read in full, or
+    one whose commit is not the pointer's;
+  - a file copy with no checksum, or a copy that is not a built-in-forge site.
+
+  The copy's age is always named, and called out past `--max-age-hours`.
+  `repair-forge` refuses a forge that answers and holds the copy's commit,
+  unless you pass `--force`. Both write a new recovery kit, since the new forge
+  has new secrets. Not restored: review comments and the forge's own settings
+  (there is no forge dump yet). Until copies are signed, a copy is only as
+  trustworthy as whoever can write to its bucket or remote, and a file copy is
+  checked by SHA-256 alone.
+
 - **The Models page now shows what each hosted model costs: its list price,
   what the gateway spent on it, and how often it was called, and anything it
   cannot source reads unknown, never an estimate (TM-1298).** Each Frontier

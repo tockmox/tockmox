@@ -379,5 +379,7 @@ assert_artifact "with the platform rules off there is no S3 rule to miss, and it
 # install/bootstrap-forge.sh: its refusals, hermetically, on the same shims.
 # shellcheck source=bootstrap-forge-tests.sh
 . "$HERE/bootstrap-forge-tests.sh"
+# shellcheck source=forge-restore-tests.sh
+. "$HERE/forge-restore-tests.sh"
 
 assert_summary
