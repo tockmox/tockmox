@@ -326,7 +326,7 @@ case "$INTERNAL_DOMAIN" in null|"~") INTERNAL_DOMAIN="" ;; esac
 # forge_sso_on: does the site's identity layer turn on the forge's application?
 forge_sso_on() {
   grep -Eqs '^ *forge: *\{ *enabled: *true' "$SITE/site/values/identity.yaml" \
-    || grep -A1 -Es '^    forge:' "$SITE/site/values/identity.yaml" 2>/dev/null | grep -Eq 'enabled: *true'
+    || grep -A1 -Es '^    forge:' "$SITE/site/values/identity.yaml" 2>/dev/null | grep -E 'enabled: *true' >/dev/null
 }
 SIGN_IN=true; SIGN_IN_WHY=""
 if $NO_SIGN_IN; then
@@ -578,7 +578,7 @@ connect_sign_in() {
   # A list that FAILED must not read as "no source yet": that would add a second one.
   list="$(kubectl "${K[@]}" -n "$FORGE_NS" exec deploy/"$RELEASE" -c forgejo -- forgejo admin auth list --vertical-bars 2>/dev/null)" \
     || { warn "could not list the forge's sign-in sources (is its pod restarting?)"; return 1; }
-  printf '%s\n' "$list" | grep -q '^ID' || { warn "the forge's list of sign-in sources did not read as one"; return 1; }
+  printf '%s\n' "$list" | grep '^ID' >/dev/null || { warn "the forge's list of sign-in sources did not read as one"; return 1; }
   id="$(printf '%s\n' "$list" | awk -F'|' -v n="$SSO_SOURCE" '{for (i=1;i<=NF;i++) gsub(/^[ \t]+|[ \t]+$/, "", $i)} $2==n && $3=="OAuth2" {print $1}')"
   [[ "$(printf '%s' "$id" | grep -c .)" -le 1 ]] || { warn "the forge has more than one sign-in source named ${SSO_SOURCE}; remove the extra one first"; return 1; }
   # The client secret goes in on stdin, so it is on no command line on this workstation
