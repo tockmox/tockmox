@@ -1,0 +1,109 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fuzzing with ClusterFuzzLite: the atheris targets in tockmox-ui/fuzz/ (the
+# short-path redirect and the cron evaluator; tockmox-ui/fuzz/README.md says
+# what each one asserts). The build image is .clusterfuzzlite/Dockerfile; it is
+# built and run on the runner and never pushed.
+#
+#   pull_request  the targets a change can reach, for 5 minutes in all, when the
+#                 UI's code, the targets or this setup change. A crash fails the
+#                 job and its reproducer is uploaded as an artifact. It is not a
+#                 required check.
+#   schedule      weekly batch fuzzing (20 minutes) that grows the corpus, then a
+#                 prune of that corpus. With no storage repository configured,
+#                 ClusterFuzzLite keeps the corpus as workflow artifacts, so
+#                 `actions: read` lets the next run find the last one.
+#
+# The two actions are pinned by commit like every other `uses:`; each runs a
+# container image ClusterFuzzLite publishes under a moving :v1 tag, which a pin
+# here cannot reach. The job has no write permission to give that image.
+
+name: fuzz
+
+on:
+  pull_request:
+    paths:
+      - 'tockmox-ui/app/**'
+      - 'tockmox-ui/fuzz/**'
+      - '.clusterfuzzlite/**'
+      - '.github/workflows/fuzz.yaml'
+  schedule:
+    # Weekly, Wednesday 07:17 UTC.
+    - cron: '17 7 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  pr:
+    name: Fuzz the change
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read   # find the last batch run's corpus artifact
+    steps:
+      - name: Build the fuzz targets
+        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: python
+          sanitizer: address
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run them
+        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: python
+          sanitizer: address
+          mode: code-change
+          fuzz-seconds: 300
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  batch:
+    name: Batch fuzzing
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Build the fuzz targets
+        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: python
+          sanitizer: address
+      - name: Run them
+        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: python
+          sanitizer: address
+          mode: batch
+          fuzz-seconds: 1200
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  prune:
+    name: Prune the corpus
+    needs: batch
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Build the fuzz targets
+        uses: google/clusterfuzzlite/actions/build_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: python
+      - name: Prune
+        uses: google/clusterfuzzlite/actions/run_fuzzers@884713a6c30a92e5e8544c39945cd7cb630abcd1 # v1
+        with:
+          language: python
+          mode: prune
+          fuzz-seconds: 300
+          github-token: ${{ secrets.GITHUB_TOKEN }}

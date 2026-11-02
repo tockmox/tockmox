@@ -1,0 +1,3 @@
+# SPDX-License-Identifier: Apache-2.0
+# ClusterFuzzLite: the fuzz targets are tockmox-ui/fuzz/*_fuzzer.py (atheris). See tockmox-ui/fuzz/README.md.
+language: python

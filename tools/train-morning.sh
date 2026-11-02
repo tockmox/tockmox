@@ -37,6 +37,13 @@
 #   - Report-only is the default. The checks run for real (they only read); every
 #     mutation is printed as "would run: $ ..." and skipped. --go runs them in that
 #     order, stopping at the first failure.
+# THE ARCHIVE AND SHA256SUMS. When the candidate's tree holds
+# .github/workflows/release-assets.yaml, that workflow builds both from the tag
+# after the Release is published, with signed build provenance (RELEASING.md,
+# Checksums), and this script builds neither: it attaches only the gate report
+# and its signature. A release line without that file (release-0.8) builds them
+# here as before; the workflow cannot run for it, because a release event runs
+# the workflow as it is at the tagged commit.
 # RESUMABLE. Rerun with the same SPEC after a stop. A step whose end state already
 # holds (branch at the SHA, tag on the SHA and verified, .sig that verifies,
 # SHA256SUMS that checks, Release with every asset) is skipped with a message.
@@ -357,6 +364,8 @@ tag_and_push() {
 }
 
 # ---------------------------------------------------------------- 5. sign the report, checksums
+ci_builds_assets() { g cat-file -e "$SHA:.github/workflows/release-assets.yaml" 2>/dev/null; }
+
 sign_and_sum() {
   say "5/7 sign the gate report, archive and SHA256SUMS"
   grep -q "${SHA:0:12}" "$GATE_REPORT" || stop "$GATE_REPORT does not name $SHA; a report that names another commit must not be signed for this one"
@@ -371,6 +380,10 @@ sign_and_sum() {
         || stop "the fresh $GATE_REPORT.sig does not verify"
       say "  signed and verified (namespace file, principal $PRINCIPAL)"
     fi
+  fi
+  if ci_builds_assets; then
+    say "  archive and SHA256SUMS: built from the tag by release-assets.yaml once the Release is published; not built here"
+    return 0
   fi
   if [ -f "$ARCHIVE" ] && [ -f "$DIST_DIR/SHA256SUMS" ] && (cd "$DIST_DIR" && $SHA256 -c SHA256SUMS >/dev/null 2>&1); then
     say "  $ARCHIVE and SHA256SUMS already present and verified; skipping"
@@ -388,7 +401,8 @@ sign_and_sum() {
 # ---------------------------------------------------------------- 6. the Release
 publish() {
   say "6/7 GitHub Release $TAG (--verify-tag; attachments per RELEASING.md)"
-  ASSETS=("$ARCHIVE" "$DIST_DIR/SHA256SUMS" "$GATE_REPORT" "$GATE_REPORT.sig")
+  if ci_builds_assets; then ASSETS=("$GATE_REPORT" "$GATE_REPORT.sig")
+  else ASSETS=("$ARCHIVE" "$DIST_DIR/SHA256SUMS" "$GATE_REPORT" "$GATE_REPORT.sig"); fi
   if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
     names=$(gh release view "$TAG" --repo "$GH_REPO" --json assets \
       | python3 -I -c 'import json,sys; print("\n".join(a["name"] for a in json.load(sys.stdin)["assets"]))')
@@ -405,6 +419,10 @@ publish() {
   if [ "$GO" = 1 ]; then
     gh release view "$TAG" --repo "$GH_REPO" >/dev/null || stop "gh release view $TAG fails after create"
     say "  published: $(gh release view "$TAG" --repo "$GH_REPO" --json url | jfield url)"
+  fi
+  if ci_builds_assets; then
+    say "  NEXT: release-assets.yaml attaches tockmox-$VER.tar.gz, SHA256SUMS and the provenance in a minute or two;"
+    say "        confirm all three are on the Release page (a failed run says what to do in its log)"
   fi
 }
 
@@ -494,6 +512,7 @@ st_fixture() { # NAME VARIANT -> builds $PT/NAME with origin.git, repo, template
   echo "security" > "$seed/SECURITY.md"
   printf 'verify\n\n<!-- tockmox:footer:begin -->\n<sub>Tockmox v0.8.1</sub>\n<!-- tockmox:footer:end -->\n' > "$seed/docs/deployment/verify.md"
   echo "# changelog" > "$seed/CHANGELOG.md"
+  if [ "$v" = ciassets ]; then mkdir -p "$seed/.github/workflows"; echo "name: release-assets" > "$seed/.github/workflows/release-assets.yaml"; fi
   # a stand-in for tools/site-pin-at-tag.sh with the same interface (TAG --dir DIR)
   cat > "$seed/tools/site-pin-at-tag.sh" <<'EOS'
 #!/usr/bin/env bash
@@ -619,6 +638,19 @@ selftest_main() {
   st_run good --go
   st_probe "second --go skips every step" good 0 "DONE. v0.8.2 is cut: 0 actions"
   st_assert "second run appended its own log line" test "$(wc -l < "$PT/good/train-log.txt")" -eq 2
+
+  echo "selftest: a line whose tree has release-assets.yaml leaves the archive and SHA256SUMS to CI"
+  st_fixture ciassets ciassets
+  st_run ciassets
+  st_probe "report-only: two fewer actions (no archive, no SHA256SUMS)" ciassets 0 "REPORT DONE: 6 actions would run"
+  st_probe "it says CI builds them" ciassets 0 "built from the tag by release-assets.yaml"
+  st_run ciassets --go
+  st_probe "--go exits 0 with six actions" ciassets 0 "DONE. v0.8.2 is cut: 6 actions"
+  st_probe "it names the next check" ciassets 0 "NEXT: release-assets.yaml attaches tockmox-0.8.2.tar.gz"
+  st_assert "no archive built locally" bash -c "[ ! -e $PT/ciassets/dist ]"
+  st_assert "release created with the gate report and its signature only" bash -c "python3 -I -c 'import json,sys; a=sorted(x[\"name\"] for x in json.load(open(sys.argv[1]))[\"assets\"]); sys.exit(0 if a==[\"GATE-REPORT-v0.8.2.md\",\"GATE-REPORT-v0.8.2.md.sig\"] else 1)' $PT/ciassets/release.json"
+  st_run ciassets --go
+  st_probe "second --go skips every step" ciassets 0 "DONE. v0.8.2 is cut: 0 actions"
 
   if [ "$FAILS" = 0 ]; then echo "train-morning --selftest: PASSED"; exit 0; fi
   echo "train-morning --selftest: FAILED"; exit 1

@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The Release's archive, its SHA256SUMS and the archive's build provenance,
+# made here rather than on the maintainer's machine (RELEASING.md, Checksums).
+#
+# WHY HERE. A provenance statement says which workflow built an artifact from
+# which commit. It is true only for an artifact this workflow built: the
+# archive used to be made on a Mac, and the same `git archive` gzips to
+# different bytes there (the tar inside is identical; the compressor is not),
+# so CI could not vouch for it. Now CI builds it, from the signed tag, and
+# signs a SLSA provenance statement about exactly those bytes.
+#
+# WHAT IT ATTACHES, a minute or two after the Release is published:
+#   tockmox-X.Y.Z.tar.gz               git archive of the tag, prefix tockmox-X.Y.Z/
+#   SHA256SUMS                         its checksum, the file docs/deployment/verify.md checks
+#   tockmox-X.Y.Z.tar.gz.intoto.jsonl  a Sigstore bundle carrying the in-toto SLSA
+#                                      provenance statement; verify with
+#                                      `gh attestation verify tockmox-X.Y.Z.tar.gz --repo tockmox/tockmox`
+#                                      (add `--bundle <that file>` to use the copy on the Release)
+# The gate report and its signature stay the maintainer's; this job never sees a key.
+#
+# WHAT IT REFUSES, before building anything: a tag that is not vX.Y.Z, a tag
+# that does not verify against .gitsigners (an unsigned tag, or one signed by
+# another key; it does not catch a .gitsigners edited in the same tag, which is
+# what SECURITY.md's published fingerprint is for), and a Release that already
+# carries some of these files. All three already there is a success with
+# nothing to do. If a run fails after attaching some of them, delete those
+# from the Release and re-run the job; never upload a replacement by hand.
+#
+# Runs only for tags whose tree holds this file, because a release event runs
+# the workflow as it is at the tagged commit. tools/train-morning.sh checks
+# the same thing: a release line without this file builds the archive locally,
+# as before.
+
+name: release-assets
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-assets-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  assets:
+    name: Archive, checksum and provenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write       # attach the three files to the Release
+      id-token: write       # sign the provenance (Sigstore, keyless, this run's identity)
+      attestations: write   # record it in the repository's attestations
+    env:
+      TAG: ${{ github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      - name: the tag is vX.Y.Z and verifies against .gitsigners
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::$TAG is not a vX.Y.Z tag"; exit 1; }
+          # the annotated tag object itself, so verify-tag has a signature to read
+          git fetch -q --no-tags --depth=1 --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          [ "$(git cat-file -t "$TAG")" = tag ] || { echo "::error::$TAG is a lightweight tag: no signature"; exit 1; }
+          [ "$(git rev-parse HEAD)" = "$(git rev-parse "$TAG^{commit}")" ] || { echo "::error::checkout is not $TAG"; exit 1; }
+          git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=.gitsigners verify-tag "$TAG"
+
+      - name: the Release does not already carry some of the files
+        id: have
+        run: |
+          VER="${TAG#v}"
+          names="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          n=0
+          for f in "tockmox-$VER.tar.gz" SHA256SUMS "tockmox-$VER.tar.gz.intoto.jsonl"; do
+            if grep -Fqx -- "$f" <<<"$names"; then echo "on the Release already: $f"; n=$((n + 1)); fi
+          done
+          if [ "$n" -eq 3 ]; then echo "all three already attached; nothing to do"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if [ "$n" -gt 0 ]; then
+            echo "::error::$n of the three files are already on the Release. Delete them from the Release and re-run this job; this workflow does not overwrite an asset."
+            exit 1
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: build the archive and SHA256SUMS from the tag
+        id: build
+        if: steps.have.outputs.skip == 'false'
+        run: |
+          VER="${TAG#v}"
+          mkdir -p dist
+          git archive --format=tar.gz --prefix="tockmox-$VER/" -o "dist/tockmox-$VER.tar.gz" "$TAG"
+          (cd dist && sha256sum "tockmox-$VER.tar.gz" > SHA256SUMS && sha256sum -c SHA256SUMS)
+          # grep without -q: an early exit under pipefail would fail the pipe on tar's SIGPIPE
+          tar -tzf "dist/tockmox-$VER.tar.gz" | grep -Fx -- "tockmox-$VER/CHANGELOG.md" >/dev/null \
+            || { echo "::error::the archive has no tockmox-$VER/CHANGELOG.md"; exit 1; }
+          echo "archive=dist/tockmox-$VER.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: sign its build provenance
+        id: attest
+        if: steps.have.outputs.skip == 'false'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.build.outputs.archive }}
+
+      - name: the provenance verifies, then attach all three
+        if: steps.have.outputs.skip == 'false'
+        env:
+          ARCHIVE: ${{ steps.build.outputs.archive }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp "$BUNDLE" "$ARCHIVE.intoto.jsonl"
+          gh attestation verify "$ARCHIVE" --bundle "$ARCHIVE.intoto.jsonl" --repo "$GITHUB_REPOSITORY"
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" "$ARCHIVE" dist/SHA256SUMS "$ARCHIVE.intoto.jsonl"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'
