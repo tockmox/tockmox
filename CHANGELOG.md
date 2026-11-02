@@ -7,6 +7,107 @@ Breaking changes come first in their release, in their own section, each with
 the action required beneath it. Entries are bullets: what changed and what it
 costs you, with the reasoning in the documentation rather than here.
 
+## [0.8.3] ... 2026-11-02
+
+A patch release of dependency updates, carried for the cert-manager security
+fix. To upgrade from 0.8.2, change the nine `targetRevision` pins to `v0.8.3`
+and push. Nothing else is required.
+
+### What taking this patch costs
+
+- **Hand actions:** none beyond the nine `targetRevision` pins.
+- **Rollback:** a revision swap, for every layer. Authentik moves from 2026.8.4
+  to 2026.8.5 and applies no database migration (its `django_migrations` table
+  held the same 777 rows before and after the upgrade), and no other bundled
+  application with a database moved. Upgrading directly from 0.8.0 also crosses
+  0.8.1's application updates (Authentik, LiteLLM, Open WebUI), which roll back
+  only by restoring their databases: take the pre-upgrade backup that
+  [upgrade.md](docs/deployment/upgrade.md) describes.
+- **Images:** eight references in `images.txt` move, listed under Component
+  versions; the count stays at 44, and the SBOM changes only in those versions
+  and the Tockmox version it names.
+- **Contract:** no `stable` values key moved, and no immutable field differs
+  between the 0.8.2 and 0.8.3 renders.
+- **Air-gap:** the static image-redirect check passed on 2026-11-02. An
+  air-gapped install was not exercised for this release.
+
+### Security
+
+- **cert-manager v1.21.3** removes trust in the compromised eMudhra CA (the
+  "emSign ECC Root CA - G3" root is gone from its images, and Go 1.26.10 makes
+  `crypto/x509` refuse chains through the compromised intermediates). It also
+  stops the controller copying a private key from a Secret the Certificate does
+  not own: the next private key is now always written under a generated name.
+  An ACME renewal loop is fixed, and Go and dependencies are updated for
+  reported vulnerabilities. Upstream says all users should upgrade.
+- Authentik 2026.8.5 carries the same certificate-related dependency update,
+  with four small fixes of its own.
+- The documentation build's pinned `certifi` and `Markdown` move to their
+  latest patches; the `Markdown` patch sanitizes attribute names in two
+  extensions. This applies to building the documentation site from source.
+
+### Component versions
+
+- authentik (chart and `ghcr.io/goauthentik/server`) 2026.8.4 -> 2026.8.5
+- cert-manager (chart and the four `quay.io/jetstack/cert-manager-*` images)
+  v1.21.2 -> v1.21.3
+- argo-workflows chart 2.0.13 -> 2.0.14 (`quay.io/argoproj/argocli` and
+  `workflow-controller` v4.1.5 -> v4.1.6)
+- prometheus-blackbox-exporter chart 11.20.0 -> 11.20.2
+  (`quay.io/prometheus/blackbox-exporter` v0.29.0 -> v0.29.1)
+- prometheus-operator-crds chart 32.0.1 -> 32.0.2
+- `caronc/apprise` 2.0.1 -> 2.0.2 (off by default)
+- Documentation build: certifi 2026.10.19 -> 2026.10.23, Markdown 3.11.1 ->
+  3.11.2, platformdirs 4.13.0 -> 4.13.5
+- Tockmox's own components (the Tockmox UI, the Security Posture Probe) did not
+  change.
+
+### Changed
+
+- RELEASING.md requires a Component versions list in every release's notes,
+  as in this section.
+
+### How this release was tested
+
+- **Upgrade from 0.8.2**, on a single-node k3s lab restored to the state
+  recorded at 0.8.2's release, with a 5,001-row checksum table in each of its
+  two CloudNativePG databases: the nine revision pins and nothing else. All nine
+  layers were Synced and Healthy on the candidate within about 80 seconds of
+  Argo CD reading the new pins, with no retries and no hand action. Both
+  checksums read byte-identical afterwards, every volume claim stayed bound to
+  the same volume, every sealed secret still decrypted, no Longhorn volume
+  shrank, the identity PostgreSQL did not restart, and every identity blueprint
+  was applied. All eight moved images ran with no restarts, and a certificate
+  forced to re-issue on cert-manager v1.21.3 was Ready again in five seconds.
+- **Fresh install** of the candidate, on the same lab holding only k3s, Argo CD
+  and Sealed Secrets: one `root.yaml` applied, every Application Synced and
+  Healthy five minutes later with no hand action (Argo CD's own retries only).
+  On that install: an on-demand database backup, a restore drill that restored
+  the database from the object store into a scratch cluster and found 99
+  tables, every identity blueprint applied, and a test alert delivered to the
+  ntfy server.
+- The static checks on the candidate, including the comparison of the 0.8.2 and
+  0.8.3 renders for immutable fields (193 objects, none flagged), the values
+  contract against 0.8.2 (62 stable keys, none moved), and the documented
+  installation paths run against a live cluster.
+
+### Known issues
+
+- LiteLLM's database migration Job still logs a `Read-only file system` error
+  from `prisma generate` after the migrations have applied; the Job completes.
+
+### Not tested for this release
+
+- Upgrading from 0.8.0 or 0.8.1 straight to 0.8.3. 0.8.2 measured the upgrade
+  from 0.8.0, and this patch changes no chart template and applied no Authentik
+  migration on the measured upgrade, but that path was not run for this
+  release.
+- An air-gapped install.
+- An alert reaching a phone: the test alert was read on the ntfy server, not on
+  a subscribed client.
+- A rollback from 0.8.3 to 0.8.2.
+- Anything multi-node: the lab is a single node.
+
 ## [0.8.2] ... 2026-10-25
 
 A patch release: two fixes to how the identity layer applies Authentik
@@ -269,6 +370,7 @@ on what hardware, and what has not: [project-status.md](docs/project-status.md).
   by default.
 
 [Unreleased]: https://github.com/tockmox/tockmox/compare/v0.8.2...main
+[0.8.3]: https://github.com/tockmox/tockmox/releases/tag/v0.8.3
 [0.8.2]: https://github.com/tockmox/tockmox/releases/tag/v0.8.2
 [0.8.1]: https://github.com/tockmox/tockmox/releases/tag/v0.8.1
 [0.8.0]: https://github.com/tockmox/tockmox/releases/tag/v0.8.0
