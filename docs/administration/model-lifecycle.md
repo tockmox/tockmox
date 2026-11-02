@@ -494,6 +494,36 @@ modelLifecycle:
       githubApp: {appId: 123456}          # its key in the Secret secrets.githubAppKey (key private-key.pem)
 ```
 
+On a site whose repository is in the **built-in forge** (`site.forge: built-in`),
+`bootstrap-forge` has already given the watcher the forge's change bot: a Secret
+`tockmox-forge-change-bot` in the AI namespace whose `token` opens changes and
+cannot approve them. Point the opener at the forge's in-cluster address (plain
+http is accepted for a Forgejo at a `*.svc.cluster.local` address and nowhere
+else) and let the pod through to it:
+
+```yaml
+modelLifecycle:
+  watch:
+    pullRequests:
+      enabled: true
+      forge: forgejo
+      apiUrl: http://tockmox-forge-http.tockmox-forge.svc.cluster.local:3000/api/v1
+      repo: tockmox/site
+      valuesPath: site/values/models.yaml
+    secrets:
+      forgeToken: tockmox-forge-change-bot
+    egress:
+      extra:
+        - to:
+            - namespaceSelector:
+                matchLabels: {kubernetes.io/metadata.name: tockmox-forge}
+              podSelector:
+                matchLabels: {app.kubernetes.io/instance: tockmox-forge}
+          ports: [{port: 3000, protocol: TCP}]
+```
+
+The forge's own NetworkPolicy already admits the watcher's pods.
+
 It renders one CronJob with **no Kubernetes credentials** and a NetworkPolicy of
 its own: no ingress at all; egress to DNS, and to HTTPS on the internet with
 every private, shared, link-local and loopback range excepted, so it reaches the

@@ -207,10 +207,28 @@ def test_promotion_reads_verdicts_from_the_repo_and_an_unreadable_one_blocks_it(
 
 @pytest.mark.parametrize("kind,api,repo,match", [("gitlab", "https://x", "o/r", "github or forgejo"),
                                                  ("github", "http://api.github.com", "o/r", "https"),
-                                                 ("github", "https://api.github.com", "o/r/../x", "owner/name")])
+                                                 ("github", "https://api.github.com", "o/r/../x", "owner/name"),
+                                                 # plain http: only a Forgejo at an in-cluster Service address (TM-1336)
+                                                 ("github", "http://tockmox-forge-http.tockmox-forge.svc.cluster.local:3000/api/v1", "o/r", "https"),
+                                                 ("forgejo", "http://forgejo.example/api/v1", "o/r", "https"),
+                                                 ("forgejo", "http://svc.cluster.local/api/v1", "o/r", "https"),
+                                                 ("forgejo", "http://x.svc.cluster.local.evil.example/api/v1", "o/r", "https"),
+                                                 ("forgejo", "http://10.43.0.10:3000/api/v1", "o/r", "https")])
 def test_forge_config_is_refused(kind, api, repo, match):
     with pytest.raises(po.Refused, match=match):
         po.Forge(kind, api, repo, "t")
+
+
+def test_the_built_in_forge_is_reached_at_its_in_cluster_address_over_http():
+    seen = []
+
+    def h(req):
+        seen.append((req.url.scheme, req.url.host, req.headers.get("authorization")))
+        return httpx.Response(200, json={"content": "", "sha": "s"})
+    api = "http://tockmox-forge-http.tockmox-forge.svc.cluster.local:3000/api/v1"
+    forge = po.Forge("forgejo", api, "tockmox/site", "tok", transport=httpx.MockTransport(h))
+    forge.read_file(PATH, "main")
+    assert seen == [("http", "tockmox-forge-http.tockmox-forge.svc.cluster.local", "token tok")]
 
 
 def test_a_redirect_is_not_followed():

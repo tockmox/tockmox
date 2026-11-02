@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Sourced by run.sh. Groups F1-F17: install/bootstrap-forge.sh (TM-1335, TM-1337).
+# Sourced by run.sh. Groups F1-F24: install/bootstrap-forge.sh (TM-1335, TM-1337, TM-1336).
 #
 # HERMETIC, and deliberately narrow: every case here is a REFUSAL, and the
 # assertion that matters in each is that the refusal came before any write to a
@@ -108,6 +108,7 @@ assert_artifact "F10 ... writes nothing to the cluster and no kit" "fs_writes; [
 FG="$FS/gen-built-in"; mkdir -p "$FG"
 sed 's|^  name: ci-interactive|  name: ci-interactive\n  forge: built-in|' "$PARITY_CFG" > "$FG/tockmox.yaml"
 run_config "$FG" --config tockmox.yaml --no-cluster
+cp "$WORK/cfg-out.txt" "$FG/cfg-out.txt"
 assert_artifact "F11 site.forge: built-in generates cleanly" "echo $CONFIG_STATUS" "0"
 assert_artifact "F11 ... with no placeholder left anywhere" \
   "{ grep -rl PLACEHOLDER_SITE_REPO_URL '$FG/tockmox-site' || true; } | wc -l | tr -d ' '" "0"
@@ -117,6 +118,12 @@ assert_artifact "F11 ... and the observability layer turns on the off-site copy'
   "python3 -c 'import yaml,sys; print(yaml.safe_load(open(sys.argv[1]))[\"siteForge\"][\"enabled\"])' '$FG/tockmox-site/site/values/observability.yaml'" "True"
 assert_artifact "F11 the external route carries no siteForge key" \
   "grep -c '^siteForge:' '$SITE_C/tockmox-site/site/values/observability.yaml' || true" "0"
+assert_artifact "F11 ... the identity layer turns on the forge's sign-in (TM-1336)" \
+  "python3 -c 'import yaml,sys; print(yaml.safe_load(open(sys.argv[1]))[\"sso\"][\"apps\"][\"forge\"][\"enabled\"])' '$FG/tockmox-site/site/values/identity.yaml'" "True"
+assert_artifact "F11 ... and its next steps end with connecting it" \
+  "grep -c 'bootstrap-forge --site .* --connect-sign-in' '$FG/cfg-out.txt'" "1"
+assert_artifact "F11 the external route does not turn the forge's sign-in on" \
+  "grep -c 'forge:' '$SITE_C/tockmox-site/site/values/identity.yaml' || true" "0"
 
 # F12-F16. The off-site copy's flags are refused before any cluster write.
 os_run() { fs_run --site "$D/site" --kit-out "$D/kits/k" --passphrase-file "$D/inputs/pass" --sealing-key-backup "$D/inputs/seal.enc" "${FS_OK[@]}" "$@"; }
@@ -154,3 +161,63 @@ os_run --offsite-s3-endpoint https://s3.example.com --offsite-s3-bucket site-cop
 assert_artifact "F17 a dry run names the off-site copy it would make" \
   "echo $FS_STATUS; grep -c 'off-site copy (bucket) to https://s3.example.com/site-copy/lab/site' '$D/out/stdout'" "$(printf '0\n1')"
 assert_artifact "F17 ... and writes nothing to the cluster" "fs_writes" "0"
+
+# F18-F23. Sign-in through Authentik (TM-1336). Everything it needs comes from the
+# site, so a contradiction or a missing domain is refused before the cluster is touched.
+fs_case f18
+fs_run --site "$D/site" --connect-sign-in --no-sign-in "${FS_OK[@]}"
+assert_artifact "F18 --connect-sign-in with --no-sign-in is refused" \
+  "echo $FS_STATUS; fs_err | grep -c 'contradict each other'" "$(printf '1\n1')"
+assert_artifact "F18 ... before any write to the cluster" "fs_writes" "0"
+
+fs_case f19; rm -f "$D/site/bootstrap/applications/tockmox-identity.yaml"
+fs_run --site "$D/site" --connect-sign-in "${FS_OK[@]}"
+assert_artifact "F19 --connect-sign-in on a site without the identity layer is refused" \
+  "echo $FS_STATUS; fs_err | grep -c 'no Authentik to connect the forge to'" "$(printf '1\n1')"
+
+fs_case f20
+sed 's/^  internalDomain: .*/  internalDomain: ""/' "$D/site/site/values/global.yaml" > "$D/g" && mv "$D/g" "$D/site/site/values/global.yaml"
+fs_run --site "$D/site" --kit-out "$D/kits/k" --passphrase-file "$D/inputs/pass" --sealing-key-backup "$D/inputs/seal.enc" "${FS_OK[@]}"
+assert_artifact "F20 sign-in with no internalDomain is refused, naming the key" \
+  "echo $FS_STATUS; fs_err | grep -c 'global.internalDomain is empty'" "$(printf '1\n1')"
+assert_artifact "F20 ... before any write to the cluster" "fs_writes" "0"
+
+fs_case f21
+fs_run --site "$D/site" --kit-out "$D/kits/k" --passphrase-file "$D/inputs/pass" --sealing-key-backup "$D/inputs/seal.enc" --forge-host 'forge;rm' "${FS_OK[@]}"
+assert_artifact "F21 a forge host that is not a host name is refused" \
+  "echo $FS_STATUS; fs_err | grep -c 'is not a host name'" "$(printf '1\n1')"
+fs_case f21b
+fs_run --site "$D/site" --kit-out "$D/kits/k" --passphrase-file "$D/inputs/pass" --sealing-key-backup "$D/inputs/seal.enc" --admin-group 'admins"}' "${FS_OK[@]}"
+assert_artifact "F21 an admin group that could break the forge's group map is refused" \
+  "echo $FS_STATUS; fs_err | grep -c -- '--admin-group must be'" "$(printf '1\n1')"
+
+# F22. A dry run names the browser address, Authentik and the mapping, and writes nothing.
+fs_case f22
+DOM="$(sed -n 's/^  internalDomain: *//p' "$D/site/site/values/global.yaml" | tr -d '"')"
+fs_run --site "$D/site" --kit-out "$D/kits/k" --passphrase-file "$D/inputs/pass" --sealing-key-backup "$D/inputs/seal.enc" --dry-run "${FS_OK[@]}"
+assert_artifact "F22 a dry run derives forge.<internalDomain> and maps the admin group to approvers" \
+  "echo $FS_STATUS; grep -c \"sign-in .*forge.$DOM/ through Authentik at auth.$DOM; tockmox-admins -> team approvers\" '$D/out/stdout'" "$(printf '0\n1')"
+assert_artifact "F22 ... warns that this site's identity values do not turn the forge on" \
+  "grep -c 'does not turn on sso.apps.forge' '$D/out/stderr' '$D/out/stdout' | awk -F: '{s+=\$2} END {print s}'" "1"
+assert_artifact "F22 ... and writes nothing to the cluster" "fs_writes" "0"
+fs_case f22b
+fs_run --site "$D/site" --kit-out "$D/kits/k" --passphrase-file "$D/inputs/pass" --sealing-key-backup "$D/inputs/seal.enc" --no-sign-in --dry-run "${FS_OK[@]}"
+assert_artifact "F22 --no-sign-in plans a forge that answers only in the cluster" \
+  "echo $FS_STATUS; grep -c 'sign-in     none (--no-sign-in)' '$D/out/stdout'" "$(printf '0\n1')"
+
+# F23. --connect-sign-in needs neither the kit nor its encryption: a dry run plans it.
+fs_case f23
+fs_run --site "$D/site" --connect-sign-in --dry-run "${FS_OK[@]}"
+assert_artifact "F23 --connect-sign-in plans without a kit" \
+  "echo $FS_STATUS; grep -c \"add or update the forge's sign-in source 'authentik'\" '$D/out/stdout'" "$(printf '0\n1')"
+assert_artifact "F23 ... and writes nothing to the cluster" "fs_writes" "0"
+
+# F24. --no-sign-in on a site whose identity values turn the forge's application on:
+# its blueprint would read a client secret nobody wrote, and Authentik would apply none
+# of its blueprints. Refused, naming the key, before the cluster is touched.
+fs_case f24
+printf 'sso:\n  apps:\n    forge:\n      enabled: true\n' >> "$D/site/site/values/identity.yaml"
+fs_run --site "$D/site" --kit-out "$D/kits/k" --passphrase-file "$D/inputs/pass" --sealing-key-backup "$D/inputs/seal.enc" --no-sign-in "${FS_OK[@]}"
+assert_artifact "F24 --no-sign-in with sso.apps.forge on is refused, naming the key" \
+  "echo $FS_STATUS; fs_err | grep -c 'Set sso.apps.forge.enabled: false'" "$(printf '1\n1')"
+assert_artifact "F24 ... before any write to the cluster" "fs_writes" "0"

@@ -578,6 +578,26 @@ sso:
       access: admin
       host: ""            # same value as tockmoxUi.ingress.host in the AI layer
       subMode: ""
+    # The built-in site forge (TM-1336, experimental), for a site whose
+    # repository lives in the forge Tockmox installs (site.forge: built-in;
+    # the generator turns this on for you). People sign in to the forge
+    # through Authentik and are registered on first sign-in; the admin group
+    # above becomes the forge's `approvers` team, the only people whose
+    # approval merges a change to the site. OFF by default for the same
+    # reason as tockmoxUi: its client secret is FORGE_CLIENT_SECRET in a
+    # `tockmox-sso-forge` Secret in THIS namespace, which
+    # `tockmox-install.sh bootstrap-forge` writes (with the forge's own copy)
+    # before Argo CD installs this layer. Turn it on without that Secret and
+    # every blueprint stops applying. Admins only by default: the forge's
+    # pages are the advanced route, and approving belongs to the admin group.
+    # The host must equal the forge's (bootstrap-forge --forge-host).
+    # No clientId key: bootstrap-forge creates the forge's side as `tockmox-forge`,
+    # and the two must agree.
+    forge:
+      enabled: false
+      access: admin
+      host: ""            # empty derives forge.<internalDomain>
+      subMode: ""
   # FORWARD-AUTH CONSOLES (TM-0425): consoles with NO sign-in of their own,
   # put behind Authentik by its embedded outpost instead of each speaking OIDC.
   # Each one turned on here renders, in its own blueprint file entry:
@@ -725,6 +745,12 @@ authentik:
       # tools/mint-secrets.sh --with-tockmox-ui writes both halves.
       - secretRef:
           name: tockmox-sso-tockmox-ui
+          optional: true
+      # FORGE_CLIENT_SECRET for sso.apps.forge (TM-1336). Written by
+      # bootstrap-forge, never sealed into the site repository: the forge
+      # holds that repository, so its own sign-in secret cannot come from it.
+      - secretRef:
+          name: tockmox-sso-forge
           optional: true
   blueprints:
     configMaps:

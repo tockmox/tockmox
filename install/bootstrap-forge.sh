@@ -28,17 +28,18 @@
 #      installer's own port-forward enters through the kubelet, which the policy
 #      does not see.
 #   3. create the organisation `tockmox`, the private repository `tockmox/site`,
-#      and two machine users: `tockmox-argocd` (read) and `tockmox-changes`
-#      (opens changes, cannot approve them)
+#      and the machine users: `tockmox-argocd` (read), `tockmox-changes` (opens
+#      changes, cannot approve them) and `tockmox-offsite` (reads main for the copy)
 #   4. push the site directory to it as `main`
 #   5. protect `main`: no direct pushes, one approval from the `approvers` team
-#      (TM-1336 maps the console's admin group onto that team). The forge's ADMIN
+#      (the console's admin group, mapped at sign-in; see SIGN-IN). The forge's ADMIN
 #      can still force-merge past the rule: Forgejo 15 has no admin-override block
 #      (measured 2026-10-31 on 15.0.11; the Gitea field is silently ignored). That
 #      is the detect-not-prevent boundary the spec states, and why no service but
 #      this installer holds the admin credential.
-#   6. give ArgoCD its read credential as a repository Secret, and the console's
-#      change identity as a Secret in the forge namespace
+#   6. give ArgoCD its read credential as a repository Secret, the console's
+#      change identity as a Secret in the forge namespace, and the same bot's
+#      token to the model watcher as a Secret in the AI layer's namespace
 #   6b. with an off-site destination (optional): a CronJob that copies main every
 #      minute (a git bundle to an S3-compatible bucket) or verifies the forge's push
 #      mirror (a git remote), and the first copy written and read back before this
@@ -55,6 +56,37 @@
 #        === forge-admin                  (user, then password, one per line)
 #        === sealed-secrets.key.enc (base64)   (your bootstrap-secrets export, as is)
 #        === end                          (a kit without it was cut short)
+#
+# SIGN-IN (TM-1336). People sign in to the forge through Authentik and are registered
+# at their first sign-in; Forgejo's OIDC group mapping puts members of the console's
+# admin group (tockmox-admins) in the `approvers` team, and takes them out again at
+# a sign-in where the group is gone. Nobody is ever made a forge ADMIN that way: the
+# admin can merge past the rule, so the admin stays one credential in one Secret.
+# Two halves, because the forge exists before Authentik does:
+#   this run      gives the forge a browser address (an Ingress at forge.<internalDomain>,
+#                 TLS from the platform's CA when global.certIssuer is set), makes it
+#                 trust that CA for its own calls to Authentik, admits Traefik through
+#                 the fence, and mints the OIDC client secret into BOTH namespaces: the
+#                 forge's (`tockmox-forge-oidc`) and the identity layer's
+#                 (`tockmox-sso-forge`, FORGE_CLIENT_SECRET, which Authentik's blueprint
+#                 for sso.apps.forge reads). Never sealed into the site repository: the
+#                 forge holds that repository, so its own sign-in cannot come from it.
+#   --connect-sign-in, once tockmox-identity is Healthy: adds the sign-in source
+#                 `authentik` to the forge. Forgejo refuses a source whose discovery
+#                 address does not answer (measured on 15.0.11: "Non-success code for
+#                 Discovery URL: 404"), and the chart's own `gitea.oauth` runs that same
+#                 check in an init container on EVERY start, which would make the forge
+#                 unable to start whenever Authentik is down. So the source is added once,
+#                 here, into the forge's database; a forge that later starts with Authentik
+#                 unreachable logs a warning, starts, and signs people in again as soon as
+#                 Authentik answers, with no restart (measured on the lab, 2026-11-02).
+#                 This run tries it at the end too, so a re-run on a finished install needs
+#                 nothing else.
+# The browser offers ONLY Authentik: the username-and-password form is off
+# (ENABLE_INTERNAL_SIGNIN=false), so the forge's admin has no web sign-in at all.
+# Accounts are never LINKED: an Authentik user whose name equals a forge user's (a
+# machine user, the admin) is refused at sign-in (ACCOUNT_LINKING=disabled; measured:
+# "CreateUser: user already exists"), never signed in as that user.
 #
 # THE IN-CLUSTER ADDRESS IS THE INTERFACE. Every Application the generator wrote
 # for a built-in-forge site names
@@ -75,8 +107,11 @@
 # so it is never written), and a trap removes it on every exit path.
 #
 # WHAT THIS DOES NOT DO (yet, each its own card): the nightly forge dump (TM-1337);
-# rebuild and forge repair (TM-1338); Authentik sign-in and the
-# approvers mapping (TM-1336); upgrades (TM-1342). Proven on one single-node k3s
+# rebuild and forge repair (TM-1338); approving in the console as yourself (TM-1339);
+# upgrades (TM-1342). Taking someone OUT of the admin group takes them out of
+# `approvers` only at their next forge sign-in, and with sso.apps.forge.access: admin
+# (the default) that sign-in is refused, so it never happens: until a reconciler
+# exists, remove them from the team by hand as well (docs/administration/identity.md). Proven on one single-node k3s
 # lab cluster only; nothing here has been run against a multi-node cluster.
 # ============================================================================
 set -euo pipefail
@@ -96,6 +131,8 @@ BOT_CHANGE="tockmox-changes"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BOT_OFFSITE="tockmox-offsite"   # reads main for the off-site copy; nothing else
 APPROVERS_TEAM="approvers"
+SSO_SOURCE="authentik"         # the sign-in source's name; the identity layer's redirect URI names it
+SSO_CLIENT_ID="tockmox-forge"  # sso.apps.forge.clientId in the identity layer
 KIT_MARKER="# tockmox-recovery-kit v1"
 PBKDF2_ITER=600000
 
@@ -119,6 +156,7 @@ repository in it, pushes your site, gives ArgoCD its read credential, and writes
 the encrypted recovery kit.
 
   tockmox-install.sh bootstrap-forge --site DIR --kit-out FILE (--age-recipient R | --passphrase-file F) [options]
+  tockmox-install.sh bootstrap-forge --site DIR --connect-sign-in [--context ...]   (once tockmox-identity is Healthy)
 
   --site DIR             the generated site repository (site.forge: built-in)
   --context NAME         kubectl context (default: the current one)
@@ -149,6 +187,20 @@ the encrypted recovery kit.
                               (protect its main from force pushes)
   --offsite-git-credentials F two lines: the user, then a token that can push
 
+ Sign-in through Authentik (on when the site has the identity layer)
+  --connect-sign-in      add the forge's sign-in source now. Run it once tockmox-identity
+                         is Healthy; it needs neither the kit nor the off-site flags.
+                         The full run tries it at its end as well
+  --forge-host HOST      the forge's browser address (default forge.<internalDomain>;
+                         must equal sso.apps.forge.host in the identity layer if set)
+  --admin-group G        the group whose members become approvers (default tockmox-admins,
+                         the identity layer's sso.adminGroup)
+  --identity-namespace NS  where Authentik runs (default tockmox-authentik)
+  --platform-namespace NS  where Traefik runs, admitted through the fence (default tockmox-platform)
+  --auth-host HOST       Authentik's address (default auth.<internalDomain>; set it if the
+                         identity layer's ingress.apps.authentik.host is overridden)
+  --no-sign-in           no sign-in, no Ingress: the forge answers only in the cluster
+
  Forge
   --namespace NS         default ${FORGE_NS_DEFAULT} (the in-cluster address names it;
                          change it only if you also change every Application)
@@ -158,6 +210,8 @@ the encrypted recovery kit.
   --storage-class SC     for the forge's volume (default: the cluster default)
   --argocd-namespace NS  default argocd
   --ai-namespace NS      where tockmox-actions and the model watcher run (default tockmox-ai)
+  --replace-argocd-credential  replace an ArgoCD tockmox-site-repo Secret that names another
+                         repository (refused without this: ArgoCD would lose that repository)
   --wait-seconds N       how long to wait for the forge (default 300)
 
   --dry-run              show the plan; change nothing
@@ -172,6 +226,8 @@ FORGE_NS="$FORGE_NS_DEFAULT"; CHART_REF="$CHART_REF_DEFAULT"; CHART_VERSION="$CH
 OS_S3_ENDPOINT=""; OS_S3_BUCKET=""; OS_S3_PREFIX=""; OS_S3_REGION="us-east-1"; OS_S3_CREDS=""; OS_S3_CA=""
 OS_GIT_URL=""; OS_GIT_CREDS=""
 IMAGE_REGISTRY=""; STORAGE_CLASS=""; ARGO_NS="argocd"; AI_NS="tockmox-ai"; WAIT_SECONDS=300; DRY_RUN=false
+CONNECT_ONLY=false; NO_SIGN_IN=false; REPLACE_ARGO_CRED=false; FORGE_HOST=""; ADMIN_GROUP="tockmox-admins"
+IDENTITY_NS="tockmox-authentik"; PLATFORM_NS="tockmox-platform"; AUTH_HOST=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -201,6 +257,14 @@ while [[ $# -gt 0 ]]; do
     --offsite-git) OS_GIT_URL="${2:?--offsite-git needs a URL}"; shift 2 ;;
     --offsite-git-credentials) OS_GIT_CREDS="${2:?--offsite-git-credentials needs a file}"; shift 2 ;;
     --wait-seconds) WAIT_SECONDS="${2:?--wait-seconds needs a number}"; shift 2 ;;
+    --connect-sign-in) CONNECT_ONLY=true; shift ;;
+    --replace-argocd-credential) REPLACE_ARGO_CRED=true; shift ;;
+    --no-sign-in) NO_SIGN_IN=true; shift ;;
+    --forge-host) FORGE_HOST="${2:?--forge-host needs a host name}"; shift 2 ;;
+    --admin-group) ADMIN_GROUP="${2:?--admin-group needs a group name}"; shift 2 ;;
+    --identity-namespace) IDENTITY_NS="${2:?--identity-namespace needs a name}"; shift 2 ;;
+    --platform-namespace) PLATFORM_NS="${2:?--platform-namespace needs a name}"; shift 2 ;;
+    --auth-host) AUTH_HOST="${2:?--auth-host needs a host name}"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage; die "unknown argument: $1" ;;
@@ -249,8 +313,60 @@ grep -rqsF "$REPO_URL" "$SITE/bootstrap/root.yaml" || die "bootstrap/root.yaml d
          $REPO_URL
        Was the site generated with site.forge: built-in, and with this --namespace?"
 
+# ---- sign-in: everything it needs comes from the site, and is refused here if it cannot
+NS_RE='^[a-z0-9]([a-z0-9-]*[a-z0-9])?$'
+HOST_RE='^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$'
+gval() {  # KEY -> its value in the site's global.yaml (two-space indent, quotes and comment stripped)
+  sed -n "s/^  $1: *//p" "$SITE/site/values/global.yaml" 2>/dev/null | head -1 | sed 's/ #.*$//' | tr -d "\"'" | tr -d '[:space:]'
+}
+INTERNAL_DOMAIN="$(gval internalDomain)"; CERT_ISSUER="$(gval certIssuer)"
+case "$CERT_ISSUER" in null|"~") CERT_ISSUER="" ;; esac
+case "$INTERNAL_DOMAIN" in null|"~") INTERNAL_DOMAIN="" ;; esac
+[[ -z "$CERT_ISSUER" || "$CERT_ISSUER" =~ $NS_RE ]] || die "global.certIssuer in the site is not an issuer name: '$CERT_ISSUER'"
+# forge_sso_on: does the site's identity layer turn on the forge's application?
+forge_sso_on() {
+  grep -Eqs '^ *forge: *\{ *enabled: *true' "$SITE/site/values/identity.yaml" \
+    || grep -A1 -Es '^    forge:' "$SITE/site/values/identity.yaml" 2>/dev/null | grep -Eq 'enabled: *true'
+}
+SIGN_IN=true; SIGN_IN_WHY=""
+if $NO_SIGN_IN; then
+  $CONNECT_ONLY && die "--connect-sign-in and --no-sign-in contradict each other"
+  # The identity layer's blueprint for the forge reads FORGE_CLIENT_SECRET, which only a
+  # run WITH sign-in writes; an !Env with nothing behind it stops Authentik applying
+  # EVERY blueprint, so every console's sign-in would go with it.
+  forge_sso_on && die "--no-sign-in, but site/values/identity.yaml turns on sso.apps.forge. Its blueprint needs the
+       client secret only a run with sign-in writes, and without it Authentik applies none of its blueprints.
+       Set sso.apps.forge.enabled: false in that file (or drop --no-sign-in). Nothing was touched."
+  SIGN_IN=false; SIGN_IN_WHY="--no-sign-in"
+elif [[ ! -f "$SITE/bootstrap/applications/tockmox-identity.yaml" ]]; then
+  $CONNECT_ONLY && die "the site has no identity layer (no bootstrap/applications/tockmox-identity.yaml),
+       so there is no Authentik to connect the forge to"
+  SIGN_IN=false; SIGN_IN_WHY="the site has no identity layer"
+fi
+FORGE_URL="http://${RELEASE}-http.${FORGE_NS}.svc.cluster.local:3000/"; SCHEME=""; DISCOVERY=""
+if $SIGN_IN; then
+  [[ -n "$INTERNAL_DOMAIN" ]] || die "global.internalDomain is empty in $SITE/site/values/global.yaml.
+       The forge's address (forge.<internalDomain>) and Authentik's come from it. Set it, or run with --no-sign-in."
+  FORGE_HOST="${FORGE_HOST:-forge.${INTERNAL_DOMAIN}}"; AUTH_HOST="${AUTH_HOST:-auth.${INTERNAL_DOMAIN}}"
+  [[ "$FORGE_HOST" =~ $HOST_RE ]] || die "--forge-host is not a host name: '$FORGE_HOST'"
+  [[ "$AUTH_HOST" =~ $HOST_RE ]] || die "--auth-host is not a host name: '$AUTH_HOST'"
+  [[ "$ADMIN_GROUP" =~ ^[A-Za-z0-9._-]+$ ]] || die "--admin-group must be letters, digits, '.', '_' or '-': '$ADMIN_GROUP'"
+  [[ "$IDENTITY_NS" =~ $NS_RE ]] || die "--identity-namespace is not a namespace name: '$IDENTITY_NS'"
+  [[ "$PLATFORM_NS" =~ $NS_RE ]] || die "--platform-namespace is not a namespace name: '$PLATFORM_NS'"
+  # global.certIssuer set means the platform's CA signs the forge's certificate, and the
+  # forge must trust that CA to reach Authentik; empty means plain http on both.
+  SCHEME=http; [[ -n "$CERT_ISSUER" ]] && SCHEME=https
+  FORGE_URL="${SCHEME}://${FORGE_HOST}/"
+  DISCOVERY="${SCHEME}://${AUTH_HOST}/application/o/${SSO_CLIENT_ID}/.well-known/openid-configuration"
+  # The identity layer's blueprint only exists when the site turned it on.
+  forge_sso_on \
+    || warn "site/values/identity.yaml does not turn on sso.apps.forge. Without it Authentik has no application
+       for the forge and --connect-sign-in will be refused (a site generated with site.forge: built-in has it)."
+fi
+
 # ---- the kit: choose the encryption BEFORE anything is created
-ENC=""
+ENC=""; OFFSITE=""; OFFSITE_WHERE=""
+if ! $CONNECT_ONLY; then
 if [[ -n "$AGE_RECIPIENT" ]]; then ENC="age"
 elif [[ -n "$PASSFILE" ]]; then
   ENC="openssl"
@@ -314,6 +430,7 @@ case "$OFFSITE" in
 esac
 OFFSITE_SCRIPT="$HERE/forge-offsite-copy.sh"
 [[ -z "$OFFSITE" || -r "$OFFSITE_SCRIPT" ]] || die "missing $OFFSITE_SCRIPT, which the off-site CronJob runs"
+fi  # not --connect-sign-in
 
 # ---- tools
 need() { command -v "$1" >/dev/null 2>&1 || die "missing: $1 ... $2"; }
@@ -338,12 +455,28 @@ info "API server  ${SERVER:-unknown}"
 info "site        ${SITE}"
 info "forge       release ${RELEASE} in namespace ${FORGE_NS}, chart ${CHART_REF} ${CHART_VERSION}"
 info "repository  ${REPO_URL}"
-info "kit         ${KIT_OUT} (${ENC})"
+if $SIGN_IN; then
+  info "sign-in     ${FORGE_URL} through Authentik at ${AUTH_HOST}; ${ADMIN_GROUP} -> team ${APPROVERS_TEAM}"
+else
+  info "sign-in     none (${SIGN_IN_WHY}); the forge answers only in the cluster"
+fi
+$CONNECT_ONLY || info "kit         ${KIT_OUT} (${ENC})"
+if $DRY_RUN && $CONNECT_ONLY; then
+  say "Plan (dry run, nothing changed)"
+  info "check the forge's certificate and Authentik's discovery address (${DISCOVERY}),"
+  info "then add or update the forge's sign-in source '${SSO_SOURCE}'"
+  exit 0
+fi
 if $DRY_RUN; then
   say "Plan (dry run, nothing changed)"
   info "install or adopt the forge; fence its port to ArgoCD (${ARGO_NS}), the AI layer (${AI_NS}) and its own namespace"
   info "create ${ORG}/${REPO}, ${BOT_READ}, ${BOT_CHANGE}, team ${APPROVERS_TEAM}"
   info "push ${SITE} as main; protect main; write the ArgoCD repository Secret in ${ARGO_NS}"
+  info "give the model watcher the change bot's token: Secret ${RELEASE}-change-bot in ${AI_NS}"
+  if $SIGN_IN; then
+    info "an Ingress at ${FORGE_HOST}; the OIDC client secret in ${FORGE_NS} and ${IDENTITY_NS};"
+    info "Traefik (${PLATFORM_NS}) admitted through the fence; the sign-in source once Authentik answers"
+  fi
   if [[ -n "$OFFSITE" ]]; then info "off-site copy (${OFFSITE}) to ${OFFSITE_WHERE}: a CronJob every minute, then the first copy written and read back"
   else info "no off-site copy (the console will raise No off-site copy until one is set)"; fi
   info "write the recovery kit to ${KIT_OUT}"
@@ -372,6 +505,26 @@ kubectl "${K[@]}" get namespace >/dev/null 2>&1 || die "cannot reach the cluster
 kubectl "${K[@]}" get namespace "$ARGO_NS" >/dev/null 2>&1 || die "namespace $ARGO_NS does not exist. Install ArgoCD first
        (fresh-install.md section 6), or name its namespace with --argocd-namespace."
 ok "cluster reachable, ArgoCD namespace present"
+# ArgoCD's repository credential is ONE Secret, tockmox-site-repo, and the external
+# route's docs name the same one. Overwriting a credential for another repository cuts
+# ArgoCD off from it at its next refresh, and the old token is gone for good (it did
+# exactly that to a lab cluster on 2026-11-02, TM-1336). So a credential for any other
+# URL stops the run here, before anything is written, unless you say to replace it.
+if ! $CONNECT_ONLY; then
+  CUR_ERR="$(kubectl "${K[@]}" -n "$ARGO_NS" get secret tockmox-site-repo -o name 2>&1 >/dev/null)" \
+    || [[ "$CUR_ERR" == *NotFound* ]] \
+    || die "cannot read ${ARGO_NS}/tockmox-site-repo to check what it holds: ${CUR_ERR}. Nothing was touched."
+  CUR_URL="$(kubectl "${K[@]}" -n "$ARGO_NS" get secret tockmox-site-repo -o jsonpath='{.data.url}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  if [[ -n "$CUR_URL" && "$CUR_URL" != "$REPO_URL" ]]; then
+    $REPLACE_ARGO_CRED || die "${ARGO_NS}/tockmox-site-repo already holds ArgoCD's credential for
+         ${CUR_URL}
+       This run would replace it with the built-in forge's, and ArgoCD would lose that repository at its next
+       refresh. Nothing was touched. If this cluster is moving its site to the built-in forge, keep a copy of
+       that Secret and re-run with --replace-argocd-credential; to try the forge beside a running site, use
+       another cluster."
+    warn "replacing ArgoCD's credential for ${CUR_URL} (--replace-argocd-credential)"
+  fi
+fi
 
 TMPD="$(mktemp -d)"
 gen() {  # n -> n random alphanumerics, or the run stops
@@ -394,22 +547,123 @@ secret_apply() {
 }
 
 # ---------------------------------------------------------------- install
+# connect_sign_in: add (or update) the forge's sign-in source. Defined here because
+# --connect-sign-in runs it on its own, after the context is confirmed, and the full
+# run tries it once at its end. Returns non-zero, with the forge's own words, when
+# Authentik does not answer yet; never dies, so the full run can finish without it.
+connect_sign_in() {
+  local pod started ca_made list id out
+  pod="$(kubectl "${K[@]}" -n "$FORGE_NS" get pod -l "app.kubernetes.io/instance=$RELEASE" \
+    --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+  [[ -n "$pod" ]] || { warn "the forge has no running pod"; return 1; }
+  if [[ "$SCHEME" == https ]]; then
+    # The forge trusts the platform's CA through the ca.crt cert-manager writes beside
+    # its certificate. That Secret appears only once the platform layer runs, after this
+    # forge started; a process that started without it has no CA to trust, so restart once.
+    ca_made="$(kubectl "${K[@]}" -n "$FORGE_NS" get secret "${RELEASE}-tls" -o jsonpath='{.metadata.creationTimestamp}' 2>/dev/null || true)"
+    if [[ -z "$ca_made" ]] || [[ -z "$(kubectl "${K[@]}" -n "$FORGE_NS" get secret "${RELEASE}-tls" -o jsonpath='{.data.ca\.crt}' 2>/dev/null)" ]]; then
+      warn "the forge's certificate (${FORGE_NS}/${RELEASE}-tls, with ca.crt) does not exist yet: cert-manager issues it once
+       tockmox-platform is Healthy. Sign-in waits for it."
+      return 1
+    fi
+    started="$(kubectl "${K[@]}" -n "$FORGE_NS" get pod "$pod" -o jsonpath='{.status.startTime}' 2>/dev/null || true)"
+    if [[ -z "$started" || "$started" < "$ca_made" ]]; then
+      info "the forge started before its certificate existed; restarting it once so it trusts the CA"
+      if ! kubectl "${K[@]}" -n "$FORGE_NS" rollout restart deploy/"$RELEASE" >/dev/null \
+         || ! kubectl "${K[@]}" -n "$FORGE_NS" rollout status deploy/"$RELEASE" --timeout="${WAIT_SECONDS}s" >/dev/null; then
+        warn "the forge did not come back within ${WAIT_SECONDS}s after the restart"; return 1
+      fi
+    fi
+  fi
+  # A list that FAILED must not read as "no source yet": that would add a second one.
+  list="$(kubectl "${K[@]}" -n "$FORGE_NS" exec deploy/"$RELEASE" -c forgejo -- forgejo admin auth list --vertical-bars 2>/dev/null)" \
+    || { warn "could not list the forge's sign-in sources (is its pod restarting?)"; return 1; }
+  printf '%s\n' "$list" | grep -q '^ID' || { warn "the forge's list of sign-in sources did not read as one"; return 1; }
+  id="$(printf '%s\n' "$list" | awk -F'|' -v n="$SSO_SOURCE" '{for (i=1;i<=NF;i++) gsub(/^[ \t]+|[ \t]+$/, "", $i)} $2==n && $3=="OAuth2" {print $1}')"
+  [[ "$(printf '%s' "$id" | grep -c .)" -le 1 ]] || { warn "the forge has more than one sign-in source named ${SSO_SOURCE}; remove the extra one first"; return 1; }
+  # The client secret goes in on stdin, so it is on no command line on this workstation
+  # (inside the pod it is the forgejo CLI's argument while that runs; the CLI takes it
+  # no other way). The map names the ADMIN group's members `approvers`, never forge admins.
+  local -a flags=(--name "$SSO_SOURCE" --provider openidConnect --key "$SSO_CLIENT_ID"
+    --auto-discover-url "$DISCOVERY" --scopes "openid email profile"
+    --group-claim-name groups --group-team-map "{\"${ADMIN_GROUP}\":{\"${ORG}\":[\"${APPROVERS_TEAM}\"]}}"
+    --group-team-map-removal)
+  [[ -z "$id" ]] || flags=(--id "$id" "${flags[@]}")
+  # shellcheck disable=SC2016  # $0, $S and $@ are the pod's shell's, not this one's
+  out="$(kubectl "${K[@]}" -n "$FORGE_NS" get secret "${RELEASE}-oidc" -o jsonpath='{.data.secret}' | base64 -d \
+    | kubectl "${K[@]}" -n "$FORGE_NS" exec -i deploy/"$RELEASE" -c forgejo -- \
+        sh -c 'IFS= read -r S; exec forgejo admin auth "$0" --secret "$S" "$@"' \
+        "$([[ -z "$id" ]] && echo add-oauth || echo update-oauth)" "${flags[@]}" 2>&1)" || {
+    warn "the forge refused the sign-in source: $(printf '%s' "$out" | grep -E 'error|Error|Failed' | grep -v '\[I\]' | tail -1)"
+    info "Authentik answers at ${DISCOVERY} only once tockmox-identity is Healthy with sso.apps.forge.enabled: true."
+    return 1
+  }
+  list="$(kubectl "${K[@]}" -n "$FORGE_NS" exec deploy/"$RELEASE" -c forgejo -- forgejo admin auth list --vertical-bars 2>/dev/null || true)"
+  printf '%s\n' "$list" | awk -F'|' -v n="$SSO_SOURCE" '{for (i=1;i<=NF;i++) gsub(/^[ \t]+|[ \t]+$/, "", $i)} $2==n && $3=="OAuth2" && $4=="true" {f=1} END {exit !f}' \
+    || { warn "the sign-in source '${SSO_SOURCE}' does not read back as an enabled OAuth2 source"; return 1; }
+  ok "sign-in: ${FORGE_URL} signs people in through Authentik; ${ADMIN_GROUP} members join ${APPROVERS_TEAM} at sign-in"
+}
+
+if $CONNECT_ONLY; then
+  say "Connecting the forge's sign-in"
+  helm --kube-context "$CTX" -n "$FORGE_NS" status "$RELEASE" >/dev/null 2>&1 \
+    || die "release ${RELEASE} is not installed in ${FORGE_NS}. Run bootstrap-forge without --connect-sign-in first."
+  kubectl "${K[@]}" -n "$FORGE_NS" get secret "${RELEASE}-oidc" >/dev/null 2>&1 \
+    || die "${FORGE_NS}/${RELEASE}-oidc does not exist: this forge was installed without sign-in.
+       Re-run bootstrap-forge without --connect-sign-in (and without --no-sign-in) to give it one."
+  connect_sign_in || die "sign-in is not connected yet. Nothing else was changed; run this again when the above is fixed."
+  exit 0
+fi
+
 say "The forge"
+# The OIDC client secret, one value in two Secrets: the forge's, which the sign-in
+# source is created from, and the identity layer's, which Authentik's blueprint reads
+# (FORGE_CLIENT_SECRET). An existing value is kept, from either side, so a re-run or a
+# forge repair never leaves Authentik holding a different one than the forge.
+if $SIGN_IN; then
+  OIDC_SECRET="$(kubectl "${K[@]}" -n "$FORGE_NS" get secret "${RELEASE}-oidc" -o jsonpath='{.data.secret}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  ID_SECRET="$(kubectl "${K[@]}" -n "$IDENTITY_NS" get secret tockmox-sso-forge -o jsonpath='{.data.FORGE_CLIENT_SECRET}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  OIDC_SECRET="${OIDC_SECRET:-${ID_SECRET:-$(gen 48)}}"
+  for ns in "$FORGE_NS" "$IDENTITY_NS"; do
+    kubectl "${K[@]}" get namespace "$ns" >/dev/null 2>&1 || kubectl "${K[@]}" create namespace "$ns" >/dev/null
+  done
+  secret_apply "$FORGE_NS" "${RELEASE}-oidc" "" key="$SSO_CLIENT_ID" secret="$OIDC_SECRET"
+  secret_apply "$IDENTITY_NS" tockmox-sso-forge "" FORGE_CLIENT_SECRET="$OIDC_SECRET"
+  if [[ -n "$ID_SECRET" && "$ID_SECRET" != "$OIDC_SECRET" ]]; then
+    warn "${IDENTITY_NS}/tockmox-sso-forge held a different client secret and now holds the forge's. Authentik reads it
+       at start: restart its server and worker, then delete and re-sync the tockmox-app-forge blueprint, or the
+       forge's sign-in is refused (invalid_client)."
+  fi
+  ok "OIDC client ${SSO_CLIENT_ID}: one secret in ${FORGE_NS}/${RELEASE}-oidc and ${IDENTITY_NS}/tockmox-sso-forge"
+fi
+
+# The release's values are this script's: an adopted release is upgraded to the values
+# this run writes, so a value set by hand on it is reverted (set it here instead).
 if helm --kube-context "$CTX" -n "$FORGE_NS" status "$RELEASE" >/dev/null 2>&1; then
-  ok "release ${RELEASE} already installed in ${FORGE_NS}; adopting it (no reinstall)"
+  ADOPT=true
+  ok "release ${RELEASE} already installed in ${FORGE_NS}; adopting it (its data and admin are kept)"
   ADMIN_USER="$(kubectl "${K[@]}" -n "$FORGE_NS" get secret "${RELEASE}-admin" -o jsonpath='{.data.username}' 2>/dev/null | base64 -d || true)"
   ADMIN_PASS="$(kubectl "${K[@]}" -n "$FORGE_NS" get secret "${RELEASE}-admin" -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || true)"
   [[ -n "$ADMIN_USER" && -n "$ADMIN_PASS" ]] || die "release ${RELEASE} exists but its admin Secret ${RELEASE}-admin does not.
        It was not installed by this script. Refusing to guess at a forge it did not create."
+  # A volume's class cannot change in place: keep the one it was made with unless told.
+  # (gitea-shared-storage is the chart's own claim name, persistence.claimName.)
+  if [[ -z "$STORAGE_CLASS" ]]; then
+    STORAGE_CLASS="$(kubectl "${K[@]}" -n "$FORGE_NS" get pvc gitea-shared-storage -o jsonpath='{.spec.storageClassName}' 2>/dev/null || true)"
+  fi
 else
+  ADOPT=false
   kubectl "${K[@]}" get namespace "$FORGE_NS" >/dev/null 2>&1 \
     || kubectl "${K[@]}" create namespace "$FORGE_NS" >/dev/null
   ADMIN_USER="tockmox-admin"; ADMIN_PASS="$(gen 32)"
   # The admin credential lives in ONE Secret the chart reads (gitea.admin.existingSecret).
   secret_apply "$FORGE_NS" "${RELEASE}-admin" "" username="$ADMIN_USER" password="$ADMIN_PASS"
-  # No secret in this file: the admin password comes from the Secret above, and the
-  # forge generates its own SECRET_KEY and tokens on first start (the kit exports them).
-  cat > "$TMPD/values.yaml" <<VALUES
+fi
+# No secret in this file: the admin password comes from the Secret above, the OIDC
+# client secret is added by connect_sign_in from its own Secret, and the forge generates
+# its own SECRET_KEY and tokens on first start (the kit exports them).
+{
+cat <<VALUES
 fullnameOverride: ${RELEASE}
 replicaCount: 1
 strategy:
@@ -425,8 +679,6 @@ service:
     port: 3000
   ssh:
     type: ClusterIP
-ingress:
-  enabled: false
 postgresql:
   enabled: false
 postgresql-ha:
@@ -439,6 +691,51 @@ valkey:
   enabled: false
 valkey-cluster:
   enabled: false
+VALUES
+if $SIGN_IN; then
+  # The browser address. The class is the cluster default (the platform layer's Traefik
+  # marks itself default); the Ingress waits harmlessly until Traefik and cert-manager exist.
+  cat <<VALUES
+ingress:
+  enabled: true
+$( [[ "$SCHEME" == https ]] && printf '  annotations:\n    cert-manager.io/cluster-issuer: %s\n' "$CERT_ISSUER" )
+  hosts:
+    - host: ${FORGE_HOST}
+      paths:
+        - path: /
+          pathType: Prefix
+$( [[ "$SCHEME" == https ]] && printf '  tls:\n    - secretName: %s-tls\n      hosts: [%s]\n' "$RELEASE" "$FORGE_HOST" )
+VALUES
+  if [[ "$SCHEME" == https ]]; then
+    # Trust: ONLY ca.crt from the certificate's Secret (never its key), as an extra
+    # directory beside the image's own store. Go reads every directory in SSL_CERT_DIR.
+    # Optional, so the forge starts before cert-manager exists; connect_sign_in restarts
+    # it once when the CA arrived after it started.
+    cat <<VALUES
+extraVolumes:
+  - name: tockmox-ca
+    secret:
+      secretName: ${RELEASE}-tls
+      optional: true
+      items: [{key: ca.crt, path: tockmox-ca.crt}]
+extraContainerVolumeMounts:
+  - name: tockmox-ca
+    mountPath: /etc/tockmox-ca
+    readOnly: true
+extraInitVolumeMounts:
+  - name: tockmox-ca
+    mountPath: /etc/tockmox-ca
+    readOnly: true
+deployment:
+  env:
+    - name: SSL_CERT_DIR
+      value: /etc/ssl/certs:/etc/tockmox-ca
+VALUES
+  fi
+else
+  printf 'ingress:\n  enabled: false\n'
+fi
+cat <<VALUES
 gitea:
   admin:
     existingSecret: ${RELEASE}-admin
@@ -457,8 +754,8 @@ gitea:
       ISSUE_INDEXER_TYPE: bleve
       REPO_INDEXER_ENABLED: false
     server:
-      ROOT_URL: http://${RELEASE}-http.${FORGE_NS}.svc.cluster.local:3000/
-      DOMAIN: ${RELEASE}-http.${FORGE_NS}.svc.cluster.local
+      ROOT_URL: ${FORGE_URL}
+      DOMAIN: $( $SIGN_IN && printf '%s' "$FORGE_HOST" || printf '%s' "${RELEASE}-http.${FORGE_NS}.svc.cluster.local" )
       DISABLE_SSH: true
       START_SSH_SERVER: false
       OFFLINE_MODE: true
@@ -468,9 +765,26 @@ gitea:
       ENABLE_PUSH_CREATE_USER: false
       ENABLE_PUSH_CREATE_ORG: false
     service:
+      # No local sign-up. Sign-in registers people through Authentik (measured on
+      # 15.0.11: auto-registration works with registration disabled).
       DISABLE_REGISTRATION: true
       REQUIRE_SIGNIN_VIEW: true
       DEFAULT_ALLOW_CREATE_ORGANIZATION: false
+      DEFAULT_USER_VISIBILITY: private
+      # No username-and-password form in the browser, so the forge's admin (who can
+      # merge past the rule) has no web sign-in at forge.<internalDomain>. The API's
+      # basic auth, which this script uses through its port-forward, still works
+      # (measured on 15.0.11). Off only with sign-in: without it the form is the only way in.
+      ENABLE_INTERNAL_SIGNIN: $( $SIGN_IN && printf false || printf true )
+    oauth2_client:
+      ENABLE_AUTO_REGISTRATION: true
+      # Never sign someone in as an existing forge user because the names match.
+      ACCOUNT_LINKING: disabled
+      USERNAME: nickname
+      UPDATE_AVATAR: false
+    openid:
+      ENABLE_OPENID_SIGNIN: false
+      ENABLE_OPENID_SIGNUP: false
     security:
       INSTALL_LOCK: true
     actions:
@@ -482,13 +796,13 @@ gitea:
     api:
       ENABLE_SWAGGER: false
 VALUES
-  info "installing chart ${CHART_REF} ${CHART_VERSION} (this pulls the forge image)"
-  helm --kube-context "$CTX" upgrade --install "$RELEASE" "$CHART_REF" --version "$CHART_VERSION" \
-    -n "$FORGE_NS" -f "$TMPD/values.yaml" --wait --timeout "${WAIT_SECONDS}s" >/dev/null \
-    || die "helm install of the forge failed or did not become ready within ${WAIT_SECONDS}s.
+} > "$TMPD/values.yaml"
+info "$($ADOPT && echo upgrading || echo installing) chart ${CHART_REF} ${CHART_VERSION} (an install pulls the forge image)"
+helm --kube-context "$CTX" upgrade --install "$RELEASE" "$CHART_REF" --version "$CHART_VERSION" \
+  -n "$FORGE_NS" -f "$TMPD/values.yaml" --wait --timeout "${WAIT_SECONDS}s" >/dev/null \
+  || die "helm $($ADOPT && echo upgrade || echo install) of the forge failed or did not become ready within ${WAIT_SECONDS}s.
        Look at: kubectl --context $CTX -n $FORGE_NS get pods,events"
-  ok "forge installed: release ${RELEASE} in ${FORGE_NS}"
-fi
+ok "forge $($ADOPT && echo upgraded || echo installed): release ${RELEASE} in ${FORGE_NS}"
 kubectl "${K[@]}" -n "$FORGE_NS" rollout status deploy/"$RELEASE" --timeout="${WAIT_SECONDS}s" >/dev/null \
   || die "the forge did not become ready within ${WAIT_SECONDS}s"
 
@@ -501,6 +815,14 @@ kubectl "${K[@]}" -n "$FORGE_NS" rollout status deploy/"$RELEASE" --timeout="${W
 # labelled pod in `default` are refused; the forge's own probes keep it Ready. A
 # pod that has just started can be refused for its first ~10 s while kube-router
 # adds it to the policy's sets; ArgoCD retries.
+# With sign-in, Traefik too: it serves the Ingress at the forge's browser address.
+TRAEFIK_PEER=""
+if $SIGN_IN; then
+  TRAEFIK_PEER="        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: ${PLATFORM_NS} }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: traefik }"
+fi
 kubectl "${K[@]}" apply -f - >/dev/null <<NETPOL || die "could not apply the forge's NetworkPolicy"
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -526,10 +848,11 @@ spec:
             matchExpressions:
               - { key: app.kubernetes.io/name, operator: In, values: [tockmox-actions, tockmox-model-watch] }
         - podSelector: {}
+${TRAEFIK_PEER}
       ports:
         - { port: 3000, protocol: TCP }
 NETPOL
-ok "forge fenced: port 3000 admits ArgoCD's repo-server, tockmox-actions, the model watcher and ${FORGE_NS}'s own pods"
+ok "forge fenced: port 3000 admits ArgoCD's repo-server, tockmox-actions, the model watcher$($SIGN_IN && printf ', Traefik') and ${FORGE_NS}'s own pods"
 
 # ---------------------------------------------------------------- reach it
 # A port-forward this script starts and stops. The address ArgoCD uses is the
@@ -644,29 +967,35 @@ mktoken() {  # user scope...
   local u="$1"; shift
   local scopes; scopes="$(printf '"%s",' "$@")"; scopes="[${scopes%,}]"
   local body
-  body="$(SUDO_AS="$u" api POST "/users/$u/tokens" "{\"name\":\"bootstrap-$STAMP\",\"scopes\":$scopes}")"
+  body="$(SUDO_AS="$u" api POST "/users/$u/tokens" "{\"name\":\"${TOKEN_NAME:-bootstrap-$STAMP}\",\"scopes\":$scopes}")"
   expect "minting a token for $u" 201
   printf '%s' "$body" | json_field sha1
 }
 # A re-run mints fresh tokens and then revokes this script's older ones, so tokens
 # never pile up and the one ArgoCD holds is always the newest. Only names this
-# script writes (bootstrap-<stamp>) are touched; a token someone made by hand stays.
-revoke_old() {  # user keep-name
-  local u="$1" keep="$2" n
+# script writes (bootstrap-<stamp>, bootstrap-watch-<stamp>) are touched; a token
+# someone made by hand stays.
+revoke_old() {  # user keep-name...
+  local u="$1" n; shift
   local names
-  names="$(SUDO_AS="$u" api GET "/users/$u/tokens" | grep -o '"name":"bootstrap-[0-9TZ]*"' | cut -d'"' -f4 || true)"
+  names="$(SUDO_AS="$u" api GET "/users/$u/tokens" | grep -oE '"name":"bootstrap-([a-z]+-)?[0-9TZ]*"' | cut -d'"' -f4 || true)"
   for n in $names; do
-    [[ "$n" == "$keep" ]] && continue
+    [[ " $* " == *" $n "* ]] && continue
     SUDO_AS="$u" api DELETE "/users/$u/tokens/$n" >/dev/null
     [[ "$(status)" == 204 ]] || warn "could not revoke $u's older token $n (HTTP $(status)); revoke it in the forge"
   done
 }
 TOKEN_READ="$(mktoken "$BOT_READ" read:repository)"
 TOKEN_CHANGE="$(mktoken "$BOT_CHANGE" write:repository write:issue)"
-[[ -n "$TOKEN_READ" && -n "$TOKEN_CHANGE" ]] || die "a token came back empty"
-ok "tokens minted for $BOT_READ (read:repository) and $BOT_CHANGE (write:repository, write:issue)"
-revoke_old "$BOT_READ" "bootstrap-$STAMP"
-revoke_old "$BOT_CHANGE" "bootstrap-$STAMP"
+# The model watcher opens its changes as the same bot, with a token of its own, so
+# either can be revoked without the other.
+TOKEN_WATCH="$(TOKEN_NAME="bootstrap-watch-$STAMP" mktoken "$BOT_CHANGE" write:repository write:issue)"
+[[ -n "$TOKEN_READ" && -n "$TOKEN_CHANGE" && -n "$TOKEN_WATCH" ]] || die "a token came back empty"
+ok "tokens minted for $BOT_READ (read:repository) and $BOT_CHANGE (write:repository, write:issue; one for the console, one for the model watcher)"
+# The older tokens are revoked only once the new ones are in their Secrets (below).
+# Revoking here, as this script first did, left a re-run that stopped in between (a
+# forge whose main had moved past the site's, say) with every Secret holding a revoked
+# token: ArgoCD and the change bot answered 401 (measured on the lab, 2026-11-02).
 
 # ---------------------------------------------------------------- push
 say "Publishing the site"
@@ -729,7 +1058,11 @@ for want in '"enable_push":false' '"required_approvals":1' '"enable_approvals_wh
   printf '%s' "$RULE" | grep "$want" >/dev/null || die "the rule on main does not read back $want: $RULE"
 done
 ok "main: no direct pushes, one approval from team $APPROVERS_TEAM (the forge admin can still override; see the header)"
-info "nobody is in $APPROVERS_TEAM yet; the console's admin group is mapped onto it at sign-in (TM-1336)"
+if $SIGN_IN; then
+  info "members of ${ADMIN_GROUP} join $APPROVERS_TEAM when they sign in to ${FORGE_URL} (after --connect-sign-in)"
+else
+  warn "nobody can join $APPROVERS_TEAM without sign-in (${SIGN_IN_WHY}): add approvers in the forge as its admin"
+fi
 
 # ---------------------------------------------------------------- credentials
 say "ArgoCD's read credential and the console's change identity"
@@ -742,6 +1075,16 @@ secret_apply "$FORGE_NS" "${RELEASE}-change-bot" "" \
   username="$BOT_CHANGE" token="$TOKEN_CHANGE" \
   url="http://${RELEASE}-http.${FORGE_NS}.svc.cluster.local:3000" repository="$ORG/$REPO"
 ok "change identity ${FORGE_NS}/${RELEASE}-change-bot (opens changes; cannot approve them)"
+# The model watcher (modelLifecycle.watch in the AI layer) reads `token` from a Secret
+# in its own namespace; docs/administration/model-lifecycle.md has the values that
+# point it at this forge. The namespace may not exist yet: ArgoCD adopts it.
+kubectl "${K[@]}" get namespace "$AI_NS" >/dev/null 2>&1 || kubectl "${K[@]}" create namespace "$AI_NS" >/dev/null
+secret_apply "$AI_NS" "${RELEASE}-change-bot" "" \
+  username="$BOT_CHANGE" token="$TOKEN_WATCH" \
+  url="http://${RELEASE}-http.${FORGE_NS}.svc.cluster.local:3000" repository="$ORG/$REPO"
+ok "model watcher's identity ${AI_NS}/${RELEASE}-change-bot (the same bot, its own token)"
+revoke_old "$BOT_READ" "bootstrap-$STAMP"
+revoke_old "$BOT_CHANGE" "bootstrap-$STAMP" "bootstrap-watch-$STAMP"
 
 # ---------------------------------------------------------------- off-site copy
 # A CronJob in the forge namespace, every minute, running install/forge-offsite-copy.sh
@@ -757,7 +1100,6 @@ if [[ -n "$OFFSITE" ]]; then
   [[ -n "$IMAGE" ]] || die "cannot read the forge's image from deploy/$RELEASE"
   TOKEN_OFFSITE="$(mktoken "$BOT_OFFSITE" read:repository)"
   [[ -n "$TOKEN_OFFSITE" ]] || die "minting a token for $BOT_OFFSITE returned none"
-  revoke_old "$BOT_OFFSITE" "bootstrap-$STAMP"
   if [[ "$OFFSITE" == bucket ]]; then
     secret_apply "$FORGE_NS" "${RELEASE}-offsite" "" forge-username="$BOT_OFFSITE" forge-token="$TOKEN_OFFSITE" \
       s3-access-key-id="$(sed -n 1p "$OS_S3_CREDS")" s3-secret-access-key="$(sed -n 2p "$OS_S3_CREDS")"
@@ -783,6 +1125,7 @@ if [[ -n "$OFFSITE" ]]; then
     api POST "/repos/$ORG/$REPO/push_mirrors-sync" >/dev/null; expect "starting the first push to $OS_GIT_URL" 200 204
     ok "push mirror: main goes to $OS_GIT_URL on every commit"
   fi
+  revoke_old "$BOT_OFFSITE" "bootstrap-$STAMP"   # only now that its Secret holds the new one
   CA_VOL=""; CA_MOUNT=""; CA_ENV=""
   if [[ -n "$OS_S3_CA" ]]; then
     kubectl "${K[@]}" -n "$FORGE_NS" create configmap "${RELEASE}-offsite-ca" --from-file=ca.crt="$OS_S3_CA" \
@@ -927,6 +1270,16 @@ else
 fi
 [[ -n "$SEAL_BACKUP" ]] || warn "the kit does NOT carry your sealing-key backup (--no-sealing-key-backup). A rebuild needs both."
 
+# ---------------------------------------------------------------- sign-in
+SIGNED_IN=false
+if $SIGN_IN; then
+  say "Sign-in"
+  # On a fresh install Authentik does not exist yet, so this is expected to wait; on a
+  # re-run against a finished install it connects, and nothing else is needed.
+  if connect_sign_in; then SIGNED_IN=true
+  else info "that is expected before the layers are applied; finish with --connect-sign-in (below)"; fi
+fi
+
 # ---------------------------------------------------------------- done
 say "Done"
 ok "the built-in forge holds ${ORG}/${REPO}; ArgoCD reads it at ${REPO_URL}"
@@ -937,4 +1290,8 @@ else
        console says so (No off-site copy) until you add one: re-run with --offsite-s3-* or --offsite-git."
 fi
 info "next: kubectl --context $CTX apply -f $SITE/bootstrap/root.yaml"
+if $SIGN_IN && ! $SIGNED_IN; then
+  info "then, once tockmox-identity is Synced and Healthy, connect the forge's sign-in:"
+  info "  $HERE/tockmox-install.sh bootstrap-forge --site $SITE --context $CTX --connect-sign-in"
+fi
 info "keep the recovery kit somewhere that is not this cluster and not any off-site bucket"

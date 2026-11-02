@@ -82,6 +82,23 @@ costs you, with the reasoning in the documentation rather than here.
   `TockmoxSiteRepositoryNoOffsiteCopy`, which the console's new Site repository
   part can silence. New key: `siteForge` (observability).
 
+- **Experimental: people sign in to the built-in forge through Authentik, and
+  only the admin group's approval merges a change (TM-1336).** `bootstrap-forge`
+  gives the forge a browser address (`forge.<internalDomain>`, TLS from the
+  platform's CA), and `bootstrap-forge --connect-sign-in`, run once
+  `tockmox-identity` is Healthy, adds its sign-in source. People are registered
+  at first sign-in; members of `tockmox-admins` join the forge's `approvers`
+  team, the only approvals the rule on `main` counts. The change bot cannot
+  approve, an Authentik name that matches a forge account is refused rather
+  than linked, and nobody becomes a forge admin through sign-in. Taking someone
+  out of the admin group takes them out of `approvers` only at a forge sign-in
+  Authentik still allows, so for now remove them from the team by hand as well.
+  The model watcher can open its changes as the forge's change bot
+  (`tockmox-forge-change-bot` in the AI namespace; Forgejo at an in-cluster
+  `*.svc.cluster.local` address over plain http). New key:
+  `sso.apps.forge` (identity, off unless the generator turns it on);
+  `site.forge: built-in` sites get it on.
+
 - **The Models page now shows what each hosted model costs: its list price,
   what the gateway spent on it, and how often it was called, and anything it
   cannot source reads unknown, never an estimate (TM-1298).** Each Frontier

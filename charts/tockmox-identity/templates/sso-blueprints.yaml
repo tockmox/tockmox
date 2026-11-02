@@ -357,6 +357,21 @@ post-logout redirect URI, so Sign out lands back on its sign-in page.
 {{- $apps = append $apps (dict "key" "tockmoxui" "title" "Tockmox" "host" ($ui.host | default "") "subMode" ($ui.subMode | default $.Values.sso.subMode | default "") "cid" ($ui.clientId | default "tockmox-ui") "access" ($ui.access | default "admin") "env" "TOCKMOX_UI_CLIENT_SECRET" "hostPrefix" "tockmox" "path" "/auth/callback" "desc" "Platform administration: status, nodes, models and versions." "group" "Infrastructure" "icon" "" "invalidation" "default-invalidation-flow" "logoutPath" "/") }}
 {{- end }}
 {{- /*
+THE BUILT-IN SITE FORGE (TM-1336) joins the list only when `sso.apps.forge.enabled`
+is true, off by default for the tockmoxUi reason above: FORGE_CLIENT_SECRET comes
+from the `tockmox-sso-forge` Secret that `tockmox-install.sh bootstrap-forge`
+writes, and an `!Env` with nothing behind it stops discovery for every blueprint.
+The callback path names the forge's sign-in source, `authentik`, which
+bootstrap-forge creates under exactly that name. Who may APPROVE is not decided
+here: the forge maps this layer's admin group onto its `approvers` team from the
+`groups` claim (the profile scope carries it) at each sign-in. `access` only
+decides who may sign in to the forge at all.
+*/ -}}
+{{- $fg := .Values.sso.apps.forge | default dict }}
+{{- if eq $fg.enabled true }}
+{{- $apps = append $apps (dict "key" "forge" "title" "Site repository" "host" ($fg.host | default "") "subMode" ($fg.subMode | default $.Values.sso.subMode | default "") "cid" "tockmox-forge" "access" ($fg.access | default "admin") "env" "FORGE_CLIENT_SECRET" "hostPrefix" "forge" "path" "/user/oauth2/authentik/callback" "desc" "The site repository in the built-in forge (advanced). Changes are reviewed and approved in the Tockmox console." "group" "Infrastructure" "icon" "") }}
+{{- end }}
+{{- /*
 LINK-ONLY APPLICATIONS (`sso.links.<key>`): a tile that opens a console which
 has no OIDC to attach a provider to. Authentik's Application.provider is
 optional (a nullable one-to-one on the model, and absent from the blueprint
@@ -381,7 +396,7 @@ declining the capability sets `enabled: false` here as well.
 {{- /* Keys whose `tockmox-<key>` slug is already taken by a shipped application
 (the OAuth consoles and the forward-auth consoles): a link with one of these
 keys would overwrite that application's tile. */ -}}
-{{- $oauthKeys := list "grafana" "openwebui" "argo" "tockmoxui" "prometheus" "alertmanager" "longhorn" "traefik" }}
+{{- $oauthKeys := list "grafana" "openwebui" "argo" "tockmoxui" "forge" "prometheus" "alertmanager" "longhorn" "traefik" }}
 {{- $links := list }}
 {{- range $key, $l := (.Values.sso.links | default dict) }}
 {{- if has $key $oauthKeys }}

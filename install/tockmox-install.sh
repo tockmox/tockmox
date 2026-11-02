@@ -821,6 +821,43 @@ addressPool:
 # Both are checked by: ./install/tockmox-install.sh --lint <site path>
 apps: {}
 EOF
+    elif [[ "$l" == "identity" && "$SITE_FORGE" == built-in ]]; then
+      # The built-in forge signs people in through Authentik (TM-1336): this turns on
+      # its application in the identity layer. Its client secret is written into the
+      # identity namespace by bootstrap-forge, before ArgoCD installs this layer.
+      wr "$SITE_PATH/site/values/${l}.yaml" <<EOF
+# Overrides for tockmox-${l}. Globals are inherited from global.yaml.
+# Anything you set here wins.
+# The built-in site forge's sign-in (site.forge: built-in). Members of the
+# admin group become the forge's approvers when they sign in. Its client
+# secret (tockmox-sso-forge) is written by tockmox-install.sh bootstrap-forge.
+sso:
+  apps:
+    forge:
+      enabled: true
+# Feature switches. To enable something, replace the empty map on the last line
+# of this block with your entries, indented under the key.
+#
+# This comment deliberately does NOT quote that line verbatim. It used to, and
+# a scripted edit then matched the text inside this comment before the real
+# key, splitting the comment and hoisting the entries to the top level. What
+# ArgoCD reports for that is a schema error naming the KEY, which sends you
+# looking for a chart bug rather than at the indentation. Cost an hour on
+# 2026-09-11.
+#
+# Two ways to get this wrong, and neither reports an error:
+#   - appending a SECOND "apps:" block lower down. YAML keeps only the LAST
+#     occurrence of a top-level key and silently discards this one.
+#   - leaving "apps:" with nothing under it. That is null, which DELETES this
+#     layer's switch map rather than leaving it at defaults. Most layers then
+#     fail to render; tockmox-ai instead falls every app through to its
+#     capability tier and quietly undoes any component you turned off (until
+#     0.8.0 that switched on the model gateway, which then shipped off, with
+#     no NetworkPolicy over its database). Measured 2026-09-11.
+#
+# Both are checked by: ./install/tockmox-install.sh --lint <site path>
+apps: {}
+EOF
     elif [[ "$l" == "devops" ]]; then
       # Argo Workflows' upstream chart takes the OIDC issuer and redirect URL
       # as plain values it does not template, so the installer derives them
@@ -1145,7 +1182,9 @@ This site lives in the **built-in forge**. Its Applications already name the
 forge's in-cluster address, so there is nothing to replace. Run
 `tockmox-install.sh bootstrap-forge --site <this directory>`: it installs the
 forge, creates the repository, pushes this directory and gives ArgoCD its read
-credential. Then apply `bootstrap/root.yaml`.
+credential. Then apply `bootstrap/root.yaml`. Once `tockmox-identity` is Healthy,
+`tockmox-install.sh bootstrap-forge --site <this directory> --connect-sign-in`
+lets the admin group sign in to the forge and approve changes.
 BI
 else cat <<'EX'
 `bootstrap/root.yaml` and `bootstrap/applications/*.yaml` contain **PLACEHOLDER_SITE_REPO_URL**.
@@ -1276,5 +1315,10 @@ info "5. watch it land: kubectl -n ${ARGO_NS} get applications -w"
 info "6. when tockmox-platform is Synced and Healthy, publish the product docs from this"
 info "   checkout (they are not in any image; the docs site shows a placeholder until then):"
 info "     $0 publish-docs --context YOUR_KUBECONTEXT --config ${CONFIG:-tockmox.yaml} --wait 600"
+if [[ "$SITE_FORGE" == built-in && " ${LAYERS_ON[*]} " == *" identity "* ]]; then
+info "7. when tockmox-identity is Synced and Healthy, connect the forge's sign-in, so the"
+info "   admin group's members can sign in to it and approve changes:"
+info "     $0 bootstrap-forge --site $SITE_PATH --context YOUR_KUBECONTEXT --connect-sign-in"
+fi
 printf '\n'
 ok "installer finished. Nothing was applied to your cluster."
