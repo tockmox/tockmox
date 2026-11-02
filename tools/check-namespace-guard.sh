@@ -41,14 +41,14 @@
 #
 # EXIT 2 IS SKIPPED, the repository's convention: helm, python3, PyYAML or
 # cel-python missing. A partial run is never a pass. CI installs cel-python
-# (`python3 -m pip install cel-python==0.1.5`) in the check-all workflow.
+# (`python3 -m pip install cel-python==0.5.0`) in the check-all workflow.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 
 command -v helm >/dev/null 2>&1 || { echo "check-namespace-guard: helm missing" >&2; exit 2; }
 command -v python3 >/dev/null 2>&1 || { echo "check-namespace-guard: python3 missing" >&2; exit 2; }
 python3 -c 'import yaml' 2>/dev/null || { echo "check-namespace-guard: python3 PyYAML missing" >&2; exit 2; }
-python3 -c 'import celpy' 2>/dev/null || { echo "check-namespace-guard: cel-python missing (python3 -m pip install cel-python==0.1.5)" >&2; exit 2; }
+python3 -c 'import celpy' 2>/dev/null || { echo "check-namespace-guard: cel-python missing (python3 -m pip install cel-python==0.5.0)" >&2; exit 2; }
 
 # Must match dest_ns() in install/tockmox-install.sh (same map as
 # check-pod-security.sh and check-no-ghost-policies.sh).
