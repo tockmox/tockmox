@@ -18,8 +18,7 @@ Local first. Frontier by exception. Built from established infrastructure with i
 
 [![CI](https://github.com/tockmox/tockmox/actions/workflows/ci.yaml/badge.svg)](https://github.com/tockmox/tockmox/actions/workflows/ci.yaml)
 [![Executed docs](https://github.com/tockmox/tockmox/actions/workflows/executed-docs.yaml/badge.svg?branch=main&event=schedule)](https://github.com/tockmox/tockmox/actions/workflows/executed-docs.yaml)
-[![Code: Apache-2.0](https://img.shields.io/badge/code-Apache--2.0-blue.svg)](LICENSE)
-[![Docs: CC BY 4.0](https://img.shields.io/badge/docs-CC%20BY%204.0-blue.svg)](LICENSE-docs)
+[![License: Apache-2.0 code, CC BY 4.0 docs](https://img.shields.io/badge/license-Apache--2.0%20%2F%20CC%20BY%204.0-blue.svg)](#license)
 
 [![Release](https://img.shields.io/github/v/release/tockmox/tockmox?include_prereleases&sort=semver)](https://github.com/tockmox/tockmox/releases)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/tockmox/tockmox/badge)](https://scorecard.dev/viewer/?uri=github.com/tockmox/tockmox)

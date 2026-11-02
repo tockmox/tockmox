@@ -242,7 +242,9 @@ cutoff.
 3. Fast-forward `release-X.Y` to the train head and push. The line never
    carries content the lab did not test.
 4. Create and sign the tag on that commit ("The tag" below), and push it.
-5. Sign the gate report and generate `SHA256SUMS` (both sections below).
+5. Sign the gate report (below). From 0.9 the archive and `SHA256SUMS` are
+   built by CI after step 6 ("Checksums" below); on `release-0.8` the script
+   still generates them here.
 6. Publish the drafted Release with `--verify-tag`, so an unsigned tag cannot be
    created by the Release step.
 
@@ -626,7 +628,40 @@ against the repository.
 ## Checksums, from 0.6.0 onward
 
 `docs/deployment/verify.md` promises that every release publishes a
-`SHA256SUMS`:
+`SHA256SUMS`.
+
+### From 0.9: built by CI, with provenance
+
+When the tagged tree holds `.github/workflows/release-assets.yaml`, publishing
+the Release is the whole step. The workflow runs on the Release's `published`
+event, refuses a tag that is not `vX.Y.Z` or does not verify against
+`.gitsigners`, builds the archive from the tag, and attaches three files:
+
+| Asset | What |
+|---|---|
+| `tockmox-X.Y.Z.tar.gz` | `git archive` of the tag, prefix `tockmox-X.Y.Z/` |
+| `SHA256SUMS` | its checksum |
+| `tockmox-X.Y.Z.tar.gz.intoto.jsonl` | a Sigstore bundle carrying the archive's SLSA build provenance |
+
+Do not build or upload the archive yourself: the workflow refuses a Release
+that already carries any of the three, so a hand-made one stops it rather than
+being overwritten. Confirm all three are on the Release page a few minutes after
+publishing. If the run fails after attaching some, delete those from the Release
+and re-run the job from the Actions tab. Anyone can check the provenance:
+
+```bash
+gh attestation verify tockmox-X.Y.Z.tar.gz --repo tockmox/tockmox
+```
+
+The provenance is why the archive moved off the maintainer's machine: it can
+only describe bytes CI built, and `git archive` on a Mac gzips the identical tar
+to different bytes than a Linux runner does.
+
+### Before 0.9, and on `release-0.8`
+
+A release event runs the workflow as it is at the tagged commit, so a line
+without the file builds the archive by hand (`tools/train-morning.sh` checks the
+candidate's tree and does this for you):
 
 ```bash
 TAG=vX.Y.Z
