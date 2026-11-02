@@ -237,8 +237,8 @@ namespace (`FORGE_CLIENT_SECRET`, which the blueprint reads) and
 does, so the sign-in source is added by a second, short run once this layer is
 Healthy:
 
-```console
-$ ./install/tockmox-install.sh bootstrap-forge --site ./tockmox-site --context YOUR_KUBECONTEXT --connect-sign-in
+```bash
+./install/tockmox-install.sh bootstrap-forge --site ./tockmox-site --context <your-cluster> --connect-sign-in
 ```
 
 What it gives you:
@@ -263,15 +263,16 @@ it and they stay in `approvers`. Remove them from the admin group, then from the
 forge's `tockmox` organisation, which takes them out of every team in it. With
 the forge's API reached through a port-forward and its admin password read from
 `tockmox-forge-admin` (passed to `curl` on a pipe, so it is on no command line);
-`THEIR_FORGE_NAME` is their Authentik username:
+`<their-forge-name>` is their Authentik username:
 
-```console
-$ kubectl --context YOUR_KUBECONTEXT -n tockmox-forge port-forward svc/tockmox-forge-http 3000:3000 >/dev/null &
-$ PASS="$(kubectl --context YOUR_KUBECONTEXT -n tockmox-forge get secret tockmox-forge-admin -o jsonpath='{.data.password}' | base64 -d)"
-$ curl -sS -o /dev/null -w '%{http_code}\n' -K <(printf 'user = "tockmox-admin:%s"\n' "$PASS") \
-    -X DELETE http://127.0.0.1:3000/api/v1/orgs/tockmox/members/THEIR_FORGE_NAME; unset PASS
-204
+```bash
+kubectl --context <your-cluster> -n tockmox-forge port-forward svc/tockmox-forge-http 3000:3000 >/dev/null &
+PASS="$(kubectl --context <your-cluster> -n tockmox-forge get secret tockmox-forge-admin -o jsonpath='{.data.password}' | base64 -d)"
+curl -sS -o /dev/null -w '%{http_code}\n' -K <(printf 'user = "tockmox-admin:%s"\n' "$PASS") \
+  -X DELETE http://127.0.0.1:3000/api/v1/orgs/tockmox/members/<their-forge-name>; unset PASS
 ```
+
+It prints `204`. Stop the port-forward afterwards (`kill %1`, or close the terminal).
 
 ## Tiles for consoles that have no SSO
 

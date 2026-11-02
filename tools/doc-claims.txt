@@ -268,10 +268,11 @@ states: [0-9]+ CI gates
 # 2026-10-28: 462 -> 464, upgrade.md's two blocks in the 0.9.0 section on the LiteLLM migrations hook and the pre-upgrade backup (TM-1196, TM-1054).
 # 2026-10-28: 464 -> 465 and 42 -> 43 pages, administration/namespace-guard.md's one block: the read that the policy and its binding exist (TM-1223).
 # 2026-11-01: 467 -> 469, administration/identity.md's "From the console": the token mint and the admin-group refusal check (TM-1315).
+# 2026-11-02: 469 -> 471, administration/identity.md's "The built-in forge: sign-in and approvers": --connect-sign-in and the approver removal (TM-1336).
 page:   tests/executed-docs/INVENTORY.md
 claim:  fenced bash blocks across
 test:   grep -rhE '^[ \t]*```bash$' docs/ | wc -l | tr -d ' '
-expect: 469
+expect: 471
 states: [0-9]+ fenced bash blocks
 
 # TM-0970, TM-0120 (2026-10-27): two sentences pinned so they cannot be edited
