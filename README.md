@@ -306,7 +306,7 @@ Change one line in your site repository and sync.
 
 ```yaml
 # bootstrap/applications/*.yaml in your site repo
-targetRevision: v0.8.1   ->   v0.8.2
+targetRevision: v0.8.2   ->   v0.8.3
 ```
 
 Your values, secrets and own applications live in a different repository and are
