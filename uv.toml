@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE PYTHON LOCKFILES TAKE NOTHING YOUNGER THAN THREE DAYS.
+#
+# renovate.json5 holds every update for three days (minimumReleaseAge), so an
+# upstream can pull a bad release before a PR for it exists (TM-1197: LiteLLM's
+# pipeline shipped a credential stealer on 2026-10-21). That hold covers only
+# the pins Renovate bumps by name. A lockfile refresh (lockFileMaintenance, and
+# any hand regeneration) re-resolves every transitive package to whatever is
+# newest on PyPI at that moment, which is exactly the window the hold exists to
+# close. This file closes it for both hashed lockfiles
+# (tools/requirements-gates.txt, tockmox-ui/requirements.txt): uv finds it from
+# either directory, for Renovate's runs and a person's alike.
+#
+# WHY HERE AND NOT IN THE LOCKFILE HEADER. Renovate re-runs the command written
+# at the top of each lockfile and refuses any option it does not know;
+# --exclude-newer is one (checked with Renovate 41, 2026-11-02). uv reads this
+# file without anyone passing it.
+#
+# THE COST. A security fix younger than three days cannot enter a lockfile
+# through uv either: the resolve fails rather than taking it. For that case,
+# regenerate by hand with --exclude-newer-package <name>=<date> for that one
+# package and say so in the commit.
+exclude-newer = "P3D"

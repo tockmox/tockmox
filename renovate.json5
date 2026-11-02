@@ -98,11 +98,22 @@
   // and with it refused this manager tracks nothing (PR #144, 2026-11-02).
   // The pip_requirements manager's default pattern also matches both files;
   // the first packageRule keeps it off them.
+  // A pip-compile bump moves only the direct pins in the .in files; everything
+  // they pull in moves only when the whole lockfile is re-resolved. Lock file
+  // maintenance does that once a week, as one PR, in the same Monday window as
+  // everything else (its own default is a narrower 4am window, which the hosted
+  // scan cadence can miss). Scoped to this manager: a Chart.lock refresh buys
+  // nothing and costs an images.txt/SBOM regen. uv.toml at the root holds the
+  // re-resolve to packages at least three days old, the same soak as below.
   "pip-compile": {
     managerFilePatterns: [
       "/^tools/requirements-gates\\.txt$/",
       "/^tockmox-ui/requirements\\.txt$/",
     ],
+    lockFileMaintenance: {
+      enabled: true,
+      schedule: ["before 9am on monday"],
+    },
   },
 
   customManagers: [
@@ -357,6 +368,14 @@
       // the top; they reach operators with the next minor.
       matchBaseBranches: ["release-0.8"],
       matchUpdateTypes: ["major"],
+      enabled: false,
+    },
+    {
+      // No lockfile refresh on the line either: it moves every transitive
+      // Python package at once, which is a minor's worth of change, not a
+      // patch. A fix the line needs arrives as a named pin bump above.
+      matchBaseBranches: ["release-0.8"],
+      matchUpdateTypes: ["lockFileMaintenance"],
       enabled: false,
     },
     {
