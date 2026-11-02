@@ -4,12 +4,12 @@ dependencies:
   version: 0.8.2
 - name: prometheus-blackbox-exporter
   repository: https://prometheus-community.github.io/helm-charts
-  version: 11.20.0
+  version: 11.20.2
 - name: prometheus-snmp-exporter
   repository: https://prometheus-community.github.io/helm-charts
   version: 9.18.1
 - name: prometheus-smartctl-exporter
   repository: https://prometheus-community.github.io/helm-charts
   version: 0.17.1
-digest: sha256:6569c1c8445cb9a789d6f7310701b058927c4bcd4dcea754d0fc1b4f828ae39c
-generated: "2026-10-24T20:52:23.802761711Z"
+digest: sha256:119471e242954215bf7299619d5d3e4228337b25911b426bfd489d1784cd4352
+generated: "2026-11-02T11:02:59.699140382Z"

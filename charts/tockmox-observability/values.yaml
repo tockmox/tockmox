@@ -311,7 +311,7 @@ notifications:
   # while doing it.
   apprise:
     enabled: false
-    image: caronc/apprise:2.0.1     # no "v" from 2.0 on
+    image: caronc/apprise:2.0.2     # no "v" from 2.0 on
     # Secret YOU create, holding one key whose value is a newline-separated
     # list of Apprise URLs. Those URLs contain credentials, which is why this
     # is a Secret and not a value.
