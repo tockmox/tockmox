@@ -329,6 +329,18 @@ Use a real name and a reachable address. Forgot on the last commit:
 force-push. A missing sign-off is the one review comment that is not a
 judgment call.
 
+### Sign-off at merge (the maintainer's App lane)
+
+Some changes reach `main` through the `tockmox-engineer` GitHub App: the
+maintainer's own tooling opens the pull request, and the App authors its
+commits. An App cannot certify the DCO, so the certification is the
+maintainer's, given at merge: he approves the pull request's exact head, and the
+squash commit that lands carries his `Signed-off-by`. CI's sign-off check skips
+the App's commits in a pull request the App opened, and
+`signoff-on-main.yaml` fails any commit that reaches `main` without a sign-off,
+and any App squash without the maintainer's. A commit anyone else pushes onto
+such a branch still needs its own sign-off.
+
 **A red `ci / secrets` is more often a missing sign-off than a leaked
 credential.** The DCO check runs in that job, with gitleaks, because it is the
 only job that checks out with `fetch-depth: 0`. Read which step failed before

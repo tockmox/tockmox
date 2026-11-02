@@ -650,6 +650,8 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Changed
 
+- **The maintainer's App lane signs off at merge.** Changes opened by the `tockmox-engineer` GitHub App carry the maintainer's `Signed-off-by` on the squash that lands, added because he approved that exact head. `ci / secrets` skips the App's own commits in a pull request the App opened, and a new workflow, `signoff-on-main.yaml`, fails any commit that reaches `main` without a sign-off (and any App squash without the maintainer's). CONTRIBUTING.md, "Sign-off at merge".
+
 - **From 0.9 a release's archive and `SHA256SUMS` are built by CI, with signed build provenance.** `.github/workflows/release-assets.yaml` runs when a Release is published: it refuses a tag that does not verify against `.gitsigners`, builds `tockmox-X.Y.Z.tar.gz` from the tag as before, and attaches it with `SHA256SUMS` and `tockmox-X.Y.Z.tar.gz.intoto.jsonl`, a Sigstore bundle carrying the archive's SLSA provenance (`gh attestation verify tockmox-X.Y.Z.tar.gz --repo tockmox/tockmox`). Verifying a release is unchanged: the signed tag first, the checksum for a downloaded archive. `tools/train-morning.sh` leaves both files to CI when the candidate's tree has the workflow, and builds them as before on `release-0.8`. RELEASING.md, "Checksums".
 
 - **The Tockmox UI image installs its Python packages from a hashed lockfile,

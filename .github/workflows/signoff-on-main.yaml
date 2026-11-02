@@ -1,0 +1,77 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Every commit that lands on main by itself (a squash, never a merge commit)
+# carries a DCO sign-off, and a squash the tockmox-engineer App lands carries
+# the maintainer's own. ci.yaml's DCO step checks the commits a pull request
+# adds; this checks what actually reached main, after the fact.
+#
+# WHY BOTH. The maintainer's App lane (CONTRIBUTING.md, "Sign-off at merge"):
+# the App opens a PR with commits it authors, the maintainer approves that exact
+# head, and the GitOps Engineer squash-merges it adding his Signed-off-by. The PR
+# check exempts the App's own commits because the sign-off does not exist until
+# the merge, so the merge is where it has to be proven present.
+#
+# WHAT IT READS. `git rev-list --first-parent --no-merges BEFORE..AFTER`: the
+# commits main gained directly. A merge commit's second parent is a PR's own
+# history, already checked by ci.yaml. Renovate's commits are exempt here as
+# there (a bot cannot certify the DCO), by author address; main takes changes
+# only through a pull request, where the opener was checked.
+#
+# It runs after the push, so it cannot stop one; a red run here is the alarm.
+
+name: signoff-on-main
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  signoff:
+    name: every commit on main is signed off
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: the commits main gained carry a sign-off
+        shell: bash -euo pipefail {0}
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          MAINTAINER: "jmaaks <jeff@maaks.com>"
+          ENGINEER_BOT: "tockmox-engineer"
+        run: |
+          if [[ "$BEFORE" =~ ^0+$ ]] || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            echo "no earlier main in this checkout to compare against; nothing to check"
+            exit 0
+          fi
+          missing=0; n=0
+          for sha in $(git rev-list --first-parent --no-merges "$BEFORE..$AFTER"); do
+            n=$((n + 1))
+            ae="$(git log -1 --format='%ae' "$sha")"
+            body="$(git log -1 --format='%B' "$sha")"
+            line="$(git log -1 --format='%h %s (author %an <%ae>)' "$sha")"
+            if grep -qE '^[0-9]+\+renovate\[bot\]@users\.noreply\.github\.com$' <<<"$ae"; then
+              echo "exempt: $line (Renovate)"
+            elif grep -qE "^[0-9]+\+${ENGINEER_BOT}\[bot\]@users\.noreply\.github\.com$" <<<"$ae"; then
+              if grep -qxF "Signed-off-by: $MAINTAINER" <<<"$body"; then
+                echo "ok: $line (the App's squash, signed off by the maintainer)"
+              else
+                echo "::error::$line: the App landed it without 'Signed-off-by: $MAINTAINER'"
+                missing=1
+              fi
+            elif grep -qiE '^Signed-off-by: .+ <.+@.+>' <<<"$body"; then
+              echo "ok: $line"
+            else
+              echo "::error::$line: no Signed-off-by trailer"
+              missing=1
+            fi
+          done
+          echo "$n commit(s) main gained directly in this push"
+          exit "$missing"
