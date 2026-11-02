@@ -80,11 +80,13 @@ jobs:
         run: |
           "$RUNNER_TEMP/litellm/bin/pip" install --quiet pytest
           "$RUNNER_TEMP/litellm/bin/python" -m pytest -q tests/key-policy/test_key_policy.py
-      - name: the key policy - every bad key write refused by a real proxy, and allowed without it
+      - name: the key policy - the prisma client
         # litellm[proxy] does not install the prisma client (only litellm's extra-proxy extra does); pinned to the
-        # version the local proof ran with, inside litellm's own range (>=0.11.0,<1.0).
+        # version the local proof ran with, inside litellm's own range (>=0.11.0,<1.0). Its own step so its seconds
+        # show apart from the proxy test's (TM-1365): the two together were one 228 s median step.
         run: |
           "$RUNNER_TEMP/litellm/bin/pip" install --quiet "prisma==0.15.0"
           proxy_dir="$("$RUNNER_TEMP/litellm/bin/python" -c 'import litellm, os; print(os.path.join(os.path.dirname(litellm.__file__), "proxy"))')"
           (cd "$proxy_dir" && PATH="$RUNNER_TEMP/litellm/bin:$PATH" "$RUNNER_TEMP/litellm/bin/prisma" generate --schema schema.prisma >/dev/null)
-          bash tests/key-policy/run.sh
+      - name: the key policy - every bad key write refused by a real proxy, and allowed without it
+        run: bash tests/key-policy/run.sh
