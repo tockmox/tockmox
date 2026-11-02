@@ -16,6 +16,6 @@ dependencies:
     repository: "https://prometheus-community.github.io/helm-charts"
     condition: apps.blackbox.enabled,capabilities.observability.enabled
   - name: prometheus-snmp-exporter
-    version: 9.18.2
+    version: 9.19.0
     repository: "https://prometheus-community.github.io/helm-charts"
     condition: apps.snmp.enabled,capabilities.hardwareTelemetry.enabled

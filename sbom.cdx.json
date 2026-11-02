@@ -9,15 +9,15 @@
     },
     {
       "name": "binwiederhier/ntfy",
-      "purl": "pkg:oci/ntfy?repository_url=binwiederhier/ntfy&tag=v2.33.1",
+      "purl": "pkg:oci/ntfy?repository_url=binwiederhier/ntfy&tag=v2.35.0",
       "type": "container",
-      "version": "v2.33.1"
+      "version": "v2.35.0"
     },
     {
       "name": "caronc/apprise",
-      "purl": "pkg:oci/apprise?repository_url=caronc/apprise&tag=2.0.1",
+      "purl": "pkg:oci/apprise?repository_url=caronc/apprise&tag=2.0.2",
       "type": "container",
-      "version": "2.0.1"
+      "version": "2.0.2"
     },
     {
       "name": "docker.io/aquasec/kube-bench",
@@ -27,15 +27,15 @@
     },
     {
       "name": "docker.io/grafana/alloy",
-      "purl": "pkg:oci/alloy?repository_url=docker.io/grafana/alloy&tag=v1.21.1",
+      "purl": "pkg:oci/alloy?repository_url=docker.io/grafana/alloy&tag=v1.21.3",
       "type": "container",
-      "version": "v1.21.1"
+      "version": "v1.21.3"
     },
     {
       "name": "docker.io/grafana/grafana",
-      "purl": "pkg:oci/grafana?repository_url=docker.io/grafana/grafana&tag=13.2.4-distroless",
+      "purl": "pkg:oci/grafana?repository_url=docker.io/grafana/grafana&tag=13.3.0-distroless",
       "type": "container",
-      "version": "13.2.4-distroless"
+      "version": "13.3.0-distroless"
     },
     {
       "name": "docker.io/grafana/loki-canary",
@@ -93,9 +93,9 @@
     },
     {
       "name": "dxflrs/garage",
-      "purl": "pkg:oci/garage?repository_url=dxflrs/garage&tag=v2.4.1",
+      "purl": "pkg:oci/garage?repository_url=dxflrs/garage&tag=v2.5.0",
       "type": "container",
-      "version": "v2.4.1"
+      "version": "v2.5.0"
     },
     {
       "name": "ghcr.io/berriai/litellm-database",
@@ -171,27 +171,27 @@
     },
     {
       "name": "quay.io/jetstack/cert-manager-cainjector",
-      "purl": "pkg:oci/cert-manager-cainjector?repository_url=quay.io/jetstack/cert-manager-cainjector&tag=v1.21.2",
+      "purl": "pkg:oci/cert-manager-cainjector?repository_url=quay.io/jetstack/cert-manager-cainjector&tag=v1.21.3",
       "type": "container",
-      "version": "v1.21.2"
+      "version": "v1.21.3"
     },
     {
       "name": "quay.io/jetstack/cert-manager-controller",
-      "purl": "pkg:oci/cert-manager-controller?repository_url=quay.io/jetstack/cert-manager-controller&tag=v1.21.2",
+      "purl": "pkg:oci/cert-manager-controller?repository_url=quay.io/jetstack/cert-manager-controller&tag=v1.21.3",
       "type": "container",
-      "version": "v1.21.2"
+      "version": "v1.21.3"
     },
     {
       "name": "quay.io/jetstack/cert-manager-startupapicheck",
-      "purl": "pkg:oci/cert-manager-startupapicheck?repository_url=quay.io/jetstack/cert-manager-startupapicheck&tag=v1.21.2",
+      "purl": "pkg:oci/cert-manager-startupapicheck?repository_url=quay.io/jetstack/cert-manager-startupapicheck&tag=v1.21.3",
       "type": "container",
-      "version": "v1.21.2"
+      "version": "v1.21.3"
     },
     {
       "name": "quay.io/jetstack/cert-manager-webhook",
-      "purl": "pkg:oci/cert-manager-webhook?repository_url=quay.io/jetstack/cert-manager-webhook&tag=v1.21.2",
+      "purl": "pkg:oci/cert-manager-webhook?repository_url=quay.io/jetstack/cert-manager-webhook&tag=v1.21.3",
       "type": "container",
-      "version": "v1.21.2"
+      "version": "v1.21.3"
     },
     {
       "name": "quay.io/kiwigrid/k8s-sidecar",
@@ -219,15 +219,15 @@
     },
     {
       "name": "quay.io/prometheus-operator/prometheus-operator",
-      "purl": "pkg:oci/prometheus-operator?repository_url=quay.io/prometheus-operator/prometheus-operator&tag=v0.94.1",
+      "purl": "pkg:oci/prometheus-operator?repository_url=quay.io/prometheus-operator/prometheus-operator&tag=v0.94.2",
       "type": "container",
-      "version": "v0.94.1"
+      "version": "v0.94.2"
     },
     {
       "name": "quay.io/prometheus/alertmanager",
-      "purl": "pkg:oci/alertmanager?repository_url=quay.io/prometheus/alertmanager&tag=v0.34.1",
+      "purl": "pkg:oci/alertmanager?repository_url=quay.io/prometheus/alertmanager&tag=v0.34.2",
       "type": "container",
-      "version": "v0.34.1"
+      "version": "v0.34.2"
     },
     {
       "name": "quay.io/prometheus/blackbox-exporter",
@@ -249,9 +249,9 @@
     },
     {
       "name": "redis",
-      "purl": "pkg:oci/redis?tag=7.4.11-alpine",
+      "purl": "pkg:oci/redis?tag=7.4.12-alpine",
       "type": "container",
-      "version": "7.4.11-alpine"
+      "version": "7.4.12-alpine"
     },
     {
       "name": "registry.k8s.io/kube-state-metrics/kube-state-metrics",
@@ -289,9 +289,9 @@
     {
       "description": "Helm chart dependency of tockmox-devops",
       "name": "argo-workflows",
-      "purl": "pkg:generic/helm/argo-workflows@2.0.14",
+      "purl": "pkg:generic/helm/argo-workflows@2.0.15",
       "type": "application",
-      "version": "2.0.14"
+      "version": "2.0.15"
     },
     {
       "description": "Helm chart dependency of tockmox-exporters",
@@ -303,9 +303,9 @@
     {
       "description": "Helm chart dependency of tockmox-exporters",
       "name": "prometheus-snmp-exporter",
-      "purl": "pkg:generic/helm/prometheus-snmp-exporter@9.18.2",
+      "purl": "pkg:generic/helm/prometheus-snmp-exporter@9.19.0",
       "type": "application",
-      "version": "9.18.2"
+      "version": "9.19.0"
     },
     {
       "description": "Helm chart dependency of tockmox-identity",
@@ -317,9 +317,9 @@
     {
       "description": "Helm chart dependency of tockmox-observability",
       "name": "kube-prometheus-stack",
-      "purl": "pkg:generic/helm/kube-prometheus-stack@92.11.0",
+      "purl": "pkg:generic/helm/kube-prometheus-stack@92.16.1",
       "type": "application",
-      "version": "92.11.0"
+      "version": "92.16.1"
     },
     {
       "description": "Helm chart dependency of tockmox-observability",
@@ -331,16 +331,16 @@
     {
       "description": "Helm chart dependency of tockmox-observability",
       "name": "alloy",
-      "purl": "pkg:generic/helm/alloy@1.14.2",
+      "purl": "pkg:generic/helm/alloy@1.15.0",
       "type": "application",
-      "version": "1.14.2"
+      "version": "1.15.0"
     },
     {
       "description": "Helm chart dependency of tockmox-platform",
       "name": "cert-manager",
-      "purl": "pkg:generic/helm/cert-manager@v1.21.2",
+      "purl": "pkg:generic/helm/cert-manager@v1.21.3",
       "type": "application",
-      "version": "v1.21.2"
+      "version": "v1.21.3"
     },
     {
       "description": "Helm chart dependency of tockmox-platform",
