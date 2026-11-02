@@ -93,6 +93,11 @@
   // beside it with the uv command written at the top of the lockfile: the
   // gates' (tools/requirements-gates.txt) and the Tockmox UI image's
   // (tockmox-ui/requirements.txt, installed with --require-hashes).
+  // The header must spell every option with '=' (--python-version=3.12, not
+  // --python-version 3.12): Renovate's header parser refuses the spaced form,
+  // and with it refused this manager tracks nothing (PR #144, 2026-11-02).
+  // The pip_requirements manager's default pattern also matches both files;
+  // the first packageRule keeps it off them.
   "pip-compile": {
     managerFilePatterns: [
       "/^tools/requirements-gates\\.txt$/",
@@ -185,6 +190,19 @@
   ],
 
   packageRules: [
+    {
+      // THE HASHED LOCKFILES ARE pip-compile's, NEVER pip_requirements'. Its
+      // default pattern matches any *requirements*.txt, so it read both
+      // lockfiles as plain pin lists and bumped a pin in place with new hashes
+      // and no re-resolve: cel-python 0.1.5 -> 0.5.0 arrived without the
+      // google-re2 it needs, --require-hashes refused the file, and every gate
+      // venv went red (PR #144, 2026-11-02). pip-compile bumps the .in and
+      // regenerates the whole lockfile instead. docs-site/requirements.txt is a
+      // plain pin list and stays with pip_requirements.
+      matchManagers: ["pip_requirements"],
+      matchFileNames: ["tools/requirements-gates.txt", "tockmox-ui/requirements.txt"],
+      enabled: false,
+    },
     {
       // Majors on platform charts carry breaking-change risk and want a
       // deliberate window, not an auto-opened PR. Surface on the dashboard.
