@@ -72,6 +72,13 @@ One subcommand DOES write to a cluster, and only when you name it:
                      ArgoCD, create the site repository in it, push the site,
                      give ArgoCD its read credential, and write the encrypted
                      recovery kit. Run '$0 bootstrap-forge --help'.
+  repair-forge       (site.forge: built-in) reinstall ONLY the built-in forge and
+                     seed it from the off-site copy, while the rest of the
+                     cluster runs. Run '$0 repair-forge --help'.
+  --restore-from offsite|file:PATH
+                     (site.forge: built-in) rebuild a site on a cluster that has
+                     ArgoCD and nothing else, from the off-site copy and the
+                     recovery kit. Run '$0 --restore-from offsite --help'.
   publish-docs       AFTER the platform layer is Healthy: build the product docs
                      from this checkout and upload them to the docs bucket
                      (tools/publish-docs.sh, which takes the same arguments:
@@ -332,6 +339,19 @@ if [[ "${1:-}" == "bootstrap-forge" ]]; then
   shift
   exec bash "$SELF/bootstrap-forge.sh" "$@"
 fi
+# Rebuild and forge repair (TM-1338), from the off-site copy and the recovery kit.
+# Cluster-writing like the two above, so their own program. --restore-from may sit
+# anywhere among the arguments (the spec writes it after --config), so look for it
+# before the generator reads a single flag.
+if [[ "${1:-}" == "repair-forge" ]]; then
+  shift
+  exec bash "$SELF/forge-restore.sh" repair "$@"
+fi
+for _a in "$@"; do
+  if [[ "$_a" == "--restore-from" || "$_a" == --restore-from=* ]]; then
+    exec bash "$SELF/forge-restore.sh" rebuild "$@"
+  fi
+done
 
 # publish-docs is the install's last step (TM-0807), and it is a subcommand for the
 # same reason bootstrap-secrets is: this script applies nothing and waits for
