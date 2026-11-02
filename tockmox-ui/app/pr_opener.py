@@ -50,6 +50,7 @@ repo with that sha256. An evidence PR does not wait on, or block, an admit or pr
 
 Config, under modelLifecycle.watch.pullRequests:
   forge: github | forgejo        apiUrl: https://api.github.com | https://forgejo.example/api/v1
+                                 (the built-in forge: http://tockmox-forge-http.tockmox-forge.svc.cluster.local:3000/api/v1)
   repo: owner/name               baseBranch: main          valuesPath: site/values/models.yaml
   tokenEnv: TOCKMOX_BOT_TOKEN    maxOpen: 1                commitTrailers: ["Tockmox-Origin: model-watcher"]
   githubApp: {appId: 123456, privateKeyFile: /bot/private-key.pem}   # in-cluster: mint a one-hour, one-repo token
@@ -471,6 +472,15 @@ def app_installation_token(api_url, repo, app_id, key_pem, transport=None, now=N
 
 # ---------------------------------------------------------------- the forge (the only I/O)
 
+def in_cluster_forge(kind, host) -> bool:
+    """The built-in site forge (TM-1336) answers only at its in-cluster Service address, over plain http, like the
+    address Argo CD reads the site from: nothing outside the cluster resolves it, so there is no certificate to
+    present. Plain http is accepted for exactly that shape (a Forgejo, a host under .svc.cluster.local) and nothing
+    else; GitHub, and any address that leaves the cluster, still needs https."""
+    h = (host or "").lower().rstrip(".")
+    return kind == "forgejo" and h.endswith(".svc.cluster.local") and h.count(".") >= 4
+
+
 class Forge:
     """GitHub REST or Forgejo/Gitea API v1. Talks only to the configured API host, never follows a redirect,
     caps every answer, and sends the token only there."""
@@ -479,8 +489,8 @@ class Forge:
         if kind not in ("github", "forgejo"):
             raise Refused("forge must be github or forgejo")
         u = urlsplit(api_url)
-        if u.scheme != "https" or not u.hostname:
-            raise Refused("apiUrl must be an https:// URL")
+        if not u.hostname or not (u.scheme == "https" or (u.scheme == "http" and in_cluster_forge(kind, u.hostname))):
+            raise Refused("apiUrl must be an https:// URL (plain http only for a Forgejo at an in-cluster *.svc.cluster.local address)")
         if not re.match(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$", repo or ""):
             raise Refused("repo must be owner/name")
         self.kind, self.base, self.host, self.repo = kind, api_url.rstrip("/"), u.hostname, repo

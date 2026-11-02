@@ -83,10 +83,12 @@ sso:
       alertmanager: {enabled: true}
       longhorn: {enabled: true}
       traefik: {enabled: true}
-  # The Tockmox UI's blueprint (TM-0956) and the Argo CD link tile (TM-0740),
-  # both off by default.
+  # The Tockmox UI's blueprint (TM-0956), the built-in forge's (TM-1336) and the
+  # Argo CD link tile (TM-0740), all off by default.
   apps:
     tockmoxUi:
+      enabled: true
+    forge:
       enabled: true
   links:
     argocd:

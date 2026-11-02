@@ -216,6 +216,64 @@ you move local accounts onto SSO and control every address, then set `false`.
 With `false`, a login whose email matches an existing local account is refused
 rather than merged.
 
+## The built-in forge: sign-in and approvers
+
+A site whose repository lives in the forge Tockmox installs (`site.forge:
+built-in`, experimental) signs people in to that forge through Authentik. The
+generator turns on its application in `site/values/identity.yaml`:
+
+```yaml
+# site/values/identity.yaml
+sso:
+  apps:
+    forge:
+      enabled: true     # access: admin by default; host: forge.<internalDomain>
+```
+
+Its client secret is not in the site repository: `tockmox-install.sh
+bootstrap-forge` writes it into two Secrets, `tockmox-sso-forge` in this
+namespace (`FORGE_CLIENT_SECRET`, which the blueprint reads) and
+`tockmox-forge-oidc` in the forge's namespace. The forge exists before Authentik
+does, so the sign-in source is added by a second, short run once this layer is
+Healthy:
+
+```bash
+./install/tockmox-install.sh bootstrap-forge --site ./tockmox-site --context <your-cluster> --connect-sign-in
+```
+
+What it gives you:
+
+- **People are registered at their first sign-in.** There is no local sign-up.
+- **Members of the admin group become the forge's `approvers` team** at each
+  sign-in, by Forgejo's OIDC group mapping. The rule on `main` counts only that
+  team's approvals; the change bot, which opens changes, is not in it and cannot
+  approve its own.
+- **Nobody becomes a forge administrator by signing in.** The forge's admin can
+  merge past the rule (Forgejo 15 has no way to stop it), so the admin stays one
+  credential in one Secret and the recovery kit, and the forge's pages offer no
+  username-and-password form at all: the browser signs in through Authentik or
+  not at all. The admin credential works only against the forge's API.
+- **A name that matches an existing forge account is refused, not linked.** An
+  Authentik user called `tockmox-changes` does not sign in as the change bot.
+
+**Removing an approver takes two steps for now.** The forge updates a person's
+teams only when they sign in, and with `access: admin` (the default) someone you
+take out of the admin group can no longer sign in, so the forge never hears of
+it and they stay in `approvers`. Remove them from the admin group, then from the
+forge's `tockmox` organisation, which takes them out of every team in it. With
+the forge's API reached through a port-forward and its admin password read from
+`tockmox-forge-admin` (passed to `curl` on a pipe, so it is on no command line);
+`<their-forge-name>` is their Authentik username:
+
+```bash
+kubectl --context <your-cluster> -n tockmox-forge port-forward svc/tockmox-forge-http 3000:3000 >/dev/null &
+PASS="$(kubectl --context <your-cluster> -n tockmox-forge get secret tockmox-forge-admin -o jsonpath='{.data.password}' | base64 -d)"
+curl -sS -o /dev/null -w '%{http_code}\n' -K <(printf 'user = "tockmox-admin:%s"\n' "$PASS") \
+  -X DELETE http://127.0.0.1:3000/api/v1/orgs/tockmox/members/<their-forge-name>; unset PASS
+```
+
+It prints `204`. Stop the port-forward afterwards (`kill %1`, or close the terminal).
+
 ## Tiles for consoles that have no SSO
 
 ntfy cannot sign in through Authentik: its server offers its own user database
