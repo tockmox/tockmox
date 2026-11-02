@@ -4,7 +4,7 @@ dependencies:
   version: 0.8.0
 - name: cert-manager
   repository: https://charts.jetstack.io
-  version: v1.21.2
+  version: v1.21.3
 - name: metallb
   repository: https://metallb.github.io/metallb
   version: 0.16.1
@@ -26,5 +26,5 @@ dependencies:
 - name: snapshot-controller
   repository: https://piraeus.io/helm-charts/
   version: 5.4.0
-digest: sha256:787457a313e2e86cf9b9d73e133dd98e7a1f84e92ced58448d5d3921eac38559
-generated: "2026-10-18T20:29:01.037095826Z"
+digest: sha256:ca3a90047ac8e86fce79c66c36096964efaa6c08083aa149a36af920ac5c6e6c
+generated: "2026-11-02T17:39:04.212144949Z"

@@ -1222,7 +1222,7 @@ open-webui:
       # to fan websocket events out between replicas, so a restart loses nothing.
       image:
         repository: redis
-        tag: 7.4.11-alpine
+        tag: 7.4.12-alpine
       resources:
         # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
         # peak 12.7 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2); average 11.7 MiB.
