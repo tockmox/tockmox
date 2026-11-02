@@ -15,9 +15,9 @@
     },
     {
       "name": "caronc/apprise",
-      "purl": "pkg:oci/apprise?repository_url=caronc/apprise&tag=2.0.1",
+      "purl": "pkg:oci/apprise?repository_url=caronc/apprise&tag=2.0.2",
       "type": "container",
-      "version": "2.0.1"
+      "version": "2.0.2"
     },
     {
       "name": "docker.io/aquasec/kube-bench",
@@ -117,9 +117,9 @@
     },
     {
       "name": "ghcr.io/goauthentik/server",
-      "purl": "pkg:oci/server?repository_url=ghcr.io/goauthentik/server&tag=2026.8.4",
+      "purl": "pkg:oci/server?repository_url=ghcr.io/goauthentik/server&tag=2026.8.5",
       "type": "container",
-      "version": "2026.8.4"
+      "version": "2026.8.5"
     },
     {
       "name": "ghcr.io/jkroepke/access-log-exporter",
@@ -159,39 +159,39 @@
     },
     {
       "name": "quay.io/argoproj/argocli",
-      "purl": "pkg:oci/argocli?repository_url=quay.io/argoproj/argocli&tag=v4.1.5",
+      "purl": "pkg:oci/argocli?repository_url=quay.io/argoproj/argocli&tag=v4.1.6",
       "type": "container",
-      "version": "v4.1.5"
+      "version": "v4.1.6"
     },
     {
       "name": "quay.io/argoproj/workflow-controller",
-      "purl": "pkg:oci/workflow-controller?repository_url=quay.io/argoproj/workflow-controller&tag=v4.1.5",
+      "purl": "pkg:oci/workflow-controller?repository_url=quay.io/argoproj/workflow-controller&tag=v4.1.6",
       "type": "container",
-      "version": "v4.1.5"
+      "version": "v4.1.6"
     },
     {
       "name": "quay.io/jetstack/cert-manager-cainjector",
-      "purl": "pkg:oci/cert-manager-cainjector?repository_url=quay.io/jetstack/cert-manager-cainjector&tag=v1.21.2",
+      "purl": "pkg:oci/cert-manager-cainjector?repository_url=quay.io/jetstack/cert-manager-cainjector&tag=v1.21.3",
       "type": "container",
-      "version": "v1.21.2"
+      "version": "v1.21.3"
     },
     {
       "name": "quay.io/jetstack/cert-manager-controller",
-      "purl": "pkg:oci/cert-manager-controller?repository_url=quay.io/jetstack/cert-manager-controller&tag=v1.21.2",
+      "purl": "pkg:oci/cert-manager-controller?repository_url=quay.io/jetstack/cert-manager-controller&tag=v1.21.3",
       "type": "container",
-      "version": "v1.21.2"
+      "version": "v1.21.3"
     },
     {
       "name": "quay.io/jetstack/cert-manager-startupapicheck",
-      "purl": "pkg:oci/cert-manager-startupapicheck?repository_url=quay.io/jetstack/cert-manager-startupapicheck&tag=v1.21.2",
+      "purl": "pkg:oci/cert-manager-startupapicheck?repository_url=quay.io/jetstack/cert-manager-startupapicheck&tag=v1.21.3",
       "type": "container",
-      "version": "v1.21.2"
+      "version": "v1.21.3"
     },
     {
       "name": "quay.io/jetstack/cert-manager-webhook",
-      "purl": "pkg:oci/cert-manager-webhook?repository_url=quay.io/jetstack/cert-manager-webhook&tag=v1.21.2",
+      "purl": "pkg:oci/cert-manager-webhook?repository_url=quay.io/jetstack/cert-manager-webhook&tag=v1.21.3",
       "type": "container",
-      "version": "v1.21.2"
+      "version": "v1.21.3"
     },
     {
       "name": "quay.io/kiwigrid/k8s-sidecar",
@@ -231,9 +231,9 @@
     },
     {
       "name": "quay.io/prometheus/blackbox-exporter",
-      "purl": "pkg:oci/blackbox-exporter?repository_url=quay.io/prometheus/blackbox-exporter&tag=v0.29.0",
+      "purl": "pkg:oci/blackbox-exporter?repository_url=quay.io/prometheus/blackbox-exporter&tag=v0.29.1",
       "type": "container",
-      "version": "v0.29.0"
+      "version": "v0.29.1"
     },
     {
       "name": "quay.io/prometheus/node-exporter",
@@ -282,23 +282,23 @@
     {
       "description": "Helm chart dependency of tockmox-crds",
       "name": "prometheus-operator-crds",
-      "purl": "pkg:generic/helm/prometheus-operator-crds@32.0.1",
+      "purl": "pkg:generic/helm/prometheus-operator-crds@32.0.2",
       "type": "application",
-      "version": "32.0.1"
+      "version": "32.0.2"
     },
     {
       "description": "Helm chart dependency of tockmox-devops",
       "name": "argo-workflows",
-      "purl": "pkg:generic/helm/argo-workflows@2.0.13",
+      "purl": "pkg:generic/helm/argo-workflows@2.0.14",
       "type": "application",
-      "version": "2.0.13"
+      "version": "2.0.14"
     },
     {
       "description": "Helm chart dependency of tockmox-exporters",
       "name": "prometheus-blackbox-exporter",
-      "purl": "pkg:generic/helm/prometheus-blackbox-exporter@11.20.0",
+      "purl": "pkg:generic/helm/prometheus-blackbox-exporter@11.20.2",
       "type": "application",
-      "version": "11.20.0"
+      "version": "11.20.2"
     },
     {
       "description": "Helm chart dependency of tockmox-exporters",
@@ -317,9 +317,9 @@
     {
       "description": "Helm chart dependency of tockmox-identity",
       "name": "authentik",
-      "purl": "pkg:generic/helm/authentik@2026.8.4",
+      "purl": "pkg:generic/helm/authentik@2026.8.5",
       "type": "application",
-      "version": "2026.8.4"
+      "version": "2026.8.5"
     },
     {
       "description": "Helm chart dependency of tockmox-observability",
@@ -345,9 +345,9 @@
     {
       "description": "Helm chart dependency of tockmox-platform",
       "name": "cert-manager",
-      "purl": "pkg:generic/helm/cert-manager@v1.21.2",
+      "purl": "pkg:generic/helm/cert-manager@v1.21.3",
       "type": "application",
-      "version": "v1.21.2"
+      "version": "v1.21.3"
     },
     {
       "description": "Helm chart dependency of tockmox-platform",
