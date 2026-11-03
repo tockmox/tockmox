@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# THE HOUSEHOLD-SSO PROFILE ... small, single node, WITH single sign-on (TM-0276).
+# THE HOUSEHOLD-SSO PROFILE ... small, single node, WITH single sign-on.
 #
 # The two other profiles are "everything" (reference.yaml) and "small, without
 # single sign-on" (minimal.yaml). This is the shape in between: one node, one
@@ -17,7 +17,7 @@
 # layers minimal.yaml does, tockmox-identity included.
 #
 # WHY NOT SMALLER. The obvious next cut is the observability capability, and it
-# is its own file: profiles/observability-off.yaml (TM-0825). List it after
+# is its own file: profiles/observability-off.yaml. List it after
 # this one to go further. It is not folded in here because the capability alone
 # is not enough (the vendored subcharts' monitor switches have to be turned off
 # too, and platform and identity refuse to render with only half of that done),
@@ -39,7 +39,7 @@
 # whole AI plane.
 #
 # THE MODEL GATEWAY (LiteLLM) IS ON, as it is in every profile since 0.8.0
-# (TM-0460, ruling C1: "required" means on in the smallest profile too). It
+# (ruling C1: "required" means on in the smallest profile too). It
 # costs about 0.5Gi here, the proxy plus a one-instance CNPG, and the console
 # goes through it on a key the chart mints, so there is no post-install key
 # step. Turning it off and pointing Open WebUI straight at a LAN model
@@ -79,6 +79,6 @@ kube-prometheus-stack:
       # `local-path`. Grafana's chart does not run tpl over this key, so it
       # cannot follow the global: without this line it keeps the chart's
       # `longhorn` and the claim sits Pending on a cluster with no Longhorn.
-      # Shipped that way until 0.8.0 (TM-0146); the observability layer now
+      # Shipped that way until 0.8.0; the observability layer now
       # refuses to render the mismatch.
       storageClassName: local-path

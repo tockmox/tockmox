@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1258 (the Inbox), TM-1265 (the retirement countdown), TM-1300 (Inbox revision 2): the watcher's candidates as one scannable
+"""Inbox revision 2, with the retirement countdown: the watcher's candidates as one scannable
 row each (reason, model and one sentence, best fit, size, one primary action, a menu) with the per-node fit, licence, labelled hints
 and admit PR open under the row; filters split local and frontier and show snoozed and dismissed; source health is one line at the
 foot. Evaluate, Snooze and Dismiss each render a change and write nothing; a snoozed or dismissed candidate is hidden from the
@@ -207,7 +207,7 @@ def test_a_hosted_row_says_the_data_class_rails_give_it_public_data_only_in_its_
     t = text(c.get("/models/inbox"))
     row = row_of(t, HOSTED_NEW)
     line, detail = row.split('class="in-detail"')[0], detail_of(row)
-    assert "Hosted: public data only" in detail and "the data-class rails, TM-1249" in detail and "Fit:" not in t
+    assert "Hosted: public data only" in detail and "the data-class rails" in detail and "Fit:" not in t
     assert "the data-class rails" not in line and "Licence" not in detail          # no node, no licence chip for a hosted model
 
 
@@ -430,7 +430,7 @@ def test_retirement_countdown(when, state, text_):
     assert ib.retire_state(r) == {"upcoming": "warning", "retired": "critical", "unknown": "unknown"}[state]
 
 
-# ------------------------------------------------------------ TM-1265: the countdown on the pages, and the replacement
+# ------------------------------------------------------------ the countdown on the pages, and the replacement
 
 def retiring(when, **kw):
     return dict(CANDIDATES["deprecation"], when=when, **kw)
@@ -440,7 +440,7 @@ def test_the_inbox_card_for_a_retiring_model_counts_down_and_offers_the_replacem
     c, u = page_client(tmp_path, candidates=[retiring(day(12))])
     t = plain(c.get("/models/inbox"))
     assert "retires in 12 days" in t and f"Replacement named: {HOSTED_NEW}" in t and "Evaluate the replacement" in t
-    assert "the data-class rails, TM-1249" in t                             # public data only, on the card
+    assert "the data-class rails" in t                                      # public data only, on the card
     r = c.post("/models/propose", data={"csrf": u.csrf, "cid": CANDIDATES["deprecation"]["id"]})
     t2 = text(r)
     assert r.status_code == 200 and f"Admit {HOSTED_NEW} for evaluation" in t2 and "eval gateway" in t2 and "endpoint_tier: external" in t2
@@ -451,7 +451,7 @@ def test_a_retiring_row_keeps_its_action_wording_shows_the_countdown_on_the_row_
     row = row_of(text(c.get("/models/inbox")), HOSTED_OLD)
     line, detail = row.split('class="in-detail"')[0], detail_of(row)
     assert "retires in 12 days" in line and "hosted, no node" in line
-    assert f"Replacement named: <code>{HOSTED_NEW}</code>" in detail and "the data-class rails, TM-1249" in detail
+    assert f"Replacement named: <code>{HOSTED_NEW}</code>" in detail and "the data-class rails" in detail
     assert "Evaluate the replacement" in acts_of(row) and 'action="/models/propose"' in acts_of(row)
     pr = dict(retiring(day(12)), pr="https://forge.example/o/r/pull/12")                     # the replacement's admit PR is already open
     c, u = page_client(tmp_path, candidates=[pr])
@@ -584,7 +584,7 @@ def test_the_opener_does_not_plan_a_hidden_candidate_and_records_the_pr_link(tmp
 
 
 def _noshell(t):
-    """The page minus the kit's one same-origin script (shell.js: theme and header menus, TM-1304); any
+    """The page minus the kit's one same-origin script (shell.js: theme and header menus); any
     other script tag is still a failure."""
     import re as _re
     return _re.sub(r'<script src="/static/kit/shell\.js[^"]*"></script>', "", t)

@@ -205,7 +205,7 @@ class Flag:
 
 
 def speed_range(tps: float | None) -> tuple[int, int] | None:
-    """A predicted decode speed as a whole-number range, never a decimal (TM-1274): the prediction is bandwidth over
+    """A predicted decode speed as a whole-number range, never a decimal: the prediction is bandwidth over
     bytes read, good to perhaps a tenth either way, and one decimal place says otherwise. Plus or minus 12%, widened
     outward to a step of 10 tokens/s from 100, 5 from 20, else 1. 125 reads as 110 to 140."""
     if tps is None or tps <= 0:
@@ -246,7 +246,7 @@ class Row:
     admissible: bool
     why_not: str
     in_service: str = ""            # where the model serves the class alias now, when it does
-    tps_range: tuple | None = None  # (low, high) whole tokens/s: how a predicted speed is shown (TM-1274)
+    tps_range: tuple | None = None  # (low, high) whole tokens/s: how a predicted speed is shown
     tps_measured: tuple | None = None   # (tokens/s, date) once a perf twin has measured it: replaces the range
 
 

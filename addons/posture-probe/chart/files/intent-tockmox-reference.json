@@ -1,7 +1,7 @@
 {
  "version": "v0",
  "name": "tockmox-reference-pilot",
- "status": "PILOT INTENT ... derived from the chart's own stated design, for Jeff to ratify. Rows test declared intent only; namespaces with no stated egress intent (authentik, devops, selfcheck) are deliberately not asserted (TM-0273 tracks egress).",
+ "status": "PILOT INTENT ... derived from the chart's own stated design, for Jeff to ratify. Rows test declared intent only; namespaces with no stated egress intent (authentik, devops, selfcheck) are deliberately not asserted.",
  "intents": [
   {
    "subject": "tockmox-ai->tockmox-authentik",

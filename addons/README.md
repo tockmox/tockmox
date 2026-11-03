@@ -8,7 +8,7 @@ running service.
 
 **This is a first-party contract.** It describes what the add-ons Tockmox itself
 ships promise, and it is checked by a gate. It is not an interface for writing
-your own: the extension point stays internal (TM-0329 closed on that), and no
+your own: the extension point stays internal (that was decided), and no
 third-party add-on is promised until someone asks for one. If that changes, the
 third-party contract is a separate piece of work with its own review of what an
 outside add-on may not do.

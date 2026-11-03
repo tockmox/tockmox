@@ -3,7 +3,7 @@
 #
 # With capabilities.observability off, no layer may render a ServiceMonitor,
 # PodMonitor, PrometheusRule, ScrapeConfig or Probe, and the layers that cannot
-# promise that on their own must refuse instead (TM-0825).
+# promise that on their own must refuse instead.
 #
 #   ./tools/check-capability-monitors.sh             the gate
 #   ./tools/check-capability-monitors.sh --selftest  prove it can go red

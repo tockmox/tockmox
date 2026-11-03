@@ -26,12 +26,12 @@
 # HISTORY, kept short because the defect is fixed. P07 was first written
 # 2026-09-02 against a page whose block omitted `--controller-name` and
 # `--controller-namespace`, so the page's own bytes produced a zero-byte file
-# against the controller this repo's own install creates (TM-0346). The first
+# against the controller this repo's own install creates. The first
 # shape of this script pinned that as an XFAIL, then re-ran the same command
 # with the two flags added as flagged harness glue to isolate the diagnosis.
-# TM-0346 put the flags on the page, the XFAIL was observed flipping with this
-# script unmodified (TM-0346's close-out log, run against `main` at 133637b),
-# and TM-0350 collapsed the script to the single attempt below. The second
+# put the flags on the page, the XFAIL was observed flipping with this
+# script unmodified (the close-out log, run against `main` at 133637b),
+# and the script was then collapsed to the single attempt below. The second
 # attempt isolated nothing once the page carried the flags, and its glue
 # substitution had started inserting the flags a second time. Do not
 # reintroduce the two-attempt structure: a pinned XFAIL is for a live defect.
@@ -45,7 +45,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "${HERE}/../lib/assert.sh"
-# TM-0797: every kubectl and helm call below names its cluster with --context or
+# every kubectl and helm call below names its cluster with --context or
 # --kube-context from this variable, and an empty value is refused rather than
 # falling back to the current context (docs/deployment/fresh-install.md, "Name
 # the cluster"). run.sh exports it; a standalone run must export it itself.
@@ -56,7 +56,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # Added 2026-09-13. Run with no kubeseal on PATH, this path reported two FAILs:
 # the page's own success condition reading 0, and an empty decrypted value. Both
 # read as "the sealing documentation is broken" ... which it genuinely was once
-# (TM-0346), so a reader of that report would reasonably believe it had
+#, so a reader of that report would reasonably believe it had
 # regressed. It had not. kubeseal was simply absent, the `>` redirect created an
 # empty file, and the assertions measured that.
 #
@@ -217,7 +217,7 @@ rm -rf "$WORKDIR" 2>/dev/null || true
 
 does_not_prove \
   "That tools/mint-secrets.sh, which the page recommends over the manual block, seals correctly. Only the page's inline block is executed here; the script's seal() helper carries the same two flags (read in the source at this ref, not executed), and that is a reading, not a cluster-observed result." \
-  "That the page's block fails without the two --controller-* flags. A single attempt against the page's own bytes cannot isolate which part of the command made it work; the earlier two-attempt shape did, once, against the broken page (TM-0346's evidence log). If the flags are ever dropped from the page, assertion 1 goes red and says nothing about why." \
+  "That the page's block fails without the two --controller-* flags. A single attempt against the page's own bytes cannot isolate which part of the command made it work; the earlier two-attempt shape did, once, against the broken page. If the flags are ever dropped from the page, assertion 1 goes red and says nothing about why." \
   "Anything about a SealedSecret committed to git and synced by ArgoCD. The apply below is direct kubectl, harness glue standing in for that path; the real GitOps loop is A5's scope, not this one's." \
   "Anything about key ROTATION, about a backup restoring into a fresh cluster (administration/secrets.md's separate 'Prove it once' step), or about a SealedSecret sealed against a DIFFERENT cluster's key ever decrypting here. Only one controller, one key, one cluster, one run." \
   "That the default 'strict' encryption scope is the only one Tockmox readers use, or that a mismatched secret name/namespace at seal time behaves any particular way. Not exercised." \

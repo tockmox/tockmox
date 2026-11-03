@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1258 (specified by the REQ-0048 amendment, TM-1254): the `rejected` stage, the reject change and the revert change (DESIGN-2026-10-29-eval-runner sections 3
+"""specified by the REQ-0048 amendment: the `rejected` stage, the reject change and the revert change (DESIGN-2026-10-29-eval-runner sections 3
 and 8). A failing candidate leaves the eval gateway and is never offered again at that revision; a promoted build
 that breaches its health rules goes back to what the alias served before, in one reviewed change."""
 import pytest

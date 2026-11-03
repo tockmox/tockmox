@@ -3,7 +3,7 @@
 #
 # Assert, ON THE RENDERED ARTIFACT, that the policy layer refuses a global.lanCIDR
 # that contains global.clusterCIDR when platformNetpol.nodeOriginSources is set
-# (TM-0790), and that it refuses nothing else.
+#, and that it refuses nothing else.
 #
 #   ./tools/check-lan-cidr-overlap.sh
 #
@@ -141,7 +141,7 @@ passes  "lan is inside the cluster block"                10.42.5.0/24 10.42.0.0/
 passes  "lan is a narrower prefix on the same base"      10.42.0.0/17 10.42.0.0/16
 
 # Not set: since 0.8.0 an empty list refuses rather than rendering the wide
-# clusterCIDR rule (TM-0798), whatever the lanCIDR. Both a supernet and a
+# clusterCIDR rule, whatever the lanCIDR. Both a supernet and a
 # disjoint LAN must refuse, and the message must name the key and the helper.
 for lan in 10.0.0.0/8 192.168.1.0/24; do
   render "$lan" 10.42.0.0/16 '[]'
@@ -150,7 +150,7 @@ for lan in 10.0.0.0/8 192.168.1.0/24; do
      && printf '%s' "$R" | grep -- '--print-netpol-node-sources' >/dev/null && [ -z "$got" ]; then
     ok "nodeOriginSources empty, lanCIDR $lan: refused, naming the key and the helper, no policy rendered"
   else
-    bad "nodeOriginSources empty must refuse (TM-0798), lanCIDR $lan" "got cidrs: '${got:-<none>}'; $(printf '%s' "$R" | head -2 | cut -c1-200)"
+    bad "nodeOriginSources empty must refuse, lanCIDR $lan" "got cidrs: '${got:-<none>}'; $(printf '%s' "$R" | head -2 | cut -c1-200)"
   fi
 done
 

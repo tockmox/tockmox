@@ -80,7 +80,7 @@ class Tracker:
 
 
 def _engine_upgrade_note(tr: Tracker, status_dir: str) -> str:
-    """TM-1264: compare this run's smoke and perf figures with the last done run of the alias on the node. Facts only."""
+    """Compare this run's smoke and perf figures with the last done run of the alias on the node. Facts only."""
     d = tr.doc
     prev = next((s for s in st.read_statuses(status_dir) if s["state"] == "done" and s["alias"] == d["alias"]
                  and s["node"] == d["node"] and s["candidate"]["model"] == d["candidate"]["model"]

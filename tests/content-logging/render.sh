@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # shellcheck disable=SC2015  # `ok ... || bad ...`: ok and bad are printf wrappers that return 0, so C runs only when A or B failed
 #
-# PROMPT CONTENT IN AN OBSERVABILITY CALLBACK (TM-1250), AT RENDER. An otel,
+# PROMPT CONTENT IN AN OBSERVABILITY CALLBACK, AT RENDER. An otel,
 # Langfuse or Arize callback with LiteLLM message logging on copies every
 # prompt to its collector; the preflight refuses that unless the site
 # acknowledges it with a reason. Each case changes one thing from the CI values.

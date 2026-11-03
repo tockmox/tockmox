@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1295 and TM-1295's explicit re-run: two runs of one build on one day write their own twins (the second run on
+"""The explicit re-run: two runs of one build on one day write their own twins (the second run on
 prod, 2026-10-30, measured for 75 minutes and then refused to write a smoke twin the morning's run had written), a run
 id is used once and refused before any leg, the evidence PR accepts every twin a run writes, and runner.rerun queues a
 finished run again."""

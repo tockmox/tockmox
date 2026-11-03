@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# The key policy fixture (TM-0991): the module, its policy file and its registration. Layered on ci/values.yaml.
+# The key policy fixture: the module, its policy file and its registration. Layered on ci/values.yaml.
 modelGateway:
   keyPolicy:
     enabled: true

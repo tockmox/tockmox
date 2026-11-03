@@ -45,7 +45,7 @@ Every `kubectl` and `helm` call in this directory (and in
 `--context` or `--kube-context`, taken from a variable that is refused when
 empty. A bare call would target whichever context the caller's shell happens to
 have current, and this harness creates and deletes VMs, Secrets and namespaces
-(TM-0797; the standing rule after INC-2026-09-29-01).
+(the standing rule after INC-2026-09-29-01).
 
 | Variable | Names | Who supplies it |
 |---|---|---|
@@ -95,7 +95,7 @@ coverage.
 
 **3. Claims are tested, not only commands.** `P03` patches a StorageClass,
 **reboots the node**, and reads the annotation again. That single re-read is what
-TM-0287 needed and did not have. Every command on that page exited zero and the
+was needed and was missing. Every command on that page exited zero and the
 page was still wrong.
 
 **4. Each gate states what it does not prove.** `does_not_prove` and
@@ -251,7 +251,7 @@ Everything happens in one disposable namespace, `tockmox-test` by default, on a
 KubeVirt-capable cluster. `provision/throwaway-cluster.sh` refuses to start if
 it is pointed anywhere else.
 
-**Teardown deletes only what it created** (TM-0587). Everything the harness
+**Teardown deletes only what it created**. Everything the harness
 makes on the substrate is named after the VM (`$TOCKMOX_TEST_VM`, or
 `$TOCKMOX_TEST_VM-...`), and `destroy` deletes that VM and only the objects named
 after it, then prints the VMs it left alone. The namespace is shared: the

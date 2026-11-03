@@ -116,14 +116,14 @@ check "an invalid outcome leaves no receipt" 0 "$got"
 
 rm -rf "$RD"
 
-# --- FIVE NAMED SCENARIOS (TM-0571 DoD) --------------------------------------
+# --- FIVE NAMED SCENARIOS (DoD) ----------------------------------------------
 #
 # The 16 checks above are generic state-machine assertions on the model; none
 # of them drives it through the shape of an actual failure a path hits. The
 # 2026-09-14 overnight verification found that gap: grepping this tree for the
 # five scenario phrases the DoD names returned nothing. These five do, each
 # through the real mechanism a path would use, not a hand-set flag standing in
-# for one, and each maps to the outcome named in TM-0571's own table.
+# for one, and each maps to the outcome named in the card's own table.
 
 # 1. MISSING BINARY -> INFRA_ERROR. The general shape of P07's kubeseal guard:
 #    a dependency this path is not testing, absent from PATH, is a runner/
@@ -172,7 +172,7 @@ rm -f "$BROKEN_KC"
 check_outcome "SCENARIO broken kubeconfig -> INFRA_ERROR" 1 INFRA_ERROR "$SCEN_B_OUT" "$SCEN_B_RC"
 
 # 3. DENIED IMAGE PULL -> INFRA_ERROR. The registry-rate-limit case from
-#    TM-0571's own log ("nearly attributed it to the product"): classify a pod
+#    own log ("nearly attributed it to the product"): classify a pod
 #    status line the way a path reading `kubectl get pods` would, off the
 #    actual text a denied pull produces, not an invented label.
 classify_pod_status() {
@@ -191,7 +191,7 @@ else
 fi
 check_outcome "SCENARIO denied image pull -> INFRA_ERROR" 1 INFRA_ERROR "$SCEN_C_OUT" "$SCEN_C_RC"
 
-# 4. PREMATURE SENTINEL -> ABORTED. The exact TM-0562/TM-0571 mechanism: a
+# 4. PREMATURE SENTINEL -> ABORTED. The exact mechanism: a
 #    documented `${VAR:?}` guard fires before the value it wants exists, exits
 #    127 under `bash -c` (identical to command-not-found), and the exit is
 #    UNDECLARED, so outcome_pass_allowed refuses PASS. Runs the real guard

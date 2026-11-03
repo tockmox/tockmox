@@ -163,7 +163,7 @@ fi
 # `# tockmox:route=<name>` in its own header; paths that install nothing share
 # the default group and cost no extra cluster.
 #
-# Computed here, BEFORE provisioning, rather than after: TM-0581's dry-run mode
+# Computed here, BEFORE provisioning, rather than after: the dry-run mode
 # (below) needs the derived groups and nothing else, and deriving them from the
 # same function the real run uses -- never a second copy of the logic -- is
 # what makes the dry run actual evidence about the real grouping rather than a
@@ -197,7 +197,7 @@ done
 
 # TOCKMOX_DRY_RUN=1 -- print the derived route groups and stop. No cluster is
 # created, no path is executed, nothing is torn down (the cleanup trap is not
-# even installed yet). This is what TM-0581 asked for: a way to prove the
+# even installed yet). This is what was asked for: a way to prove the
 # grouping mechanism itself -- reading `# tockmox:route=` headers and bucketing
 # paths by name -- without needing a substrate at all. It settles the grouping
 # half of the card's own DoD; it says nothing about whether a rebuilt cluster
@@ -212,7 +212,7 @@ if [ "${TOCKMOX_DRY_RUN:-0}" = "1" ]; then
   exit 0
 fi
 
-# ---- TM-0797: NO BARE kubectl OR helm, ANYWHERE IN THIS HARNESS -------------
+# ---- NO BARE kubectl OR helm, ANYWHERE IN THIS HARNESS ----------------------
 # Every call names its cluster. Two clusters are in play and each has its own
 # variable, both REFUSED when empty (`--context=` with an empty value silently
 # means the current context, which is the failure this exists to prevent):
@@ -365,7 +365,7 @@ export KUBECONFIG="$GUEST_KUBECONFIG"
 # environmental fault was laundered into a statement about the documentation.
 export TOCKMOX_SUBSTRATE_KUBECONFIG="$SUBSTRATE_KUBECONFIG"
 
-# TM-0469 gave fresh-install.md sections 6 and 7 a `: "${KUBE_CONTEXT:?}"`
+# gave fresh-install.md sections 6 and 7 a `: "${KUBE_CONTEXT:?}"`
 # guard, because those sections install cluster-wide components and used to
 # name no cluster at all. Five bash blocks across the two sections now open
 # with it, and P04/P05 run those blocks VERBATIM through `bash -c`, so with
@@ -457,7 +457,7 @@ if [ -n "$RESUME" ] && [ -s "${RESUME}/counters" ]; then
   . "${RESUME}/counters"
 fi
 # route_of(), ROUTES and the per-group membership are computed above, before
-# provisioning (TM-0581's dry-run mode needs them there). Reuse
+# provisioning (the dry-run mode needs them there). Reuse
 # (TOCKMOX_EXISTING_KUBECONFIG) forces a SINGLE group and says so, because a run
 # that did not create its cluster cannot testify to any group's prior state ...
 # the provenance banner already printed above applies to the whole run. That
@@ -550,7 +550,7 @@ done
   # The first version of this block said, of every absent path, "its documented
   # section is GONE at this ref; re-point the path or retire it." That is a
   # false accusation against a path whose absence is a recorded decision. P01 is
-  # exactly that case: INVENTORY.md records (TM-0422, 2026-09-04) that the
+  # exactly that case: INVENTORY.md records (2026-09-04) that the
   # raw-manifest route is not documented at main BY DESIGN, that P01 therefore
   # skips cleanly, and that it is exercised at ref 24e3a9b where the route still
   # exists. Nagging every run about a settled decision is how a report earns the

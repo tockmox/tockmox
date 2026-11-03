@@ -3,7 +3,7 @@
 #
 # Assert, ON THE RENDERED ARTIFACT, that a site can load its own LiteLLM
 # callbacks (a pre-call policy gate and a logging hook) through documented
-# values only (TM-0787).
+# values only.
 #
 #   ./tools/check-litellm-hooks.sh
 #
@@ -177,9 +177,9 @@ expect_refusal "site replaces litellm.volumes" 'has no `tockmox-hooks` volume' \
   --set 'litellm.volumes[0].name=other' --set 'litellm.volumes[0].emptyDir={}'
 expect_refusal "site drops litellm.volumeMounts" 'does not mount `tockmox-hooks`' \
   --set 'litellm.volumeMounts=null'
-expect_refusal "site restates tockmox-hooks but drops tockmox-scratch (TM-1005)" 'has no `tockmox-scratch` volume' \
+expect_refusal "site restates tockmox-hooks but drops tockmox-scratch" 'has no `tockmox-scratch` volume' \
   --set 'litellm.volumes[0].name=tockmox-hooks' --set 'litellm.volumes[0].configMap.name=tockmox-litellm-hooks'
-expect_refusal "site mounts tockmox-hooks but not /scratch (TM-1005)" 'does not mount `tockmox-scratch` at /scratch' \
+expect_refusal "site mounts tockmox-hooks but not /scratch" 'does not mount `tockmox-scratch` at /scratch' \
   --set 'litellm.volumeMounts[0].name=tockmox-hooks' --set 'litellm.volumeMounts[0].mountPath=/etc/litellm/hooks'
 expect_refusal "callback names a missing file" 'has no key "nope.py"' \
   --set 'litellm.proxy_config.litellm_settings.callbacks[2]=hooks.nope.x'

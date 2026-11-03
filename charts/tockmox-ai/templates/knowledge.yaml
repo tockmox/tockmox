@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-KNOWLEDGE MODE (TM-1256; DESIGN-2026-10-29-document-qa Option A). OFF by default.
+KNOWLEDGE MODE (DESIGN-2026-10-29-document-qa Option A). OFF by default.
 
 Configures Open WebUI's own Knowledge feature the Tockmox way, and keeps a Knowledge base in sync with a git
 repository. It is CONSOLE STATE: it leaves with the console, nothing else in Tockmox depends on it, and it holds public
@@ -58,7 +58,7 @@ Anything else could leave the site. */ -}}
 {{- end -}}
 {{- /* The gateway, named explicitly. Open WebUI 0.12.4 does NOT default the RAG URL to the console's gateway:
 config.py resets OPENAI_API_BASE_URL to https://api.openai.com/v1 after building its URL lists, and
-RAG_OPENAI_API_BASE_URL defaults to that, so an unset URL sends every document to OpenAI (TM-1256 build, 2026-10-29). */ -}}
+RAG_OPENAI_API_BASE_URL defaults to that, so an unset URL sends every document to OpenAI (2026-10-29). */ -}}
 {{- $gw := printf "http://%s-litellm:4000/v1" .Release.Name -}}
 {{- $store := $k.vectorStore | default "chroma" -}}
 {{- if not (has $store (list "chroma" "pgvector")) -}}

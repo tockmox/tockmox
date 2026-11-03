@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-GRAFANA'S DATABASE ON CLOUDNATIVEPG (TM-0786). Off by default; values.yaml,
+GRAFANA'S DATABASE ON CLOUDNATIVEPG. Off by default; values.yaml,
 `grafanaDatabase`, says what it changes and how to move an existing Grafana.
 
 WHY CNPG GENERATES THE CREDENTIAL HERE, unlike the model gateway. LiteLLM's

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""comparative-verdict/1 results[] is [{path, sha256}] and CI recomputes every hash (REQ-0048 AC-48.6, TM-0930 extended).
+"""comparative-verdict/1 results[] is [{path, sha256}] and CI recomputes every hash (REQ-0048 AC-48.6).
 The planted-defect tests at the bottom are the proof the check can go red: each one edits a committed file after the
 fact and expects the gate to say so."""
 import json

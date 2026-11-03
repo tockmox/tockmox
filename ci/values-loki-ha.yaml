@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# THE DOCUMENTED HIGH-AVAILABILITY SHAPE FOR LOKI (TM-0778), layered over the
+# THE DOCUMENTED HIGH-AVAILABILITY SHAPE FOR LOKI, layered over the
 # observability chart. docs/operations/monitoring.md quotes it; tools/check-loki-ha.sh
 # renders it and asserts what comes out. Not a default and not installed by
 # anything: a site that wants Loki to survive a node going away copies this

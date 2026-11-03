@@ -27,13 +27,13 @@ Single sign-on across the shipped consoles, backed by Authentik, with OIDC as
 the protocol. The identity layer ships the wiring as blueprints; you supply the
 client secrets (see [secrets](secrets.md)).
 
-![Identity and trust. Your browser runs on a machine whose trust store holds the Tockmox private CA, and reaches the consoles over HTTPS through the Traefik ingress. Authentik is the OIDC provider for Grafana, Open WebUI and Argo Workflows; the groups tockmox-admins and tockmox-users decide who reaches each console and in which role, and a user in neither group is refused by Authentik. Each console exchanges the token from inside its own container, so it needs the CA in the cluster too. Prometheus, Alertmanager, Longhorn and the Traefik dashboard can be put behind Authentik's forward-auth, off by default. Each console keeps a local break-glass login outside the group model. Forgejo is planned, not shipped; ntfy is a portal link with no single sign-on.](../diagrams/rendered/identity-flow.svg)
+![Identity and trust. Your browser runs on a machine whose trust store holds the Tockmox private CA, and reaches the consoles over HTTPS through the Traefik ingress. Authentik is the OIDC provider for Grafana, Open WebUI and Argo Workflows; the groups tockmox-admins and tockmox-users decide who reaches each console and in which role, and a user in neither group is refused by Authentik. Each console exchanges the token from inside its own container, so it needs the CA in the cluster too. Prometheus, Alertmanager, Longhorn and the Traefik dashboard can be put behind Authentik's forward-auth, off by default. Each console keeps a local break-glass login outside the group model. Forgejo, the built-in forge, is opt-in and signs in through Authentik when installed; ntfy is a portal link with no single sign-on.](../diagrams/rendered/identity-flow.svg)
 
 **Text equivalent.** You reach the ingress over HTTPS from a machine that trusts the Tockmox CA ([TLS and trust](tls-and-trust.md)), and the ingress sends you to Authentik.
 Authentik is the OIDC provider for three shipped consoles: Grafana, Open WebUI
-and Argo Workflows. Forgejo is drawn as planned rather than wired ... Tockmox
-does not ship Forgejo, and the policy layer's Forgejo bundle is for one you
-installed yourself. ntfy has a tile on the portal too, but only as a link: it
+and Argo Workflows. Forgejo is the built-in forge, drawn dashed because it is
+opt-in (`site.forge: built-in`): when the installer's `bootstrap-forge` step runs,
+it signs in through Authentik too, with the admin group as its approvers. ntfy has a tile on the portal too, but only as a link: it
 has no OIDC, so Authentik signs nobody in to it
 ([below](#tiles-for-consoles-that-have-no-sso)). The two groups decide who reaches each
 console ([below](#two-groups-drive-every-role-mapping)), consoles with no sign-in of
@@ -89,7 +89,7 @@ every sign-on. The first account is the exception, and it applies to SSO too.
 
 ### The first Open WebUI account is an administrator
 
-*Corrected 2026-10-04 (TM-0856).* This page used to say arrival order does not
+*Corrected 2026-10-04.* This page used to say arrival order does not
 matter for SSO. That was wrong. The 2026-08-18 check it rested on had a `tockmox-admins`
 member sign in **second**, after a local account already held the admin slot, so
 it never exercised an SSO login into an empty Open WebUI.
@@ -105,7 +105,7 @@ sign-in. Measured on a 0.7.1 greenfield (lab, 2026-10-04): a `tockmox-users`
 member signing in first read `admin`, `admin`, then `user` after an administrator
 had signed in.
 
-**Since 0.8.0 the window is closed by default** (TM-0859). The AI layer's
+**Since 0.8.0 the window is closed by default**. The AI layer's
 `open-webui.extraEnvFrom` carries an optional `tockmox-openwebui-bootstrap-admin`
 entry, and `tools/mint-secrets.sh` (so `tockmox-install.sh bootstrap-secrets`)
 mints that Secret with a random password and the address
@@ -128,7 +128,7 @@ model to everyone. Measured through the API: `POST /api/v1/models/model/access/u
 with `{"id": "<model>", "access_grants": [{"principal_type": "user",
 "principal_id": "*", "permission": "read"}]}`, after which the `user` saw the model
 and a browser chat streamed. The admin interface's equivalent was not checked.
-TM-0912 tracks whether the chart should do this for you.
+Whether the chart should do this for you is open.
 
 Before 0.8.0, and on a site that sets its own `extraEnvFrom`, the two ways to
 close the window:

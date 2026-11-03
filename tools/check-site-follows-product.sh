@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # A product bump of Open WebUI or LiteLLM reaches a site with no site edit
-# (TM-1053). Asserted ON THE RENDERED ARTIFACT, because each of these renders
+#. Asserted ON THE RENDERED ARTIFACT, because each of these renders
 # clean when it is wrong.
 #
 #   ./tools/check-site-follows-product.sh             run the assertions

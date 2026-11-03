@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# EVERY FIRST-PARTY ADD-ON KEEPS ITS MANIFEST (TM-1115).
+# EVERY FIRST-PARTY ADD-ON KEEPS ITS MANIFEST.
 #
 #   ./tools/check-addon-manifest.sh              the gate
 #   ./tools/check-addon-manifest.sh --selftest   prove it goes red on every mutation, and green untouched
 #
 # WHY. An add-on is a chart beside the layers, not one of them, and until
-# TM-1115 nothing said what that meant. addons/posture-probe shipped in 0.8.0
+# nothing said what that meant. addons/posture-probe shipped in 0.8.0
 # ahead of any contract; its values keys sat outside the stability-tier gate, and
 # the promises that make it safe to install (no write verb, no route to the
 # cluster, off until enabled, what it leaves behind when removed) lived in prose
@@ -38,7 +38,7 @@
 # WHAT IT DOES NOT PROVE. That the add-on works (its own gate and the lab do
 # that), that the contract is the right one, or anything about a cluster. It does
 # not promise anything to a third party: the contract is first-party only, and
-# TM-0329 closed on "the extension point stays internal".
+# closed on "the extension point stays internal".
 #
 # EXIT 2 IS SKIPPED, the repository's convention: python3 or PyYAML missing, or
 # helm missing (the static checks still run and are reported; a partial run is
@@ -127,7 +127,7 @@ for name in names:
     if m["manifestVersion"] != 1:
         bad(name, f"manifestVersion is {m['manifestVersion']!r}; this gate reads 1")
     if m["owner"] != "first-party":
-        bad(name, f"owner is {m['owner']!r}; the contract is first-party only (TM-0329)")
+        bad(name, f"owner is {m['owner']!r}; the contract is first-party only")
     if m["name"] != name:
         bad(name, f"name `{m['name']}` differs from the directory `{name}`")
     if m["stability"] not in STABILITY:

@@ -22,7 +22,7 @@
 #
 # UNLIKE every other path in this inventory, this one needs no cluster ...
 # only network egress to an OCI registry. No KUBECONFIG is read or required.
-# That is exactly what makes it the candidate TM-0289's B7 row named for
+# That is exactly what makes it the candidate that the B7 row named for
 # moving to a per-commit tier: it is minutes, not the twenty-odd this
 # harness's cluster-backed paths cost. This run reports whether that candidacy
 # holds, but does not change any workflow's cadence ... that stays a design

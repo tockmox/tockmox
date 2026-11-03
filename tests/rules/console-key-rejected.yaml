@@ -1,4 +1,4 @@
-# TockmoxConsoleKeyRejected ... TM-0982.
+# TockmoxConsoleKeyRejected.
 #
 # DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
 #

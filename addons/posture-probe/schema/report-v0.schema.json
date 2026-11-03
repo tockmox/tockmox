@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:tockmox:posture-probe:report:v0",
   "title": "Security Posture Probe report, schemaVersion v0",
-  "description": "The published contract for the posture probe's report (TM-0882). Versioning: within v0 fields are only ADDED, never removed, renamed, retyped or repurposed, and enum values are only added; anything else is a new schemaVersion (v1) published as a new file beside this one. Consumers must ignore fields they do not know. Gate contract (the process exit code AND summary.gateExit, always equal): 0 clean, no drift and every declared row observed; 1 could not run, an error or any declared row with no usable observation; 2 drift, at least one row with bucket drift. unintended-deny rows are reported and do not set the exit code in v0.",
+  "description": "The published contract for the posture probe's report. Versioning: within v0 fields are only ADDED, never removed, renamed, retyped or repurposed, and enum values are only added; anything else is a new schemaVersion (v1) published as a new file beside this one. Consumers must ignore fields they do not know. Gate contract (the process exit code AND summary.gateExit, always equal): 0 clean, no drift and every declared row observed; 1 could not run, an error or any declared row with no usable observation; 2 drift, at least one row with bucket drift. unintended-deny rows are reported and do not set the exit code in v0.",
   "x-tockmox-stability": "experimental",
   "type": "object",
   "required": [

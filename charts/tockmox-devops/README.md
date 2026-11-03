@@ -16,8 +16,9 @@
 
 Container registry and workflows.
 
-Contains: Argo Workflows (`workflows.<internalDomain>`). Planned: a git forge
-and object storage (planned).
+Contains: Argo Workflows (`workflows.<internalDomain>`). Planned: object storage.
+The built-in forge is not in this chart: the installer's `bootstrap-forge` step
+installs it beside ArgoCD (`site.forge: built-in`).
 
 No registry ships here as of 0.1.0. A registry is a prerequisite rather than a
 component ... see `docs/deployment/registry.md`.

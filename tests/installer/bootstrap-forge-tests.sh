@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Sourced by run.sh. Groups F1-F24: install/bootstrap-forge.sh (TM-1335, TM-1337, TM-1336).
+# Sourced by run.sh. Groups F1-F24: install/bootstrap-forge.sh.
 #
 # HERMETIC, and deliberately narrow: every case here is a REFUSAL, and the
 # assertion that matters in each is that the refusal came before any write to a
@@ -11,7 +11,7 @@
 #
 # WHAT THIS IS NOT. Nothing here installs a forge, talks to its API or pushes a
 # site. That path was run for real on 2026-10-31 against a lab k3s cluster in throwaway
-# namespaces (TM-1335's Log: install, repository, users, teams, tokens, push,
+# namespaces (install, repository, users, teams, tokens, push,
 # the rule on main read back, ArgoCD's credential cloning main from inside the
 # cluster, the kit opened with its passphrase and refused with a wrong one, and a
 # second run adopting everything). A shim that answered the forge API would prove
@@ -104,7 +104,7 @@ assert_artifact "F10 ... writes nothing to the cluster and no kit" "fs_writes; [
 
 # F11. The generator, site.forge: built-in: every Application names the forge,
 # nothing carries the placeholder, and the observability layer gets the off-site
-# copy's alerts (TM-1337). The external route gets none of that.
+# copy's alerts. The external route gets none of that.
 FG="$FS/gen-built-in"; mkdir -p "$FG"
 sed 's|^  name: ci-interactive|  name: ci-interactive\n  forge: built-in|' "$PARITY_CFG" > "$FG/tockmox.yaml"
 run_config "$FG" --config tockmox.yaml --no-cluster
@@ -118,7 +118,7 @@ assert_artifact "F11 ... and the observability layer turns on the off-site copy'
   "python3 -c 'import yaml,sys; print(yaml.safe_load(open(sys.argv[1]))[\"siteForge\"][\"enabled\"])' '$FG/tockmox-site/site/values/observability.yaml'" "True"
 assert_artifact "F11 the external route carries no siteForge key" \
   "grep -c '^siteForge:' '$SITE_C/tockmox-site/site/values/observability.yaml' || true" "0"
-assert_artifact "F11 ... the identity layer turns on the forge's sign-in (TM-1336)" \
+assert_artifact "F11 ... the identity layer turns on the forge's sign-in" \
   "python3 -c 'import yaml,sys; print(yaml.safe_load(open(sys.argv[1]))[\"sso\"][\"apps\"][\"forge\"][\"enabled\"])' '$FG/tockmox-site/site/values/identity.yaml'" "True"
 assert_artifact "F11 ... and its next steps end with connecting it" \
   "grep -c 'bootstrap-forge --site .* --connect-sign-in' '$FG/cfg-out.txt'" "1"
@@ -162,7 +162,7 @@ assert_artifact "F17 a dry run names the off-site copy it would make" \
   "echo $FS_STATUS; grep -c 'off-site copy (bucket) to https://s3.example.com/site-copy/lab/site' '$D/out/stdout'" "$(printf '0\n1')"
 assert_artifact "F17 ... and writes nothing to the cluster" "fs_writes" "0"
 
-# F18-F23. Sign-in through Authentik (TM-1336). Everything it needs comes from the
+# F18-F23. Sign-in through Authentik. Everything it needs comes from the
 # site, so a contradiction or a missing domain is refused before the cluster is touched.
 fs_case f18
 fs_run --site "$D/site" --connect-sign-in --no-sign-in "${FS_OK[@]}"

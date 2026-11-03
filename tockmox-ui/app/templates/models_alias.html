@@ -125,7 +125,7 @@ model = "{{ alias }}"{{ " " * 4 }}# floating: today {{ now.generation or family.
   {% if retire %}
   <p>{{ badge(retire.badge, retire.text, true) }}</p>
   {% if retire.state == "retired" %}<p>The provider has retired this model. A request to <code>{{ alias }}</code> may already fail.</p>{% endif %}
-  {% if retire.replacement %}<p>Replacement named: <code>{{ retire.replacement }}</code>. It is offered for evaluation in <a href="/models/inbox">the Inbox</a>; a hosted candidate is evaluated on public eval sets only (the data-class rails, TM-1249).</p>
+  {% if retire.replacement %}<p>Replacement named: <code>{{ retire.replacement }}</code>. It is offered for evaluation in <a href="/models/inbox">the Inbox</a>; a hosted candidate is evaluated on public eval sets only (the data-class rails).</p>
   <form method="post" action="/models/propose" class="inline"><input type="hidden" name="csrf" value="{{ user.csrf }}"><input type="hidden" name="cid" value="{{ retire.candidate }}"><button class="btn-ghost" type="submit">Evaluate the replacement<span class="visually-hidden"> {{ retire.replacement }}</span></button></form>
   {% else %}<p class="muted">The report names no replacement.</p>{% endif %}
   {% if pinned %}

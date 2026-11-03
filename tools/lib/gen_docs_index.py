@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Generate the docs index surfaces from repo metadata (TM-0228).
+"""Generate the docs index surfaces from repo metadata.
 
 Two surfaces, both written BETWEEN MARKER COMMENTS so the prose around them
 stays hand-written:
@@ -45,7 +45,7 @@ import sys
 
 # name -> (what it gives you, declinable). Outcome first, then the components and
 # addresses that make the outcome concrete. This is the ONE place the layer
-# table is written (TM-0840): docs/architecture.md used to carry a second,
+# table is written: docs/architecture.md used to carry a second,
 # hand-kept table of the same nine layers, and the two disagreed within a week
 # (this one said "Registry, git" for a layer that ships neither). policy is
 # "No" by ruling (2026-08-30): apps.platform_netpol.enabled=false exists, but

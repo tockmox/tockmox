@@ -1,6 +1,6 @@
 {{/* SPDX-License-Identifier: Apache-2.0 */}}
 {{/*
-THE RESILIENT CLAIM (TM-0597).
+THE RESILIENT CLAIM.
 
 `global.resilience.profile: resilient` is the one key that says "this install
 claims to be resilient". profiles/resilient.yaml sets it. A layer that has a

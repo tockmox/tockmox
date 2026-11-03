@@ -184,7 +184,7 @@ def set_leg(doc: dict, name: str, state: str, summary: str = "", metrics: dict |
     return doc
 
 
-# ---------------------------------------------------------------- engine-upgrade comparison (TM-1264)
+# ---------------------------------------------------------------- engine-upgrade comparison
 
 # How far a figure may move before an engine upgrade is called a regression. Wide on purpose: perf figures from a
 # couple of dozen requests move on their own, and a status line that cries wolf teaches the reader to ignore it.

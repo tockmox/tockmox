@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # tockmox:route=argocd-helm
 #
-# PATH P04 ... ArgoCD via Helm, the ONLY documented route since TM-0299.
+# PATH P04 ... ArgoCD via Helm, the ONLY documented route.
 #
 # fresh-install.md "## 6. Install ArgoCD" carries three bash blocks:
 #
@@ -29,7 +29,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "${HERE}/../lib/assert.sh"
-# TM-0797: every kubectl and helm call below names its cluster with --context or
+# every kubectl and helm call below names its cluster with --context or
 # --kube-context from this variable, and an empty value is refused rather than
 # falling back to the current context (docs/deployment/fresh-install.md, "Name
 # the cluster"). run.sh exports it; a standalone run must export it itself.
@@ -41,7 +41,7 @@ SECTION="${TOCKMOX_P04_SECTION:-## 6. Install ArgoCD}"
 EXTRACT="${HERE}/../lib/extract-block.sh"
 
 path_begin "P04-argocd-via-helm" \
-  "the Helm route TM-0299 made the only documented way to install ArgoCD"
+  "the Helm route, the only documented way to install ArgoCD"
 
 # --- block 1: repo add/update + the version listing the reader is told to read
 if ! CMD1="$("$EXTRACT" --ref "$REF" --page "$PAGE" --section "$SECTION" --lang bash --containing 'helm repo add argo' 2>/dev/null)"; then
@@ -54,7 +54,7 @@ provenance "$REF" "$PAGE" "$SECTION" 1 "$SHA1"
 verbatim "$CMD1"
 
 # Run in THIS shell, carrying exports forward. Block 1 exports
-# ARGOCD_CHART_VERSION and block 2 guards on it (TM-0484's derive-once rule);
+# ARGOCD_CHART_VERSION and block 2 guards on it (the derive-once rule);
 # a command substitution is a subshell, so capturing the output that way threw
 # the export away and block 2 then died on its own guard with 127.
 _B1OUT="$(mktemp "${TMPDIR:-/tmp}/p04-b1.XXXXXX")"
@@ -77,7 +77,7 @@ _emit "  ARGOCD_CHART_VERSION carried from block 1 -> ${ARGOCD_CHART_VERSION:-<u
 _emit "  (the row this path read for reporting: chart ${CHART_VERSION:-?} appVersion ${APP_VERSION:-?})"
 _emit ""
 
-# No substitution is made any more. Since TM-0484 the page DERIVES the version
+# No substitution is made any more. Since then the page DERIVES the version
 # into an exported variable instead of printing a placeholder, so the honest
 # job here is to carry the variable, not to patch a token. If the export did
 # not arrive, block 2 cannot run as written and saying so beats guessing.

@@ -36,7 +36,7 @@ other components that carry non-OSI or source-available terms, is in
 | | Nodes | CPU | RAM | Disk (per node) | Survives |
 |---|---|---|---|---|---|
 | **Minimal** | 1 | 4 cores | 12 GB | 100 GB SSD | a process crash |
-| **Reference** | 1 | 8 cores | 24 GB | 250 GB SSD | a process crash; a rebuild, from backups |
+| **Reference** | 1 | 8 cores | 24 GB | 250 GB SSD | a process crash; a rebuild from backups (documented, not yet rehearsed as one exercise) |
 | **Resilient** | 1 + offsite backups | 8 cores | 32 GB | 500 GB SSD | losing the box, with a restore you have rehearsed |
 | **HA** | 3 | 8 cores each | 32 GB each | 500 GB SSD each | losing a node, live |
 

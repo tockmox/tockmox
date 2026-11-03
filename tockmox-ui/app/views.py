@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Page composition helpers for the UI standard (DESIGN-2026-10-23-ui-standard, TM-1127).
+"""Page composition helpers for the UI standard (DESIGN-2026-10-23-ui-standard).
 
 Exceptions first: every page opens with the problems, as rows that link to their page, and folds
 what is healthy to one line. These functions turn the sources' readings into those rows and

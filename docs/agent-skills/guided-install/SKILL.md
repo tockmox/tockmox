@@ -32,7 +32,7 @@ StorageClass, credentials sealed into their site repository, and a console they
 have signed in to.
 
 **Do not restate the bar here.** Three surfaces stated it three different ways
-and all three were false on a correct install (TM-0496). This one was the
+and all three were false on a correct install. This one was the
 strictest: it named `site-apps`, which is the operator's OWN content, so an
 agent following it would report a working install as not ready.
 
@@ -185,6 +185,6 @@ What this page used to say, and when it changed. Nothing here is needed to follo
 
 This step claimed `local-path` stops being the default until 2026-09-12;
 the install page says the opposite twice, and the change was recorded as
-breaking. TM-0499 fixed the same sentence in `install.md`'s diagram
+breaking. An earlier fix corrected the same sentence in `install.md`'s diagram
 text; this was a fifth copy, found by grepping the CLAIM rather than the paths
 that card named.

@@ -3,7 +3,7 @@
 # THE PYTHON LOCKFILES TAKE NOTHING YOUNGER THAN THREE DAYS.
 #
 # renovate.json5 holds every update for three days (minimumReleaseAge), so an
-# upstream can pull a bad release before a PR for it exists (TM-1197: LiteLLM's
+# upstream can pull a bad release before a PR for it exists (LiteLLM's
 # pipeline shipped a credential stealer on 2026-10-21). That hold covers only
 # the pins Renovate bumps by name. A lockfile refresh (lockFileMaintenance, and
 # any hand regeneration) re-resolves every transitive package to whatever is

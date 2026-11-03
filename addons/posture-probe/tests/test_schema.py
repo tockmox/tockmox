@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""TM-0882: the report schema and the gate exit-code contract are a published,
+"""The report schema and the gate exit-code contract are a published,
 versioned interface, and the code that writes reports is held to them.
 
 Proves, against the REAL pilot reports (tests/fixtures/pilot-report-*.json, from

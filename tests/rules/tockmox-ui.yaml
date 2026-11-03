@@ -1,4 +1,4 @@
-# TockmoxUISignInFailing and TockmoxUIUnreachable ... TM-1013.
+# TockmoxUISignInFailing and TockmoxUIUnreachable.
 #
 # DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
 #

@@ -47,7 +47,7 @@ data:
         attrs:
           is_superuser: false
 {{- if .Values.sso.recoveryFlow }}
-  # TM-1315. A recovery flow reached only through a link an administrator made
+  # A recovery flow reached only through a link an administrator made
   # (Authentik's "Create recovery link", or the console's Identity page): the
   # link carries the user, so the flow asks for no username and sends no email.
   # Choose a password, checked as the password-change flow checks it, and the
@@ -61,7 +61,7 @@ data:
     metadata:
       name: tockmox-recovery
       labels:
-        blueprints.goauthentik.io/description: "Password recovery by a link an administrator made (TM-1315)"
+        blueprints.goauthentik.io/description: "Password recovery by a link an administrator made"
     entries:
       - model: authentik_policies_password.passwordpolicy
         id: recovery-password-policy
@@ -182,7 +182,7 @@ data:
           flow_recovery: !KeyOf recovery-flow
 {{- end }}
 {{- if .Values.sso.consoleActions.enabled }}
-  # TM-1315. The console's identity actions, through one service account whose
+  # The console's identity actions, through one service account whose
   # bounds are Authentik's own permissions, so a compromised tockmox-actions pod
   # holds no more than this:
   #   globally   see users (the Identity page, and the user an action names)
@@ -202,7 +202,7 @@ data:
     metadata:
       name: tockmox-console-identity
       labels:
-        blueprints.goauthentik.io/description: "The Tockmox console's identity actions: one narrow service account (TM-1315)"
+        blueprints.goauthentik.io/description: "The Tockmox console's identity actions: one narrow service account"
     entries:
       - model: authentik_rbac.role
         id: console-role
@@ -225,7 +225,7 @@ data:
           roles:
             - !KeyOf console-role
           attributes:
-            notes: "The Tockmox console's identity actions (TM-1315). Its role is managed by the tockmox-console-identity blueprint and the tockmox-console-identity-grants CronJob; changes made here are reverted."
+            notes: "The Tockmox console's identity actions. Its role is managed by the tockmox-console-identity blueprint and the tockmox-console-identity-grants CronJob; changes made here are reverted."
       - model: authentik_core.group
         state: present
         identifiers:
@@ -342,7 +342,7 @@ four lines per app and removes the ordering dependency entirely.
       (dict "key" "openwebui" "title" "Open WebUI"     "host" (.Values.sso.apps.openWebui.host | default "") "subMode" (.Values.sso.apps.openWebui.subMode | default $.Values.sso.subMode | default "") "cid" .Values.sso.apps.openWebui.clientId     "access" (.Values.sso.apps.openWebui.access | default "users")     "env" "OPENWEBUI_CLIENT_SECRET" "hostPrefix" "chat"      "path" "/oauth/oidc/callback" "desc" "Chat with models running on your own hardware." "group" "AI Apps" "icon" "app-openwebui.svg")
       (dict "key" "argo"      "title" "Argo Workflows" "host" (.Values.sso.apps.argoWorkflows.host | default "") "subMode" (.Values.sso.apps.argoWorkflows.subMode | default $.Values.sso.subMode | default "") "cid" .Values.sso.apps.argoWorkflows.clientId "access" (.Values.sso.apps.argoWorkflows.access | default "users") "env" "ARGO_CLIENT_SECRET"      "hostPrefix" "workflows" "path" "/oauth2/callback"    "desc" "Run and inspect workflows." "group" "Infrastructure" "icon" "app-argo-workflows.svg") }}
 {{- /*
-THE TOCKMOX UI (TM-0956) joins the list only when `sso.apps.tockmoxUi.enabled`
+THE TOCKMOX UI joins the list only when `sso.apps.tockmoxUi.enabled`
 is true: off by default in 0.9.0, because its secret is a key an older
 `tockmox-sso` Secret lacks, and an `!Env` that resolves to nothing puts this
 blueprint in `error` and stops discovery for every other one (values.yaml says
@@ -357,7 +357,7 @@ post-logout redirect URI, so Sign out lands back on its sign-in page.
 {{- $apps = append $apps (dict "key" "tockmoxui" "title" "Tockmox" "host" ($ui.host | default "") "subMode" ($ui.subMode | default $.Values.sso.subMode | default "") "cid" ($ui.clientId | default "tockmox-ui") "access" ($ui.access | default "admin") "env" "TOCKMOX_UI_CLIENT_SECRET" "hostPrefix" "tockmox" "path" "/auth/callback" "desc" "Platform administration: status, nodes, models and versions." "group" "Infrastructure" "icon" "" "invalidation" "default-invalidation-flow" "logoutPath" "/") }}
 {{- end }}
 {{- /*
-THE BUILT-IN SITE FORGE (TM-1336) joins the list only when `sso.apps.forge.enabled`
+THE BUILT-IN SITE FORGE joins the list only when `sso.apps.forge.enabled`
 is true, off by default for the tockmoxUi reason above: FORGE_CLIENT_SECRET comes
 from the `tockmox-sso-forge` Secret that `tockmox-install.sh bootstrap-forge`
 writes, and an `!Env` with nothing behind it stops discovery for every blueprint.
@@ -423,7 +423,7 @@ keys would overwrite that application's tile. */ -}}
 {{- $accessOn := dig "access" "enabled" true .Values.sso }}
 {{- $subModes := list "hashed_user_id" "user_id" "user_uuid" "user_username" "user_email" }}
 {{- range $app := (concat $apps $links) }}
-{{- /* Redirect host: an explicit sso.apps.<app>.host wins, else <prefix>.<domain>. Mirrors the per-app ingress host override in the layer that serves the app (TM-0820). */ -}}
+{{- /* Redirect host: an explicit sso.apps.<app>.host wins, else <prefix>.<domain>. Mirrors the per-app ingress host override in the layer that serves the app. */ -}}
 {{- $appHost := $app.host | default (printf "%s.%s" $app.hostPrefix $domain) }}
 {{- if and $app.subMode (not (has $app.subMode $subModes)) }}
 {{- fail (printf "sso.apps.%s.subMode (or sso.subMode) must be one of %s, got %q" $app.key (join ", " $subModes) $app.subMode) }}
@@ -548,7 +548,7 @@ keys would overwrite that application's tile. */ -}}
 {{- end }}
 {{- end }}
 {{- /*
-FORWARD-AUTH CONSOLES (TM-0425, TM-0217). One blueprint file for all of them,
+FORWARD-AUTH CONSOLES. One blueprint file for all of them,
 because the embedded outpost's provider list is ONE field: it is set whole from
 every enabled console plus `keepProviders`, and two files setting it would undo
 each other. values.yaml (`sso.forwardAuth`) explains why the list is owned here.
@@ -566,7 +566,7 @@ none on the embedded outpost is left exactly as it is. It is identified by
 `managed`, the stable marker Authentik itself creates it with, never by its
 display name, which an operator can rename.
 
-THE OUTPOST ENTRY ALSO SETS `config.authentik_host` (TM-0425, the maintainers' lab,
+THE OUTPOST ENTRY ALSO SETS `config.authentik_host` (the maintainers' lab,
 2026-10-28). The embedded outpost builds the browser-facing sign-in URL from it:
 `GetOIDCEndpoint` in the outpost's endpoint.go rewrites scheme and host of the
 authorization and end-session URLs to `authentik_host` for an embedded outpost,

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The console's side of actions (TM-1311, TM-1313): the buttons, the confirm panel, the sign-in that binds a
+"""The console's side of actions: the buttons, the confirm panel, the sign-in that binds a
 confirmation to one intent, and Platform > Activity. Nothing here writes: the intent goes to tockmox-actions
 (app/actions_service.py) with the ID token the issuer minted for it, and that service decides and acts.
 
@@ -7,7 +7,7 @@ confirmation to one intent, and Platform > Activity. Nothing here writes: the in
   POST /actions/go             CSRF, then off to the issuer with nonce = actions.nonce_for(intent)
   (GET /auth/callback)         finish(): the ID token and the intent go to the service; the result is a page
   GET  /platform/activity      what was done, by whom, and how it ended
-  GET  /platform/identity      the people Authentik knows, with a recovery link and user-group membership (TM-1315)
+  GET  /platform/identity      the people Authentik knows, with a recovery link and user-group membership
 """
 from __future__ import annotations
 
@@ -241,7 +241,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
             return done("action_result.html", 502, ok=False, d=d,
                         reason=f"the actions service did not answer ({type(e).__name__}); nothing is known to have been done")
         ok = out.get("result") == "done"
-        # a recovery link (TM-1315) is shown on this page once; every page here is sent no-store (main.py)
+        # a recovery link is shown on this page once; every page here is sent no-store (main.py)
         return done("action_result.html", 200 if ok else (r.status_code or 502), ok=ok, d=d, out=out,
                     reason=out.get("reason", ""), secret=out.get("secret", ""))
 

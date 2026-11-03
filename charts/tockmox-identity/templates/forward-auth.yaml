@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# FORWARD-AUTH FOR CONSOLES WITH NO SIGN-IN OF THEIR OWN (TM-0425).
+# FORWARD-AUTH FOR CONSOLES WITH NO SIGN-IN OF THEIR OWN.
 #
 # Two things live here, beside the blueprint in sso-blueprints.yaml that creates
 # the per-console proxy providers:
@@ -11,7 +11,7 @@
 #    (tockmox.forwardAuthRef in tockmox-common), so it is the same object for
 #    Prometheus, Alertmanager and Longhorn, and for any Ingress of your own you
 #    put behind it. The Traefik dashboard is an IngressRoute, which cannot
-#    attach another namespace's Middleware (TM-0217): the platform layer
+#    attach another namespace's Middleware: the platform layer
 #    renders a copy of this one's spec beside it, and
 #    tools/check-forward-auth.sh holds the two equal.
 #    The outpost decides PER HOST which provider applies, so sharing

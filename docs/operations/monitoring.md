@@ -70,7 +70,7 @@ your ArgoCD, so it cannot fix that for you.
 
 So `apps.argocdMonitoring.enabled` gates the three ServiceMonitors, the board
 **and** the sync-state alert rules together. It follows the observability
-capability, so it is on by default (TM-0739; it was off until 0.7.1). An ArgoCD
+capability, so it is on by default (it was off until 0.7.1). An ArgoCD
 installed per [fresh-install § 6](../deployment/fresh-install.md#6-install-argocd)
 has its metrics on already. One you installed without them
 ([ArgoCD § its metrics are off until you turn them on](../administration/argocd.md#its-metrics-are-off-until-you-turn-them-on)
@@ -172,7 +172,7 @@ drill's Jobs rather than the databases:
 | Alert | Fires when | Why it exists separately |
 |---|---|---|
 | `TockmoxRestoreDrillStale` | no PASS in 15 days | Two missed weekly cycles. One slot lost to a maintenance window stays silent; two never does |
-| `TockmoxRestoreDrillNeverRan` | no drill Job has ever completed, and the CronJob has passed a slot: scheduled over 26h ago, or its next scheduled time more than an hour gone | A freshness rule alone cannot see a drill that was never scheduled ... absence and health look identical from the metrics side. Keyed on the CronJob's own schedule, so a fresh install is silent until its first slot has come and gone (TM-0851; until 0.8.0 it fired for up to six days on every new install) |
+| `TockmoxRestoreDrillNeverRan` | no drill Job has ever completed, and the CronJob has passed a slot: scheduled over 26h ago, or its next scheduled time more than an hour gone | A freshness rule alone cannot see a drill that was never scheduled ... absence and health look identical from the metrics side. Keyed on the CronJob's own schedule, so a fresh install is silent until its first slot has come and gone (until 0.8.0 it fired for up to six days on every new install) |
 | `TockmoxRestoreDrillFailed` | the most recent drill ran and did not PASS, or could not write its row and read it back (a drill that cannot record its verdict exits non-zero, whatever the restore found) | The other two see a drill that stopped or never started; neither sees one that ran and failed, and a failed drill that pages nobody is worse than no drill. Clears on the next PASS rather than when the failed Job is garbage-collected |
 
 All three are stated in `charts/tockmox-ai/values.yaml` beside the
@@ -231,7 +231,7 @@ once you give it URLs. It stays off until you do: an Apprise with no
 destinations accepts every alert, delivers none of them, and reports healthy
 while it does.
 
-**Until 0.8.0-rc2 the Apprise path never delivered** (TM-1020). The config was
+**Until 0.8.0-rc2 the Apprise path never delivered**. The config was
 mounted as `tockmox.txt`, and Apprise's simple mode reads only `.cfg` or `.yml`,
 so Apprise 1.5.4 answered every alert `204` and sent nothing while the bridge
 counted it delivered. The chart now mounts `tockmox.cfg` read-only, locks the
@@ -293,7 +293,7 @@ The chart therefore compares that literal against the Service it actually
 creates and **refuses to render** when they disagree, printing the corrected
 block. A deliberately invalid render beats a deliberately silent one.
 
-## Two Prometheus replicas and `ALERTS` (TM-0781)
+## Two Prometheus replicas and `ALERTS`
 
 Tockmox sets no `prometheusSpec.replicas`, so a default install runs **one**
 Prometheus (upstream's default) and nothing here applies. A site that raises it
@@ -357,9 +357,9 @@ both survive, and "deterministic" is not the same as "safe" for a gate.
 
 To check a live install, query the Service from one pod several times and
 compare, as in `tools/check-platform-seams.sh` S10 for the render and the lab
-steps in TM-0781 for the behaviour.
+steps for the behaviour.
 
-## The reboot gate: which alerts hold a kured reboot (TM-0225)
+## The reboot gate: which alerts hold a kured reboot
 
 kured can hold a node reboot while chosen alerts are firing. Tockmox ships
 `kured.configuration.prometheusUrl` and `alertFilterRegexp` empty, so the gate
@@ -377,7 +377,7 @@ kured:
 
 Set `alertFilterMatchOnly: true`. Without it kured reads the expression as a
 list of alerts to **ignore**, which inverts the gate. The Service name is the
-Prometheus Service from [two Prometheus replicas](#two-prometheus-replicas-and-alerts-tm-0781)
+Prometheus Service from [two Prometheus replicas](#two-prometheus-replicas-and-alerts)
 above; read the real one with `kubectl get svc -n <monitoring-namespace>`.
 
 **What the regexp is built from.** One decision per alert Tockmox authors,
@@ -412,7 +412,7 @@ alert that is merely pending (a Longhorn volume rebuilding after the previous
 node's reboot is the usual one). And because Alertmanager does not serve
 `/api/v1/query`, the URL has to be a Prometheus, not Alertmanager.
 
-## Grafana on CloudNativePG, and more than one Grafana (TM-0786)
+## Grafana on CloudNativePG, and more than one Grafana
 
 **Optional, off by default, new in 0.8.0.** What you get: Grafana's own state
 (users, org membership, preferences, annotations, UI-made alert rules) in a
@@ -476,7 +476,7 @@ WAL to it and takes a scheduled base backup.
 > one pod was read back through the other, and both reported database `ok`.
 > **Not yet run: a fresh install with the database on from the first sync.**
 
-## Loki is one replica by default, and the way to more than one (TM-0778)
+## Loki is one replica by default, and the way to more than one
 
 Loki ships as a single pod with its chunks and index on a local volume. That is
 deliberate, not an oversight: a week of logs on one disk is cheap to lose and

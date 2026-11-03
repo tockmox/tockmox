@@ -110,7 +110,7 @@ class OIDC:
         that one intent, and max_age for a step-up kind, which makes the issuer ask again after that many seconds."""
         # Fresh, not cached: a cached discovery document sends the browser to an IdP
         # that is down, where it meets the proxy's bare 503 instead of our recovery
-        # page. Found in the lab (TM-0901, 2026-10-05, run D10).
+        # page. Found in the lab (2026-10-05, run D10).
         d = self.discovery(fresh=True)
         verifier = _b64(secrets.token_bytes(32))
         st = {"state": secrets.token_urlsafe(24), "nonce": nonce or secrets.token_urlsafe(24), "verifier": verifier}

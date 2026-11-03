@@ -2,9 +2,9 @@
 {% from "macros.html" import badge, argo_badge, source_line, problems_table, fold_summary, state_icon, state_word, mascot, trend, trend_row %}
 {% block title %}Status{% endblock %}
 {% block main %}
-{# Exceptions first (TM-1127): the problems open the page as rows; every healthy group folds to one
+{# Exceptions first: the problems open the page as rows; every healthy group folds to one
    row with its count and source line, and opens to the full list. Sync and Health stay two facts. #}
-{#- TM-1305 (specs/tockmox-ui/SPEC.md section 5): the platform drawn as the stack it is. Every signal sits on one
+{#- specs/tockmox-ui/SPEC.md section 5: the platform drawn as the stack it is. Every signal sits on one
     part (app/stack.py, app/stack.yaml), so four signals about one backup count once. A part opens its drawer at
     /status/<part>, server-rendered: it works and deep-links without JavaScript. The sources, as read, fold below. -#}
 {%- set qbits = [] -%}
@@ -170,9 +170,9 @@
   </details>
 
   {% set am = readings["alertmanager"] %}
-  {# The heartbeat is the pipeline's "I am alive", not a problem (TM-0904): named once as that, never as a firing row.
+  {# The heartbeat is the pipeline's "I am alive", not a problem: named once as that, never as a firing row.
      Which alert it is comes from config (sources.alertmanager.heartbeat). Every OTHER always-firing heartbeat
-     (TockmoxHeartbeat, TM-1014) reads Alive when present and is never a firing row; absent says nothing. #}
+     (TockmoxHeartbeat) reads Alive when present and is never a firing row; absent says nothing. #}
   {% set hb_on = (am.data or []) | selectattr("name", "equalto", heartbeat) | list %}
   {% set real = (am.data or []) | rejectattr("name", "in", pipeline) | list %}
   <details class="fold">

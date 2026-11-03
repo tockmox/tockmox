@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Unit tests for the shipped key policy module (TM-0991). The live proof against a real LiteLLM is run.sh."""
+"""Unit tests for the shipped key policy module. The live proof against a real LiteLLM is run.sh."""
 import asyncio
 import importlib.util
 import os

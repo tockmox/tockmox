@@ -119,7 +119,7 @@ step 7c is a node:
 | [1. Delete the ArgoCD Applications](#1-delete-the-argocd-applications) | Required | A surviving Application with `selfHeal` recreates everything the later steps delete. Deleting `tockmox-platform` also runs Longhorn's uninstaller hook, which must fail (the flag is still `false`) |
 | [2. Delete the workload namespaces](#2-delete-the-workload-namespaces) | Required | They will stall. That is expected, and step 3 is the reason |
 | [3. Delete the object store's PVCs](#3-delete-the-object-stores-pvcs) | Conditional | Two PVCs in a *different* namespace are what every namespace in step 2 is waiting on |
-| [3b. Delete released volumes](#3b-delete-released-volumes-the-longhorn-storageclass-retains-them-tm-0789) | Conditional | A `Retain` StorageClass leaves the volume behind after its claim goes, and step 4 refuses to continue while any volume is listed |
+| [3b. Delete released volumes](#3b-delete-released-volumes-the-longhorn-storageclass-retains-them) | Conditional | A `Retain` StorageClass leaves the volume behind after its claim goes, and step 4 refuses to continue while any volume is listed |
 | [4. Clear Longhorn's interlock, then delete the platform namespace](#4-clear-longhorns-uninstall-interlock-then-delete-the-platform-namespace) | Required | The interlock patch is a write to a `longhorn.io` resource, so it has to happen while the webhook still answers |
 | [5. Delete Longhorn's webhook configurations, then its finalizers](#5-delete-longhorns-webhook-configurations-then-its-finalizers) | Required | Reverse those two and the finalizer patch is rejected by a webhook whose Service you just deleted |
 | [6. Clear whatever finalizer the namespace names](#6-clear-whatever-finalizer-the-namespace-names) | Conditional | Only if `tockmox-platform` is still there after step 5 |
@@ -351,7 +351,7 @@ gate two of them took just under two minutes. If one is still
 `Terminating` several minutes later, ask it what it is holding rather than
 guessing: [troubleshooting](troubleshooting.md#a-namespace-is-stuck-terminating).
 
-## 3b. Delete released volumes: the Longhorn StorageClass retains them (TM-0789)
+## 3b. Delete released volumes: the Longhorn StorageClass retains them
 
 **Conditional. Run this if** the Longhorn StorageClass on this cluster has
 `reclaimPolicy: Retain`, which is the default from 0.7.1. A cluster installed
@@ -419,7 +419,7 @@ kubectl --context="$KUBE_CONTEXT" -n tockmox-platform get volumes.longhorn.io
 
 Expect `No resources found in tockmox-platform namespace.` **If any volume is
 listed, stop.** Either it is a volume that
-[step 3b](#3b-delete-released-volumes-the-longhorn-storageclass-retains-them-tm-0789)
+[step 3b](#3b-delete-released-volumes-the-longhorn-storageclass-retains-them)
 exists to clear, or something above did not finish. Clearing the flag now
 destroys a volume that still has a claim on it.
 
@@ -1142,7 +1142,7 @@ written.** Three things on it have never been run in this form:
   branches are reasoned, not walked.
 
 **Step 9 is transcribed from an execution, not from a run of step 9.** Added at
-0.6.1 (TM-0624). The uninstaller's two output lines and all six post-reboot
+0.6.1. The uninstaller's two output lines and all six post-reboot
 facts were observed on a real MicroOS node on 2026-09-15, during the rc4
 rebuild, and are quoted from that run rather than reconstructed. What was *not*
 run is the confirmation block in the form printed above, as a block ... the
@@ -1193,7 +1193,7 @@ chart that failed to render a ClusterRole, or rendered one with the wrong
 rules, would have installed perfectly over the stale permissive copy, which is
 precisely the class of defect a clean reinstall exists to catch. Step 7f and
 the derived check in step 8 exist because of that run; the confirmation as it
-then read enumerated eight kinds by hand and missed all five (TM-0536).
+then read enumerated eight kinds by hand and missed all five.
 
 Found 2026-09-13 by running this page end to end: the sweep ran clean and the
 listing block still printed `namespaces news`, because the listing lacked the

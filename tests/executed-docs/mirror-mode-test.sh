@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Hermetic contract test for the registry-mirror modes. TM-0575. No cluster, no
+# Hermetic contract test for the registry-mirror modes. No cluster, no
 # network, no root: kubectl, curl and sleep are stubs, iptables is a stub that
 # records its arguments, and the provisioner and the MicroOS profile run
 # unmodified against them (the same stub shape as handoff-secret-test.sh).
@@ -56,7 +56,7 @@ cat >"${BIN}/kubectl" <<'STUB'
 ST="$STUB_STATE"
 printf '%s\n' "$*" >>"$ST/log"
 # Every invocation, verbatim, so a case can assert that each one named a cluster
-# (TM-0797). `log` above also carries non-call lines the cases grep for.
+#. `log` above also carries non-call lines the cases grep for.
 printf '%s\n' "$*" >>"$ST/calls"
 a=()
 while [ $# -gt 0 ]; do
@@ -77,7 +77,7 @@ case "$j" in
   "auth can-i"*) echo yes ;;
   *"jsonpath={.clusters[0].cluster.server}") printf 'https://api.invalid:6443' ;;
   *"jsonpath={.users[0].user.token}")
-    # A JWT-shaped ServiceAccount token for tockmox-test (TM-0849 reads its
+    # A JWT-shaped ServiceAccount token for tockmox-test (the script reads its
     # subject); $ST/token overrides it for the refusal cases.
     if [ -f "$ST/token" ]; then cat "$ST/token"
     else printf 'eyJhbGciOiJub25lIn0.%s.sig' "$(printf '{"sub":"system:serviceaccount:tockmox-test:tockmox-test-agent"}' | base64 | tr -d '=\n' | tr '+/' '-_')"; fi ;;

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Frontier generations (TM-1297, rulings D1 and D2 of 2026-10-30).
+"""Frontier generations (rulings D1 and D2 of 2026-10-30).
 
 A hosted family keeps several generations at once. Each generation is served under a PINNED alias that never moves
 (`claude-sonnet-5-5` is always anthropic/claude-sonnet-5-5), and the family has one FLOATING alias (`claude-sonnet`) that
@@ -170,7 +170,7 @@ def family_view(gateway, lc, family: str, retire_map=None, retire_for=None) -> F
     return FamilyView(family, fam, target, gens, left, lc.keep_generations)
 
 
-# ---------------------------------------------------------------- display grouping for the Models page (TM-1296)
+# ---------------------------------------------------------------- display grouping for the Models page
 # family_of above is the one family rule; these group hosted models by provider, then family, for /models.
 
 _VERSION = re.compile(r"^v?\d+(\.\d+)*$")           # 5  4.5  v2  20250929
@@ -206,7 +206,7 @@ def frontier_groups(lc, gateway_hosted: dict, retire_of) -> list[dict]:
     production gateway's own hosted routes: a model the catalog does not know still shows, as not in the catalog. `retire_of(*ids)`
     returns the countdown dict (with "badge") for a model id, or None.
 
-    A row: {id, model, entry, stage, aliases, retire}. What the model costs is frontier_cost.costs_for (TM-1298), keyed by `id`."""
+    A row: {id, model, entry, stage, aliases, retire}. What the model costs is frontier_cost.costs_for, keyed by `id`."""
     rows: dict[str, dict] = {}
     for e in lc.catalog:
         if e.source.kind != "hosted" or e.stage not in ("promoted", "candidate"):

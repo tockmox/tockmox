@@ -231,5 +231,5 @@ What this page used to say, and when it changed. Nothing here is needed to follo
 `MIRROR_REGISTRY` was written as a bare `REGISTRY_HOST` inside the command
 until 2026-09-11. That spelling is the worst kind of placeholder: uppercase
 without `YOUR_` and without brackets, so it reads as a value, pastes verbatim,
-and fails with a DNS error naming a host nobody chose (TM-0484, RULE 4 of
+and fails with a DNS error naming a host nobody chose (RULE 4 of
 `check-pasteable-blocks.sh`).

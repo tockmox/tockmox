@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-0930: CI opens the verdict files a promotion cites; the record alone can be invented."""
+"""CI opens the verdict files a promotion cites; the record alone can be invented."""
 import hashlib
 import json
 

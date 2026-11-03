@@ -18,7 +18,7 @@
   ],
   "panels": [
     {
-      "description": "ValidatingAdmissionPolicy denials that are actual policy decisions: enforcement_action deny with error_type invalid_error, which is how the apiserver labels an ordinary violation (it never emits an empty error_type; an earlier version of this panel filtered for one and always read 0, TM-0976). compile_error and out_of_budget denials are CEL errors and are counted on the CEL errors panel instead. Known limit: a runtime CEL error under failurePolicy Fail carries the same labels as a violation, so it is counted here.",
+      "description": "ValidatingAdmissionPolicy denials that are actual policy decisions: enforcement_action deny with error_type invalid_error, which is how the apiserver labels an ordinary violation (it never emits an empty error_type; an earlier version of this panel filtered for one and always read 0). compile_error and out_of_budget denials are CEL errors and are counted on the CEL errors panel instead. Known limit: a runtime CEL error under failurePolicy Fail carries the same labels as a violation, so it is counted here.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -71,7 +71,7 @@
       "type": "stat"
     },
     {
-      "description": "Policy CEL that failed to compile or ran out of cost budget (error_type compile_error or out_of_budget), plus any evaluation error under failurePolicy Ignore (enforcement_action allow with error_type invalid_error). An ordinary violation is NOT counted: the apiserver labels it invalid_error too, with enforcement_action deny, audit or warn (TM-0914). Not counted: a runtime CEL error under failurePolicy Fail, which the metric labels like a violation.",
+      "description": "Policy CEL that failed to compile or ran out of cost budget (error_type compile_error or out_of_budget), plus any evaluation error under failurePolicy Ignore (enforcement_action allow with error_type invalid_error). An ordinary violation is NOT counted: the apiserver labels it invalid_error too, with enforcement_action deny, audit or warn. Not counted: a runtime CEL error under failurePolicy Fail, which the metric labels like a violation.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -177,7 +177,7 @@
       "description": "Window follows the dashboard's time range. It was a fixed [24h], which on a cluster younger than the window makes increase() extrapolate: a healthy 12-minute-old install rendered 'Webhook fail-open events (24h): 74.2' in red, and none of those events happened. Measured 2026-09-12."
     },
     {
-      "description": "Observed counter delta across the selected range: max_over_time minus min_over_time. Deliberately NOT increase(), which extrapolates across the full range and therefore reports a fractional count of events that never happened on any cluster younger than the window ... 74.2 on 2026-09-12 and 70.2 on 2026-09-15, both on healthy clusters where no webhook had failed open (TM-0532). Switching the window to $__range in 2026-09-13 fixed the title, not the extrapolation, because the dashboard's default range is 24h.",
+      "description": "Observed counter delta across the selected range: max_over_time minus min_over_time. Deliberately NOT increase(), which extrapolates across the full range and therefore reports a fractional count of events that never happened on any cluster younger than the window ... 74.2 on 2026-09-12 and 70.2 on 2026-09-15, both on healthy clusters where no webhook had failed open. Switching the window to $__range in 2026-09-13 fixed the title, not the extrapolation, because the dashboard's default range is 24h.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -230,7 +230,7 @@
       "type": "stat"
     },
     {
-      "description": "Rows are per-second rates over the trailing 5 minutes, at the moment the panel was evaluated ... not counts, and not the selected range. Zero-rate series are filtered out (`> 0`) so that a row appearing here means something is happening now. Before 2026-09-15 a dormant `error_type` label combination rendered identically to an active one and read as a finding (TM-0644).",
+      "description": "Rows are per-second rates over the trailing 5 minutes, at the moment the panel was evaluated ... not counts, and not the selected range. Zero-rate series are filtered out (`> 0`) so that a row appearing here means something is happening now. Before 2026-09-15 a dormant `error_type` label combination rendered identically to an active one and read as a finding.",
       "gridPos": {
         "h": 9,
         "w": 12,

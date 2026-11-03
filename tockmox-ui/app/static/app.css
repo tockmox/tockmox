@@ -2,7 +2,7 @@
    Tockmox UI: the page shapes this app owns. The shell, type, controls, state badges, folds and
    tables come from the vendored kit (static/kit/kit.css, loaded first); this file only adds to it.
 
-   UI standard (DESIGN-2026-10-23-ui-standard, TM-1127, TM-1130): exceptions first; healthy folds to
+   UI standard (DESIGN-2026-10-23-ui-standard): exceptions first; healthy folds to
    a count; one action zone; identifiers truncated. */
 
 /* ---- verdict row and the problems table (exceptions first) ---- */
@@ -64,7 +64,7 @@ fieldset.plainset { border: 0; padding: 0; margin: .75rem 0; } fieldset.plainset
 label.check { font-weight: 400; display: flex; align-items: center; min-height: 32px; }
 .cands { list-style: none; padding: 0; margin: 0; } .cands li { border-top: 1px solid var(--tx-border); padding: .5rem 0; } .cands li p { margin: .2rem 0; }
 
-/* TM-1014: the footer's "new version" pill, and the documentation links. */
+/* the footer's "new version" pill, and the documentation links. */
 .pill { display: inline-block; margin-left: .35rem; padding: 0 .5rem; border: 1px solid var(--tx-btn2-border); border-radius: 999px; color: var(--tx-link); font-weight: 600; text-decoration: none; }
 .pill:hover, .pill:focus-visible { background: var(--tx-btn2-bg-hover); color: var(--tx-btn2-text); }
 .docs-links { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; padding: 0; margin: 0; list-style: none; font-size: var(--fs-1); }
@@ -155,14 +155,14 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .badge.st-closed { background: var(--st-unknown-soft); }
 table.timeline td:first-child { white-space: nowrap; }
 
-/* Models inbox, candidate page and budget (TM-1258): chips wrap, cards separate by a rule, the leg list reads as a row of names. */
+/* Models inbox, candidate page and budget: chips wrap, cards separate by a rule, the leg list reads as a row of names. */
 .chips-row { display: flex; flex-wrap: wrap; gap: .35rem .9rem; margin: .35rem 0; }
 .cands.inbox li { padding: .85rem 0; }
 .cands.inbox .page-actions { margin-top: .5rem; }
 ol.legs { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; counter-reset: leg; }
 ol.legs li { counter-increment: leg; } ol.legs li::before { content: counter(leg) ". "; color: var(--tx-text-muted); }
 
-/* TM-1301: run pipeline */
+/* run pipeline */
 .pipe, .mini, .runs { list-style: none; margin: 0; padding: 0; }
 .pipe { display: flex; align-items: stretch; margin: 1rem 0 0; }
 .pipe-item { flex: 1 1 0; min-width: 0; display: flex; align-items: stretch; }
@@ -231,7 +231,7 @@ ol.legs li { counter-increment: leg; } ol.legs li::before { content: counter(leg
   .stage .prog { flex: 1 1 100%; }
 }
 
-/* TM-1300: inbox rows */
+/* inbox rows */
 .inbox-filters .n { margin-left: .25rem; font-weight: 600; color: var(--tx-text); font-variant-numeric: tabular-nums; }
 .inbox-rows > h2 { margin: 0; padding: .7rem 1rem; font-size: var(--fs-3); border-bottom: 1px solid var(--tx-border); }
 .inbox-rows details { margin: 0; }
@@ -288,7 +288,7 @@ ol.legs li { counter-increment: leg; } ol.legs li::before { content: counter(leg
   .in-detail { padding-left: 0; }
 }
 
-/* TM-1299: node models and memory bar */
+/* node models and memory bar */
 .membar-wrap { padding: 1rem 1rem 1.1rem; border-bottom: 1px solid var(--tx-border); }
 .membar-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: .6rem; gap: .25rem 1rem; flex-wrap: wrap; }
 .membar-top strong { font-size: var(--fs-3); font-variant-numeric: tabular-nums; }
@@ -324,7 +324,7 @@ table.models-on tbody th[scope="row"] a { white-space: nowrap; }
 table.models-on td:nth-child(3) code { white-space: nowrap; }
 table.models-on td.num { white-space: normal; }
 
-/* TM-1296: models page revision 2 */
+/* models page revision 2 */
 .needs { padding: 0; }
 .needs-head { display: flex; align-items: baseline; gap: .6rem; padding: .7rem 1rem; border-bottom: 1px solid var(--tx-border); }
 .needs-head h2 { margin: 0; font-size: var(--fs-3); }
@@ -388,7 +388,7 @@ table.frontier details.callers table { width: auto; min-width: 0; margin: .3rem 
   .folds .fold > summary .muted { display: none; }
 }
 
-/* TM-1297: frontier generations */
+/* frontier generations */
 .fam-point { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; }
 .fam-from, .fam-to { padding: .6rem 1rem; border: 1px solid var(--tx-border); border-radius: var(--tx-radius-md); background: var(--tx-surface-raised); min-width: 0; }
 .fam-to { border-color: var(--tx-emerald-600); }
@@ -401,11 +401,11 @@ table.frontier details.callers table { width: auto; min-width: 0; margin: .3rem 
 .callout p { max-width: 80ch; }
 pre.snip { margin: .5rem 0 0; font-size: 13px; }
 @media (max-width: 640px) { .fam-ar { transform: rotate(90deg); } }
-/* TM-1298: the family alias page's figures and its footnote */
+/* the family alias page's figures and its footnote */
 table.gens .sub { display: block; margin-top: .15rem; color: var(--tx-text-muted); font-size: var(--fs-1); font-weight: 400; }
 .panel-foot { padding: .65rem 1rem .8rem; border-top: 1px solid var(--tx-border); color: var(--tx-text-muted); font-size: var(--fs-1); }
 
-/* ------------------------------------------------------------ Status: the stack (TM-1305)
+/* ------------------------------------------------------------ Status: the stack
    A part's border and fill carry its worst state, always with the shape and a word (in the drawer, the list,
    and the chip's accessible name). OK parts stay quiet: a plain chip with a green tick. */
 .stack-tools { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem 1.25rem; margin: 1rem 0; }
@@ -469,7 +469,7 @@ table.gens .sub { display: block; margin-top: .15rem; color: var(--tx-text-muted
 }
 
 
-/* ------------------------------------------------------------ the mascot at a moment (TM-1310, spec section 11)
+/* ------------------------------------------------------------ the mascot at a moment (spec section 11)
    One per screen; 56 in a section header, 76 beside the verdict, 160 on a full-page error or the sign-in page.
    At most a one-time fade, and none under reduced motion. */
 .mascot { flex: none; object-fit: contain; }
@@ -480,7 +480,7 @@ table.gens .sub { display: block; margin-top: .15rem; color: var(--tx-text-muted
 .error-page { display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap; padding: 1.5rem 0; }
 @media (max-width: 600px) { .mascot.m76, .mascot.m128 { width: 76px; height: 76px; } .mascot.m160 { width: 112px; height: 112px; } }
 
-/* ------------------------------------------------------------ Home: verdict, chips, the stack strip (TM-1307) */
+/* ------------------------------------------------------------ Home: verdict, chips, the stack strip */
 .home-verdict { align-items: center; }
 .home-verdict .chips { display: flex; flex-wrap: wrap; gap: .45rem; margin: .5rem 0 0; }
 .strip ol { display: flex; flex-wrap: wrap; gap: .4rem; margin: 1rem 0 1.5rem; padding: 0; }
@@ -496,7 +496,7 @@ table.gens .sub { display: block; margin-top: .15rem; color: var(--tx-text-muted
 .strip .side-cell { margin-left: .4rem; padding-left: .8rem; border-left: 1px solid var(--tx-border); }
 @media (max-width: 860px) { .strip ol { flex-direction: column; } .strip .side-cell { margin-left: 0; padding-left: 0; border-left: 0; } .strip .cell { width: 100%; } }
 
-/* ------------------------------------------------------------ trend panels (TM-1306) */
+/* ------------------------------------------------------------ trend panels */
 :root { --ch-0: #6FB3DD; --ch-1: #E0A43A; --ch-2: #C77DDB; --ch-3: #4FC1A0; --ch-4: #E8838C; --ch-5: #B8C0C8; }
 [data-theme="light"] { --ch-0: #1F6FA8; --ch-1: #8F5D00; --ch-2: #7E3A98; --ch-3: #1A7059; --ch-4: #A8323F; --ch-5: #555F68; }
 .trends { display: grid; grid-template-columns: repeat(auto-fill, minmax(11.5rem, 1fr)); gap: .6rem; margin: 1rem 0; }
@@ -524,7 +524,7 @@ table.gens .sub { display: block; margin-top: .15rem; color: var(--tx-text-muted
 .trend .src-s { margin: 0; }
 .trend.compact { border: 0; padding: 0; background: none; }
 
-/* ------------------------------------------------------------ Platform (TM-1308) */
+/* ------------------------------------------------------------ Platform */
 .team-lines { display: grid; gap: .4rem; margin: .5rem 0 1rem; padding: 0; }
 .team-line { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .75rem; padding: .55rem .8rem; border: 1px solid var(--tx-border); border-radius: var(--tx-radius-sm); background: var(--tx-surface); color: var(--tx-text); text-decoration: none; }
 .team-line:hover { border-color: var(--tx-trim); }
@@ -536,7 +536,7 @@ table.grouped td.num { white-space: nowrap; }
 .rail .rs { margin-left: auto; display: inline-flex; } .rail .rs .ico { width: 1em; height: 1em; }
 .rail .rs.st-warning { color: var(--st-warning); background: none; }
 
-/* TM-1311: actions. The confirm panel names target, effect and undo; nothing here moves on its own. */
+/* actions. The confirm panel names target, effect and undo; nothing here moves on its own. */
 .confirm { max-width: 44rem; }
 .confirm-facts { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1rem; margin: 1rem 0; }
 .confirm-facts dt { font-weight: 600; }
@@ -548,7 +548,7 @@ table.grouped td.num { white-space: nowrap; }
 .drawer .acts { flex-wrap: wrap; }
 .silenced { color: var(--tx-text-muted); }
 .silenced::before { content: "· "; }
-/* TM-1315: a recovery link, shown once, selectable for copying. */
+/* a recovery link, shown once, selectable for copying. */
 .confirm .secret { display: block; resize: none; word-break: break-all; width: 100%; box-sizing: border-box; padding: .5rem .6rem; font-family: var(--tx-font-mono, ui-monospace, monospace); font-size: var(--fs-1); }
 
 /* Row actions as pills (the lab run, 2026-11-01: text links read as prose, not as things to press). */

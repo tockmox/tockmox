@@ -41,7 +41,7 @@
 #           states a number for it. A page nobody thought to register is still
 #           checked, because the class scans the tree, not a list.
 #
-# The class form was added 2026-09-04 (TM-0394) after an outside reader found
+# The class form was added 2026-09-04 after an outside reader found
 # three countable contradictions in an hour on a tree this gate was green on.
 # All three were in the gate's remit; none was in its list. A registry that
 # only checks the claims somebody enumerated is a gate that tests its own list.
@@ -120,7 +120,7 @@ EOF
 as_number() {
   # Strip markdown emphasis and code ticks first: `**Nine**` is a nine. The
   # first version did not, and a `states:` regex whose first token was bold
-  # matched, yielded no number, and asserted nothing (TM-0394 log, 09-03).
+  # matched, yielded no number, and asserted nothing (09-03).
   set -- "$(printf '%s' "$1" | tr -d '*_\`')"
   case "$1" in
     zero) echo 0 ;;      one) echo 1 ;;       two) echo 2 ;;
@@ -391,7 +391,7 @@ run_claims() {
       bad=$((bad + 1)); return 0
     fi
 
-    # PARTITION, NOT RELAX (TM-0713). Everything above needs only the page
+    # PARTITION, NOT RELAX. Everything above needs only the page
     # and grep, so a registry entry that has detached from its sentence is
     # still refused with the tool absent. The measurement below is what the
     # missing tool would falsify, so it alone is skipped, by name.
@@ -558,7 +558,7 @@ if [ "${1:-}" = "--selftest" ]; then
   # WANT is pass (exit 0), fail (exit 1) or skip (exit 2), matched EXACTLY.
   # WHY, when given, is a string the report must contain. A want-fail probe
   # that only checks "non-zero" passes when run_claims dies for ANY reason,
-  # including one that means the check under test never ran (TM-0713 log,
+  # including one that means the check under test never ran (on
   # 2026-09-17). So a refusal must be the refusal the probe is about.
   probe() {
     local label="$1" want="$2" body="$3" why="${4:-}" out rc wrc
@@ -664,7 +664,7 @@ test:   echo 3" \
     echo "  selftest ok: the last block is checked even with no trailing newline"
   fi
 
-  # ---- classes and waivers (2026-09-04, TM-0394) ----------------------------
+  # ---- classes and waivers (2026-09-04) ----------------------------
   # Two pages in scope, neither registered as a page entry. The class must see
   # both, which is the whole point: a page nobody enumerated is still checked.
   printf 'The tree ships three widgets today.\n' > "$tmp/docs/page.md"
@@ -757,7 +757,7 @@ expect: 3
 states: ships [A-Za-z0-9]+ widgets" \
   "STATES YIELDS NO NUMBER"
 
-  # ---- a missing tool partitions, it does not refuse wholesale (TM-0713) ----
+  # ---- a missing tool partitions, it does not refuse wholesale ----
   # MISSING is set by hand: the probes must behave the same whether or not
   # the machine running --selftest has helm.
   printf 'The tree ships three widgets today.\n' > "$tmp/docs/page.md"
@@ -919,7 +919,7 @@ fi
 # Exit 2 is "could not run" and is not exit 1 -- a caller must never read this
 # gate's inability to run as a finding about the documentation.
 #
-# PARTITION RATHER THAN REFUSE WHOLESALE (TM-0713, 2026-09-17). Until then a
+# PARTITION RATHER THAN REFUSE WHOLESALE (2026-09-17). Until then a
 # missing tool stopped the whole gate: in a sandbox with no helm not one entry
 # was read, while only seven of the 32 page claims (none of the 8 classes)
 # name helm. Three stale counts got past it there and were caught downstream,

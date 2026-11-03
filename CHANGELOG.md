@@ -63,10 +63,10 @@ costs you, with the reasoning in the documentation rather than here.
 
 - **Fuzzing for the console's two input parsers.** ClusterFuzzLite (`.github/workflows/fuzz.yaml`, build in `.clusterfuzzlite/`) runs atheris targets in `tockmox-ui/fuzz/` against the short-path redirect and the cron evaluator: for five minutes on a pull request that changes the console's code, and weekly for twenty. Each target asserts properties, not only "no exception": a redirect never leaves the configured host, never carries a control character, space or dot segment; a cron answer is a real fire time on the right side of now, with none skipped. Nothing ships in the image. `tockmox-ui/fuzz/README.md`.
 
-- **The console can send someone a password recovery link and change who is in the user group (TM-1315, epic TM-1303; experimental, off by default).** **Platform › Identity** lists the people Authentik knows. For a person who is not an administrator it makes a recovery link, good once for 1 hour, 24 hours or 3 days, shown to you once to send them and kept in no record or log line; and it adds a person to, or removes them from, the user group. Each asks for a fresh sign-in and lands in Activity. The bounds are Authentik's own: one service account, `tockmox-console-actions`, whose role sees users and nothing else globally, holds add and remove on the user group object only, and holds a recovery link only for the people a new CronJob, `tockmox-console-identity-grants`, grants it (active, a person, not a superuser, not in the admin group or a group under it), taking it back from everyone else and failing closed. Creating and deactivating users stay in Authentik's console, because Authentik 2026.8 cannot grant either without letting the account set a user's groups, the admin group included. Turn on with `tools/mint-secrets.sh --with-console-actions` (or the same flag on `install/bootstrap-secrets.sh`), then `sso.consoleActions.enabled` in the identity layer and `tockmoxUi.actions.identity.enabled` in the AI layer. docs/administration/identity.md, "From the console".
-- **A recovery flow on the default brand (TM-1315).** Authentik ships none, so its own "Create recovery link" answered "No recovery flow set". The identity layer now ships `tockmox-recovery`: choose a password, twice, checked as the password-change flow checks it. It runs only from a link an administrator made, and it does not sign the person in, so a link is a password reset and never a way past a second factor. `sso.recoveryFlow: false` keeps a recovery flow of your own on the brand.
+- **The console can send someone a password recovery link and change who is in the user group (experimental, off by default).** **Platform › Identity** lists the people Authentik knows. For a person who is not an administrator it makes a recovery link, good once for 1 hour, 24 hours or 3 days, shown to you once to send them and kept in no record or log line; and it adds a person to, or removes them from, the user group. Each asks for a fresh sign-in and lands in Activity. The bounds are Authentik's own: one service account, `tockmox-console-actions`, whose role sees users and nothing else globally, holds add and remove on the user group object only, and holds a recovery link only for the people a new CronJob, `tockmox-console-identity-grants`, grants it (active, a person, not a superuser, not in the admin group or a group under it), taking it back from everyone else and failing closed. Creating and deactivating users stay in Authentik's console, because Authentik 2026.8 cannot grant either without letting the account set a user's groups, the admin group included. Turn on with `tools/mint-secrets.sh --with-console-actions` (or the same flag on `install/bootstrap-secrets.sh`), then `sso.consoleActions.enabled` in the identity layer and `tockmoxUi.actions.identity.enabled` in the AI layer. docs/administration/identity.md, "From the console".
+- **A recovery flow on the default brand.** Authentik ships none, so its own "Create recovery link" answered "No recovery flow set". The identity layer now ships `tockmox-recovery`: choose a password, twice, checked as the password-change flow checks it. It runs only from a link an administrator made, and it does not sign the person in, so a link is a password reset and never a way past a second factor. `sso.recoveryFlow: false` keeps a recovery flow of your own on the brand.
 
-- **The console can act: silence a part's alerts, run a scheduled job now, restart a console, send a test alert, and with your Argo CD account refresh or sync (TM-1311, TM-1313, epic TM-1303; experimental).** A part's drawer on Status gains **Actions**, Help gains **Send a test alert to your phone**, and **Platform › Activity** lists what was done, by whom and how it ended. Every action opens a confirm panel naming the target, the effect and the undo. The UI stays write-free: confirming sends your browser through the identity provider with an OIDC nonce made from that one action, and a new Deployment, `tockmox-actions`, checks the issuer's token itself (signature, audience, freshness, the admin group, the nonce) before it acts with one narrow credential per kind: Alertmanager by NetworkPolicy; Jobs created only from allowlisted CronJobs; a patch of allowlisted Deployments and StatefulSets that ValidatingAdmissionPolicies bound to the `restartedAt` annotation; and an Argo CD account with get and sync only, which you provide. Sync and restart ask for a fresh sign-in after five minutes (`max_age`); an idempotency key, reserved before anything runs, makes a double click or a replay do nothing twice; one `tockmox.action` JSON line per attempt goes to the log, and the last 300 actions to a ConfigMap Activity reads. When Alertmanager, Argo CD, Authentik or the Kubernetes API refuses an action, the console and Activity show which one and its status code; the upstream's own error text goes to the `tockmox-actions` log only. A console silence keeps its alerts on Status, marked "Silenced by *name* until *time*"; a silence made in Alertmanager itself still hides them, as before. Switched per kind under `tockmoxUi.actions`, on by default for what Tockmox ships (silences and the test alert with observability; run-now for the AI layer's own CronJobs; restart for the gateway, the chat console and the UI) and off for Argo CD until you configure its account. Off means the button is absent. With the UI on, two things render that did not: the `tockmox-actions` Deployment, its Roles and three admission policies, and the policy layer's `allow-from-tockmox-actions` rule at Alertmanager. docs/administration/tockmox-ui.md, "Taking action".
+- **The console can act: silence a part's alerts, run a scheduled job now, restart a console, send a test alert, and with your Argo CD account refresh or sync (experimental).** A part's drawer on Status gains **Actions**, Help gains **Send a test alert to your phone**, and **Platform › Activity** lists what was done, by whom and how it ended. Every action opens a confirm panel naming the target, the effect and the undo. The UI stays write-free: confirming sends your browser through the identity provider with an OIDC nonce made from that one action, and a new Deployment, `tockmox-actions`, checks the issuer's token itself (signature, audience, freshness, the admin group, the nonce) before it acts with one narrow credential per kind: Alertmanager by NetworkPolicy; Jobs created only from allowlisted CronJobs; a patch of allowlisted Deployments and StatefulSets that ValidatingAdmissionPolicies bound to the `restartedAt` annotation; and an Argo CD account with get and sync only, which you provide. Sync and restart ask for a fresh sign-in after five minutes (`max_age`); an idempotency key, reserved before anything runs, makes a double click or a replay do nothing twice; one `tockmox.action` JSON line per attempt goes to the log, and the last 300 actions to a ConfigMap Activity reads. When Alertmanager, Argo CD, Authentik or the Kubernetes API refuses an action, the console and Activity show which one and its status code; the upstream's own error text goes to the `tockmox-actions` log only. A console silence keeps its alerts on Status, marked "Silenced by *name* until *time*"; a silence made in Alertmanager itself still hides them, as before. Switched per kind under `tockmoxUi.actions`, on by default for what Tockmox ships (silences and the test alert with observability; run-now for the AI layer's own CronJobs; restart for the gateway, the chat console and the UI) and off for Argo CD until you configure its account. Off means the button is absent. With the UI on, two things render that did not: the `tockmox-actions` Deployment, its Roles and three admission policies, and the policy layer's `allow-from-tockmox-actions` rule at Alertmanager. docs/administration/tockmox-ui.md, "Taking action".
 
 - **Experimental: the installer can run the site repository for you, on a
   forge inside the cluster.** Set `site.forge: built-in` and every Application
@@ -85,7 +85,7 @@ costs you, with the reasoning in the documentation rather than here.
   part can silence. New key: `siteForge` (observability).
 
 - **Experimental: people sign in to the built-in forge through Authentik, and
-  only the admin group's approval merges a change (TM-1336).** `bootstrap-forge`
+  only the admin group's approval merges a change.** `bootstrap-forge`
   gives the forge a browser address (`forge.<internalDomain>`, TLS from the
   platform's CA), and `bootstrap-forge --connect-sign-in`, run once
   `tockmox-identity` is Healthy, adds its sign-in source. People are registered
@@ -102,7 +102,7 @@ costs you, with the reasoning in the documentation rather than here.
   `site.forge: built-in` sites get it on.
 
 - **Experimental: rebuild a built-in-forge site, or repair just its forge, from
-  the off-site copy and the recovery kit (TM-1338).**
+  the off-site copy and the recovery kit.**
   `tockmox-install.sh --restore-from offsite|file:PATH` takes a cluster that
   has Argo CD and nothing else. It restores the sealing key before the
   controller starts, installs the forge, seeds it from the copy, and applies
@@ -126,7 +126,7 @@ costs you, with the reasoning in the documentation rather than here.
 
 - **The Models page now shows what each hosted model costs: its list price,
   what the gateway spent on it, and how often it was called, and anything it
-  cannot source reads unknown, never an estimate (TM-1298).** Each Frontier
+  cannot source reads unknown, never an estimate.** Each Frontier
   row has a price per 1M tokens in and out with the day it was read, a Spend
   column and a Calls column, and a footer naming where the prices came from.
   The watcher reads LiteLLM's price map (the file the gateway prices spend
@@ -152,7 +152,7 @@ costs you, with the reasoning in the documentation rather than here.
 
 - **A hosted family keeps several generations: a floating family alias,
   pinned generation aliases, and `modelLifecycle.frontier.keepGenerations`
-  (TM-1297).** Promoting a hosted model under its family alias
+ .** Promoting a hosted model under its family alias
   (`claude-sonnet`) now renders a change that adds the pinned alias
   (`claude-sonnet-5-5`, the model name without the provider, which never
   moves) and points the family alias at the same model. The family alias is
@@ -170,12 +170,12 @@ costs you, with the reasoning in the documentation rather than here.
   countdown, and how to pin one; a pinned alias page says it never moves.
   Nothing is written by the UI, and nothing leaves on its own: every change is
   a PR you review. Each generation's row shows its price, spend and calls
-  (TM-1298). Any alias that is not a family alias is promoted as
+ . Any alias that is not a family alias is promoted as
   before. `docs/administration/model-lifecycle.md`, "Keeping several frontier
   generations".
 
 - **A node's page lists the models it serves, with a memory bar, and the Models
-  page links back (TM-1299).** `/nodes/<id>` opens with "Models on this node":
+  page links back.** `/nodes/<id>` opens with "Models on this node":
   per engine endpoint (with its probe state), each deployment's alias, model,
   catalog build, context window, slots, max output tokens, thinking on or off,
   the memory it is planned at, and whether it is live or a `-next` candidate.
@@ -213,18 +213,18 @@ costs you, with the reasoning in the documentation rather than here.
   constraints and short reasoning; `agent` covers tool selection and arguments (36 cases) and answering without
   a tool (12). Each is held to the known-bad control and to hand-written right and wrong replies in
   `tests/test_shipped_evalsets.py`. `docs/administration/model-lifecycle.md`, "Shipped eval sets".
-- **A production health watch for promoted models, off by default (REQ-0048 AC-48.19, TM-1263).**
+- **A production health watch for promoted models, off by default (REQ-0048 AC-48.19).**
   `modelLifecycle.healthWatch` renders a CronJob in the Tockmox UI image that reads
   Prometheus every 15 minutes and compares each promoted alias with what it served
   before (`promotion.previous`) on error rate and p95 latency, at like hours of the
-  day (TM-1274) and inside `soakDays`. A breach renders the revert change as a PR
+  day and inside `soakDays`. A breach renders the revert change as a PR
   through the watcher's bot and sends an ntfy message; an inconclusive reading
   renders nothing; `autoRevert` is per alias and only marks the PR. Tool-call parse
   failures and thumbs show as unknown until the gateway hook and the console count
   them. The monitoring namespace's policy must admit the pod to Prometheus.
   `docs/administration/model-lifecycle.md`, "Watching a promoted model".
 - **The eval runner on a schedule, and a re-evaluation after an engine upgrade
-  (TM-1261, TM-1264).** `modelLifecycle.runner.enabled` (off by default) renders
+ .** `modelLifecycle.runner.enabled` (off by default) renders
   a scheduler CronJob that finds every admitted `<alias>-next` candidate with no
   finished run, waits for a quiet window on the node (production requests in the
   last `quietWindow.minutes` at most `maxProductionRequests`, and the node's
@@ -249,8 +249,7 @@ costs you, with the reasoning in the documentation rather than here.
   `docs/administration/model-lifecycle.md`, "Running evaluations on a schedule".
 
 - **Models: an Inbox, a candidate page, a budget page, a Reject button, reject
-  and revert PRs, and a hosted retirement countdown (TM-1258, TM-1262, TM-1265,
-  TM-1119).** `/models/inbox` shows the watcher's candidates with a reason, a fit
+  and revert PRs, and a hosted retirement countdown.** `/models/inbox` shows the watcher's candidates with a reason, a fit
   per node and a licence, and Snooze and Dismiss render a change to
   `modelLifecycle.inbox` that the watcher and the PR opener then skip;
   `/models/c/<alias>` shows the plan and the runner's progress with no winner
@@ -262,7 +261,7 @@ costs you, with the reasoning in the documentation rather than here.
   `.budget` and `.watch.providers.<p>.replacements`.
 
 - **The eval runner measures prefill and tool-call reliability, and reads a
-  speed tradeoff (TM-1267, TM-1268, TM-1269, TM-1274).** New twin kinds
+  speed tradeoff.** New twin kinds
   `prefill` (time to first token at 4096 to 65536 tokens, steps over the route's
   maximum skipped with the reason) and `tool_reliability` (parse failures, wrong
   tool, schema violations over 100 calls at temperature 0.7; a parse-failure
@@ -275,13 +274,13 @@ costs you, with the reasoning in the documentation rather than here.
   `--prefill-contexts`, `--prefill-requests`, `--max-input-tokens`.
 
 - **`tools/audit-keys.sh`: the gateway keys the key policy would refuse
-  (TM-0991).** The policy sees a key only when it is written; this lists, from
+ .** The policy sees a key only when it is written; this lists, from
   inside the LiteLLM pod and without printing any key, every existing key that
   can call every model (no model list or a wildcard), names a `-next` model, or
   states no MCP access, so they can be fixed before the policy is turned on.
   `docs/usage/ai-plane.md`, "Scope every key: the key policy".
 
-- **A key policy on the production gateway, off by default (TM-0991).**
+- **A key policy on the production gateway, off by default.**
   `modelGateway.keyPolicy` loads LiteLLM's own `custom_key_policy` hook, which
   refuses with 403, on every key generate, update and regenerate: a key with no
   model list or a wildcard one (except aliases you name; the console's key is
@@ -294,7 +293,7 @@ costs you, with the reasoning in the documentation rather than here.
   `no-mcp-servers` for the console's key when the policy is on.
   `docs/usage/ai-plane.md`, "Scope every key".
 
-- **Knowledge mode, off by default (TM-1256).** `knowledge` in the AI layer
+- **Knowledge mode, off by default.** `knowledge` in the AI layer
   configures Open WebUI's own Knowledge feature: embeddings, and optionally
   reranking, through the gateway on local routes only, hybrid search, file
   retention off, and optionally oikb (MIT) keeping Knowledge bases in sync with
@@ -306,7 +305,7 @@ costs you, with the reasoning in the documentation rather than here.
   `tockmox-ai-knowledge-key`) on every install; absent, they change nothing.
   `docs/administration/knowledge-mode.md`.
 
-- **Per-tool egress for agent tools, off by default (TM-1251).** `agentEgress`
+- **Per-tool egress for agent tools, off by default.** `agentEgress`
   in the policy layer makes a namespace of agent tools egress default-deny with
   DNS, and gives each tool back either NetworkPolicy egress rules (the CIDR
   tier) or its own Smokescreen proxy that allows only the names you list and
@@ -318,7 +317,7 @@ costs you, with the reasoning in the documentation rather than here.
   with the policies removed). `docs/usage/ai-plane.md`, "Fence the tools agents
   call".
 
-- **A gate that every NetworkPolicy selects a rendered pod (TM-1251).**
+- **A gate that every NetworkPolicy selects a rendered pod.**
   `tools/check-policy-selects.sh` renders every layer three ways (defaults,
   every application on, the optional surfaces) and fails on a policy whose
   `podSelector` matches no pod in its namespace, with operator-made and
@@ -327,13 +326,13 @@ costs you, with the reasoning in the documentation rather than here.
   and expects red.
 
 - **The render refuses an otel, Langfuse or Arize callback that would export
-  prompt content (TM-1250).** With LiteLLM message logging on, those callbacks
+  prompt content.** With LiteLLM message logging on, those callbacks
   copy every prompt and response to their collector. Set
   `litellm_settings.turn_off_message_logging: true`, or acknowledge a collector
   you trust with `modelGateway.contentLogging: {acknowledged: true, reason:
   ...}`.
 
-- **A `rejected` catalog stage, and reject and revert changes (TM-1258).** A
+- **A `rejected` catalog stage, and reject and revert changes.** A
   build that failed its evaluation, or was reverted, is `stage: rejected` with
   `rejection: {reason, date}`: the gate refuses any route to it, on either
   gateway, an AI node refuses it, and Recommend skips it. `models.reject` removes
@@ -341,25 +340,25 @@ costs you, with the reasoning in the documentation rather than here.
   as `promotion.previous`, and `models.revert` points the alias back at it.
   The alias page renders the revert change.
 
-- **Two Models pages: a comparison and an alias (TM-1258).** `/models/v/<run>`
+- **Two Models pages: a comparison and an alias.** `/models/v/<run>`
   shows one verdict answer first (its label), then the counts, the interval,
   the known-bad control, how it was run, what it cites, and whether it counted
   toward promotion and why not. `/models/a/<alias>` shows what the alias
   serves, its promotion record and the route it replaced, and renders the
   revert change for you to review and commit.
 
-- **The eval runner v0 (HL-0917).** `python -m app.runner run` in the Tockmox
+- **The eval runner v0.** `python -m app.runner run` in the Tockmox
   UI image takes an `eval-request/1` and an `eval-set/1` and writes an evidence
   bundle: a known-bad control that stops the run when the graders cannot fail,
   smoke, perf and quality legs against the eval gateway, hashed result twins,
   and a verdict with paired statistics (wins, losses, ties, an exact sign test,
   a seeded bootstrap interval) or, with no incumbent, a Wilson bound against the
   set's bar. Sets above `internal` and hosted candidates are refused until the
-  safety rails land (TM-1249). Opening the evidence PR is unchanged
+  safety rails land. Opening the evidence PR is unchanged
   (`app.pr_opener`).
 
 - **A resilient profile that refuses to present itself as resilient without an
-  off-cluster backup target (TM-0597).** `profiles/resilient.yaml`, added after
+  off-cluster backup target.** `profiles/resilient.yaml`, added after
   another profile, sets a new `global.resilience.profile: resilient`
   (`provisional`, ruled 2026-10-29, ruled again by 0.10.0) and turns database
   backups and the weekly restore drill on. `tockmox-ai` and `tockmox-identity`
@@ -402,7 +401,7 @@ costs you, with the reasoning in the documentation rather than here.
   cluster built from this chart.
 
 - **Six documentation pages are executed on every pull request and push, with no
-  cluster (TM-0289).** The new `docs-no-cluster` workflow runs
+  cluster.** The new `docs-no-cluster` workflow runs
   `tests/executed-docs/pages-no-cluster.sh`: every `bash` block on
   `values-contract.md`, `customising.md`, `capabilities.md`, `configuration.md`,
   `platform-management.md` and `verify.md` is extracted by the harness's own
@@ -671,17 +670,17 @@ costs you, with the reasoning in the documentation rather than here.
   as before. CI scopes and shards pull requests and runs every gate on pushes
   and nightly. Nothing to do on upgrade. CONTRIBUTING.md.
 
-- **Platform Management groups what waits on you, filters its cases, and shows the organization one team at a time (TM-1308, epic TM-1303).** On the Overview, the cases waiting on you are grouped by what fired and what they ask, with the hosts counted: thirteen cases for one alert on six hosts are one row, "13 on 6 hosts", which opens the Cases page filtered to exactly those thirteen; a case with no alert name, or alone in its group, stays its own row. The Cases page takes `team`, `state`, `wait`, `alert` and `ask` filters (a form on the page, and the links from the Overview), says how many of how many it shows, and shows nothing, never everything, for a value it does not know. The teams' tables move from the Overview to a new **Organization** page in the Platform rail (`/platform/organization?team=<id>`): one team at a time, active roles in a table, roles not started folded to one line; the Overview keeps one line per team. **Capabilities** in the rail carries a warning when a switch and what is deployed disagree, and Unknown when Argo CD does not answer. Release notes on About and Platform › Updates render through one macro. Nothing to do on upgrade. docs/administration/platform-management.md, "The pages".
+- **Platform Management groups what waits on you, filters its cases, and shows the organization one team at a time.** On the Overview, the cases waiting on you are grouped by what fired and what they ask, with the hosts counted: thirteen cases for one alert on six hosts are one row, "13 on 6 hosts", which opens the Cases page filtered to exactly those thirteen; a case with no alert name, or alone in its group, stays its own row. The Cases page takes `team`, `state`, `wait`, `alert` and `ask` filters (a form on the page, and the links from the Overview), says how many of how many it shows, and shows nothing, never everything, for a value it does not know. The teams' tables move from the Overview to a new **Organization** page in the Platform rail (`/platform/organization?team=<id>`): one team at a time, active roles in a table, roles not started folded to one line; the Overview keeps one line per team. **Capabilities** in the rail carries a warning when a switch and what is deployed disagree, and Unknown when Argo CD does not answer. Release notes on About and Platform › Updates render through one macro. Nothing to do on upgrade. docs/administration/platform-management.md, "The pages".
 
-- **Home answers "is it working?" in one sentence from the stack, and Status, AI and Platform draw trends (TM-1306, TM-1307, TM-1310, epic TM-1303).** For administrators, Home opens with **Everything is running.** or the worst part named with what is wrong, up to two chips that open those parts on Status, and the stack strip: one cell per band with its state and how many parts are OK, linking to that band. Members see the verdict as before. Status, AI › Models, AI › Inference nodes and Platform Management draw small trend panels (Status: the last 24 hours of alerts firing, scrape targets up, consoles reachable, the busiest node's memory, the fullest volume, the next certificate expiry; AI: calls, latency, errors and hosted spend through the gateway, engines healthy and restarting per node; Platform: days since a passing restore drill, alerts), and a part's drawer shows its own last 7 days. The panels are drawn by the UI as SVG with a text alternative, not embedded, so no Grafana, CSP or NetworkPolicy setting changes; each title links to its Grafana board. A query that fails, returns nothing or has gone stale reads **Unknown** with the reason, never a flat line at zero. The expressions live once, in `app/panels.yaml`; the new **Tockmox / Status** board (uid `tockmox-status`) is generated from the same file by `tools/gen-dashboard-status.py`, and a gate in `check-all.sh` keeps them equal. Prometheus is read once a minute per panel at most. Tockmox the gnome now appears at a few moments, one per screen (Home's verdict, the header of a page with nothing wrong, About, sign-in, and a new page for an address that does not exist), as decoration with `alt=""`. Nothing to do on upgrade. docs/administration/tockmox-ui.md, "Home", "Trends" and "The mascot".
+- **Home answers "is it working?" in one sentence from the stack, and Status, AI and Platform draw trends.** For administrators, Home opens with **Everything is running.** or the worst part named with what is wrong, up to two chips that open those parts on Status, and the stack strip: one cell per band with its state and how many parts are OK, linking to that band. Members see the verdict as before. Status, AI › Models, AI › Inference nodes and Platform Management draw small trend panels (Status: the last 24 hours of alerts firing, scrape targets up, consoles reachable, the busiest node's memory, the fullest volume, the next certificate expiry; AI: calls, latency, errors and hosted spend through the gateway, engines healthy and restarting per node; Platform: days since a passing restore drill, alerts), and a part's drawer shows its own last 7 days. The panels are drawn by the UI as SVG with a text alternative, not embedded, so no Grafana, CSP or NetworkPolicy setting changes; each title links to its Grafana board. A query that fails, returns nothing or has gone stale reads **Unknown** with the reason, never a flat line at zero. The expressions live once, in `app/panels.yaml`; the new **Tockmox / Status** board (uid `tockmox-status`) is generated from the same file by `tools/gen-dashboard-status.py`, and a gate in `check-all.sh` keeps them equal. Prometheus is read once a minute per panel at most. Tockmox the gnome now appears at a few moments, one per screen (Home's verdict, the header of a page with nothing wrong, About, sign-in, and a new page for an address that does not exist), as decoration with `alt=""`. Nothing to do on upgrade. docs/administration/tockmox-ui.md, "Home", "Trends" and "The mascot".
 
-- **Status draws the platform as a stack of parts, and every count is parts, not signals (TM-1305, epic TM-1303).** Your apps are at the top, what you provide (cluster and inference nodes) at the bottom, the Tockmox layers in between in sync-wave order, and Argo CD down the side. Every signal the UI reads (an Argo CD application, a firing alert, a scrape target down, a node not ready) sits on exactly one part, so four signals about one failing backup are one part that needs a look, on Status, in the page summary and on the health pill. Open a part for what is wrong, what else was checked, which sources answered, and where to go next (its Argo CD application, Grafana board and runbook, when you can open them); the drawer has its own address, `/status/<part>`, and works without JavaScript. **List** shows the same parts as a table, worst first; **Only problems** folds the OK parts. A signal no part claims shows in **Unplaced** at the top. A part reads Unknown, never OK, when nothing reports on it or its source did not answer. The stack is data (`app/stack.yaml`); a site extends it with `tockmoxUi.config.stack`, and an alert can name its part with the label `tockmox_component`. The old Problems table is gone; what each source said folds below the stack as **Sources, as read**. UI kit 0.4.1 (arrow keys within a `[data-roving]` list). Nothing to do on upgrade. docs/administration/tockmox-ui.md, "Status: the stack".
+- **Status draws the platform as a stack of parts, and every count is parts, not signals.** Your apps are at the top, what you provide (cluster and inference nodes) at the bottom, the Tockmox layers in between in sync-wave order, and Argo CD down the side. Every signal the UI reads (an Argo CD application, a firing alert, a scrape target down, a node not ready) sits on exactly one part, so four signals about one failing backup are one part that needs a look, on Status, in the page summary and on the health pill. Open a part for what is wrong, what else was checked, which sources answered, and where to go next (its Argo CD application, Grafana board and runbook, when you can open them); the drawer has its own address, `/status/<part>`, and works without JavaScript. **List** shows the same parts as a table, worst first; **Only problems** folds the OK parts. A signal no part claims shows in **Unplaced** at the top. A part reads Unknown, never OK, when nothing reports on it or its source did not answer. The stack is data (`app/stack.yaml`); a site extends it with `tockmoxUi.config.stack`, and an alert can name its part with the label `tockmox_component`. The old Problems table is gone; what each source said folds below the stack as **Sources, as read**. UI kit 0.4.1 (arrow keys within a `[data-roving]` list). Nothing to do on upgrade. docs/administration/tockmox-ui.md, "Status: the stack".
 
-- **The Tockmox UI is organized in four sections, with health, help and your account on the right, and a light theme (TM-1304, epic TM-1303).** The top bar reads Home, Status, AI and Platform for administrators (Home alone for everyone else); AI and Platform list their pages in a rail on the left, chips on a narrow screen. On the right: a health pill on every administrator page (the worst state and the counts, linking to Status), a Help menu (the documentation, help for the page you are on, what this build contains, the recovery page, a problem report, About) and an account menu with Appearance and Sign out. The site name moves from the bar to the tab title and the footer; the version moves from Home's healthy line to the footer and the new **Help › About** page (`/about`, every signed-in user). The Version page is now **Platform › Updates** at `/platform/updates`; `/version` redirects there. Appearance offers System (the default, following your computer), Light and Dark, stored in the browser. The UI now loads one script, `/static/kit/shell.js`, from its own origin, before the stylesheets: it applies the theme before first paint and runs the header menus; without JavaScript the pages render dark and every link still works. The UI kit is 0.4.0 (the `utilities` and `rail` blocks, `shell.js`, the `appearance()` macro); an app that fills only the old `who` block renders as before. Nothing to do on upgrade. docs/administration/tockmox-ui.md, "Finding your way around".
+- **The Tockmox UI is organized in four sections, with health, help and your account on the right, and a light theme.** The top bar reads Home, Status, AI and Platform for administrators (Home alone for everyone else); AI and Platform list their pages in a rail on the left, chips on a narrow screen. On the right: a health pill on every administrator page (the worst state and the counts, linking to Status), a Help menu (the documentation, help for the page you are on, what this build contains, the recovery page, a problem report, About) and an account menu with Appearance and Sign out. The site name moves from the bar to the tab title and the footer; the version moves from Home's healthy line to the footer and the new **Help › About** page (`/about`, every signed-in user). The Version page is now **Platform › Updates** at `/platform/updates`; `/version` redirects there. Appearance offers System (the default, following your computer), Light and Dark, stored in the browser. The UI now loads one script, `/static/kit/shell.js`, from its own origin, before the stylesheets: it applies the theme before first paint and runs the header menus; without JavaScript the pages render dark and every link still works. The UI kit is 0.4.0 (the `utilities` and `rail` blocks, `shell.js`, the `appearance()` macro); an app that fills only the old `who` block renders as before. Nothing to do on upgrade. docs/administration/tockmox-ui.md, "Finding your way around".
 
 - **The Models page opens with what needs you, then local models by node, then
   frontier models by provider, and build drift moved to the node page
-  (TM-1296).** `/models` now starts with a Needs-you strip that lists only
+ .** `/models` now starts with a Needs-you strip that lists only
   exceptions, each with one action: candidates waiting in the Inbox, a hosted
   model being retired, a candidate short of its passing count or ready to
   promote, an evaluation in progress and the leg it is on, and a node serving a
@@ -691,7 +690,7 @@ costs you, with the reasoning in the documentation rather than here.
   setting the route does not state shows the engine default, labelled as one.
   A `-next` candidate sits under its alias, marked. Frontier models are grouped
   by provider and family (`claude-sonnet`, `gpt`), with price, spend and calls
-  per model (TM-1298). The catalog and the upstream sources fold
+  per model. The catalog and the upstream sources fold
   to one line each. The new-revision, quant and successor boxes, "Comparisons
   in progress" and "Builds on the nodes" are gone from `/models`: the Inbox and
   the Needs-you rows carry the first four, and the build table and its "Check
@@ -713,7 +712,7 @@ costs you, with the reasoning in the documentation rather than here.
   renders a change.
 
 - **The candidate page draws a run as a pipeline of stages, and has a Re-run
-  button (TM-1301).** `/models/c/<alias>` now shows the latest run as connected
+  button.** `/models/c/<alias>` now shows the latest run as connected
   boxes with an arrow between each (Control, Smoke, Perf, Prefill, Tool calls,
   Quality, Verdict), each with its state and, once done, its key number read
   from the leg's recorded metrics (the leg's summary when a number was not
@@ -756,7 +755,7 @@ costs you, with the reasoning in the documentation rather than here.
   when neither is set.
 
 - **Promotion counts independent evidence, and `requiredPasses` defaults to 1
-  (TM-1248).** A passing verdict now counts once per evidence key (candidate
+ .** A passing verdict now counts once per evidence key (candidate
   revision, eval set and its sha256, sampling, engine, node), so three reruns of
   one frozen set count once, not three times. `modelLifecycle.promotion.
   requiredPasses` keeps its name and now means independent passing evidence,
@@ -794,7 +793,8 @@ costs you, with the reasoning in the documentation rather than here.
   names a CNPG Cluster) with the version being applied; if it differs it creates a
   CloudNativePG `Backup`, waits for `completed`, and fails the sync with nothing of
   the new version applied if it does not. A first install and an unchanged version
-  do nothing. `modelGateway.upgradeBackup.enabled: false` removes it. **Action:**
+  do nothing. Open WebUI's default SQLite database is not covered by this hook;
+  its volume backup is. `modelGateway.upgradeBackup.enabled: false` removes it. **Action:**
   none with Argo CD, which prunes the old hash-named Job; with a sync that does not
   prune, delete it (`docs/deployment/upgrade.md`, "The LiteLLM migrations Job
   becomes an Argo CD hook"). A plain `helm upgrade` has no hook machinery: the Job
@@ -953,7 +953,7 @@ costs you, with the reasoning in the documentation rather than here.
   passes on a Mac now, where it had failed for want of `sha256sum`.
 
 - **`tools/check-notify-and-drill.sh` and its `--selftest` no longer fail each
-  other's D4 when run at once (TM-1291).** The drill scripts keep their register
+  other's D4 when run at once.** The drill scripts keep their register
   scratch files in `/tmp/drill-register` (an emptyDir in the pod); the gate runs
   them on the host, and `check-all.sh` runs the gate and its selftest side by
   side, so both used one directory and D4 failed in one or both. The gate now

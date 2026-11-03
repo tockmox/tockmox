@@ -8,6 +8,12 @@ Prometheus metrics, and a Grafana dashboard. The example is
 exercises every integration point (native OIDC, /metrics, needs a database)
 while staying one container. Substitute your app; the shape is the point.
 
+**How far this page is proven.** The Miniflux app it builds ran on two release
+candidates' lab installs, and its database is what the CNPG backup-health alert
+rule was written against. The page itself is not in the executed-docs harness,
+so an edit to it is not re-run as written; treat each step as a worked example
+and check its success condition on your own cluster.
+
 Everything here lives in **your site repository** under `apps/`. The
 installer generates a `site-apps` Application that syncs that directory, so
 `git push` is the deploy button. Nothing below touches the Tockmox charts.

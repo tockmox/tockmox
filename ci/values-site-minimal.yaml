@@ -37,7 +37,7 @@ global:
 # LoadBalancer Service Pending forever with nothing explaining why.
 addressPool:
   range: 192.168.1.200-192.168.1.220
-# Required by the policy layer since 0.8.0 (TM-0798): the platform policy
+# Required by the policy layer since 0.8.0: the platform policy
 # refuses to render without the nodes' gateway sources, rather than falling
 # back to admitting the whole pod network. A real site adds this in install.md
 # step 1f from `tockmox-install.sh --print-netpol-node-sources`; one entry per

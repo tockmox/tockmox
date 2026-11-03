@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Assert that a BUILT documentation site holds only static web content.
-# TM-0807, TM-0805, ADR-0036.
+# ADR-0036.
 #
 #   ./tools/check-docs-site-contents.sh              build the site, then check it
 #   ./tools/check-docs-site-contents.sh --site DIR   check an already-built site

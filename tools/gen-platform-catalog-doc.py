@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Write the default Platform Management catalog into its documentation page (TM-1112).
+"""Write the default Platform Management catalog into its documentation page.
 
 The catalog (tockmox-ui/app/platform_catalog.yaml) is data the UI reads; the page's table of roles is
 generated from it, so the two cannot drift. Only the block between the two markers is written.

@@ -86,7 +86,7 @@ rc_checks:
       path: [tools/check-values-tiers.sh]
 
     - id: upgrade-leg
-      check: "Upgrade leg (TM-0281)"
+      check: "Upgrade leg"
       per_rc: "Required once per cycle, on the rc the tag is cut from"
       at_tag: "Not repeated if the tagged commit is that rc's commit"
       at: [rc, tag]

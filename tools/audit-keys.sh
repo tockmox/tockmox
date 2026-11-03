@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# AUDIT THE GATEWAY'S VIRTUAL KEYS (TM-0991). The key policy (modelGateway.keyPolicy) runs on every key generate,
+# AUDIT THE GATEWAY'S VIRTUAL KEYS. The key policy (modelGateway.keyPolicy) runs on every key generate,
 # update and regenerate, so it never sees a key that already exists until that key is next written. This lists the
 # existing keys the policy would refuse, so they can be fixed before the policy is turned on, and found afterwards:
 #

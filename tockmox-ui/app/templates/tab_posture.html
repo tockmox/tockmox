@@ -7,7 +7,7 @@
 {% set r = reading %}
 <p>{{ source_line(r) }}</p>
 {# "Last answered 0s ago" is the age of the READ, which is always fresh; what a
-   reader needs is the age of the REPORT, the run the probe made (TM-0904). #}
+   reader needs is the age of the REPORT, the run the probe made. #}
 {% if r.data and r.data.run and r.data.run.startedAt %}<p class="muted">Report measured at {{ r.data.run.startedAt }}{% if report_age %} ({{ report_age }} ago){% endif %}.</p>{% endif %}
 {% if r.data %}
 {% set s = r.data.summary %}

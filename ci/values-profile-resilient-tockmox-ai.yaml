@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # What a site supplies to the AI layer for profiles/resilient.yaml, as obvious
-# placeholders (TM-0597).
+# placeholders.
 #
 # The resilient profile makes the layers that have a database backup refuse to
 # render until the backup endpoint is an address outside the cluster. A gate

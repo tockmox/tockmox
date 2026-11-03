@@ -54,7 +54,7 @@ class Case:
     tools: list = field(default_factory=list)
     response_format: dict | None = None
     max_tokens: int | None = None
-    classification: str = ""     # TM-1249: a row may carry a class above its set's (a replay row, say); never below
+    classification: str = ""     # a row may carry a class above its set's (a replay row, say); never below
 
 
 @dataclass
@@ -109,7 +109,7 @@ def _case(raw: dict, i: int) -> Case:
 
 
 def run_class(es) -> str:
-    """TM-1249: the highest class among the set and its rows: what every request of a run on this set carries."""
+    """The highest class among the set and its rows: what every request of a run on this set carries."""
     order = {c: i for i, c in enumerate(CLASSIFICATIONS)}
     return max([es.classification] + [c.classification for c in es.cases if c.classification], key=lambda c: order[c])
 

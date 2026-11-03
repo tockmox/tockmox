@@ -22,7 +22,7 @@ class Aborted(RuntimeError):
 
 
 class BudgetSpent(ValueError):
-    """TM-1295: the answers came back empty because the token budget ran out first (finish_reason length, no content,
+    """The answers came back empty because the token budget ran out first (finish_reason length, no content,
     no tool call), usually spent on reasoning. That measures the route's settings, not the model, so the run stops with
     the cause and writes no verdict. It is a refusal, not a transient: the scheduler does not retry it until the route
     changes (its params are part of the run key)."""
@@ -226,14 +226,14 @@ def quality(base, key, model, es: EvalSet, workers=2, seed=1, health=None) -> li
         return out
     with ThreadPoolExecutor(max_workers=max(1, workers)) as ex:
         res = list(ex.map(run_case, es.cases))
-    # TM-1295: when at least half the answers are empty for want of tokens, the pass rate measures the route's
+    # when at least half the answers are empty for want of tokens, the pass rate measures the route's
     # settings; stop with the cause rather than write a Worse verdict about the model
     if answered[0] and spent[0] * 2 >= answered[0]:
         raise BudgetSpent(budget_sentence(model, spent[0], answered[0], thought[0]))
     return res
 
 
-# ---------------------------------------------------------------- prefill (TM-1268)
+# ---------------------------------------------------------------- prefill
 
 CHARS_PER_TOKEN = 4          # the filler is sized by this estimate; the twin says so, and records the engine's own count
 DEFAULT_PREFILL_CONTEXTS = (4096, 16384, 32768, 65536)
@@ -293,7 +293,7 @@ def prefill(base, key, model, contexts=DEFAULT_PREFILL_CONTEXTS, requests_per_st
     return out
 
 
-# ---------------------------------------------------------------- tool-call reliability (TM-1267)
+# ---------------------------------------------------------------- tool-call reliability
 
 def _tool(name, desc, props, required):
     return {"type": "function", "function": {"name": name, "description": desc,

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1248: the statistics a verdict rests on, and the counting rule that stops reruns of one frozen set from
+"""The statistics a verdict rests on, and the counting rule that stops reruns of one frozen set from
 counting as independent evidence (AIX-1 of the 2026-10-29 council, verified against count_passes)."""
 import json
 
@@ -121,7 +121,7 @@ def _rerun(n, sampling, **kw):
 
 
 def test_three_reruns_of_one_frozen_set_are_one_piece_of_evidence():
-    """The planted defect: before TM-1248 count_passes deduplicated on run_id only, and a producer that stamps the
+    """The planted defect: before the fix count_passes deduplicated on run_id only, and a producer that stamps the
     run id from a clock (compare.py) turned three reruns of the same eight cases into three passes."""
     counted, notes = ml.count_passes(verdicts(*_rerun(3, {"temperature": 0, "seed": 1})), "local-agent", NEW, "", OLD)
     assert len(counted) == 1

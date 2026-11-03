@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# KUBECONFORM OVER THE RENDERED CHARTS, ONE DEFINITION FOR CI AND A LAPTOP (TM-0584).
+# KUBECONFORM OVER THE RENDERED CHARTS, ONE DEFINITION FOR CI AND A LAPTOP.
 #
 # Until this script, ci.yaml's "kubeconform rendered output" step was the only
 # place kubeconform ran, and tools/check-all.sh carried a SKIP line for it in
@@ -30,7 +30,7 @@ cd "$(dirname "$0")/.." || exit 1
 . tools/lib/tool-runs.sh
 
 KC_FLAGS="-strict -summary -ignore-missing-schemas"
-# KUBECONFORM_SCHEMA_DIR (HL-0675): validate against a local copy of the
+# KUBECONFORM_SCHEMA_DIR: validate against a local copy of the
 # schemas instead of fetching them, for a run with no network (an airgap, the
 # QA lane's test pod). The directory mirrors kubernetes-json-schema's layout,
 # <dir>/master-standalone-strict/<kind>[-<group>]-<version>.json; a schema it

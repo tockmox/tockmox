@@ -3,13 +3,13 @@
 #
 # Assert, ON THE RENDERED ARTIFACT, that every container Tockmox ships under
 # the all-on overlay carries a memory limit, or is on the residue list with the
-# reason it does not (TM-0595).
+# reason it does not.
 #
 #   ./tools/check-memory-limits.sh              the gate
 #   ./tools/check-memory-limits.sh --selftest   prove it goes red, and green
 #
 # WHY. On 2026-09-13 a Grafana memory limit that was too low presented as a
-# 502 from the gateway (TM-0553), and the same investigation counted 15 of 64
+# 502 from the gateway, and the same investigation counted 15 of 64
 # running containers with any memory limit at all. A container with no limit
 # is not safe either: one leak takes the node's memory, and every pod on that
 # node pays for it. So the default is a limit sized from a measurement, and the
@@ -34,7 +34,7 @@
 # unlimited subchart container exhausts a node exactly as well as ours.
 #
 # WHAT IT DOES NOT PROVE. That a limit is RIGHT. A limit is a claim about a
-# peak, and only a live install under load can test that claim (TM-0553's
+# peak, and only a live install under load can test that claim (the
 # Grafana rule: below 80% of the limit after a session, zero restarts). It does
 # not see pods an operator creates with no custom resource in the render
 # (Longhorn's instance-managers, the restore drill's throwaway Cluster).
@@ -134,7 +134,7 @@ PY
   local out; out=$(python3 "$tmp/scan.py" "$tmp/m" "$tmp/res.txt" 2>&1) && { echo "selftest FAIL  $1: scan stayed GREEN"; fail=1; return; }
   if grep -q "$4" <<<"$out"; then echo "selftest ok    $1: RED on '$4'"; else echo "selftest FAIL  $1: red, but not for the expected reason"; echo "$out" | grep error | head -3 || true; fail=1; fi
 }
-# A limited container loses its limit (the TM-0553 container itself).
+# A limited container loses its limit.
 # `\S` after the indent makes each line's indentation one unambiguous run. With `.*` alone the
 # spaces could be split between ` {10,}` and `.*` in many ways, so on a render that already lacks
 # the limit Python's regex engine tried every split of every line of the Grafana block (about 100

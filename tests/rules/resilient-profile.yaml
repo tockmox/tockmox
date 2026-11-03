@@ -1,5 +1,5 @@
 # The resilient profile's drill alarm: TockmoxResilientDrillAbsent and
-# TockmoxResilientNoPassingDrill ... TM-0597.
+# TockmoxResilientNoPassingDrill.
 #
 # DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules,
 # and renders them WITH profiles/resilient.yaml, because these rules exist only
@@ -16,7 +16,7 @@
 # and has passed, and a cluster whose kube-state-metrics is not being scraped,
 # are SILENT. The signals are kube-state-metrics' own series for the drill
 # CronJob and its Jobs, so nothing here depends on where the drill register is
-# kept (the ConfigMap today, the object store after TM-0459).
+# kept (the ConfigMap today, the object store later).
 #
 # Timing: promtool's clock starts at 0, and every case stops at 3h on purpose: promtool evaluates
 # every rendered rule in the tree at every step up to the last eval_time, so a ten day horizon costs

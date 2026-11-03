@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1295: a thinking model behind a route that leaves thinking on answers nothing within max_tokens. The runner must
+"""A thinking model behind a route that leaves thinking on answers nothing within max_tokens. The runner must
 say so and write no verdict (a Worse verdict there measures the route, not the model), and fixing the route must
 schedule a new run (the route's provider and params are part of the run key)."""
 import os

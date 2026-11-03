@@ -66,7 +66,7 @@
 
 @media (min-width: 1000px) { .top nav { order: 0; flex-basis: auto; margin-left: .5rem; } }
 
-/* ---- kit 0.4.0 (TM-1304): the right-hand utilities (health, Help, account), header menus, Appearance ---- */
+/* ---- kit 0.4.0: the right-hand utilities (health, Help, account), header menus, Appearance ---- */
 .util { margin-left: auto; display: flex; align-items: center; gap: .5rem; }
 
 .hpill { display: inline-flex; align-items: center; gap: .4rem; min-height: 32px; padding: 0 .7rem 0 .55rem; border-radius: 999px; font-size: var(--fs-1); font-weight: 600; text-decoration: none; white-space: nowrap; }

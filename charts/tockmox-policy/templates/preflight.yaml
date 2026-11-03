@@ -19,7 +19,7 @@ cleanup ... see the roadmap.
 */ -}}
 {{- include "tockmox.capabilityCoherent" (dict "ctx" $ "capability" "networkPolicy" "apps" (list "ai_namespace" "ai_cnpg_netpol" "ai_openwebui_egress" "authentik_netpol" "devops_netpol" "forgejo_netpol" "harbor_netpol" "monitoring_netpol" "platform_netpol" "selfcheck_netpol" "syslog_ingest_netpol" "tailscale_netpol")) -}}
 {{- /*
-`serviceMonitors` is deliberately NOT guarded here (TM-0825). Declining the
+`serviceMonitors` is deliberately NOT guarded here. Declining the
 observability capability while pinning `apps.serviceMonitors.enabled: true` is
 the documented "run your own Prometheus operator" route: the capability says
 "do not deploy a monitoring stack", the component says "but render the monitors

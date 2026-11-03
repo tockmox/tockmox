@@ -52,21 +52,18 @@ export SITE_REPO=YOUR_SITE_REPO_PATH
 test -f "$SITE_REPO/bootstrap/root.yaml" && echo "SITE_REPO: $SITE_REPO"
 ```
 
-**A misspelt key is the failure mode this page has to warn about twice.** The
-`apps` block accepts any key shaped like an object, so `apps.open_webui` lints
-clean, renders clean, and does nothing at all, while the real key is
-`apps.openWebui`. Verified 2026-09-01 against the 0.6.0 tree: the AI layer
-renders 8 objects at baseline, 8 with `apps.open_webui.enabled=false`, and 0
-with `apps.openWebui.enabled=false`. Read the component name out of the chart
-before you set it, and check the render afterwards.
+**A misspelt key is the failure mode this page has to warn about twice.** Every
+layer's `apps` block accepts only the component names that some layer declares,
+so `apps.open_webui` fails at lint with the bad name quoted, while the real key is
+`apps.openWebui` ([values contract](values-contract.md)). What still gets through
+is a real component name set on the wrong layer: it lints clean, renders clean,
+and does nothing. Read the component name out of the chart before you set it, and
+check the render afterwards.
 
-**What the schema does catch, since 2026-09-04, is a typo one level down.**
-`apps.<component>` must now be an object whose only key is `enabled`, on every
-layer, so `apps.openWebui.enabld: false` fails at lint with the offending
-property named. The component name itself is still free-form ... it has to be,
-because the set of components changes with every layer and release ... so the
-paragraph above still describes a real hole. The difference is that only one of
-the two spellings is now silent.
+**A typo one level down is caught as well.** `apps.<component>` must be an object
+whose only key is `enabled`, on every layer, so `apps.openWebui.enabld: false`
+fails at lint with the offending property named. The one silent case left is the
+right name in the wrong layer.
 
 ## Rung 1 ... values
 

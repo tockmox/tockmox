@@ -277,7 +277,7 @@ spec:
         - protocol: TCP
           port: 3100
 ---
-# The Tockmox UI (tockmox-ai, TM-0920) -> Prometheus :9090 and Alertmanager :9093. It reads node health, targets and
+# The Tockmox UI (tockmox-ai) -> Prometheus :9090 and Alertmanager :9093. It reads node health, targets and
 # firing alerts from both; its own egress policy (tockmox-ai, templates/tockmox-ui.yaml) already allows exactly these,
 # and without this rule the default-deny above refused them, so every status read "unreachable" and node health
 # stayed Unknown (lab F8, 2026-10-08).
@@ -317,7 +317,7 @@ spec:
         - protocol: TCP
           port: 9093
 ---
-# tockmox-actions (tockmox-ai, TM-1311) -> Alertmanager :9093 only: console silences, expiring them, and the test
+# tockmox-actions (tockmox-ai) -> Alertmanager :9093 only: console silences, expiring them, and the test
 # alert. Its own egress policy (templates/tockmox-actions.yaml) allows exactly this, and it is the one pod that takes
 # Alertmanager's write API on purpose. Not conditional on the AI layer's actions switches, for the reason above:
 # inert unless a pod with BOTH tockmox-actions' name label and tockmox.com/isolated runs in the AI namespace.
@@ -399,7 +399,7 @@ spec:
           port: 8080
 {{- if .Values.namespaces.node_agents }}
 ---
-# THE NODE-AGENTS NAMESPACE (TM-0799). node-exporter, Alloy's log DaemonSet and the
+# THE NODE-AGENTS NAMESPACE. node-exporter, Alloy's log DaemonSet and the
 # SMART exporter run in `namespaces.node_agents` so that the monitoring namespace can
 # enforce a Pod Security level its own pods pass. Everything that crosses between the
 # two namespaces is listed here, in both directions of the cross:
@@ -453,7 +453,7 @@ spec:
           port: 12345
 ---
 # Alloy (node-agents namespace) -> the Loki gateway (monitoring namespace) :8080. Before
-# TM-0799 this was same-namespace traffic and allow-intra-namespace covered it; Alloy now
+# this was same-namespace traffic and allow-intra-namespace covered it; Alloy now
 # pushes across namespaces, and without this rule the push dies against the default-deny
 # above and no container log reaches Loki. Scoped to the gateway pod and the Alloy pod.
 apiVersion: networking.k8s.io/v1
@@ -484,7 +484,7 @@ spec:
 {{- end }}
 {{- with ($.Values.platformNetpol | default dict).extraMonitoringClientNamespaces }}
 ---
-# Site clients of the monitoring namespace (TM-0820, observability-cutover A1):
+# Site clients of the monitoring namespace (observability-cutover A1):
 # a site's own Alloy, capacity jobs or alert publishers living in namespaces of
 # their own. Listed in platformNetpol.extraMonitoringClientNamespaces, empty by
 # default so this object does not render. Reaches Prometheus :9090, Loki :3100,

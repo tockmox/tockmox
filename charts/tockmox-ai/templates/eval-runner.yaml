@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-The eval runner on a schedule (TM-1261, TM-1264). OFF by default: modelLifecycle.runner.enabled.
+The eval runner on a schedule. OFF by default: modelLifecycle.runner.enabled.
 
 WHAT RUNS. One CronJob, the scheduler (`python -m app.runner schedule`), in the Tockmox UI image. Each pass it lists the
 admitted candidates (a live <alias>-next route on the eval gateway whose catalog entry is at stage candidate: merging the
@@ -151,7 +151,7 @@ spec:
 {{- $ui := .Values.tockmoxUi | default dict -}}
 {{- $image := $r.image | default (ternary ($ui.image | default "") "" (default false $ui.enabled)) -}}
 {{- if not $image -}}
-{{- fail "modelLifecycle.runner.enabled is true but modelLifecycle.runner.image is empty and tockmoxUi has no image to fall back to (tockmoxUi.enabled with tockmoxUi.image): the runner runs in the Tockmox UI image, which ships as source (TM-0902). Build it from the same commit as this chart, push it to your registry, and name it in tockmoxUi.image or modelLifecycle.runner.image." -}}
+{{- fail "modelLifecycle.runner.enabled is true but modelLifecycle.runner.image is empty and tockmoxUi has no image to fall back to (tockmoxUi.enabled with tockmoxUi.image): the runner runs in the Tockmox UI image, which ships as source. Build it from the same commit as this chart, push it to your registry, and name it in tockmoxUi.image or modelLifecycle.runner.image." -}}
 {{- end -}}
 {{- $eg := $lc.evalGateway | default dict -}}
 {{- if not $eg.enabled -}}

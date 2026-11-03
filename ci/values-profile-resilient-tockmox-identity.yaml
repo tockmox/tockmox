@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # What a site supplies to the identity layer for profiles/resilient.yaml, as
-# obvious placeholders (TM-0597). See ci/values-profile-resilient-tockmox-ai.yaml
+# obvious placeholders. See ci/values-profile-resilient-tockmox-ai.yaml
 # for why this file exists and how the gates use it.
 
 identity:

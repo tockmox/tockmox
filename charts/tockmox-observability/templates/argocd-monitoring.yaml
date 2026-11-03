@@ -9,7 +9,7 @@ stops reconciling, every OTHER signal stays green, because the workloads it
 last applied keep running. The cluster looks healthy right up until a drift or
 a failed sync matters.
 
-CHANGED 0.7.1 (TM-0739): THIS NOW FOLLOWS capabilities.observability, like the
+CHANGED 0.7.1: THIS NOW FOLLOWS capabilities.observability, like the
 rest. The section below is the reason it used to be off, and still describes
 what a monitor selects on an ArgoCD without metrics (nothing). It was turned on
 by default so TockmoxArgoCDCannotCompare renders on every install; the install

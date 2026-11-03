@@ -52,8 +52,8 @@ Three render-time refusals, each a quiet failure otherwise:
 {{- end -}}
 {{- $_ := set $config "model_list" (concat $hand $derived) -}}
 {{- /*
-DEFAULT MODELS FOR NEW KEYS (TM-0920, REQ-0048). On LiteLLM a virtual key minted with no model list can call
-every model the gateway has (TM-0936). modelLifecycle.productionKeys.defaultModels gives such keys a list instead.
+DEFAULT MODELS FOR NEW KEYS (REQ-0048). On LiteLLM a virtual key minted with no model list can call
+every model the gateway has. modelLifecycle.productionKeys.defaultModels gives such keys a list instead.
 Defense in depth, NOT a fence: LiteLLM applies it only at mint time, so keys that exist keep what they have, and a
 key later updated to an empty list reaches everything again. Refused: an empty list or all-proxy-models (both
 mean every model), a name that is not a production model or access group, and a second writer of the setting.

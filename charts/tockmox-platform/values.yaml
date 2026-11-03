@@ -41,7 +41,7 @@ global:
   # Empty falls back to the cluster default, which un-does the policy without
   # complaining. Set it to a class you have.
   localStorageClass: "local-path"
-  # Extra labels for EVERY namespace a chart here creates (TM-0816): the policy
+  # Extra labels for EVERY namespace a chart here creates: the policy
   # layer's namespaces and the platform layer's createCredentialsNamespaces.
   # For an admission mutator keyed on namespace labels, which would otherwise
   # act on the first chart pod before you could label the namespace: Zarf's
@@ -78,7 +78,7 @@ ingress:
     # by the Ingress consoles, which use `middleware` above.
     address: ""
   # Longhorn and the Traefik dashboard ship no sign-in. Turning a route on puts
-  # Authentik's forward-auth in front of it (TM-0425), which needs the SAME
+  # Authentik's forward-auth in front of it, which needs the SAME
   # console on in the identity layer (`sso.forwardAuth.apps.<app>.enabled`), and
   # fails the render if the identity capability is off. `forwardAuth: false`
   # routes the console with NO sign-in: only behind your own authentication.
@@ -254,7 +254,7 @@ apps:
   # Set true or false here to override capabilities.dataProtection.
   garage: {}
   # The product's own documentation, served from the shipped Garage's web
-  # endpoint at docs.<global.internalDomain> (TM-0215). Needs the object store,
+  # endpoint at docs.<global.internalDomain>. Needs the object store,
   # so it is owned by dataProtection with it: declining that capability removes
   # both, and turning this on with apps.garage off fails the render. Turn this
   # off to keep the object store and not serve the docs.
@@ -426,7 +426,7 @@ corednsHa:
 cert-manager:
   cainjector:
     resources:
-      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # measured on the prod install 2026-10-05 (accepted for the lab):
       # peak 104.2 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 126.8 MiB in the pre-migration namespace (30 days); average 101.1 MiB.
       # limit = max peak x 3, rounded up (32Mi steps to 512Mi, 128Mi above). This one grows
       # with the cluster, not the chart: x3 is a starting point, and a bigger cluster
@@ -437,7 +437,7 @@ cert-manager:
       limits:
         memory: 384Mi
   resources:
-    # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+    # measured on the prod install 2026-10-05 (accepted for the lab):
     # peak 96.2 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 60.3 MiB in the pre-migration namespace (30 days); average 89.8 MiB.
     # limit = max peak x 3, rounded up (32Mi steps to 512Mi, 128Mi above). This one grows
     # with the cluster, not the chart: x3 is a starting point, and a bigger cluster
@@ -449,7 +449,7 @@ cert-manager:
       memory: 320Mi
   webhook:
     resources:
-      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # measured on the prod install 2026-10-05 (accepted for the lab):
       # peak 64.3 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 28.2 MiB in the pre-migration namespace (30 days); average 57.1 MiB.
       # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
       # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -487,7 +487,7 @@ metallb:
   # it exists before any pod here references it.
   controller:
     resources:
-      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # measured on the prod install 2026-10-05 (accepted for the lab):
       # peak 156.5 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2); average 150.4 MiB.
       # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
       # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -498,7 +498,7 @@ metallb:
     priorityClassName: tockmox-cluster-critical
   speaker:
     resources:
-      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # measured on the prod install 2026-10-05 (accepted for the lab):
       # peak 51.6 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 46.8 MiB in the pre-migration namespace (30 days); average 45.2 MiB.
       # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
       # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -524,7 +524,7 @@ metallb:
     serviceAccount: tockmox-observability-kube-prometheus
 traefik:
   resources:
-    # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+    # measured on the prod install 2026-10-05 (accepted for the lab):
     # peak 180.9 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 127.5 MiB in the pre-migration namespace (30 days); average 164.6 MiB.
     # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
     # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -532,7 +532,7 @@ traefik:
       memory: 176Mi
     limits:
       memory: 288Mi
-  # NO PHONE-HOME FROM THE INGRESS CONTROLLER (TM-0785).
+  # NO PHONE-HOME FROM THE INGRESS CONTROLLER.
   #
   # Traefik's own defaults are `checkNewVersion: true` (it asks an upstream
   # service whether a newer release exists) and `sendAnonymousUsage: false`
@@ -553,7 +553,7 @@ traefik:
   # See the note there for why the class is guaranteed to exist by this wave.
   priorityClassName: tockmox-cluster-critical
   # --------------------------------------------------------------------------
-  # HTTP -> HTTPS, ON BY DEFAULT. Added 2026-09-13, TM-0558.
+  # HTTP -> HTTPS, ON BY DEFAULT. Added 2026-09-13.
   #
   # Before this the web entrypoint simply served http. A typed hostname, or any
   # link without a scheme, stayed plaintext and nothing nudged it over. That is
@@ -649,7 +649,7 @@ traefik:
   # policy layer's NetworkPolicies constrain the former.
   #
   # The routed, authenticated dashboard is `ingress.apps.traefik` above
-  # (TM-0425, TM-0217). This is the break-glass path beside it, which is the
+  #. This is the break-glass path beside it, which is the
   # right shape anyway ... a console that tells you WHY routing is broken
   # should not be reachable only through the routing you are trying to debug.
   # ---------------------------------------------------------------------------
@@ -678,7 +678,7 @@ traefik:
 longhorn:
   longhornManager:
     resources:
-      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # measured on the prod install 2026-10-05 (accepted for the lab):
       # peak 295.7 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 1993.3 MiB in the pre-migration namespace (30 days); average 258.4 MiB.
       # limit = max peak x 3, rounded up (32Mi steps to 512Mi, 128Mi above). This one grows
       # with the cluster, not the chart: x3 is a starting point, and a bigger cluster
@@ -770,7 +770,7 @@ longhorn:
     # ------------------------------------------------------------------------
     defaultClassReplicaCount: 1
     # ------------------------------------------------------------------------
-    # RECLAIM POLICY: RETAIN (TM-0789, changed for 0.7.1; upstream and 0.7.0
+    # RECLAIM POLICY: RETAIN (changed for 0.7.1; upstream and 0.7.0
     # shipped Delete).
     #
     # THE ARGUMENT. With Delete, removing a PVC removes the PersistentVolume and
@@ -781,7 +781,7 @@ longhorn:
     # product runs (Postgres, Garage, Loki, Prometheus) lives on these claims,
     # and this product's other data-loss defaults already point the same way:
     # `longhorn-backup` has deletionPolicy Retain for exactly this accident
-    # (TM-0216, volume-snapshot-class.yaml). A StorageClass that deletes the
+    # (volume-snapshot-class.yaml). A StorageClass that deletes the
     # volume while the backup class keeps the backup is the inconsistent pair.
     #
     # THE COST, STATED. Retain leaves the PV (phase Released) and the Longhorn
@@ -806,7 +806,7 @@ longhorn:
     # often).
     # ------------------------------------------------------------------------
     reclaimPolicy: Retain
-    # LEFTOVER PriorityClass `longhorn-critical` (TM-0789). This subchart renders
+    # LEFTOVER PriorityClass `longhorn-critical`. This subchart renders
     # a cluster-scoped PriorityClass by that name. One left by a previous
     # Longhorn install (an uninstall does not remove it) carries another
     # release's Helm ownership metadata, and `helm install` of this layer refuses
@@ -815,7 +815,7 @@ longhorn:
     #   kubectl delete priorityclass longhorn-critical
     # (only if no Longhorn you still run is using it).
   defaultSettings:
-    # No upgrade check to longhorn-upgrade-responder.rancher.io (TM-0671): the
+    # No upgrade check to longhorn-upgrade-responder.rancher.io: the
     # setting defaults on and reports the running version out. Sovereignty: no
     # unrequested outbound calls. Upgrades follow this repo's releases.
     upgradeChecker: false
@@ -855,7 +855,7 @@ garage:
   # ONE COPY, honestly. A single replica cannot satisfy a higher factor, and
   # claiming one would leave every write degraded while looking careful.
   replicationFactor: 1
-  # Garage's `block_size` (TM-0782): the size objects are split into. EMPTY
+  # Garage's `block_size`: the size objects are split into. EMPTY
   # renders no `block_size` line at all, so Garage uses its own default, which the
   # v2.4.1 configuration reference gives as 1MiB. That is what this chart has
   # always run, so the default here changes nothing. (The 1MiB figure is from
@@ -879,7 +879,7 @@ garage:
   # rewrite. Changing this key also changes the config checksum, which rolls the
   # single Garage pod once: backups and the docs sync see a brief S3 outage.
   blockSize: ""
-  # Garage's metadata engine (TM-0817): "sqlite" (what this chart has always run)
+  # Garage's metadata engine: "sqlite" (what this chart has always run)
   # or "lmdb" (upstream's long-time default, so most EXISTING Garage stores you
   # might adopt are LMDB). The engine is not stored in the data: point a sqlite
   # Garage at an LMDB metadata directory and it starts an EMPTY sqlite database
@@ -967,7 +967,7 @@ garage:
   # only by the site's app manifests; the install failed on it. Present since
   # the key was added, hidden on any cluster where the namespace already existed.)
   createCredentialsNamespaces: []
-  # Labels per namespace named in createCredentialsNamespaces (TM-0815), on top
+  # Labels per namespace named in createCredentialsNamespaces, on top
   # of global.namespaceLabels (this map wins on a clash). The reason to use it:
   # a namespace this layer creates cannot also be declared by your own
   # Application (two owners fight over the tracking label), so labels you used to
@@ -977,7 +977,7 @@ garage:
   #       pod-security.kubernetes.io/warn: restricted
   #       pod-security.kubernetes.io/audit: restricted
   credentialsNamespaceLabels: {}
-  # THE RESTORE-DRILL REGISTER (TM-0459). Each restore drill records its dated
+  # THE RESTORE-DRILL REGISTER. Each restore drill records its dated
   # PASS or FAIL as one JSON object in a bucket of its own, and reads it back
   # before the run may end as a PASS. The bootstrap Job (step 5b) creates the
   # bucket and a key with read and write on THAT bucket only (not owner, and no
@@ -1051,7 +1051,7 @@ garage:
     image: alpine/k8s:1.37.1
 
   # ---------------------------------------------------------------------------
-  # STATIC SITES SERVED FROM GARAGE (TM-0215): the web endpoint, and the list of
+  # STATIC SITES SERVED FROM GARAGE: the web endpoint, and the list of
   # sites it serves. Documentation for the product is the first site.
   #
   # Garage's web endpoint (`[s3_web]`, port 3902) serves a bucket as a website
@@ -1159,7 +1159,7 @@ garage:
 
 cloudnative-pg:
   resources:
-    # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+    # measured on the prod install 2026-10-05 (accepted for the lab):
     # peak 112.4 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 84.5 MiB in the pre-migration namespace (30 days); average 97.6 MiB.
     # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
     # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -1189,7 +1189,7 @@ cloudnative-pg:
 
 plugin-barman-cloud:
   resources:
-    # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+    # measured on the prod install 2026-10-05 (accepted for the lab):
     # peak 65.4 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 29.9 MiB in the pre-migration namespace (30 days); average 56.7 MiB.
     # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
     # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -1213,7 +1213,7 @@ plugin-barman-cloud:
 
 kured:
   resources:
-    # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+    # measured on the prod install 2026-10-05 (accepted for the lab):
     # peak 37.5 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 35.0 MiB in the pre-migration namespace (30 days); average 28.8 MiB.
     # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
     # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -1246,7 +1246,7 @@ kured:
   # profiles/observability-off.yaml, which flips each subchart's own switch, and
   # this layer refuses to render with the capability off and any of them still
   # on (templates/preflight.yaml); tools/check-capability-monitors.sh asserts
-  # both (TM-0825).
+  # both.
   service:
     create: true
   metrics:
@@ -1261,7 +1261,7 @@ kured:
     # Never reboot while a volume is rebuilding.
     # With more than one Prometheus replica this gate can see different ALERTS
     # on each request; see "Two Prometheus replicas and ALERTS" in
-    # docs/operations/monitoring.md (TM-0781) before pointing it at the Service.
+    # docs/operations/monitoring.md before pointing it at the Service.
     prometheusUrl: ""
     alertFilterRegexp: ""
 
@@ -1277,7 +1277,7 @@ snapshot-controller:
   keepCRDs: true
   controller:
     resources:
-      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # measured on the prod install 2026-10-05 (accepted for the lab):
       # peak 67.6 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 37.0 MiB in the pre-migration namespace (30 days); average 61.1 MiB.
       # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
       # request = average, rounded up to 16Mi. Re-measure before changing.

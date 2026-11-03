@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1311 and TM-1313: actions from the console (specs/tockmox-ui/SPEC.md section 7 in the planning repo).
+"""Actions from the console (specs/tockmox-ui/SPEC.md section 7 in the planning repo).
 
   shared     the kinds, the intent, the nonce that binds a sign-in to one intent, the checks both sides run
   service    tockmox-actions: the token is the issuer's or nothing; a disabled kind is refused; a replayed key does
@@ -351,7 +351,7 @@ def test_the_service_will_not_start_without_an_issuer_or_namespace():
 
 def console(tmp_path, actions=None, groups=("tockmox-admins",), down=False, authentik=None):
     """The UI with actions on, its callback wired to a real Service in-process (authentik: a fake Authentik's
-    handler, for the identity kinds, TM-1315)."""
+    handler, for the identity kinds)."""
     from fastapi.testclient import TestClient
     from app import config
     from app.auth import Sessions
@@ -597,7 +597,7 @@ def test_review_7_a_target_that_is_not_an_object_is_a_400_not_a_crash(tmp_path):
         assert r.status_code == 400, t
 
 
-# ---------------------------------------------------------------- TM-1356: no upstream text in a reason
+# ---------------------------------------------------------------- no upstream text in a reason
 
 SENTINEL = "UPSTREAM-BODY-7f3a"
 
@@ -632,7 +632,7 @@ def _upstream_says(kind, tmp_path):
 
 
 @pytest.mark.parametrize("kind, status", [("run-job", "403"), ("silence", "400"), ("sync", "500")])
-def test_tm1356_an_upstream_error_body_reaches_the_log_not_the_caller(kind, status, tmp_path, caplog, capsys):
+def test_an_upstream_error_body_reaches_the_log_not_the_caller(kind, status, tmp_path, caplog, capsys):
     s, it, extra = _upstream_says(kind, tmp_path)
     with caplog.at_level("WARNING", logger="tockmox.actions"):
         code, out = s.handle({"intent": it, "id_token": token(act.nonce_for(it), **extra)})
@@ -648,7 +648,7 @@ def test_tm1356_an_upstream_error_body_reaches_the_log_not_the_caller(kind, stat
     assert kind == "run-job" or it["key"] in caplog.text
 
 
-def test_tm1356_a_refusal_carries_its_reason_as_an_attribute():
+def test_a_refusal_carries_its_reason_as_an_attribute():
     e = act.Refused("the sign-in was not made for this action")
     assert e.reason == str(e) == "the sign-in was not made for this action"
 

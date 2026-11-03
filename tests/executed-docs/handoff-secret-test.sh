@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Hermetic contract test for the guest kubeconfig handoff Secret. TM-0766.
+# Hermetic contract test for the guest kubeconfig handoff Secret.
 # No cluster, no network: kubectl, curl and ip are stubs over a directory of
 # files, and the provisioner runs unmodified against them.
 #
@@ -53,7 +53,7 @@ cat >"${BIN}/kubectl" <<'STUB'
 ST="$STUB_STATE"
 printf '%s\n' "$*" >>"$ST/log"
 # Every invocation, verbatim, so a case can assert that each one named a cluster
-# (TM-0797). `log` above also carries non-call lines the cases grep for.
+#. `log` above also carries non-call lines the cases grep for.
 printf '%s\n' "$*" >>"$ST/calls"
 a=()
 while [ $# -gt 0 ]; do
@@ -74,7 +74,7 @@ case "$j" in
   "auth can-i"*) echo yes ;;
   *"jsonpath={.clusters[0].cluster.server}") printf 'https://api.invalid:6443' ;;
   *"jsonpath={.users[0].user.token}")
-    # A JWT-shaped ServiceAccount token for tockmox-test (TM-0849 reads its
+    # A JWT-shaped ServiceAccount token for tockmox-test (the handoff reads its
     # subject); $ST/token overrides it for the refusal cases.
     if [ -f "$ST/token" ]; then cat "$ST/token"
     else printf 'eyJhbGciOiJub25lIn0.%s.sig' "$(printf '{"sub":"system:serviceaccount:tockmox-test:tockmox-test-agent"}' | base64 | tr -d '=\n' | tr '+/' '-_')"; fi ;;
@@ -142,7 +142,7 @@ secrets_left() {  # state-dir -> names of Secrets still present
   return 0
 }
 run_tc() {  # state-dir verb -> stdout+stderr in $OUT, rc in $RC
-  # SUBSTRATE_CTX="" runs the verb with the required context empty (TM-0797).
+  # SUBSTRATE_CTX="" runs the verb with the required context empty.
   OUT="$(STUB_STATE="$1" PATH="${BIN}:${PATH}" KUBECONFIG="${TMP}/substrate.kubeconfig" \
          TOCKMOX_SUBSTRATE_CONTEXT="${SUBSTRATE_CTX-stub-substrate}" \
          TOCKMOX_WORKDIR="$1/wd" TOCKMOX_K3S_VERSION=v0.0.0-stub TOCKMOX_K3S_TIMEOUT=2 \
@@ -267,7 +267,7 @@ else
   bad "destroy removes harness Secrets and counts them to zero" "rc=${RC}; left: $(secrets_left "$S"); secrets ARTEFACT: $(printf '%s' "$OUT" | grep -c 'ARTEFACT: secrets')"
 fi
 
-# TM-0587: destroy is scoped to its own VM. Another VM's Secrets in the same
+# destroy is scoped to its own VM. Another VM's Secrets in the same
 # namespace (a person's, an agent's, an earlier run's) must survive it.
 S="${TMP}/destroy-scoped"; new_state "$S"; seed_stale "$S"; : >"$S/secrets/${VM}-cloudinit"
 : >"$S/secrets/someone-else-01-kubeconfig"; : >"$S/secrets/someone-else-01-cloudinit"
@@ -307,7 +307,7 @@ else
   bad "destroy fails when harness Secrets survive a delete that returned 0" "rc=${RC}; $(printf '%s' "$OUT" | grep RESULT | tr '\n' ' ')"
 fi
 
-# ---- TM-0797: every call names a cluster, and an empty name is refused ------
+# ---- every call names a cluster, and an empty name is refused ------
 # The stub records each invocation. Every one must carry --context; `config`
 # subcommands that only read or edit the guest's kubeconfig FILE are the
 # recorded exemption (they cannot take a cluster).
@@ -327,7 +327,7 @@ for S in "${TMP}/create-replace" "${TMP}/destroy-clean"; do
   fi
 done
 
-# TM-0849: the secret handoff copies the token into the guest, so anything but a
+# the secret handoff copies the token into the guest, so anything but a
 # ServiceAccount of the disposable namespace is refused before any VM exists.
 jwt() { printf 'eyJhbGciOiJub25lIn0.%s.sig' "$(printf '{"sub":"%s"}' "$1" | base64 | tr -d '=\n' | tr '+/' '-_')"; }
 for case_ in "admin:$(jwt 'system:admin')" "other-ns:$(jwt 'system:serviceaccount:default:harvester-admin')" "opaque:not-a-jwt-token"; do

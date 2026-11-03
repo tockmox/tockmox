@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Console actions, on the rendered artifact (TM-1311, TM-1313; docs/administration/tockmox-ui.md, "Taking action").
+"""Console actions, on the rendered artifact (docs/administration/tockmox-ui.md, "Taking action").
 
     python3 tools/check-actions.py              the gate (renders tockmox-ai three ways)
     python3 tools/check-actions.py --selftest   prove each assertion goes red on a planted render, then green
@@ -21,7 +21,7 @@ WHAT IT ASSERTS:
      2026-11-01, crashed on it).
   5. Off means absent: with every kind off, nothing called tockmox-actions renders and the UI's config has no
      `actions` block; with argocd turned on and no account, the render fails with the reason.
-  6. THE IDENTITY KINDS' TOKEN (TM-1315) is mounted into tockmox-actions and into no pod of the UI.
+  6. THE IDENTITY KINDS' TOKEN is mounted into tockmox-actions and into no pod of the UI.
   7. THE IDENTITY LAYER'S SIDE (tockmox-identity rendered with sso.consoleActions on, and off): the role grants
      `authentik_core.view_user` globally and nothing else; object permissions sit on the user group only, and are
      only view_group, add_user_to_group and remove_user_from_group, each to the console role; the service account is a

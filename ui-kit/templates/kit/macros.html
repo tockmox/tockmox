@@ -35,7 +35,7 @@
 <summary>{{ badge(state, word) }}<span class="fold-title">{{ title }}</span>{% if reading %}<span class="src"><span><span class="src-name">{{ reading.source }}</span>{% if why %}<span class="muted">: {{ why }}</span>{% endif %}<span class="muted age"> · last answered {{ reading.age_text() }}</span></span></span>{% else %}<span></span>{% endif %}<span class="chev" aria-hidden="true"></span></summary>
 {%- endmacro %}
 
-{# Kit 0.4.0 (TM-1304). The Appearance control: System / Light / Dark. Rendered hidden; shell.js shows it and wires it,
+{# Kit 0.4.0. The Appearance control: System / Light / Dark. Rendered hidden; shell.js shows it and wires it,
    so a page without JavaScript shows no control that cannot work. The choice lives in this browser only. #}
 {% macro appearance() -%}
 <div class="appearance" data-appearance hidden>

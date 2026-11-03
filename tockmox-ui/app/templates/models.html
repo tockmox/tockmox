@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% from "macros.html" import badge, source_line, tune, unknown, mascot, trend_row %}
 {% block title %}Models{% endblock %}
-{#- TM-1296, revision 2: Needs you, Local models by inference node, Frontier models by provider and family; the catalog and the
+{#- revision 2: Needs you, Local models by inference node, Frontier models by provider and family; the catalog and the
     upstream sources fold to one line each. Build drift is on the node page. -#}
 {% macro need_badge(it) -%}
 {%- if it.spin -%}<span class="badge st-{{ it.state }}"><svg class="ico spin" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2" opacity=".25"/><path d="M10 2a8 8 0 0 1 8 8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg><span>{{ it.word }}</span></span>
@@ -157,7 +157,7 @@
   <details class="fold" id="catalog"{% if gate %} open{% endif %}>
     <summary>{{ badge(cat_line.state, cat_line.word) }}<span class="fold-title">Catalog ({{ cat_line.n }} entr{{ "ies" if cat_line.n != 1 else "y" }})</span><span class="muted">{{ cat_line.parts }}</span><span class="chev" aria-hidden="true"></span></summary>
     <div class="fold-body pad">
-      <p>{{ badge("ok", "Promotion gate passes") if not gate else badge("critical", "Promotion gate fails") }} {% if gate %}{{ gate|join("; ") }}{% else %}Every live alias points at a model that was promoted with enough passing comparisons on record, or was already in service when it was catalogued (<code>adopted</code>). The record is checked here; that each committed verdict file matches its hash is checked in CI (TM-0930).{% endif %}</p>
+      <p>{{ badge("ok", "Promotion gate passes") if not gate else badge("critical", "Promotion gate fails") }} {% if gate %}{{ gate|join("; ") }}{% else %}Every live alias points at a model that was promoted with enough passing comparisons on record, or was already in service when it was catalogued (<code>adopted</code>). The record is checked here; that each committed verdict file matches its hash is checked in CI.{% endif %}</p>
       {% for note in gate_notes %}<p>{{ badge("warning", "Older bar") }} {{ note }}</p>{% endfor %}
       {% if catalog %}
       <div class="table-wrap" role="region" aria-labelledby="cat-cap" tabindex="0">

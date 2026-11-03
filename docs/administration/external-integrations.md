@@ -260,7 +260,7 @@ hardware suited to them, and Open WebUI points at any OpenAI-compatible
 endpoint.
 
 **YOU SUPPLY:** the endpoint URL, as a model in the gateway's list. Since
-0.8.0 the console goes through the model gateway by default (TM-0460), so the
+0.8.0 the console goes through the model gateway by default, so the
 host is named once, in the gateway, and the console needs no change:
 
 ```yaml
@@ -545,7 +545,7 @@ Three default-on rules are wider than their names read, and the policy layer
 now has a key for each. In 0.7.x **all three defaulted to empty, which kept the
 pre-0.7.0 behaviour**. Since 0.8.0 the first one is required: an empty
 `nodeOriginSources` refuses to render rather than admitting the whole pod
-network (TM-0798). The other two still default to the wider setting. Set them.
+network. The other two still default to the wider setting. Set them.
 
 | Rule | Key | Empty | Set |
 |---|---|---|---|

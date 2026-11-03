@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tockmox policy gate for the model gateway (TM-0383; REQ-0002, REQ-0003).
+"""Tockmox policy gate for the model gateway (REQ-0002, REQ-0003).
 
 Ported from the reference site's hook, which has run since 2026-06-05, and
 shipped here in ENFORCE mode. Rendered into the `tockmox-litellm-hooks`

@@ -17,7 +17,7 @@
 #
 # A THIRD CADENCE lives in its own workflow, docs-no-cluster.yaml: the six pages
 # whose blocks need no cluster, run on every pull request and push with no path
-# filter (TM-0289). It is not a job here because this file's `docs/**` filter
+# filter. It is not a job here because this file's `docs/**` filter
 # would miss a chart-only change that breaks a documented command, and widening
 # the filter would widen the `paths` job below with it.
 #
@@ -61,7 +61,7 @@ on:
       - '.github/workflows/executed-docs.yaml'
   push:
     # release-* for the same reason as ci.yaml: the tag goes on a release
-    # branch commit, and that commit's own run is the evidence (TM-0775).
+    # branch commit, and that commit's own run is the evidence.
     branches: [main, 'release-*']
     paths:
       - 'tests/executed-docs/**'
@@ -123,7 +123,7 @@ jobs:
           #     become permanent by being forgotten
           # Clear both values to remove the waiver.
           #
-          # CLEARED 2026-09-28: TM-0345 is closed. `paths` ran green on main
+          # CLEARED 2026-09-28: this is closed. `paths` ran green on main
           # (run 36423037925, 6faf994) and was shown to go red on a deliberate
           # one-line docs break (run 36424726218). The normal stale window now
           # applies; keep the mechanism for the next declared gap.
@@ -245,7 +245,7 @@ jobs:
           # to prevent. So it is tested, hermetically, on every commit.
           bash tests/executed-docs/selftest.sh
 
-      - name: no kubectl or helm call in the harness omits its cluster (TM-0797)
+      - name: no kubectl or helm call in the harness omits its cluster
         shell: bash -euo pipefail {0}
         run: |
           # A bare call targets whatever context the caller's shell has current,
@@ -276,7 +276,7 @@ jobs:
             fi
           }
           check_containing() {
-            # Added 0.6.1 (TM-0628). A canary that asserts an ORDINAL while the
+            # Added 0.6.1. A canary that asserts an ORDINAL while the
             # path script selects by CONTENT is testing something the path does
             # not use: on 2026-09-13 a block was inserted at the top of
             # fresh-install section 6, every ordinal shifted, the ordinal checks
@@ -319,7 +319,7 @@ jobs:
           fi
 
       # The inline-anchor canary that stood here was DELETED at 0.6.1
-      # (TM-0628). It existed only because fresh-install.md's ArgoCD-metrics
+      #. It existed only because fresh-install.md's ArgoCD-metrics
       # success condition was prose with an inline code span, which
       # extract-block.sh cannot walk, so P06 pulled the bytes out with sed
       # against a literal prose anchor and this step asserted that anchor still
@@ -337,7 +337,7 @@ jobs:
     runs-on: [self-hosted, tockmox-devtest]
     timeout-minutes: 60
     concurrency:
-      # One at a time. Since TM-0587 the teardown only removes this run's own
+      # One at a time. Since then the teardown only removes this run's own
       # VM (named below), but two runs would still compete for the substrate's
       # capacity, and a capacity failure reads like a flake.
       group: executed-docs-tockmox-test
@@ -345,11 +345,11 @@ jobs:
     env:
       TOCKMOX_DOCS_REF: ${{ github.event.inputs.ref || github.sha }}
       TOCKMOX_TEST_NAMESPACE: tockmox-test
-      # TM-0587. This run's VM, by a name nothing else uses, so its teardown can
+      # This run's VM, by a name nothing else uses, so its teardown can
       # delete exactly what it created. The `ed-` prefix belongs to this
       # workflow; the teardown's sweep relies on that.
       TOCKMOX_TEST_VM: ed-${{ github.run_id }}-${{ github.run_attempt }}
-      # TM-0797. The hypervisor cluster's kubectl context, from a repository
+      # The hypervisor cluster's kubectl context, from a repository
       # variable (Settings -> Secrets and variables -> Actions -> Variables). It
       # is REQUIRED: every kubectl call below names it, and a step that finds it
       # empty refuses rather than letting `--context=` fall back to whichever
@@ -374,7 +374,7 @@ jobs:
           for t in kubectl curl ssh ssh-keygen; do
             command -v "$t" >/dev/null 2>&1 || { echo "MISSING TOOL: $t"; miss=1; }
           done
-          # The credential's remaining life, named before it bites. TM-0345.
+          # The credential's remaining life, named before it bites.
           #
           # ORDER MATTERS AND THIS GOES FIRST, ahead of the namespace probe
           # below. An expired token makes the namespace probe fail, so without
@@ -420,7 +420,7 @@ jobs:
             rotating)
               # Short total life, so something renews it and a days-remaining
               # floor is the wrong question ... it would refuse EVERY run under
-              # the projected-token design, which is the option TM-0345 prefers.
+              # the projected-token design, which is the preferred option.
               # This says the credential is of the self-renewing KIND. It does
               # not say the renewal is happening; a wedged kubelet reads the
               # same right up until the namespace probe below fails.
@@ -447,7 +447,7 @@ jobs:
           esac
 
           # Probe the capability the paths NEED, inside the namespace, not the
-          # cluster-scoped Namespace object. CORRECTED 2026-09-27 (TM-0345): this
+          # cluster-scoped Namespace object. CORRECTED 2026-09-27: this
           # used to be `kubectl get ns`, which a correctly confined credential
           # CANNOT do, so the first real run on the unparked runner refused a
           # healthy rig. throwaway-cluster.sh fixed the same mistake earlier;
@@ -486,10 +486,10 @@ jobs:
           # the case where the runner killed the job before the trap fired ...
           # a leaked VM makes the next run's results unrepeatable, which is
           # worse than a failed run. It is also the only cleanup a FAILED create
-          # gets (TM-0766): run.sh calls destroy only after a create succeeded,
+          # gets: run.sh calls destroy only after a create succeeded,
           # and the cloud-init Secret carries a namespace-scoped token.
           #
-          # IT TEARS DOWN ONLY WHAT THIS RUN CREATED (TM-0587). It used to be
+          # IT TEARS DOWN ONLY WHAT THIS RUN CREATED. It used to be
           # `delete vm --all` plus every harness-labelled Secret and Service in
           # the namespace, and on 2026-10-06 this step deleted two agent lab VMs
           # mid-install. Every VM this job makes is named TOCKMOX_TEST_VM

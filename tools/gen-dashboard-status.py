@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Generates the Tockmox / Status board (uid tockmox-status) from tockmox-ui/app/panels.yaml (TM-1306).
+"""Generates the Tockmox / Status board (uid tockmox-status) from tockmox-ui/app/panels.yaml.
 
 The Tockmox UI draws its trend panels from panels.yaml and links each one here, so the console and the board read
 the SAME expressions: change panels.yaml, run this, commit both. One timeseries panel per UI panel, in file order,

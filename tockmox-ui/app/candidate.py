@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The candidate page's content (TM-1258): what an evaluation of `<alias>-next` will run, and how far each run has got.
+"""The candidate page's content: what an evaluation of `<alias>-next` will run, and how far each run has got.
 
 Pure except read_runs(), which reads the run-status/1 files the eval runner writes (app/runner/status.py). A run strip shows
 state and partial numbers and never a winner: a half-finished run says nothing about which model is better, and the page says
@@ -101,7 +101,7 @@ def _flat(d, prefix="", out=None):
     return out
 
 
-# ---------------------------------------------------------------- the run as a pipeline of stages (TM-1301)
+# ---------------------------------------------------------------- the run as a pipeline of stages
 
 # (key, name on the page, the legs it folds). A stage whose legs are in neither the plan nor the run's legs is left out.
 STAGES = (("control", "Control", ("control",)), ("smoke", "Smoke", ("smoke",)),

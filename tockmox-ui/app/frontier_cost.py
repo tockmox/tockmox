@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""What a hosted model costs (TM-1298): its list price, what the gateway spent on it, and how often it was called.
+"""What a hosted model costs: its list price, what the gateway spent on it, and how often it was called.
 
 Jeff's rulings (2026-10-30): a price comes from a dated, recorded source and spend from the gateway's own spend data; never an
 estimate passed off as a fact. A figure nobody has reads "unknown", with the reason on hover, and is never 0 or a guess.

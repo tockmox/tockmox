@@ -16,7 +16,7 @@
 #
 # WHAT IS CHECKED, on `helm template` of every layer that carries a
 # PrometheusRule, with ci/values.yaml and ci/values-all-on.yaml (and the identity
-# layer once more with the bundled server kept, TM-0788):
+# layer once more with the bundled server kept):
 #   - every Tockmox-authored alert has a line in tools/kured-gate.txt or a
 #     `kured_gate: block|pass` annotation, and not both
 #   - every line names an alert that still renders
@@ -57,7 +57,7 @@ for chart in $LAYERS; do
   helm template "$chart" "charts/$chart" -f ci/values.yaml -f ci/values-all-on.yaml > "$T/$chart.yaml" 2> "$T/$chart.err" \
     || { echo "check-kured-gate: REFUSING ... charts/$chart did not render: $(head -c 300 "$T/$chart.err")" >&2; exit 1; }
   RENDERED+=("$T/$chart.yaml")
-  # Alerts that render only under a PROFILE (TM-0597: the resilient profile's
+  # Alerts that render only under a PROFILE (the resilient profile's
   # drill alarm) are invisible to the render above, so they would reach a
   # cluster with no kured decision, and a ledger line for them would be
   # reported as naming an alert that no longer renders. The profile is passed
@@ -70,7 +70,7 @@ for chart in $LAYERS; do
     RENDERED+=("$T/$chart-profile-$pn.yaml")
   done
 done
-# THE BUNDLED-SERVER SHAPE OF THE IDENTITY LAYER (TM-0788). From 0.9.0 Authentik
+# THE BUNDLED-SERVER SHAPE OF THE IDENTITY LAYER. From 0.9.0 Authentik
 # runs on CNPG by default, and an install that keeps the bundled server (two
 # keys, docs/deployment/upgrade.md) renders the pg_dump bridge and its two
 # freshness alerts, which neither overlay above renders any more. Those alerts

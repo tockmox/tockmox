@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# KNOWN-BAD LITELLM IMAGE DIGESTS AND TAGS (TM-1197). One list, read by
+# KNOWN-BAD LITELLM IMAGE DIGESTS AND TAGS. One list, read by
 # tools/check-litellm-compromise.sh; add a line here when a new bad artifact is
 # published, nothing else needs to change.
 #
@@ -13,7 +13,7 @@
 # SOURCES, read 2026-10-29:
 #   [vendor] https://docs.litellm.ai/blog/security-incident-oct-21-2026
 #   [issue]  https://github.com/BerriAI/litellm/issues/47826
-# The card TM-1197 names only the first digest below. The others come from the
+# The card names only the first digest below. The others come from the
 # same two sources; each line says which. Not listed: layer digests (the issue
 # names sha256:b52b5f46cf92... for the venv layer, truncated), because no image
 # reference carries a layer digest.
@@ -29,7 +29,7 @@
 # FORMAT, one entry per line: sha256:<12 to 64 lowercase hex>, then a label.
 # The gate refuses a line that does not parse, so a typo cannot go quiet.
 
-sha256:1bbcb1443bc962e45f5aad53fe3d2c30600e0379715fb6c664cdd3ac126c339e  image index of litellm on Docker Hub, and (truncated in the sources) ghcr.io/berriai/litellm; tags v1.107.0 latest main-latest main-stable (TM-1197 card, vendor post)
+sha256:1bbcb1443bc962e45f5aad53fe3d2c30600e0379715fb6c664cdd3ac126c339e  image index of litellm on Docker Hub, and (truncated in the sources) ghcr.io/berriai/litellm; tags v1.107.0 latest main-latest main-stable (card, vendor post)
 sha256:bd1aeee419ea36da9aa2b657288da4101887be468f020ac63d22ba6ed84a3ea5  v1.107.0 amd64 platform manifest (issue 47826, IOC table)
 sha256:56b74573eed6e4aafe4b50603dbe7853e0345f188c8e44a09f1098caf1f4bcdf  v1.107.0 arm64 platform manifest (issue 47826, IOC table)
 sha256:c00f9d92c427  ghcr.io/berriai/litellm-database image index, published truncated to 12 hex (vendor post, issue 47826)

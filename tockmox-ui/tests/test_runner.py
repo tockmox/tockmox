@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""HL-0917: the eval runner v0 against stub OpenAI-compatible gateways. Each stub model has a behaviour, so every
+"""The eval runner v0 against stub OpenAI-compatible gateways. Each stub model has a behaviour, so every
 outcome the runner can produce is produced here: better, worse, absolute bars, a control that does not fail, a
-broken stream, the data-class rails (TM-1249), and an unhealthy node."""
+broken stream, the data-class rails, and an unhealthy node."""
 import json
 import os
 import re
@@ -41,7 +41,7 @@ def _answer(model, messages, body):
 
 def gateway(behaviour):
     """A stub gateway. `behaviour` maps a route name to a stub model name. `_tiers` ({route: tier}) answers GET
-    /model/info as LiteLLM does; `_seen` (a list) collects every chat request's tags (TM-1249)."""
+    /model/info as LiteLLM does; `_seen` (a list) collects every chat request's tags."""
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
             pass
@@ -91,7 +91,7 @@ def gateway(behaviour):
             self.end_headers()
             self.wfile.write(b)
         def think(self, body):
-            """TM-1295: a thinking model whose route did not turn thinking off. It reasons until max_tokens and answers
+            """A thinking model whose route did not turn thinking off. It reasons until max_tokens and answers
             nothing: finish_reason length, empty content, the reasoning beside it (as mlx-lm and LiteLLM return it)."""
             if body.get("stream"):
                 self.send_response(200)
@@ -199,7 +199,7 @@ def test_a_broken_stream_fails_smoke_and_the_verdict(tmp_path):
 
 @pytest.mark.parametrize("classification", ["internal", "confidential", "restricted"])
 def test_data_above_public_goes_to_no_route_the_gateway_does_not_report_as_local(tmp_path, classification):
-    """TM-1249: unknown tier counts as not local, so a gateway that says nothing gets public data only."""
+    """Unknown tier counts as not local, so a gateway that says nothing gets public data only."""
     es = make_set(tmp_path, classification=classification)
     with pytest.raises(RunError, match="not known to be local"):
         _run(tmp_path, es, {})
@@ -220,7 +220,7 @@ def test_on_local_routes_every_request_carries_the_sets_class_as_a_tag(tmp_path,
 
 
 def test_a_hosted_candidate_gets_public_data_only(tmp_path):
-    """The hosted-candidate refusal that held until TM-1249 is now the class rail: an external route takes public sets."""
+    """The hosted-candidate refusal that once held is now the class rail: an external route takes public sets."""
     tiers = {"local-agent-next": "external", "local-agent": "local"}
     es = make_set(tmp_path)
     seen = []

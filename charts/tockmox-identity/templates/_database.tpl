@@ -1,7 +1,7 @@
 {{/* SPDX-License-Identifier: Apache-2.0 */}}
 {{/*
 THE IDENTITY DATABASE, the questions every template here asks about it
-(TM-0788). One answer each, so the Cluster, the bridge, the drill and the
+. One answer each, so the Cluster, the bridge, the drill and the
 upgrade guard cannot disagree about which database Authentik is on.
 */}}
 

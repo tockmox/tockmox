@@ -366,8 +366,9 @@ apps:
 ```
 
 **Component names are the chart's keys, not names you can guess.** `apps` accepts
-any key that is an object with an optional `enabled`, so a misspelt component
-name lints clean, renders clean, and changes nothing. Read the component names
+only the component names that some layer declares, so a misspelt name fails at
+lint ([values contract](values-contract.md)). A real name set on the wrong layer
+still lints clean, renders clean, and changes nothing. Read the component names
 out of the layer's own `values.yaml` before you set one. A switch that removes no
 object is the same failure as no switch at all, and it looks identical from
 outside.

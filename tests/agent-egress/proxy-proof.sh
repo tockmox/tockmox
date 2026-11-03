@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# THE AGENT-EGRESS PROXY, AS RENDERED, IN A REAL SMOKESCREEN (TM-1251).
+# THE AGENT-EGRESS PROXY, AS RENDERED, IN A REAL SMOKESCREEN.
 #
 # Takes the proxy's config.yaml and acl.yaml from `helm template` of the policy
 # layer with ci/values-agent-egress.yaml, runs Smokescreen on them with a

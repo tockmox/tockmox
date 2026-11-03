@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Render every layer chart at two points and refuse a change to a field that
-# Kubernetes will not let an existing object take (TM-0754).
+# Kubernetes will not let an existing object take.
 #
 #   tools/check-immutable-fields.sh                       baseline tag vs the working tree
 #   tools/check-immutable-fields.sh --base REF [--head REF]
@@ -25,7 +25,7 @@
 # WHY RENDERED OUTPUT. "No template file changed" does not mean "no rendered
 # manifest changed": `helm.sh/chart` is rendered from Chart.yaml's version, so a
 # version bump alone rewrites a label inside every pod template. On a Job, whose
-# spec.template is immutable, that is refused at upgrade (v0.6.1-rc1, TM-0753)
+# spec.template is immutable, that is refused at upgrade (v0.6.1-rc1)
 # while a fresh install passes. The patch bar's entry condition reads template
 # SOURCE and could not see it. This reads the rendered artifact.
 #
@@ -34,8 +34,8 @@
 #       Job is an Argo CD hook (argocd.argoproj.io/hook) or a Helm hook whose
 #       hook-delete-policy includes BeforeHookCreation: that policy deletes the
 #       old Job before the new one is created. An Argo CD hook with NO
-#       hook-delete-policy gets that policy by Argo's default (TM-1031). A Job whose NAME changes is a
-#       different object and is not compared (the TM-0753 fix: the chart version
+#       hook-delete-policy gets that policy by Argo's default. A Job whose NAME changes is a
+#       different object and is not compared (the chart version
 #       is in the name).
 #   Deployment, DaemonSet, StatefulSet   spec.selector
 #   StatefulSet                      spec.serviceName, spec.volumeClaimTemplates,
@@ -47,7 +47,7 @@
 # that touches only mutable fields (labels on a Deployment's pod template, an
 # image, a ConfigMap) is green, and the summary says how large it was.
 #
-# --perturb-images (TM-1022). The baseline-tag run cannot see a dependency bump
+# --perturb-images. The baseline-tag run cannot see a dependency bump
 # INSIDE one version: a site that follows a branch (the homelab) moves between
 # two heads with the same chart version, and a Job named after the version
 # keeps its name while Renovate changes its image. On 2026-10-11 that stranded
@@ -142,7 +142,7 @@ def delete_before_create(d):
         # No delete policy at all is Argo CD's documented default, BeforeHookCreation
         # ("if no deletion policy is specified, Argo CD will automatically assume
         # BeforeHookCreation", Sync Phases and Waves): the Job is replaced, never
-        # patched (TM-1031, kube-prometheus-stack's admission-patch Job). An explicit
+        # patched (kube-prometheus-stack's admission-patch Job). An explicit
         # policy is read as written, so HookSucceeded alone stays flagged.
         if "argocd.argoproj.io/hook-delete-policy" not in ann:
             return True
@@ -311,7 +311,7 @@ prepare() { # name source(ref|dir:PATH)
   fill_deps "$1"
 }
 
-perturb_images() { # name: rewrite every image tag in the staged side's values (TM-1022)
+perturb_images() { # name: rewrite every image tag in the staged side's values
   python3 - "$work/$1" <<'PY2'
 import sys, re, glob
 d = sys.argv[1]
@@ -355,7 +355,7 @@ if [ "$SELFTEST" = 1 ]; then
   expect_red j4 "an Argo hook with only HookSucceeded is flagged (it stays after a failure)" "" 'FAIL L Job ns/boot'
   NOPOL='  annotations: {argocd.argoproj.io/hook: PreSync}'
   pair j4b "$(job patch tockmox-platform-0.6.0 "$NOPOL")" "$(job patch tockmox-platform-0.6.1 "$NOPOL")"
-  expect_green j4b "an Argo hook with no delete policy passes (Argo's default is BeforeHookCreation, TM-1031)"
+  expect_green j4b "an Argo hook with no delete policy passes (Argo's default is BeforeHookCreation)"
   pair j5 "$(job creds tockmox-platform-0.6.0 '')" "$(job creds tockmox-platform-0.6.0 '' | sed 's/helm.sh\/chart: other/helm.sh\/chart: moved/')"
   expect_green j5 "a Job whose metadata label moves but whose pod template does not passes"
   dep() { printf 'apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: web, namespace: ns}\nspec:\n  selector: {matchLabels: {app: %s}}\n  template:\n    metadata: {labels: {app: %s, helm.sh/chart: %s}}\n' "$1" "$1" "$2"; }
@@ -375,7 +375,7 @@ if [ "$SELFTEST" = 1 ]; then
   out=$(run a1 "" "$fx/allow.txt") || die "an allow-listed hit failed"; printf '%s' "$out" | grep 'allowed L Job ns/creds' >/dev/null || die "allowed hit not printed"; ok "an allow-listed hit passes and is still printed"
   printf 'L Job other spec.template\n' > "$fx/allow2.txt"
   out=$(run j2 "" "$fx/allow2.txt"); printf '%s' "$out" | grep 'matched nothing' >/dev/null || die "stale allow entry not reported"; ok "an allow entry that matches nothing is reported"
-  # Real renders: a version bump of the real platform chart, with and without the TM-0753 fix.
+  # Real renders: a version bump of the real platform chart, with and without the Job-name fix.
   command -v helm >/dev/null || die "helm"
   ver=$(awk '$1=="version:"{print $2; exit}' charts/tockmox-platform/Chart.yaml)
   mk() { stage_dir "$1" "$ROOT"; }
@@ -384,12 +384,12 @@ if [ "$SELFTEST" = 1 ]; then
   fill_deps sa 2>/dev/null; fill_deps sb 2>/dev/null
   out=$(bash "$self" --base-dir "$work/sa" --head-dir "$work/sb" --layers tockmox-platform 2>&1) || die "the real platform chart, version-bumped, was flagged: $out"
   printf '%s' "$out" | grep -E 'the rendered diff is [1-9][0-9]* changed lines; 0 immutable' >/dev/null || die "green bump did not show a non-empty rendered diff: $out"
-  ok "the real platform chart bumped $ver -> 9.9.9 has a non-empty rendered diff and no immutable-field change (TM-0753 fix in place)"
+  ok "the real platform chart bumped $ver -> 9.9.9 has a non-empty rendered diff and no immutable-field change"
   for s in sa sb; do f="$work/$s/charts/tockmox-platform/templates/garage-bootstrap.yaml"; sed 's/^  name: {{ \$credName }}$/  name: {{ $name }}-credentials/' "$f" > "$f.n" && mv "$f.n" "$f"; done
-  out=$(bash "$self" --base-dir "$work/sa" --head-dir "$work/sb" --layers tockmox-platform 2>&1) && die "the pre-TM-0753 Job name passed: $out"
+  out=$(bash "$self" --base-dir "$work/sa" --head-dir "$work/sb" --layers tockmox-platform 2>&1) && die "the pre-fix Job name passed: $out"
   printf '%s' "$out" | grep -E 'FAIL tockmox-platform Job .*-credentials: spec.template changes .*helm.sh/chart' >/dev/null || die "wrong output: $out"
   ok "the same bump with the version taken out of the credentials Job's name is flagged, naming that Job"
-  # --perturb-images (TM-1022): the fixed tree passes; the credentials Job named for the version again fails, naming it.
+  # --perturb-images: the fixed tree passes; the credentials Job named for the version again fails, naming it.
   pt="$work/pt"; mkdir -p "$pt"; (cd "$ROOT" && tar -c charts ci tools) | tar -x -C "$pt"
   out=$(bash "$pt/tools/check-immutable-fields.sh" --perturb-images 2>&1) || die "--perturb-images failed on this tree: $out"
   printf '%s' "$out" | grep -E 'perturbed [1-9][0-9]* image references' >/dev/null || die "--perturb-images changed nothing: $out"
@@ -484,7 +484,7 @@ fi
 # ------------------------------------------------------------------ run
 t0=$(date +%s)
 if [ "$PERTURB" = 1 ]; then
-  echo "check-immutable-fields: the tree vs itself with every image tag changed (TM-1022)"
+  echo "check-immutable-fields: the tree vs itself with every image tag changed"
   prepare base "dir:$ROOT" 2> "$work/dep-warn.txt" || { cat "$work/dep-warn.txt" >&2; exit 2; }
   prepare head "dir:$ROOT" 2>> "$work/dep-warn.txt" || { cat "$work/dep-warn.txt" >&2; exit 2; }
   perturb_images head || { echo "check-immutable-fields: found no image reference to perturb" >&2; exit 2; }

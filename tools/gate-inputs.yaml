@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# What each gate reads, so a pull request runs only the gates its changes can affect (TM-1288).
+# What each gate reads, so a pull request runs only the gates its changes can affect.
 # tools/gate-plan.py applies it; check-all.sh --changed-from REF asks for it; a run with no
 # arguments, every push to main and the nightly run ignore it and run every gate.
 #

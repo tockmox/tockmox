@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1297 (rulings D1 and D2, 2026-10-30): frontier generations. A hosted family keeps up to
+"""rulings D1 and D2, 2026-10-30: frontier generations. A hosted family keeps up to
 modelLifecycle.frontier.keepGenerations generations, each under a pinned alias that never moves (claude-sonnet-5-5), and has
 one floating family alias (claude-sonnet) that only a promotion moves. A generation leaves only on provider retirement or by
 falling off the list through a change a person commits.
@@ -420,7 +420,7 @@ def test_the_family_alias_page_shows_where_it_points_the_generations_kept_and_ho
     assert "Generations kept" in t and "up to 3 per family" in t and "modelLifecycle.frontier.keepGenerations" in t
     pos = [t.index(a) for a in ("claude-sonnet-5-5 " + SON, "claude-sonnet-5 " + SON + "5 ", "claude-sonnet-4-5 " + SON + "4-5")]
     assert pos == sorted(pos)                                                               # newest first
-    assert "not recorded yet" not in t and "Spend this month" not in t                       # TM-1298: figures, or unknown with why
+    assert "not recorded yet" not in t and "Spend this month" not in t                       # figures, or unknown with why
     assert "Price per 1M tokens, in / out" in t and t.count("unknown") >= 10 and "never an estimate" in t
     assert "Current" in t and "Kept" in t
     for g in ("claude-sonnet-5-5", "claude-sonnet-5", "claude-sonnet-4-5"):
@@ -565,7 +565,7 @@ def test_the_change_carries_keep_generations_when_the_site_wrote_it(tmp_path):
 
 
 def _noshell(t):
-    """The page minus the kit's one same-origin script (shell.js: theme and header menus, TM-1304); any
+    """The page minus the kit's one same-origin script (shell.js: theme and header menus); any
     other script tag is still a failure."""
     import re as _re
     return _re.sub(r'<script src="/static/kit/shell\.js[^"]*"></script>', "", t)

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # shellcheck disable=SC2015  # `ok ... || bad ...`: ok and bad are printf wrappers that return 0, so C runs only when A or B failed
 #
-# PER-TOOL EGRESS, AT RENDER (TM-1251). What the policy layer renders for the
+# PER-TOOL EGRESS, AT RENDER. What the policy layer renders for the
 # two tiers in ci/values-agent-egress.yaml, and that every refusal in
 # templates/agent-egress.yaml fires. Each refusal case changes ONE value from
 # the passing fixture, so a refusal that stops firing turns this red rather

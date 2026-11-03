@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-0841: the read-only status API, GET /api/v1/status, provisional.
+"""The read-only status API, GET /api/v1/status, provisional.
 
 Same session cookie as the pages, admins only; every write verb under /api/ is refused with 405 for
-everyone. The lab finding that binds it (TM-0901 D4): Argo CD Application CRs keep their last sync and
+everyone. The lab finding that binds it: Argo CD Application CRs keep their last sync and
 health when the application controller stops, so an application not reconciled within
 argocdStaleSeconds reads `unknown` here whatever the CR says. Run from tockmox-ui/: python -m pytest tests
 """
@@ -160,7 +160,7 @@ def test_a_healthy_cluster_reads_ok_with_every_layer_fresh(tmp_path, world):
     assert "layers" not in b["version"]   # the per-app detail lives under applications, once
 
 
-# ------------------------------------------------------------ which Applications are the Tockmox layers (TM-0979)
+# ------------------------------------------------------------ which Applications are the Tockmox layers
 
 MIRROR = "git://site-git.tockmox-harness.svc.cluster.local/tockmox.git"
 
@@ -209,7 +209,7 @@ def test_a_degraded_layer_reads_critical(tmp_path, world):
     assert by_name(b, "tockmox-ai")["state"] == "critical" and b["verdict"] == "critical"
 
 
-# ------------------------------------------------------------ the stale-controller case (TM-0901 D4)
+# ------------------------------------------------------------ the stale-controller case
 
 def test_a_stopped_argocd_controller_reads_unknown_not_healthy(tmp_path, world):
     # The CRs still say Synced/Healthy; only reconciledAt gives the stopped controller away.

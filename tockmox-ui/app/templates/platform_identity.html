@@ -2,7 +2,7 @@
 {% from "macros.html" import badge %}
 {% block title %}Identity · Platform{% endblock %}
 {% block main %}
-{#- TM-1315: the people Authentik knows, a recovery link for anyone who is not an administrator, and membership of
+{#- the people Authentik knows, a recovery link for anyone who is not an administrator, and membership of
     the user group. Read and done through tockmox-actions; the UI holds no Authentik credential. -#}
 <h1>Identity</h1>
 <p class="lede">Send someone a link to set a new password, or let them into the consoles open to users. Administrators are set in Git (<code>sso.adminUsers</code>); creating, deactivating and recovering an administrator are in {% if admin_url %}<a href="{{ admin_url }}">Authentik's admin console</a>{% else %}Authentik's admin console{% endif %}.</p>

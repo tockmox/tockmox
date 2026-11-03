@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Assert, ON THE RENDERED ARTIFACTS, what Loki's replica count is allowed to be
-# (TM-0778).
+#.
 #
 #   ./tools/check-loki-ha.sh              the three cases below
 #   ./tools/check-loki-ha.sh --selftest   prove each assertion can go red

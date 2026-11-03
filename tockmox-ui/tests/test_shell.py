@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1304: the console's shell (specs/tockmox-ui/SPEC.md sections 2-3 in the planning repo).
+"""The console's shell (specs/tockmox-ui/SPEC.md sections 2-3 in the planning repo).
 
   sections   Home, Status, AI, Platform in the top bar; a rail inside AI and Platform; non-admins see Home
   utilities  the health pill (admins), the Help menu, the account menu with Appearance, Sign out last

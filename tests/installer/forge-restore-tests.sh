@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Sourced by run.sh. Groups R1-R12: install/forge-restore.sh, reached as
-# `tockmox-install.sh --restore-from ...` and `tockmox-install.sh repair-forge` (TM-1338).
+# `tockmox-install.sh --restore-from ...` and `tockmox-install.sh repair-forge`.
 #
 # HERMETIC. Every case is a refusal, or a dry run, and each one comes before any
 # contact with a cluster: the assertion that matters is that the shims' call log
@@ -10,7 +10,7 @@
 # repository committed and bundled with git, its SHA-256 written the way the off-site
 # job writes it, and a kit encrypted with openssl the way bootstrap-forge writes it,
 # carrying a sealing key backup encrypted the way bootstrap-secrets writes one. The
-# path that installs and seeds a forge was run on a lab cluster (TM-1338's Log); a
+# path that installs and seeds a forge was run on a lab cluster; a
 # shim that answered a forge would only prove that the shim agrees with the script.
 
 RS="$WORK/restore"; mkdir -p "$RS"

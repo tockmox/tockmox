@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1308: Platform's rail and pages (specs/tockmox-ui/SPEC.md section 8 in the planning repo).
+"""Platform's rail and pages (specs/tockmox-ui/SPEC.md section 8 in the planning repo).
 
   grouping      Needs you groups by alert name and what it asks; 13 cases for one alert on 6 hosts are one row
   filters       a group opens the Cases page filtered to exactly its cases

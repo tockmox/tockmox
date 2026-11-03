@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# THE SECURITY POSTURE PROBE ADD-ON STAYS OBSERVE-ONLY (TM-0874, TM-0882).
+# THE SECURITY POSTURE PROBE ADD-ON STAYS OBSERVE-ONLY.
 #
 #   ./tools/check-posture-probe.sh              the gate
 #   ./tools/check-posture-probe.sh --selftest   prove it goes red on every mutation, and green untouched
@@ -36,7 +36,7 @@
 #      values.yaml declares no key the schema does not.
 #   6. the render refuses: no image, a measured release namespace, a row naming an
 #      unknown target, a row with a dimension its target is not measured on.
-#   7. the add-on's unit tests: engine, schema + gate exit-code contract (TM-0882),
+#   7. the add-on's unit tests: engine, schema + gate exit-code contract,
 #      termination transport, the differential against a fake API.
 #
 # WHAT IT DOES NOT PROVE. That the role is enough to run (the lab run proves
@@ -171,7 +171,7 @@ mutate "the add-on on by default"                   chart/values.yaml "s.replace
 mutate "a values key promoted to stable"            chart/values.schema.json "s.replace('\"experimental\"','\"stable\"',1)" "not experimental"
 mutate "an rbac row the collector never asks"       chart/files/intent-tockmox-reference.json "s.replace('rbac:list nodes @*','rbac:list configmaps @*')" "never asks the oracle"
 mutate "the image check removed"                    chart/templates/_helpers.tpl "s.replace('{{- if not \$v.image -}}','{{- if false -}}')" "FAIL rendered anyway: enabled with no image"
-mutate "the schema accepts gateExit 3 (TM-0882)"    schema/report-v0.schema.json "s.replace('\"enum\": [\n            0,\n            1,\n            2\n          ]','\"enum\": [0, 1, 2, 3]')" "test_schema_is_versioned_and_states_the_contract" unit
+mutate "the schema accepts gateExit 3"    schema/report-v0.schema.json "s.replace('\"enum\": [\n            0,\n            1,\n            2\n          ]','\"enum\": [0, 1, 2, 3]')" "test_schema_is_versioned_and_states_the_contract" unit
 mutate "unobserved rows read as clean"              posture_probe/differential.py "s.replace('    elif n(\"unknown\"):\n        gate = GATE_ERROR','    elif False:\n        gate = GATE_ERROR')" "test_unobserved_is_1_not_clean" unit
 mutate "the differential skips its write check"     posture_probe/aggregate.py "s.replace('    bad = write_violations(cl, namespaces)','    bad = []')" "test_write_capable_identity_refuses_before_reading_anything" unit
 mutate "identity vantages given network controls (N2)" posture_probe/blackbox.py "s.replace('    if not endpoints:\n','    if False:\n',1)" "test_an_identity_vantage_ignores_its_namespaces_network_controls" unit

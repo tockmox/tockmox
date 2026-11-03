@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The Budget page's numbers (TM-1258): per alias, requests over the demand query's window, the local share of traffic, and for
+"""The Budget page's numbers: per alias, requests over the demand query's window, the local share of traffic, and for
 hosted aliases an estimated cost. Pure: the sources are read by the caller and passed in.
 
 Every figure carries where it came from, and a figure nobody has is Unknown, never 0: an alias with no series in the window may
@@ -11,7 +11,7 @@ what they cost is the node, which this page does not price.
       budget:
         spendQuery: 'sum by (model_group) (increase(litellm_spend_metric_total[7d]))'   # optional: measured USD per alias or model
         usdPerRequest: {big-hosted-chat: 0.012}                                         # optional: an operator's estimate per alias
-        spendByCallerQuery: 'sum by (api_key_alias, model) (increase(litellm_spend_metric_total[7d]))'   # optional (TM-1298): top callers by cost
+        spendByCallerQuery: 'sum by (api_key_alias, model) (increase(litellm_spend_metric_total[7d]))'   # optional: top callers by cost
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ class SpendSource(DemandSource):
 
 
 class CallerSpendSource(DemandSource):
-    """USD per caller and model over a window (TM-1298), from the operator's own query: a series per (caller label, model label).
+    """USD per caller and model over a window, from the operator's own query: a series per (caller label, model label).
     Unlike the other two it keeps every label, because which caller spent on which model is the answer. Off until
     modelLifecycle.budget.spendByCallerQuery is set."""
     name = "Gateway spend by caller"

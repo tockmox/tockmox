@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1299: the node page lists the models it serves per endpoint, with tunings, planned memory and a memory bar, and
+"""The node page lists the models it serves per endpoint, with tunings, planned memory and a memory bar, and
 the Models page links every local deployment to its node. Run from tockmox-ui/: python -m pytest tests"""
 import html
 import re
@@ -115,7 +115,7 @@ def test_the_existing_sections_are_kept(tmp_path):
 def test_the_models_page_links_each_local_deployment_to_its_node(tmp_path):
     c, _ = models_client(tmp_path, inventory=inventory())
     t = c.get("/models").text
-    # TM-1296: one card per node, headed by a link to the node page, with the node's deployments (the candidate's too) inside it
+    # one card per node, headed by a link to the node page, with the node's deployments (the candidate's too) inside it
     card = re.search(r'<section class="panel flush" aria-labelledby="node-alpha-h">.*?</section>', t, re.S).group(0)
     assert '<a class="nm" href="/nodes/alpha"><code>alpha</code></a>' in card and "Node details" in card
     assert re.search(r'<code>local-medium-next</code>', card) and "<code>local-embed</code>" not in card

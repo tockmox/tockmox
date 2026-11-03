@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-THE BUILT-IN FORGE'S OFF-SITE COPY, WATCHED BY WHAT IT SHOULD SAY (TM-1337).
+THE BUILT-IN FORGE'S OFF-SITE COPY, WATCHED BY WHAT IT SHOULD SAY.
 
 The site repository can live on a forge inside the cluster (site.forge:
 built-in; `tockmox-install.sh bootstrap-forge` installs it, never Argo CD).

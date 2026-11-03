@@ -12,11 +12,11 @@
 # therefore the grep on the workstation this repository is developed from, does
 # not honour it. So the gate that CHECKS the mirror list and the generator that
 # WRITES it were not reading the same manifests, and the difference was
-# invisible on Linux CI. TM-0646's clause is "extracts identically in both",
+# invisible on Linux CI. The requirement is "extracts identically in both",
 # and two copies cannot be made identical by testing them ... only by being one
 # copy.
 #
-# THE QUOTE RULE, which is the defect TM-0646 was raised for. `toYaml`
+# THE QUOTE RULE, which is the original defect. `toYaml`
 # single-quotes a templated image inside a list and `tpl` runs afterwards, so
 # the quotes reach the rendered manifest:
 #
@@ -50,7 +50,7 @@ extract_images() {
 }
 
 # extract_images_selftest
-#   Proves the extractor on the three quoting forms TM-0646 names, plus the
+#   Proves the extractor on the three quoting forms below, plus the
 #   shapes that have actually bitten. Needs no helm and no cluster, so it runs
 #   wherever CI runs ... which matters, because the defect it guards was found
 #   by a gate going red on a correct tree, not by a test.
@@ -69,7 +69,7 @@ extract_images_selftest() {
     fi
   }
 
-  # The three forms TM-0646's DoD names, each yielding the SAME reference.
+  # The three forms, each yielding the SAME reference.
   _ei_case "bare"           "reg.example/busybox:1.37" \
                             "        image: reg.example/busybox:1.37"
   _ei_case "double-quoted"  "reg.example/busybox:1.37" \
@@ -77,7 +77,7 @@ extract_images_selftest() {
   _ei_case "single-quoted"  "reg.example/busybox:1.37" \
                             "        image: 'reg.example/busybox:1.37'"
 
-  # THE TM-0646 CASE ITSELF: a templated image inside a values list, which
+  # THE CASE ITSELF: a templated image inside a values list, which
   # toYaml single-quotes. The sentinel must survive at the START of the value,
   # because check-airgap.sh tests `^$SENTINEL`.
   got=$(printf "%s\n" "      - name: wait-for-ca

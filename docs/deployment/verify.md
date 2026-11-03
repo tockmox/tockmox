@@ -86,6 +86,12 @@ file.** What carries an archive checksum is the part that changed:
 **Every release carries a gate report too**, signed with the same key as the
 tag; pre-releases do not get one.
 
+**What a signed tag does not cover: the container images.** The charts name
+their images by tag, and one image is pinned by digest
+([registry](registry.md)), so a verified tag tells you which images were
+intended, not that a registry served you those exact bytes. A release lock that
+pins every image by digest is not built yet.
+
 ## 1. Verify the signed tag
 
 **Required.** This is the check that establishes the tree is the maintainer's.

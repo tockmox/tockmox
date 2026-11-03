@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1258: the candidate page /models/c/<alias>: the plan for an evaluation and a strip of its run-status/1 files. A leg that
+"""The candidate page /models/c/<alias>: the plan for an evaluation and a strip of its run-status/1 files. A leg that
 has not finished shows its numbers as partial and the page says nothing yet tells which model is better."""
 import html
 import json

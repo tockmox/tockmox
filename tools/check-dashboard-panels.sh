@@ -8,14 +8,14 @@
 #   ./tools/check-dashboard-panels.sh --selftest   prove the rule actually trips
 #   ./tools/check-dashboard-panels.sh FILE...      specific dashboard JSON files
 #
-# WHY THIS EXISTS (TM-0559, and it is the THIRD instance of one failure).
+# WHY THIS EXISTS (and it is the THIRD instance of one failure).
 #
 # Three shipped dashboards have now been correct in JSON, correct in the data
 # they query, and misleading on screen: a red count that never happened and a
-# table of metric plumbing (TM-0532), then the ArgoCD board's Application
+# table of metric plumbing, then the ArgoCD board's Application
 # status table rendering `dest_namespace / cluster / exported_namespace` in its
 # visible width while `name`, `sync_status` and `health_status` sat off the
-# right edge (TM-0559). Every one was caught by a human looking at the board.
+# right edge. Every one was caught by a human looking at the board.
 # None was caught by a gate, and a CLI pre-check the same day reported the
 # ArgoCD panel as "12 series, ok" ... which was true and was the wrong question.
 # A check that reads the data can never catch a presentation defect.

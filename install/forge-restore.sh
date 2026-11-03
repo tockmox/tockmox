@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # ============================================================================
-# Tockmox built-in forge: rebuild and repair from the off-site copy (TM-1338)
+# Tockmox built-in forge: rebuild and repair from the off-site copy
 #
 #   ./install/tockmox-install.sh --restore-from offsite --kit KIT --passphrase-file F \
 #       --offsite-s3-endpoint URL --offsite-s3-bucket B --offsite-s3-credentials F \

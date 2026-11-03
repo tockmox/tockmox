@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1261: run-status/1. Atomic writes, a reader that skips what it cannot trust, newest first, and the engine-upgrade
-comparison (TM-1264) that states a regression and nothing more."""
+"""run-status/1. Atomic writes, a reader that skips what it cannot trust, newest first, and the engine-upgrade
+comparison that states a regression and nothing more."""
 import json
 import os
 

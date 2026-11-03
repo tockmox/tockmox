@@ -1,4 +1,4 @@
-# TockmoxSelfCheckStale ... TM-0531.
+# TockmoxSelfCheckStale.
 #
 # DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
 #

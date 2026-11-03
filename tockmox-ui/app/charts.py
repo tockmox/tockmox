@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Trend panels from the data Grafana graphs, drawn here as server-side SVG (TM-1306, absorbs TM-1016).
+"""Trend panels from the data Grafana graphs, drawn here as server-side SVG.
 
 specs/tockmox-ui/SPEC.md section 6 (planning repo). Native panels, not iframes: DECISION-2026-10-04 call 4
 (server-side reads plus links out) and DESIGN-2026-10-11-tockmox-ui-embedded-grafana (allow_embedding turns

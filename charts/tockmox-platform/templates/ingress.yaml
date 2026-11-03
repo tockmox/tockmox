@@ -9,7 +9,7 @@
 {{ include "tockmox.ingress" (dict "ctx" . "name" "longhorn" "prefix" "longhorn" "host" .Values.ingress.apps.longhorn.host "service" "longhorn-frontend" "port" 80 "wave" "8" "annotations" (include "tockmox.forwardAuthAnnotations" (dict "ctx" $ "app" "longhorn" "on" .Values.ingress.apps.longhorn.forwardAuth) | fromYaml)) }}
 {{- end }}
 {{- /*
-THE TRAEFIK DASHBOARD AT A HOST-MATCHED NAME, BEHIND AUTHENTIK (TM-0217, TM-0425).
+THE TRAEFIK DASHBOARD AT A HOST-MATCHED NAME, BEHIND AUTHENTIK.
 
 The upstream chart's own dashboard route matches PathPrefix(/dashboard) and
 PathPrefix(/api) with no Host rule and no auth, so it answers on every internal
@@ -24,7 +24,7 @@ own Certificate (an Ingress gets one from the cert-manager annotation; an
 IngressRoute does not) when global.certIssuer is set, and its own forward-auth
 Middleware, `traefik-dashboard-forward-auth`, in THIS namespace.
 
-WHY A MIDDLEWARE OF ITS OWN (TM-0217, found on the maintainers' lab, 2026-10-28). The
+WHY A MIDDLEWARE OF ITS OWN (found on the maintainers' lab, 2026-10-28). The
 consoles that are Ingresses (Longhorn here, Prometheus and Alertmanager in the
 observability layer) attach the identity layer's `tockmox-forward-auth` through
 the `router.middlewares` annotation, where a provider-qualified name

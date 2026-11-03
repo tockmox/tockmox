@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1249: the data-class rails' pieces outside a whole run (tests/test_runner.py runs them end to end): the client
+"""The data-class rails' pieces outside a whole run (tests/test_runner.py runs them end to end): the client
 reads the gateway's tiers and tags its requests, and the eval gateway's entries are fenced by tier the same way in the
 UI as in the chart (tools/check-inference-nodes.sh holds the chart to tests/golden)."""
 import json

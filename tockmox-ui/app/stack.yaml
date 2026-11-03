@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# The stack Status draws (TM-1305; specs/tockmox-ui/SPEC.md section 5 in the planning repo).
+# The stack Status draws (specs/tockmox-ui/SPEC.md section 5 in the planning repo).
 #
 # DATA, no code. Bands are listed top to bottom as the page shows them: your apps on top, what you
 # provide at the bottom, the layers in between in deploy order (their sync waves). Argo CD runs down
@@ -21,7 +21,7 @@
 # component the install does not deploy, judged from the layer application's resources the way the
 # capabilities page judges it (kind, name regex); while Argo CD cannot be read, the part shows.
 #
-# `trend` names the drawer's 7-day panel in panels.yaml (TM-1306); a part with namespaces and no `trend`
+# `trend` names the drawer's 7-day panel in panels.yaml; a part with namespaces and no `trend`
 # gets the alerts firing in them. `goto` adds the drawer's buttons; one whose console is not configured, or not visible to the
 # viewer, is not shown. `runbook` is a docs page, relative to docs/.
 #
@@ -39,7 +39,7 @@ side:
     alerts: ["TockmoxArgoCD*", "ArgoCD*"]
     goto: {grafana: tockmox-argocd}
     runbook: administration/argocd.md
-  # The built-in forge (site.forge: built-in, TM-1337), when the observability layer
+  # The built-in forge (site.forge: built-in), when the observability layer
   # renders its rules. Its alerts carry tockmox_component: site-repository; Silence on
   # this part is how "No off-site copy" is snoozed or dismissed.
   - id: site-repository

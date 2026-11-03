@@ -16,7 +16,7 @@
   <h2 id="d-h">What the gateway actually served</h2>
   <p>{{ source_line(demand) }}</p>
   {% if demand.data %}<ul class="plain">{% for a, n in demand.data|dictsort(by="value", reverse=true) %}<li><code>{{ a }}</code>: {{ n|round|int }} requests</li>{% endfor %}</ul>
-  <p class="muted">Shown beside the plan, not fed into it: profile weights from demand come once there are weeks of data (TM-0931).</p>{% endif %}
+  <p class="muted">Shown beside the plan, not fed into it: profile weights from demand come once there are weeks of data.</p>{% endif %}
 </section>
 
 {% for x in plans %}{% set p = x.plan %}

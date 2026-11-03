@@ -1,4 +1,4 @@
-# The built-in forge's off-site copy ... TM-1337.
+# The built-in forge's off-site copy.
 #
 # DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
 #

@@ -13,7 +13,7 @@ Pure: no network, no clock. Files are read and written only by the functions tha
      "tool": {"id": "guidellm", "version": "0.8.1"},                    # optional
      "workload": {"profile": "evals/profiles/<alias>.workload.json", "mode": "cold" | "warm", "seed": 1},   # optional
      "class": "chat",                                                   # optional: the workload class the run used
-     "run": "large-local-large-20261030-2",                             # optional: the eval run that measured it (TM-1295)
+     "run": "large-local-large-20261030-2",                             # optional: the eval run that measured it
      "metrics": [{"name": "decode_tps_stream_p50", "value": 31.2, "unit": "tok/s", "n": 120, "concurrency": 4}, ...],
      "memory": {"peak_resident_gib": 29.4, "predicted_gib": 33.9, "context_tokens": 32768, "parallel_slots": 3},
      "power": {"tokens_per_joule": 0.42, "watts_mean": 71.0},           # optional
@@ -97,7 +97,7 @@ class Result:
     watts_mean: float | None = None
     sha256: str = ""            # of the file bytes, set by parse()
     path: str = ""              # where it sits in the site repo, set by load_dir()
-    run: str = ""               # TM-1295: the eval run (run_id) that measured it; part of the file name
+    run: str = ""               # the eval run (run_id) that measured it; part of the file name
 
     def metric(self, name: str, concurrency: int | None = None):
         return next((m for m in self.metrics if m.name == name and (concurrency is None or m.concurrency == concurrency)), None)
@@ -242,7 +242,7 @@ def model_slug(model: str) -> str:
 def repo_path(r: Result) -> str:
     """Where the twin lives in the site repo: evals/results/<node>/<date>-<model>-<engine>-<plane>.json for a perf leg,
     with `<kind>-` before the plane for the others (so legs of one run never share a name), the class after `quality-`
-    (two classes, or the incumbent's leg, on one day), and `-<run>` at the end when the twin names its run (TM-1295: two
+    (two classes, or the incumbent's leg, on one day), and `-<run>` at the end when the twin names its run (two
     runs of one build on one day, such as a re-run after a route fix, never share a name). A twin without `run` keeps
     the name it always had."""
     mid = "" if r.kind == "perf" else f"{r.kind}-"

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The last build check (TM-0934), shared by the node pages and the Models page (TM-1296).
+"""The last build check, shared by the node pages and the Models page.
 
 Git holds the build each model is pinned to; the node holds the one it actually serves. A check reads every pinned Ollama and
 Hugging Face route's node through the probe's fences and keeps the answer in memory only (the UI writes nothing). An old check

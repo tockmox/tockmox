@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Deployments (TM-1299): every gateway route read as "a model served by an engine on a node", with its tunings, the
-memory it is planned at, and a node's memory bar. The node page builds on it now; the Models page (TM-1296) reuses it.
+"""Deployments: every gateway route read as "a model served by an engine on a node", with its tunings, the
+memory it is planned at, and a node's memory bar. The node page builds on it now; the Models page reuses it.
 
   deployment_rows(inv, lc=None, fit_inputs=None, node=None) -> [Deployment]
   memory_bar(node, deployments, usable) -> MemoryBar

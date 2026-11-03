@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1119: a -next route made by the admit flow carries what the policy gate reads. The gate treats a deployment with
+"""A -next route made by the admit flow carries what the policy gate reads. The gate treats a deployment with
 no model_info.endpoint_tier as external (fail closed), and with tag filtering on an untagged deployment serves no class,
 so a -next route copied without them looked like an off-site model. Node routes are local by definition, and the tags are
 the live alias's."""

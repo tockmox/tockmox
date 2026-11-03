@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The eval runner v0 (HL-0917; DESIGN-2026-10-29-eval-runner): one evaluation request in, one evidence bundle out.
+"""The eval runner v0 (DESIGN-2026-10-29-eval-runner): one evaluation request in, one evidence bundle out.
 
     python -m app.runner run REQUEST.yaml --set evals/sets/<class>/<version> --gateway http://tockmox-litellm-eval:4000 \
         --key-env EVAL_KEY --node <node> --engine mlx-lm --engine-version 0.32.2 --out <site repo root>
@@ -7,20 +7,20 @@
 What it does, in order, and what stops it:
 
   1. reads the eval-request/1 and the eval-set/1; refuses a set whose classification is above `internal` (the safety
-     rails, TM-1249: until a data class is enforced end to end, nothing above internal is sent to any route) and a
+     rails: until a data class is enforced end to end, nothing above internal is sent to any route) and a
      request that names a hosted candidate (hosted candidates wait for the rails too);
   2. runs the KNOWN-BAD CONTROL: the set's graders against a responder that is always wrong. If the control passes,
      the run stops: graders that cannot fail prove nothing;
   3. smoke, perf, prefill, tool-call reliability and quality legs against the eval gateway (candidate as
      <alias>-next, incumbent as <alias>), checking health before each leg (aborting if the node is not fit to
-     measure). Prefill (TM-1268) times the first token at several context lengths; tool-call reliability (TM-1267)
+     measure). Prefill times the first token at several context lengths; tool-call reliability
      runs only for a set whose cases offer tools or class agent, and a parse-failure rate above the set's
      `tool_parse_bar` fails the verdict whatever the quality. When the set or the request carries a
      `speed_criterion` the incumbent's perf is measured too, and a quality pass that breaks the criterion reads
-     "tradeoff" (TM-1269);
+     "tradeoff";
   4. writes one capability-result/1 twin per leg (results.write_new: immutable, dated) and one comparative-verdict/1
      whose statistics come from verdict_stats.decide (paired) or decide_absolute (no incumbent), citing every twin
-     by path and sha256, with the TM-1248 fields (n, interval, label, sampling, engine, node, control) and a
+     by path and sha256, with the fields (n, interval, label, sampling, engine, node, control) and a
      one-line `summary`.
 
 It writes files under --out and nothing else; opening the evidence PR is `python -m app.pr_opener evidence`.
@@ -44,12 +44,12 @@ from .evalset import EvalSet, run_class
 
 MAX_CONTEXT_STEP = 1_000_000
 
-# TM-1249: an eval set's class as the tag the eval gateway filters on (the same table as app/nodes.py EVAL_CLASS_TAG)
+# an eval set's class as the tag the eval gateway filters on (the same table as app/nodes.py EVAL_CLASS_TAG)
 CLASS_TAG = {"public": "open", "internal": "internal", "confidential": "restricted", "restricted": "restricted"}
 METHOD_PATH = "evals/methodology/runner-v1.md"
 METHOD_TEXT = """# Eval runner v1: methodology
 
-Written by the Tockmox eval runner (HL-0917). Every result twin and verdict that cites this file was produced so:
+Written by the Tockmox eval runner. Every result twin and verdict that cites this file was produced so:
 
 - **Where.** Every request goes to the eval gateway: the candidate as `<alias>-next`, the incumbent as `<alias>`.
   Nothing reaches the production gateway.
@@ -129,7 +129,7 @@ def guard(req: dict, es: EvalSet):
 
 
 def rails(es: EvalSet, tiers: dict, routes) -> str:
-    """TM-1249, the runner's half of the data-class rail (the eval gateway's tag filter is the other): the set and every
+    """The runner's half of the data-class rail (the eval gateway's tag filter is the other): the set and every
     row carry a class (evalset.load refuses one without), and data above public goes to no route the gateway does not
     report as local. A route the gateway does not describe counts as not local. Returns the tag every request carries.
     There is no judge on this path (grades are deterministic, evalset refuses another grader), so no judge can be non-local."""
@@ -141,12 +141,12 @@ def rails(es: EvalSet, tiers: dict, routes) -> str:
             if tier != "local":
                 raise RunError(f"eval set {es.id} carries {klass} data ({n} of {len(es.cases)} cases above public) and route "
                                f"{route} is {'external' if tier == 'external' else 'not known to be local (the eval gateway does not report its endpoint_tier)'}: "
-                               "only public data goes to a route that is not local (TM-1249). Use a public set, or serve the route from a node.")
+                               "only public data goes to a route that is not local. Use a public set, or serve the route from a node.")
     return CLASS_TAG[klass]
 
 
 def run(req: dict, es: EvalSet, **kw) -> dict:
-    """Run the bundle (see _measure for the arguments and the result), inside TM-1249's rails: every request it sends
+    """Run the bundle (see _measure for the arguments and the result), inside the rails: every request it sends
     carries the eval set's class as a tag, and data above public reaches only routes the gateway reports as local."""
     guard(req, es)
     alias = req["alias"]
@@ -165,7 +165,7 @@ def _measure(req: dict, es: EvalSet, *, gateway: str, key: str, node: str, engin
 
     run_id      the id the scheduler gave this run (its run-status/1 file carries it); default <class>-<alias>-<date>-<seed>.
     only        a set of leg names ("smoke", "perf", "quality"); default all. Without "quality" the run writes the smoke
-                and perf twins and NO verdict: there is nothing to decide (the engine-upgrade re-evaluation, TM-1264).
+                and perf twins and NO verdict: there is nothing to decide (the engine-upgrade re-evaluation).
                 The control, prefill and tool-reliability legs ride with "quality".
     route       the gateway route that serves the build under test; default <alias>-next.
     tool_calls  0 switches the tool-reliability leg off; `prefill_contexts` () switches the prefill leg off.
@@ -187,7 +187,7 @@ def _measure(req: dict, es: EvalSet, *, gateway: str, key: str, node: str, engin
     only = set(only or ("smoke", "perf", "quality"))
     pg = _Progress(progress)
     run_id = run_id or f"{es.klass}-{alias}-{today.replace('-', '')}-{seed}"
-    # TM-1295: a run id that already has a verdict is refused before any leg runs, not after an hour of them
+    # a run id that already has a verdict is refused before any leg runs, not after an hour of them
     if "quality" in only and os.path.exists(os.path.join(out, "evals", "verdicts", f"{run_id}.json")):
         raise RunError(f"evals/verdicts/{run_id}.json already exists: a run id is used once (give this run another id, "
                        "or another seed)")

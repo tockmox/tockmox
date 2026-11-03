@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Asserts, when a release tag is pushed, that tockmox-site-template's `main`
-# pins that same tag (TM-0534).
+# pins that same tag.
 #
 #   tools/site-pin-at-tag.sh vX.Y.Z[-rcN]              clone the template, check it
 #   tools/site-pin-at-tag.sh vX.Y.Z --dir DIR          check a checkout you already have
@@ -20,7 +20,7 @@
 # template, run release-preflight, then tag. So at tag-push time the template's
 # `main` must already name the tag being pushed. A red here means the re-pin was
 # not merged (or was merged for a different tag) before the tag was cut.
-# That order is a deliberate, accepted WINDOW (TM-0738): between the merged
+# That order is a deliberate, accepted WINDOW: between the merged
 # re-pin and the tag push the public template names a ref that does not resolve.
 # RELEASING.md "The re-pin window" states its length; release-preflight.sh
 # check 5 reports whether the ref resolves.
@@ -103,7 +103,7 @@ selftest() {
   echo "selftest: site pin at tag"
   mk "$tmp/g" v1.2.3 v1.2.3 v1.2.3;           probe "template on the pushed tag" pass "$tmp/g" v1.2.3
   mk "$tmp/rc" v1.2.3-rc2 v1.2.3-rc2 v1.2.3-rc2; probe "an rc tag pinned as that rc" pass "$tmp/rc" v1.2.3-rc2
-  mk "$tmp/stale" v1.2.2 v1.2.2 v1.2.2;       probe "template left on the previous release (the TM-0534 case)" fail "$tmp/stale" v1.2.3
+  mk "$tmp/stale" v1.2.2 v1.2.2 v1.2.2;       probe "template left on the previous release" fail "$tmp/stale" v1.2.3
   mk "$tmp/rcold" v1.2.3-rc1 v1.2.3-rc1 v1.2.3-rc1; probe "template on rc1 when rc2 is pushed" fail "$tmp/rcold" v1.2.3-rc2
   mk "$tmp/final" v1.2.3-rc2 v1.2.3-rc2 v1.2.3-rc2; probe "final tag with the template still on its rc" fail "$tmp/final" v1.2.3
   mk "$tmp/half" v1.2.3 v1.2.2 v1.2.3;        probe "one layer left behind" fail "$tmp/half" v1.2.3

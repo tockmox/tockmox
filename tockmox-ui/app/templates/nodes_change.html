@@ -2,7 +2,7 @@
 {% block title %}Your change{% endblock %}
 {% block main %}
 <h1>Your change</h1>
-<p class="lede">Nothing has changed yet. This is the new <code>inferenceNodes</code> block for <code>{{ values_file }}</code> in your site repository. Commit it and Argo CD applies it: this page then reads the new nodes' health. The gateway gets the routes once your chart derives them from this block (TM-0920); until then, add the entries under "What the gateway will get" to its <code>model_list</code> by hand.</p>
+<p class="lede">Nothing has changed yet. This is the new <code>inferenceNodes</code> block for <code>{{ values_file }}</code> in your site repository. Commit it and Argo CD applies it: this page then reads the new nodes' health. The gateway gets the routes once your chart derives them from this block; until then, add the entries under "What the gateway will get" to its <code>model_list</code> by hand.</p>
 <section class="panel" aria-labelledby="sum-h">
   <h2 id="sum-h">What it does</h2>
   <ul>

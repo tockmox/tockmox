@@ -1,5 +1,5 @@
 {
- "description": "ArgoCD application sync/health and controller reconcile. REQUIRES apps.argocdMonitoring.enabled AND metrics enabled on your own ArgoCD install (prerequisites.md section 2) ... ArgoCD is a prerequisite Tockmox does not install, and the argo-cd chart ships its metrics services disabled. This board and its ServiceMonitors are gated on the same key (on with observability since 0.7.1, TM-0739), so an ArgoCD installed without metrics shows No data here until they are turned on.",
+ "description": "ArgoCD application sync/health and controller reconcile. REQUIRES apps.argocdMonitoring.enabled AND metrics enabled on your own ArgoCD install (prerequisites.md section 2) ... ArgoCD is a prerequisite Tockmox does not install, and the argo-cd chart ships its metrics services disabled. This board and its ServiceMonitors are gated on the same key (on with observability since 0.7.1), so an ArgoCD installed without metrics shows No data here until they are turned on.",
  "editable": true,
  "graphTooltip": 1,
  "links": [

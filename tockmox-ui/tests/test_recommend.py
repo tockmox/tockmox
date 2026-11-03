@@ -190,7 +190,7 @@ def test_without_a_sizes_section_everything_is_an_estimate_and_the_page_says_so(
 
 
 def test_a_predicted_speed_is_a_whole_number_range_never_a_decimal():
-    """TM-1274: bandwidth over bytes read is good to about a tenth, so the page says a range."""
+    """Bandwidth over bytes read is good to about a tenth, so the page says a range."""
     assert rc.speed_range(125.0) == (110, 140)
     assert rc.speed_range(125.3) == (110, 150)               # whole numbers whatever the decimals of the arithmetic
     assert rc.speed_range(42.0) == (35, 50) and rc.speed_range(4.3) == (3, 5)

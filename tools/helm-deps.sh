@@ -24,7 +24,7 @@
 # RELEASING.md tells the maintainer to run THIS script during a version bump.
 # A release tool that only works on the CI runner is not a release tool. That
 # is why the repo list is read with a `while read` loop rather than `mapfile`,
-# which is bash 4.0+ and fails with "mapfile: command not found" (TM-0245).
+# which is bash 4.0+ and fails with "mapfile: command not found".
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -42,7 +42,7 @@ trap 'rm -f "$_retry_log"' EXIT
 
 # retry LABEL COMMAND... -- run COMMAND, retrying on failure with backoff.
 #
-# WHY THIS EXISTS (TM-0246). On the v0.6.0-rc1 bump PR, one subchart download
+# WHY THIS EXISTS. On the v0.6.0-rc1 bump PR, one subchart download
 # returned a 504 from a GitHub release asset. `helm dependency build` exited 1,
 # this script died under `set -e`, `charts/*/charts/` was never populated, and
 # every later CI step failed on missing dependencies. The cost was not the
@@ -77,7 +77,7 @@ retry() {
   done
 }
 
-# OFFLINE PATH (HL-0675, D5). A tree that already carries every upstream
+# OFFLINE PATH (D5). A tree that already carries every upstream
 # subchart needs no network: a sandbox with no egress (the QA lane's test pod),
 # or an airgapped site that carried the archives inside (docs/deployment/
 # airgap.md, step 3). There `helm repo add` can only fail, and check-all.sh

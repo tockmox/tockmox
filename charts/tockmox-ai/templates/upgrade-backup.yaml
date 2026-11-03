@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-THE PRE-UPGRADE BACKUP (TM-1054). Open WebUI and LiteLLM both migrate their
+THE PRE-UPGRADE BACKUP. Open WebUI and LiteLLM both migrate their
 database FORWARD when a new version starts (Open WebUI's alembic at startup,
 LiteLLM's migrations Job), and neither migrates back. A rollback after a bad
 version is therefore a restore, and a restore needs a backup taken BEFORE the new
@@ -25,7 +25,7 @@ says the same), so "the version changed" exists only in the cluster, and only
 before the sync replaces it.
 
 ORDERING AGAINST THE MIGRATION. The LiteLLM migrations Job is an Argo Sync hook
-(litellm.migrationJob.jobAnnotations, TM-1196). PreSync hooks run to completion
+(litellm.migrationJob.jobAnnotations). PreSync hooks run to completion
 before the sync phase starts, so the backup precedes the migration by Argo's own
 phase order and no sync wave is needed. tools/check-upgrade-safety.sh F7 asserts
 both annotations on the render. Open WebUI's alembic runs when its new pod

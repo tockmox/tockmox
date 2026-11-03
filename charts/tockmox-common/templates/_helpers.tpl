@@ -72,7 +72,7 @@ plain HTTP only ... which looks like a routing bug and is really a TLS one.
 */}}
 {{- /*
 `annotations` (a dict) is added to THIS Ingress only, before the site-wide
-`ingress.annotations`. It exists for the forward-auth route (TM-0425): a console
+`ingress.annotations`. It exists for the forward-auth route: a console
 behind Authentik carries the router.middlewares annotation that
 tockmox.forwardAuthAnnotations renders, and no other Ingress in the layer does.
 */ -}}
@@ -226,7 +226,7 @@ pod spec rather than a Secret, so changing them already rolls the pod.
 {{- end -}}
 
 {{/*
-FORWARD-AUTH FOR A CONSOLE THAT HAS NO SIGN-IN OF ITS OWN (TM-0425).
+FORWARD-AUTH FOR A CONSOLE THAT HAS NO SIGN-IN OF ITS OWN.
 
 Prometheus, Alertmanager, Longhorn and the Traefik dashboard ship no
 authentication. Each can now be routed at a Host-matched name with Authentik in
@@ -241,7 +241,7 @@ is how Traefik resolves a Middleware in another namespace from an Ingress
 annotation. An IngressRoute cannot use it: Traefik refuses `@kubernetescrd`
 references and cross-namespace Middlewares from the CRD provider unless its
 `allowCrossNamespace` is on, so the platform layer's Traefik dashboard route
-carries a Middleware of its own (TM-0217). The default matches a stock install (identity in
+carries a Middleware of its own. The default matches a stock install (identity in
 `tockmox-authentik`); `ingress.forwardAuth.middleware` overrides it for a site
 that moved the identity layer.
 

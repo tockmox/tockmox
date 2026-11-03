@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# What can the RENDERED tree reach? (TM-0671)
+# What can the RENDERED tree reach?
 #
 #   ./tools/check-cloud-egress.sh             the gate
 #   ./tools/check-cloud-egress.sh --selftest  prove it can go red
@@ -54,7 +54,7 @@ expect_red() {   # <label> <dir> <grep-for>
   else echo "selftest FAIL  $1: red, but not for the expected reason"; echo "$out" | grep FAIL | head -3; fail=1; fi
 }
 fresh() { rm -rf "$tmp/m"; cp -R "$r" "$tmp/m"; }
-# Portable in-place edit (TM-0996). BSD sed on macOS reads a bare -i's next
+# Portable in-place edit. BSD sed on macOS reads a bare -i's next
 # argument as a backup suffix, so `sed -i 's/x/y/' f` dies there with "invalid
 # command code". Write and move instead, the way install/tockmox-install.sh does.
 sedi() { local e="$1" f rc=0; shift; for f in "$@"; do if sed "$e" "$f" > "$f.sedi"; then mv "$f.sedi" "$f"; else rm -f "$f.sedi"; rc=1; fi; done; return $rc; }

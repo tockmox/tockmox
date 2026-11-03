@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The model gateway is the shipped default, and the console goes through it
-# (TM-0460; REQ-0004 AC-4.1 under the D1 reading ruled 2026-10-08: the shipped
+# (REQ-0004 AC-4.1 under the D1 reading ruled 2026-10-08: the shipped
 # default routes the console through the gateway, and a site may override).
 # Asserted ON THE RENDERED ARTIFACT, because every one of these renders clean
 # when it is wrong: a console pointed at nothing, a Job with a Role wider than
@@ -24,7 +24,7 @@
 #     `update` on the one Secret name plus `create` on secrets plus `delete`
 #     on the console's pod names and nothing else, the RoleBinding binds its
 #     ServiceAccount, and the policy layer renders the egress rule that lets
-#     it reach the API. And (TM-0977) an existing Secret is checked against
+#     it reach the API. And an existing Secret is checked against
 #     the gateway, GET /v1/models with its key, before the Job trusts it: a
 #     401 replaces the key in place and restarts the console's pods, so a
 #     gateway turned off and on again (its database pruned with it) does not
@@ -39,7 +39,7 @@
 # G6  tools/mint-secrets.sh with no credential flag mints the gateway's master
 #     key and database credential (step 1 of the design); --without-litellm
 #     does not.
-# G7  The console-key check (TM-0982) renders beside the Job: a CronJob on a
+# G7  The console-key check renders beside the Job: a CronJob on a
 #     schedule, Forbid, backoffLimit 0, a podFailurePolicy that fails the Job
 #     on exit 1 alone, a pod with no token (automountServiceAccountToken
 #     false on the pod and its own ServiceAccount), no Role at all, the
@@ -121,7 +121,7 @@ script = "\n".join(c.get("args", []))
 i_ready, i_check, i_gen, i_create = script.find('"$GATEWAY/health/readiness"'), script.find('"$GATEWAY/v1/models"'), script.find('POST "$GATEWAY/key/generate"'), script.find("create secret generic")
 if not (0 <= i_ready < i_check < i_gen < i_create): sys.exit(1)
 if 'get secret "$SECRET_NAME"' not in script: sys.exit(1)   # the idempotence check
-# TM-0977: the existing key is sent to the gateway; 401 replaces it in place
+# the existing key is sent to the gateway; 401 replaces it in place
 # and restarts the console's pods; a working key (200) is left alone.
 if "-H \"Authorization: Bearer $have\"" not in script: sys.exit(1)
 if "401)" not in script or "200)" not in script: sys.exit(1)
@@ -293,7 +293,7 @@ if [ "${1:-}" = "--selftest" ]; then
   fail=0
   must_refuse() { local n="$1"; shift; if "$@"; then echo "selftest FAIL: $n stayed green"; fail=1; else echo "selftest ok: $n goes red"; fi; }
   M="$T/mut"; mkdir -p "$M"; cp -R charts ci profiles tools "$M/"
-  # Portable in-place edit (TM-0996). BSD sed on macOS reads a bare -i's next
+  # Portable in-place edit. BSD sed on macOS reads a bare -i's next
   # argument as a backup suffix, so `sed -i 's/x/y/' f` dies there with "invalid
   # command code". Write and move instead, the way install/tockmox-install.sh does.
   sedi() { local e="$1" f rc=0; shift; for f in "$@"; do if sed "$e" "$f" > "$f.sedi"; then mv "$f.sedi" "$f"; else rm -f "$f.sedi"; rc=1; fi; done; return $rc; }
@@ -327,7 +327,7 @@ if [ "${1:-}" = "--selftest" ]; then
   sedi 's/  restartPolicy: OnFailure/  restartPolicy: Never/' "$M/charts/tockmox-ai/templates/_gateway-key.tpl"
   r m7 ai; must_refuse "G3 restartPolicy Never" g3 "$T/m7" "$T/pol.m"
   cp charts/tockmox-ai/templates/_gateway-key.tpl "$M/charts/tockmox-ai/templates/_gateway-key.tpl"
-  # G3 (TM-0977): the 0.8.0-rc shape restored, an existing Secret trusted unchecked.
+  # G3: the 0.8.0-rc shape restored, an existing Secret trusted unchecked.
   sedi 's|"$GATEWAY/v1/models"|"$GATEWAY/nothing"|' "$M/charts/tockmox-ai/templates/_gateway-key.tpl"
   r m7b ai; must_refuse "G3 an existing Secret is no longer checked against the gateway" g3 "$T/m7b" "$T/pol.m"
   cp charts/tockmox-ai/templates/_gateway-key.tpl "$M/charts/tockmox-ai/templates/_gateway-key.tpl"
@@ -355,7 +355,7 @@ PY
   r m9 ai --set capabilities.aiPlane.enabled=false; must_refuse "G5 the Job ignores a declined aiPlane" none "$T/m9" Job t-gateway-key-
   r m10 ai --set modelGateway.consoleKey.enabled=false; must_refuse "G5 the Job ignores consoleKey.enabled false" none "$T/m10" Job t-gateway-key-
   cp charts/tockmox-ai/templates/gateway-key.yaml "$M/charts/tockmox-ai/templates/gateway-key.yaml"
-  # G7 (TM-0982): the check gains a Role; the master key referenced; the
+  # G7: the check gains a Role; the master key referenced; the
   # schedule dropped; the rule removed; the reason selector dropped; the token
   # mounted; exit 1 no longer failing the Job by policy; the policy rule
   # widened to the API port; check.enabled false ignored.

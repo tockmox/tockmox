@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The model watcher's PR opener (REQ-0048 third ruling, TM-0930). Turns what the watcher found, and what the eval
+"""The model watcher's PR opener (REQ-0048 third ruling). Turns what the watcher found, and what the eval
 runner has recorded, into pull requests on the site repo. Each PR is one of the two approvals, and still waits for
 a person to merge it:
 
@@ -9,9 +9,9 @@ a person to merge it:
             kind that is not an approval: it carries the proof the promotion PR will cite, and it never touches the
             values file (see "Evidence PRs" below)
   reject    a -next route a person (or the Compare page's Reject button) gave up on -> the route leaves the eval gateway
-            and its catalog entry becomes `rejected` with the reason (TM-1262). Never planned by a run: it is asked for
+            and its catalog entry becomes `rejected` with the reason. Never planned by a run: it is asked for
   revert    a live alias that must go back to what it served before its last promotion -> the alias is re-pointed and the
-            demoted build becomes `rejected` (TM-1262). Asked for by a person, or by the health watch
+            demoted build becomes `rejected`. Asked for by a person, or by the health watch
 
     python -m app.pr_opener CONFIG.yaml REPORT.json            # dry run: print the plan, touch nothing
     python -m app.pr_opener CONFIG.yaml REPORT.json --apply    # open the PRs
@@ -117,7 +117,7 @@ BRANCH_SLUG_MAX = 40
 def branch_slug(s: str) -> str:
     """The branch-name part for a model id or alias. Short ones read as before; a long one is cut and given a
     hash of the WHOLE id, so two ids that agree in their first 40 characters never share a branch (a shared
-    branch reads as "a PR for it is already open", and the second candidate would never be offered; TM-0939)."""
+    branch reads as "a PR for it is already open", and the second candidate would never be offered)."""
     import hashlib
     full = re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-") or "model"
     if len(full) <= BRANCH_SLUG_MAX:
@@ -223,7 +223,7 @@ def plan(values: dict, report: dict | None, verdicts, open_branches=(), max_open
         hosted = cand.kind == "frontier"
         body = (f"{cand.detail}\n\n" + (f"Upstream: {cand.url}\n\n" if cand.url else "")
                 + "".join(f"- {n}\n" for n in notes)
-                + ("\nThe eval gateway serves hosted candidates from the catalog (stage candidate), tagged open alone (public eval data only, TM-1249).\n" if hosted else "")
+                + ("\nThe eval gateway serves hosted candidates from the catalog (stage candidate), tagged open alone (public eval data only).\n" if hosted else "")
                 + "\nMerging this is the first approval (REQ-0048): the candidate can be evaluated. No agent can call it.")
         verb = "Record a new build of" if cand.kind in ("revision", "digest") else "Admit for evaluation:"
         add(PRSpec(f"tockmox/admit/{branch_slug(cand.model)}", f"{verb} {cand.model}", body,
@@ -231,7 +231,7 @@ def plan(values: dict, report: dict | None, verdicts, open_branches=(), max_open
     return out
 
 
-# ---------------------------------------------------------------- reject and revert PRs (TM-1262)
+# ---------------------------------------------------------------- reject and revert PRs
 
 def _one_at_a_time(open_branches):
     busy = sorted(b for b in open_branches if not b.startswith(EVIDENCE_BRANCH))
@@ -473,7 +473,7 @@ def app_installation_token(api_url, repo, app_id, key_pem, transport=None, now=N
 # ---------------------------------------------------------------- the forge (the only I/O)
 
 def in_cluster_forge(kind, host) -> bool:
-    """The built-in site forge (TM-1336) answers only at its in-cluster Service address, over plain http, like the
+    """The built-in site forge answers only at its in-cluster Service address, over plain http, like the
     address Argo CD reads the site from: nothing outside the cluster resolves it, so there is no certificate to
     present. Plain http is accepted for exactly that shape (a Forgejo, a host under .svc.cluster.local) and nothing
     else; GitHub, and any address that leaves the cluster, still needs https."""

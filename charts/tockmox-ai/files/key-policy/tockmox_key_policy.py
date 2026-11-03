@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Tockmox key policy for the model gateway (TM-0991; DESIGN-2026-10-29-agent-kit-security K1 and K2).
+"""Tockmox key policy for the model gateway (DESIGN-2026-10-29-agent-kit-security K1 and K2).
 
 Registered as LiteLLM's `general_settings.custom_key_policy: hooks.tockmox_key_policy.check` and rendered into the
 `tockmox-litellm-hooks` ConfigMap by charts/tockmox-ai when modelGateway.keyPolicy.enabled is true. LiteLLM calls
@@ -7,7 +7,7 @@ it on every key generate, update and regenerate, with the key as it WILL be writ
 the operation with a 403 when it returns {"decision": False}.
 
 Why it exists. On LiteLLM a virtual key whose model list is empty, absent, `*` or `all-proxy-models` can call every
-model the gateway has (measured on 1.100.3, TM-0936; the same code path in 1.106.6), and
+model the gateway has (measured on 1.100.3; the same code path in 1.106.6), and
 `default_key_generate_params` fills the gap only when a key is MINTED, so a later update back to an empty list
 reopens it. The same open default applies to MCP tool servers: a key with no `mcp_servers` list reaches every one.
 Defaults are defense in depth; this is the fence, because it runs on every write.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# THE ADVERSARIAL NETWORKPOLICY HARNESS (TM-0273). Plants probe pods in TWO of
+# THE ADVERSARIAL NETWORKPOLICY HARNESS. Plants probe pods in TWO of
 # the six namespaces the shipped policy set guards (tockmox-ai and
 # tockmox-monitoring ... the two the card's findings name) on a LIVE cluster,
 # and asserts, in both directions, what the policies actually let through ...
@@ -13,7 +13,7 @@
 # as an attacker and found egress unrestricted everywhere except Open WebUI,
 # plus three ingress rules wider than they read. The reviewer executed nothing
 # and said so. Everything here was first measured by hand on 2026-09-06 on a
-# throwaway k3s (Tockmox/EVIDENCE-2026-09-06-TM0273-egress-measure.log); this
+# throwaway k3s; this
 # script is that measurement made repeatable, so each fix on the card lands
 # against an assertion instead of a diff.
 #
@@ -41,7 +41,7 @@
 # NEVER run this against a cluster you care about: it creates namespaces and
 # pods. The throwaway lane is the host (tests/executed-docs/provision/).
 #
-# THE FIXES ARE VALUES-DEPENDENT, so the assertions are too (TM-0273 0.7.0).
+# THE FIXES ARE VALUES-DEPENDENT, so the assertions are too (0.7.0).
 # A leak stays an assert_artifact_xfail until the caller says the fix's values
 # are applied to the cluster under test, and then it is a hard assert_artifact:
 #
@@ -67,7 +67,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 . tests/executed-docs/lib/assert.sh
-# TM-0797: every kubectl and helm call below names its cluster with --context or
+# every kubectl and helm call below names its cluster with --context or
 # --kube-context from this variable, and an empty value is refused rather than
 # falling back to the current context (docs/deployment/fresh-install.md, "Name
 # the cluster"). run.sh exports it; a standalone run must export it itself.
@@ -252,14 +252,14 @@ _emit ""
 # 2. EGRESS ... the card's central finding
 # ---------------------------------------------------------------------------
 _emit "--- 2. egress ----------------------------------------------------------"
-# TM-0273 fix 1: an ordinary AI-namespace workload must have no egress to the
+# fix 1: an ordinary AI-namespace workload must have no egress to the
 # internet. A hard assertion once TOCKMOX_EXPECT_AI_EGRESS_DENY=1.
 fix_assert "$EXPECT_AI_DENY" "egress: ${AI_NS} plain workload -> external ${EXT_HOST}:${EXT_PORT} (fix 1 target)" \
   "$(tcp_from "$AI_NS" probe-plain "$EXT_HOST" "$EXT_PORT")" "BLOCKED"
 # The one contained path today, and it must stay contained.
 assert_artifact "egress: ${AI_NS} open-webui -> external ${EXT_HOST}:${EXT_PORT} is contained" \
   "$(tcp_from "$AI_NS" probe-owui "$EXT_HOST" "$EXT_PORT")" "BLOCKED"
-# KNOWN DEFECT (TM-0273 census): monitoring has unrestricted egress.
+# KNOWN DEFECT (census): monitoring has unrestricted egress.
 assert_artifact_xfail "egress: ${MON_NS} workload -> external ${EXT_HOST}:${EXT_PORT}" \
   "$(tcp_from "$MON_NS" probe-mon "$EXT_HOST" "$EXT_PORT")" "BLOCKED"
 # A CNPG pod may reach the Kubernetes API and the object store and NOTHING else.

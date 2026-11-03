@@ -1,12 +1,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# tools/check-all.sh on Linux, on every pull request (TM-1006).
+# tools/check-all.sh on Linux, on every pull request.
 #
 # ci.yaml does not run check-all.sh. About two dozen gates run only through it
 # (check-immutable-fields, check-upgrade-safety, check-pod-security,
 # check-identity-seams, check-policy-gate and the rest: the run_gate lines in
 # check-all.sh that have no step in ci.yaml), and until this workflow their only
-# CI was portability-macos, which is weekly and manual (TM-1006, Jeff
+# CI was portability-macos, which is weekly and manual (Jeff
 # 2026-10-11). A chart-only pull request ran none of them. This is the per-PR
 # home for every one, and the reason a release checkpoint no longer runs
 # check-all.sh by hand: this run on the tagged commit is that check.
@@ -24,18 +24,18 @@
 # Gates needing a tool installed nowhere here (promtool, gitleaks, the MkDocs
 # venv) report SKIPPED, as on a laptop; ci.yaml runs those.
 #
-# SPLIT AND SCOPED (TM-1288, TM-1289). The gates run on four shards at once, balanced by measured
+# SPLIT AND SCOPED. The gates run on four shards at once, balanced by measured
 # seconds, and a pull request runs only the gates whose declared inputs it changed (plus every gate
 # that declares none; tools/gate-inputs.yaml). A push to main or release-*, the nightly schedule
 # and a manual run run every gate. The job named check-all-linux, the one required check, waits for
 # the shards and passes only when all of them passed and every gate was reported exactly once.
 # The vendored subcharts are cached on the Chart.lock files and pip's downloads on the gates'
-# lockfile (TM-1286); a miss is a cold run, never a different one.
+# lockfile; a miss is a cold run, never a different one.
 name: check-all
 on:
   pull_request:
   push:
-    # release-* for the same reason as ci.yaml (TM-0775): a point release is
+    # release-* for the same reason as ci.yaml: a point release is
     # tagged on a release-branch commit, and a pull_request run tests a merge
     # commit, not that one.
     branches: [main, 'release-*']
@@ -48,7 +48,7 @@ permissions:
   contents: read
 
 env:
-  # shellcheck for the advisory job below (TM-0847). Pinned here, not in ci.yaml,
+  # shellcheck for the advisory job below. Pinned here, not in ci.yaml,
   # because this job is the only user. The project publishes no checksum file, so
   # SHELLCHECK_SHA256 is the SHA-256 of the release asset as downloaded when the
   # pin was set; a bump that does not update it fails the download step, which
@@ -163,7 +163,7 @@ jobs:
           exit "$rc"
 
   shellcheck-advisory:
-    # ADVISORY (TM-0847): reports what a change ADDS against
+    # ADVISORY: reports what a change ADDS against
     # tools/shellcheck-baseline.txt, as warning annotations on the pull request.
     # continue-on-error keeps it from blocking a merge; it is not a check-all.sh
     # gate for the same reason. See tools/check-shellcheck.sh.

@@ -90,7 +90,7 @@ Nothing on it reads healthy.
 
 ## The pages
 
-Platform has a rail (TM-1308): **Overview** (the verdict, one line per team,
+Platform has a rail: **Overview** (the verdict, one line per team,
 what waits on you, the next 24 hours), **Cases**, **Organization** (every role,
 one team at a time; roles with no live check or scheduled job yet fold under
 **Not started**), **Schedule**, **Specialists**, then **Capabilities** (with a

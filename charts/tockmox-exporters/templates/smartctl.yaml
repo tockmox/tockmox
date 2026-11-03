@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-THE SMART EXPORTER, OWNED HERE RATHER THAN VENDORED (TM-0799).
+THE SMART EXPORTER, OWNED HERE RATHER THAN VENDORED.
 
 It reads every disk on the node: a privileged container with the host's /dev mounted. The
 Pod Security Standards refuse that at every level below privileged, so it cannot share a

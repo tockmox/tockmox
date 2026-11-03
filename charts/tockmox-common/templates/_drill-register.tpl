@@ -1,6 +1,6 @@
 {{/* SPDX-License-Identifier: Apache-2.0 */}}
 {{/*
-THE RESTORE-DRILL REGISTER WRITER, ONE COPY (TM-0459).
+THE RESTORE-DRILL REGISTER WRITER, ONE COPY.
 
 Every restore drill (the model gateway's, Authentik's) ends by recording its
 verdict. Until 0.9.0 each drill carried its own copy of the recording code and
@@ -80,7 +80,7 @@ returns 1 with REG_ERR set to the reason, on one line.
 */}}
 {{- define "tockmox.drillRegister.script" -}}
 # ---- the register writer (tockmox-common: tockmox.drillRegister.script) -------------
-# The failing step's own words on one line, for the register row (HL-0863): a pod that dies in
+# The failing step's own words on one line, for the register row: a pod that dies in
 # seconds is gone before Alloy tails it, so the row is the only record of why. No newline, no
 # "=" (later key=value fields are evidence), no double quote and no backslash, at most 240
 # characters.

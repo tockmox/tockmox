@@ -21,7 +21,7 @@ NOW = time.time()
 
 
 def org_text(c):
-    """TM-1308: the roles moved from the Overview to Organization, one team at a time; read every team."""
+    """The roles moved from the Overview to Organization, one team at a time; read every team."""
     return "".join(c.get(f"/platform/organization?team={t.id}").text for t in pm.load_catalog().teams)
 
 
@@ -143,7 +143,7 @@ def test_nothing_answers_reads_unknown_never_healthy(world):
     assert "Not connected" in t and "not the same as nothing waiting" in t
 
 
-# The same scenario with the page's clock pinned, including just after the top of an hour (TM-1134). The page
+# The same scenario with the page's clock pinned, including just after the top of an hour. The page
 # reads its clock through app.platform's `time`, so pinning is one monkeypatch on that module; nothing else in
 # the process sees it. The fixture below is staged from the SAME instant the page reads, so the scenario cannot
 # straddle an hour boundary between the test's clock and the page's, which a module-level NOW read at import
@@ -163,14 +163,14 @@ def test_healthy_world_is_ok_and_says_what_is_not_started(world, monkeypatch, pi
     hour = 3600
     prev = Cron("0 * * * *").prev_before(now)
     # Never stage the success after the clock the page reads: at hh:00:08, prev + 30 is 22 s in the future
-    # (TM-1134). The clamp keeps the staged job's times at or before `now` at every second of the hour.
+    #. The clamp keeps the staged job's times at or before `now` at every second of the hour.
     ok = max(prev, min(prev + 30, now - 1))
     add_cronjob(world, "tockmox-selfcheck", "tockmox-heartbeat", "0 * * * *", last_run=prev, last_ok=ok, nxt=prev + hour)
     c, app, s = client_for(world, doc_with_platform(), cronworkflows=[])
     login_as(c, s, ["tockmox-admins"])
     t = c.get("/platform").text
     assert "Every running practice reports healthy" in t, t[:3000]
-    assert "not started" in t                         # the team lines count the roles not started (TM-1308)
+    assert "not started" in t                         # the team lines count the roles not started
     o = org_text(c)
     assert "not started yet" in o                     # roles with no live check: said, not hidden
     assert "Not started" in o
@@ -303,7 +303,7 @@ def test_ledger_waiting_and_failing(world):
                            ledger=led, cronworkflows=[])
     login_as(c, s, ["tockmox-admins"])
     o = c.get("/platform").text
-    org = org_text(c)                                 # the agent column moved to Organization (TM-1308)
+    org = org_text(c)                                 # the agent column moved to Organization
     assert "Waiting on you" in org and "Failing" in org
     assert "https://ui.int.example.com/jobs/j-1" in o
     assert "SECRET MODEL PROSE" not in org

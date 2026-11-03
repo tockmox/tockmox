@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1261, TM-1264: `python -m app.runner run --status-dir --run-id` keeps the run-status/1 file true leg by leg, the
+"""`python -m app.runner run --status-dir --run-id` keeps the run-status/1 file true leg by leg, the
 engine-upgrade run writes twins and no verdict, and a regression is a sentence in the reason."""
 import json
 

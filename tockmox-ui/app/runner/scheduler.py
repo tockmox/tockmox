@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The eval scheduler (TM-1261, TM-1264): decides what the runner should evaluate next and starts it, one Job per node.
+"""The eval scheduler: decides what the runner should evaluate next and starts it, one Job per node.
 
     python -m app.runner schedule --config /etc/tockmox-eval/config.yaml
 
@@ -10,8 +10,8 @@ watcher (modelLifecycle and inferenceNodes), and does four things in a pass:
      admitted candidate: merging the admit PR was the consent to evaluate it. It is work unless a run-status/1 for the same
      (alias, candidate model and revision, eval set sha256, engine id and version, node, route digest) is already `done` or
      `failed`. A failed run is not retried by itself: change the build, the set, the engine or the route's provider and
-     params (TM-1295: turning thinking off on a -next route re-runs it), or list its run id in runner.rerun.
-     TM-1264: a node whose engine (id or version) differs from the one in the last `done` run of the build an alias serves gets
+     params (turning thinking off on a -next route re-runs it), or list its run id in runner.rerun.
+     A node whose engine (id or version) differs from the one in the last `done` run of the build an alias serves gets
      a re-evaluation of the incumbent, trigger `engine-upgrade`, smoke and perf legs only. It decides nothing: a
      regression is written into the status `reason`, and no verdict, label or promotion follows from it.
   2. QUIET. A run starts only when production has been quiet on the node: the requests that reached the node's live
@@ -88,7 +88,7 @@ class Settings:
     prefill_contexts: list = field(default_factory=lambda: [4096, 16384, 32768, 65536])
     nodes: dict = field(default_factory=dict)
     aliases: list = field(default_factory=list)      # runner.aliases: only these live aliases' candidates; empty = all
-    rerun: list = field(default_factory=list)        # runner.rerun: finished run ids to measure again (TM-1295)
+    rerun: list = field(default_factory=list)        # runner.rerun: finished run ids to measure again
     sets_dir: str = "/etc/tockmox-eval/sets"
     job_template: str = "/etc/tockmox-eval/job-template.yaml"
     namespace: str = ""
@@ -184,7 +184,7 @@ class Work:
     es: object = None
     setdir: str = ""
     set_problem: str = ""
-    route_digest: str = ""           # TM-1295: the route's provider and params; a change schedules a new run
+    route_digest: str = ""           # the route's provider and params; a change schedules a new run
 
     @property
     def legs(self):
@@ -207,7 +207,7 @@ def status_key(s: dict) -> tuple:
 
 
 def route_digest(route) -> str:
-    """TM-1295: what the gateway sends the engine besides the model (the route's provider and params, e.g. a thinking
+    """What the gateway sends the engine besides the model (the route's provider and params, e.g. a thinking
     switch or an output cap). Part of the run key, so fixing a route re-runs its evaluation instead of the scheduler
     skipping it as done. A route with neither has the empty digest, which every status written before this had."""
     params, provider = dict(getattr(route, "params", None) or {}), str(getattr(route, "provider", "") or "")
@@ -549,7 +549,7 @@ def schedule(cfg: dict, kube, *, prom_transport=None, health_transport=None, dry
         existing = [d for d in statuses if status_key(d) == w.key()]
         finished = [d for d in existing if d["state"] in ("done", "failed")]
         live = next((d for d in existing if d["state"] in ("queued", "running", "waiting")), None)
-        # TM-1295: runner.rerun names finished runs to measure again; a newer finished run of the same work settles it
+        # runner.rerun names finished runs to measure again; a newer finished run of the same work settles it
         if finished and not all(d["run_id"] in s.rerun for d in finished):
             continue
         if finished and live is None:
