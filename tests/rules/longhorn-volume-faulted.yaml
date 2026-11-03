@@ -1,4 +1,4 @@
-# TockmoxLonghornVolumeFaulted ... TM-0836 (and the 2026-08-18 fault it was built for).
+# TockmoxLonghornVolumeFaulted ... and the 2026-08-18 fault it was built for.
 #
 # DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
 #

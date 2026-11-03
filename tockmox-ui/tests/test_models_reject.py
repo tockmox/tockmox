@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1262: the Reject button on the Compare page. Offered for a fail, worse or tradeoff comparison while `<alias>-next` still routes
+"""The Reject button on the Compare page. Offered for a fail, worse or tradeoff comparison while `<alias>-next` still routes
 the candidate; the reason is required; it renders models.reject's change and writes nothing."""
 import html
 
@@ -25,7 +25,7 @@ def world(nxt=True, live_new=False):
 def comparison(tmp_path, label="worse", verdict="fail", nxt=True, live_new=False, groups=None, run="r1"):
     lc, inv = world(nxt, live_new)
     extras = {k: v for k, v in {**FULL, "label": label}.items() if k != "label" or label}          # label None: an older runner's pass / fail
-    if label == "tradeoff":         # TM-1269: a tradeoff is an inconclusive verdict resting on a speed criterion
+    if label == "tradeoff":         # a tradeoff is an inconclusive verdict resting on a speed criterion
         extras["speed_criterion"] = {"decode_tok_s_min_ratio": 0.9}
     return client(tmp_path, rec(run=run, verdict=verdict, extras=extras), lifecycle=lc, inventory=inv, groups=groups)
 
@@ -43,7 +43,7 @@ def tradeoff_label_exists():
         return False
 
 
-needs_tradeoff = pytest.mark.skipif(not tradeoff_label_exists(), reason="verdict label 'tradeoff' (TM-1269) lands with the runner/stats agent; this base's parse_verdict does not know it yet")
+needs_tradeoff = pytest.mark.skipif(not tradeoff_label_exists(), reason="verdict label 'tradeoff' lands with the runner/stats agent; this base's parse_verdict does not know it yet")
 
 
 @pytest.mark.parametrize("label,verdict", [("worse", "fail"), (None, "fail"),

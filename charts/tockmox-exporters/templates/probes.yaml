@@ -47,7 +47,7 @@ direction for a check that would otherwise page.
 */ -}}
 {{- $servedBy := dict "auth" "authentik" "chat" "openWebui" "grafana" "kubePrometheusStack" "workflows" "argoWorkflows" "llm" "litellm" }}
 {{- /*
-THE HOSTNAME IS THE ONE THE INGRESS USES (TM-0820). Each console's Ingress takes
+THE HOSTNAME IS THE ONE THE INGRESS USES. Each console's Ingress takes
 `ingress.apps.<app>.host` from its own layer, falling back to <svc>.<domain>.
 This layer reads the same key from the shared values file, so a site that moves
 Open WebUI to another host does not get a permanent TockmoxConsoleUnreachable
@@ -56,7 +56,7 @@ for a name nothing serves. Unset or blank derives, as before.
 {{- $ingressKey := dict "auth" "authentik" "chat" "openWebui" "grafana" "grafana" "workflows" "argoWorkflows" "llm" "litellm" }}
 {{- $ingressApps := dig "ingress" "apps" dict (.Values | toYaml | fromYaml) }}
 {{- /*
-THE PATH, FOR THE ONE CONSOLE WHOSE ROOT IS NOT A HEALTH SIGNAL (TM-0905).
+THE PATH, FOR THE ONE CONSOLE WHOSE ROOT IS NOT A HEALTH SIGNAL.
 Authentik answers `/` with a redirect into whatever onboarding flow it is in,
 and on the lab that was `/setup`, answering 500 for as long as nobody had run
 initial setup in a browser: TockmoxConsoleUnreachable critical, around the
@@ -69,8 +69,7 @@ console's root already answers 200, 30x or 401.
 */ -}}
 {{- $probePath := dict "auth" "/-/health/ready/" }}
 {{- /*
-A COMPONENT THAT SHIPS OFF NEEDS ITS SWITCH SEEN ON (2026-10-06, wave 080 lab,
-TM-0910), and since 0.8.0 no console component ships off (TM-0460). Through
+A COMPONENT THAT SHIPS OFF NEEDS ITS SWITCH SEEN ON (2026-10-06, wave 080 lab), and since 0.8.0 no console component ships off. Through
 0.7.x the AI layer shipped `apps.litellm.enabled: false`, and that default
 lived in the AI layer's values, not here. So this layer, reading a site that
 left LiteLLM alone, saw no switch, fell back to the capability, and probed

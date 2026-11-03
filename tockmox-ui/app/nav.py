@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The console's sections, each section's rail, the health pill and "Help for this page" (TM-1304).
+"""The console's sections, each section's rail, the health pill and "Help for this page".
 
 specs/tockmox-ui/SPEC.md, sections 2 and 3 (Tockmox planning repo): four sections in the top bar
 (Home, Status, AI, Platform), a left rail for the pages inside a section, and utilities on the right.
@@ -16,7 +16,7 @@ class Item:
     href: str
     prefixes: tuple[str, ...] = ()   # paths that light this item up; the longest matching prefix wins
     count: int | None = None
-    state: str | None = None         # a warning the rail shows on the item (TM-1308: Capabilities disagreeing)
+    state: str | None = None         # a warning the rail shows on the item (Capabilities disagreeing)
 
     def matches(self, path: str) -> int:
         """Length of the longest prefix of `path` this item claims, 0 for none. Exact href counts too."""
@@ -105,9 +105,9 @@ def rail(section: str | None, is_admin: bool, platform_on: bool, admin_tabs=(), 
         conf = [Item("Capabilities", "/capabilities", state=capabilities_state)]
         conf += [Item(t.name, f"/tabs/{t.id}") for t in admin_tabs]
         conf.append(Item("Updates", "/platform/updates", ("/upgrade", "/version")))
-        if identity:                    # TM-1315: recovery links and user-group membership
+        if identity:                    # recovery links and user-group membership
             conf.append(Item("Identity", "/platform/identity"))
-        if activity:                    # TM-1311: what was done from the console
+        if activity:                    # what was done from the console
             conf.append(Item("Activity", "/platform/activity"))
         groups.append(Group("Configuration", tuple(conf)))
         return groups
@@ -122,7 +122,7 @@ def rail_current(groups, path: str):
 
 def health(verdict: str, problem_rows: list[dict]) -> dict:
     """The pill on every admin page: the worst state and the counts, in words (the accessible name too).
-    Counts are rows today; TM-1305 makes them parts (four signals about one backup count once)."""
+    Counts are rows today; they will become parts (four signals about one backup count once)."""
     crit = sum(1 for p in problem_rows if p.get("state") == "critical")
     warn = sum(1 for p in problem_rows if p.get("state") == "warning")
     unk = sum(1 for p in problem_rows if p.get("state") == "unknown")
@@ -134,7 +134,7 @@ def health(verdict: str, problem_rows: list[dict]) -> dict:
     if unk:
         parts.append(f"{unk} unknown")
     if not parts:
-        # No row to count: say what the verdict says, so the words never contradict the colour (review, TM-1304).
+        # No row to count: say what the verdict says, so the words never contradict the colour (review).
         parts = [{"ok": "All healthy", "warning": "Warning", "critical": "Problem"}.get(verdict, "Status unknown")]
     return {"state": verdict, "parts": parts, "label": ", ".join(parts) + ". Open Status."}
 

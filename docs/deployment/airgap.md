@@ -25,8 +25,10 @@ diverges.
 route level for both IPv4 and IPv6, and a greenfield install from a freshly
 generated site repository: all nine layers Synced and Healthy, 59 of 59 pods
 Running, zero image pull failures, with `github.com`, `quay.io`, `ghcr.io` and
-`registry-1.docker.io` unreachable throughout. That is one build on one date;
-see [what is not certified here](#what-is-not-certified-here).
+`registry-1.docker.io` unreachable throughout. That is one build on one date.
+Two paths on this page have **not** been run disconnected: updating to a new
+release (step 8) and the built-in forge. See
+[what is not certified here](#what-is-not-certified-here).
 
 Tockmox distributes **source, never binaries**. There is no single-artifact
 offline installer and we do not claim one. Why that is a deliberate trade, and

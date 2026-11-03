@@ -1,4 +1,4 @@
-# TockmoxCNPGClusterNotHealthy ... TM-0518.
+# TockmoxCNPGClusterNotHealthy.
 #
 # DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
 #
@@ -26,7 +26,7 @@ tests:
         alertname: TockmoxCNPGClusterNotHealthy
         exp_alerts: []
 
-  # 2. THE TM-0518 REGRESSION CASE. Phase is the operator-side failure string,
+  # 2. THE REGRESSION CASE. Phase is the operator-side failure string,
   #    and readyInstances is 1 ... the database is serving. Must fire anyway.
   - interval: 1m
     input_series:

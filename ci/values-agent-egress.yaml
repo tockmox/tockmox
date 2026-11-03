@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# THE AGENT-EGRESS FIXTURE (TM-1251). Applied ON TOP of ci/values.yaml to the
+# THE AGENT-EGRESS FIXTURE. Applied ON TOP of ci/values.yaml to the
 # policy layer by tests/agent-egress/render.sh and tools/check-policy-selects.sh:
 # one tool per tier in a namespace of their own. Documentation addresses (RFC
 # 5737) and example names. Not a site.

@@ -9,7 +9,7 @@
 #   ./tools/check-pasteable-blocks.sh --selftest   prove the rules actually trip
 #   ./tools/check-pasteable-blocks.sh FILE...      check specific files
 #
-# WHY THIS EXISTS (TM-0484). Three findings, all reproduced on the platform the
+# WHY THIS EXISTS. Three findings, all reproduced on the platform the
 # docs name as a supported workstation rather than reasoned about:
 #
 #   RULE 1 -- no `#` inside a ```bash fence, in either position.
@@ -57,7 +57,7 @@
 #
 #     WORKSTATION/NODE decides which machine a command runs on, and it used to
 #     live in a `#` line: the one element of a code block that every "copy"
-#     control strips and that reads as decoration. TM-0469 made those markers
+#     control strips and that reads as decoration. An earlier change made those markers
 #     present and consistent; it did not make them survive a copy. The marker is
 #     now **WORKSTATION** or **NODE** in the paragraph before the fence.
 #
@@ -78,7 +78,7 @@
 #                             no brackets. Reads as a hostname.
 #       modelGateway          not a placeholder at all, but the same failure:
 #                             a real key that silently accepts what belongs
-#                             somewhere else (TM-0498).
+#                             somewhere else.
 #
 #     The rule documentation-standard § 5 already states is "make it obviously
 #     not-a-value". This is that sentence made checkable. A token is suspicious
@@ -95,7 +95,7 @@
 #
 #   RULE 5 -- no `read -p` inside a ```bash fence.
 #
-#     Added 2026-09-13 (TM-0537). zsh has no `-p` PROMPT flag on `read`; there
+#     Added 2026-09-13. zsh has no `-p` PROMPT flag on `read`; there
 #     `-p` means "read from a coprocess". So `read -rs -p "token: " TOK` on the
 #     shell macOS ships prints `read: -p: no coprocess`, one line among several,
 #     and continues with TOK unset. Measured on the rc3 gate 2026-09-12: two
@@ -139,7 +139,7 @@
 #     not match.
 #
 #   RULE 7 -- once a page names its cluster, every block that runs kubectl
-#             pins it (TM-0844).
+#             pins it.
 #
 #     `kubectl --context=` with an EMPTY value does not error: it falls back to
 #     the current context. So `--context="$KUBE_CONTEXT"` alone fails OPEN the
@@ -345,7 +345,7 @@ check_file() {
 
 # RULE 7 is its own pass: it needs page-level state (has the page named its
 # cluster yet?) that the per-block pass above does not carry. Portable awk only:
-# no interval expressions and no escaped braces, which is the TM-0769 lesson
+# no interval expressions and no escaped braces, which is a lesson learned
 # (mawk 20200120 silently never matched one).
 check_rule7() {
   awk -v FNAME="$1" '

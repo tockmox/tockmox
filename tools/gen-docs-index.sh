@@ -7,7 +7,7 @@
 #   ./tools/gen-docs-index.sh --check      fail when a block differs from a fresh render (CI)
 #   ./tools/gen-docs-index.sh --selftest   prove the checks can go red
 #
-# WHY GENERATED (TM-0228). Every hand-maintained count in this repo has gone
+# WHY GENERATED. Every hand-maintained count in this repo has gone
 # stale at least once, and these surfaces track nine charts and some fifty
 # pages. The layer table in docs/architecture.md takes its wave from each
 # charts/*/Chart.yaml and asserts the installer's wave() function agrees. The

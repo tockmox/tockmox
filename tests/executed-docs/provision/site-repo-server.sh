@@ -51,7 +51,7 @@
 # again. Hence alpine + an explicit `apk add git-daemon`, and an emptyDir.
 
 set -euo pipefail
-# TM-0797: every kubectl call below names its cluster with --context from this
+# every kubectl call below names its cluster with --context from this
 # variable; an empty value is refused rather than falling back to the current context.
 : "${KUBE_CONTEXT:?KUBE_CONTEXT is empty: export the context of the cluster under test}"
 
@@ -145,7 +145,7 @@ YAML
 # it already serves ... which is how one served repository carries two
 # revisions, so an Application can be pointed at `v0.5.0` and then moved to
 # `v0.6.0-rc2` by changing one line, exactly as docs/deployment/upgrade.md says
-# an operator does. Added 2026-09-06 for TM-0281: without it the only way to
+# an operator does. Added 2026-09-06: without it the only way to
 # "upgrade" on the harness was to change repoURL as well, which is not the
 # documented path and tests something the operator never does.
 cmd_push() {

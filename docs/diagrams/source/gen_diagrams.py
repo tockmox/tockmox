@@ -537,8 +537,8 @@ def identity_flow():
             "a user in neither group is refused by Authentik. Prometheus, Alertmanager, Longhorn "
             "and the Traefik dashboard have no sign-in of their own and can be put behind "
             "Authentik's forward-auth, off by default. Each OIDC console keeps a local break-glass "
-            "login outside the group model. Forgejo is planned, not shipped, and ntfy is a "
-            "portal link with no single sign-on.")
+            "login outside the group model. Forgejo, the built-in forge, is opt-in and signs in "
+            "through Authentik when installed, and ntfy is a portal link with no single sign-on.")
     header(s, "Who gets in, and how",
            "One identity provider, two groups, and a break-glass door on every console.")
     s.boundary(140, 100, 870, 530, "YOUR CLUSTER")
@@ -575,7 +575,7 @@ def identity_flow():
     s.box(352, 470, 230, 96, "Forward-auth", ["Prometheus · Alertmanager", "Longhorn · Traefik dashboard",
           "off by default"], "amber", dashed=True, tsize=13.5, rsize=11)
     s.arrow([(400, 368), (400, 466)], "amber", dashed=True)
-    s.box(842, 430, 152, 60, "Forgejo", ["planned, not shipped"], "neutral", dashed=True, tsize=13, rsize=11)
+    s.box(842, 430, 152, 60, "Forgejo", ["built-in forge, opt-in"], "neutral", dashed=True, tsize=13, rsize=11)
     s.box(842, 506, 152, 60, "ntfy", ["a portal link, no SSO"], "neutral", dashed=True, tsize=13, rsize=11)
     s.legend(156, 470, [
         ("bound", "ink", "trust boundary"),

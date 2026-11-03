@@ -13,7 +13,7 @@
 # prints (ordinal, key, serial flag, name; tab-separated). The plan is one line per gate:
 # ordinal, key, decision (run | unselected | othershard), shard, reason.
 #
-# SELECTION (TM-1288). A pull request runs a gate when a changed path matches one of the gate's
+# SELECTION. A pull request runs a gate when a changed path matches one of the gate's
 # declared inputs in tools/gate-inputs.yaml. A gate with NO declaration always runs, and a change to
 # any `always_full` path (the runner, the planner, the declarations, the toolchain, the workflow)
 # runs every gate. With no list of changed paths every gate runs: a local check-all.sh, every push
@@ -21,7 +21,7 @@
 # declaration forgot. A selection is only ever narrowed by a declaration somebody wrote; it is
 # never guessed.
 #
-# SHARDS (TM-1289). The gates that will run are split across N shards by measured seconds
+# SHARDS. The gates that will run are split across N shards by measured seconds
 # (tools/gate-weights.tsv; a gate with no measurement weighs DEFAULT_WEIGHT): heaviest first, each
 # to the lightest shard so far, ties to the lowest shard number. Every gate lands on exactly one
 # shard, so the shards' results together are one unsharded run. Gates registered with serial_gate

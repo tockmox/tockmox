@@ -3,50 +3,50 @@
 #
 # Assert, ON THE RENDERED ARTIFACT, the site-facing seams added for 0.7.1 that
 # no other gate covers. Each one was a gap a site worked around in its own
-# values or manifests (TM-0820), and each renders cleanly when it is wrong.
+# values or manifests, and each renders cleanly when it is wrong.
 #
 #   ./tools/check-platform-seams.sh             run the assertions
 #   ./tools/check-platform-seams.sh --selftest  prove each can go red
 #
 # S1  global.namespaceLabels lands on EVERY Namespace the policy and platform
-#     layers create, and a label the chart owns is refused (TM-0816).
+#     layers create, and a label the chart owns is refused.
 # S2  garage.credentialsNamespaceLabels lands on that one namespace only,
-#     including pod-security.kubernetes.io/* (TM-0815).
+#     including pod-security.kubernetes.io/*.
 # S3  The consoles Probe follows ingress.apps.<app>.host, and still derives
-#     <svc>.<domain> when unset (TM-0820, last row).
+#     <svc>.<domain> when unset (last row).
 # S4  Every chart dashboard ConfigMap key is prefixed `tockmox-`.
 # S5  The CNPG operator PodMonitor renders by default.
 # S6  apps.etcdScrapeConfig renders a ScrapeConfig job kube-etcd with the listed
 #     targets, and refuses an empty list.
 # S7  platformNetpol.extraPrometheusNamespaces adds a peer to the devops and
-#     platform scrape rules (TM-0820, inventory-devops 4.10 item 4).
-# S8  The shipped Longhorn StorageClass reclaims with Retain (TM-0789).
+#     platform scrape rules (inventory-devops 4.10 item 4).
+# S8  The shipped Longhorn StorageClass reclaims with Retain.
 # S9  platformNetpol.extraMonitoringClientNamespaces renders allow-from-site-clients
 #     in the monitoring namespace (observability-cutover A1).
 # S10 kube-prometheus-stack.prometheus.service.sessionAffinity=ClientIP renders on
 #     the Prometheus Service (the one that selects the Prometheus pods) with its
 #     timeout, beside prometheusSpec.replicas 2; and the DEFAULT render keeps one
-#     replica and no affinity, so the knob stays opt-in (TM-0781).
+#     replica and no affinity, so the knob stays opt-in.
 #
 # S11 The default Prometheus image is v3.15.0 or newer, not the subchart's
-#     v3.14.0 (TM-0820 A5; default change).
+#     v3.14.0 (default change).
 # S12 The consoles Probe uses a module that accepts 401 (and 200/301/302), and
-#     http_2xx is NOT widened for everyone (TM-0820 A6; default change).
+#     http_2xx is NOT widened for everyone (default change).
 # S13 devops renders the argo-workflows CRDs inline and no crd-install hook Job
-#     that downloads them (crds.full false, TM-0820; default change).
+#     that downloads them (crds.full false; default change).
 # S14 The workflow controller ServiceMonitor renders honorLabels: true
-#     (TM-0820; default change).
+#     (default change).
 # S15 The workflow controller and server both set the infrastructure
 #     PriorityClass, and tockmox-policy renders a PriorityClass of that name
-#     (TM-0820; default change).
+#     (default change).
 #
 # S18 The node agents (node-exporter, Alloy's log DaemonSet, the SMART exporter) render in
 #     the node-agents namespace and no pod that reads the host is left in the monitoring
 #     namespace; the policy layer labels the first privileged and the second baseline, and
 #     the two crossings (Alloy to the Loki gateway, Prometheus to the SMART exporter) have
-#     allow rules (TM-0799).
+#     allow rules.
 #
-# S19 The Garage bootstrap Job provisions the restore-drill register (TM-0459): a bucket
+# S19 The Garage bootstrap Job provisions the restore-drill register: a bucket
 #     of its own (never the backup bucket), a key with read and write and NOT owner on it,
 #     a Secret of its own, and a copy of that Secret into the model gateway's and the
 #     identity namespaces, with the Role in each that lets the Job create it there. The
@@ -150,7 +150,7 @@ shared = set(mods.get("http_2xx", {}).get("http", {}).get("valid_status_codes") 
 sys.exit(0 if {200, 301, 302, 401} <= codes and 401 not in shared and m["http"].get("follow_redirects") is True else 1)
 PY
 }
-# S16 (TM-0905): Authentik's console is probed at its readiness endpoint, not at
+# S16: Authentik's console is probed at its readiness endpoint, not at
 # `/`, which redirects into whatever onboarding flow it is in (on the lab,
 # `/setup`, answering 500). Every other console target keeps no path.
 s16() { python3 - "$1" <<'PY'
@@ -169,8 +169,8 @@ PY
 # gateway's switch as every layer sees it. Through 0.7.x the AI layer shipped
 # `apps.litellm.enabled: false`, a default this layer could not see, so the
 # probe fell back to the aiPlane capability and paged TockmoxConsoleUnreachable
-# for llm.<domain> on every install that never deployed LiteLLM (TM-0910).
-# Since 0.8.0 the gateway follows the capability (TM-0460), so the smallest
+# for llm.<domain> on every install that never deployed LiteLLM.
+# Since 0.8.0 the gateway follows the capability, so the smallest
 # real site, which never mentions LiteLLM, IS probed; and a site that turns the
 # gateway off in a values file this layer reads is NOT. Both halves, because
 # either one alone holds on a probe that ignores the switch.
@@ -219,7 +219,7 @@ sys.exit(0 if ok else 1)
 PY
 }
 
-# S18 (TM-0799): the privileged node agents live in their own namespace. Arguments: the
+# S18: the privileged node agents live in their own namespace. Arguments: the
 # observability render, the exporters render (both with -n tockmox-monitoring, so an object
 # without a namespace lands there as it does under Argo CD), the policy render.
 s18() { python3 - "$1" "$2" "$3" <<'PY'
@@ -332,7 +332,7 @@ r argo.bad devops --api-versions monitoring.coreos.com/v1 --set argo-workflows.c
   --set argo-workflows.controller.metricsConfig.honorLabels=false \
   --set argo-workflows.controller.priorityClassName= --set argo-workflows.server.priorityClassName=
 r mc.good policy -f ci/values-all-on.yaml --set 'platformNetpol.extraMonitoringClientNamespaces={site-ai}'
-# S18 (TM-0799): rendered into the monitoring namespace, as Argo CD does, with every shipped app on.
+# S18: rendered into the monitoring namespace, as Argo CD does, with every shipped app on.
 rn() { local out="$1" chart="$2"; shift 2; helm template t "charts/tockmox-$chart" -n tockmox-monitoring -f ci/values.yaml -f ci/values-all-on.yaml "$@" > "$T/$out" 2>"$T/$out.err" || { cat "$T/$out.err" >&2; return 1; }; }
 rn na.obs observability
 rn na.exp exporters

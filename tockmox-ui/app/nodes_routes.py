@@ -10,8 +10,8 @@ which shows the site-values change for the admin to commit (AC-47.8).
   GET  /nodes/import          import from the gateway's route list (no network)
   POST /nodes/import          the same, from a pasted model_list
   GET  /nodes/<id>            one node: the models it serves per endpoint with their tunings, planned memory and a memory bar
-                              (TM-1299), the builds it holds against the ones the catalog pins and the check that reads them
-                              (TM-1296); `?model=&endpoint=&alias=` previews a placement and its fit
+                             , the builds it holds against the ones the catalog pins and the check that reads them
+                             ; `?model=&endpoint=&alias=` previews a placement and its fit
   POST /nodes/change          the generated change (also format=yaml as a download); a newly enrolled node's
                               ai-nodes/<id>/ai-node.yaml skeleton comes with it (format=ai-node&ai_node=<id>)
 """
@@ -225,7 +225,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_nodes,
                       engines=nm.ENGINES, form={"model": model, "endpoint": endpoint, "alias": alias, "kind": kind, "size": size})
 
     def _models_on(n, inv, node_health):
-        """Per endpoint, the deployments it serves, and the node's memory bar (TM-1299). The memory arithmetic is fit v2's,
+        """Per endpoint, the deployments it serves, and the node's memory bar. The memory arithmetic is fit v2's,
         with the inputs the Recommend page gives it, so this page and the fit pages agree."""
         rep = src_report.read().data if src_report is not None else None
         fi = dp.fit_inputs_for(s.lifecycle, rep)
@@ -243,7 +243,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_nodes,
                 "in_use_gib": mem["used_gib"] if mem and mem.get("used_gib") is not None else None}
 
     def _builds_on(n, inv):
-        """The build check for this node's pinned routes (TM-0934, moved here from /models by TM-1296): pinned against the build
+        """The build check for this node's pinned routes (moved here from /models): pinned against the build
         the node holds, per route, the findings, and when it was last read."""
         rows = [x for x in checks.rows(s.lifecycle.lifecycle, inv) if x.node == n.id]
         return {"rows": rows, "findings": mdl.drift_findings(rows), "probe_on": checks.probe_on, "checked_at": checks.at}

@@ -110,7 +110,7 @@ for name, bp in blueprints.items():
                   if e.get('model') == 'authentik_core.group' and e.get('id')}
     # An application rendered `state: absent` is being DELETED, so nobody can
     # reach it and it needs no binding (the forward-auth consoles that are off,
-    # TM-0425, render this way so turning one off removes it). Only absent
+    # render this way so turning one off removes it). Only absent
     # counts: any other state, or none, is checked.
     apps = [e for e in entries if e.get('model') == 'authentik_core.application'
             and e.get('state') != 'absent']

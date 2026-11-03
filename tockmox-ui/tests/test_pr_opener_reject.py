@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1262: the PR opener's `reject` and `revert` kinds. Same lane as admit and promote: one model-lifecycle PR open at a time, built by
+"""The PR opener's `reject` and `revert` kinds. Same lane as admit and promote: one model-lifecycle PR open at a time, built by
 the UI's own functions, and a refusal in the words models.reject / models.revert use."""
 import pytest
 import yaml

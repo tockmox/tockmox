@@ -21,7 +21,7 @@ esac
 # Render values come from ci/values.yaml ... one file, same as CI, so a value
 # added there is a value added here.
 cd "$(dirname "$0")/.."
-# The image extractor, shared with check-airgap.sh. See TM-0646 and the header
+# The image extractor, shared with check-airgap.sh. See the header
 # of that file. Prove it with `bash tools/lib/extract-images.sh --selftest`.
 . "$(dirname "$0")/lib/extract-images.sh"
 
@@ -33,7 +33,7 @@ cd "$(dirname "$0")/.."
 # failed to render during the version bump and images.txt lost 45 of 45 entries.
 #
 # images.txt is the air-gap mirror list. A truncated one that reaches a tag means
-# an air-gapped install pulls nothing and fails very far from here. TM-0520.
+# an air-gapped install pulls nothing and fails very far from here.
 OUT="$(mktemp "${TMPDIR:-/tmp}/tockmox-images.XXXXXX")"
 trap 'rm -f "$OUT"' EXIT
 {
@@ -62,7 +62,7 @@ trap 'rm -f "$OUT"' EXIT
       -f ci/values.yaml \
       --skip-tests \
       || { echo "RENDER FAILED for $c" >&2; exit 1; }
-    # THE IDENTITY LAYER ONCE MORE WITH THE BUNDLED SERVER KEPT (TM-0788). From
+    # THE IDENTITY LAYER ONCE MORE WITH THE BUNDLED SERVER KEPT. From
     # 0.9.0 a default render runs Authentik on CNPG, so the bundled PostgreSQL
     # server and the pg_dump client drop out of it; an install that keeps the
     # bundled server (docs/deployment/upgrade.md) still pulls both, and an
@@ -75,7 +75,7 @@ trap 'rm -f "$OUT"' EXIT
         || { echo "RENDER FAILED for $c with the bundled server kept" >&2; exit 1; }
     fi
   # ONE extractor, shared with check-airgap.sh (tools/lib/extract-images.sh,
-  # TM-0646). It used to be a copy of that pipeline, and the copies had drifted:
+  # ). It used to be a copy of that pipeline, and the copies had drifted:
   # this one used `\s`, which is a GNU extension that BSD `grep -E` ... the grep
   # on macOS ... does not honour. The gate that checks the mirror list and the
   # generator that writes it were not reading the same manifests, and on Linux

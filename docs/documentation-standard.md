@@ -168,7 +168,7 @@ helm search repo argo/argo-cd --version "$ARGOCD_CHART_VERSION"
 
 The second line reprints exactly what the first chose, so the reader confirms a
 value rather than transcribing one. `fresh-install.md` sections 6 and 7 are the
-worked examples. Ruled 2026-09-11 (TM-0484).
+worked examples. Ruled 2026-09-11.
 
 **Derive with a command you can reason about.** The first version of the block
 above used `sed -n 's/.*"version":"\([^"]*\)".*/\1/p'` over `helm ... -o json`
@@ -187,7 +187,7 @@ because it fails silently: the block looks like it prompted, the variable is
 empty, and the Secret it feeds is created and labelled and useless. A prompted
 secret is `printf 'x: '; read -rs VAR; echo`, followed by a printed byte count
 so an empty paste is visible at the prompt rather than three phases later.
-Ruled 2026-09-13 (TM-0537).
+Ruled 2026-09-13.
 
 ### 6. Dated claims carry their date and their scope
 

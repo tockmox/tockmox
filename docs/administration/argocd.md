@@ -181,7 +181,7 @@ them instead, so they carry Tockmox's labels and land in the monitoring
 namespace with everything else.
 
 The Tockmox side needs nothing from you: `apps.argocdMonitoring` follows
-`capabilities.observability` (TM-0739), so with observability on it is on. The
+`capabilities.observability`, so with observability on it is on. The
 only value you may need is where your ArgoCD lives:
 
 ```yaml

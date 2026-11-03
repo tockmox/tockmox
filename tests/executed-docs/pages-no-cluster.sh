@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The six pages whose procedures need no cluster, executed on every commit.
-# TM-0289, Jeff's ruling of 2026-10-28 (docs/QUESTION-TM-0289.md, item 3).
+# Jeff's ruling of 2026-10-28 (item 3).
 #
 #   bash tests/executed-docs/pages-no-cluster.sh              all six pages
 #   bash tests/executed-docs/pages-no-cluster.sh verify       one or more, by file name without .md

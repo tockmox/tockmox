@@ -14,7 +14,7 @@
 # It gets a namespace of its own instead of a place in tockmox-selfcheck so that
 # the loosening is as small as it can be: nothing else lives here, and the
 # heartbeat and blackbox exporter in tockmox-selfcheck stay eligible for
-# `restricted` when Pod Security enforcement lands (TM-0135).
+# `restricted` when Pod Security enforcement lands.
 #
 # A namespace label overrides a cluster-wide default in the API server's
 # AdmissionConfiguration, so this works on a k3s that enforces `restricted`
@@ -44,12 +44,12 @@ metadata:
     pod-security.kubernetes.io/warn-version: latest
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/audit-version: latest
-    {{- /* global.namespaceLabels (TM-0816): validated in namespaces.yaml. */}}
+    {{- /* global.namespaceLabels: validated in namespaces.yaml. */}}
     {{- range $k, $v := (.Values.global.namespaceLabels | default dict) }}
     {{ $k | quote }}: {{ $v | quote }}
     {{- end }}
 ---
-# TM-0759 (CIS 5.1.5): the namespace controller creates `default`; rendering it here lets it carry
+# (CIS 5.1.5): the namespace controller creates `default`; rendering it here lets it carry
 # automountServiceAccountToken: false. Prune=false,Delete=false: removing this object must never
 # delete the account, which Kubernetes recreates anyway; no Tockmox pod runs as it, and no
 # Role or ClusterRole binds it (tools/check-sa-tokens.sh asserts the first).

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The statistics a comparative verdict rests on (TM-1248; REQ-0045 AC-45.9; DESIGN-2026-10-29-eval-runner §4.4).
+"""The statistics a comparative verdict rests on (REQ-0045 AC-45.9; DESIGN-2026-10-29-eval-runner §4.4).
 
 Pure: no network, no clock, no randomness the caller did not seed. The eval runner calls `decide` to turn paired
 per-case outcomes into a verdict; the UI and CI call `check_extras` to read the optional fields a verdict carries.
@@ -23,7 +23,7 @@ A set under SCREENING_FLOOR cases is "screening": it may say Same, Worse or Inco
 small frozen set cannot show an improvement worth moving an alias for. The verdict a label maps to:
 Better or Same -> pass, Worse -> fail, Inconclusive -> inconclusive.
 
-Tradeoff (TM-1269) is a fifth label that only `apply_speed` produces: the quality pass held, but the candidate broke the
+Tradeoff is a fifth label that only `apply_speed` produces: the quality pass held, but the candidate broke the
 set's speed criterion (for example decode under half the incumbent's tokens per second). It maps to verdict
 "inconclusive", so it neither counts toward a promotion nor resets the count (models.count_passes also skips it by
 label): a person decides whether the quality is worth the speed. A summary line says it in one sentence.
@@ -266,7 +266,7 @@ _SAMPLING_KEYS = {"temperature", "top_p", "thinking", "max_tokens", "seed", "epo
 
 
 def check_extras(d: dict) -> tuple[dict, list[str]]:
-    """The optional comparative-verdict/1 fields added by TM-1248, validated. Returns (extras, problems). An absent
+    """The optional comparative-verdict/1 fields, validated. Returns (extras, problems). An absent
     field is fine (older producers); a present one must be well-formed, and the label must agree with the verdict."""
     ex, problems = {}, []
     if "n" in d:

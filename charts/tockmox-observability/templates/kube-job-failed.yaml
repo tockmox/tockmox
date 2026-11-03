@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-KubeJobFailed, UPSTREAM'S RULE WITH ONE JOB LEFT OUT (TM-0982, lab L6 F-L6-2).
+KubeJobFailed, UPSTREAM'S RULE WITH ONE JOB LEFT OUT (lab L6 F-L6-2).
 
 THE NOISE. kube-prometheus-stack's KubeJobFailed (warning, for 15m) fires one
 alert per failed Job that exists, and keeps it firing until the Job is pruned.

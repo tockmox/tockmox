@@ -2,7 +2,7 @@
 {% from "macros.html" import mascot %}
 {% block title %}{{ title }}{% endblock %}
 {% block main %}
-{#- TM-1310: a full-page error gets one mascot, up to 160px: lost on a page that does not exist, puzzled otherwise.
+{#- a full-page error gets one mascot, up to 160px: lost on a page that does not exist, puzzled otherwise.
     The words stay plain and say what to do (spec section 11). -#}
 <section class="error-page">
   {{ mascot(pose or ("lost" if status_code == 404 else "puzzled"), 160) }}

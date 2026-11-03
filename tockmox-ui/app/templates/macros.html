@@ -74,19 +74,19 @@
 </ul>
 {%- endmacro %}
 
-{#- a figure nobody recorded: "unknown", with why on hover and for a screen reader (TM-1298) -#}
+{#- a figure nobody recorded: "unknown", with why on hover and for a screen reader -#}
 {% macro unknown(why) -%}
 <span class="muted help" title="{{ why }}">unknown<span class="visually-hidden">: {{ why }}</span></span>
 {%- endmacro %}
 
-{# TM-1310: the mascot at a moment (specs/tockmox-ui/SPEC.md section 11). One per screen, never in the top bar, menus,
+{# the mascot at a moment (specs/tockmox-ui/SPEC.md section 11). One per screen, never in the top bar, menus,
    tables, rail, drawer or charts; alt="" because the words beside him say everything. Sizes: 56 in a section header,
    76 beside the verdict, up to 160 on an empty state or a full-page error. 2x WebP from the UI's own origin. #}
 {% macro mascot(pose, size=76) -%}
 <img class="mascot m{{ size }}" src="/static/mascot/tockmox-pose-{{ pose }}-192.webp" srcset="/static/mascot/tockmox-pose-{{ pose }}-192.webp 1x, /static/mascot/tockmox-pose-{{ pose }}-384.webp 2x" width="{{ size }}" height="{{ size }}" alt="" decoding="async" data-pose="{{ pose }}">
 {%- endmacro %}
 
-{# TM-1306: one trend panel from panels.yaml, drawn server-side. The SVG is decoration (aria-hidden); the sentence
+{# one trend panel from panels.yaml, drawn server-side. The SVG is decoration (aria-hidden); the sentence
    under it is the text alternative and carries every number. Unknown reads Unknown with its reason, never a
    flat line at zero. The title links to the Grafana board that explains it, when the viewer can open Grafana. #}
 {% macro trend(v, compact=false) -%}
@@ -117,7 +117,7 @@
 {%- endmacro %}
 
 
-{# Release notes as folded sections, one per heading (TM-1304 About, TM-1308 Updates). The text is the CHANGELOG's,
+{# Release notes as folded sections, one per heading (About, Updates). The text is the CHANGELOG's,
    rendered inline by app/notes.py; no raw markdown reaches the page. #}
 {% macro release_notes(notes, empty="No notes are bundled with this build.") -%}
   {% if notes %}

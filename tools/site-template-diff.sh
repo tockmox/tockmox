@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# COMPARE tockmox-site-template WITH WHAT THE INSTALLER GENERATES (TM-0621).
+# COMPARE tockmox-site-template WITH WHAT THE INSTALLER GENERATES.
 #
 #   tools/site-template-diff.sh <path to a tockmox-site-template checkout>
 #

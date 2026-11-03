@@ -173,7 +173,7 @@ def test_a_models_words_never_render(world):
 def test_a_planted_unlabelled_or_client_note_never_renders(world):
     fix = copy.deepcopy(FIX)
     tl = fix["get"]["INC-0002"]["record"]["timeline"]
-    tl.append({"ts": "2026-10-26T16:10:00.000Z", "actor": "tish", "kind": "note", "text": "PLANTED-CLIENT", "refs": [], "src": "client"})
+    tl.append({"ts": "2026-10-26T16:10:00.000Z", "actor": "orchestrator", "kind": "note", "text": "PLANTED-CLIENT", "refs": [], "src": "client"})
     tl.append({"ts": "2026-10-26T16:11:00.000Z", "actor": "specialist/x", "kind": "note", "text": "PLANTED-OLD", "refs": []})
     tl.append({"ts": "2026-10-26T16:12:00.000Z", "actor": "schedule", "kind": "dispatch", "text": "desk words", "refs": []})
     c, _ = cases_client(world, Host(fix))
@@ -215,8 +215,8 @@ def test_a_title_a_client_or_a_model_wrote_is_not_shown(world):
 def test_an_unlabelled_alert_entry_from_a_caller_is_not_the_desks(world):
     fix = copy.deepcopy(FIX)
     tl = fix["get"]["INC-0002"]["record"]["timeline"]
-    tl.append({"ts": "2026-10-26T16:10:00.000Z", "actor": "tish", "kind": "alert", "text": "PLANTED-ALERT", "refs": []})
-    tl.append({"ts": "2026-10-26T16:11:00.000Z", "actor": "tish", "kind": "dispatch", "text": "PLANTED-DISPATCH", "refs": []})
+    tl.append({"ts": "2026-10-26T16:10:00.000Z", "actor": "orchestrator", "kind": "alert", "text": "PLANTED-ALERT", "refs": []})
+    tl.append({"ts": "2026-10-26T16:11:00.000Z", "actor": "orchestrator", "kind": "dispatch", "text": "PLANTED-DISPATCH", "refs": []})
     c, _ = cases_client(world, Host(fix))
     t = c.get("/platform/cases/INC-0002").text
     assert "PLANTED-ALERT" not in t and "PLANTED-DISPATCH" not in t

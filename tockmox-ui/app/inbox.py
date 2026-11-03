@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The Models inbox (TM-1258, TM-1265): what the watcher found, as cards a person decides about, and when a hosted model
+"""The Models inbox: what the watcher found, as cards a person decides about, and when a hosted model
 retires.
 
 Pure: no I/O, no clock reads except where a caller passes `today`. The watcher (app/watcher.py) and the PR opener read the
@@ -123,7 +123,7 @@ def with_dismiss(raw_inbox, cid: str, today) -> dict:
     return base
 
 
-# ---------------------------------------------------------------- when a hosted model retires (TM-1265)
+# ---------------------------------------------------------------- when a hosted model retires
 
 def parse_date(raw) -> datetime.date | None:
     """A provider's shutdown date: YYYY-MM-DD (with or without a time), or epoch seconds."""

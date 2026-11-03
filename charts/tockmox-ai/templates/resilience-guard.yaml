@@ -1,5 +1,5 @@
 {{- /*
-THE RESILIENT PROFILE'S REFUSAL, model gateway database (TM-0597).
+THE RESILIENT PROFILE'S REFUSAL, model gateway database.
 
 Renders nothing. It exists to FAIL the render, and only when the install
 claims to be resilient (`global.resilience.profile: resilient`, set by

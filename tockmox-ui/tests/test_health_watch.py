@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1263 / TM-1274 (REQ-0048 AC-48.19): the production health watch.
+"""REQ-0048 AC-48.19: the production health watch.
 
 A fake Prometheus (an httpx MockTransport) serves synthetic gateway series for one promoted alias, and the tests
 plant the cases the acceptance criterion names: a breach renders the revert, an inconclusive signal renders nothing,
@@ -270,7 +270,7 @@ def test_just_promoted_means_the_windows_would_still_hold_the_previous_model():
     assert res["state"] == hw.INSUFFICIENT and "previous model's requests" in res["reasons"][0]
 
 
-# ---------------------------------------------------------------- like hours (TM-1274)
+# ---------------------------------------------------------------- like hours
 
 def shifted():
     """Identical behaviour before and after the promotion: the peak is simply worse than the quiet hours, as it always was."""

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1315: identity actions from the console. A recovery link for a person who is not an administrator, and
+"""Identity actions from the console. A recovery link for a person who is not an administrator, and
 membership of the user group, through a narrow Authentik service account held by tockmox-actions.
 
   shared     the identity kinds' targets and parameters; every one is a step-up kind
@@ -177,7 +177,7 @@ def test_authentiks_own_refusal_is_reported(tmp_path):
     assert rows[0]["result"] == "failed"
 
 
-def test_tm1356_authentiks_own_words_reach_the_log_not_the_caller(tmp_path, caplog, capsys):
+def test_authentiks_own_words_reach_the_log_not_the_caller(tmp_path, caplog, capsys):
     ak = Authentik()
     ak.granted = set()
     s, ak, _ = service(tmp_path, ak)

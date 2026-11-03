@@ -13,7 +13,7 @@
     {%- elif out.kind == "expire" %}{{ (out.detail or "expired").split(" · ")[0] | capitalize }}.
     {%- else %}{{ out.detail }}{% endif %}{% if refs %} · <code>{{ refs | join(", ") }}</code>{% endif %}</p>
   {% if secret %}
-  {#- TM-1315: shown here once. It is in no record, no log line and no replay; this page is sent no-store. -#}
+  {#- shown here once. It is in no record, no log line and no replay; this page is sent no-store. -#}
   <label for="secret">The link, to send them <span class="muted small">(shown once: it is not kept anywhere)</span></label>
   {#- A wrapping box, not a one-line input: the whole link shows, and a triple-click selects all of it (the lab run,
       2026-11-01: the input cut the link off). The console has no script, so no Copy button. -#}

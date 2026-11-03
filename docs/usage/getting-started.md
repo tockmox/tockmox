@@ -199,7 +199,7 @@ Authentik 2026.5.6:
   What the other consoles do with that user, as of 0.7.1 (measured 2026-10-04
   on the 0.7.1 rc4 lab install): Grafana signs the user in as Viewer, with the
   login taken from `preferred_username` (the `email || preferred_username`
-  attribute path, TM-0667). Argo Workflows and Miniflux signed the same user
+  attribute path). Argo Workflows and Miniflux signed the same user
   in on the 0.6.0 release candidate; they were not re-measured on 0.7.1.
   History: on the 0.6.0 release candidate (measured 2026-09-16) Grafana failed
   the same user with **"Login failed"** and **"InternalError"** in the browser

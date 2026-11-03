@@ -23,7 +23,7 @@
 #
 # AND IT TURNS A CLASS OF "SOMEONE HAS TO LOOK" DEFECTS INTO ASSERTIONS.
 # Three shipped dashboards were correct in JSON and misleading on screen
-# (TM-0532 twice, TM-0559), every one caught by a human and none by a gate.
+# -- every one caught by a human and none by a gate.
 # "The first three columns are name, sync_status, health_status" is a DOM fact.
 #
 # TRUST, and this is a CORRECTION to what this file claimed when it was first
@@ -58,7 +58,7 @@
 # readability and whether a label means anything to a human are still a human
 # judgement on the screenshot.
 set -euo pipefail
-# TM-0797: every kubectl call below names its cluster with --context from this
+# every kubectl call below names its cluster with --context from this
 # variable; an empty value is refused rather than falling back to the current context.
 : "${KUBE_CONTEXT:?KUBE_CONTEXT is empty: export the context of the cluster under test}"
 

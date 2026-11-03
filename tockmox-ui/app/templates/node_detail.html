@@ -7,7 +7,7 @@
 {% if health and health.why %}<p class="muted">{{ health.why }}</p>{% elif not health %}<p class="muted">{{ reading.reason or "no reading" }}</p>{% endif %}
 {% if health and health.disagree %}<p class="warnbox">{{ badge("warning", "Check this") }} {{ health.disagree }}.</p>{% endif %}
 
-{#- TM-1299: the models this node serves, per engine endpoint, and its memory against what is planned. -#}
+{#- the models this node serves, per engine endpoint, and its memory against what is planned. -#}
 {% set bar = models.bar %}
 {% set ndep = models.deployments|length %}
 <section class="panel flush" aria-labelledby="models-h">
@@ -82,7 +82,7 @@
   <p class="muted small">Planned memory is weights plus the cache for context x slots, plus engine overhead, from the routes as recorded, the same arithmetic as the fit checks. A route that does not state its context is planned at the fit default context (8K) and at one slot unless a slot count is on record, and the cell says so. A candidate counts while its -next route exists. <b>default</b> means the route does not state it and the engine's own setting applies; <b>engine default, not reported</b> means Tockmox does not know what that is. Hover a default for what it is.</p>
 </section>
 
-{#- TM-1296: the build each pinned model is held at, against what the node serves. Moved here from the Models page, next to the routes it is about. -#}
+{#- the build each pinned model is held at, against what the node serves. Moved here from the Models page, next to the routes it is about. -#}
 <section class="panel" aria-labelledby="builds-h">
   <h2 id="builds-h">Builds on this node <span class="muted small" title="Git holds the build each model is pinned to; the node holds the one it actually serves. For every pinned Ollama or Hugging Face model, this asks the node serving it (Ollama's digest from /api/tags, llama-server's Hugging Face snapshot from its model path) and compares. When it cannot tell, it says Unknown and why.">pinned in git vs. served on the node{% if builds.checked_at %} &middot; last checked {{ builds.checked_at.strftime("%Y-%m-%d %H:%M UTC") }}{% elif builds.probe_on %} &middot; not checked yet{% endif %}</span></h2>
   {% if builds.findings %}

@@ -1018,7 +1018,7 @@ The same binary reaching the public internet while failing to a private address,
 with Apple-signed binaries reaching that same address fine, is the gate and
 nothing else. Fix it in **System Settings, Privacy & Security, Local Network**.
 Four things about that remedy are easy to get wrong, all written from the
-2026-09-15 measurements recorded on TM-0625, not re-executed for this release:
+2026-09-15 measurements, not re-executed for this release:
 
 1. **The grant attaches to the terminal application, not to the tool.** Enable
    the switch for the app your shell runs in. Re-signing `kubectl` or `helm`
@@ -1186,7 +1186,7 @@ as `helm upgrade` with the same flags.
 > The other half is `apps.argocdMonitoring`, which renders three ServiceMonitors,
 > the ArgoCD dashboard **and** the sync-state alert rules together. It follows
 > `capabilities.observability`, so it is on by default and you set nothing
-> (TM-0739). This half alone gets metrics nobody scrapes; that half alone gets
+>. This half alone gets metrics nobody scrapes; that half alone gets
 > monitors scraping nothing.
 >
 > The release gate's **acceptance row N10** ("the ArgoCD dashboard renders
@@ -1332,7 +1332,7 @@ What the steps above used to say, and when it changed. Nothing here is needed to
 Until 2026-09-12 this page asked you to mint a read-only token for a
 repository whose creation was never a step on any page; it appeared only as an
 aside much later, in `install.md` 2a. So the prerequisite arrived after the
-step that needed it, and a reader either guessed or stalled (TM-0499). The
+step that needed it, and a reader either guessed or stalled. The
 "Name the cluster" block also once sat between sections 5 and 6, after two
 blocks that already needed it; a "before you begin" that appears after the
 beginning is not one.
@@ -1343,14 +1343,14 @@ beginning is not one.
 
 "Turn on ArgoCD's metrics" was marked *Optional* until 2026-09-13 and
 connected to nothing, so a reader who skipped it met an empty dashboard hours
-later with no indication why (TM-0539).
+later with no indication why.
 
 Making it non-optional did not move it into the install command, so until
 0.6.1 the page's order was: install ArgoCD, then three paragraphs later ask for
 values that only apply at install time. Following the page top to bottom
 produced an install without them and needed a `helm upgrade` the page never
 mentioned. The values are in the install block now, and what remains here is a
-check rather than a step (TM-0628). The lesson generalises past this pair: a
+check rather than a step. The lesson generalises past this pair: a
 prerequisite that arrives after the command it is a prerequisite for is not a
 documented step, it is a documented trap.
 

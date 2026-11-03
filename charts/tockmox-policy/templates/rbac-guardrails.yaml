@@ -159,7 +159,7 @@ spec:
   # because Ignore is what decides that case.
   validationActions: {{ .Values.rbacGuardrails.denyWildcardClusterrole.validationActions | toJson }}
 {{- /*
-TM-0825: this PrometheusRule is one of the monitor kinds the observability capability
+this PrometheusRule is one of the monitor kinds the observability capability
 owns, so it follows the same `serviceMonitors` component as every other rule this repo
 writes. It used to render unconditionally, which left tockmox-policy applying a
 monitoring.coreos.com object on a cluster whose CRDs tockmox-crds had (correctly) not
@@ -296,7 +296,7 @@ spec:
         # we control rather than a property of upstream's we are hoping holds.
         # `tools/check-sa-token-naming.sh` fails the build if any SA-token Secret
         # Tockmox renders stops matching it, which is what keeps this scope from
-        # silently narrowing to nothing. TM-0519.
+        # silently narrowing to nothing.
         - alert: StaticSATokenRotationOverdue
           expr: >-
             (time() - kube_secret_created{namespace=~"tockmox-.*", secret=~".+\\.service-account-token"}

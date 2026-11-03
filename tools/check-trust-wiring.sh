@@ -45,7 +45,7 @@ set -euo pipefail
 
 # SHELL GUARD -- bash 4.0+ required. THIS SCRIPT IS THE REASON THE GUARD EXISTS.
 #
-# Measured on a stock Mac 2026-08-31 (TM-0245), against bash 3.2.57:
+# Measured on a stock Mac 2026-08-31, against bash 3.2.57:
 #
 #   $ /bin/bash ./tools/check-trust-wiring.sh; echo "exit=$?"
 #   ./tools/check-trust-wiring.sh: line 59: tockmox: unbound variable

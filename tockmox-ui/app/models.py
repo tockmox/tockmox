@@ -9,14 +9,14 @@ The rules this module exists to hold (REQ-0048 as revised by Jeff's rulings of 2
 
   1. A candidate never replaces what an alias points at, and no agent can reach it. Proposing a
      candidate adds it to the catalog at stage `candidate` and a `<alias>-next` route beside the live
-     one, and `-next` routes render ONLY to the eval gateway (nodes.render_model_list). TM-0936 showed
+     one, and `-next` routes render ONLY to the eval gateway (nodes.render_model_list). Here is
      why: inside one LiteLLM, an access group fails open for any key with no model list, so the fence is
      the candidate not being in the production gateway at all.
   2. An alias moves only after `promotion.requiredPasses` passing comparisons of the candidate against
      the incumbent (default 3, per-class override), read from REQ-0045 comparative verdict records
-     (AC-45.9, proposed in TM-0935). A fail resets the count; inconclusive neither counts nor resets.
+     (AC-45.9, proposed). A fail resets the count; inconclusive neither counts nor resets.
      check_promotions() refuses values where an alias moved without that record; the UI refuses to start
-     on them, and the same function is the CI gate (TM-0930).
+     on them, and the same function is the CI gate.
   3. A new hosted model is a candidate too: it lands on the eval gateway with NO data-class tags. Its
      tags are chosen when it is promoted, through the same gate (the `open` default is withdrawn).
 
@@ -45,14 +45,14 @@ from . import nodes as nm
 from . import verdict_stats as vs
 from .nodes import ALIAS_RE, ID_RE, Inventory, NodeError, Route, estimate_size_gib, fit, loading
 
-# `rejected` (TM-1258, specified by the REQ-0048 amendment TM-1254; DESIGN-2026-10-29-eval-runner section 3): a build that failed its evaluation or was demoted,
+# `rejected` (specified by the REQ-0048 amendment; DESIGN-2026-10-29-eval-runner section 3): a build that failed its evaluation or was demoted,
 # with rejection {reason, date, revision}; nothing routes it, and the watcher offers it again only as a NEW revision.
 STAGES = ("candidate", "promoted", "retired", "rejected")
 SOURCE_KINDS = ("huggingface", "ollama", "modelkit", "hosted")
 TRACKS = ("revision", "quants", "successors", "deprecation")
 CANDIDATE_KINDS = ("revision", "quant", "successor", "frontier", "deprecation", "digest")
 RESIDENCY = ("pinned", "on-demand")
-DEFAULT_KEEP_GENERATIONS = 3     # TM-1297, ruling D2 (2026-10-30)
+DEFAULT_KEEP_GENERATIONS = 3     # ruling D2 (2026-10-30)
 NEXT = "-next"
 # The verdict class of a re-placement (the same model on another node). A re-placement measures the platform, not
 # the model, so one passing comparison is the default; it applies ONLY to a re-placement (Lifecycle.required_for).
@@ -95,7 +95,7 @@ class Entry:
     pending: dict = field(default_factory=dict)     # {revision, seen}: a newer build proposed for evaluation
     links: list = field(default_factory=list)       # [{title, url}] the operator adds: release notes, license ... https only
     rejection: dict = field(default_factory=dict)   # stage rejected: {reason, date, revision?, alias?, demoted?}
-    retirement: dict = field(default_factory=dict)  # stage retired, when a change recorded why (TM-1297): {reason, date}
+    retirement: dict = field(default_factory=dict)  # stage retired, when a change recorded why: {reason, date}
 
     def serves(self, alias: str) -> bool:
         p = self.promotion or {}
@@ -145,14 +145,14 @@ class Lifecycle:
     catalog: list[Entry] = field(default_factory=list)
     profiles: list[Profile] = field(default_factory=list)
     frontier_providers: dict = field(default_factory=dict)   # provider -> {"keyEnv": ...}
-    frontier_prices: dict = field(default_factory=dict)      # TM-1298: "provider/model" -> {inPer1M, outPer1M, date}: a price the site states
+    frontier_prices: dict = field(default_factory=dict)      # "provider/model" -> {inPer1M, outPer1M, date}: a price the site states
     active_profile: str = ""
-    required_passes: int = 1                                 # TM-1248 (ruling E1, 2026-10-29): counts independent evidence keys, not reruns; was 3 reruns
+    required_passes: int = 1                                 # ruling E1, 2026-10-29: counts independent evidence keys, not reruns; was 3 reruns
     required_by_class: dict = field(default_factory=dict)    # class slug -> passes (REQ-0045 class 3 proposal: 1)
     eval_gateway_entries: list = field(default_factory=list)        # hosted entries a change adds (not serialised)
     production_gateway_entries: list = field(default_factory=list)  # hosted entries a promotion adds, or replaces by model_name (not serialised)
     production_gateway_removed: list = field(default_factory=list)  # model_names a change removes from the production gateway (not serialised)
-    keep_generations: int = DEFAULT_KEEP_GENERATIONS                # TM-1297 (ruling D2): pinned generations a hosted family keeps
+    keep_generations: int = DEFAULT_KEEP_GENERATIONS                # ruling D2: pinned generations a hosted family keeps
     keep_generations_set: bool = False                              # written in the values, so a change writes it back
 
     def required_for(self, klass: str, replacement: bool = False) -> int:
@@ -233,7 +233,7 @@ def _price(v, where: str) -> float:
 
 
 def parse_prices(raw) -> dict:
-    """modelLifecycle.frontier.prices (TM-1298): the list price the SITE states for a hosted model, per 1M tokens in and out, with
+    """modelLifecycle.frontier.prices: the list price the SITE states for a hosted model, per 1M tokens in and out, with
     the date it read it. {"anthropic/claude-sonnet-5-5": {inPer1M: 3.0, outPer1M: 15.0, date: "2026-10-30"}}. It wins over the
     watcher's price map and is labelled "set by this site". A price with no date, a negative one, or one that is not a number is
     refused: a figure with no date is not a fact the page can show."""
@@ -338,7 +338,7 @@ def parse(doc: dict | None) -> Lifecycle:
         # Jeff, 2026-10-07: new models, local or hosted, are unusable until explicitly approved. A default tag
         # would make a hosted model usable for that data class on arrival, so the key is refused, not ignored.
         raise LifecycleError("frontier.tags is withdrawn: a new hosted model lands on the eval gateway tagged open alone "
-                             "(TM-1249), and its production data-class tags are chosen when it is promoted")
+                             ", and its production data-class tags are chosen when it is promoted")
     lc.frontier_providers = dict(fr.get("providers") or {})
     if "keepGenerations" in fr:
         k = fr["keepGenerations"]
@@ -427,7 +427,7 @@ def check_promotions(lc: Lifecycle, inv: Inventory) -> list[str]:
     (a) its promotion record names this alias and carries enough passing comparisons (evidence_problem), or
     (b) it carries `adopted: <date>`: it was already in service when it entered the catalog, said in a reviewable line.
     A promoted hosted model is held to the same record. What this function cannot do is open the verdict files:
-    the record says WHICH bytes passed, and CI checks that the committed files hash to it (TM-0930).
+    the record says WHICH bytes passed, and CI checks that the committed files hash to it.
     (Review finding 2026-10-07: a stage flipped by hand, or a promotion for another alias, used to pass.)"""
     problems = []
     for r in inv.routes:
@@ -503,7 +503,7 @@ class Verdict:
     warnings: list = field(default_factory=list)   # accepted but deprecated shapes (a bare-path results[] entry)
     placement: dict = field(default_factory=dict)  # {from_node, to_node}: the move a re-placement verdict measures
     criterion: str = ""
-    extras: dict = field(default_factory=dict)     # TM-1248 optional fields (n, label, interval, sampling, engine, node, control ...)
+    extras: dict = field(default_factory=dict)     # optional fields (n, label, interval, sampling, engine, node, control ...)
     advisories: list = field(default_factory=list) # what a reader should know that does not make the record unusable
 
     @property
@@ -611,7 +611,7 @@ def count_passes(verdicts, alias: str, model: str, revision: str = "", incumbent
                  placement: dict | None = None):
     """The passing comparisons that count toward moving `alias` to `model`, oldest first, and notes on what
     did not count. Only `pass` counts; a `fail` resets the count; `inconclusive` neither counts nor resets;
-    a run id counts once, and so does an evidence key (TM-1248: the same build, eval set, sampling, engine and node
+    a run id counts once, and so does an evidence key (the same build, eval set, sampling, engine and node
     measured twice is one piece of evidence, not two); a pass whose known-bad control also passed does not count
     (its graders could not tell good from bad); only passes on the newest eval-set version count; a record for another build
     (revision) or against another incumbent does not count.
@@ -703,7 +703,7 @@ class Report:
     sizes: dict = field(default_factory=dict)  # repo -> fit.SizeRecord: what the watcher read of each model's files and config
     size_gaps: list = field(default_factory=list)   # repos it could not size, and why (kept apart from `gaps`: a model that
                                                     # cannot be sized is not "watched for nothing", and must not turn the report amber)
-    prices: dict = field(default_factory=dict)      # TM-1298: "provider/model" -> {inPer1M, outPer1M, readAt, stale}: LiteLLM's price map, as read
+    prices: dict = field(default_factory=dict)      # "provider/model" -> {inPer1M, outPer1M, readAt, stale}: LiteLLM's price map, as read
     price_source: dict = field(default_factory=dict)   # {} = the watcher did not read prices; else {ok, reason, readAt}. Apart from `sources`:
                                                        # a price map that did not answer must not turn the candidates Unknown
 
@@ -876,7 +876,7 @@ def _tags_of(live: Route | None, gateway=()) -> list | None:
 
 
 def local_defaults(route: Route, live: Route | None = None, gateway=()) -> Route:
-    """TM-1119: what the policy gate reads off a node route. A node route is local-tier by definition, and the gate reads a
+    """What the policy gate reads off a node route. A node route is local-tier by definition, and the gate reads a
     deployment with no model_info.endpoint_tier as external; with tag filtering on, an untagged deployment serves no class.
     So a -next route gets `model_info.endpoint_tier: local` (unless the live route already said otherwise) and the live
     alias's tags (a copy, never the same list). Idempotent; never overwrites what the route already has."""
@@ -954,7 +954,7 @@ def propose(cand: Candidate, lc: Lifecycle, inv: Inventory, node: str = "", endp
             n = node or r.node
             ep = endpoint or r.endpoint
             # deep copies: a shallow dict shared the incumbent's tags LIST, which PyYAML then wrote as an anchor
-            # (&id001 / *id001) in the machine-owned values file (site PR #114, TM-0939)
+            # (&id001 / *id001) in the machine-owned values file (site PR #114)
             routes.append(local_defaults(Route(r.alias + NEXT, n, ep, cand.model, r.kind, r.provider, copy.deepcopy(r.params),
                                                copy.deepcopy(r.model_info), entry.size_gib), r, gateway))
         if not live:
@@ -985,7 +985,7 @@ def _propose_frontier(cand, lc, inv, taken=()):
     entry = Entry(_slug(f"{provider}-{mid}"), cand.model, cand.source, stage="candidate", track=("deprecation",))
     keyenv = (lc.frontier_providers.get(provider) or {}).get("keyEnv", f"{provider.upper()}_API_KEY")
     notes = ["admitted to the EVAL gateway only, tagged open alone: the eval runner sends it public eval sets only "
-             "(TM-1249), and no agent can call it (the production gateway does not have it, which TM-0936 showed is the "
+             ", and no agent can call it (the production gateway does not have it, which is the "
              "only fence that holds for every key)",
              f"start an evaluation against the alias it should compete for; after enough passing comparisons, promoting "
              f"it is a separate change, and that is where you choose its data-class tags"]
@@ -1145,7 +1145,7 @@ def propose_replacement(alias: str, node: str, endpoint: str, lc: Lifecycle, inv
 
 
 def hosted_candidate_entries(lc: Lifecycle) -> list[dict]:
-    """The eval gateway's entries for hosted catalog entries at stage candidate, tagged open alone (TM-1249: the eval
+    """The eval gateway's entries for hosted catalog entries at stage candidate, tagged open alone (the eval
     gateway filters by tag, so only public eval data reaches them). The chart derives the same list
     (tockmox-ai.hostedCandidates); tests/golden in tockmox/tockmox pins it."""
     out = []
@@ -1242,7 +1242,7 @@ def promote(alias_next: str, verdicts, lc: Lifecycle, inv: Inventory) -> tuple[L
     counted, klass, req, cnotes = _passed(alias, nxt.model, verdicts, lc, e.source.revision, old, placement)
     rec_extra = {"placement": placement} if replacement else {}
     if live is not None and not replacement:
-        # what a revert restores (TM-1258): the route as it was, so demotion is one reviewed change, not a rebuild
+        # what a revert restores: the route as it was, so demotion is one reviewed change, not a rebuild
         rec_extra["previous"] = _route_snapshot(live)
     record = _record(alias, old, klass, req, counted, **rec_extra)
     routed_now = {r.alias for r in inv.routes if r.model == nxt.model and not r.alias.endswith(NEXT)}
@@ -1332,7 +1332,7 @@ def promote_hosted(entry_id: str, alias: str, tags, verdicts, lc: Lifecycle, gat
 
     `gateway` is the production gateway's model_list (dicts), or just its names.
 
-    TM-1297 (rulings D1 and D2): when `alias` is the model's FAMILY alias (claude-sonnet for claude-sonnet-5-5) the
+    rulings D1 and D2: when `alias` is the model's FAMILY alias (claude-sonnet for claude-sonnet-5-5) the
     promotion keeps generations. It adds the generation's pinned alias (claude-sonnet-5-5, which never moves), points the
     family alias at the same model (the only entry whose model changes), and never touches another pinned entry. When
     that leaves the family with more than lc.keep_generations pinned generations, the oldest one's entry is removed and
@@ -1428,7 +1428,7 @@ def promote_hosted(entry_id: str, alias: str, tags, verdicts, lc: Lifecycle, gat
 
 
 def retire_generation(alias: str, lc: Lifecycle, gateway, when: str = "", provider_date: str = "", replacement: str = "") -> tuple[Lifecycle, list[str]]:
-    """The retire change for a pinned generation its provider is retiring (TM-1297): the pinned entry leaves the production
+    """The retire change for a pinned generation its provider is retiring: the pinned entry leaves the production
     gateway and its catalog entry becomes retired, with the reason and the date. `provider_date` is the date the watcher
     read; `replacement` is the model the watcher names, used only to say what to promote.
 
@@ -1528,7 +1528,7 @@ def merge(base: Lifecycle, add: Lifecycle) -> Lifecycle:
     return res
 
 
-# ---------------------------------------------------------------- where a model comes from (TM-0938)
+# ---------------------------------------------------------------- where a model comes from
 
 HF_REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 OLLAMA_NAME = re.compile(r"^([a-z0-9][a-z0-9._-]{0,63}/)?[a-z0-9][a-z0-9._-]{0,63}$")
@@ -1734,7 +1734,7 @@ def render_ollama(plan: Plan, idle: str = "10m") -> dict:
             "env": {"OLLAMA_MAX_LOADED_MODELS": str(max(1, len(pinned_models) + 1)), "OLLAMA_KEEP_ALIVE": idle}}
 
 
-# ---------------------------------------------------------------- pinned build vs what a node serves (TM-0934)
+# ---------------------------------------------------------------- pinned build vs what a node serves
 # Git holds the intended build; the node holds the actual one. For every catalogued Ollama or Hugging Face
 # model with a pinned revision, each route that serves it is compared with what its node reports. The rule
 # this section holds: a comparison it cannot make reads UNKNOWN with the reason, never current.
@@ -1813,7 +1813,7 @@ def drift_findings(rows: list[DriftRow]) -> list[str]:
             f"{_norm_build(x.pinned)[:12] or x.pinned}" for x in rows if x.state == "drift"]
 
 
-# ---------------------------------------------------------------- reject and revert (TM-1258; design sections 3 and 8)
+# ---------------------------------------------------------------- reject and revert (design sections 3 and 8)
 
 def _route_snapshot(r: Route) -> dict:
     d = {"model": r.model, "node": r.node, "endpoint": r.endpoint, "kind": r.kind}

@@ -3,7 +3,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-THE UPGRADE GUARD (TM-0788). A fresh install from 0.9.0 runs Authentik on the
+THE UPGRADE GUARD. A fresh install from 0.9.0 runs Authentik on the
 CNPG cluster in authentik-db.yaml; an install that already runs the bundled
 server must not take that default blind, because Authentik would start on an
 EMPTY database: every user, group, flow and OAuth provider gone from its point

@@ -6,13 +6,13 @@
 # profile) read, and that tests/executed-docs/mirror-mode-test.sh runs without a
 # cluster. Sourced; defines functions and constants only.
 #
-# TWO MODES (TM-0575). TOCKMOX_REGISTRY_MODE:
+# TWO MODES. TOCKMOX_REGISTRY_MODE:
 #
 #   cache       (default) The mirror is tried first and the upstream is the
 #               fallback. That supports "pulls are cached" and nothing more: a
 #               run that is missing an image from the mirror looks identical to a
 #               run whose image set is closed, because the fallback repairs the
-#               miss with exactly the thing an air gap forbids (TM-0568 wrote it
+#               miss with exactly the thing an air gap forbids (it was written
 #               this way on purpose, to survive a mirror outage).
 #
 #   nofallback  The mirror is the ONLY registry. Three things, each closing a
@@ -127,7 +127,7 @@ mirror_k3s_dropin() {
 mirror_deny_script() {
   cat <<EOF
 #!/bin/sh
-# nofallback mode (TM-0575): the upstream registries are unreachable on purpose.
+# nofallback mode: the upstream registries are unreachable on purpose.
 # Their names resolve to ${MIRROR_DENY_ADDR} (RFC 5737, never routed), the host rejects
 # connections to it, and one rule counts every attempt. \`throwaway-cluster.sh
 # mirror-proof\` reads the counter.

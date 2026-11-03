@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1261, TM-1264: the eval scheduler. Work discovery (admitted candidates, engine upgrades), the quiet window, one Job
+"""The eval scheduler. Work discovery (admitted candidates, engine upgrades), the quiet window, one Job
 per node, the request it writes, and the Kubernetes client, with Prometheus, the node and the API server mocked."""
 import copy
 import os
@@ -308,7 +308,7 @@ def test_a_queued_run_whose_job_exists_is_left_alone_and_one_whose_job_vanished_
     assert s["state"] == "failed" and "the Job is gone before the run wrote a result" == s["reason"]
 
 
-# ------------------------------------------------------------------ TM-1264: engine upgrade
+# ------------------------------------------------------------------ engine upgrade
 
 def done_run(tmp_path, version="0.32.2", metrics=None, **kw):
     d = st.new_status("large-local-large-20261001-1", "local-large", "large", {"model": OLD, "revision": "1" * 40}, None, "studio",

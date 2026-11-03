@@ -29,16 +29,16 @@ rotates forever and an Application that never reports Synced.
 The config checksum below hashes the whole garage block so a change to any value
 rolls the pod. An EMPTY blockSize is left out of that hash: it renders nothing, so
 including it would change the checksum on every existing install and restart the
-one Garage pod on upgrade for a key nobody set (TM-0782, default unchanged).
+one Garage pod on upgrade for a key nobody set (default unchanged).
 */ -}}
 {{- $gsum := $g -}}
 {{- if not $g.blockSize }}{{- $gsum = omit $g "blockSize" -}}{{- end -}}
-{{- /* dbEngine at its historical value is left out of the hash too (TM-0817), for the
+{{- /* dbEngine at its historical value is left out of the hash too, for the
      same reason: adding the key must not change the checksum on existing installs. */ -}}
 {{- if eq ($g.dbEngine | default "sqlite") "sqlite" }}{{- $gsum = omit $gsum "dbEngine" -}}{{- end -}}
-{{- /* Namespace labels do not change the Garage config; keep them out of the pod-template checksum (TM-0815) so adding the key does not roll Garage. */ -}}
+{{- /* Namespace labels do not change the Garage config; keep them out of the pod-template checksum so adding the key does not roll Garage. */ -}}
 {{- $gsum = omit $gsum "credentialsNamespaceLabels" -}}
-{{- /* The restore-drill register is a bucket, a key and two Secrets the bootstrap Job makes; none of it is in the Garage config, so it stays out of the hash too (TM-0459) and an upgrade does not restart the one Garage pod for it. */ -}}
+{{- /* The restore-drill register is a bucket, a key and two Secrets the bootstrap Job makes; none of it is in the Garage config, so it stays out of the hash too and an upgrade does not restart the one Garage pod for it. */ -}}
 {{- $gsum = omit $gsum "drillRegister" -}}
 {{- if not (has ($g.dbEngine | default "sqlite") (list "sqlite" "lmdb")) -}}
 {{- fail (printf "garage.dbEngine must be \"sqlite\" or \"lmdb\", got %q" $g.dbEngine) -}}
@@ -71,7 +71,7 @@ data:
     consistency_mode = "consistent"
     {{- if $g.blockSize }}
 
-    # garage.blockSize (TM-0782). Absent when the value is empty, so Garage uses
+    # garage.blockSize. Absent when the value is empty, so Garage uses
     # its own default. Only NEW uploads use it; see the note in values.yaml.
     block_size = {{ $g.blockSize | toString | quote }}
     {{- end }}
@@ -86,7 +86,7 @@ data:
 
     {{- if $webOn }}
 
-    # The static-site endpoint (TM-0215). Anonymous and read-only: it serves
+    # The static-site endpoint. Anonymous and read-only: it serves
     # any bucket that has website access enabled and an alias equal to the
     # request Host. `root_domain` only matters for `<bucket><root_domain>`
     # hosts; the sites this chart configures are matched by alias. Not
@@ -179,8 +179,7 @@ spec:
         # its resolved state and root domain are hashed in as well.
         checksum/config: {{ printf "%s|%s|%s" (toYaml $gsum) $webOn (include "tockmox.garageWeb.rootDomain" .) | sha256sum | trunc 16 }}
     spec:
-      # No Kubernetes API calls: a ServiceAccount of its own and no token (TM-0759,
-      # CIS 5.1.5 and 5.1.6).
+      # No Kubernetes API calls: a ServiceAccount of its own and no token (# CIS 5.1.5 and 5.1.6).
       serviceAccountName: {{ $name }}
       automountServiceAccountToken: false
       {{- with $g.priorityClassName }}
@@ -196,7 +195,7 @@ spec:
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
         seccompProfile: { type: RuntimeDefault }
-      # ENGINE GUARD (TM-0817). Garage does not record which engine wrote its
+      # ENGINE GUARD. Garage does not record which engine wrote its
       # metadata, so a sqlite Garage on an LMDB directory starts empty and looks
       # healthy. This refuses that start, loudly, before Garage can create a
       # second, empty database. It reuses the bootstrap image (it already ships
@@ -363,7 +362,7 @@ spec:
           requests:
             storage: {{ $g.dataSize }}
 ---
-# TM-0759: this workload's own identity, with no token. The namespace's `default`
+# this workload's own identity, with no token. The namespace's `default`
 # account is not used (CIS 5.1.5 and 5.1.6).
 apiVersion: v1
 kind: ServiceAccount

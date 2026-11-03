@@ -3,7 +3,7 @@
 change to commit, and the two that matter are the two approvals Jeff ruled on: admitting a candidate to the
 eval gateway, and promoting it to the production gateway after enough passing comparisons.
 
-  GET  /models                      the landing page (TM-1296): Needs you (exceptions, one action each), Local models by inference
+  GET  /models                      the landing page: Needs you (exceptions, one action each), Local models by inference
                                     node with their tunings, Frontier models by provider and family; the catalog and the upstream
                                     sources fold to one line each
   POST /models/propose              admit a candidate: catalog entry at stage candidate + <alias>-next (eval gateway)
@@ -13,23 +13,23 @@ eval gateway, and promoting it to the production gateway after enough passing co
   POST /models/promote
   GET  /models/v/<runId>            one comparison: the label, the numbers, how it was run, what it cites, whether it counted
   GET  /models/a/<alias>            one live alias: what it serves, its promotion record, and the revert. A hosted family alias
-                                    (claude-sonnet) shows the generations kept under it; a pinned generation alias says it never moves (TM-1297)
-  POST /models/a/<alias>/retire     the change that retires a pinned generation its provider is withdrawing (TM-1297); writes nothing
+                                    (claude-sonnet) shows the generations kept under it; a pinned generation alias says it never moves
+  POST /models/a/<alias>/retire     the change that retires a pinned generation its provider is withdrawing; writes nothing
   POST /models/a/<alias>/revert     the revert change (alias back to promotion.previous), for a person to review and commit
   GET  /models/promote-hosted?entry=  the same for a hosted candidate, choosing its alias and data-class tags
   POST /models/promote-hosted
   GET  /models/recommend?node=<id>  per alias class, a shortlist for one node (AC-48.14). A hypothesis list: it admits nothing
   POST /models/recommend/admit      the same change as /models/propose, for one row of that list ("Admit for evaluation")
-  GET  /models/inbox                what the watcher found, one row per candidate (TM-1300): reason, best fit, size, one action; details open under the row
-                                    as a labelled hint, and Evaluate / Snooze 30 days / Dismiss (TM-1258, TM-1265)
+  GET  /models/inbox                what the watcher found, one row per candidate: reason, best fit, size, one action; details open under the row
+                                    as a labelled hint, and Evaluate / Snooze 30 days / Dismiss
   POST /models/inbox/snooze         the values change that snoozes one candidate (modelLifecycle.inbox.snoozed); writes nothing
   POST /models/inbox/dismiss        the same for modelLifecycle.inbox.dismissed
   GET  /models/c/<alias>            the candidate for an alias: the plan, and a strip of its runs from run-status/1 files
-  POST /models/c/<alias>/rerun      the values change that lists a finished run in modelLifecycle.runner.rerun (TM-1301); writes nothing
+  POST /models/c/<alias>/rerun      the values change that lists a finished run in modelLifecycle.runner.rerun; writes nothing
   GET  /models/budget               requests and estimated cost per alias, and the local share of traffic; Unknown where nothing says
   POST /models/v/<runId>/reject     the reject change for a fail, worse or tradeoff comparison (reason required); writes nothing
   GET  /models/profiles             workload profiles -> a residency plan per node, and the engine configs
-  POST /models/builds               read which build each node holds for the pinned models it serves (TM-0934),
+  POST /models/builds               read which build each node holds for the pinned models it serves,
                                     through the probe's fences; the result lives in memory and goes stale. The result is shown on
                                     the node page (/nodes/<id>#builds-h); `next=<node id>` says which one to go back to
 """
@@ -68,7 +68,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
              prober=None, node_facts=None, build_checks=None):
     """node_facts(node_id) -> {"wired_limit_mib": float} from the node's live metrics, or {}. Optional. Without it the wired
     limit is read from the newest capability-result/1 that recorded one, and failing that the node's planning fraction is used.
-    build_checks is the last build check, shared with the node pages (they show it, TM-1296); one is made when none is given."""
+    build_checks is the last build check, shared with the node pages (they show it); one is made when none is given."""
     L = s.lifecycle
     inv = s.nodes.inventory
     checks = build_checks if build_checks is not None else BuildChecks(prober)     # in memory only (the UI writes nothing)
@@ -177,7 +177,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         node = back if inv.node(back) is not None else next((r.node for _e, r in ml.drift_targets(L.lifecycle, inv)), "")
         return RedirectResponse(f"/nodes/{node}#builds-h" if node else "/models", status_code=303)
 
-    # ------------------------------------------------------------ the landing page (TM-1296)
+    # ------------------------------------------------------------ the landing page
 
     def upstream_line(rep):
         """The one line the upstream sources fold to: its badge, a title that says how many answered and when, and who."""
@@ -296,7 +296,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         runs, _runs_problem = cd.read_runs(cd.status_dir(L.raw))
         running = run_items(runs)
 
-        # Local models: one card per node, its deployments with their tunings (deployments.py, TM-1299)
+        # Local models: one card per node, its deployments with their tunings (deployments.py)
         fi = dp.fit_inputs_for(L, rep.data)
         deps = dp.deployment_rows(inv, L.lifecycle, fi)
         nexts_by = {x["route"].alias: x for x in nexts}
@@ -321,7 +321,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
             return {**r, "badge": ib.retire_state(r)} if r else None
         groups = fr.frontier_groups(L.lifecycle, hosted_by_model, retire_of)
         fcount = {"models": sum(g["count"] for g in groups), "families": sum(len(g["families"]) for g in groups), "providers": len(groups)}
-        # what each hosted model costs (TM-1298): list price from the site or the watcher's price map; spend and calls from the gateway's
+        # what each hosted model costs: list price from the site or the watcher's price map; spend and calls from the gateway's
         # own metrics, over the window each query names. Nothing is read when there is no hosted model to show.
         fin = {"costs": {}, "price_footer": "", "callers": None}
         if fcount["models"]:
@@ -395,7 +395,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         if cand is None:
             return bad(request, u, "That candidate is not in the watcher's current report.", 404)
         if cand.kind == "deprecation":
-            # a retiring hosted model: what is offered is the replacement the report names, as a hosted candidate (TM-1265)
+            # a retiring hosted model: what is offered is the replacement the report names, as a hosted candidate
             cand, why = replacement_candidate(cand, rep.data)
             if cand is None:
                 return bad(request, u, why)
@@ -493,7 +493,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         try:
             add_lc, add_inv, notes = rc.build_change(row.action, row.alias, row.option, node, ep, cr.spec, L.lifecycle, inv,
                                                      gateway_names())
-            ml.stamp_next_routes(add_inv, inv, gateway_list())          # TM-1119: tier and tags, as propose() writes them
+            ml.stamp_next_routes(add_inv, inv, gateway_list())          # tier and tags, as propose() writes them
             new_lc = ml.merge(L.lifecycle, add_lc)
             new_inv = nm.merge(inv, add_inv) if add_inv.routes else inv
         except (ml.LifecycleError, nm.NodeError, ValueError) as e:
@@ -503,12 +503,12 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         return _change(request, u, new_lc, new_inv, notes, f"Admit {model} for evaluation as {row.alias}{ml.NEXT}", fmt,
                        {"node": node, "cls": cls, "model": model, "endpoint": ep}, "/models/recommend/admit")
 
-    # ------------------------------------------------------------ the inbox (TM-1258, TM-1265)
+    # ------------------------------------------------------------ the inbox
 
     FIT_BADGE = {"fits": "ok", "tight": "warning", "over": "critical", "unknown": "unknown"}
     INBOX_RANK = {"deprecation": 0, "revision": 1, "digest": 1, "successor": 2, "quant": 3, "frontier": 4}
     HOSTED_HELD = ("Hosted candidates are admitted to the eval gateway tagged open: the eval runner sends them public eval sets "
-                   "only, and the eval gateway refuses them anything tagged above open (the data-class rails, TM-1249).")
+                   "only, and the eval gateway refuses them anything tagged above open (the data-class rails).")
 
     def ctx_label(tokens):
         """8192 -> "8K": the context a fit was planned at."""
@@ -606,7 +606,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
             if c.kind == "deprecation":
                 card["retire"] = retire_note(c.when)
                 card["retire_alias"] = next((str(g["model_name"]) for g in gateway_list() if fz.is_pinned_entry(g)
-                                             and fz.hosted_model(g) == c.model), "")            # TM-1297: a pinned generation can be retired from here
+                                             and fz.hosted_model(g) == c.model), "")            # a pinned generation can be retired from here
                 if c.replacement:
                     e = L.lifecycle.by_model(c.replacement)
                     card["replacement"] = {"model": c.replacement, "entry": e}
@@ -701,7 +701,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
             return PlainTextResponse("bad request", status_code=400)
         return inbox_change(request, u, "dismiss", cid, fmt)
 
-    # ------------------------------------------------------------ the candidate for an alias: plan and run strip (TM-1258)
+    # ------------------------------------------------------------ the candidate for an alias: plan and run strip
 
     @app.get("/models/c/{alias}")
     def models_candidate(request: Request, alias: str):
@@ -735,7 +735,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
 
     @app.post("/models/c/{alias}/rerun")
     def models_candidate_rerun(request: Request, alias: str, csrf: str = Form(""), run_id: str = Form(""), fmt: str = Form("")):
-        """TM-1301: measure a finished run again. The change lists its run id in modelLifecycle.runner.rerun (appended to what the
+        """Measure a finished run again. The change lists its run id in modelLifecycle.runner.rerun (appended to what the
         site already lists); the runner's next pass queues a new run for the same combination. A change to review and commit."""
         u, deny = admin(request)
         if deny:
@@ -764,7 +764,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
             notes.insert(1, "modelLifecycle.runner.enabled is off here, so nothing measures it until the runner is turned on")
         return _change(request, u, L.lifecycle, inv, notes, f"Run {run_id} again", fmt, {"run_id": run_id}, f"/models/c/{alias}/rerun", raw=new_raw)
 
-    # ------------------------------------------------------------ the budget (TM-1258)
+    # ------------------------------------------------------------ the budget
 
     @app.get("/models/budget")
     def models_budget(request: Request):
@@ -879,7 +879,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
                        {"alias": alias}, "/models/promote")
 
     def family_note(e, target):
-        """What promoting hosted entry `e` under `target` does when `target` is its family alias (TM-1297), else None."""
+        """What promoting hosted entry `e` under `target` does when `target` is its family alias, else None."""
         if not (fz.has_family(e.model) and target == fz.family_of(e.model)):
             return None
         return {"family": target, "generation": fz.generation_alias(e.model), "keep": L.lifecycle.keep_generations}
@@ -893,7 +893,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         if e is None or e.source.kind != "hosted" or e.stage != "candidate":
             return render(request, "error.html", u, status_code=404, title="Not found", message="That is not a hosted candidate.")
         vr, vs = verdicts()
-        target = target or (fz.family_of(e.model) if fz.has_family(e.model) else "")      # TM-1297: a family's floating alias is the default
+        target = target or (fz.family_of(e.model) if fz.has_family(e.model) else "")      # a family's floating alias is the default
         prog = progress(target, e.model, vs=vs) if target and nm.ALIAS_RE.match(target) else None
         return render(request, "models_promote_hosted.html", u, e=e, target=target, prog=prog, error=None, verdict_reading=vr,
                       fam=family_note(e, target))
@@ -933,7 +933,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         None, and the template says "not recorded"."""
         ex = v.extras
         label = ex.get("label") or v.verdict
-        # an older runner wrote pass / fail; the label set is better / same / worse / inconclusive, and a tradeoff (TM-1269) is neither
+        # an older runner wrote pass / fail; the label set is better / same / worse / inconclusive, and a tradeoff is neither
         # a win nor a loss. A label this page does not know reads as a warning, never as a crash and never as OK.
         state = {"better": "ok", "same": "ok", "worse": "critical", "inconclusive": "warning", "tradeoff": "warning", "pass": "ok",
                  "fail": "critical"}.get(label, "warning")
@@ -1045,7 +1045,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
                        f"/models/v/{run_id}/reject")
 
     def hosted_alias(alias):
-        """{model, entry} for an alias the gateway routes to a hosted provider, else None (TM-1265: its page carries the countdown)."""
+        """{model, entry} for an alias the gateway routes to a hosted provider, else None (its page carries the countdown)."""
         m = next((g for g in gateway_list() if g.get("model_name") == alias and not alias.endswith(ml.NEXT)), None)
         h = bg.hosted_model(m) if m else ""
         if not h:
@@ -1095,7 +1095,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
                "ours": bool(cur)}
         for g in fv.generations:
             g.retire = ({**g.retire, "badge": ib.retire_state(g.retire)} if g.retire else None)
-        # what each generation costs (TM-1298), keyed by its pinned alias: two pinned aliases may route one model, and the
+        # what each generation costs, keyed by its pinned alias: two pinned aliases may route one model, and the
         # current generation's row also counts the calls made through the floating alias
         spend, demand = (spend_src.read() if spend_src is not None else None), src_demand.read()
         fin = {**cost_heads(), "costs": {}, "price_footer": "", "callers": None}
@@ -1178,7 +1178,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
     @app.get("/models/m/{eid}")
     def models_model(request: Request, eid: str):
         """One model: where it comes from (links built from the catalog, never fetched), the links the operator
-        added, which routes serve it on which gateway, and its promotion record (TM-0938)."""
+        added, which routes serve it on which gateway, and its promotion record."""
         u, deny = admin(request)
         if deny:
             return deny

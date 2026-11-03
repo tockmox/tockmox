@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1296, the Models page revision 2: a Needs-you strip (exceptions only, one action each), Local models grouped by inference node
+"""The Models page revision 2: a Needs-you strip (exceptions only, one action each), Local models grouped by inference node
 with each deployment's tunings, Frontier models grouped by provider and family, and the catalog and the upstream sources folded to one
 line each. Build drift is on the node page (test_models_drift.py). Run from tockmox-ui/: python -m pytest tests"""
 import html
@@ -282,7 +282,7 @@ def test_frontier_models_are_grouped_by_provider_then_family_newest_first(tmp_pa
         "anthropic/claude-opus-5-5", "anthropic/claude-sonnet-5-5", "anthropic/claude-sonnet-5"]
     assert "openai/gpt-5.1" in fp.split('id="prov-2-h"', 1)[1]
     assert "4 models in 3 families · 2 providers" in plain(fp.split("</div>", 1)[0])
-    assert "Price and spend are not recorded yet." not in plain(fp)                              # TM-1298 records them
+    assert "Price and spend are not recorded yet." not in plain(fp)                              # records them
 
 
 def frow(fp, model):
@@ -389,7 +389,7 @@ def test_a_stale_run_is_flagged_on_the_strip(tmp_path):
 
 
 def _noshell(t):
-    """The page minus the kit's one same-origin script (shell.js: theme and header menus, TM-1304); any
+    """The page minus the kit's one same-origin script (shell.js: theme and header menus); any
     other script tag is still a failure."""
     import re as _re
     return _re.sub(r'<script src="/static/kit/shell\.js[^"]*"></script>', "", t)

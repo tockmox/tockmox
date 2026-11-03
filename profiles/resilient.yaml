@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # THE RESILIENT PROFILE ... an install that can prove it survives losing the
-# cluster (TM-0597).
+# cluster.
 #
 # Add it AFTER another profile, or after your own globals; it does not replace
 # one. It sets no footprint, no component and no storage class. It makes one

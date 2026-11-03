@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# The first-party add-on manifest of the Security Posture Probe (TM-1115).
+# The first-party add-on manifest of the Security Posture Probe.
 # The format is defined in addons/README.md and enforced by
 # tools/check-addon-manifest.sh; a field the gate does not know is refused.
 manifestVersion: 1

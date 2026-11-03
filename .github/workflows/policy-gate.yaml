@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# THE POLICY GATE, PROVEN (TM-0383). Its own workflow rather than a ci.yaml step
+# THE POLICY GATE, PROVEN. Its own workflow rather than a ci.yaml step
 # because it installs and runs a real LiteLLM proxy, which ci.yaml's static
 # gates deliberately do not, and because a failure here should read as "the
 # sovereignty claim broke", not as one red line among forty.
@@ -11,7 +11,7 @@
 #                                backend killed, a restricted request with a
 #                                client fallback to an external model, and
 #                                nothing reaching the external backend
-#   tests/key-policy/            the key policy (TM-0991): unit tests, then a
+#   tests/key-policy/            the key policy: unit tests, then a
 #                                real proxy and database refusing every bad
 #                                key write, and the same writes allowed with
 #                                the policy unregistered (the red leg)
@@ -41,7 +41,7 @@ jobs:
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
         with:
           version: ${{ env.HELM_VERSION }}
-      # Subcharts keyed on every Chart.lock (TM-1286): a hit makes helm-deps.sh offline.
+      # Subcharts keyed on every Chart.lock: a hit makes helm-deps.sh offline.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: charts/*/charts
@@ -50,7 +50,7 @@ jobs:
         run: bash tools/helm-deps.sh
       - name: the config invariant refuses every bad config by name
         run: bash tools/check-policy-gate.sh
-      # The LiteLLM venv (TM-1286), keyed on the ai layer's Chart.lock (which moves with the vendored
+      # The LiteLLM venv, keyed on the ai layer's Chart.lock (which moves with the vendored
       # LiteLLM) and the runner's Python. The install step below still checks the version it finds.
       - id: py
         run: echo "v=$(python3 -c 'import sys; print(sys.version.split()[0])')" >> "$GITHUB_OUTPUT"
@@ -74,7 +74,7 @@ jobs:
           echo "LITELLM_BIN=$RUNNER_TEMP/litellm/bin/litellm" >> "$GITHUB_ENV"
       - name: the forced failure - local backend down, nothing reaches external
         run: bash tests/policy-gate/run.sh
-      # TM-0991. The key policy's unit tests, then the same LiteLLM with a real Postgres (the runner image's own
+      # The key policy's unit tests, then the same LiteLLM with a real Postgres (the runner image's own
       # binaries, under /usr/lib/postgresql) and its red leg: the policy unregistered, the same writes succeed.
       - name: the key policy - unit tests
         run: |
@@ -83,7 +83,7 @@ jobs:
       - name: the key policy - the prisma client
         # litellm[proxy] does not install the prisma client (only litellm's extra-proxy extra does); pinned to the
         # version the local proof ran with, inside litellm's own range (>=0.11.0,<1.0). Its own step so its seconds
-        # show apart from the proxy test's (TM-1365): the two together were one 228 s median step.
+        # show apart from the proxy test's: the two together were one 228 s median step.
         run: |
           "$RUNNER_TEMP/litellm/bin/pip" install --quiet "prisma==0.15.0"
           proxy_dir="$("$RUNNER_TEMP/litellm/bin/python" -c 'import litellm, os; print(os.path.join(os.path.dirname(litellm.__file__), "proxy"))')"

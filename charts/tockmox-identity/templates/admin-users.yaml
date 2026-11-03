@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-ADMIN MEMBERSHIP (TM-0820, A3). Adds the users named in `sso.adminUsers` to the
+ADMIN MEMBERSHIP (A3). Adds the users named in `sso.adminUsers` to the
 admin group, and does nothing else. The default (an empty list) renders NOTHING.
 
 WHY A JOB AND NOT A BLUEPRINT. A blueprint's `users:` on a group is a SET: it
@@ -91,8 +91,7 @@ spec:
         app.kubernetes.io/name: tockmox-authentik-admin-users
     spec:
       restartPolicy: Never
-      # No Kubernetes API calls: a ServiceAccount of its own and no token (TM-0759,
-      # CIS 5.1.5 and 5.1.6). It runs `ak shell` against the database.
+      # No Kubernetes API calls: a ServiceAccount of its own and no token (# CIS 5.1.5 and 5.1.6). It runs `ak shell` against the database.
       # An Argo hook with BeforeHookCreation, so changing the pod template is safe on upgrade.
       serviceAccountName: tockmox-admin-users
       automountServiceAccountToken: false
@@ -163,7 +162,7 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
 ---
-# TM-0759: this workload's own identity, with no token. The namespace's `default`
+# this workload's own identity, with no token. The namespace's `default`
 # account is not used (CIS 5.1.5 and 5.1.6).
 apiVersion: v1
 kind: ServiceAccount

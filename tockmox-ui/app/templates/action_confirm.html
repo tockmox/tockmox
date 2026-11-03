@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ d.title }}{% endblock %}
 {% block main %}
-{#- TM-1311 (spec section 7): every action names its target, its effect and its undo, and asks once more. -#}
+{#- spec section 7: every action names its target, its effect and its undo, and asks once more. -#}
 <p class="crumb"><a href="{{ back }}">Back</a></p>
 <section class="panel confirm" aria-labelledby="confirm-h">
   <h1 id="confirm-h">{{ d.title }}</h1>

@@ -227,7 +227,7 @@
       // how tockmox-identity's databaseBackup.postgresImage names it; Renovate
       // matches the name as written, so "postgres" alone let a 17 -> 18 bump of
       // that pg_dump client through while the server it dumps stays on 17
-      // (TM-1010, 2026-10-11: dropped from the sweep).
+      // (2026-10-11: dropped from the sweep).
       matchDatasources: ["docker"],
       matchPackageNames: ["postgres", "docker.io/library/postgres", "ghcr.io/cloudnative-pg/postgresql"],
       matchUpdateTypes: ["major"],
@@ -280,7 +280,7 @@
       // several releases a week and their fixes matter (spend accounting,
       // access checks), so this rule sets no soak and no Monday window: a PR
       // opens as soon as a stable release is out. That ruling stands for Open
-      // WebUI; for LiteLLM the next rule puts three days back (TM-1197).
+      // WebUI; for LiteLLM the next rule puts three days back.
       // AFTER the non-major group on purpose, so this group name wins for
       // these packages. Both Open WebUI pins (the image tag and the
       // trust-bundle initContainer) are the same package, so they land in one
@@ -303,7 +303,7 @@
     },
     {
       // LITELLM WAITS THREE DAYS ON MAIN (maintainer ruling, 2026-10-28,
-      // TM-1197). On 2026-10-21 LiteLLM's release pipeline was hijacked and
+      // ). On 2026-10-21 LiteLLM's release pipeline was hijacked and
       // v1.107.0 shipped a credential stealer; our bump to 1.106.2 merged 36
       // minutes before that window opened, so the exposure was luck. The wait
       // lets the vendor pull a bad release before a PR for it exists (1.107.0

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# The trend panels the Tockmox UI draws (TM-1306; specs/tockmox-ui/SPEC.md section 6 in the planning repo).
+# The trend panels the Tockmox UI draws (specs/tockmox-ui/SPEC.md section 6 in the planning repo).
 #
 # DATA, no code. Each panel's PromQL lives here ONCE: app/charts.py draws it server-side as SVG with a text
 # alternative, and tools/gen-dashboard-status.py writes the same expressions into the Tockmox / Status

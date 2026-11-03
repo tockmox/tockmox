@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1014 and TM-1017: the fixes from the 0.8.0 testing pass on the reference site (2026-10-11).
+"""The fixes from the 0.8.0 testing pass on the reference site (2026-10-11).
 
   footer        the RUNNING Tockmox version, not the UI's own build number; a pill when newer exists
   heartbeat     TockmoxHeartbeat is an always-firing heartbeat: Alive, never a firing row
@@ -71,7 +71,7 @@ def test_tockmox_heartbeat_is_alive_not_a_firing_row(tmp_path, world):
     rows = t.split("<tbody>")[-1]
     assert "TockmoxHeartbeat" not in rows.split("</tbody>")[0].replace("Alive", "")  # not a row in the firing table
     assert "<code>TockmoxHeartbeat</code> is firing, as it always should" in t
-    assert "KubePodNotReady" in admin(tmp_path, world).get("/status/unplaced").text   # TM-1305: on its part's drawer
+    assert "KubePodNotReady" in admin(tmp_path, world).get("/status/unplaced").text   # on its part's drawer
     assert "Active, not silenced, not inhibited: 1" in t
 
 
@@ -94,7 +94,7 @@ def test_home_links_the_docs_on_the_platform_and_on_github_at_the_release(tmp_pa
     c = admin(tmp_path, world, tweak=lambda d: d["site"].update({"docsUrl": "https://docs.int.example.com"}))
     t = c.get("/").text
     assert 'href="https://docs.int.example.com/"' in t                       # footer and Help > Documentation
-    t = c.get("/about").text                                                  # TM-1304: the GitHub copy moved to About
+    t = c.get("/about").text                                                  # the GitHub copy moved to About
     assert 'href="https://github.com/tockmox/tockmox/tree/v0.8.0/docs"' in t
 
 
@@ -187,7 +187,7 @@ def test_sign_out_can_be_kept_local(tmp_path, world):
     assert r.status_code == 200 and "You are signed out" in r.text
 
 
-# ------------------------------------------------------------ capabilities (TM-1017)
+# ------------------------------------------------------------ capabilities
 
 CONF = {"identity": True, "observability": True, "notifications": True, "aiPlane": True,
         "dataProtection": True, "hardwareTelemetry": False, "workflowAutomation": True, "networkPolicy": True}
@@ -239,7 +239,7 @@ def test_app_tiles_open_the_short_link_they_show(tmp_path, world):
 
 
 def test_inference_nodes_tab_is_named_in_full(tmp_path, world):
-    # TM-1304: Inference nodes is a page in the AI section's rail, named in full there.
+    # Inference nodes is a page in the AI section's rail, named in full there.
     t = admin(tmp_path, world).get("/models").text
     assert ">Inference nodes</a>" in t and ">Nodes</a>" not in t
 

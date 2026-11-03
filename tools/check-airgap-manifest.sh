@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # THE FIVE-SURFACE TABLE IN airgap.md IS GENERATED FROM tools/airgap-manifest.yaml
-# AND CHECKED AGAINST THE TREE (TM-0185).
+# AND CHECKED AGAINST THE TREE.
 #
 #   ./tools/check-airgap-manifest.sh              the gate: report, exit 1 on anything missing or stale
 #   ./tools/check-airgap-manifest.sh --write      regenerate the table in the page from the manifest and the tree

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # shellcheck disable=SC2015  # `ok ... || bad ...`: ok and bad are printf wrappers that return 0, so C runs only when A or B failed
 #
-# KNOWLEDGE MODE, AT RENDER (TM-1256). What the chart renders when knowledge is
+# KNOWLEDGE MODE, AT RENDER. What the chart renders when knowledge is
 # on, and that every refusal in templates/knowledge.yaml fires: each one guards
 # a failure that is quiet otherwise (documents embedded off-site, restricted
 # material on a shared console, records and vectors restored at two points).

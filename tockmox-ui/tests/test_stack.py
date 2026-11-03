@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1305: Status draws the stack (specs/tockmox-ui/SPEC.md section 5 in the planning repo).
+"""Status draws the stack (specs/tockmox-ui/SPEC.md section 5 in the planning repo).
 
   placing    every signal on exactly one part: app globs, layer claims, site apps, alert labels and
              globs, namespaces, Unplaced last and shown first
@@ -151,8 +151,8 @@ def test_a_scrape_target_down_lands_by_namespace():
 
 
 def test_site_apps_group_under_the_app_they_extend():
-    assert stack.site_groups(["forgejo", "forgejo-backup", "paperless", "site-monitoring"]) == \
-        {"forgejo": "forgejo", "forgejo-backup": "forgejo", "paperless": "paperless", "site-monitoring": "site-monitoring"}
+    assert stack.site_groups(["forgejo", "forgejo-backup", "wiki", "site-monitoring"]) == \
+        {"forgejo": "forgejo", "forgejo-backup": "forgejo", "wiki": "wiki", "site-monitoring": "site-monitoring"}
 
 
 def test_site_apps_and_site_secrets_belong_to_argo_cd():
@@ -198,7 +198,7 @@ def test_a_part_whose_component_is_not_deployed_is_absent_not_locked():
 
 
 def test_the_site_repository_part_shows_only_with_the_built_in_forges_rules():
-    # TM-1337: the observability layer renders tockmox-site-repository only for site.forge: built-in.
+    # the observability layer renders tockmox-site-repository only for site.forge: built-in.
     assert "site-repository" not in place(readings()).by_id
     apps = [layer(x) for x in ALL if x != "observability"] + [
         layer("observability", resources=[("PrometheusRule", "tockmox-site-repository")])]
@@ -242,7 +242,7 @@ def test_a_site_adds_a_part_and_a_band():
     {"bands": 5},
     {"bands": [{"id": "x", "parts": [{"id": "y", "when": 5}]}]},
     {"bands": [{"id": "x", "parts": [{"id": "y", "alerts": {"a": 1}}]}]},
-    {"bands": [{"id": "x", "parts": [{"id": "y", "alerts": ["A*"], "trend": "part-volum"}]}]},   # TM-1306: a typo
+    {"bands": [{"id": "x", "parts": [{"id": "y", "alerts": ["A*"], "trend": "part-volum"}]}]},   # a typo
     {"bands": [{"id": "x", "parts": [{"id": "y", "alerts": ["A*"], "trend": "alerts-firing"}]}]},  # not a part panel
 ])
 def test_a_malformed_site_stack_stops_the_ui_at_start(tmp_path, bad):

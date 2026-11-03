@@ -222,13 +222,8 @@ and 15m02s from creating the VM. The script did the hand steps too, so
 they are inside the number. It leaves out reading time, it started with the model
 host already running, and one harness retry of about 40 seconds is not counted.
 This is one run, so it is a point and not a range. Expect a person reading as they
-go to take longer; the range will widen when people other than the author time it
-(TM-0280\*). The run log is kept with the maintainer's lab evidence for TM-0284\*.
-
-<sub>\* Internal task-tracker references. They don't resolve publicly, and every
-sentence that carries one is written to stand without it; one that doesn't is a
-documentation defect worth an issue
-([the convention](../CONTRIBUTING.md#tm--and-hl--identifiers)).</sub>
+go to take longer; the range will widen when people other than the author time it.
+The run log is kept with the maintainer's lab evidence.
 
 ## Opinionated, not closed
 

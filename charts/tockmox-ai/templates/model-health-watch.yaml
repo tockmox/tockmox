@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-The production health watch (REQ-0048 AC-48.19, TM-1263). OFF by default: modelLifecycle.healthWatch.enabled.
+The production health watch (REQ-0048 AC-48.19). OFF by default: modelLifecycle.healthWatch.enabled.
 
 Every 15 minutes a small CronJob in the Tockmox UI image reads Prometheus and compares each promoted alias with what
 it served before its promotion (promotion.previous), on error rate and p95 latency from the gateway's own metrics, at
@@ -29,7 +29,7 @@ watch.secrets), so the bot that opens the admit and promote PRs opens the revert
 {{- $ui := .Values.tockmoxUi | default dict -}}
 {{- $img := $h.image | default (ternary ($ui.image | default "") "" (default false $ui.enabled)) -}}
 {{- if not $img -}}
-{{- fail "modelLifecycle.healthWatch.enabled is true but there is no image: healthWatch.image is empty and the Tockmox UI is off or has no tockmoxUi.image. The health watch runs in the Tockmox UI image, which ships as source (TM-0902). Build it, push it to your registry, and name it in tockmoxUi.image (it is used by default) or healthWatch.image." -}}
+{{- fail "modelLifecycle.healthWatch.enabled is true but there is no image: healthWatch.image is empty and the Tockmox UI is off or has no tockmoxUi.image. The health watch runs in the Tockmox UI image, which ships as source. Build it, push it to your registry, and name it in tockmoxUi.image (it is used by default) or healthWatch.image." -}}
 {{- end -}}
 {{- $w := $lc.watch | default dict -}}
 {{- $pr := $w.pullRequests | default dict -}}

@@ -84,7 +84,7 @@
       closeMenus(inside);
     });
     // Roving arrows (kit 0.4.1): inside a [data-roving] list, the arrow keys move between its links; Tab
-    // still moves in reading order. Status uses it for each band of the stack (TM-1305).
+    // still moves in reading order. Status uses it for each band of the stack.
     document.addEventListener("keydown", function (ev) {
       var keys = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
       if (!(ev.key in keys) || ev.altKey || ev.ctrlKey || ev.metaKey) { return; }

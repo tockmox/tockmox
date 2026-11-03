@@ -39,7 +39,7 @@ global:
   # complaining. Set it to a class you have.
   localStorageClass: "local-path"
 
-  # THE RESILIENT CLAIM (TM-0597). Empty makes no claim. `resilient`, set by
+  # THE RESILIENT CLAIM. Empty makes no claim. `resilient`, set by
   # profiles/resilient.yaml, says "this install is resilient": the layers that
   # have a backup then REFUSE to render while the backup is off or points inside
   # the cluster, and raise an alert while no restore drill has passed. Leave it
@@ -183,8 +183,7 @@ capabilities:
 # being asked, is rude. Point Open WebUI at a model host you already run, or
 # turn Ollama on deliberately.
 #
-# LiteLLM, the model gateway, FOLLOWS THE CAPABILITY since 0.8.0 (TM-0460,
-# REQ-0004 AC-4.1, ruled 2026-10-08). Through 0.7.x it shipped off because it
+# LiteLLM, the model gateway, FOLLOWS THE CAPABILITY since 0.8.0 (# REQ-0004 AC-4.1, ruled 2026-10-08). Through 0.7.x it shipped off because it
 # needs two things only the site can supply: a master key Secret
 # (docs/administration/secrets.md; mint-secrets.sh now mints it by default)
 # and a model list naming hosts on your network (it still ships empty, so a
@@ -232,7 +231,7 @@ apps:
 #   modelGateway.*   objects THIS chart renders around it
 # ---------------------------------------------------------------------------
 modelGateway:
-  # Open WebUI's trust bundle (TM-1053). Lives here because this object is the
+  # Open WebUI's trust bundle. Lives here because this object is the
   # provisional one; it is not about the gateway. templates/trust-env.yaml renders
   # the ConfigMap the `tockmox-trust-bundle` initContainer reads.
   trustBundle:
@@ -279,7 +278,7 @@ modelGateway:
     # directory is a dump and restore, not an image bump.
     imageName: ""
     # The postgres container's resources, set on the Cluster's spec.resources
-    # (TM-0595). Measured on the prod install 2026-10-05 (accepted for the lab):
+    #. Measured on the prod install 2026-10-05 (accepted for the lab):
     # peak 212.5 MiB in tockmox-ai (~3 days at v0.7.2), 129.2 MiB for the same
     # database in the pre-migration namespace (30 days); average 127.4 MiB.
     # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
@@ -303,7 +302,7 @@ modelGateway:
     # does not work.
     monitoring:
       enablePodMonitor: true
-    # DISASTER RECOVERY INTO THIS CLUSTER (TM-0820 C1). Off: the cluster
+    # DISASTER RECOVERY INTO THIS CLUSTER. Off: the cluster
     # bootstraps empty with `initdb`, as before. On: it bootstraps from a base
     # backup and WAL in an ObjectStore instead (`bootstrap.recovery`), so a lost
     # gateway database comes back with its keys, spend and teams. The database,
@@ -320,7 +319,7 @@ modelGateway:
       objectStoreName: ""
       serverName: ""
       sourceName: ""
-    # BACKUPS FOLLOW THE dataProtection CAPABILITY (TM-0312). The house
+    # BACKUPS FOLLOW THE dataProtection CAPABILITY. The house
     # tri-state: unset (null) follows `capabilities.dataProtection`, which is on,
     # so a stock install with the model gateway enabled is backed up; true or
     # false here means what it says whatever the capability says.
@@ -382,7 +381,7 @@ modelGateway:
       # restore drill reads the same name. Set it when a cluster is RECOVERED
       # from a store it will also archive to: CNPG refuses to archive into a
       # path that already holds another cluster's backups, so the new cluster
-      # needs a new server name (TM-0820 C1/C6).
+      # needs a new server name.
       serverName: ""
       schedule: "0 0 3 * * *"      # six fields (CNPG includes seconds); 03:00 daily
       # ----------------------------------------------------------------------
@@ -416,7 +415,7 @@ modelGateway:
         schedule: "30 4 * * 1"
         suspend: false
         image: alpine/k8s:1.37.1
-        # WHERE THE DRILL RECORDS ITS ROW (TM-0459): one JSON object per run in
+        # WHERE THE DRILL RECORDS ITS ROW: one JSON object per run in
         # a bucket of its own in the shipped Garage, read back and checksummed
         # before the run may end as a PASS. A run whose row cannot be written or
         # read back FAILS (non-zero exit, the reason in the Job's log and its
@@ -432,7 +431,7 @@ modelGateway:
           credentialsSecretName: ""    # tockmox-drill-register-credentials
 
   # ------------------------------------------------------------------------
-  # SITE HOOKS FOR THE MODEL GATEWAY (TM-0787). A supported way to load your
+  # SITE HOOKS FOR THE MODEL GATEWAY. A supported way to load your
   # own LiteLLM callbacks ... a pre-call policy gate, a logging hook ... with
   # no forked template.
   #
@@ -482,7 +481,7 @@ modelGateway:
     files: {}
 
   # ------------------------------------------------------------------------
-  # THE KEY POLICY (TM-0991). Off by default in this release; the default render
+  # THE KEY POLICY. Off by default in this release; the default render
   # is unchanged. Turning it on is two edits, checked together by preflight:
   #
   #   modelGateway:
@@ -524,7 +523,7 @@ modelGateway:
     requireMcp: true
 
   # ------------------------------------------------------------------------
-  # PROMPT CONTENT IN AN OBSERVABILITY CALLBACK (TM-1250). LiteLLM's otel,
+  # PROMPT CONTENT IN AN OBSERVABILITY CALLBACK. LiteLLM's otel,
   # Langfuse and Arize callbacks copy every prompt and response to their
   # collector unless litellm_settings.turn_off_message_logging is true, so the
   # render refuses one of them with message logging on. If the collector is one
@@ -538,7 +537,7 @@ modelGateway:
     reason: ""
 
   # ------------------------------------------------------------------------
-  # THE POLICY GATE (TM-0383). Off by default; the default render is unchanged.
+  # THE POLICY GATE. Off by default; the default render is unchanged.
   #
   # A pre-call hook that gives every request a CLASS and refuses one whose class
   # may not use the endpoint tier of the model it asked for. It is the shipped
@@ -580,7 +579,7 @@ modelGateway:
     routePosture: {}
 
   # ------------------------------------------------------------------------
-  # THE CONSOLE'S VIRTUAL KEY, MINTED BY THE CHART (TM-0460 ruling B1,
+  # THE CONSOLE'S VIRTUAL KEY, MINTED BY THE CHART (ruling B1,
   # 2026-10-08). Open WebUI authenticates to the gateway with a LiteLLM virtual
   # key, and a virtual key can only be issued by a running LiteLLM. Through
   # 0.7.x that was a manual post-install step (install.md, "Mint the console's
@@ -640,7 +639,7 @@ modelGateway:
     # How long one attempt polls the gateway before giving the pod back to the
     # Job's backoff. Seconds.
     waitSeconds: 600
-    # THE CHECK (TM-0982). The Job repairs a rejected key at sync time only;
+    # THE CHECK. The Job repairs a rejected key at sync time only;
     # between syncs nothing else notices one, because the llm uptime probe
     # carries no key (it stayed green through the 0.8.0 upgrade lab's
     # off-then-on cycle with the console unable to chat). So a CronJob sends
@@ -663,7 +662,7 @@ modelGateway:
       suspend: false
 
   # ------------------------------------------------------------------------
-  # THE PRE-UPGRADE BACKUP (TM-1054). Open WebUI and LiteLLM migrate their
+  # THE PRE-UPGRADE BACKUP. Open WebUI and LiteLLM migrate their
   # database forward when a new version starts and never back, so a rollback is
   # a restore, and a restore needs a backup taken before the new version ran.
   # A PreSync hook Job compares the version each application runs now with the
@@ -723,7 +722,7 @@ sso:
   # same way. Keep it true if you migrate existing local accounts onto SSO and
   # you control every address; set false once accounts are migrated, or if
   # users can change their own email. With false, a login whose email matches
-  # an existing local account is refused rather than merged (TM-0669).
+  # an existing local account is refused rather than merged.
   mergeAccountsByEmail: true
 
 # ---------------------------------------------------------------------------
@@ -796,7 +795,7 @@ inferenceNodes:
 modelLifecycle:
   catalog: []
   promotion:
-    # Independent passing evidence per required leg (TM-1248): a verdict counts
+    # Independent passing evidence per required leg: a verdict counts
     # once per evidence key (candidate revision, eval set and its sha256,
     # sampling, engine, node), so rerunning one frozen set no longer counts
     # three times. Raise it only by varying something real: a second set
@@ -805,7 +804,7 @@ modelLifecycle:
   # The model watcher (and, with pullRequests, its PR opener) as a CronJob of
   # its own: the one part of Tockmox that reaches the internet unprompted, so
   # OFF by default. It runs in the Tockmox UI image, which ships as source
-  # (TM-0902): build it and name it in `image`. Its NetworkPolicy allows DNS
+  #: build it and name it in `image`. Its NetworkPolicy allows DNS
   # and HTTPS to the internet only (no cluster, LAN or metadata address);
   # add an in-cluster forge under egress.extra. docs/administration/model-lifecycle.md.
   # Every other key under watch (providers, quantAuthors, pullRequests ...)
@@ -814,7 +813,7 @@ modelLifecycle:
     enabled: false
     image: ""
     schedule: "17 6 * * *"
-    # List prices for hosted models (TM-1298): the watcher reads LiteLLM's price map (the file the gateway prices spend with)
+    # List prices for hosted models: the watcher reads LiteLLM's price map (the file the gateway prices spend with)
     # from raw.githubusercontent.com, once per run, and records each hosted model's price with the day it was read. On while
     # the watcher is on; set enabled: false for a site that wants no request to that host (prices then read unknown unless
     # frontier.prices states them).
@@ -830,7 +829,7 @@ modelLifecycle:
       accessModes: [ReadWriteOnce]
     egress:
       extra: []
-  # The production health watch (REQ-0048 AC-48.19, TM-1263): a CronJob in the Tockmox
+  # The production health watch (REQ-0048 AC-48.19): a CronJob in the Tockmox
   # UI image that reads Prometheus every 15 minutes and compares each promoted alias
   # with what it served before (promotion.previous) on error rate and p95 latency,
   # at LIKE HOURS of the day, inside soakDays of the promotion. OFF by default.
@@ -854,7 +853,7 @@ modelLifecycle:
       toolParseFailureRatio: 2.0
       minRequests: 50                 # a window or baseline with fewer requests is never judged
       forMinutes: 30                  # a breach must hold this long
-      likeHours: true                 # compare with the same hours of the day, not a flat mean (TM-1274)
+      likeHours: true                 # compare with the same hours of the day, not a flat mean
       # windowMinutes: 60             # each reading is a trailing window of this length (a multiple of 15)
       # baselineDays: 7               # days before the promotion that make the baseline
       # errorRateFloor: 0.01          # a baseline of zero failures is read as this
@@ -874,20 +873,20 @@ modelLifecycle:
   productionKeys: {}
   frontier:
     providers: {}
-    # How many generations of one hosted family stay available (TM-1297). Each is served under
+    # How many generations of one hosted family stay available. Each is served under
     # a pinned alias that never moves (claude-sonnet-5-5), and the family alias (claude-sonnet)
     # follows the current one and moves only through a promotion PR. A generation leaves when its
     # provider retires it (the watcher's countdown, then a retire PR) or when a promotion would
     # leave the family with more than this many: that PR removes the oldest and says so. Never
     # silently, never by the UI. A whole number of 1 or more.
     keepGenerations: 3
-    # A price the SITE states for a hosted model (TM-1298), per 1M tokens in and out, with the day you read it. It wins over
+    # A price the SITE states for a hosted model, per 1M tokens in and out, with the day you read it. It wins over
     # the watcher's price (LiteLLM's price map) and the Models page labels it "set by this site". Quote the date. A negative
     # price, a missing date or an extra key is refused when the chart renders; a model with no price reads unknown, never 0.
     #   prices:
     #     anthropic/claude-sonnet-5-5: {inPer1M: 3.0, outPer1M: 15.0, date: "2026-10-30"}
     prices: {}
-  # What the Models page shows for hosted spend (TM-1258, TM-1298); the UI reads these queries from the Prometheus it already
+  # What the Models page shows for hosted spend; the UI reads these queries from the Prometheus it already
   # uses. Each figure is shown over the window its query names ([7d] reads "7 d"), so a [30d] query reads "30 d".
   #   budget:
   #     spendQuery: 'sum by (model_group) (increase(litellm_spend_metric_total[7d]))'   # measured USD per alias or model
@@ -906,7 +905,7 @@ modelLifecycle:
     resources:
       requests: { cpu: 50m, memory: 384Mi }
       limits: { memory: 1Gi }
-  # THE EVAL RUNNER ON A SCHEDULE (TM-1261, TM-1264). OFF by default. A CronJob (the
+  # THE EVAL RUNNER ON A SCHEDULE. OFF by default. A CronJob (the
   # scheduler) looks every `schedule` for admitted candidates (a live <alias>-next route
   # on the eval gateway; merging the admit PR was the consent to evaluate it) with no
   # finished run, waits until production has been quiet on the node, and starts ONE Job
@@ -916,7 +915,7 @@ modelLifecycle:
   # (run-status/1) on a small volume the Tockmox UI mounts read-only; the evidence the Job
   # writes (results, verdicts) lands beside it, and the UI reads verdicts and results from
   # there unless verdictsDir / resultsDir are set. Needs evalGateway.enabled.
-  # The runner is the Tockmox UI image, which ships as source (TM-0902): empty `image`
+  # The runner is the Tockmox UI image, which ships as source: empty `image`
   # means tockmoxUi.image, and the image MUST be built from the same commit as this chart.
   # The Job pods carry tockmox.com/eval-client: "true": add a peer that selects it to
   # evalGateway.allowedClients, or the gateway admits nobody. templates/eval-runner.yaml;
@@ -951,7 +950,7 @@ modelLifecycle:
     aliases: []
     # Run ids (run-status/1's run_id) to measure again although they finished: the next pass queues a new run for the
     # same candidate, set, engine, node and route, under a new run id. A listed id whose combination already has a newer
-    # finished run is left alone, so the list can stay until you tidy it. TM-1295's explicit re-run request.
+    # finished run is left alone, so the list can stay until you tidy it. This is the explicit re-run request.
     rerun: []
     evidence:
       pullRequests: false              # true: open the evidence PR with watch.pullRequests and watch.secrets
@@ -961,7 +960,7 @@ modelLifecycle:
       limits: { memory: 1Gi }
 
 # ---------------------------------------------------------------------------
-# KNOWLEDGE MODE (TM-1256; docs/administration/knowledge-mode.md). OFF.
+# KNOWLEDGE MODE (docs/administration/knowledge-mode.md). OFF.
 # Open WebUI's own Knowledge feature, configured the Tockmox way: embeddings
 # through the gateway on a LOCAL-tier route (refused otherwise), hybrid search,
 # file retention off, and optionally oikb keeping Knowledge bases in sync with
@@ -1012,7 +1011,7 @@ knowledge:
 # THE TOCKMOX UI (experimental in 0.8.0; Jeff 2026-10-07). The admin console
 # for inference nodes and model lifecycle: it reads the cluster, Prometheus
 # and these blocks, and every change it makes ends in YAML an admin commits.
-# OFF by default. Ships as source (TM-0902): build the image and name it.
+# OFF by default. Ships as source: build the image and name it.
 #
 # Its NetworkPolicy is the whole of what it may reach: DNS, the Kubernetes
 # API, Prometheus and Alertmanager, Traefik (for the OIDC issuer), the
@@ -1025,7 +1024,7 @@ knowledge:
 # first source path is charts/tockmox-<layer> as the Tockmox layers, whichever
 # repository serves them, so a site that mirrors the product tree (airgap.md
 # section 5, and every lab) reads its version like one on github.com. Set it
-# to match on one repository URL instead (TM-0979).
+# to match on one repository URL instead.
 # ---------------------------------------------------------------------------
 tockmoxUi:
   enabled: false
@@ -1042,7 +1041,7 @@ tockmoxUi:
   networkPolicy:
     apiServer: []                        # [{cidr: 10.0.0.10/32, port: 6443}]; empty uses global.lanCIDR on 6443
     extraEgress: []
-  # The update feed from a ConfigMap instead of the internet (TM-1027): the ConfigMap's
+  # The update feed from a ConfigMap instead of the internet: the ConfigMap's
   # keys appear under /feed, so `releases.json` and `releases.json.sig` make
   # config.updateCheck.feedUrl `file:///feed/releases.json`. With a file feed the
   # NetworkPolicy opens no HTTPS out. Empty mounts nothing.
@@ -1052,7 +1051,7 @@ tockmoxUi:
   # a site's own catalog from a ConfigMap, key catalog.yaml. Empty uses the product's default catalog.
   platformCatalog:
     configMap: ""
-  # Actions from the console (TM-1311, TM-1313; experimental; docs/administration/tockmox-ui.md, "Taking action").
+  # Actions from the console (experimental; docs/administration/tockmox-ui.md, "Taking action").
   # A separate tockmox-actions Deployment acts; the UI stays write-free. Each kind is on by default when this
   # install can do it with what Tockmox ships; argocd needs the site's Argo CD account. Off means absent.
   actions:
@@ -1071,7 +1070,7 @@ tockmoxUi:
       url: ""                            # http://argocd-server.argocd.svc
       tokenSecret: ""                    # a Secret in this namespace, key token
     identity:
-      # A recovery link for anyone who is not an administrator, and membership of the user group (TM-1315). Needs
+      # A recovery link for anyone who is not an administrator, and membership of the user group. Needs
       # sso.consoleActions.enabled in the identity layer and the token Secret both layers share
       # (tools/mint-secrets.sh --with-console-actions); docs/administration/identity.md, "From the console".
       enabled: false
@@ -1092,7 +1091,7 @@ open-webui:
     repository: ghcr.io/open-webui/open-webui
     tag: "v0.12.5"
   resources:
-    # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+    # measured on the prod install 2026-10-05 (accepted for the lab):
     # peak 742.6 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 784.0 MiB in the pre-migration namespace (30 days); average 718.5 MiB.
     # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
     # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -1102,7 +1101,7 @@ open-webui:
       memory: 1280Mi
   # ------------------------------------------------------------------------
   # THE CONSOLE TALKS TO THE MODEL GATEWAY, AND TO NOTHING ELSE, BY DEFAULT
-  # (TM-0460, REQ-0004 AC-4.1, ruled 2026-10-08). Through 0.7.x this block
+  # (REQ-0004 AC-4.1, ruled 2026-10-08). Through 0.7.x this block
   # shipped the API off and the URL empty, and the page that told you to point
   # the console at the gateway called it "optional, and recommended". The
   # shipped default now does it: the OpenAI-compatible API is on, the URL is
@@ -1202,7 +1201,7 @@ open-webui:
     capabilities:
       drop: ["ALL"]
   # ------------------------------------------------------------------------
-  # THE BUNDLED WEBSOCKET REDIS (TM-0135). Upstream deploys it by default with
+  # THE BUNDLED WEBSOCKET REDIS. Upstream deploys it by default with
   # both security contexts empty, so it failed all four restricted fields the
   # console itself now meets. It is the only default pod in this namespace that
   # did. uid 999 is the `redis` user the alpine image creates and its /data is
@@ -1224,7 +1223,7 @@ open-webui:
         repository: redis
         tag: 7.4.12-alpine
       resources:
-        # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+        # measured on the prod install 2026-10-05 (accepted for the lab):
         # peak 12.7 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2); average 11.7 MiB.
         # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
         # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -1327,7 +1326,7 @@ open-webui:
         fi
 
         echo "copy-app-data: $(cd "$src" && find . -type f -readable | wc -l) readable file(s) present at destination"
-    # TM-0903: no sample could be taken (it finishes in under a second on a warm
+    # no sample could be taken (it finishes in under a second on a warm
     # restart), so this is the 32Mi init-container floor doubled: it copies the
     # console's app tree, which the 32Mi shell-only containers do not.
     resources:
@@ -1341,7 +1340,7 @@ open-webui:
     - secretRef:
         name: tockmox-ai-sso-env
         optional: true
-    # Knowledge mode's settings (TM-1256), from the parent-rendered ConfigMap; absent unless knowledge.enabled.
+    # Knowledge mode's settings, from the parent-rendered ConfigMap; absent unless knowledge.enabled.
     - configMapRef:
         name: tockmox-ai-knowledge-env
         optional: true
@@ -1349,11 +1348,11 @@ open-webui:
     - secretRef:
         name: tockmox-ai-knowledge-key
         optional: true
-    # THE FIRST-ACCOUNT WINDOW, CLOSED BY CONSTRUCTION (TM-0859, ruled for 0.8.0).
+    # THE FIRST-ACCOUNT WINDOW, CLOSED BY CONSTRUCTION (ruled for 0.8.0).
     # Open WebUI makes the first account it ever creates an administrator,
     # whatever that account's groups, and SSO logins count. So on a fresh
     # install the first person through Authentik, admin or not, became the
-    # console's admin (TM-0856). Open WebUI also creates a local administrator
+    # console's admin. Open WebUI also creates a local administrator
     # at startup from WEBUI_ADMIN_EMAIL / WEBUI_ADMIN_PASSWORD when it has no
     # accounts at all, which makes the count one before anyone signs in.
     #
@@ -1490,7 +1489,7 @@ open-webui:
         # AFTER the Secret, so that modelGateway.trustBundle.expectCA wins over the
         # Secret's own copy of the key. This one renders whether or not SSO does
         # (templates/trust-env.yaml), which is what lets a site with SSO off stop
-        # restating this container (TM-1053).
+        # restating this container.
         - configMapRef:
             name: tockmox-ai-trust-env
             optional: true
@@ -1504,7 +1503,7 @@ open-webui:
           # store. A bundle built before the CA lands is wrong for the life of
           # the pod, and the old `else` branch printed a calm line while that
           # happened ... a silent permanent failure behind a reassuring
-          # message. TM-0632, measured on Grafana at a one-second margin.
+          # message. Measured on Grafana at a one-second margin.
           if [ "${TOCKMOX_EXPECT_CA:-false}" = "true" ]; then
             i=0
             while [ ! -s "$ca" ]; do
@@ -1539,7 +1538,7 @@ open-webui:
           drop: ["ALL"]
         seccompProfile:
           type: RuntimeDefault
-      # TM-0903: 0.6 MiB peak measured (waits for the CA, then copies one
+      # 0.6 MiB peak measured (waits for the CA, then copies one
       # bundle); 32Mi is the floor for every shell-and-cp init container.
       resources:
         requests: {memory: 8Mi}
@@ -1651,7 +1650,7 @@ litellm:
   # the config file the subchart mounts is left alone.
   # ------------------------------------------------------------------------
   #
-  # THE SAME TWO LISTS ALSO CARRY THE SCRATCH VOLUME (TM-0596). With
+  # THE SAME TWO LISTS ALSO CARRY THE SCRATCH VOLUME. With
   # readOnlyRootFilesystem true the Deployment gets tmp, .cache and .npm
   # emptyDirs from the subchart, but the migrations Job shares the security
   # context and gets none, and a values-supplied `tmp` at /tmp would collide
@@ -1767,7 +1766,7 @@ litellm:
       #
       # That is ONE of that command's two hazards. The other is that it wraps at
       # 64 columns, which put a newline inside AUTHENTIK_SECRET_KEY and broke the
-      # authentik embedded outpost on every by-the-book install (TM-0662). Both
+      # authentik embedded outpost on every by-the-book install. Both
       # are stated together in docs/administration/secrets.md, which is the rule
       # to follow when minting anything; `rand -hex` sidesteps both at any
       # length. tools/mint-secrets.sh refuses a control character outright.
@@ -1808,7 +1807,7 @@ litellm:
     TMPDIR: /scratch
 
   # Schema migrations run in their own Job rather than racing on proxy startup,
-  # and the Job is the SUBCHART'S OWN (TM-1196). Since 0.9.0 Tockmox renders no
+  # and the Job is the SUBCHART'S OWN. Since 0.9.0 Tockmox renders no
   # migrations Job of its own: litellm-helm's `migrationJob` is on and carries an
   # Argo CD SYNC hook through `jobAnnotations`, which upstream added for this
   # (BerriAI/litellm#42242, every litellm-helm tag from v1.106.0).
@@ -1822,7 +1821,7 @@ litellm:
   #                                  bump included, failed the sync with `field
   #                                  is immutable` and stopped after five tries.
   #                                  That is why 0.8.0 shipped a hash-named Job
-  #                                  of its own (TM-0596).
+  #                                  of its own.
   #   A Job named after its template That worked, and cost a copy of upstream's
   #                                  pod template to keep in step by hand, a
   #                                  gate to prove the copy still matched, and a
@@ -1840,7 +1839,7 @@ litellm:
   # the database's bootstrap. Argo does not compare a hook against the live
   # cluster, so it should never show OutOfSync and `selfHeal` should never
   # recreate it (read from Argo's hook documentation, NOT YET MEASURED on a
-  # cluster: TM-1196's lab test is the proof). The last Job stays after a sync
+  # cluster: a lab test is the proof). The last Job stays after a sync
   # (no TTL, below) until the next sync replaces it, which is the "green Job
   # you can still read" the empty TTL is for.
   #
@@ -1869,7 +1868,7 @@ litellm:
   #
   # AND THE TTL IS STILL REMOVED. Upstream defaults `ttlSecondsAfterFinished:
   # 120`. On the old ordinary-resource Job that was measured on a throwaway
-  # single-node install 2026-09-11 (TM-0495): the Job completes, the TTL
+  # single-node install 2026-09-11: the Job completes, the TTL
   # deletes it two minutes later, ArgoCD sees an object in desired state and
   # absent from the cluster, `selfHeal` recreates it, it runs again. Twelve
   # recreations in fifty-five minutes on an exact 300-second period, and
@@ -1908,7 +1907,7 @@ litellm:
     # database, the nightly backup captures nothing, and the weekly restore
     # drill correctly writes FAIL. **Every layer still reports Synced.**
     #
-    # This was MASKED until 2026-09-11 by the churn TM-0495 removed. A finite
+    # This was MASKED until 2026-09-11 by churn that has since been removed. A finite
     # `ttlSecondsAfterFinished` deletes a FAILED Job as readily as a completed
     # one, ArgoCD's selfHeal put it straight back, and each recreation bought
     # four more attempts ... so the migration eventually won, by accident, via a
@@ -1922,9 +1921,9 @@ litellm:
     # measured. Raise it if a substrate is slower; do NOT solve this by
     # reintroducing a TTL.
     backoffLimit: 20
-    # TM-0903: peak 1287.7 MiB (prisma migrate deploy, the run that completed),
+    # peak 1287.7 MiB (prisma migrate deploy, the run that completed),
     # measured on a 0.8.0 greenfield, 2026-10-08. limit = peak x 1.5 = 1931.6,
-    # rounded up to 2048Mi. The 1536Mi limit TM-0595 tried from a 953.1 MiB
+    # rounded up to 2048Mi. The 1536Mi limit tried earlier from a 953.1 MiB
     # sample was OOMKilled on 2026-10-06 (1309Mi read ten seconds before the
     # kill), which is why this is sized from the full run. Request = the peak
     # rounded down to a 128Mi step.
@@ -1938,7 +1937,7 @@ litellm:
     # to 1800. It is a WALL-CLOCK cap that ignores backoffLimit entirely: at
     # 1800 the Job is marked DeadlineExceeded after 30 minutes no matter how
     # many attempts remain, and DeadlineExceeded is terminal in exactly the way
-    # TM-0516 was about. 30 minutes clears the 12-minute bootstrap we measured,
+    # was about. 30 minutes clears the 12-minute bootstrap we measured,
     # but that measurement is one substrate on NVMe ... a slower disk is the
     # scenario this whole block exists for, so the default is the wrong side of
     # thin. 5400 keeps a real ceiling on a genuinely wedged Job while sitting
@@ -1964,9 +1963,9 @@ litellm:
     # That mattered because the CI gates then ran helm 3.16.3 while ArgoCD
     # shipped 4.2.1, so the `null` form passed every gate and was inert on the
     # cluster: a fresh install on 2026-09-11 produced a live Job reading 120
-    # with the fix committed. See TM-0495.
+    # with the fix committed.
     #
-    # The gates moved to helm 4.3.0 on 2026-09-12 (TM-0508), which closes that
+    # The gates moved to helm 4.3.0 on 2026-09-12, which closes that
     # particular gap but does not retire the rule. `""` was re-measured under
     # 4.3.0 on the same day and still renders empty. Keep the empty string: it
     # is the only form measured to behave the same in both files under every
@@ -1987,7 +1986,7 @@ litellm:
     requests: { cpu: 100m, memory: 512Mi }
     limits:   { memory: 2Gi }
 
-  # NON-ROOT AND READ-ONLY, MEASURED ON A LAB CLUSTER 2026-10-05 (TM-0596) against
+  # NON-ROOT AND READ-ONLY, MEASURED ON A LAB CLUSTER 2026-10-05 against
   # ghcr.io/berriai/litellm-database:1.100.1, and observed again on the reference
   # site on 1.105.0 and 1.105.1 (2026-10-17/18, an upgrade over a 1.100.3 schema:
   # migrations Job Complete, proxy ready as uid 1000 on a read-only root). The older note here said the image

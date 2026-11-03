@@ -321,7 +321,7 @@ def split(rows):
 
 
 def group_cases(rows):
-    """Needs-you rows grouped by what fired and what they wait on (TM-1308; spec section 8).
+    """Needs-you rows grouped by what fired and what they wait on (spec section 8).
 
     The key is the alert name (facts.alertname) plus what the case waits on (who, and the ask or the reason); the
     services become the count. On 2026-10-31, 19 cases read as 5 groups: 13 node-exporter cases on 6 hosts were one
@@ -426,7 +426,7 @@ def register(app, cat, srcs, guard, render, common):
             return render(request, "error.html", u, status_code=404, title="Not found",
                           message="There is no such role in this platform's organization.")
         shown = role_cases(sel, rows) if sel else rows
-        # TM-1308: filters, so a grouped row on the Overview opens exactly its cases
+        # filters, so a grouped row on the Overview opens exactly its cases
         filters = {k: v for k, v in (("alert", alert), ("wait", wait), ("ask", ask), ("state", state), ("team", team))
                    if v}
         filtered = filter_cases(shown, cat=cat, **filters)

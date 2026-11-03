@@ -59,7 +59,7 @@ no shell.
     (dict "present" $hasCaVol "detail" "argo-workflows.server.volumes has no `tockmox-ca` entry, so the CA is never presented to the container")
     (dict "present" $hasMount "detail" "argo-workflows.server.volumeMounts does not mount `tockmox-ca` at /etc/tockmox/ca")
     (dict "present" (eq $sslEnv "/etc/tockmox/ca/ca.crt") "detail" "argo-workflows.server.extraEnv does not set SSL_CERT_FILE to /etc/tockmox/ca/ca.crt, which is what Go reads")
-    (dict "present" (or (not .Values.global.certIssuer) (contains "wait-for-ca" (toYaml ((index .Values "argo-workflows").server.extraInitContainers | default list)))) "detail" "argo-workflows.server.extraInitContainers has no `wait-for-ca` container, so the server can start before cert-manager has written the CA, build its Go root pool from the public roots alone and never rebuild it ... SSO then fails permanently while the server reports healthy (TM-0632)")
+    (dict "present" (or (not .Values.global.certIssuer) (contains "wait-for-ca" (toYaml ((index .Values "argo-workflows").server.extraInitContainers | default list)))) "detail" "argo-workflows.server.extraInitContainers has no `wait-for-ca` container, so the server can start before cert-manager has written the CA, build its Go root pool from the public roots alone and never rebuild it ... SSO then fails permanently while the server reports healthy")
   )) -}}
 {{- end -}}
 {{- /*

@@ -64,14 +64,14 @@ turn the model gateway off:**
 
 - **`platformNetpol.nodeOriginSources`, unless you have turned
   `apps.platform_netpol` off.** Optional in 0.7.x; from 0.8.0 the policy layer
-  refuses to render without it (TM-0798), and `tockmox-policy` sits in
+  refuses to render without it, and `tockmox-policy` sits in
   `ComparisonError` until it is set. Generate it with
   `install/tockmox-install.sh --print-netpol-node-sources --context <yours>`
   and add the block to `site/values/policy.yaml`;
   [install § 1f](install.md#1f-name-each-nodes-gateway-address-for-the-policy-layer)
   has the commands. If your `global.lanCIDR` contains the pod network (a
   `10.0.0.0/8` LAN against k3s's `10.42.0.0/16`), narrow it in the same commit:
-  the list refuses a lanCIDR that would re-admit every pod (TM-0790).
+  the list refuses a lanCIDR that would re-admit every pod.
 - **`platformNetpol.extraS3ClientNamespaces`, for every namespace of your own
   in `garage.credentialsNamespaces`.** Setting `nodeOriginSources` (above) drops
   the 0.7.x rule that admitted the whole pod network to the platform namespace.
@@ -92,12 +92,12 @@ turn the model gateway off:**
   your `global.storageClass` is not `longhorn`.** The 0.8.0 profiles carry
   `storageClassName: local-path` under `kube-prometheus-stack.grafana.persistence`;
   a copied 0.7.2 profile does not. From 0.8.0 `tockmox-observability`
-  refuses to render that mismatch (TM-0146), and sits in `ComparisonError`
+  refuses to render that mismatch, and sits in `ComparisonError`
   naming the key until you set it to your `global.storageClass`. Measured on a
   lab upgrade that dropped the line. A site that set the literal itself is
   unaffected.
 - **The model gateway is on by default from 0.8.0, and the console goes
-  through it** (TM-0460; REQ-0004 AC-4.1). `apps.litellm` follows
+  through it** (REQ-0004 AC-4.1). `apps.litellm` follows
   `capabilities.aiPlane` where it shipped `false`, and `open-webui` ships
   pointed at `http://<release>-litellm:4000/v1` on the key in
   `tockmox-openwebui-gateway`, which the AI layer's console-key Job now mints.
@@ -116,7 +116,7 @@ turn the model gateway off:**
   the second.
 
   On this path `mint-secrets.sh` also mints a third file,
-  `tockmox-openwebui-bootstrap-admin` (TM-0859), that no row above asks for.
+  `tockmox-openwebui-bootstrap-admin`, that no row above asks for.
   It is harmless on a console that already has accounts: Open WebUI creates
   that administrator only while it has no accounts, so the Secret goes unused
   and your users keep theirs. The consequence is on the model list: with no
@@ -131,7 +131,7 @@ turn the model gateway off:**
   gateway's console as its own values files say, and it does not read
   `ai.yaml`. Through 0.8.0's lab upgrade from 0.7.2, a site that set
   `apps.litellm.enabled: true` only in `ai.yaml` lost the gateway's uptime
-  probe (TM-0910); with the gateway on by default that site is probed again
+  probe; with the gateway on by default that site is probed again
   with no edit. The case that now needs the global file is the other one: a
   site that turns the gateway off only in `ai.yaml` keeps a probe for a host
   nothing serves, and `TockmoxConsoleUnreachable` pages for it.
@@ -834,7 +834,7 @@ kubectl --context="$KUBE_CONTEXT" -n tockmox-ai get jobs \
 ```
 
 The same release runs the gateway and the Job as uid 1000 on a read-only root
-filesystem (TM-0596), so the gateway restarts once on this sync. If you mount
+filesystem, so the gateway restarts once on this sync. If you mount
 [your own gateway hooks](../usage/ai-plane.md#load-your-own-gateway-hooks) and
 one of them writes to the container filesystem, it now fails with `Read-only
 file system`; write under `/scratch` instead.

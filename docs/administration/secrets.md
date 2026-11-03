@@ -223,7 +223,7 @@ values file points:
 | Secret | Namespace | Keys | Consumed by |
 |---|---|---|---|
 | `tockmox-grafana-admin` | `tockmox-monitoring` | `admin-user`, `admin-password` | Grafana local login (break-glass) |
-| `tockmox-openwebui-bootstrap-admin` | `tockmox-ai` | `WEBUI_ADMIN_EMAIL`, `WEBUI_ADMIN_PASSWORD`, `WEBUI_ADMIN_NAME` | Open WebUI's bootstrap administrator, created at startup only while it has no accounts, so the first SSO login cannot become the console's admin (TM-0859). Optional; `mint-secrets.sh` mints it with an address under `.invalid` that no Authentik user can hold. The console's break-glass login: read the password with `kubectl -n tockmox-ai get secret tockmox-openwebui-bootstrap-admin -o jsonpath='{.data.WEBUI_ADMIN_PASSWORD}'` and decode it |
+| `tockmox-openwebui-bootstrap-admin` | `tockmox-ai` | `WEBUI_ADMIN_EMAIL`, `WEBUI_ADMIN_PASSWORD`, `WEBUI_ADMIN_NAME` | Open WebUI's bootstrap administrator, created at startup only while it has no accounts, so the first SSO login cannot become the console's admin. Optional; `mint-secrets.sh` mints it with an address under `.invalid` that no Authentik user can hold. The console's break-glass login: read the password with `kubectl -n tockmox-ai get secret tockmox-openwebui-bootstrap-admin -o jsonpath='{.data.WEBUI_ADMIN_PASSWORD}'` and decode it |
 | `tockmox-authentik` | `tockmox-authentik` | `AUTHENTIK_SECRET_KEY`, `AUTHENTIK_POSTGRESQL__PASSWORD` | Authentik server + worker |
 | `tockmox-authentik-db` | `tockmox-authentik` | `username`, `password` (type `kubernetes.io/basic-auth`) | Authentik's database on CloudNativePG, the default for a fresh install from 0.9.0 (`identity.database`). CloudNativePG bootstraps the owner from this Secret. `username` must EQUAL `identity.database.owner` (`authentik`) and `password` must EQUAL `AUTHENTIK_POSTGRESQL__PASSWORD` above. An install minted before 0.9.0 writes it from the live Secret: [below](#an-install-minted-before-090) |
 | `tockmox-authentik-postgres` | `tockmox-authentik` | `password`, `postgres-password` | Authentik's bundled PostgreSQL, used only while `authentik.postgresql.enabled` is true (the default through 0.8, kept by an install that has not moved its database). `password` must EQUAL `AUTHENTIK_POSTGRESQL__PASSWORD` above ... the database and the server must agree. Still minted on a fresh install, so turning the bundled server back on needs no new Secret |
@@ -499,7 +499,7 @@ minted after the first sync, and until it exists the console alone stays in
 secret "tockmox-openwebui-gateway" not found
 ```
 
-**Since 0.8.0 the chart does the minting** (TM-0460 ruling B1). The AI layer
+**Since 0.8.0 the chart does the minting** (ruling B1). The AI layer
 renders a Job, `<release>-gateway-key-<hash>`, that waits for the gateway's
 readiness endpoint, calls `POST /key/generate` with the master key, and creates
 the Secret. It holds the master key for that one request. Its Role is `get`

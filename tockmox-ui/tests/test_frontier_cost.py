@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1298: frontier cost. The watcher records each hosted model's list price per 1M tokens (LiteLLM's price map) with the day it
+"""Frontier cost. The watcher records each hosted model's list price per 1M tokens (LiteLLM's price map) with the day it
 was read; the Models page shows price, spend and calls (spend and calls from the gateway's own metrics, over the window each query
 names); a missing figure reads unknown, never an estimate. Run from tockmox-ui/: python -m pytest tests"""
 import html
@@ -557,7 +557,7 @@ def test_a_caller_name_is_escaped(tmp_path):
     assert "<img src=x" not in t and "&lt;img src=x" in t
 
 
-# ---------------------------------------------------------------- the family alias page (TM-1297's page, TM-1298's figures)
+# ---------------------------------------------------------------- the family alias page
 
 def family_page(tmp_path, **kw):
     from tests.test_models_frontier import gateway, gw_lifecycle
@@ -606,7 +606,7 @@ def test_the_family_page_with_nothing_configured_reads_unknown_with_why_and_no_c
 
 
 def _noshell(t):
-    """The page minus the kit's one same-origin script (shell.js: theme and header menus, TM-1304); any
+    """The page minus the kit's one same-origin script (shell.js: theme and header menus); any
     other script tag is still a failure."""
     import re as _re
     return _re.sub(r'<script src="/static/kit/shell\.js[^"]*"></script>', "", t)

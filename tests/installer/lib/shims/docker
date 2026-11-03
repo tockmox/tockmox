@@ -8,7 +8,7 @@ printf 'docker %s\n' "$*" >> "$S/calls.log"
 case " $* " in
   *" user hash "*)
     in="$(cat)"
-    # As ntfy 2.28.0 does (measured 2026-10-06, TM-0631): bcrypt refuses a
+    # As ntfy 2.28.0 does (measured 2026-10-06): bcrypt refuses a
     # password longer than 72 BYTES, and ntfy prints why and exits non-zero.
     first="$(printf '%s\n' "$in" | head -1)"
     if [ "$(printf '%s' "$first" | LC_ALL=C wc -c | tr -d ' ')" -gt 72 ]; then

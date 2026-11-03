@@ -53,7 +53,7 @@ def size_rec(ref, gib=17.0, lic="apache-2.0", fmt="mlx", evals=(), revision=REV)
 
 def write_report(tmp_path, candidates, *, generated=None, sources=None, sizes=None, gaps=(), prices=None, price_source=None):
     """The watcher's report. `prices` ({model: {inPer1M, outPer1M, readAt[, stale]}}) and `price_source` ({ok, reason, readAt}) are
-    TM-1298's sections; left out, the report is one from a watcher that did not read prices."""
+    the price sections; left out, the report is one from a watcher that did not read prices."""
     p = tmp_path / "report.json"
     doc = {"schema": 1, "generatedAt": generated or iso(),
            "sources": sources if sources is not None else {"huggingface": {"ok": True}, "anthropic": {"ok": True}},

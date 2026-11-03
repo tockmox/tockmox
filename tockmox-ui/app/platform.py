@@ -909,7 +909,7 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
 
     @app.get("/platform/organization")
     def organization(request: Request, team: str = ""):
-        # TM-1308: the roles, one team at a time; the Overview keeps each team to one line.
+        # the roles, one team at a time; the Overview keeps each team to one line.
         u, deny = guard(request)
         if deny:
             return deny

@@ -96,7 +96,7 @@ the chart shipped `apps.litellm: { enabled: false }` and this page called
 pointing the console at it "optional, and recommended". That default was the
 contradiction REQ-0004 AC-4.1 names: all AI traffic fronted by a local gateway
 is the mechanism the control claim rests on, and a shipped default that
-bypasses it makes the claim decorative. Ruled 2026-10-08 (TM-0460): the
+bypasses it makes the claim decorative. Ruled 2026-10-08: the
 gateway is required, in the sense this page now states under
 [the console goes through the gateway](#point-the-console-at-the-gateway).
 
@@ -425,7 +425,7 @@ wrote nothing while the callback was running.
 
 ## The policy gate
 
-**Optional, off by default, new in 0.8.0 (TM-0383).** What you get: every
+**Optional, off by default, new in 0.8.0.** What you get: every
 request through the gateway is given a class, and a request whose class forbids
 an external endpoint never reaches one, including when the local model it asked
 for is down and the client asks for a fallback. What you give up by turning it
@@ -520,7 +520,7 @@ red (measured 2026-10-06: the external backend answered).
 
 ## Scope every key: the key policy
 
-**Optional, off by default, new in this release (TM-0991).** What you get: no
+**Optional, off by default, new in this release.** What you get: no
 virtual key on the production gateway can be minted or updated into one that
 reaches every model, names a candidate, or leaves its tool access unstated. What
 you give up: two edits to your gateway values, and every key you mint states its
@@ -648,7 +648,7 @@ a second bundle, below.
 
 ### The namespace egress default-deny
 
-Development after 0.6.2 (TM-0273 fix 1), behind the same toggle as the
+Development after 0.6.2, behind the same toggle as the
 namespace's ingress default-deny (`apps.ai_namespace`), with a rollback lever
 `aiEgress.namespaceDefaultDeny`. The earlier reasoning here was that a
 default-deny in front of the gateway and the database "buys no containment and
@@ -711,7 +711,7 @@ record of what left your network across two components.
 
 ### Fence the tools agents call: per-tool egress
 
-**Optional, off by default, new in this release (TM-1251).** The gateway scopes
+**Optional, off by default, new in this release.** The gateway scopes
 which models and tool servers a key may use. It cannot see a tool that calls the
 network itself: a fetch tool, a search tool, a Kubernetes tool. Per-tool egress
 fences those at the network, in a namespace of their own (`agentEgress` in the

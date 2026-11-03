@@ -9,7 +9,7 @@
 #
 #   --context NAME   the cluster to act on. WITHOUT IT EVERY kubectl HERE
 #                    RESOLVES current-context, which is how a release step run
-#                    from a workstation reaches production (TM-0634).
+#                    from a workstation reaches production.
 #   --yes            skip the confirmation that --poison/--unpoison require.
 #                    For automation only; a human should type the context name.
 #
@@ -35,13 +35,13 @@
 # per layer, `site/values/global.yaml` and `site/values/<layer>.yaml`, and the
 # layer's file alone fails the chart schema on `global.internalDomain` before
 # this gate examines anything ... an error that reads as a site defect when the
-# site is fine (TM-0362). With no -f, the legacy VALUES environment variable is
+# site is fine. With no -f, the legacy VALUES environment variable is
 # honoured, colon-separated, defaulting to ci/values.yaml, which is NOT a site.
 #
 # NEEDS A LIVE CLUSTER with the identity layer installed. This is the one gate
 # in tools/ that cannot run in CI, and that is the whole point of it.
 #
-# WHAT IT IS, stated so nobody has to run it to find out (TM-0320). This is a
+# WHAT IT IS, stated so nobody has to run it to find out. This is a
 # RELEASE gate, not a per-commit gate and not an operator convenience. It is
 # wired into `RELEASING.md` and is asserted during the greenfield gate install;
 # `docs/administration/identity.md` names it as "a live cluster only, never CI".
@@ -166,7 +166,7 @@ done
 
 # Every kubectl in this script goes through `kc`, so --context is impossible to
 # forget on one call and lose the guarantee. bash 3.2 safe: an empty array under
-# `set -u` needs the ${arr[@]+...} form (macOS ships 3.2, TM-0245).
+# `set -u` needs the ${arr[@]+...} form (macOS ships 3.2).
 KCTX=()
 [ -n "$CONTEXT" ] && KCTX=(--context "$CONTEXT")
 kc() { kubectl ${KCTX[@]+"${KCTX[@]}"} "$@"; }

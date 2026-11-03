@@ -31,7 +31,7 @@ cd "$(dirname "$0")/.."
 # Scanned paths: everything that ships. Deliberately excludes .git, and excludes
 # this file (it necessarily contains the patterns it hunts for).
 #
-# THE SCAN SET IS DERIVED, NOT LISTED. TM-0319, closed 2026-09-02.
+# THE SCAN SET IS DERIVED, NOT LISTED.
 #
 # This was an allow list until today, and that was the defect. A top-level entry
 # added after the list was written went unscanned and nothing said so: the gate
@@ -88,6 +88,7 @@ SCAN_EXCLUDE=""
 RULES="
 internal git host|git\.int\.
 internal hostname|[A-Za-z0-9_-]+\.int\.[A-Za-z0-9-]+\.[A-Za-z]{2,}
+internal tracker id|(^|[^A-Za-z0-9])([Tt][Mm]|[Hh][Ll])-?[0-9]{3,4}([^0-9]|$)
 "
 PATTERNS_FILE="${TOCKMOX_SITE_PATTERNS_FILE:-}"
 if [ -z "$PATTERNS_FILE" ] && [ -f "${HOME:-/nonexistent}/.config/tockmox/site-patterns" ]; then
@@ -152,6 +153,8 @@ if [ "${1:-}" = "--selftest" ]; then
 
   probe "git host"       "clone from git.int.example-internal"   "internal git host"
   probe "internal host"  "see grafana.int.acme-lab.net for details" "internal hostname"
+  probe "tracker id"     "fixed in the last release (TM-0123)"     "internal tracker id"
+  probe "tracker id, lc" "def test_tm0123_a_case():"                "internal tracker id"
 
   # A SITE RULE FILE IS LOADED, and a named file that is missing REFUSES. Uses a
   # synthetic pattern, never a real site's: the point is the loading path.

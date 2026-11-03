@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1258: /models/budget. Requests per alias, the local share, and what hosted routes cost. A figure nobody has is Unknown,
+"""/models/budget. Requests per alias, the local share, and what hosted routes cost. A figure nobody has is Unknown,
 never 0: an alias with no series may have had no traffic or may not be counted, and the page cannot tell which."""
 import html
 import re

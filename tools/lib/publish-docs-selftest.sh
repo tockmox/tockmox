@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# The self-test behind `tools/publish-docs.sh --selftest` (TM-0807). Runs the
+# The self-test behind `tools/publish-docs.sh --selftest`. Runs the
 # real script against a STUB kubectl on PATH that records every call, and
 # asserts on what the script asked the cluster to do. It needs no cluster, no
 # generator and no network.
@@ -12,7 +12,7 @@
 #
 # WHAT THIS DOES NOT PROVE. The stub answers what the script expects; it says
 # nothing about a real API server, Pod Security admission, the image's tar, or
-# Garage. The lab run in the TM-0807 report is where those were observed.
+# Garage. The lab run is where those were observed.
 set -uo pipefail
 ROOT="${1:?usage: publish-docs-selftest.sh REPO_ROOT}"
 cd "$ROOT"

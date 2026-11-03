@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""A demo server for looking at the Platform Management pages: mock upstreams shaped like a real
-reference site (its CronJobs, CronWorkflows and signal values as read 2026-10-23), no network.
+"""A demo server for looking at the Platform Management pages: mock upstreams shaped like a typical
+small site (its CronJobs, CronWorkflows and signal values), no network.
 
     python3 tests/demo_platform.py [port] [--ledger] [--desk]   then sign in with GET /__demo_login
     --desk serves the Service Desk and the specialist index from tests/fixtures/desk-case.json
@@ -28,21 +28,21 @@ from fastapi.responses import RedirectResponse  # noqa: E402
 
 NOW = time.time()
 CT = "America/Chicago"
-# (namespace, name, schedule, tz, state) as the reference site ran them; state shapes the demo
+# (namespace, name, schedule, tz, state) for a fictional small site; state shapes the demo
 JOBS = [
     ("forgejo", "forgejo-backup", "15 21 * * *", CT, "up"),
     ("harbor", "harbor-postgres-backup", "5 21 * * *", CT, "up"),
     ("site-identity", "authentik-postgres-backup", "0 21 * * *", CT, "up"),
     ("site-monitoring", "capacity-drift-snapshot", "0 3 * * *", CT, "up"),
     ("site-monitoring", "forgejo-label-reconciler", "*/2 * * * *", "UTC", "up"),
-    ("site-paperless", "paperless-drill-b", "30 11 * * 6", CT, "up"),
-    ("site-paperless", "paperless-exporter", "45 20 * * *", CT, "up"),
-    ("site-paperless", "paperless-postgres-backup", "10 21 * * *", CT, "up"),
-    ("site-paperless", "paperless-weekly-digest", "5 8 * * 1", CT, "up"),
-    ("site-tish", "tish-db-drill", "30 4 * * 5", CT, "never"),
-    ("site-tish", "tish-sched-daily-brief", "35 9 * * *", CT, "up"),
-    ("site-tish", "tish-sched-daily-capacity-alerts", "30 9 * * *", CT, "paused"),
-    ("site-tish", "tish-sched-weekly-catches", "0 9 * * 0", CT, "never"),
+    ("site-wiki", "wiki-drill-b", "30 11 * * 6", CT, "up"),
+    ("site-wiki", "wiki-exporter", "45 20 * * *", CT, "up"),
+    ("site-wiki", "wiki-postgres-backup", "10 21 * * *", CT, "up"),
+    ("site-wiki", "wiki-weekly-digest", "5 8 * * 1", CT, "up"),
+    ("site-orchestrator", "orchestrator-db-drill", "30 4 * * 5", CT, "never"),
+    ("site-orchestrator", "orchestrator-sched-daily-brief", "35 9 * * *", CT, "up"),
+    ("site-orchestrator", "orchestrator-sched-daily-capacity-alerts", "30 9 * * *", CT, "paused"),
+    ("site-orchestrator", "orchestrator-sched-weekly-catches", "0 9 * * 0", CT, "never"),
     ("tockmox-agent", "r4-drill-rehearsal", "0 10 * * 3", CT, "up"),
     ("tockmox-ai", "owui-db-drill", "30 4 * * 3", CT, "up"),
     ("tockmox-ai", "tockmox-litellm-db-drill", "30 4 * * 1", CT, "up"),
@@ -118,7 +118,7 @@ def specialists_host():
 def make_app(ledger_jobs=None, desk=False):
     w = build_world()
     doc = base_doc()
-    doc["site"]["name"] = "Maaks Home"
+    doc["site"]["name"] = "Example Home"
     doc["apps"][1]["url"] = "https://grafana.int.example.com"
     doc["features"] = dict(doc["features"], platform={"enabled": True, "timezone": CT,
                                                       **({"ledgerUrl": "http://ledger.test", "interfaceUrl": "https://chat.int.example.com"} if ledger_jobs is not None else {}),

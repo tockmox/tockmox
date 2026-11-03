@@ -338,7 +338,7 @@ gaps:
     note: >-
       Shipped OFF through 0.7.x; `apps.litellm.enabled: true` had to be set in
       the site's ai.yaml BEFORE the root Application was applied (on by default
-      since 0.8.0, TM-0460; the frame predates that). The admin panel is
+      since 0.8.0; the frame predates that). The admin panel is
       at /ui and the bare host serves the Swagger API page; the panel logs in
       with username `admin` and the gateway master key.
 

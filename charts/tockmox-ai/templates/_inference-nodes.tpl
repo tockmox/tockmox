@@ -12,8 +12,7 @@ ci/values-inference-nodes.yaml; tools/check-inference-nodes.sh fails when this t
 
 TWO GATEWAYS. A route whose alias ends in `-next` is a candidate (REQ-0048): it goes to the EVAL gateway
 only, beside the live route it is compared against. It never reaches the production gateway, because
-inside one LiteLLM a key with no model list can call every model the gateway has (measured on 1.100.3,
-TM-0936), so a candidate in the production gateway is reachable by any such key.
+inside one LiteLLM a key with no model list can call every model the gateway has (measured on 1.100.3), so a candidate in the production gateway is reachable by any such key.
 
 Call with (dict "root" $ "gateway" "production"|"eval"); returns a YAML list.
 */ -}}
@@ -44,7 +43,7 @@ Call with (dict "root" $ "gateway" "production"|"eval"); returns a YAML list.
 {{- $ep := dict -}}
 {{- range ($node.endpoints | default list) -}}{{- if eq .id $r.endpoint -}}{{- $ep = . -}}{{- end -}}{{- end -}}
 {{- if not $ep -}}{{- fail (printf "inferenceNodes.routes: route %s names endpoint %s/%s, which does not exist" $r.alias $r.node $r.endpoint) -}}{{- end -}}
-{{- /* EVERY OLLAMA ROUTE PINS ITS CONTEXT (TM-0957). With no num_ctx, current Ollama sizes the context from the node's
+{{- /* EVERY OLLAMA ROUTE PINS ITS CONTEXT. With no num_ctx, current Ollama sizes the context from the node's
 memory (under 24 GiB 4k tokens, 24-48 GiB 32k, 48 GiB or more 256k), and the KV cache for 256k can outweigh the model:
 Qwen3-Coder-30B at 262k is a 24 GiB KV cache beside 19 GiB of weights, and a lab route with none reached a 64 GiB node
 (2026-10-08). The schema types num_ctx but cannot
@@ -67,7 +66,7 @@ require it, because whether a route is Ollama's is known only from the endpoint 
 {{- $_ := set $lp "api_key" (printf "os.environ/NODE_KEY_%s" (regexReplaceAll "[^A-Z0-9]" (upper $ep.auth.secretRef) "_")) -}}
 {{- else if eq $prov "openai" -}}
 {{- /* LiteLLM's openai provider refuses to send a request with no api_key at all ("The api_key client option must be
-set"), even to a server that checks none (measured on 1.100.1, TM-0920 lab). A no-auth engine ignores the placeholder.
+set"), even to a server that checks none (measured on 1.100.1 in the lab). A no-auth engine ignores the placeholder.
 The UI does the same (app/nodes.py NO_AUTH_KEY). */ -}}
 {{- $_ := set $lp "api_key" "no-auth" -}}
 {{- end -}}
@@ -76,7 +75,7 @@ The UI does the same (app/nodes.py NO_AUTH_KEY). */ -}}
 {{- $info := deepCopy ($r.modelInfo | default dict) -}}
 {{- if not (hasKey $info "tockmox_node") -}}{{- $_ := set $info "tockmox_node" $r.node -}}{{- end -}}
 {{- if eq $gw "eval" -}}
-{{- /* THE EVAL GATEWAY'S DATA-CLASS RAIL (TM-1249). The eval gateway filters by tag, and the runner tags every request
+{{- /* THE EVAL GATEWAY'S DATA-CLASS RAIL. The eval gateway filters by tag, and the runner tags every request
 with its eval set's class (public -> open, internal -> internal, confidential and restricted -> restricted). A node
 route is local unless it says otherwise and may serve every class; an external route may serve open only. The UI
 applies the same defaults and the same refusal (app/nodes.py render_model_list). */ -}}
@@ -84,7 +83,7 @@ applies the same defaults and the same refusal (app/nodes.py render_model_list).
 {{- if not (has $tier (list "local" "external")) -}}{{- fail (printf "inferenceNodes.routes: route %s has model_info.endpoint_tier %q; it must be local or external" $r.alias $tier) -}}{{- end -}}
 {{- $_ := set $info "endpoint_tier" $tier -}}
 {{- if not (hasKey $lp "tags") -}}{{- $_ := set $lp "tags" (ternary (list "restricted" "internal" "open") (list "open") (eq $tier "local")) -}}{{- end -}}
-{{- if and (eq $tier "external") (without $lp.tags "open") -}}{{- fail (printf "inferenceNodes.routes: route %s is external but its tags %s let the eval gateway send it data above public; an external route may carry only the tag open (TM-1249)" $r.alias (toJson $lp.tags)) -}}{{- end -}}
+{{- if and (eq $tier "external") (without $lp.tags "open") -}}{{- fail (printf "inferenceNodes.routes: route %s is external but its tags %s let the eval gateway send it data above public; an external route may carry only the tag open" $r.alias (toJson $lp.tags)) -}}{{- end -}}
 {{- end -}}
 {{- $out = append $out (dict "model_name" $r.alias "litellm_params" $lp "model_info" $info) -}}
 {{- end -}}
@@ -94,7 +93,7 @@ applies the same defaults and the same refusal (app/nodes.py render_model_list).
 
 {{- /*
 Hosted models admitted for evaluation (REQ-0048): catalog entries at stage `candidate` whose source is a
-hosted provider. They go to the eval gateway only, tagged `open` alone (TM-1249): the eval gateway filters by tag,
+hosted provider. They go to the eval gateway only, tagged `open` alone: the eval gateway filters by tag,
 so only public eval data reaches them. Production tags are chosen when one is promoted, and a promoted hosted model
 is an entry in the production gateway's own model_list.
 */ -}}

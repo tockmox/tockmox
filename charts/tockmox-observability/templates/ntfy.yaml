@@ -106,7 +106,7 @@ metadata:
     {{- include "tockmox.labels" . | nindent 4 }}
     app.kubernetes.io/name: tockmox-ntfy
 spec:
-  # One replica on purpose, and not a value (TM-0779): ntfy keeps its message
+  # One replica on purpose, and not a value: ntfy keeps its message
   # cache and auth database in SQLite on the ReadWriteOnce volume below, and two
   # pods cannot both write one SQLite file. A second replica would at best
   # Multi-Attach-fail and at worst split the cache. The cost is a gap during
@@ -133,8 +133,7 @@ spec:
         # the only thing the ConfigMap derives from.
         tockmox.com/config-hash: {{ printf "%s|%s" (toYaml .Values.notifications.ntfy) $baseURL | sha256sum | trunc 16 | quote }}
     spec:
-      # No Kubernetes API calls: a ServiceAccount of its own and no token (TM-0759,
-      # CIS 5.1.5 and 5.1.6).
+      # No Kubernetes API calls: a ServiceAccount of its own and no token (# CIS 5.1.5 and 5.1.6).
       serviceAccountName: tockmox-ntfy
       automountServiceAccountToken: false
       priorityClassName: {{ .Values.notifications.priorityClassName }}
@@ -243,7 +242,7 @@ spec:
             secretName: {{ .Values.notifications.ntfy.auth.existingSecret }}
             optional: true
 ---
-# TM-0759: this workload's own identity, with no token. The namespace's `default`
+# this workload's own identity, with no token. The namespace's `default`
 # account is not used (CIS 5.1.5 and 5.1.6).
 apiVersion: v1
 kind: ServiceAccount

@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-PER-TOOL EGRESS FOR AGENT TOOLS (TM-1251; DESIGN-2026-10-29-agent-kit-security K3). OFF by default.
+PER-TOOL EGRESS FOR AGENT TOOLS (DESIGN-2026-10-29-agent-kit-security K3). OFF by default.
 
 The gateway can scope which tools a key may call (the key policy, MCP permissions). It cannot see a tool that
 calls the internet itself: a fetch tool, a search tool, a Kubernetes tool. This fences those tools at the network,

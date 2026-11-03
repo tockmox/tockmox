@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# EVERY TRACKED SCRIPT THROUGH SHELLCHECK, ADVISORY, AGAINST A COMMITTED BASELINE (TM-0847).
+# EVERY TRACKED SCRIPT THROUGH SHELLCHECK, ADVISORY, AGAINST A COMMITTED BASELINE.
 #
 # The repository ships about a hundred bash scripts and none had been linted.
 # The first run found 414 findings at the linter's default severity.

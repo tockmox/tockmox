@@ -376,6 +376,16 @@ Source failures are counted but not alerted: the UI reads a source only when a
 page asks for it, so their rate measures page views as much as health. The
 status page and `/api/v1/status` already show a failing source as `unknown`.
 
+## Accessibility, and what has not been assessed
+
+The console's colours are checked against WCAG contrast in both themes
+(`tockmox-ui/tests/test_ui_kit.py`), and its tests assert the landmarks and
+labels a screen reader relies on, page by page. Those are design checks, not a
+conformance assessment: no audit with assistive technology has been run, and
+Tockmox publishes no VPAT or Accessibility Conformance Report. The chat console,
+Open WebUI, is an upstream project and its accessibility is its own
+([frontend posture](../frontend-posture.md)).
+
 ## Finding your way around
 
 The top bar has four sections for administrators: **Home**, **Status**, **AI**
@@ -741,7 +751,7 @@ The response, schema `tockmox-status/1`:
 | `nodes` | array or `null` | Kubernetes nodes, each `{name, ready, version}` |
 | `alerts` | array or `null` | the alerts firing in Alertmanager, heartbeat included, each `{name, severity, namespace, summary, startsAt}`; an empty list without the heartbeat makes `sources.alertmanager` `unknown` |
 | `inferenceNodes` | array or `null` | with `inferenceNodes.nodes` set, each node's `{id, state, reason, checks: [{what, state, reason}], memory}` as the nodes page reads them from Prometheus; `null` when none is configured |
-| `capabilities` | array | added in 0.8.0-rc2 (TM-1017): each capability's `{key, configured, deployed, agree, evidence}` as the [capabilities page](#the-capabilities-page) shows it; `configured` is `on`, `off` or `null`, `deployed` is `on`, `off` or `unknown` |
+| `capabilities` | array | added in 0.8.0-rc2: each capability's `{key, configured, deployed, agree, evidence}` as the [capabilities page](#the-capabilities-page) shows it; `configured` is `on`, `off` or `null`, `deployed` is `on`, `off` or `unknown` |
 
 Every `state` is one of `ok`, `warning`, `critical`, `unknown`. A healthy
 single-node install answers, cut down:

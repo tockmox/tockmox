@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""tockmox-actions: the one process that acts (TM-1311, TM-1313). The Tockmox UI stays write-free.
+"""tockmox-actions: the one process that acts. The Tockmox UI stays write-free.
 
     python -m app.actions_service            reads TOCKMOX_ACTIONS_CONFIG (default /etc/tockmox-actions/config.yaml) and
                                              listens on TOCKMOX_ACTIONS_LISTEN_PORT (default 8081)
@@ -9,7 +9,7 @@ A separate Deployment on the UI's image, with its own ServiceAccount and one nar
 namespaces; a Role that patches only the restart allowlist's workloads, bounded by a ValidatingAdmissionPolicy to the
 restartedAt annotation; when the site gives it one, an Argo CD account with get and sync only; and, with the identity
 kinds on, an Authentik service account whose role can see users, make a recovery link only for a user the identity
-layer's reconciler has granted it (never an administrator), and change membership of the user group only (TM-1315).
+layer's reconciler has granted it (never an administrator), and change membership of the user group only.
 
 API (reachable from the UI pod only, by NetworkPolicy):
   POST /v1/intents   {"intent": {...}, "id_token": "..."}   carry out one intent; 200 with the result

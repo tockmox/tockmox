@@ -23,7 +23,7 @@ WHAT IT DOES, ONCE:
   6. writes the S3 credentials into a Secret the ObjectStore reads
   6b. (drillRegister on) the restore-drill register: its own bucket, its own
      key with read/write on that bucket only, its own Secret, copied to the
-     namespaces that run a drill (TM-0459)
+     namespaces that run a drill
   7. (Longhorn on) points Longhorn's backup target at the store
   8. (web serving on) for each static site: creates its bucket with a global
      alias equal to the site host, turns website access on, and, when the site
@@ -42,7 +42,7 @@ run again, knowing that anything holding the old key stops working.
 {{- $name := "tockmox-garage" -}}
 {{- $sites := include "tockmox.garageWeb.sites" . | fromYamlArray -}}
 {{- /*
-THE RESTORE-DRILL REGISTER (TM-0459). Decided at render time like step 7, so the
+THE RESTORE-DRILL REGISTER. Decided at render time like step 7, so the
 Role, the env and the script agree. The Secret is copied only to the namespaces
 that are BOTH on the register's list and in credentialsNamespaces: the copy
 target's Role is rendered from credentialsNamespaces, and a site that took
@@ -63,7 +63,7 @@ not have its render refused by a key it never set.
 {{- /*
 STEP 7 (Longhorn's default BackupTarget -> the shipped Garage) RUNS ONLY WHEN IT
 IS WANTED, decided at render time so the Role, the Secret and the script all
-agree (TM-0216).
+agree.
 
 It is skipped when EITHER
   - `garage.bootstrap.wireLonghornBackupTarget` is false, or
@@ -134,7 +134,7 @@ greenfield install path is untouched. Each release gets a fresh Job; `prune: tru
 removes the previous one. The Job is idempotent by design (it exits 0 when the
 Secret already exists), so the re-run an upgrade causes is a no-op.
 
-WHY A HASH AND NOT THE VERSION (TM-1022). The name used to be
+WHY A HASH AND NOT THE VERSION. The name used to be
 `tockmox-garage-credentials-<chart version>`, which assumed the pod template
 only changes when the version does. A dependency bump breaks that: Renovate
 moved `garage.bootstrap.image` (alpine/k8s 1.36.2 to 1.37.1) inside 0.8.0, the
@@ -142,7 +142,7 @@ homelab moved between two 0.8.0 heads on 2026-10-11, and the platform sync
 failed `field is immutable` five times with everything after wave -1 left
 behind (Longhorn, Traefik, Garage, the backup plugin) until the old Job was
 deleted by hand. Naming the Job after the sha256 of its rendered pod template,
-like the LiteLLM migrations Job and the console-key Job (TM-0596), covers every
+like the LiteLLM migrations Job and the console-key Job, covers every
 case at once: a version bump changes the template (`helm.sh/chart` is in it),
 so the name moves; an image or argument change moves it too; an rc and its
 final tag render the same template, so promoting an rc does not recreate it.
@@ -205,7 +205,7 @@ rules:
     verbs: ["get", "patch"]
 {{- end }}
 {{- /*
-Extra labels on the namespaces created below (TM-0816, TM-0815):
+Extra labels on the namespaces created below:
 global.namespaceLabels for every one, garage.credentialsNamespaceLabels.<ns> for
 one (Pod Security labels, an admission mutator's opt-out). The per-namespace map
 wins on a clash; the four labels this chart sets are refused.
@@ -241,7 +241,7 @@ metadata:
     {{ $k | quote }}: {{ $v | quote }}
 {{- end }}
 ---
-# TM-0759 (CIS 5.1.5): the namespace controller creates `default`; rendering it here lets it carry
+# (CIS 5.1.5): the namespace controller creates `default`; rendering it here lets it carry
 # automountServiceAccountToken: false. Prune=false,Delete=false: removing this object must never
 # delete the account, which Kubernetes recreates anyway; no Tockmox pod runs as it, and no
 # Role or ClusterRole binds it (tools/check-sa-tokens.sh asserts the first).
@@ -336,7 +336,7 @@ question is the whole fix.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  # Named after its own pod template (TM-1022): a changed template is a new Job,
+  # Named after its own pod template: a changed template is a new Job,
   # never `field is immutable`. Full argument at the top of this file.
   name: {{ $credName }}
   namespace: {{ .Release.Namespace }}
@@ -371,7 +371,7 @@ spec:
       restartPolicy: Never
       serviceAccountName: {{ $name }}-bootstrap
       # Needs the API: kubectl creates and reads Secrets (the Role below). Token kept on
-      # purpose (TM-0759); gate allowlist in tools/check-sa-tokens.sh.
+      # purpose; gate allowlist in tools/check-sa-tokens.sh.
       automountServiceAccountToken: true
       {{- with $g.priorityClassName }}
       priorityClassName: {{ . }}
@@ -550,7 +550,7 @@ spec:
               fi
 
 {{- if $drOn }}
-              # ---- 5b. the restore-drill register (TM-0459) ------------------
+              # ---- 5b. the restore-drill register ------------------
               # A bucket of its own and a key of its own, so the drill that proves
               # the backups holds no key to them, and the key that writes the
               # backups cannot forge evidence. Garage grants per bucket (read,
@@ -684,7 +684,7 @@ spec:
 {{- end }}
 {{- if $sites }}
 
-              # ---- 8. static sites (TM-0215) ---------------------------------
+              # ---- 8. static sites ---------------------------------
               # One bucket per site, with the HOST as its global alias: the web
               # endpoint finds a bucket by matching the request Host against
               # aliases. Website access is what makes the bucket readable on
@@ -764,7 +764,7 @@ spec:
                 fi
 {{- if $hasPlaceholder }}
                 # The docs site's placeholder page, ONLY into an empty bucket
-                # (TM-0808; garage-web-placeholder.yaml says why). Best effort
+                # (garage-web-placeholder.yaml says why). Best effort
                 # and never fatal, like step 9: this Job is a PostSync hook.
                 # "Empty" means the listing has no object at all, so published
                 # docs, the publish script's version marker or anything an
@@ -828,7 +828,7 @@ spec:
 {{- end }}
 {{- define "tockmox-platform.garageCredentialsPod" -}}
 {{- /* The credentials Job's pod template, rendered once so its sha256 can name the
-Job (TM-1022). Arguments: ctx (root context), g (.Values.garage), name. */ -}}
+Job. Arguments: ctx (root context), g (.Values.garage), name. */ -}}
 {{- $c := .ctx -}}{{- $g := .g -}}{{- $name := .name -}}
 metadata:
   labels:
@@ -837,7 +837,7 @@ spec:
   restartPolicy: OnFailure
   serviceAccountName: {{ $name }}-bootstrap
   # Needs the API: kubectl creates and reads Secrets (the Role below), so the token
-  # stays. Left implicit (TM-0759); tools/check-sa-tokens.sh lists it as the one
+  # stays. Left implicit; tools/check-sa-tokens.sh lists it as the one
   # allowed implicit token.
   securityContext:
     runAsNonRoot: true

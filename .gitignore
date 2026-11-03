@@ -26,7 +26,7 @@ pub-sealed-secrets.pem
 sealed-secrets-key.backup.yaml
 
 # Git plumbing that belongs in .git/ and never at the root. FETCH_HEAD was a
-# TRACKED, zero-byte file here until 2026-09-01 (TM-0268) ... a `git fetch` run
+# TRACKED, zero-byte file here until 2026-09-01 ... a `git fetch` run
 # somewhere it should not have been, then swept up by `git add -A`. Nothing
 # broke, which is why nothing caught it; an external reviewer found it in about
 # four seconds and read every operational claim afterwards one notch more
@@ -66,7 +66,7 @@ _*.sh
 # is imported on every run, so a `.pyc` appears and sits in `git status`
 # forever ... on a repo whose release procedure READS `git status`. It is one
 # line against a reader learning to skim that surface, which is the actual
-# cost (TM-0677). Checked when this was added: no `.pyc` was already tracked,
+# cost. Checked when this was added: no `.pyc` was already tracked,
 # and an ignore rule would not have untracked one if it were.
 __pycache__/
 *.pyc

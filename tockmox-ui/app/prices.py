@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""List prices for hosted models (TM-1298), read by the watcher from LiteLLM's price map.
+"""List prices for hosted models, read by the watcher from LiteLLM's price map.
 
 Providers publish no price API. The one dated, recorded source the gateway itself prices spend with is LiteLLM's
 model_prices_and_context_window.json: a single JSON object keyed by model id, with input_cost_per_token and

@@ -31,12 +31,12 @@
 # measure, and is NOT the recovery the page describes. Between 2026-09-01 and
 # 2026-09-04 that substitution happened silently and nobody noticed, because P01
 # was exiting 2 and its red line read as a defect rather than as a missing
-# precondition (TM-0422). Check P01's result before reading this one.
+# precondition. Check P01's result before reading this one.
 
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "${HERE}/../lib/assert.sh"
-# TM-0797: every kubectl and helm call below names its cluster with --context or
+# every kubectl and helm call below names its cluster with --context or
 # --kube-context from this variable, and an empty value is refused rather than
 # falling back to the current context (docs/deployment/fresh-install.md, "Name
 # the cluster"). run.sh exports it; a standalone run must export it itself.
@@ -48,7 +48,7 @@ SECTION="${TOCKMOX_P02_SECTION:-## If you install from the raw manifest anyway}"
 EXTRACT="${HERE}/../lib/extract-block.sh"
 
 path_begin "P02-argocd-server-side-recovery" \
-  "the published fix for TM-0288, which the page itself marks unverified"
+  "the published fix, which the page itself marks unverified"
 
 # The page must actually carry this route at the ref under test. At v0.6.0-rc1
 # it does not ... administration/argocd.md was written later. Say so and stop,

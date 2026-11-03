@@ -11,7 +11,7 @@
 # harness, because it is the environment the reference deployment actually
 # uses." The image landed 2026-09-11 (`tockmox-test/microos-cloud`). This is the
 # second provisioner profile, and `throwaway-cluster.sh create` delegates to it
-# whenever the image resolves to MicroOS (TM-0715).
+# whenever the image resolves to MicroOS.
 #
 # THE TRAP THIS PROFILE EXISTS TO AVOID, and it is the whole point of the file.
 # Every step MicroOS needs is already written in `fresh-install.md`: the
@@ -35,7 +35,7 @@
 # runs that block, so the guest gets the version the page tells a reader to use
 # rather than whatever the stable channel says today.
 #
-# WHAT RUN 1 TAUGHT (2026-09-17, guest tm0715-microos-01), carried forward here
+# WHAT RUN 1 TAUGHT (2026-09-17, guest microos-01), carried forward here
 # because all three lessons are cheap to honour and expensive to rediscover:
 #
 #   1. IT REPORTED ONCE AND WENT DARK FOR AN HOUR. With no console on this lane
@@ -58,13 +58,13 @@
 #      could not reach the apiserver would have hung rather than failed, and a
 #      hang looks exactly like the silence in lesson 1.
 #
-# AND WHAT RUN 2 (tm0715b) GOT RIGHT THAT THE FIRST DRAFT OF THIS FILE DROPPED,
+# AND WHAT RUN 2 GOT RIGHT THAT THE FIRST DRAFT OF THIS FILE DROPPED,
 # found 2026-09-23 while wiring it, recorded so it is not dropped a third time:
 #
 #   4. BLOCKS RUN AS THE UNPRIVILEGED USER, NOT AS ROOT. The page is written
 #      for a person with sudo, and two defects this lane has already found only
-#      exist for that person (TM-0622, sudo's secure_path omits /usr/local/bin;
-#      TM-0630, section 2's success condition for a non-root PATH). A driver
+#      exist for that person (sudo's secure_path omits /usr/local/bin;
+#      section 2's success condition for a non-root PATH). A driver
 #      invoked by cloud-init runs as root, so running a block with plain `bash`
 #      would quietly hide exactly that class. Every block goes through
 #      `runuser -u $RUN_AS`.
@@ -82,14 +82,14 @@
 #      have reported iscsid's default state as the page's result ... a harness
 #      step skipped, reported as a documentation defect. The enable block could
 #      not be selected by content (four blocks in the section carry it) or by
-#      label (its nearest prose line was shared), which was TM-0721, so run 2
+#      label (its nearest prose line was shared), so run 2
 #      selected it by an ordinal confirmed by content. The page now labels it
 #      `**NODE** ... every node, on MicroOS`, the form the section's other
 #      MicroOS-only blocks already used, and it is selected by that label ANDed
 #      with its content. No block in this profile is selected by ordinal, and
 #      the extraction loop refuses one.
 #
-# NOTHING IS TRANSCRIBED. Until TM-0722 one command was: fresh-install section
+# NOTHING IS TRANSCRIBED. Formerly one command was: fresh-install section
 # 2's `sudo systemctl disable --now transactional-update.timer
 # rebootmgr.service`, which the page prescribes for exactly this case ("For a
 # time-boxed build or a release gate, hold both off until you are done") but
@@ -110,7 +110,7 @@
 # conventional distribution, and nothing on amd64-versus-arm64 grounds beyond
 # what the harness README already bounds. `create` stops at a Ready k3s node:
 # no Tockmox chart is installed, so section 5's and section 6's blocks are
-# untested by the profile itself and TM-0628's metrics Services remain owed ...
+# untested by the profile itself and the metrics Services remain owed ...
 # though run.sh can now run its paths against a MicroOS guest, which it never
 # could before.
 
@@ -131,9 +131,9 @@
 # MicroOS` carries the snapshot check, the timer hold and the post-reboot
 # enable), the sixth column ANDs a --containing onto it, so the label picks the
 # group and the content picks the block. --block is refused: an ordinal is a
-# position, and TM-0721 removed the last one this profile used.
+# position, and the last one this profile used has been removed.
 #
-# Verified resolving against the working tree on 2026-09-23 (TM-0721/TM-0722).
+# Verified resolving against the working tree on 2026-09-23.
 # An ambiguous or missing selector is a REFUSAL below, never a fallback.
 MICROOS_FRESH_INSTALL_PAGE="docs/deployment/fresh-install.md"
 MICROOS_UNINSTALL_PAGE="docs/operations/uninstall.md"
@@ -220,7 +220,7 @@ microos_extract_blocks() {
     [ -n "$name" ] || continue
     if [ "$flag" = "--block" ]; then
       # An ordinal is a position, and a position moves when anyone inserts a
-      # block above it. See the header, lesson 6 (TM-0721).
+      # block above it. See the header, lesson 6.
       echo "REFUSING: ${name} is selected by --block ${value}. This profile selects" >&2
       echo "          by label or content only; name the block, not its position." >&2
       return 3
@@ -410,7 +410,7 @@ spawn_await() {
   # systemd kills whatever it leaves behind in its cgroup when it exits.
   #
   # THROUGH /bin/bash, NOT THE SCRIPT PATH, measured 2026-09-23 on run
-  # tm0715-microos-05. MicroOS enforces SELinux, the script's label is
+  # microos-05. MicroOS enforces SELinux, the script's label is
   # var_lib_t, and init_t may not EXECUTE var_lib_t: the unit failed
   # `203/EXEC ... Permission denied` (AVC denied { execute } for driver.sh) the
   # instant it started. cloud-init's per-boot hook can run the same file only
@@ -498,7 +498,7 @@ case "$(state)" in
   hb_start phase1
   # The page prescribes holding both timers for a time-boxed build; without it
   # MicroOS's own updater can branch a snapshot underneath the run. Extracted
-  # since TM-0722, like every other block.
+  # like every other block.
   run_block s2-timer-hold
   # MARKER BEFORE THE BLOCK. The extracted block's last line is `sudo reboot`.
   setstate 2
@@ -544,11 +544,11 @@ case "$(state)" in
   done
   echo "ready=${ready} polls=${polls} budget=${READY_BUDGET}s" > "$H/out/s4a-ready-poll.txt"
   run_block s4a-success
-  # TM-0622: the other documented `sudo /usr/local/bin/k3s` call sites a
+  # the other documented `sudo /usr/local/bin/k3s` call sites a
   # one-node MicroOS guest can reach. 4e's server success condition is four
   # lines, three of them `sudo /usr/local/bin/k3s ...` (kubectl get nodes, get
   # pods, version) plus findmnt, run as the unprivileged user. The standalone
-  # findmnt block (TM-0623) is the same command as the second line, and cannot
+  # findmnt block is the same command as the second line, and cannot
   # be selected on its own (the label and the content are both shared), so the
   # success block carries it.
   run_block s4e-success
@@ -699,7 +699,7 @@ IPB64="$(printf '%s' "$IP" | base64 -w0)"
 tmp="$(mktemp)"
 printf '{"apiVersion":"v1","kind":"Secret","metadata":{"name":"%s-kubeconfig","namespace":"%s","labels":{"tockmox.com/harness":"executed-docs","tockmox.com/run":"%s"}},"data":{"kubeconfig":"%s","ip":"%s"}}' \
   "$PREFIX" "$BEACON_NS" "$PREFIX" "$B64" "$IPB64" > "$tmp"
-# 409 is NOT success (TM-0766): it means a stale ${PREFIX}-kubeconfig from an
+# 409 is NOT success: it means a stale ${PREFIX}-kubeconfig from an
 # earlier guest is in the way, carrying that guest's credential. Replace it
 # (PUT) and count only a 20x as delivered.
 post() {
@@ -746,7 +746,7 @@ microos_cloud_config() {
   printf '%s\n' "$MICROOS_TEARDOWN_SCAFFOLD" > "$d/teardown.SCAFFOLD.sh"
   printf '#!/bin/bash\nexec /var/lib/tockmox-harness/driver.sh per-boot\n' > "$d/perboot.sh"
   # The registry-mirror files come from the one lib both lanes read
-  # (registry-mirror.sh, TM-0575); python below only carries them.
+  # (registry-mirror.sh); python below only carries them.
   local mx_mode="${MX_MIRROR_MODE:-cache}" mx_deny="${MX_UPSTREAM_DENY:-node}"
   if [ -n "${MX_MIRROR:-}" ]; then
     # shellcheck source=/dev/null

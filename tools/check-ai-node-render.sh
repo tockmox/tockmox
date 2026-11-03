@@ -35,7 +35,7 @@ case "$py" in /*) ;; */*) py="$root/$py" ;; *) py="$(command -v "$py" || echo "$
 # said PyYAML and jsonschema; the renderer then grew an import chain to httpx
 # (ai_nodes -> models -> probe), and a python3 with the first two and not httpx
 # FAILED this gate with a traceback instead of skipping it (found on a Linux
-# check-all run, TM-1006). Importing app.ai_nodes asks the only question that
+# check-all run). Importing app.ai_nodes asks the only question that
 # matters: can this interpreter run the renderer.
 if ! ( cd "$root/tockmox-ui" && "$py" -c 'import yaml, jsonschema, app.ai_nodes' ) >/dev/null 2>&1; then
   echo "check-ai-node-render: SKIPPED: $py cannot import the renderer (tockmox-ui/app/ai_nodes.py) and its packages."

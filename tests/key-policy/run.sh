@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # shellcheck disable=SC2015  # `ok ... || bad ...`: ok and bad are printf wrappers that return 0, so C runs only when A or B failed
 #
-# THE KEY POLICY, AGAINST A REAL PROXY WITH A REAL DATABASE (TM-0991).
+# THE KEY POLICY, AGAINST A REAL PROXY WITH A REAL DATABASE.
 #
 # The claim: with modelGateway.keyPolicy on, no virtual key can be written that reaches every model, names a
 # candidate, or leaves its MCP access unstated, on mint OR on update. The case that matters is the update: LiteLLM's
 # default_key_generate_params only applies at mint time, so a key updated back to an empty model list reaches every
-# model again (measured on 1.100.3, TM-0936). This runs the shipped module in the shipped LiteLLM version, with a
+# model again (measured on 1.100.3). This runs the shipped module in the shipped LiteLLM version, with a
 # throwaway Postgres for its key table and two fake backends on 127.0.0.1 (local and frontier), and then runs the
 # SAME requests against the same proxy with the policy unregistered, so each refusal is shown to be the policy's doing
 # (the red leg), not something LiteLLM would have refused anyway.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # ============================================================================
-# Tockmox built-in forge bootstrap (TM-1335)
+# Tockmox built-in forge bootstrap
 #
 #   ./install/tockmox-install.sh bootstrap-forge --site ./my-site \
 #       --kit-out ~/keys/tockmox-recovery-kit.tar.age --age-recipient age1... \
@@ -57,7 +57,7 @@
 #        === sealed-secrets.key.enc (base64)   (your bootstrap-secrets export, as is)
 #        === end                          (a kit without it was cut short)
 #
-# SIGN-IN (TM-1336). People sign in to the forge through Authentik and are registered
+# SIGN-IN. People sign in to the forge through Authentik and are registered
 # at their first sign-in; Forgejo's OIDC group mapping puts members of the console's
 # admin group (tockmox-admins) in the `approvers` team, and takes them out again at
 # a sign-in where the group is gone. Nobody is ever made a forge ADMIN that way: the
@@ -106,9 +106,9 @@
 # the last HTTP status and the last ERROR body (a success body can carry a token,
 # so it is never written), and a trap removes it on every exit path.
 #
-# WHAT THIS DOES NOT DO (yet, each its own card): the nightly forge dump (TM-1337);
-# rebuild and forge repair (TM-1338); approving in the console as yourself (TM-1339);
-# upgrades (TM-1342). Taking someone OUT of the admin group takes them out of
+# WHAT THIS DOES NOT DO (yet, each its own card): the nightly forge dump;
+# rebuild and forge repair; approving in the console as yourself;
+# upgrades. Taking someone OUT of the admin group takes them out of
 # `approvers` only at their next forge sign-in, and with sso.apps.forge.access: admin
 # (the default) that sign-in is refused, so it never happens: until a reconciler
 # exists, remove them from the team by hand as well (docs/administration/identity.md). Proven on one single-node k3s
@@ -508,7 +508,7 @@ ok "cluster reachable, ArgoCD namespace present"
 # ArgoCD's repository credential is ONE Secret, tockmox-site-repo, and the external
 # route's docs name the same one. Overwriting a credential for another repository cuts
 # ArgoCD off from it at its next refresh, and the old token is gone for good (it did
-# exactly that to a lab cluster on 2026-11-02, TM-1336). So a credential for any other
+# exactly that to a lab cluster on 2026-11-02). So a credential for any other
 # URL stops the run here, before anything is written, unless you say to replace it.
 if ! $CONNECT_ONLY; then
   CUR_ERR="$(kubectl "${K[@]}" -n "$ARGO_NS" get secret tockmox-site-repo -o name 2>&1 >/dev/null)" \

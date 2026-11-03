@@ -18,7 +18,7 @@ tockmox:
 This is the other half of [adding an application](adding-an-application.md),
 with the same worked example: Miniflux, in a namespace called `news`, with its
 own database, a single sign-on registration and a hostname. Substitute your own
-names; the order is the point (TM-0800).
+names; the order is the point.
 
 `site-apps` syncs with `prune: true`, so deleting an app's files from `apps/`
 deletes it from the cluster. **Four things survive that:** backups in the object

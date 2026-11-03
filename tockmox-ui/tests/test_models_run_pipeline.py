@@ -1,4 +1,4 @@
-"""TM-1301: the candidate page draws a run as connected stages (Control, Smoke, Perf, Prefill, Tool calls, Quality, Verdict)
+"""The candidate page draws a run as connected stages (Control, Smoke, Perf, Prefill, Tool calls, Quality, Verdict)
 with an arrow between each, earlier runs list with the reason each ended, and Re-run renders the runner.rerun values change
 naming the run id. Nothing here is written: Re-run is a change to review and commit."""
 import datetime

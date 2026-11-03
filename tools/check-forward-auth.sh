@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Forward-auth consoles (TM-0425, TM-0217), asserted on the render.
+# Forward-auth consoles, asserted on the render.
 #
 #   ./tools/check-forward-auth.sh              render and assert
 #   ./tools/check-forward-auth.sh --selftest   prove every assertion can go red
@@ -387,12 +387,12 @@ selftest() {
   # shellcheck disable=SC2016  # the $ is Helm template text the mutation must match literally, not a shell variable
   mutate "disabled consoles left present" tockmox-identity/templates/sso-blueprints.yaml 's/state: {{ ternary "present" "absent" $on }}/state: present/'
   # shellcheck disable=SC2016  # the $ is Helm template text the mutation must match literally, not a shell variable
-  mutate "the embedded outpost's authentik_host is blank (TM-0425, the lab defect)" tockmox-identity/templates/sso-blueprints.yaml 's|authentik_host: "{{ $scheme }}://{{ $authHost }}/"|authentik_host: ""|' fa
+  mutate "the embedded outpost's authentik_host is blank (the lab defect)" tockmox-identity/templates/sso-blueprints.yaml 's|authentik_host: "{{ $scheme }}://{{ $authHost }}/"|authentik_host: ""|' fa
   mutate "the embedded outpost entry carries no config at all (the 2e82832 shape)" tockmox-identity/templates/sso-blueprints.yaml '/^          config:$/,/^            authentik_host:/d' fa
   # shellcheck disable=SC2016  # the $ is Helm template text the mutation must match literally, not a shell variable
   mutate "the embedded outpost's authentik_host is the wrong host" tockmox-identity/templates/sso-blueprints.yaml 's|authentik_host: "{{ $scheme }}://{{ $authHost }}/"|authentik_host: "{{ $scheme }}://{{ $domain }}/"|' fa
-  mutate "the dashboard IngressRoute attaches the identity Middleware across namespaces (TM-0217, the lab defect), F7 alone" tockmox-platform/templates/ingress.yaml 's|- name: traefik-dashboard-forward-auth|- name: tockmox-authentik-tockmox-forward-auth@kubernetescrd|' crossns
-  mutate "the dashboard IngressRoute attaches the identity Middleware across namespaces (TM-0217, the lab defect), whole gate" tockmox-platform/templates/ingress.yaml 's|- name: traefik-dashboard-forward-auth|- name: tockmox-authentik-tockmox-forward-auth@kubernetescrd|'
+  mutate "the dashboard IngressRoute attaches the identity Middleware across namespaces (the lab defect), F7 alone" tockmox-platform/templates/ingress.yaml 's|- name: traefik-dashboard-forward-auth|- name: tockmox-authentik-tockmox-forward-auth@kubernetescrd|' crossns
+  mutate "the dashboard IngressRoute attaches the identity Middleware across namespaces (the lab defect), whole gate" tockmox-platform/templates/ingress.yaml 's|- name: traefik-dashboard-forward-auth|- name: tockmox-authentik-tockmox-forward-auth@kubernetescrd|'
   mutate "the dashboard IngressRoute names a namespace-local Middleware that is not rendered" tockmox-platform/templates/ingress.yaml 's|- name: traefik-dashboard-forward-auth|- name: traefik-dashboard-forward-authx|' crossns
   # shellcheck disable=SC2016  # the $ is Helm template text the mutation must match literally, not a shell variable
   mutate "the dashboard Middleware asks a different address than the identity layer's" tockmox-platform/templates/ingress.yaml 's|address: {{ $faAddress }}|address: http://authentik.invalid/|' fa

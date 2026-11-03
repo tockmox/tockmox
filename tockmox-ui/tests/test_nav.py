@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1304: unit tests for app/nav.py (sections, rail, health pill wording, Help for this page).
+"""Unit tests for app/nav.py (sections, rail, health pill wording, Help for this page).
 
 Drafted by a local model (local-medium on the inference node) from nav.py alone, reviewed, kept as written:
 all 14 passed on the first run."""

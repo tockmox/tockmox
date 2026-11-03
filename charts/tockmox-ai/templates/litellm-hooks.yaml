@@ -1,10 +1,10 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-Site-supplied LiteLLM hook files (TM-0787).
+Site-supplied LiteLLM hook files.
 
 Renders ONE ConfigMap from modelGateway.hooks.files, plus the policy gate's
-module and policy when modelGateway.policyGate.enabled (TM-0383; see
+module and policy when modelGateway.policyGate.enabled (see
 _policy-gate.tpl), and nothing else. The mount
 that puts it in the proxy pod is the shipped `litellm.volumes` /
 `litellm.volumeMounts` default in values.yaml, and the registration is the

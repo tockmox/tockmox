@@ -182,7 +182,7 @@ A request routed to a hosted provider takes its conversation outside your networ
 
 [Operations →](docs/operations/)
 
-**Change it:** configuration, identity, storage, capabilities, integrations and your own applications.
+**Change it:** configuration, identity, storage, capabilities, integrations and your own applications. Before 1.0, the service names, Secret shapes and endpoints your applications wire to are the supported wiring, not a promised interface ([values contract](docs/administration/values-contract.md#before-10-there-is-no-downstream-abi)).
 
 [Administration →](docs/administration/)
 

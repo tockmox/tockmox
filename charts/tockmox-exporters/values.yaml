@@ -135,7 +135,7 @@ capabilities:
 
 namespaces:
   monitoring: tockmox-monitoring
-  # Where the SMART exporter runs (TM-0799): the namespace the policy layer
+  # Where the SMART exporter runs: the namespace the policy layer
   # labels `enforce: privileged`. It reads every disk through a privileged
   # container with the host's /dev, which no Pod Security level below
   # privileged admits, so it cannot share a namespace with pods held to
@@ -159,7 +159,7 @@ apps:
 
 prometheus-blackbox-exporter:
   resources:
-    # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+    # measured on the prod install 2026-10-05 (accepted for the lab):
     # peak 51.1 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 58.3 MiB in the pre-migration namespace (30 days); average 44.1 MiB.
     # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
     # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -167,7 +167,7 @@ prometheus-blackbox-exporter:
       memory: 48Mi
     limits:
       memory: 96Mi
-  # A MODULE OF ITS OWN FOR THE CONSOLES (TM-0820 A6). http_2xx treats only 2xx
+  # A MODULE OF ITS OWN FOR THE CONSOLES. http_2xx treats only 2xx
   # as up, and a console that answers 401 at its root (an SSO-gated or
   # forward-auth console does) read as down: TockmoxConsoleUnreachable fired for
   # a console that was serving exactly as designed. 401 here means the server
@@ -262,7 +262,7 @@ prometheus-blackbox-exporter:
     - name: SSL_CERT_FILE
       value: /etc/tockmox/ca/ca.crt
 
-  # THE MOUNT ABOVE IS NOT ENOUGH ON A GREENFIELD, AND THAT IS TM-0486.
+  # THE MOUNT ABOVE IS NOT ENOUGH ON A GREENFIELD.
   # The trust configuration is correct and was verified on 2026-08-15. It
   # still produced five permanently-failing probes on the 2026-09-10
   # greenfield gate run, and the reason is ORDER, not configuration.
@@ -285,7 +285,7 @@ prometheus-blackbox-exporter:
   #     https://github.com         probe_success 1
   # The last line is still the one that matters: public roots survive.
   #
-  # Note the contrast with the alert bridge (TM-0488), which had the same
+  # Note the contrast with the alert bridge, which had the same
   # shape and the opposite fix. That process can re-read its file on every
   # send, so the answer there was to mount and re-read. This one physically
   # cannot re-read, so the only answer is to not start until the file is
@@ -325,7 +325,7 @@ prometheus-blackbox-exporter:
             sleep 5
           done
           echo "CA present, $(wc -c < "$ca") bytes; starting the exporter."
-      # TM-0903: 0.3 MiB peak measured; 32Mi is the init-container floor.
+      # 0.3 MiB peak measured; 32Mi is the init-container floor.
       resources:
         requests:
           memory: 8Mi
@@ -346,7 +346,7 @@ prometheus-blackbox-exporter:
     {{- end }}
 prometheus-snmp-exporter:
   resources:
-    # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+    # measured on the prod install 2026-10-05 (accepted for the lab):
     # peak 63.7 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 65.7 MiB in the pre-migration namespace (30 days); average 60.2 MiB.
     # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
     # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -357,7 +357,7 @@ prometheus-snmp-exporter:
   serviceMonitor:
     enabled: true
 
-# THE SMART EXPORTER (templates/smartctl.yaml, TM-0799). Rendered by this chart
+# THE SMART EXPORTER (templates/smartctl.yaml). Rendered by this chart
 # rather than vendored, so that it can run in `namespaces.nodeAgents`; the keys
 # below are the upstream chart's (prometheus-smartctl-exporter 0.17.1), so a
 # site's overrides keep their meaning. Dropped from upstream: `rbac` (bound the
@@ -497,7 +497,7 @@ probes:
   enabled: true
   interval: 30s
   scrapeTimeout: 10s
-  # http_console, not http_2xx: accepts 200/301/302/401 (TM-0820 A6, see the
+  # http_console, not http_2xx: accepts 200/301/302/401 (see the
   # blackbox config above). Set http_2xx to go back to 2xx-only.
   module: http_console
   consoles:

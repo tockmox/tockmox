@@ -12,7 +12,7 @@ Network isolation is the other half. Egress is limited to DNS, the API server
 and in-cluster telemetry. With diagnosticIdentity.apiServerCIDRs set, that is
 literally true; with it empty (the default) the "API server" rule is the whole
 serviceCIDR and lanCIDR on 443/6443, and an HTTPS forwarder on the LAN is a path
-out. See the rule below and TM-0273 fix 2.
+out. See the rule below.
 
 Tockmox ships the cage. What runs in it is your choice.
 */ -}}

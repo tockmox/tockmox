@@ -40,7 +40,7 @@ global:
   localStorageClass: "local-path"
 namespaces:
   monitoring: tockmox-monitoring
-  # Where node-exporter and Alloy's log DaemonSet run (TM-0799): a namespace the
+  # Where node-exporter and Alloy's log DaemonSet run: a namespace the
   # policy layer labels `enforce: privileged`, so this one can enforce what the
   # rest of its pods pass. The two subcharts take the name as a LITERAL
   # `namespaceOverride` below (a subchart value cannot be templated), so this key
@@ -168,7 +168,7 @@ apps:
   # set false to drop ONLY the boards while keeping the stack.
   dashboards: {}   # unset: follows capabilities.observability
 
-  # ArgoCD monitoring (K8, TM-0739). Unset: follows capabilities.observability,
+  # ArgoCD monitoring (K8). Unset: follows capabilities.observability,
   # so the three ServiceMonitors, the ArgoCD board and the sync-state alert
   # rules render on every install with observability on. Until 0.7.1 this was
   # the one app key that defaulted OFF, because ArgoCD is a PREREQUISITE this
@@ -177,7 +177,7 @@ apps:
   #
   # What the default now means on each kind of install:
   #   - Installed per fresh-install.md §6, which turns the three metrics
-  #     Services on in the install command (TM-0628): everything scrapes, the
+  #     Services on in the install command: everything scrapes, the
   #     board has data and TockmoxArgoCDCannotCompare can fire.
   #   - An ArgoCD you installed yourself WITHOUT metrics: the monitors select
   #     nothing and the board reads "No data". TockmoxArgoCDMetricsAbsent stays
@@ -226,7 +226,7 @@ sso:
 # Alertmanager are NOT ... neither ships authentication, and an unauthenticated
 # admin surface is not a default. Reach them with `kubectl port-forward`, or
 # turn their route on here: it then goes through Authentik's forward-auth
-# (TM-0425), which needs the SAME console turned on in the identity layer
+#, which needs the SAME console turned on in the identity layer
 # (`sso.forwardAuth.apps.<app>.enabled: true`), or Authentik refuses the host.
 # docs/administration/identity.md, "Consoles behind forward-auth".
 # ---------------------------------------------------------------------------
@@ -405,7 +405,7 @@ notifications:
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# GRAFANA ON CLOUDNATIVEPG (TM-0786). Off by default.
+# GRAFANA ON CLOUDNATIVEPG. Off by default.
 #
 # Grafana keeps its users, org membership, preferences, annotations and
 # alert-rule state in a database. By default that is SQLite on the 5Gi volume
@@ -463,13 +463,13 @@ grafanaDatabase:
 
 kube-prometheus-stack:
   prometheus-node-exporter:
-    # TM-0799: the privileged node agent runs in its own namespace, not beside
+    # the privileged node agent runs in its own namespace, not beside
     # Grafana and Prometheus. Must equal `namespaces.nodeAgents` (preflight).
     # The chart's ServiceMonitor follows it, and Prometheus selects monitors in
     # every namespace, so the scrape needs nothing else.
     namespaceOverride: tockmox-node-agents
     resources:
-      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # measured on the prod install 2026-10-05 (accepted for the lab):
       # peak 32.9 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 33.4 MiB in the pre-migration namespace (30 days); average 26.9 MiB.
       # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
       # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -526,7 +526,7 @@ kube-prometheus-stack:
   # If you remove an annotation here, F4 goes red: each one is load bearing.
   prometheusOperator:
     resources:
-      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # measured on the prod install 2026-10-05 (accepted for the lab):
       # peak 61.6 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 87.4 MiB in the pre-migration namespace (30 days); average 50.0 MiB.
       # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
       # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -553,7 +553,7 @@ kube-prometheus-stack:
     annotations:
       argocd.argoproj.io/sync-wave: "1"
     # KubeJobFailed is upstream's rule, re-shipped by templates/kube-job-failed.yaml
-    # with the console-key check's Jobs left out (TM-0982, lab L6 F-L6-2): that
+    # with the console-key check's Jobs left out (lab L6 F-L6-2): that
     # check keeps 24 failed Jobs on purpose and the upstream rule fired one
     # warning per kept Job, beside the alert that owns the condition. The
     # template renders exactly when this is true; set it false to have the
@@ -592,7 +592,7 @@ kube-prometheus-stack:
     enabled: false
 
   # ---------------------------------------------------------------------------
-  # CNPG CLUSTER PHASE AS A METRIC (TM-0518).
+  # CNPG CLUSTER PHASE AS A METRIC.
   #
   # WHY THIS EXISTS. A CNPG Cluster sat in `Instance Status Extraction Error`
   # for an entire install on 2026-09-12 and nothing anywhere went red. The
@@ -626,7 +626,7 @@ kube-prometheus-stack:
   # `Active resources`. Only the metric never arrives.
   kube-state-metrics:
     resources:
-      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # measured on the prod install 2026-10-05 (accepted for the lab):
       # peak 134.8 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 65.6 MiB in the pre-migration namespace (30 days); average 123.1 MiB.
       # limit = max peak x 3, rounded up (32Mi steps to 512Mi, 128Mi above). This one grows
       # with the cluster, not the chart: x3 is a starting point, and a bigger cluster
@@ -696,7 +696,7 @@ kube-prometheus-stack:
                     type: Gauge
                     gauge:
                       path: [spec, instances]
-                # ADDED 2026-09-16 (TM-0659). The rc4 Phase E soak found a site
+                # ADDED 2026-09-16. The rc4 Phase E soak found a site
                 # app's database with ContinuousArchiving=False and a failed
                 # nightly backup for thirteen hours, and NOTHING could alert on
                 # it. The reason is worth stating because it is not obvious:
@@ -737,7 +737,7 @@ kube-prometheus-stack:
     # them. `service.sessionAffinity: ClientIP` makes each consumer stick to one
     # replica; it is NOT set here, because it is a rendered default change and
     # means nothing at one replica. What it does and does not guarantee, and the
-    # single-pod alternative, are in docs/operations/monitoring.md (TM-0781).
+    # single-pod alternative, are in docs/operations/monitoring.md.
     prometheusSpec:
       # Tockmox does NOT restrict rule/monitor discovery by Helm release.
       # Upstream defaults to matching only its own release's objects, which
@@ -748,7 +748,7 @@ kube-prometheus-stack:
       podMonitorSelectorNilUsesHelmValues: false
       probeSelectorNilUsesHelmValues: false
       scrapeConfigSelectorNilUsesHelmValues: false
-      # IMAGE (TM-0820 A5). The vendored kube-prometheus-stack ships Prometheus
+      # IMAGE. The vendored kube-prometheus-stack ships Prometheus
       # v3.14.0, and the reference deployment's TSDB was written by v3.15.0. A
       # restore-with-data install on the subchart default opens a newer TSDB with
       # an older binary, which is a downgrade. Pinned to the 3.15 line the
@@ -801,7 +801,7 @@ kube-prometheus-stack:
   grafana:
     # kube-prometheus-stack 92 stopped excluding Grafana's chart tests from its
     # package, so the render gained a `helm.sh/hook: test` Pod, ServiceAccount
-    # and ConfigMap in namespace `default` (TM-1010). Nothing here runs
+    # and ConfigMap in namespace `default`. Nothing here runs
     # `helm test`, and Argo CD does not; off, as the render was before.
     testFramework:
       enabled: false
@@ -827,12 +827,12 @@ kube-prometheus-stack:
     envFromSecrets:
       - name: tockmox-observability-sso-env
         optional: true
-      # Grafana's database settings when grafanaDatabase.enabled (TM-0786).
+      # Grafana's database settings when grafanaDatabase.enabled.
       # Rendered by this chart only then; optional, so absent means SQLite.
       - name: tockmox-observability-grafana-db-env
         optional: true
     envValueFrom:
-      # The database password CNPG generated (grafanaDatabase, TM-0786). The
+      # The database password CNPG generated (grafanaDatabase). The
       # Secret exists only when that is on, hence optional. The name follows
       # grafanaDatabase.name: change both together, or the preflight refuses.
       GF_DATABASE_PASSWORD:
@@ -846,7 +846,7 @@ kube-prometheus-stack:
           key: client-secret
           optional: true
     defaultDashboardsEnabled: true
-    # NO PHONE-HOME FROM THE OBSERVABILITY CONSOLE (TM-0671, 2026-09-16).
+    # NO PHONE-HOME FROM THE OBSERVABILITY CONSOLE (2026-09-16).
     #
     # Grafana's own defaults are `check_for_updates = true`, `reporting_enabled
     # = true` and a news feed that is on. None of them were overridden here, so
@@ -870,7 +870,7 @@ kube-prometheus-stack:
     # Grafana's addresses are in the binary, not in any values file. The same
     # trap was already written down one chart over, for Open WebUI's version
     # check, and was fixed for that console rather than turned into a check.
-    # Replacing the gate's assertion is the rest of TM-0671 and is NOT this.
+    # Replacing the gate's assertion is the rest of that work and is NOT this.
     grafana.ini:
       analytics:
         check_for_updates: false
@@ -886,7 +886,7 @@ kube-prometheus-stack:
     # surfaced as 46-second sqlite stalls and a readiness probe flapping the UI
     # in and out of 503.
     #
-    # RAISED TO 1Gi 2026-09-13, TM-0240 Phase D2, after an OOM KILL on the
+    # RAISED TO 1Gi 2026-09-13, after an OOM KILL on the
     # reference lab. Measured, in this order:
     #   - steady state 454-459 MiB for EIGHT HOURS with nobody using it, which
     #     is 89% of a 512Mi ceiling before a single dashboard is opened
@@ -906,12 +906,12 @@ kube-prometheus-stack:
     # If a future Grafana sits above ~700Mi steady, re-measure rather than
     # doubling again on reflex.
     #
-    # RAISED TO 1.5Gi 2026-10-05, TM-0595, on that instruction: re-measured, not
+    # RAISED TO 1.5Gi 2026-10-05, on instruction: re-measured, not
     # doubled. The prod install at v0.7.2 peaked at 820.8 MiB, 80.2% of 1Gi, in
-    # under four days ... over TM-0553's own line (below 80% after a session).
+    # under four days ... over the existing line (below 80% after a session).
     # Per-pod average working set ran 305-744 MiB across the pods in that window,
     # so the average HAS crossed ~700Mi. 1.5Gi puts that peak at 53%. The request
-    # follows TM-0595's rule (the highest per-pod average, rounded up to 16Mi),
+    # follows the rule (the highest per-pod average, rounded up to 16Mi),
     # 512Mi -> 752Mi.
     resources:
       requests: {cpu: 50m, memory: 752Mi}
@@ -943,7 +943,7 @@ kube-prometheus-stack:
       # A class that does not exist leaves the PVC Pending, which
       # KubePersistentVolumeErrors alerts on.
       storageClassName: longhorn
-    # TM-0903: the subchart's init-chown-data (a chown over the data volume).
+    # the subchart's init-chown-data (a chown over the data volume).
     # It finishes in under a second, so no sample could be taken; 32Mi is the
     # shell-only init-container floor.
     initChownData:
@@ -958,7 +958,7 @@ kube-prometheus-stack:
     # an endpoint of their choosing.
     sidecar:
       resources:
-        # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+        # measured on the prod install 2026-10-05 (accepted for the lab):
         # peak 99.6 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 103.4 MiB in the pre-migration namespace (30 days); average 97.2 MiB.
         # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
         # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -1009,7 +1009,7 @@ kube-prometheus-stack:
       # not do so for podAnnotations, which is why this is not the usual
       # checksum annotation. Coverage is stated on `tockmox.ssoEnvRevision`.
       TOCKMOX_SSO_ENV_REVISION: '{{ include "tockmox.ssoEnvRevision" . }}'
-    # A ONE-SHOT READER HAS TO BE SEQUENCED. TM-0632.
+    # A ONE-SHOT READER HAS TO BE SEQUENCED.
     #
     # Grafana is Go: crypto/x509 builds the root pool ONCE, lazily, at the first
     # TLS handshake, reading SSL_CERT_FILE exactly then, and caches it for the
@@ -1080,7 +1080,7 @@ kube-prometheus-stack:
               sleep 5
             done
             echo "CA present, $(wc -c < "$ca") bytes; starting."
-        # TM-0903: 0.6 MiB peak measured; 32Mi is the init-container floor.
+        # 0.6 MiB peak measured; 32Mi is the init-container floor.
         resources:
           requests: {memory: 8Mi}
           limits: {memory: 32Mi}
@@ -1201,7 +1201,7 @@ loki:
   # `Monolithic` is the 18.x spelling of what the 7.x chart called
   # `SingleBinary`. The 18.x chart still accepts `SingleBinary` but marks it
   # deprecated and its own default is now `Monolithic`, so this says what
-  # is meant instead of relying on the deprecated alias (TM-0777). The values
+  # is meant instead of relying on the deprecated alias. The values
   # block below is still named `singleBinary` in both lineages.
   deploymentMode: Monolithic
   # The Loki sidecar watches ConfigMaps and Secrets cluster-wide for ruler rule
@@ -1263,7 +1263,7 @@ loki:
   gateway:
     metrics:
       resources:
-        # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+        # measured on the prod install 2026-10-05 (accepted for the lab):
         # peak 34.9 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2); average 28.7 MiB.
         # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
         # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -1272,7 +1272,7 @@ loki:
         limits:
           memory: 64Mi
     resources:
-      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # measured on the prod install 2026-10-05 (accepted for the lab):
       # peak 15.2 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2); average 13.7 MiB.
       # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
       # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -1321,7 +1321,7 @@ loki:
             period: 24h
     limits_config:
       retention_period: 168h
-    # No usage reporting to stats.grafana.org (TM-0671): Loki's
+    # No usage reporting to stats.grafana.org: Loki's
     # analytics.reporting_enabled defaults true. Sovereignty: no unrequested
     # outbound calls.
     analytics:
@@ -1366,11 +1366,11 @@ loki:
     serviceMonitor:
       enabled: true
 alloy:
-  # TM-0799: the log DaemonSet reads the node's /var/log, so it runs in the node
+  # the log DaemonSet reads the node's /var/log, so it runs in the node
   # agents' namespace. Must equal `namespaces.nodeAgents` (preflight).
   namespaceOverride: tockmox-node-agents
   alloy:
-    # No usage reporting to stats.grafana.org (TM-0671): enableReporting
+    # No usage reporting to stats.grafana.org: enableReporting
     # defaults true and adds nothing we need. Sovereignty: no unrequested
     # outbound calls.
     enableReporting: false

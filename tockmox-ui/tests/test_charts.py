@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1306 (absorbs TM-1016): trend panels from the data Grafana graphs, drawn server-side; TM-1307: Home from parts;
-TM-1310: the mascot at a moment (specs/tockmox-ui/SPEC.md sections 4, 6 and 11 in the planning repo).
+"""Trend panels from the data Grafana graphs, drawn server-side; Home from parts;
+the mascot at a moment (specs/tockmox-ui/SPEC.md sections 4, 6 and 11 in the planning repo).
 
   panels     one file, panels.yaml; every PromQL there once; the Tockmox / Status board is generated from it
   reading    a failed or an empty range query reads Unknown with a reason, never a flat zero

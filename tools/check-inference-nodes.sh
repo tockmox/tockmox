@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Assert, ON THE RENDERED ARTIFACT, the inference-node routes (REQ-0047) and the
-# eval gateway (REQ-0048) in tockmox-ai (TM-0920).
+# eval gateway (REQ-0048) in tockmox-ai.
 #
 #   ./tools/check-inference-nodes.sh
 #
@@ -18,7 +18,7 @@
 #     the golden's and sit on the ConfigMap;
 #   - no -next route reaches the production config; the eval config holds exactly
 #     the golden's eval routes plus its hosted candidates, filters by tag, and fences
-#     each entry by tier (TM-1249: local routes every class, external ones open only);
+#     each entry by tier (local routes every class, external ones open only);
 #   - the eval gateway pod carries tockmox.com/isolated, mounts its own config, and
 #     its NetworkPolicy admits only the fixture's peer, on 4000;
 #   - the policy layer's namespace-wide allows skip isolated pods;
@@ -30,15 +30,15 @@
 #     enrolled ids and its Stale threshold is three of aiNodes.convergeIntervalSeconds;
 #   - default models for new production keys render into the config and change its hash;
 #   - the model watcher and the Tockmox UI have exactly the authority and egress documented;
-#   - the scheduled eval runner (TM-1261): its token only on the scheduler pod, a Role of Jobs and Pods in the release
+#   - the scheduled eval runner: its token only on the scheduler pod, a Role of Jobs and Pods in the release
 #     namespace, Job pods isolated and labelled for the eval gateway, egress to the nodes only, the UI reading its
 #     status volume read-only, and each of its render guards;
 #   - twenty-five wrong configurations are refused with a sentence naming the cause;
-#   - an Ollama route with no num_ctx is refused, naming the node, the endpoint and the route (TM-0957);
+#   - an Ollama route with no num_ctx is refused, naming the node, the endpoint and the route;
 #   - the policy layer's aiEgress.*.extraEgress refuses providerAllow's {cidr, ports} shape at render and
-#     accepts a NetworkPolicy egress rule, and the four pages that send a reader there show that rule (TM-0978).
+#     accepts a NetworkPolicy egress rule, and the four pages that send a reader there show that rule.
 # WHAT IT DOES NOT PROVE: that LiteLLM loads the config or that the policy blocks
-# a real connection. The lab proof does that (TM-0920 evidence).
+# a real connection. The lab proof does that.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -84,9 +84,9 @@ refuse "a route names a node that does not exist" "which is not in inferenceNode
   --set 'inferenceNodes.routes[0].node=nope' || rc=1
 refuse "a route sets a derived param" "which is derived from the node" \
   --set 'inferenceNodes.routes[0].params.api_base=http://x' || rc=1
-refuse "an external eval route tagged for data above public (TM-1249)" "an external route may carry only the tag open" \
+refuse "an external eval route tagged for data above public" "an external route may carry only the tag open" \
   --set 'inferenceNodes.routes[1].modelInfo.endpoint_tier=external' --set 'inferenceNodes.routes[1].params.tags={open,internal}' || rc=1
-refuse "an eval route whose tier is neither local nor external (TM-1249)" "it must be local or external" \
+refuse "an eval route whose tier is neither local nor external" "it must be local or external" \
   --set 'inferenceNodes.routes[1].modelInfo.endpoint_tier=cloud' || rc=1
 refuse "default key models empty (means every model)" "reads an empty list as EVERY model" \
   --set-json 'modelLifecycle.productionKeys={"defaultModels":[]}' || rc=1
@@ -217,11 +217,11 @@ ecfg = yaml.safe_load(ecm["data"]["config.yaml"]) if ecm else {}
 check(ecfg.get("model_list") == golden["eval"] + golden["hostedCandidates"],
       "the eval gateway serves exactly the -next routes, what they are compared against, and hosted candidates")
 check(all(e["litellm_params"].get("tags") == ["open"] for e in golden["hostedCandidates"]) and golden["hostedCandidates"],
-      "hosted candidates carry the tag open alone (TM-1249: public eval data only)")
+      "hosted candidates carry the tag open alone (public eval data only)")
 check(all(e["model_info"].get("endpoint_tier") in ("local", "external") and e["litellm_params"].get("tags")
           for e in ecfg.get("model_list", [])), "every eval-gateway entry names its tier and the classes it may serve")
 check((ecfg.get("router_settings") or {}).get("enable_tag_filtering") is True,
-      "the eval gateway filters by tag, so each entry's tags fence it (TM-1249)")
+      "the eval gateway filters by tag, so each entry's tags fence it")
 
 dep = find(nodes, "Deployment", "tockmox-litellm-eval")
 pod = (dep or {}).get("spec", {}).get("template", {})
@@ -295,7 +295,7 @@ check(unp["spec"]["policyTypes"] == ["Ingress", "Egress"] and len(ui_in) == 2
       and ui_in[1]["ports"] == [{"port": 9464, "protocol": "TCP"}]
       and ui_in[1]["from"] == [{"namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "tockmox-monitoring"}},
                                 "podSelector": {"matchLabels": {"app.kubernetes.io/name": "prometheus"}}}],
-      "the UI admits Traefik only on 8080, and Prometheus only on the metrics port 9464 (TM-1013)")
+      "the UI admits Traefik only on 8080, and Prometheus only on the metrics port 9464")
 uports = {p["name"]: p["containerPort"] for p in usp["containers"][0]["ports"]}
 uenv = {e["name"]: e.get("value") for e in usp["containers"][0]["env"]}
 usvc = find(nodes, "Service", "tockmox-ui")
@@ -309,7 +309,7 @@ to_actions = [r for r in ue if r.get("to") == [{"podSelector": {"matchLabels": {
 check(len(ue) - len(to_actions) == 4 and "0.0.0.0/0" not in blocks and blocks == ["10.0.0.0/16"]
       and all(r["ports"] == [{"port": 8081, "protocol": "TCP"}] for r in to_actions),
       "with probing and the update check off, the UI's egress is DNS, the API (lanCIDR:6443), Prometheus/Alertmanager and Traefik, "
-      "and tockmox-actions on 8081 when actions are on (TM-1311); no node, no internet")
+      "and tockmox-actions on 8081 when actions are on; no node, no internet")
 sys.exit(1 if bad else 0)
 PY
 
@@ -341,7 +341,7 @@ print(("  ok " if ok else "FAIL ") + "probe ranges and HTTPS out appear in the U
 sys.exit(0 if ok else 1)
 PY
 
-# A FEED FROM A CONFIGMAP (TM-1027): mounted at /feed, and NO HTTPS out for a file feed.
+# A FEED FROM A CONFIGMAP: mounted at /feed, and NO HTTPS out for a file feed.
 helm template t "$AI" -f "$BASE" -f "$FIX" --set 'tockmoxUi.config.updateCheck.enabled=true' \
   --set 'tockmoxUi.config.updateCheck.feedUrl=file:///feed/releases.json' --set 'tockmoxUi.updateFeed.configMap=site-feed' > "$tmp/ui-filefeed.yaml"
 python3 - "$tmp/ui-filefeed.yaml" <<'PY' || rc=1
@@ -374,7 +374,7 @@ print(("  ok " if ok else "FAIL ") + "with no allowedClients the eval gateway ad
 sys.exit(0 if ok else 1)
 PY
 
-# THE REPORT VOLUME HAS TWO PODS (TM-0902). The watcher writes it, the UI reads it. ReadWriteOnce attaches to one
+# THE REPORT VOLUME HAS TWO PODS. The watcher writes it, the UI reads it. ReadWriteOnce attaches to one
 # node, so with both on the watcher must be required onto the UI's node and the UI must roll WITHOUT A SURGE
 # (RollingUpdate, maxSurge 0: the old pod goes before the new one needs the volume). NOT `type: Recreate`: switching a
 # live RollingUpdate Deployment to Recreate is refused under ServerSideApply (lab N1, 2026-10-08: tockmox-ai sat
@@ -398,7 +398,7 @@ got=$(colo --set 'modelLifecycle.watch.report.accessModes={ReadWriteMany}' --set
 else echo "FAIL RWX report volume: affinity/no-surge = $got (want False False)"; rc=1; fi
 refuse "a ReadWriteOncePod report volume" "has ReadWriteOncePod: the watcher writes the report" --set 'modelLifecycle.watch.report.accessModes={ReadWriteOncePod}' || rc=1
 
-# ---- THE EVAL RUNNER ON A SCHEDULE (TM-1261, TM-1264) ------------------------------------------------------------
+# ---- THE EVAL RUNNER ON A SCHEDULE ------------------------------------------------------------
 # The fixture turns it on (ci/values-inference-nodes.yaml). Refusals first, each with its cause named; then the render.
 refuse "the runner on with no image (none of its own, none in the UI)" "modelLifecycle.runner.image is empty and tockmoxUi has no image" \
   --set 'tockmoxUi.enabled=false' --set 'tockmoxUi.image=' || rc=1
@@ -538,7 +538,7 @@ check(auc["verdictsDir"] == "/site/verdicts" and auc["resultsDir"] == "/var/lib/
 sys.exit(1 if bad else 0)
 PY
 
-# ---- LAB FINDINGS 2026-10-08 (TM-0920 lab rehearsal, agent C; F4 F5 F6 F7 F8 F10 and the pages) -------------
+# ---- LAB FINDINGS 2026-10-08 (lab rehearsal, agent C; F4 F5 F6 F7 F8 F10 and the pages) -------------
 # Each of these rendered cleanly and failed on a cluster. The assertions below evaluate the rendered NetworkPolicies
 # the way the API server would for pod-to-pod traffic (selectors and ports; ipBlock rules are not evaluated, since a
 # pod address is not known at render time), so a reach the pages deny cannot hide behind a tidy render.
@@ -696,7 +696,7 @@ refuse "F4 an engine the UI does not know" "/inferenceNodes/nodes/0/endpoints/0/
 refuse "F9 a catalog track the UI does not know" "/modelLifecycle/catalog/0/track/0" \
   --set 'modelLifecycle.catalog[0].track={quant}' || rc=1
 
-# ---- EVERY OLLAMA ROUTE PINS ITS CONTEXT (TM-0957) -----------------------------------------------------------------
+# ---- EVERY OLLAMA ROUTE PINS ITS CONTEXT -----------------------------------------------------------------
 # A request with no num_ctx gets Ollama's default context, which current Ollama sizes from the node's memory: 256k
 # tokens on 48 GiB or more. Qwen3-Coder-30B at 256k is a 24 GiB KV cache on top of 19 GiB of weights; that is how a
 # lab route reached a 64 GiB node with none (2026-10-08). It renders cleanly, so the render must refuse it. Helm
@@ -717,13 +717,13 @@ case("ctx-embed", "local-embed", lambda p: p.pop("num_ctx"))
 case("ctx-string", "local-coder", lambda p: p.update(num_ctx="16k"))
 case("ctx-zero", "local-coder", lambda p: p.update(num_ctx=0))
 PY
-refuse "TM-0957 an Ollama chat route with no num_ctx" "route local-coder on studio/ollama-11434 sets no params.num_ctx" \
+refuse "an Ollama chat route with no num_ctx" "route local-coder on studio/ollama-11434 sets no params.num_ctx" \
   -f "$tmp/ctx-chat.yaml" || rc=1
-refuse "TM-0957 an Ollama embedding route with no num_ctx" "route local-embed on studio/ollama-11434 sets no params.num_ctx" \
+refuse "an Ollama embedding route with no num_ctx" "route local-embed on studio/ollama-11434 sets no params.num_ctx" \
   -f "$tmp/ctx-embed.yaml" || rc=1
-refuse "TM-0957 num_ctx that is not a whole number" "/inferenceNodes/routes/2/params/num_ctx" \
+refuse "num_ctx that is not a whole number" "/inferenceNodes/routes/2/params/num_ctx" \
   -f "$tmp/ctx-string.yaml" || rc=1
-refuse "TM-0957 num_ctx of zero" "/inferenceNodes/routes/2/params/num_ctx" \
+refuse "num_ctx of zero" "/inferenceNodes/routes/2/params/num_ctx" \
   -f "$tmp/ctx-zero.yaml" || rc=1
 
 # ---- THE PAGES THE LAB NEEDED (F2 F3 F4 F9 F12, O1, F14) ---------------------------------------------------------
@@ -765,7 +765,7 @@ has("tools/mint-secrets.sh", "tockmox-litellm-eval", "F3 mints tockmox-litellm-e
 sys.exit(1 if bad else 0)
 PY
 
-# ---- F13 (TM-0978, 0.8.0 upgrade and greenfield labs 2026-10-08): the node's path through the policy layer -------
+# ---- F13 (0.8.0 upgrade and greenfield labs 2026-10-08): the node's path through the policy layer -------
 # Four pages say "put the node's address and ports in aiEgress.litellm.extraEgress" and none showed the shape; the
 # natural one, providerAllow's {cidr, ports} documented directly above it, rendered clean and failed at the Argo apply
 # (".spec.egress[1].cidr: field not declared in schema"). The schema now types the items, so the wrong shape is refused

@@ -1,4 +1,4 @@
-# TockmoxRestoreDrillNeverRan ... TM-0851.
+# TockmoxRestoreDrillNeverRan.
 #
 # DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
 #

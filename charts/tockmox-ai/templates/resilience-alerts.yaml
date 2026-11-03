@@ -1,5 +1,5 @@
 {{- /*
-THE RESILIENT PROFILE'S EXISTENCE ALARM, model gateway database (TM-0597).
+THE RESILIENT PROFILE'S EXISTENCE ALARM, model gateway database.
 
 Renders only while the install claims to be resilient
 (`global.resilience.profile: resilient`, set by profiles/resilient.yaml) and
@@ -17,7 +17,7 @@ not.
 WHERE THEY LOOK. At the drill CronJob and its Jobs as kube-state-metrics
 reports them (kube_cronjob_info, kube_cronjob_spec_suspend,
 kube_job_status_succeeded), never at the drill register. The register moved
-from a ConfigMap to the object store (TM-0459) and is not a thing a rule over
+from a ConfigMap to the object store and is not a thing a rule over
 cluster metrics can read, so these rules neither depend on where the row is
 kept nor on the drill's script. A drill Job that SUCCEEDED is a drill that
 recorded its row once the register move lands: the drill then exits non-zero

@@ -1,13 +1,13 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-The EVAL gateway (REQ-0048, TM-0920). A second, small LiteLLM that serves candidate models beside the
+The EVAL gateway (REQ-0048). A second, small LiteLLM that serves candidate models beside the
 models they are compared against, reachable only by the evaluators. OFF by default.
 
 WHY A SEPARATE GATEWAY. A candidate is not usable until a person approves it, local or hosted (Jeff's
 ruling, 2026-10-07). Inside one LiteLLM that cannot be enforced: a virtual key with no model list, or an
 empty one, can call every model the gateway has, access groups and tags included, and resetting a key to
-an empty list reopens it (measured on 1.100.3, TM-0936). What held for every key, the master key
+an empty list reopens it (measured on 1.100.3). What held for every key, the master key
 included, was the candidate not being in the production gateway at all. So it is here instead.
 
 What it serves (templates/_inference-nodes.tpl): every `-next` node route and the live route each is
@@ -25,7 +25,7 @@ No database: it serves the master key only, and the network policy is the fence.
 {{- if and $eg.enabled (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm")) -}}
 {{- $routes := include "tockmox-ai.nodeRoutes" (dict "root" $ "gateway" "eval") | fromYamlArray -}}
 {{- $hosted := include "tockmox-ai.hostedCandidates" . | fromYamlArray -}}
-{{- /* TM-1249: tag filtering is what makes each deployment's tags a fence (an untagged request is not fenced; the runner
+{{- /* tag filtering is what makes each deployment's tags a fence (an untagged request is not fenced; the runner
 tags every request it sends). */ -}}
 {{- $config := dict "model_list" (concat $routes $hosted) "general_settings" (dict "master_key" "os.environ/PROXY_MASTER_KEY")
       "router_settings" (dict "enable_tag_filtering" true) -}}

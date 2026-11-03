@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Actions from the console (TM-1311, TM-1313; specs/tockmox-ui/SPEC.md section 7 in the planning repo).
+"""Actions from the console (specs/tockmox-ui/SPEC.md section 7 in the planning repo).
 
 What the UI and the tockmox-actions service share: the kinds, how an intent is written down, the nonce that binds a
 sign-in to exactly one intent, and the checks both sides run. The UI stays write-free: it posts an intent to the
@@ -20,7 +20,7 @@ Kinds (`actions.<kind>.enabled`; off means absent, never a disabled button):
   restart     a rollout restart of an allowlisted Deployment or StatefulSet
   testAlert   one test alert down the same path as every other alert, to the phone
   identity    a recovery link for a person who is not an administrator, and membership of the user group, through a
-              narrow Authentik service account (TM-1315); every one asks for a fresh sign-in
+              narrow Authentik service account; every one asks for a fresh sign-in
 """
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ class Refused(ValueError):
     """An intent this side will not carry out, with the reason in words.
 
     `reason` is the sentence written at the raise site for a person to read, and the only part of a refusal that goes
-    back to a caller. Text read from an upstream response never goes in it; that goes to the log (TM-1356)."""
+    back to a caller. Text read from an upstream response never goes in it; that goes to the log."""
 
     def __init__(self, reason: str):
         super().__init__(reason)

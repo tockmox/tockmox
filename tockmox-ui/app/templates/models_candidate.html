@@ -9,7 +9,7 @@
 {%- elif l.state == "skipped" -%}<span class="badge st-closed"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Skipped</span></span>
 {%- else -%}{{ badge("unknown", "Unknown") }}{%- endif -%}
 {%- endmacro %}
-{#- TM-1301: the run as a pipeline of stages. A stage's state is a word, a shape and a colour, never colour alone. -#}
+{#- the run as a pipeline of stages. A stage's state is a word, a shape and a colour, never colour alone. -#}
 {% macro stage_tone(s) -%}
 {%- if s.state == "done" -%}ok{%- elif s.state == "verdict-done" -%}{{ s.tone }}{%- elif s.state == "running" -%}warning{%- elif s.state in ("failed", "verdict-failed") -%}critical{%- else -%}unknown{%- endif -%}
 {%- endmacro %}

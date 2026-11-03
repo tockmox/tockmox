@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The six pages whose procedures need no cluster, executed on every commit.
-# TM-0289, Jeff 2026-10-28 (docs/QUESTION-TM-0289.md, item 3): "the six no-cluster
+# Jeff 2026-10-28 (item 3): "the six no-cluster
 # pages run first as one hermetic per-commit job."
 #
 # This is the third cadence of the executed-documentation harness, and it has
@@ -46,7 +46,7 @@ name: docs-no-cluster
 on:
   pull_request:
   push:
-    # release-* for the same reason as ci.yaml (TM-0775).
+    # release-* for the same reason as ci.yaml.
     branches: [main, 'release-*']
   workflow_dispatch:
 
@@ -87,7 +87,7 @@ jobs:
           echo "ssh-keygen: $(ssh -V 2>&1)"
           echo "python:     $(python3 --version) PyYAML $(python3 -c 'import yaml; print(yaml.__version__)')"
 
-      # Subcharts keyed on every Chart.lock (TM-1286): a hit makes helm-deps.sh offline.
+      # Subcharts keyed on every Chart.lock: a hit makes helm-deps.sh offline.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: charts/*/charts

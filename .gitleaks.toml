@@ -10,7 +10,7 @@
 # purpose, and a PUBLIC key fingerprint is publishable by definition ... it is
 # what a reader compares against, not something a reader could use. Without
 # this file, the grouped CI tool-pin bump that carries gitleaks past 8.21.2
-# turns `ci / secrets` red on a page nobody edited (TM-0324).
+# turns `ci / secrets` red on a page nobody edited.
 #
 # WHAT IS ALLOWED, precisely. ONE string, on ONE path, and both conditions must
 # hold (`condition = "AND"`). The same fingerprint planted in any other file is
@@ -27,7 +27,7 @@
 # class ever appears, add a second `[[allowlists]]` block naming the string and
 # the reason; do not widen this one.
 #
-# THE FORM MATTERS, AND THE FIRST FORM WAS WRONG (measured 2026-09-04, TM-0324).
+# THE FORM MATTERS, AND THE FIRST FORM WAS WRONG (measured 2026-09-04).
 # This file first carried a TOP-LEVEL `[[allowlists]]` block with `condition =
 # "AND"`, `paths` and `regexes`, and its comment claimed a planted PAT in
 # verify.md was still flagged. Re-measured at 8.28.0 and 8.30.1 with a scratch
@@ -68,7 +68,7 @@ regexes = ['''SHA256:EWYdV82fKSzUvXc5RPMuUH35J/CiQmBm7egYCDEmGDY''']
 regexTarget = "line"
 
 [[rules.allowlists]]
-description = "Fixture token in the notify-and-drill gate (TM-0780): the gate passes this fake value to the alert bridge under test and then asserts the bridge's delivery log line does NOT contain it. It must look like a token for the assertion to mean anything. Not a credential."
+description = "Fixture token in the notify-and-drill gate: the gate passes this fake value to the alert bridge under test and then asserts the bridge's delivery log line does NOT contain it. It must look like a token for the assertion to mean anything. Not a credential."
 condition = "AND"
 paths = ['''tools/check-notify-and-drill\.sh''']
 regexes = ['''tok-SECRET-9f3a''']

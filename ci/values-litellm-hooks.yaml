@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# THE SITE-HOOKS FIXTURE (TM-0787). Applied ON TOP of ci/values.yaml by
+# THE SITE-HOOKS FIXTURE. Applied ON TOP of ci/values.yaml by
 # tools/check-litellm-hooks.sh, which asserts on the RENDER that a site can load
 # a pre-call policy gate and a logging hook through documented values alone.
 #

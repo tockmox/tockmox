@@ -105,7 +105,7 @@ spec:
 {{- end }}
 {{/*
 THIS FOLLOWS THE networkPolicy CAPABILITY, like every other netpol app, and the
-fix for TM-0518 was to stop it doing anything else.
+fix was to stop it doing anything else.
 
 `ai_cnpg_netpol` has always been in `capabilityOwners` under `networkPolicy`.
 But `tockmox-policy/values.yaml` also pinned it to `{ enabled: false }`, and an

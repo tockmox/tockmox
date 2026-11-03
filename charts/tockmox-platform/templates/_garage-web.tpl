@@ -1,6 +1,6 @@
 {{/* SPDX-License-Identifier: Apache-2.0 */}}
 {{/*
-GARAGE WEB SERVING (TM-0215): the shared decisions, in one place so the
+GARAGE WEB SERVING: the shared decisions, in one place so the
 ConfigMap, the Service, the bootstrap Job, the Ingresses and the sync Jobs
 cannot disagree about which sites exist.
 
@@ -22,7 +22,7 @@ bucket NAME instead and is refused.
 {{/*
 The EFFECTIVE site list as YAML: the configured list minus the docs entry when
 apps.docs resolves false, each entry normalised and validated. THE DOCS ENTRY IS
-THE SITE NAMED `docs` (TM-0808): it has no content, because the product
+THE SITE NAMED `docs`: it has no content, because the product
 documentation is published from the operator's checkout by tools/publish-docs.sh,
 not synced from an image; it must have a writer key (the publish pod uses it);
 and it is the one site the bootstrap Job gives a placeholder page to. Consume with

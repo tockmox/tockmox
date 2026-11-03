@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Publish the product documentation from THIS CHECKOUT into the docs bucket of a
-# cluster. TM-0807, TM-0805, ADR-0036.
+# cluster. ADR-0036.
 #
 #   ./tools/publish-docs.sh --context CTX [--site DIR] [--config FILE | --revision REV]
 #                           [--force] [--wait SECONDS] [--url URL [--curl-arg ARG]...]
@@ -56,7 +56,7 @@
 #
 # WHAT THIS DOES NOT PROVE. The pod spec passes the platform namespace's Pod
 # Security level only as far as the sync Job's own spec does (it is a copy of
-# it); the lab run recorded in the TM-0807 report is the observation. The
+# it); the recorded lab run is the observation. The
 # marker proves what the script uploaded, not that a browser renders it. The
 # tag check trusts `git` and the local tag; it is not a signature check (verify
 # the tag yourself: RELEASING.md).

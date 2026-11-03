@@ -82,13 +82,13 @@ class Settings:
     secure_cookies: bool
     nodes: "NodesSettings" = None
     lifecycle: "LifecycleSettings" = None
-    docs_url: str = ""                     # the on-cluster documentation site (TM-1014)
+    docs_url: str = ""                     # the on-cluster documentation site
     docs_repo_url: str = "https://github.com/tockmox/tockmox"   # the docs in the source repo, for when the site is down
-    capabilities: tuple = ()               # ((name, configured_on), ...) as the AI layer resolved them (TM-1017)
-    oidc_end_session: bool = True          # Sign out also ends the identity provider's session (TM-1014)
+    capabilities: tuple = ()               # ((name, configured_on), ...) as the AI layer resolved them
+    oidc_end_session: bool = True          # Sign out also ends the identity provider's session
     oidc_post_logout_url: str = ""         # sent as post_logout_redirect_uri only when set (the issuer may refuse an unregistered one)
-    stack_site: dict | None = None         # the site's additions to app/stack.yaml (TM-1305); checked at start
-    actions: object = None                 # app/actions.Config (TM-1311): which kinds this console may ask for
+    stack_site: dict | None = None         # the site's additions to app/stack.yaml; checked at start
+    actions: object = None                 # app/actions.Config: which kinds this console may ask for
     timezone: str = "UTC"                  # the site's zone (global.timezone), for times people read (the lab walk, 2026-11-01)
 
     def app(self, app_id: str) -> App | None:
@@ -174,8 +174,8 @@ class LifecycleSettings:
     verdicts_dir: str = ""                 # where the UI READS REQ-0045 comparative verdicts; empty = none yet
     verdicts_repo_path: str = "evals/verdicts"   # where those files sit in the site repo (recorded in a promotion)
     requests_repo_path: str = "evals/requests"   # where an eval request generated here is to be committed
-    provider_pages: dict = None            # provider -> https page template for hosted models (TM-0938)
-    modelkit_registries: dict = None       # registry host -> https page template for ModelKit sources (TM-0938)
+    provider_pages: dict = None            # provider -> https page template for hosted models
+    modelkit_registries: dict = None       # registry host -> https page template for ModelKit sources
 
 
 def _parse_lifecycle(raw: dict, inventory) -> LifecycleSettings:
@@ -314,7 +314,7 @@ def parse(doc: dict) -> Settings:
         # serves them. A site that mirrors the product repository (every
         # air-gapped site, and both 0.8.0 labs) used to read "Version unknown
         # ... No Argo CD application points at the Tockmox repository" until
-        # it set this key, which no page named (TM-0979). Set it to pin the
+        # it set this key, which no page named. Set it to pin the
         # match to one repository URL instead.
         tockmox_repo=str(doc.get("tockmoxRepo") or "").rstrip("/"),
         admin_group=str((doc.get("roles") or {}).get("adminGroup", "tockmox-admins")),

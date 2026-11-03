@@ -18,7 +18,7 @@ class GatewayError(RuntimeError):
     pass
 
 
-# TM-1249: the data-class tag every request of the current run carries. The eval gateway filters by tag, so a request
+# the data-class tag every request of the current run carries. The eval gateway filters by tag, so a request
 # tagged above open never reaches an external route. Process-wide (the runner measures one run per process, and the
 # legs' thread pools must see it, which a contextvar would not); set only through tagged().
 _TAGS: list = []

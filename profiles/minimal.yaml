@@ -51,7 +51,7 @@
 # AI plane. A Tockmox that cannot prove a restore is not Tockmox, and none of
 # the removals above touch that.
 #
-# THE MODEL GATEWAY IS PART OF THAT FLOOR since 0.8.0 (TM-0460, ruling C1):
+# THE MODEL GATEWAY IS PART OF THAT FLOOR since 0.8.0 (ruling C1):
 # LiteLLM follows the aiPlane capability in every profile, the console goes
 # through it on a key the chart mints, and it costs about 0.5Gi here (the
 # proxy plus a one-instance CNPG). Whether the ~1.9Gi AI-plane figure above
@@ -123,6 +123,6 @@ kube-prometheus-stack:
       # `local-path`. Grafana's chart does not run tpl over this key, so it
       # cannot follow the global: without this line it keeps the chart's
       # `longhorn` and the claim sits Pending on a cluster with no Longhorn.
-      # Shipped that way until 0.8.0 (TM-0146); the observability layer now
+      # Shipped that way until 0.8.0; the observability layer now
       # refuses to render the mismatch.
       storageClassName: local-path

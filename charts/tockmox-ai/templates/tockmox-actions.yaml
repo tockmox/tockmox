@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-tockmox-actions (TM-1311, TM-1313; specs/tockmox-ui/SPEC.md section 7 in the planning repo; DESIGN-2026-10-11's rule:
+tockmox-actions (specs/tockmox-ui/SPEC.md section 7 in the planning repo; DESIGN-2026-10-11's rule:
 writes outside the UI pod). The Tockmox UI stays write-free: it posts an intent, with the ID token the issuer minted
 for that intent, to this Deployment on the UI's own image (python -m app.actions_service), which checks the token
 itself and does the one thing the intent names with one narrow credential per kind:

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # shellcheck disable=SC2016  # the selftest's sed expressions name template variables ($why, $h) and must stay literal
 #
-# THE RESILIENT PROFILE REFUSES TO PRESENT ITSELF AS RESILIENT (TM-0597).
+# THE RESILIENT PROFILE REFUSES TO PRESENT ITSELF AS RESILIENT.
 #
 #   ./tools/check-resilient-profile.sh              run every assertion
 #   ./tools/check-resilient-profile.sh --selftest   mutate the guard and the alarm; each assertion must go red
@@ -229,7 +229,7 @@ if [ "${1:-}" = "--selftest" ]; then
   echo "selftest FAILED"; exit 1
 fi
 
-echo "=== the resilient profile (TM-0597) ==="
+echo "=== the resilient profile ==="
 run_all
 echo
 if [ "$FAILS" -eq 0 ]; then echo "check-resilient-profile: clean ($NCHK assertions)"; exit 0; fi

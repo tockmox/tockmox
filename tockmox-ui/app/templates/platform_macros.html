@@ -105,7 +105,7 @@
 </div>
 {%- endmacro %}
 
-{# TM-1308: Needs you, grouped by what fired and what it asks (platform_cases.group_cases). Thirteen cases for one
+{# Needs you, grouped by what fired and what it asks (platform_cases.group_cases). Thirteen cases for one
    alert on six hosts are one row with count 13; a group opens the Cases page filtered to it. #}
 {% macro case_groups(groups, caption, id, tz, ask_words, wait_words, reason_words) -%}
 <div class="table-wrap" tabindex="0" role="region" aria-labelledby="{{ id }}">

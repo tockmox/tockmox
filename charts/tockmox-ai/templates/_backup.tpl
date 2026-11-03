@@ -1,6 +1,6 @@
 {{/* SPDX-License-Identifier: Apache-2.0 */}}
 {{/*
-Whether the model gateway's database backs up (TM-0312). Returns "true" or "".
+Whether the model gateway's database backs up. Returns "true" or "".
 
 `modelGateway.database.backup.enabled` is the house tri-state, resolved by the
 same helper every capability-owned component uses:

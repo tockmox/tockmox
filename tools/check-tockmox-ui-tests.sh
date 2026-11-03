@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Run the Tockmox UI's own test suite, tockmox-ui/tests/ (TM-0975).
+# Run the Tockmox UI's own test suite, tockmox-ui/tests/.
 #
 #   ./tools/check-tockmox-ui-tests.sh
 #
-# WHY THIS IS A GATE. tockmox-ui/ ships as source (TM-0902) and its tests ran
+# WHY THIS IS A GATE. tockmox-ui/ ships as source and its tests ran
 # only on whichever laptop wrote them until this landed. They are unit tests
 # through FastAPI's TestClient with every upstream mocked (the Kubernetes API,
 # Prometheus, Alertmanager, an inference node): no cluster and no network, so

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # No known-bad LiteLLM image digest, and no LiteLLM image at the compromised tag, appears anywhere a LiteLLM image
-# can be named (TM-1197).
+# can be named.
 #
 #   ./tools/check-litellm-compromise.sh              scan this tree
 #   ./tools/check-litellm-compromise.sh --root DIR   scan another tree (the selftest's fixtures)

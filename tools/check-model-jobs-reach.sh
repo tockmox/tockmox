@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Assert, ACROSS TWO RENDERED CHARTS, that the model-lifecycle jobs of tockmox-ai can reach Prometheus (and the health
-# watch ntfy) through tockmox-policy's default-deny monitoring namespace (REQ-0048 AC-48.19, TM-1261, TM-1263).
+# watch ntfy) through tockmox-policy's default-deny monitoring namespace (REQ-0048 AC-48.19).
 #
 #   ./tools/check-model-jobs-reach.sh
 #

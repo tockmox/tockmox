@@ -2,7 +2,7 @@
 {{- $backupOn := include "tockmox-ai.dbBackupEnabled" . | eq "true" -}}
 {{- $drill := $db.backup.restoreDrill | default dict -}}
 {{- $os := $db.backup.objectStore | default dict -}}
-{{- /* The drill follows the database it drills: with the model gateway off there is no cluster to restore and, now that backups follow the capability (TM-0312), nothing else to keep this from rendering. */ -}}
+{{- /* The drill follows the database it drills: with the model gateway off there is no cluster to restore and, now that backups follow the capability, nothing else to keep this from rendering. */ -}}
 {{- if and $backupOn ($drill.enabled | default false) (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm")) }}
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -18,8 +18,8 @@
 #   3. writes a dated PASS/FAIL row to the drill register in the object store
 #      (one JSON object per run, bucket tockmox-drill-register), reads it back
 #      and compares it, ending in backup=<backupId> so the row says WHICH backup
-#      it proved (TM-0794). A run whose row cannot be written or read back
-#      FAILS, whatever the restore's own verdict was (TM-0459)
+#      it proved. A run whose row cannot be written or read back
+#      FAILS, whatever the restore's own verdict was
 #   4. tears the drill cluster down, PASS or FAIL, via trap
 #
 # Tockmox proves restorability; humans perform recovery. The drill never
@@ -67,7 +67,7 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list"]
-  # Read-only, to name the backup the drill pins and records (TM-0794).
+  # Read-only, to name the backup the drill pins and records.
   - apiGroups: ["postgresql.cnpg.io"]
     resources: ["backups"]
     verbs: ["get", "list"]
@@ -118,7 +118,7 @@ spec:
           restartPolicy: Never
           serviceAccountName: tockmox-restore-drill
           # Needs the API: kubectl creates and deletes the drill Cluster (the Role above).
-          # Token kept on purpose (TM-0759); gate allowlist in tools/check-sa-tokens.sh.
+          # Token kept on purpose; gate allowlist in tools/check-sa-tokens.sh.
           automountServiceAccountToken: true
           {{- with $db.priorityClassName }}
           priorityClassName: {{ . }}
@@ -167,7 +167,7 @@ spec:
                     # every later field that contains "=" is key=value. The
                     # detail before backup= is free text on a FAIL row, so
                     # match on the key, never on a position. Rows written
-                    # before TM-0794 have no backup= field; "none" below means
+                    # before the backup= field existed have none; "none" below means
                     # the drill found no completed Backup to pin, and the
                     # recovery then took the newest base backup in the store.
                     # The same line is the log's record and the object's `row`.
@@ -179,7 +179,7 @@ spec:
                   teardown() {
                     kubectl -n "$NS" delete cluster.postgresql.cnpg.io "$CLUSTER" --ignore-not-found --timeout=120s || true
                   }
-                  # THE RUN IS NOT OVER UNTIL ITS ROW IS READ BACK (TM-0459). A PASS whose row
+                  # THE RUN IS NOT OVER UNTIL ITS ROW IS READ BACK. A PASS whose row
                   # was never recorded is a failed drill: exit 1 whatever the verdict, so the Job
                   # fails and TockmoxRestoreDrillFailed pages. The reason goes in the log's last
                   # line, which FallbackToLogsOnError copies into the pod's termination message.
@@ -197,7 +197,7 @@ spec:
                   # start clean rather than asserting against stale state.
                   teardown
 
-                  # WHICH backup is being proved (TM-0794). Without a pin the
+                  # WHICH backup is being proved. Without a pin the
                   # recovery takes the newest base backup in the store and
                   # nothing records which that was. Pin the newest COMPLETED
                   # Backup of the live cluster by its backupId, so the row
@@ -215,7 +215,7 @@ spec:
                   fi
                   echo "backup: ${BACKUP_ID:-none}"
 
-                  # THE SAME POSTGRES AS THE SOURCE (TM-1023). With no imageName
+                  # THE SAME POSTGRES AS THE SOURCE. With no imageName
                   # the drill cluster gets the operator's CURRENT default, which
                   # is not what the source runs: CNPG writes its default into a
                   # Cluster once, at creation, and never moves it. Once an
@@ -336,7 +336,7 @@ spec:
           # nothing and looks healthy ... the unconnected-wire shape. This
           # names that case instead.
           #
-          # KEYED ON THE SCHEDULE, NOT ON A FIXED `for:` (TM-0851). This used
+          # KEYED ON THE SCHEDULE, NOT ON A FIXED `for:`. This used
           # to be the absent() arm alone with `for: 26h`, written as if the
           # drill ran daily. It runs weekly, so any install made after a
           # Monday 04:30 fired for up to six days before the first drill could

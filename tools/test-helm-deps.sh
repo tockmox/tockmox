@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Selftest for tools/helm-deps.sh's offline path (HL-0675, D5).
+# Selftest for tools/helm-deps.sh's offline path (D5).
 #
 #   bash tools/test-helm-deps.sh        (or: tools/helm-deps.sh --selftest)
 #

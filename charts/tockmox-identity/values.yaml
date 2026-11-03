@@ -39,7 +39,7 @@ global:
   # complaining. Set it to a class you have.
   localStorageClass: "local-path"
 
-  # THE RESILIENT CLAIM (TM-0597). Empty makes no claim. `resilient`, set by
+  # THE RESILIENT CLAIM. Empty makes no claim. `resilient`, set by
   # profiles/resilient.yaml, says "this install is resilient": the layers that
   # have a backup then REFUSE to render while the backup is off or points inside
   # the cluster, and raise an alert while no restore drill has passed. Leave it
@@ -229,7 +229,7 @@ brand:
 # gunzip < dump | psql, per backup-restore.md.
 #
 # RENDERED ONLY WHILE THE BUNDLED SERVER IS ON (`authentik.postgresql.enabled`,
-# TM-0788). A fresh 0.9.0 install runs Authentik on the CNPG cluster under
+# ). A fresh 0.9.0 install runs Authentik on the CNPG cluster under
 # `identity` below, which archives WAL and drills its restores, and gets no
 # bridge. An install that keeps the bundled server keeps the bridge with it.
 # ---------------------------------------------------------------------------
@@ -253,12 +253,12 @@ databaseBackup:
   # failure surfaces in a log nobody reads rather than at install. Re-check
   # this line against the rendered StatefulSet on every authentik bump ...
   # tools/check-identity-seams.sh S10 now fails the build when the two majors
-  # differ (TM-1023), and `grep -c postgres: images.txt` reads 1 when they agree.
+  # differ, and `grep -c postgres: images.txt` reads 1 when they agree.
   postgresImage: docker.io/library/postgres:17.11-bookworm
   uploaderImage: alpine/k8s:1.37.1
 
 # ---------------------------------------------------------------------------
-# THE IDENTITY DATABASE ON CLOUDNATIVEPG (TM-0788). Authentik's database as a
+# THE IDENTITY DATABASE ON CLOUDNATIVEPG. Authentik's database as a
 # CNPG Cluster this chart renders in the release namespace, the same shape as
 # the model gateway's (`modelGateway.database` in tockmox-ai, key for key):
 # WAL archived continuously by the Barman Cloud plugin to the shipped object
@@ -283,7 +283,7 @@ databaseBackup:
 #
 # Moving the data across is docs/deployment/upgrade.md, "Move Authentik's
 # database to CloudNativePG". That procedure is written and NOT YET PROVEN on a
-# populated install (TM-0788; the proof is planned for 0.9.1).
+# populated install (the proof is planned for 0.9.1).
 # ---------------------------------------------------------------------------
 identity:
   database:
@@ -323,7 +323,7 @@ identity:
     # takes the operator's default ONCE, at creation, and an operator upgrade
     # that moves the default major then leaves this cluster on an older major
     # than a fresh one, which is the drift the restore drill had to learn to
-    # read around (TM-1023). The tag is the minor the reference site's CNPG
+    # read around. The tag is the minor the reference site's CNPG
     # databases run. A major-version jump on an existing data directory is a
     # dump and restore, not an image bump. Mirror it for an air-gapped install:
     # like the model gateway's, it is not listed in images.txt and
@@ -333,7 +333,7 @@ identity:
     # bundled server's figures, carried over: request 128Mi from the 0.8.0
     # greenfield peak; limit 512Mi, raised after Authentik's migrations and
     # blueprints OOMKilled the bundled server at 224Mi during the 0.8.0 ->
-    # 0.8.1 upgrade on the lab (TM-0903). Not yet re-measured on CNPG.
+    # 0.8.1 upgrade on the lab. Not yet re-measured on CNPG.
     # CHANGING THIS RESTARTS THE DATABASE at instances: 1. `null` leaves it unset.
     resources:
       requests:
@@ -422,7 +422,7 @@ identity:
         schedule: "45 4 * * 1"
         suspend: false
         image: alpine/k8s:1.37.1
-        # WHERE THE DRILL RECORDS ITS ROW (TM-0459): one JSON object per run in
+        # WHERE THE DRILL RECORDS ITS ROW: one JSON object per run in
         # a bucket of its own in the shipped Garage, read back and checksummed
         # before the run may end as a PASS. A run whose row cannot be written or
         # read back FAILS (non-zero exit, the reason in the Job's log and its
@@ -443,7 +443,7 @@ sso:
   # the same defaults in their role mappings).
   adminGroup: tockmox-admins
   userGroup: tockmox-users
-  # Usernames to ADD to the admin group (TM-0820). Default empty renders nothing.
+  # Usernames to ADD to the admin group. Default empty renders nothing.
   # Non-empty renders one Argo PostSync Job that runs inside the Authentik server
   # image and, for each name, adds the user to the admin group: it never removes
   # a member, reports a name that does not exist yet as `not-found` in the Job
@@ -452,7 +452,7 @@ sso:
   # blueprint discovery), which is why this is a Job. Usernames only, no
   # whitespace. docs/administration/identity.md.
   adminUsers: []
-  # A RECOVERY FLOW ON THE DEFAULT BRAND (TM-1315). Authentik ships none, so
+  # A RECOVERY FLOW ON THE DEFAULT BRAND. Authentik ships none, so
   # "Create recovery link" (its admin console, and the Tockmox console's
   # Identity page) answers "No recovery flow set". True ships `tockmox-recovery`
   # (choose a password, twice, checked like the password-change flow; it does NOT
@@ -462,7 +462,7 @@ sso:
   # and sends no email. False leaves the brand's recovery flow as it is, for a
   # site that set its own.
   recoveryFlow: true
-  # THE CONSOLE'S IDENTITY ACTIONS (TM-1315; tockmoxUi.actions.identity in the AI
+  # THE CONSOLE'S IDENTITY ACTIONS (tockmoxUi.actions.identity in the AI
   # layer). OFF by default: it needs the service account's API token,
   # TOCKMOX_CONSOLE_ACTIONS_TOKEN in a `tockmox-console-actions-token` Secret in
   # THIS namespace, the same value as the AI namespace's (tools/mint-secrets.sh
@@ -533,7 +533,7 @@ sso:
   # (`ingress.apps.openWebui.host` in the AI layer, and so on): the layers
   # cannot read each other's values, so a site that moves Open WebUI to
   # `llm.<domain>` states it twice, and a mismatch is a redirect_uri error at
-  # login (TM-0820).
+  # login.
   #
   # `subMode` is how Authentik derives the OIDC `sub` claim. Empty renders
   # nothing, and Authentik's own default (`hashed_user_id`) applies. A site
@@ -560,7 +560,7 @@ sso:
       access: users
       host: ""
       subMode: ""
-    # The Tockmox UI (TM-0956). OFF by default in 0.9.0, unlike the three
+    # The Tockmox UI. OFF by default in 0.9.0, unlike the three
     # above, and the reason is the greenfield rule at the top of
     # templates/sso-blueprints.yaml: its client secret comes from
     # TOCKMOX_UI_CLIENT_SECRET in a `tockmox-sso-tockmox-ui` Secret in THIS
@@ -578,7 +578,7 @@ sso:
       access: admin
       host: ""            # same value as tockmoxUi.ingress.host in the AI layer
       subMode: ""
-    # The built-in site forge (TM-1336, experimental), for a site whose
+    # The built-in site forge (experimental), for a site whose
     # repository lives in the forge Tockmox installs (site.forge: built-in;
     # the generator turns this on for you). People sign in to the forge
     # through Authentik and are registered on first sign-in; the admin group
@@ -598,7 +598,7 @@ sso:
       access: admin
       host: ""            # empty derives forge.<internalDomain>
       subMode: ""
-  # FORWARD-AUTH CONSOLES (TM-0425): consoles with NO sign-in of their own,
+  # FORWARD-AUTH CONSOLES: consoles with NO sign-in of their own,
   # put behind Authentik by its embedded outpost instead of each speaking OIDC.
   # Each one turned on here renders, in its own blueprint file entry:
   #   - a proxy provider in `forward_single` mode for that ONE host, and an
@@ -688,7 +688,7 @@ sso:
       group: Observability
       icon: app-ntfy.svg
       access: users
-    # Argo CD (TM-0740). A prerequisite, not a Tockmox component, so the
+    # Argo CD. A prerequisite, not a Tockmox component, so the
     # product ships no route or OIDC client for it: this tile is OFF until you
     # give Argo CD a hostname yourself, and then opens it from the portal.
     # docs/administration/argocd.md, "A hostname and a portal tile", has the
@@ -739,14 +739,14 @@ authentik:
       - secretRef:
           name: tockmox-sso
           optional: true    # sso.enabled=false installs run without it
-      # TOCKMOX_UI_CLIENT_SECRET for sso.apps.tockmoxUi (TM-0956). Its own
+      # TOCKMOX_UI_CLIENT_SECRET for sso.apps.tockmoxUi. Its own
       # Secret rather than a key in tockmox-sso, so an install minted before
       # 0.9.0 adds it without re-minting the three console secrets.
       # tools/mint-secrets.sh --with-tockmox-ui writes both halves.
       - secretRef:
           name: tockmox-sso-tockmox-ui
           optional: true
-      # FORGE_CLIENT_SECRET for sso.apps.forge (TM-1336). Written by
+      # FORGE_CLIENT_SECRET for sso.apps.forge. Written by
       # bootstrap-forge, never sealed into the site repository: the forge
       # holds that repository, so its own sign-in secret cannot come from it.
       - secretRef:
@@ -755,13 +755,13 @@ authentik:
   blueprints:
     configMaps:
       - tockmox-sso-blueprints
-  # No outbound version or usage calls (TM-0671): authentik checks for new
+  # No outbound version or usage calls: authentik checks for new
   # versions and sends startup analytics unless told not to. Sovereignty: no
   # unrequested outbound calls. (error_reporting is already off upstream.)
   authentik:
     disable_update_check: true
     disable_startup_analytics: true
-    # WHICH DATABASE AUTHENTIK DIALS (TM-0788). A template, evaluated by the
+    # WHICH DATABASE AUTHENTIK DIALS. A template, evaluated by the
     # vendored chart against ITS values, so the host follows the bundled
     # server's own switch: `<release>-postgresql` (upstream's default) while
     # `authentik.postgresql.enabled` is true, otherwise the read/write Service
@@ -775,7 +775,7 @@ authentik:
       host: '{{ if .Values.postgresql.enabled }}{{ .Release.Name }}-postgresql{{ else }}tockmox-authentik-db-rw{{ end }}'
   server:
     resources:
-      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # measured on the prod install 2026-10-05 (accepted for the lab):
       # peak 859.7 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 870.0 MiB in the pre-migration namespace (30 days); average 769.8 MiB.
       # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
       # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -785,7 +785,7 @@ authentik:
         memory: 1408Mi
     ingress:
       enabled: false        # Tockmox renders its own; see ingress above
-    # ITS OWN SERVICEACCOUNT, NO TOKEN (TM-0759, found on the 0.7.1-rc2 gate).
+    # ITS OWN SERVICEACCOUNT, NO TOKEN (found on the 0.7.1-rc2 gate).
     # The server serves HTTP and never calls the Kubernetes API; the worker holds
     # the outpost RBAC (ServiceAccount `authentik`). Upstream leaves the server on
     # the namespace's `default` account, and 0.7.1 turns that account's token off
@@ -798,7 +798,7 @@ authentik:
     # serviceAccountName is set, which it now is.
     serviceAccountName: tockmox-authentik-server
     automountServiceAccountToken: false
-    # POD SECURITY (TM-0635). Upstream ships both contexts empty, which left the
+    # POD SECURITY. Upstream ships both contexts empty, which left the
     # server and the worker failing four `restricted` fields each:
     # allowPrivilegeEscalation, capabilities.drop, runAsNonRoot and
     # seccompProfile. Set here, in the chart an adopter inherits, so that
@@ -829,7 +829,7 @@ authentik:
         enabled: true
       enabled: true
   postgresql:
-    # THE BUNDLED (Bitnami) SERVER: OFF from 0.9.0 (TM-0788), because a fresh
+    # THE BUNDLED (Bitnami) SERVER: OFF from 0.9.0, because a fresh
     # install runs Authentik on the CNPG cluster under `identity.database`. An
     # install that already runs it sets this back to true, together with
     # `identity.database.enabled: false`, until it has moved its data across
@@ -848,7 +848,7 @@ authentik:
       existingSecret: tockmox-authentik-postgres
     primary:
       resources:
-        # TM-0903, measured on a 0.8.0 greenfield (household-sso profile), 2026-10-08:
+        # measured on a 0.8.0 greenfield (household-sso profile), 2026-10-08:
         # peak 129.7 MiB working set over ~1 h of the lab's sign-ins and probes.
         # limit = peak x 1.5, rounded up to a 32Mi step (224Mi). The request,
         # 128Mi, is the peak rounded down to a 32Mi step: no average was
@@ -866,7 +866,7 @@ authentik:
           memory: 512Mi
   worker:
     resources:
-      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # measured on the prod install 2026-10-05 (accepted for the lab):
       # peak 482.3 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 475.8 MiB in the pre-migration namespace (30 days); average 423.7 MiB.
       # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
       # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -874,7 +874,7 @@ authentik:
         memory: 432Mi
       limits:
         memory: 768Mi
-    # POD SECURITY (TM-0635): same contexts, same reasoning and same INFERRED
+    # POD SECURITY: same contexts, same reasoning and same INFERRED
     # caveat as the server block above.
     securityContext:
       runAsNonRoot: true
@@ -887,7 +887,7 @@ authentik:
       allowPrivilegeEscalation: false
       capabilities:
         drop: ["ALL"]
-    # RESTART ONTO A CHANGED BLUEPRINT (TM-1058). Authentik applies a mounted
+    # RESTART ONTO A CHANGED BLUEPRINT. Authentik applies a mounted
     # blueprint two ways: its startup discovery, and a file watcher that fires
     # when kubelet swaps the ConfigMap volume. The watcher is a single thread
     # and it can die without a trace: on the homelab both workers lost it to a
@@ -942,7 +942,7 @@ authentik:
               echo "the mounted blueprints changed since this worker started: restarting onto them"
               exit 1
             fi
-    # AN UPGRADE THAT ADDS A BLUEPRINT (TM-1060). The default RollingUpdate
+    # AN UPGRADE THAT ADDS A BLUEPRINT. The default RollingUpdate
     # starts the new worker while the old one is still running, and for that
     # window two workers share one task queue in the database. The new pod
     # queues its startup discovery, the OLD worker takes it, looks in an image

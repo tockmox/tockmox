@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Assert, ON THE RENDERED ARTIFACT, the production health watch of tockmox-ai (REQ-0048 AC-48.19, TM-1263).
+# Assert, ON THE RENDERED ARTIFACT, the production health watch of tockmox-ai (REQ-0048 AC-48.19).
 #
 #   ./tools/check-health-watch.sh
 #

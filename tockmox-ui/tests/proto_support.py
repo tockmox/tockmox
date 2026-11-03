@@ -243,8 +243,8 @@ class FakeNode:
         self.requests = []
         self.redirect_port = None
         self.huge_port = None
-        self.digests = {}                # ollama model name -> digest /api/tags reports (TM-0934)
-        self.model_path = None           # llama-server /props model_path (TM-0934)
+        self.digests = {}                # ollama model name -> digest /api/tags reports
+        self.model_path = None           # llama-server /props model_path
 
     def handler(self, req: httpx.Request):
         self.requests.append(req)
@@ -356,7 +356,7 @@ def write_report(tmp_path, candidates, sources=None, generated=None):
 def verdict_record(model, alias, verdict="pass", run="r1", date="2026-10-07", klass="chat", incumbent="", revision="",
                    eval_version="v1", grader="rule", sampling=None, extras=None):
     """A REQ-0045 comparative verdict record (proposed AC-45.9), as the eval runner would write it. Each run gets
-    its own sampling seed unless `sampling` is given, so separate runs are separate evidence (TM-1248)."""
+    its own sampling seed unless `sampling` is given, so separate runs are separate evidence."""
     d = {"schema": "comparative-verdict/1", "run_id": run, "date": date, "class": klass, "alias": alias,
          "candidate": {"model": model, **({"revision": revision} if revision else {})},
          "eval_set": {"id": f"{klass}-set", "version": eval_version}, "grader": grader,

@@ -108,16 +108,15 @@ expect: 0
 
 # The alternatives register names defaults the release does not ship (zot, Tempo,
 # Docling, SearXNG). It says so in a table, and the images list settles it.
-# TM-0749.
 page:   docs/alternatives.md
 claim:  | Container registry | zot | Not shipped
 test:   grep -ciE 'zot|tempo|docling|searxng' images.txt || true
 expect: 0
 
-# THE NARROW ONE, and the narrowness is the point (TM-0270).
+# THE NARROW ONE, and the narrowness is the point.
 #
 # The obvious form of this check is `grep -r v0.1.0 install/ docs/` returning
-# nothing, and that was the assert TM-0270 shipped with. It is wrong. A version
+# nothing, and that was the assert it shipped with. It is wrong. A version
 # grep cannot tell GUIDANCE from HISTORY: `configuration.md` legitimately
 # contains the string v0.1.0 inside a retrospective of the four claims that
 # page used to make falsely, and deleting the number would make the correction
@@ -132,7 +131,7 @@ claim:  revision: v0.8.0
 test:   grep -rhoE '^\s*(target)?[Rr]evision:\s*v0\.1\.0' install/ docs/ | wc -l
 expect: 0
 
-# The air-gap mirror list, added 2026-09-02 after the CNPG move (TM-0326)
+# The air-gap mirror list, added 2026-09-02 after the CNPG move
 # swapped one Helm repository for one OCI registry. The count stayed at 13,
 # which is exactly the kind of number that survives a change unnoticed and then
 # stops surviving the next one.
@@ -164,7 +163,7 @@ expect: 18
 states: [0-9]+ dependencies
 
 # THE IMAGE COUNT, phrased the ways the `images` class cannot match. Added
-# 2026-10-04 (TM-0887): the list went 45 -> 44 in 0.7.1, the four sentences that
+# 2026-10-04: the list went 45 -> 44 in 0.7.1, the four sentences that
 # say "44 images" were updated, and the four below, which say the same number
 # another way, stayed at 45 and passed every gate. An outside reader found them.
 page:   docs/deployment/airgap.md
@@ -210,13 +209,14 @@ states: [0-9]+ lines: every image reference
 # Counts NAMED steps in ci.yaml only. The unnamed `uses:` steps (checkout,
 # setup-helm) are plumbing rather than gates, and they carry no name precisely
 # because they assert nothing.
-# 2026-10-08: 38 -> 39, the Tockmox UI's test suite (TM-0975).
-# 2026-10-17: 39 -> 40, the images.txt freshness gate.
+# 2026-10-08: 38 -> 39, the Tockmox UI's test suite.
+# 2026-10-17: 39 -> 40, the images.txt freshness gate. 2026-11-03: the page
+# stopped stating the total ("Nearly every gate ... is static analysis"), so this
+# entry pins the sentence that replaced it and the count it no longer states.
 page:   docs/testing-standard.md
-claim:  CI gates. Thirty-nine are static analysis
+claim:  Nearly every gate in this project's CI is static analysis
 test:   grep -cE '^      - name: ' .github/workflows/ci.yaml
 expect: 40
-states: [0-9]+ CI gates
 
 # THE DENOMINATOR THE INVENTORY MEASURES ITSELF AGAINST.
 #
@@ -246,36 +246,36 @@ states: [0-9]+ CI gates
 # a fixture: the same bytes caught flush-left passed clean indented by two
 # spaces. Corrected 2026-09-13, both directions verified.
 # 2026-09-14: 335 -> 336, the one diagnostic block of troubleshooting.md's new
-# CRD-establishment-race entry (TM-0609). Recorded because the same session
+# CRD-establishment-race entry. Recorded because the same session
 # updated the PAGE first and left this `expect:` behind, and the gate duly went
 # red in CI: the page and the registry are two edits, not one, and a proxy grep
 # over the page proves only half of it.
-# 2026-10-06: 389 -> 392, upgrade.md's two 0.8.0 migrations-Job blocks (TM-0596)
-# and install.md's model-grant block (TM-0912).
-# 2026-10-07: 392 -> 393, uninstall.md's Name the cluster block (TM-0844).
-# 2026-10-08: 393 -> 394, fresh-install.md 4e's findmnt propagation check (TM-0623); fresh-install.md 41 -> 42 blocks, 28 -> 29 on a node.
-# 2026-10-08: 394 -> 410 and 36 -> 37 pages, upgrade-foundations.md (TM-0907).
-# 2026-10-09: 410 -> 414, fresh-install.md 42 -> 46 blocks, 29 -> 33 on a node: the MicroOS 4c/4d variants, the 4d worker unit block and 4e worker check (TM-0622).
-# 2026-10-09: 414 -> 416, ai-plane.md's two blocks under "When the gateway rejects the console's key" (TM-0982).
+# 2026-10-06: 389 -> 392, upgrade.md's two 0.8.0 migrations-Job blocks
+# and install.md's model-grant block.
+# 2026-10-07: 392 -> 393, uninstall.md's Name the cluster block.
+# 2026-10-08: 393 -> 394, fresh-install.md 4e's findmnt propagation check; fresh-install.md 41 -> 42 blocks, 28 -> 29 on a node.
+# 2026-10-08: 394 -> 410 and 36 -> 37 pages, upgrade-foundations.md.
+# 2026-10-09: 410 -> 414, fresh-install.md 42 -> 46 blocks, 29 -> 33 on a node: the MicroOS 4c/4d variants, the 4d worker unit block and 4e worker check.
+# 2026-10-09: 414 -> 416, ai-plane.md's two blocks under "When the gateway rejects the console's key".
 # 2026-10-12: 416 -> 415, verify.md's "verifying v0.5.0" block removed for the first public release.
 # 2026-10-20: 415 -> 417, identity.md's changed-blueprint section: the liveness-event read and the worker rollout restart.
 # 2026-10-21: 417 -> 421 and 37 -> 38 pages, the new administration/ai-nodes.md (four blocks).
-# 2026-10-23: 421 -> 422 and 38 -> 39 pages, tockmox-ui.md's first block: sealing the Authentik half of the UI client secret for an install minted before 0.9.0 (TM-0956).
+# 2026-10-23: 421 -> 422 and 38 -> 39 pages, tockmox-ui.md's first block: sealing the Authentik half of the UI client secret for an install minted before 0.9.0.
 # 2026-10-26: 422 -> 424 and 39 -> 40 pages, platform-management.md's first two blocks: the generator's rewrite and --check commands in its new Cases section.
-# 2026-10-27: 424 -> 431, Authentik on CloudNativePG (TM-0788): upgrade.md's five-block move procedure, secrets.md's block sealing tockmox-authentik-db for an install minted before 0.9.0, and backup-restore.md's read of the identity drill register.
-# 2026-10-27: 431 -> 439, airgap.md step 8, the update path for a disconnected install (TM-0120): eight blocks.
-# 2026-10-27: 439 -> 462 and 40 -> 42 pages, the new administration/bring-your-own-ca.md (TM-0784, ten blocks) and operations/second-site-dr.md (TM-0842, thirteen blocks).
-# 2026-10-28: 462 -> 464, upgrade.md's two blocks in the 0.9.0 section on the LiteLLM migrations hook and the pre-upgrade backup (TM-1196, TM-1054).
-# 2026-10-28: 464 -> 465 and 42 -> 43 pages, administration/namespace-guard.md's one block: the read that the policy and its binding exist (TM-1223).
-# 2026-11-01: 467 -> 469, administration/identity.md's "From the console": the token mint and the admin-group refusal check (TM-1315).
-# 2026-11-02: 469 -> 471, administration/identity.md's "The built-in forge: sign-in and approvers": --connect-sign-in and the approver removal (TM-1336).
+# 2026-10-27: 424 -> 431, Authentik on CloudNativePG: upgrade.md's five-block move procedure, secrets.md's block sealing tockmox-authentik-db for an install minted before 0.9.0, and backup-restore.md's read of the identity drill register.
+# 2026-10-27: 431 -> 439, airgap.md step 8, the update path for a disconnected install: eight blocks.
+# 2026-10-27: 439 -> 462 and 40 -> 42 pages, the new administration/bring-your-own-ca.md (ten blocks) and operations/second-site-dr.md (thirteen blocks).
+# 2026-10-28: 462 -> 464, upgrade.md's two blocks in the 0.9.0 section on the LiteLLM migrations hook and the pre-upgrade backup.
+# 2026-10-28: 464 -> 465 and 42 -> 43 pages, administration/namespace-guard.md's one block: the read that the policy and its binding exist.
+# 2026-11-01: 467 -> 469, administration/identity.md's "From the console": the token mint and the admin-group refusal check.
+# 2026-11-02: 469 -> 471, administration/identity.md's "The built-in forge: sign-in and approvers": --connect-sign-in and the approver removal.
 page:   tests/executed-docs/INVENTORY.md
 claim:  fenced bash blocks across
 test:   grep -rhE '^[ \t]*```bash$' docs/ | wc -l | tr -d ' '
 expect: 471
 states: [0-9]+ fenced bash blocks
 
-# TM-0970, TM-0120 (2026-10-27): two sentences pinned so they cannot be edited
+# (2026-10-27): two sentences pinned so they cannot be edited
 # back into a stronger claim without this file moving in the same commit.
 # upgrade.md says rollback is symmetric where it can be, not absolutely, and
 # the table row that names the bundled applications which migrate their own
@@ -292,7 +292,7 @@ claim:  Update a disconnected install
 test:   grep -c '^## 8\. Update a disconnected install' docs/deployment/airgap.md | tr -d ' '
 expect: 1
 
-# TM-0469 added the KUBE_CONTEXT export block to fresh-install.md, which moved
+# added the KUBE_CONTEXT export block to fresh-install.md, which moved
 # the total above and ALSO moved a second, unregistered number in the same file
 # ... the "(30 bash blocks)" in the prose under "every procedure section". The
 # registered claim went red and the prose one did not, in the file whose whole
@@ -317,7 +317,7 @@ expect: 43
 states: [0-9]+ pages
 
 # THE COVERAGE FIGURES THE INVENTORY RESTATES THE CARD'S "7 OF N PATHS" AS
-# (TM-0289, re-derived 2026-10-29). The card's title carried a dated number that
+# (re-derived 2026-10-29). The card's title carried a dated number that
 # nothing asserted, which is how it came to say 7 of N long after both moved.
 # Each figure below is a command over the tree, so the next change to a page's
 # status, to the six pages of the per-commit job, or to the written exceptions
@@ -339,7 +339,7 @@ test:   awk -F'|' '/^### E1\./{s=1;next} /^\*\*What the ruling/{s=0} s && $2 ~ /
 expect: 18
 states: [0-9]+ blocks carry a written exception
 
-# THE CHART FACTS THE TWO 0.9.0 DR PAGES STAND ON (TM-0784, TM-0842). The
+# THE CHART FACTS THE TWO 0.9.0 DR PAGES STAND ON. The
 # bring-your-own-CA page says the chart's CA Secret is written into the release
 # namespace, which is cert-manager's cluster resource namespace, and that its
 # default name is tockmox-ca-root. The second-site page tells the reader to turn
@@ -388,7 +388,7 @@ states: [0-9]+ console transcripts
 # ADDED 2026-09-03, after an external reviewer found three countable
 # contradictions in an hour that this gate was green on. All three were in its
 # stated remit and none was enumerated here, which is the real finding: a
-# registry only checks what somebody remembered to add. See TM-0394 for the
+# registry only checks what somebody remembered to add. Separately, the
 # structural fix; these four entries close the specific holes.
 # ---------------------------------------------------------------------------
 
@@ -440,14 +440,17 @@ states: [A-Za-z]+ Tockmox-authored boards
 # one, which the gate then caught. Eight edits, and the eighth is invisible to
 # the obvious search. Use `grep -n "expect: <old>" tools/doc-claims.txt` as
 # well, and edit each entry by its `test:` line.
+# CONTRIBUTING stopped stating the total on 2026-11-03: "40" was ci.yaml's
+# steps while check-all runs far more, so a contributor read the smaller number
+# as the whole burden. The page now points at the command that lists them; this
+# pins that the command it names still lists gates.
 page:   CONTRIBUTING.md
-claim:  which runs
-test:   grep -c '^      - name:' .github/workflows/ci.yaml | tr -d ' '
-expect: 40
-states: [0-9]+ gates
+claim:  every gate `./tools/check-all.sh --list` prints
+test:   bash tools/check-all.sh --list 2>/dev/null | grep -c . | awk '{print ($1 > 0) ? "lists" : "empty"}'
+expect: lists
 
 # ---------------------------------------------------------------------------
-# ADDED 2026-09-04 (TM-0403). The site-repository clone path was the most
+# ADDED 2026-09-04. The site-repository clone path was the most
 # substituted value in the docs and was spelled two ways across pages, split
 # cleanly along page boundaries, so every page was internally consistent and
 # no reviewer could see it. It is now the exported variable SITE_REPO, and the
@@ -474,7 +477,7 @@ expect: 0
 # `-exec ... +`, which may split into several invocations each printing its
 # own END total. Only ```bash fences are read, which is the fence the
 # executed-docs denominator counts; a ```sh block is outside both.
-# 2026-09-11 (TM-0484): the match is now WORD-BOUNDARY aware. It used to read
+# 2026-09-11: the match is now WORD-BOUNDARY aware. It used to read
 # `$SITE_REPO` as a plain substring, so `$SITE_REPO_URL` -- introduced on
 # install.md when the site-repo URL became a variable alongside the path --
 # counted as an unguarded use of `$SITE_REPO`, and its own correct
@@ -487,7 +490,7 @@ claim:  carries the guard
 test:   find docs -name '*.md' -print0 | xargs -0 awk '{L=$0; sub(/^[ \t]+/,"",L)} L=="```bash"{b=1;u=0;g=0;next} L=="```"{if(b&&u&&!g)n++;b=0;next} b{if($0~/\$SITE_REPO([^A-Z_0-9]|$)/||$0~/\$\{SITE_REPO[:}]/)u=1;if($0~/\$\{SITE_REPO:\?/||$0~/^export SITE_REPO=/)g=1} END{print n+0}'
 expect: 0
 
-# TM-0498, 2026-09-11. Two pages told the reader to configure models under
+# 2026-09-11. Two pages told the reader to configure models under
 # `modelGateway`, which is a REAL key holding only `modelGateway.database` and
 # which does NOT close `additionalProperties`. So a model list written there was
 # accepted, rendered past and silently ignored: empty model list, console up,
@@ -517,7 +520,7 @@ test:   awk '/^modelGateway:/{M=1;next} M && /^[a-zA-Z]/{M=0} M && /model_list/{
 expect: 0
 
 # ---------------------------------------------------------------------------
-# CLASSES, added 2026-09-04 (TM-0394). The structural half of the 2026-09-03
+# CLASSES, added 2026-09-04. The structural half of the 2026-09-03
 # finding: the entries above check sentences somebody remembered to register,
 # and an outside reader found three countable contradictions in an hour on a
 # tree they were all green on. A class measures one kind of thing from the tree
@@ -642,8 +645,8 @@ match:  [0-9]+ (CI |static )?gates\b
 test:   grep -c '^      - name:' .github/workflows/ci.yaml | tr -d ' '
 expect: 40
 
-# The node/workstation SPLIT on fresh-install.md, pinned 2026-09-12 (TM-0470).
-# The comment above records TM-0469 moving an unregistered number in this same
+# The node/workstation SPLIT on fresh-install.md, pinned 2026-09-12.
+# The comment above records an unregistered number moving in this same
 # file while the registered one went red. This is the pair that was still
 # unregistered, and it had been wrong since before anyone noticed: the page
 # claimed 21 node blocks while routing 24. Counted by nearest preceding bold
@@ -669,8 +672,8 @@ states: [0-9]+ blocks run on your workstation
 # additions are stated beside them in charts/tockmox-policy/README.md.
 #
 # The policy layer's own counts, pinned 2026-09-12 (33), moved to 40 on 2026-09-29
-# by TM-0273: six AI-namespace egress policies and the platform S3 allow; 42 -> 43
-# on 2026-10-09 by TM-0982, the console-key check's egress rule; 43 -> 46 by TM-0799
+# adding six AI-namespace egress policies and the platform S3 allow; 42 -> 43
+# on 2026-10-09 by the console-key check's egress rule; 43 -> 46 with
 # (the node-agents namespace's default-deny and Prometheus allow, and the Alloy-to-Loki
 # allow in the monitoring namespace).
 # The NetworkPolicy number
@@ -694,7 +697,7 @@ states: [0-9]+ over eight namespaces
 #
 # Entries run the same one-chart render. That is the price of not making this a
 # class yet; see the NetworkPolicies note in the CLASSES section. (The
-# docs/architecture.md restatement was removed by TM-0840: the layer table is now
+# docs/architecture.md restatement was removed: the layer table is now
 # generated and carries no count.)
 page:   docs/usage/what-you-get.md
 claim:  NetworkPolicies in total
@@ -714,7 +717,7 @@ states: [0-9]+ NetworkPolicy$
 
 # Pod Security: the label says `restricted` on all eight namespaces and, from
 # 0.7.0, `enforce` is set on seven (five at 0.7.0; monitoring joined and the node
-# agents' namespace was added by TM-0799). The two numbers make the distinction
+# agents' namespace was added). The two numbers make the distinction
 # checkable: an enforce label added or removed without the prose moving goes red
 # rather than the prose quietly becoming wrong. The enforce pin counts the
 # `enforce:` label only, not `enforce-version:`, which renders beside it.
@@ -751,7 +754,7 @@ states: [0-9]+ resources
 
 # The exemption count, registered 2026-09-13. It read 21 in prose while the
 # gate's list was about to become 22, and nothing connected the two ... the
-# exact drift TM-0533 describes: correcting a count in its owner leaves every
+# exact drift: correcting a count in its owner leaves every
 # page that restates it wrong. A site on the fallback path wires these images by
 # hand, so the number is operational, not decorative.
 page:   docs/deployment/airgap.md
@@ -760,7 +763,7 @@ test:   sed -n '/^EXEMPT="/,/^"/p' tools/check-airgap.sh | sed '1d;$d' | sed '/^
 expect: 22
 states: [0-9]+ exemptions
 
-# TM-0533. Every count that needs a render of ALL NINE charts, read from the
+# Every count that needs a render of ALL NINE charts, read from the
 # counts CI writes in "every layer renders a non-zero number of resources"
 # (tools/render-counts.sh), not rendered again here. --read prints STALE or
 # MISSING rather than a number when the file does not describe this tree, so
@@ -834,7 +837,7 @@ expect: 5
 states: [0-9]+ \| Alert rules for
 
 # frontend-posture.md states the shipped Open WebUI version because its licence
-# paragraph was checked against LICENSE at that tag (TM-0908). A bump makes this
+# paragraph was checked against LICENSE at that tag. A bump makes this
 # go red ON PURPOSE: re-read LICENSE at the new tag before changing `expect`.
 # The test drops a leading `v`: upstream publishes 0.12.4 and v0.12.4 as one
 # digest, and Renovate moved the pin to the v-prefixed tag at 0.12.4.
@@ -843,7 +846,7 @@ claim:  The Open WebUI version this release ships is `0.12.5`
 test:   grep -E '^\s+image: ghcr.io/open-webui/open-webui:' charts/tockmox-ai/values.yaml | head -1 | sed 's/.*://; s/^v//'
 expect: 0.12.5
 
-# THE MEASURED INSTALL TIME (TM-0284). A wall-clock time cannot be decided from
+# THE MEASURED INSTALL TIME. A wall-clock time cannot be decided from
 # the tree, so this entry guards the two things that can rot: the profile the
 # measurement names must still exist, and the sentence must keep saying the run
 # was scripted. If the profile is renamed or the label is edited away, the
@@ -871,7 +874,7 @@ test:   echo "$(awk '/- port: metrics/{f=1} f&&/interval:/{print $2; exit}' char
 expect: 30s 1m 5m
 
 # ---------------------------------------------------------------------------
-# DEPLOYMENT SHAPES (TM-1116, TM-1117). docs/deployment/deployment-shapes.md is
+# DEPLOYMENT SHAPES. docs/deployment/deployment-shapes.md is
 # the one table that says which shape a release gate runs. Two things are
 # pinned, because both rot by editing a sentence rather than by the tree
 # changing.
@@ -915,3 +918,24 @@ page:   docs/deployment/sizing.md
 claim:  The chart refuses a floor under 2, and says why
 test:   grep -c 'needs a floor of at least 2' charts/tockmox-platform/templates/preflight.yaml | tr -d ' '
 expect: 1
+
+# ---------------------------------------------------------------------------
+# THE apps BLOCK IS CLOSED TO UNDECLARED NAMES. Three pages said a misspelt
+# component name was accepted silently for two releases after the schema
+# started refusing it. Each page now says the name is refused; this asserts
+# every layer schema that has an `apps` block still carries the closed list.
+# ---------------------------------------------------------------------------
+page:   docs/administration/customising.md
+claim:  accepts only the component names that some layer declares
+test:   python3 -c "import json,glob; fs=sorted(glob.glob('charts/*/values.schema.json')); print(sum(1 for f in fs if 'enum' in json.load(open(f)).get('properties',{}).get('apps',{}).get('propertyNames',{})) == sum(1 for f in fs if 'apps' in json.load(open(f)).get('properties',{})))"
+expect: True
+
+page:   docs/administration/configuration.md
+claim:  only the component names that some layer declares
+test:   python3 -c "import json,glob; fs=sorted(glob.glob('charts/*/values.schema.json')); print(sum(1 for f in fs if 'enum' in json.load(open(f)).get('properties',{}).get('apps',{}).get('propertyNames',{})) == sum(1 for f in fs if 'apps' in json.load(open(f)).get('properties',{})))"
+expect: True
+
+page:   docs/administration/capabilities.md
+claim:  accepts only component names that some layer declares
+test:   python3 -c "import json,glob; fs=sorted(glob.glob('charts/*/values.schema.json')); print(sum(1 for f in fs if 'enum' in json.load(open(f)).get('properties',{}).get('apps',{}).get('propertyNames',{})) == sum(1 for f in fs if 'apps' in json.load(open(f)).get('properties',{})))"
+expect: True

@@ -35,7 +35,7 @@ def test_models_page_lists_catalog_and_candidates(world, tmp_path):
     c, app, s, u = admin(world, tmp_path)
     t = c.get("/models").text
     assert "Promotion gate passes" in t and "mlx-community/Qwen3.8-27B-4bit" in t
-    # the per-kind boxes moved to the Inbox (TM-1300); the Models page keeps one Needs-you row that counts them (TM-1296)
+    # the per-kind boxes moved to the Inbox; the Models page keeps one Needs-you row that counts them
     assert "4 new candidates" in t and 'href="/models/inbox"' in t and "Needs you" in t
     inbox = c.get("/models/inbox").text
     assert "Successor" in inbox and "Hosted, new" in inbox and "Hosted, retiring" in inbox and "New revision" in inbox

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1267 tool-call reliability, TM-1268 prefill, TM-1269 tradeoff: the runner's newer legs against stub gateways.
+"""Tool-call reliability, prefill and tradeoff: the runner's newer legs against stub gateways.
 Each stub model has a behaviour (route name -> model name), as in test_runner.py."""
 import json
 import os
@@ -128,7 +128,7 @@ def verdict(tmp_path, res):
     return json.loads((tmp_path / "site" / res["verdict_path"]).read_text())
 
 
-# ---------------------------------------------------------------- TM-1267 tool-call reliability
+# ---------------------------------------------------------------- tool-call reliability
 
 def test_a_clean_candidate_passes_the_reliability_bar(tmp_path):
     res = go(tmp_path, tool_set(tmp_path), {"local-agent-next": "good"}, tool_calls=100)
@@ -209,7 +209,7 @@ def test_the_chat_template_id_is_named_in_the_twin(tmp_path):
     assert twin(tmp_path, res, "prefill").environment["chat_template"] == "qwen3-tools-v2"
 
 
-# ---------------------------------------------------------------- TM-1268 prefill
+# ---------------------------------------------------------------- prefill
 
 def test_a_context_dependent_delay_gives_a_prefill_curve(tmp_path):
     res = go(tmp_path, make_set(tmp_path), {"local-agent-next": "good"}, prefill_contexts=(256, 1024, 4096), prefill_requests=2,
@@ -242,7 +242,7 @@ def test_each_prefill_request_is_unique_so_a_prefix_cache_cannot_answer_it():
     assert abs(len(legs.filler(512, "aaa")) - 512 * legs.CHARS_PER_TOKEN) < 60
 
 
-# ---------------------------------------------------------------- TM-1269 tradeoff
+# ---------------------------------------------------------------- tradeoff
 
 PAIR = {"local-agent-next": "good-slow", "local-agent": "half"}
 

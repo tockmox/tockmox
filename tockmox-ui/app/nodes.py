@@ -8,7 +8,7 @@ so that nothing here can open a socket.
 
 The inventory lives in site values under `inferenceNodes` (AC-47.1). The gateway's
 `model_list` entries for node routes are DERIVED from it by render_model_list(), which
-is the reference implementation the chart helper ports (TM-0920).
+is the reference implementation the chart helper ports.
 """
 from __future__ import annotations
 
@@ -490,7 +490,7 @@ GATEWAYS = ("production", "eval", "all")
 
 
 def gateway_routes(inv: Inventory, gateway: str = "production") -> list:
-    """Which routes each gateway serves (REQ-0048 as revised after TM-0936).
+    """Which routes each gateway serves (REQ-0048 as revised).
 
     production: every route except `-next` ones. A candidate is never in the production gateway, because
                 inside one LiteLLM an access group fails open for a key with no model list.
@@ -506,7 +506,7 @@ def gateway_routes(inv: Inventory, gateway: str = "production") -> list:
     return [r for r in inv.routes if r.alias.endswith(NEXT) or r.alias in bases]
 
 
-# EVERY OLLAMA ROUTE PINS ITS CONTEXT (TM-0957, TM-0958). The chart refuses an Ollama route with no params.num_ctx,
+# EVERY OLLAMA ROUTE PINS ITS CONTEXT. The chart refuses an Ollama route with no params.num_ctx,
 # because Ollama then sizes the context from the node's memory (256k tokens at 48 GiB or more). 16384 is the floor the
 # reference lab runs; the operator edits it before committing. docs/administration/inference-nodes.md, "Context length".
 DEFAULT_OLLAMA_NUM_CTX = 16384
@@ -538,7 +538,7 @@ def render_model_list(inv: Inventory, gateway: str = "production") -> list[dict]
             lp["api_key"] = f"os.environ/{_env_name(ep.auth_secret)}"
         elif prov in KEY_REQUIRED_PROVIDERS and "api_key" not in r.params:
             # LiteLLM's openai provider refuses to send a request with no api_key at all ("The api_key client
-            # option must be set"), even to a server that checks none: measured on 1.100.1 (TM-0920 lab). A
+            # option must be set"), even to a server that checks none: measured on 1.100.1 (lab). A
             # placeholder goes out as "Bearer no-auth", which a no-auth engine ignores.
             lp["api_key"] = NO_AUTH_KEY
         lp.update(r.params)
@@ -553,12 +553,12 @@ def render_model_list(inv: Inventory, gateway: str = "production") -> list[dict]
 
 
 EVAL_LOCAL_TAGS = ("restricted", "internal", "open")
-# TM-1249: an eval set's class, as the tag the runner sends with every request to the eval gateway
+# an eval set's class, as the tag the runner sends with every request to the eval gateway
 EVAL_CLASS_TAG = {"public": "open", "internal": "internal", "confidential": "restricted", "restricted": "restricted"}
 
 
 def eval_class_fence(alias: str, lp: dict, info: dict) -> None:
-    """TM-1249: the eval gateway filters by tag. A node route is local unless it says otherwise and may serve every class;
+    """The eval gateway filters by tag. A node route is local unless it says otherwise and may serve every class;
     an external route may serve open (public data) only. Fills the defaults in place; refuses an external route tagged
     for more. The chart applies the same (templates/_inference-nodes.tpl)."""
     tier = info.get("endpoint_tier") or "local"
@@ -569,7 +569,7 @@ def eval_class_fence(alias: str, lp: dict, info: dict) -> None:
         lp["tags"] = list(EVAL_LOCAL_TAGS) if tier == "local" else ["open"]
     if tier == "external" and any(t != "open" for t in lp["tags"]):
         raise NodeError(f"route {alias} is external but its tags {lp['tags']} let the eval gateway send it data above "
-                        "public; an external route may carry only the tag open (TM-1249)")
+                        "public; an external route may carry only the tag open")
 
 
 def _env_name(secret: str) -> str:
@@ -774,7 +774,7 @@ GB_TO_GIB = 1e9 / (1 << 30)
 # The smallest size a route may carry. parse_route refuses sizeGiB unless it is positive, so every size
 # the UI itself writes into a draft goes through planning_size: a model an engine lists at a few bytes
 # (a stub) or a few megabytes (a small embedding model) used to round to 0.0 and the UI refused its
-# own draft with "sizeGiB must be a positive number" and no field to correct it (TM-0980, lab F-L1-11).
+# own draft with "sizeGiB must be a positive number" and no field to correct it (lab F-L1-11).
 MIN_SIZE_GIB = 0.1
 
 
@@ -1056,7 +1056,7 @@ def merge(base: Inventory, add: Inventory) -> Inventory:
 
 class _Dumper(yaml.SafeDumper):
     """Every values file the UI or the PR opener writes. No anchors or aliases, ever: a reviewer reads these
-    files, and `*id001` hides which route a list belongs to (TM-0939)."""
+    files, and `*id001` hides which route a list belongs to."""
 
     def ignore_aliases(self, data):
         return True

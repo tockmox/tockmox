@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Status as the stack it is: bands, parts, and which part each signal is about (TM-1305).
+"""Status as the stack it is: bands, parts, and which part each signal is about.
 
 specs/tockmox-ui/SPEC.md section 5 (Tockmox planning repo). The sources say things in their own
 units: an Argo CD application, an alert, a scrape target, a node. A reader thinks in parts: "the
@@ -54,7 +54,7 @@ class Part:
     goto: tuple = ()                      # ((kind, value), ...): app | grafana
     runbook: str = ""
     about: str = ""
-    trend: str = ""                       # the panels.yaml id of its 7-day drawer panel (TM-1306); else part-alerts
+    trend: str = ""                       # the panels.yaml id of its 7-day drawer panel; else part-alerts
     site: bool = False                    # a site app, not part of Tockmox
     auto: bool = False                    # made by the mapper (a band's layer part, Unplaced, a site app)
 
@@ -244,7 +244,7 @@ class PartView:
 
     @property
     def wrong(self):
-        """What is wrong, worst first (review, TM-1305): the List row and the drawer lead with it."""
+        """What is wrong, worst first (review): the List row and the drawer lead with it."""
         return sorted((s for s in self.signals if s["state"] != OK), key=lambda s: RANK.get(s["state"], 1))
 
     @property
@@ -402,7 +402,7 @@ def place(stack: Stack, readings: dict, pipeline=(), stale_apps=(), since=lambda
         if n in pipeline or sev in ("info", "none"):
             continue
         ns = x.get("namespace") or ""
-        # alert and namespace: what a silence from the drawer names (TM-1313); silenced: the console's mark
+        # alert and namespace: what a silence from the drawer names; silenced: the console's mark
         sig = _sig("alertmanager", CRIT if sev == "critical" else WARN, n, x.get("summary", ""), since(x.get("startsAt", "")),
                    alert=n, namespace=ns, silenced=x.get("silenced"))
         comp = x.get("component") or ""
@@ -457,7 +457,7 @@ def place(stack: Stack, readings: dict, pipeline=(), stale_apps=(), since=lambda
             deps.add("alertmanager")
         if p.jobs:
             deps.add("prometheus")
-        # Every declared dependency counts, read or not (review, TM-1305): a source this UI does not read is
+        # Every declared dependency counts, read or not (review): a source this UI does not read is
         # silent, never a pass. Only the ones it reads are listed in the drawer.
         v.deps = tuple(sorted(d for d in deps if readings.get(d) is not None))
         bad = v.wrong
@@ -562,12 +562,12 @@ def pill(placed: Placed) -> dict:
 
 
 def problem_parts(placed: Placed) -> list:
-    """The parts that need a look, worst first (Home's chips, TM-1307)."""
+    """The parts that need a look, worst first (Home's chips)."""
     out = [p for p in placed.all() if p.state != OK]
     return sorted(out, key=lambda p: (RANK[p.state], p.part.name.lower()))
 
 
-# ------------------------------------------------------------ Home (TM-1307)
+# ------------------------------------------------------------ Home
 
 def _lead(pv: PartView) -> str:
     """One clause naming what is wrong with a part, from its worst signal."""

@@ -29,10 +29,10 @@ option for a registry you supply, not the one Tockmox will ship.
 |---|---|---|
 | Connected install, no private registry | **Nothing.** Images pull from their upstreams | ... |
 | Connected install, you want caching or rate-limit relief | **Optional.** Run a registry with a pull-through proxy cache | [the pull-through proxy cache](#the-pull-through-proxy-cache) |
-| Air-gapped install | **Required.** Mirror every entry in `images.txt` into a registry your cluster can reach, then set `global.imageRegistry` | [install with no internet access](airgap.md) |
+| Air-gapped install | **Required.** Mirror every entry in `images.txt` into a registry your cluster can reach, then point every node's containerd at it in `/etc/rancher/k3s/registries.yaml`. Set `global.imageRegistry` only where you cannot configure the nodes | [install with no internet access](airgap.md) |
 
-`global.imageRegistry` is the only knob Tockmox needs from you. **It does not
-reach every image**, which is
+`global.imageRegistry` is the only Tockmox value involved, and it is the
+fallback. **It does not reach every image**, which is
 [the section that matters most](#how-globalimageregistry-rewrites-an-image-reference)
 if you are mirroring.
 
@@ -66,7 +66,7 @@ registry is one of its features.
 ## What is planned: a shipped registry layer
 
 The prerequisite is not the end state. A registry is going to ship as a
-Tockmox layer, and the choice was made on 2026-08-19 (ADR-0044): **zot**,
+Tockmox layer, and the choice was made on 2026-08-19: **zot**,
 because one instance covers the three roles this page describes ... the
 pull-through cache for a connected site, an on-disk store that *is* an OCI
 image layout, so a disconnected site can be seeded by copying a directory in,
@@ -104,10 +104,12 @@ enough that some of what a bundle would contain is strong copyleft. Grafana and
 Loki, both referenced by the observability layer, are AGPL-3.0. **Referencing
 an image in a manifest is not distributing it. Bundling it is.**
 
-*(A previous version of this paragraph also named Forgejo. Tockmox does not
-ship or reference Forgejo ... it appears nowhere in `images.txt` and is not a
-dependency of any chart. Corrected 2026-09-01. The remaining examples were
-checked against `images.txt` in the same pass.)*
+*(Forgejo is not in this list and not in `images.txt`, and that is not an
+omission. The built-in forge (`site.forge: built-in`) is a prerequisite the
+installer's `bootstrap-forge` step installs beside ArgoCD, the way ArgoCD
+itself is, so it is not a dependency of any Tockmox chart; a disconnected site
+mirrors its one image by hand, as
+[install with no internet access](airgap.md) describes.)*
 
 The practical consequence is good for you: **you mirror what you actually
 want**, from upstreams you choose, into a registry you control, on your

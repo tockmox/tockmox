@@ -1,12 +1,12 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-tockmox.actions: the effective actions block (TM-1311, TM-1313), as YAML, for both the UI's config (which buttons it
+tockmox.actions: the effective actions block, as YAML, for both the UI's config (which buttons it
 offers) and the tockmox-actions service's (what it will do). One computation, two readers, so the two cannot disagree.
 
 On by default for every kind this layer can do with what Tockmox ships (R10, Jeff 2026-10-31): silences and the test
 alert (Alertmanager, by NetworkPolicy), run-now of the AI layer's own CronJobs, a restart of the AI layer's consoles.
-argocd needs the site's Argo CD account and is on only when its url and tokenSecret are set. identity (TM-1315) needs
+argocd needs the site's Argo CD account and is on only when its url and tokenSecret are set. identity needs
 the Authentik service account the identity layer makes with sso.consoleActions, and a token Secret both layers share,
 so it is off until turned on. Off means absent.
 Nothing renders without the UI, its issuer (every intent is checked against the issuer's signature) and the

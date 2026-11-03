@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-THE POLICY GATE (TM-0383), as files for the hooks ConfigMap.
+THE POLICY GATE, as files for the hooks ConfigMap.
 
 tockmox.ai.hookFiles returns, as YAML, every file the tockmox-litellm-hooks
 ConfigMap carries: the site's modelGateway.hooks.files, plus the gate's module
@@ -38,7 +38,7 @@ route_posture:
 {{- end -}}
 
 {{- /*
-THE KEY POLICY (TM-0991; DESIGN-2026-10-29-agent-kit-security K1, K2). On LiteLLM a key whose model list is empty,
+THE KEY POLICY (DESIGN-2026-10-29-agent-kit-security K1, K2). On LiteLLM a key whose model list is empty,
 absent, `*` or `all-proxy-models` reaches every model, and a key with no MCP list reaches every MCP server. The
 module refuses both on every key generate, update and regenerate (general_settings.custom_key_policy). Its policy
 file is rendered from values. The console key's alias is added to the one named exception automatically, because

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# EVERY NETWORKPOLICY SELECTS SOMETHING (TM-1251, K4).
+# EVERY NETWORKPOLICY SELECTS SOMETHING (K4).
 #
 # A policy whose podSelector matches no pod applies cleanly, reports Synced and
 # protects nothing. An egress allow that selects nothing strands the pod it was

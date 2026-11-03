@@ -28,7 +28,7 @@ on a fresh one, getting it backwards fails the sync.
 |---|---|
 | Namespaces | Eight, created from `namespaces.create` |
 | NetworkPolicies | 48 over eight namespaces |
-| Pod Security | `warn` and `audit` at `restricted` on all eight namespaces, and **`enforce` on seven** (`ai`, `devops`, `diagnostic_identity` and `monitoring` at `baseline`, `authentik` and `selfcheck` at `restricted`, `node_agents` at `privileged`). `platform` carries no enforce label because pods in it need host access by design; the node agents that used to share `monitoring` with Grafana moved to `node_agents` (TM-0799). Levels are values: `podSecurity`. See the note below |
+| Pod Security | `warn` and `audit` at `restricted` on all eight namespaces, and **`enforce` on seven** (`ai`, `devops`, `diagnostic_identity` and `monitoring` at `baseline`, `authentik` and `selfcheck` at `restricted`, `node_agents` at `privileged`). `platform` carries no enforce label because pods in it need host access by design; the node agents that used to share `monitoring` with Grafana moved to `node_agents`. Levels are values: `podSecurity`. See the note below |
 | ValidatingAdmissionPolicies | 4, plus 4 bindings. One refuses on a stock install (cluster-admin ClusterRoleBindings); the other three audit and warn |
 | PriorityClasses | 3 |
 | Diagnostic identity | Read-only ServiceAccount and ClusterRole, network-isolated |

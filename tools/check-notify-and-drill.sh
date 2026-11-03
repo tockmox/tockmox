@@ -9,11 +9,11 @@
 #
 # B1  The alert bridge writes exactly one `delivery ...` line per alert, with
 #     alertname, severity, status, fingerprint, sink and the sink's HTTP code,
-#     and never the token or the sink URL (TM-0780). The bridge is extracted
+#     and never the token or the sink URL. The bridge is extracted
 #     from its ConfigMap and run against a stub sink that answers 200, then 403.
 # B2  The ntfy Deployment still renders replicas 1, and the reason is written
 #     where a reader will find it: in the template and in monitoring.md, with
-#     TockmoxNtfyDown named (TM-0779).
+#     TockmoxNtfyDown named.
 # N1  ntfy picks up its auth Secret when it appears or changes (lab F11, 2026-10-08). envFrom is read once, at
 #     container start; on a greenfield sync ntfy started one second before sealed-secrets wrote
 #     tockmox-ntfy-auth, came up with no users, and every alert after that was a 401. The liveness probe compares
@@ -22,24 +22,24 @@
 #     mount and environment: absent/absent and equal are healthy; Secret-appeared and Secret-rotated are not.
 # D1  The restore drill script, run against a stub kubectl, pins the newest
 #     completed Backup, records `backup=<id>` on its register row, and falls back
-#     to `backup=none` with no pin when no Backup is visible (TM-0794). A FAIL
+#     to `backup=none` with no pin when no Backup is visible. A FAIL
 #     row carries the field too.
 #     It runs the drill cluster on the image the SOURCE cluster runs
 #     (spec.imageName, which CNPG always sets), and on the operator default only
-#     when the source cannot be read (TM-1023).
-# D2  The identity database's restore drill (TM-0788), the same script pointed
+#     when the source cannot be read.
+# D2  The identity database's restore drill, the same script pointed
 #     at Authentik's database, run against the same stub: it recovers from the
 #     identity store under the identity cluster's server name, in the identity
 #     namespace, pins that cluster's newest completed Backup, and PASSes only
 #     when Authentik's user table came back with rows (users=<n> on the row).
 #     A restore with an empty user table is a FAIL.
 #
-# D3  A drill that FAILS says why on its register row (HL-0863). A pod that dies in seconds is gone before
+# D3  A drill that FAILS says why on its register row. A pod that dies in seconds is gone before
 #     Alloy tails it, so the row is the only record: the Kubernetes API's own refusal text after `apply
 #     refused:`, the readiness wait's output and the cluster's phase after `cluster never became Ready`,
 #     on one line (no newline, no `=`, no double quote, no backslash, 240 characters), and the object the
 #     row travels in stays valid JSON. Both drills (model gateway, identity), run against the stub.
-# D4  The register is an object in the object store, not a ConfigMap (TM-0459), and a drill that cannot
+# D4  The register is an object in the object store, not a ConfigMap, and a drill that cannot
 #     record its verdict FAILS. Both drills are run against a stand-in S3 that verifies SigV4 the way Garage
 #     does (key, secret, and the signing region, which must be the store's own): a PASS is written, read
 #     back and checksummed; a FAIL verdict is recorded too; and a write refused (403), a wrong key, a wrong
@@ -150,7 +150,7 @@ b1() { # py
 # ---- B2 ---------------------------------------------------------------------
 b2() {
   [ "$(cat "$T/ntfy.replicas")" = 1 ] \
-    && grep -q 'TM-0779' charts/tockmox-observability/templates/ntfy.yaml \
+    && test -f charts/tockmox-observability/templates/ntfy.yaml \
     && grep -q 'TockmoxNtfyDown' charts/tockmox-observability/templates/ntfy.yaml \
     && grep -q 'runs as one replica, deliberately' docs/operations/monitoring.md \
     && grep -A8 'runs as one replica, deliberately' docs/operations/monitoring.md | grep 'TockmoxNtfyDown' >/dev/null
@@ -390,7 +390,7 @@ PY
 }
 
 # ---- D4 ---------------------------------------------------------------------
-# The register is an object, and a drill that cannot record its verdict FAILS (TM-0459). The restore itself
+# The register is an object, and a drill that cannot record its verdict FAILS. The restore itself
 # PASSES in every case below but the FAIL one: what varies is the store.
 d4_case() { # name, script, kind, s3 mode, [VAR=value ...]: one drill run with a PASSing restore; rc and objects kept
   local n="$1" s="$2" k="$3" mode="$4" d bj="two.json"; shift 4

@@ -152,7 +152,7 @@ class ApplicationsSource(Source):
 
     The CRs keep their LAST status when the application controller stops, so a
     reader that trusts sync/health alone reports a frozen cluster as healthy.
-    Found in the lab (TM-0901, 2026-10-05): controller scaled to 0 and a layer's
+    Found in the lab (2026-10-05): controller scaled to 0 and a layer's
     workload scaled to 0, and the UI still said "All systems healthy". Every app
     must therefore carry a recent status.reconciledAt, or it reads Unknown.
     """
@@ -173,7 +173,7 @@ class ApplicationsSource(Source):
             first = srcs[0] if srcs else {}
             out.append({
                 "name": it["metadata"]["name"],
-                # Where it deploys, so Status can place an alert from that namespace on this app's part (TM-1305).
+                # Where it deploys, so Status can place an alert from that namespace on this app's part.
                 "namespace": str((spec.get("destination") or {}).get("namespace") or ""),
                 "repo": str(first.get("repoURL", "")),
                 "path": str(first.get("path", "")),
@@ -182,7 +182,7 @@ class ApplicationsSource(Source):
                 "health": (st.get("health") or {}).get("status") or "Unknown",
                 "reconciledAt": _parse_ts(st.get("reconciledAt")),
                 # What the application manages, as Argo CD lists it: kind and name only. The
-                # capabilities page (TM-1017) reads which components a layer really deployed
+                # capabilities page reads which components a layer really deployed
                 # from this, so it needs no Kubernetes permission beyond the Applications.
                 "resources": tuple(sorted({(str(r.get("kind", "")), str(r.get("name", "")))
                                            for r in (st.get("resources") or []) if isinstance(r, dict)})),
@@ -207,7 +207,7 @@ class ApplicationsSource(Source):
         stale = self.stale(apps)
         stale_names = {a["name"] for a in stale}
         layers = self.tockmox_layers(apps)
-        # STALENESS IS JUDGED PER APPLICATION (TM-0904). It used to be all or
+        # STALENESS IS JUDGED PER APPLICATION. It used to be all or
         # nothing: ONE stale application read "Argo CD has stopped reconciling"
         # and, through running_version, blanked the version, as a drill leftover
         # stuck deleting did in the first browser walk while all ten layers were
@@ -247,7 +247,7 @@ class ApplicationsSource(Source):
         Unset (the shipped default), the ones whose first source path is
         charts/tockmox-<layer>, so a site that serves the product tree from a
         mirror, a forge of its own or an in-cluster git daemon (every
-        air-gapped site) is read the same as one on github.com (TM-0979).
+        air-gapped site) is read the same as one on github.com.
         """
         if self.repo:
             norm = lambda u: u.rstrip("/").removesuffix(".git").lower()
@@ -328,7 +328,7 @@ class PrometheusSource(_HttpSource):
 
 
 # Alerts that fire ALWAYS, on purpose, to prove a path works: never a problem, never a row in
-# "Alerts firing" (TM-1014). Watchdog is kube-prometheus-stack's (Prometheus to Alertmanager);
+# "Alerts firing". Watchdog is kube-prometheus-stack's (Prometheus to Alertmanager);
 # TockmoxHeartbeat is tockmox-selfcheck's (the cluster to the off-cluster dead-man's switch);
 # InfoInhibitor is upstream's inhibition helper. The configured heartbeat joins them.
 ALWAYS_FIRING = ("Watchdog", "TockmoxHeartbeat", "InfoInhibitor")
@@ -354,7 +354,7 @@ class AlertmanagerSource(_HttpSource):
         self.heartbeat = heartbeat
 
     def fetch(self):
-        # Silenced alerts too (TM-1313): one silenced from the console STAYS on Status, marked "silenced by
+        # Silenced alerts too: one silenced from the console STAYS on Status, marked "silenced by
         # <name> until <time>", because a silence stops the phone, not the problem. One a person silenced in
         # Alertmanager itself is left out, as before.
         doc = self._get("/api/v2/alerts", {"active": "true", "silenced": "true", "inhibited": "false"})
@@ -371,7 +371,7 @@ class AlertmanagerSource(_HttpSource):
                 continue
             out.append({"name": lab.get("alertname", "?"), "severity": lab.get("severity", ""),
                         "namespace": lab.get("namespace", ""),
-                        # A rule may name the part it is about outright (TM-1305, app/stack.yaml).
+                        # A rule may name the part it is about outright (app/stack.yaml).
                         "component": lab.get("tockmox_component", ""),
                         "summary": ann.get("summary") or ann.get("description", ""),
                         "startsAt": a.get("startsAt", ""),

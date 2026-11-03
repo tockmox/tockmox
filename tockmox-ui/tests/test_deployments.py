@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1299: app/deployments.py, the deployment rows (tunings, planned memory) and the node's memory bar.
+"""app/deployments.py, the deployment rows (tunings, planned memory) and the node's memory bar.
 
 Run from tockmox-ui/: python -m pytest tests
 """

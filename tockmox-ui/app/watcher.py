@@ -3,7 +3,7 @@
 
     python -m app.watcher CONFIG.yaml REPORT.json
 
-A separate process from the UI, run on a schedule (a CronJob, TM-0930), OFF unless the operator
+A separate process from the UI, run on a schedule (a CronJob), OFF unless the operator
 turns it on: it is the one Tockmox component that reaches the internet on its own, so it does so
 only to the hosts in WATCH_HOSTS, never follows a redirect, caps every answer, sends no
 identifiers, and carries a provider key only to that provider. Air-gapped sites leave it off.
@@ -17,14 +17,14 @@ Sources, all read-only:
   Anthropic      GET  /v1/models                                  when a key is configured
   OpenAI         GET  /v1/models                                  when a key is configured (+shutdown_date)
   LiteLLM        GET  raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json
-                                                                   list prices (TM-1298), see below
+                                                                   list prices, see below
 
-Inbox (TM-1258): a candidate whose id is in modelLifecycle.inbox.dismissed, or in .snoozed with a date still ahead, is left out of
+Inbox: a candidate whose id is in modelLifecycle.inbox.dismissed, or in .snoozed with a date still ahead, is left out of
 the report (and so is not sized). A retiring hosted model carries `replacement` when the provider's listing names one or the site
 does (watch.providers.<name>.replacements: {retiring id: replacement id}); a candidate keeps the `pr` link the PR opener recorded
 for it in the previous report.
 
-Prices (TM-1298): providers publish no price API, so each hosted model the catalog or the gateway names is priced from
+Prices: providers publish no price API, so each hosted model the catalog or the gateway names is priced from
 LiteLLM's price map, the file the gateway itself prices spend with. The report's `prices` holds, per "provider/model", the
 list price per 1M tokens in and out and the day it was read; `priceSource` says whether the read worked. A read that fails
 keeps the last good value under its original date (stale: true), so the page says "last read <date>" and never shows an old
@@ -297,7 +297,7 @@ def collect_sizes(cfg: dict, lc, cands, f: "Fetcher", now: str) -> tuple[dict, l
 
 
 def collect_prices(cfg: dict, model_ids, f: "Fetcher", day: str, previous: dict | None = None) -> tuple[dict, dict]:
-    """The report's `prices` and `priceSource` (TM-1298). ({}, {}) when price reading is off or there is no hosted model to price.
+    """The report's `prices` and `priceSource`. ({}, {}) when price reading is off or there is no hosted model to price.
     A failed read is recorded with its reason, and the previous report's price for each model is kept under its own date."""
     w = (((cfg.get("modelLifecycle") or {}).get("watch") or {}).get("prices")) or {}
     ids = sorted(set(model_ids))

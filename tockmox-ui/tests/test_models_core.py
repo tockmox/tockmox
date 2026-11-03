@@ -160,7 +160,7 @@ def test_frontier_proposal_lands_on_the_eval_gateway_tagged_open_and_as_a_candid
 
 
 def test_next_routes_never_reach_the_production_gateway():
-    """TM-0936: inside one gateway an access group fails open, so a candidate must not be in it at all."""
+    """Inside one gateway an access group fails open, so a candidate must not be in it at all."""
     I = inv()
     prod = {e["model_name"] for e in nm.render_model_list(I)}
     ev = {e["model_name"] for e in nm.render_model_list(I, "eval")}
@@ -333,7 +333,7 @@ def test_a_successor_without_a_size_is_not_an_upgrade():
     assert [c.model for c in ml.detect_hf(e, None, [], newer)] == ["Qwen/Qwen3.5-7B-Instruct"]
 
 
-# ------------------------------------------------------------ where a model comes from (TM-0938)
+# ------------------------------------------------------------ where a model comes from
 
 def test_source_links_per_kind():
     L = lc()

@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-Monitoring for the inference nodes (REQ-0047 AC-47.7, TM-0920). OFF by default: set
+Monitoring for the inference nodes (REQ-0047 AC-47.7). OFF by default: set
 inferenceNodes.monitoring.enabled, with the observability capability's serviceMonitors on.
 
 Two objects, both read by the Prometheus the observability layer ships (its Probe and ScrapeConfig

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-0930: the watcher's PR opener. The two approvals become PRs, one at a time, built by the UI's own functions."""
+"""The watcher's PR opener. The two approvals become PRs, one at a time, built by the UI's own functions."""
 import base64
 import json
 import re
@@ -208,7 +208,7 @@ def test_promotion_reads_verdicts_from_the_repo_and_an_unreadable_one_blocks_it(
 @pytest.mark.parametrize("kind,api,repo,match", [("gitlab", "https://x", "o/r", "github or forgejo"),
                                                  ("github", "http://api.github.com", "o/r", "https"),
                                                  ("github", "https://api.github.com", "o/r/../x", "owner/name"),
-                                                 # plain http: only a Forgejo at an in-cluster Service address (TM-1336)
+                                                 # plain http: only a Forgejo at an in-cluster Service address
                                                  ("github", "http://tockmox-forge-http.tockmox-forge.svc.cluster.local:3000/api/v1", "o/r", "https"),
                                                  ("forgejo", "http://forgejo.example/api/v1", "o/r", "https"),
                                                  ("forgejo", "http://svc.cluster.local/api/v1", "o/r", "https"),
@@ -285,7 +285,7 @@ def test_the_ui_node_change_carries_the_same_rolling_annotation():
     assert len(nm.routes_hash(inv)) == 16
 
 
-# ------------------------------------------------------------ TM-0939: branch names and anchors
+# ------------------------------------------------------------ branch names and anchors
 
 def test_branch_slug_short_names_unchanged_long_ones_hashed_and_unique():
     assert po.branch_slug("local-agent") == "local-agent"

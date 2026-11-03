@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The production health watch (REQ-0048 AC-48.19, TM-1263, TM-1274): is a promoted alias doing worse than what it replaced?
+"""The production health watch (REQ-0048 AC-48.19): is a promoted alias doing worse than what it replaced?
 
     python -m app.health_watch CONFIG.yaml            # judge every promoted alias, print the status, touch nothing
     python -m app.health_watch CONFIG.yaml --apply    # and, on a breach, open the revert PR and send the ntfy message
@@ -22,7 +22,7 @@ Prometheus as the first hour in which the gateway's `model` label on the alias's
 HOW A JUDGEMENT IS MADE (the rules are values, rules.*):
   - Every instant is a trailing window (rules.windowMinutes, default 60) ending on a 15-minute grid. The alias is judged at
     the last forMinutes/15 + 1 instants, and a breach must hold at ALL of them (rules.forMinutes, default 30).
-  - LIKE HOURS (TM-1274; rules.likeHours, default on): the baseline of an instant is the same window at the same time of
+  - LIKE HOURS (rules.likeHours, default on): the baseline of an instant is the same window at the same time of
     day on each of the baselineDays before the promotion, pooled (sum of errors over sum of requests), not a flat mean
     over the week. A model that is busier and slower at 14:00 than at 03:00 is not worse at 14:00. Off, the baseline is
     every window before the promotion.

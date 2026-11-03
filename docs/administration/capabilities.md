@@ -156,7 +156,7 @@ renders:
   decomposition.
 
 **Re-derived 2026-10-08** against the 0.8.0 tree with Helm v4.3.0, after
-TM-0460: `aiPlane` reads 28 (24 on the same tree the day before; the
+the change: `aiPlane` reads 28 (24 on the same tree the day before; the
 console-key Job and its ServiceAccount, Role and RoleBinding are the four new
 objects under it),
 `networkPolicy` 42 (the Job's API egress rule), `observability` 194,
@@ -207,11 +207,13 @@ values leave these keys as `{}` rather than setting them to `null`: a null
 condition path makes Helm warn on every render, and the schemas require an
 object there.
 
-**YOU SUPPLY:** the component key, read out of that layer's `values.yaml`. Unlike
-`capabilities`, the `apps` block is **not** closed, so a misspelt component name
-is accepted and does nothing. See
+**YOU SUPPLY:** the component key, read out of that layer's `values.yaml`. The
+`apps` block accepts only component names that some layer declares, so a
+misspelt name fails the render ([values contract](values-contract.md)). What it
+still accepts is a real component name on the wrong layer, which renders clean
+and does nothing. See
 [configuration § per-app toggles](configuration.md#per-app-toggles) for the
-worked example and the render check that catches it.
+render check that catches it.
 
 ### The case this design exists for: you already run Prometheus
 
@@ -264,7 +266,7 @@ apps:
 That renders in every layer; the coherence guard below does not apply to
 `serviceMonitors`, because the component is the point and the capability is what
 you declined. It was refused until 2026-10-03, which contradicted the capability
-text in every layer's values (TM-0825). You bring the operator and its CRDs:
+text in every layer's values. You bring the operator and its CRDs:
 `tockmox-crds` still renders nothing with the capability off. The monitors
 vendored subcharts write (cert-manager, MetalLB, Traefik, Longhorn, CNPG, kured,
 the snapshot controller, authentik) stay on, which is what you want here.
@@ -313,7 +315,7 @@ configuration that works.
 
 The second half of that "or" is reachable across a whole deployment: with
 `observability` off and `apps.serviceMonitors.enabled: true`, no layer refuses
-(the observability layer used to, and no longer does; TM-0825).
+(the observability layer used to, and no longer does).
 
 ## How it works, for people extending it
 

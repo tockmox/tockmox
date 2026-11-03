@@ -159,7 +159,7 @@ if seen == 0:
 sys.exit(rc)
 PY
 
-# SECOND PASS: EVERY PROFILE, EVERY LAYER (TM-0146).
+# SECOND PASS: EVERY PROFILE, EVERY LAYER.
 #
 # The pass above renders ci/values.yaml, whose globals happen to match every
 # literal class in the charts, so it cannot see a literal that fails to follow
@@ -179,7 +179,7 @@ for prof in profiles/*.yaml; do
   for c in charts/tockmox-*; do
     [ "$c" = "charts/tockmox-common" ] && continue
     # A profile with a YOU SUPPLY value (profiles/resilient.yaml: an off-cluster
-    # backup target, TM-0597) is rendered with the values a site would put after
+    # backup target) is rendered with the values a site would put after
     # it, per layer, when ci/values-profile-<name>-<layer>.yaml exists.
     supply=(); sf="ci/values-profile-$(basename "$prof" .yaml)-$(basename "$c").yaml"
     [ -f "$sf" ] && supply=(-f "$sf")
@@ -230,7 +230,7 @@ sys.exit(rc)
 PY
 done
 
-# -------------------------------------------- more than one Grafana (TM-0786, TM-1005)
+# -------------------------------------------- more than one Grafana
 # Two Grafana replicas need one database they share and no ReadWriteOnce volume.
 # The observability preflight refuses the two wrong shapes by name, and must
 # ACCEPT a site that runs Grafana on a database it manages itself in grafana.ini

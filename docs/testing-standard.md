@@ -18,7 +18,7 @@ tockmox:
 **A gate proves one thing. The useful question is always what it does not
 prove.**
 
-This project 40 CI gates. Thirty-nine are static analysis of the repository:
+Nearly every gate in this project's CI is static analysis of the repository:
 lint, render, schema, selector matching, link resolution, frontmatter, SBOM,
 secret scanning, sign-off, alert-rule tests, the Tockmox UI's unit tests with every
 upstream mocked, a render diff against the previous release. They are good gates and they are not enough, because

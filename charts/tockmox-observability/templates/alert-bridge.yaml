@@ -67,9 +67,7 @@ data:
 
 
     def ntfy_token():
-        """Read the bearer token at CALL time, never once at start.
-
-        TM-0488. Environment variables are resolved exactly once, when the
+        """Read the bearer token at CALL time, never once at start. Environment variables are resolved exactly once, when the
         container starts, and install.md applies the ntfy Secret at step 3c --
         which is AFTER the layers sync, correctly, because the namespaces do
         not exist until the policy wave creates them. So the bridge always
@@ -171,7 +169,7 @@ data:
         """Deliver one alert. Returns (ok, error text or None, HTTP code or 0).
 
         The code is 0 when the sink never answered (timeout, refused, DNS). It
-        is returned so do_POST can write the per-delivery line (TM-0780).
+        is returned so do_POST can write the per-delivery line.
         """
         m = render(alert, group_status)
         if SINK == "apprise":
@@ -181,7 +179,7 @@ data:
                 # Apprise types: info | success | warning | failure
                 "type": "failure" if m["severity"] == "critical" else "warning",
                 # The config is locked (apprise.yaml), and a locked key notifies only a named
-                # tag: every line of the Secret is `<key>=<url>` (TM-1020).
+                # tag: every line of the Secret is `<key>=<url>`.
                 "tag": APPRISE_KEY,
             }).encode()
             req = urllib.request.Request(
@@ -213,7 +211,7 @@ data:
 
 
     def delivery_line(alert, group_status, ok, code):
-        """One logfmt line per alert handed to the sink (TM-0780).
+        """One logfmt line per alert handed to the sink.
 
         `grep '^delivery '` answers "what did we deliver". Only labels that are
         already in the alert are written: no message body, no sink URL, no
@@ -257,7 +255,7 @@ data:
                 s = dict(STATE)
             # Read live rather than from STATE: the token can arrive (or
             # rotate) at any time without a restart, which is the whole point
-            # of TM-0488's fix, so a cached answer would be the stale half of
+            # of the fix, so a cached answer would be the stale half of
             # the thing this gauge exists to report.
             token_present = 1 if ntfy_token() else 0
             return (
@@ -351,8 +349,7 @@ spec:
       annotations:
         tockmox.com/config-hash: {{ toYaml .Values.notifications | sha256sum | trunc 16 | quote }}
     spec:
-      # No Kubernetes API calls: a ServiceAccount of its own and no token (TM-0759,
-      # CIS 5.1.5 and 5.1.6).
+      # No Kubernetes API calls: a ServiceAccount of its own and no token (# CIS 5.1.5 and 5.1.6).
       serviceAccountName: tockmox-alert-bridge
       automountServiceAccountToken: false
       priorityClassName: {{ .Values.notifications.priorityClassName }}
@@ -393,7 +390,7 @@ spec:
               value: {{ .Values.notifications.apprise.configKey | quote }}
             - name: PORT
               value: "8080"
-            # DELIBERATELY NOT a secretKeyRef for the token (TM-0488). An env
+            # DELIBERATELY NOT a secretKeyRef for the token. An env
             # var is resolved once, at container start, and install.md applies
             # this Secret at step 3c -- after the layers sync. The bridge
             # therefore always started before its token existed, resolved it to
@@ -443,13 +440,13 @@ spec:
         # single-node k3s cluster at 53s for first arrival and 77s for a
         # rotation, both with no restart. Do NOT add subPath here -- a subPath
         # mount is exactly the case kubelet does NOT update, which would
-        # reintroduce TM-0488 wearing different clothes.
+        # reintroduce the old problem wearing different clothes.
         - name: ntfy-auth
           secret:
             secretName: {{ .Values.notifications.ntfy.auth.existingSecret }}
             optional: true
 ---
-# TM-0759: this workload's own identity, with no token. The namespace's `default`
+# this workload's own identity, with no token. The namespace's `default`
 # account is not used (CIS 5.1.5 and 5.1.6).
 apiVersion: v1
 kind: ServiceAccount

@@ -63,8 +63,8 @@ and a run that asserts nothing is a failure rather than a pass.
 | `I2` | Interactive and `--config` are offered as equal routes, so the same answers must produce a **byte-identical** site repository. |
 | `I3` | `--no-cluster` does not consult a cluster, including one that answers. |
 | `I4` | Refusals name the setting and the value. The unreachable-cluster refusal names `--no-cluster`, so the escape is discoverable from the failure. |
-| `I5` | A second run over the same output changes nothing. `TM-0277`'s definition of done already assumed this; nothing tested it. |
-| `B1` to `B12` | `bootstrap-secrets` (TM-0277), in `bootstrap-secrets-tests.sh`, against shims in `lib/shims/` (`kubectl`, `helm`, `kubeseal`, `age`, `docker`, `openssl`). First run, second run rewrites no sealed file, half-pair refusal, failure mid-run leaves no plaintext or partial files, wrong context/server/adopted controller refused, adoption creates no key, `recover` restores before install, backup encryption, and the interactive prompts under a pty. Never a real cluster; the live greenfield run has not happened. |
+| `I5` | A second run over the same output changes nothing. The definition of done already assumed this; nothing tested it. |
+| `B1` to `B12` | `bootstrap-secrets`, in `bootstrap-secrets-tests.sh`, against shims in `lib/shims/` (`kubectl`, `helm`, `kubeseal`, `age`, `docker`, `openssl`). First run, second run rewrites no sealed file, half-pair refusal, failure mid-run leaves no plaintext or partial files, wrong context/server/adopted controller refused, adoption creates no key, `recover` restores before install, backup encryption, and the interactive prompts under a pty. Never a real cluster; the live greenfield run has not happened. |
 
 It deliberately does **not** prove that the generated site is correct against the
 charts (the `charts` job renders it), that the prompts ask the right questions,

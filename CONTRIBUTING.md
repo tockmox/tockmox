@@ -67,7 +67,8 @@ and the customising ladder grow past one setup.
 
 ## Practical requirements
 
-Every pull request must pass CI, which runs 40 gates. Run them yourself first:
+Every pull request must pass CI: the `ci` workflow, and `check-all`, which runs
+every gate `./tools/check-all.sh --list` prints. Run them yourself first:
 
 ```bash
 ./tools/check-all.sh
@@ -159,13 +160,13 @@ documented procedure, `portability-macos` when a gate's shell changed, and the
 release-time gates. If your change needs one of those, the pull request says
 which, and a pull request is not held for a run you had no way to start.
 
-### `TM-` and `HL-` identifiers
+### Internal tracker ids
 
-`TM-` ids appear in comments, commit messages and `tests/executed-docs/`, never
-in CHANGELOG.md; `HL-` ids appear nowhere. Both are the maintainer's internal
-trackers and do not resolve publicly. Every reference
-is written so the surrounding sentence stands without it; one that does not is a
-documentation defect worth an issue.
+The maintainer's internal trackers (ids shaped `TM-` or `HL-` and a number) do
+not resolve publicly, so none appears in this repository: not in a file, a
+commit message or pull request text. `tools/check-no-site-specifics.sh` fails
+on one in the tree. Where a sentence needs the history behind a decision, say
+what was decided and when.
 
 ### Shell requirement
 

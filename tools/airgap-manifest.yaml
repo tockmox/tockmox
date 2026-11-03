@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# THE FIVE THINGS A DISCONNECTED INSTALL NEEDS, as data (TM-0185).
+# THE FIVE THINGS A DISCONNECTED INSTALL NEEDS, as data.
 #
 # docs/deployment/airgap.md opens with a table of five dependencies. Until this
 # file existed the table was prose with some of its numbers pinned by

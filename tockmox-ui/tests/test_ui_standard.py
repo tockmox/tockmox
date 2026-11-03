@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The UI standard's page rules that are easy to break quietly (TM-1127 follow-up, 2026-10-23)."""
+"""The UI standard's page rules that are easy to break quietly (2026-10-23)."""
 import re
 import sys
 import time

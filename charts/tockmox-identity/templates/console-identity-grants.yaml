@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-THE RECOVERY-LINK GRANTS (TM-1315; sso.consoleActions in values.yaml). The console's service account may make a
+THE RECOVERY-LINK GRANTS (sso.consoleActions in values.yaml). The console's service account may make a
 recovery link only for a person this CronJob has granted it. Authentik's role model cannot say "everyone outside the
 admin group" (a global permission covers every user, an administrator too), so the grant is per user and kept here:
 every run grants the tockmox-console-identity role `reset_user_password` (and the object-level `add_user` the
@@ -80,7 +80,7 @@ spec:
             app.kubernetes.io/name: tockmox-console-identity-grants
         spec:
           restartPolicy: Never
-          # No Kubernetes API calls: its own ServiceAccount and no token (TM-0759, CIS 5.1.5 and 5.1.6).
+          # No Kubernetes API calls: its own ServiceAccount and no token (CIS 5.1.5 and 5.1.6).
           serviceAccountName: tockmox-console-identity-grants
           automountServiceAccountToken: false
           {{- with ($srv.imagePullSecrets | default $akg.imagePullSecrets) }}
@@ -135,7 +135,7 @@ spec:
                           # Written only when it differs: a save every run put a "model updated" event in Authentik's
                           # log every five minutes (the lab run, 2026-11-01).
                           want = {"user": acct, "intent": TokenIntents.INTENT_API, "expiring": False, "key": key,
-                                  "description": "The Tockmox console's identity actions (TM-1315); kept by the tockmox-console-identity-grants CronJob"}
+                                  "description": "The Tockmox console's identity actions; kept by the tockmox-console-identity-grants CronJob"}
                           tok = Token.objects.filter(identifier="tockmox-console-actions").first()
                           if tok is None:
                               Token.objects.create(identifier="tockmox-console-actions", **want)
@@ -194,7 +194,7 @@ spec:
                     name: tockmox-console-actions-token
                     optional: true
 ---
-# TM-0759: this workload's own identity, with no token.
+# this workload's own identity, with no token.
 apiVersion: v1
 kind: ServiceAccount
 metadata:

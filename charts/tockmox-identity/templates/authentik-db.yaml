@@ -1,6 +1,6 @@
 {{- if (include "tockmox.appEnabled" (dict "ctx" $ "app" "authentik")) }}
 {{- /*
-AUTHENTIK'S DATABASE ON CLOUDNATIVEPG (TM-0788).
+AUTHENTIK'S DATABASE ON CLOUDNATIVEPG.
 
 The same shape as the model gateway's database (charts/tockmox-ai/templates/
 litellm-db.yaml), deliberately: one CR in the release namespace, the owner

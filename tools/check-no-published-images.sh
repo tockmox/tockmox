@@ -2,19 +2,19 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # No workflow may publish a container image or any other OCI artifact.
-# ADR-0036, TM-0098, TM-0805.
+# ADR-0036.
 #
 #   ./tools/check-no-published-images.sh              scan the workflows
 #   ./tools/check-no-published-images.sh --selftest   prove the scan goes red
 #   ./tools/check-no-published-images.sh --dir DIR    scan DIR instead (used by the selftest)
 #
 # WHY. ADR-0036: the repository distributes source, never compiled artifacts or
-# container images. The docs image workflow (docs-image.yaml, TM-0215, deleted by
-# TM-0808) pushed ghcr.io/tockmox/tockmox-docs on every `v*` tag, and nobody
+# container images. The docs image workflow (docs-image.yaml, deleted by
+# ) pushed ghcr.io/tockmox/tockmox-docs on every `v*` tag, and nobody
 # noticed that it broke the ADR until the day before the first tag that would
 # have run it. The docs now reach a cluster through tools/publish-docs.sh.
 # Publishing an image also conveys whatever copyleft software sits in its layers
-# (TM-0098). TM-0098's close condition is "a check confirms no workflow pushes an
+#. The close condition is "a check confirms no workflow pushes an
 # image"; this is that check.
 #
 # WHAT IT SCANS. Every .github/workflows/*.yaml and *.yml, and every composite
@@ -299,7 +299,7 @@ cosign attach sbom --sbom s.json example.invalid/x:1|cosign attach
 CASES
 
 # The regression this gate exists because of, rebuilt as a fixture now that the
-# real workflow is deleted (TM-0808): a tag-triggered build-and-push to ghcr.io
+# real workflow is deleted: a tag-triggered build-and-push to ghcr.io
 # with the token permission it needs.
 mkdir -p "$tmp/real"
 cat > "$tmp/real/docs-image.yaml" <<'YAML'

@@ -11,7 +11,7 @@
 # F1  The LiteLLM migrations Job cannot wedge an upgrade. A Job's pod template
 #     is immutable once the Job exists, so a Job that keeps its name across a
 #     template change fails with 'field is immutable' and Argo stops retrying
-#     (0.7.0 lab pass). Since TM-1196 (0.9.0) the Job is litellm-helm's own,
+#     (0.7.0 lab pass). Since 0.9.0 the Job is litellm-helm's own,
 #     run as an Argo CD Sync hook with delete policy BeforeHookCreation, which
 #     deletes the previous Job before creating the next, so the template is
 #     never patched. Asserted on the render: exactly one migrations Job, named
@@ -35,7 +35,7 @@
 #     rendering a Job with no hook that wedges the next image bump.
 #     `--selftest` proves it goes red on a subchart that drops the seam.
 # F7  A LiteLLM or Open WebUI version change is preceded by a backup of its
-#     database, and a failed backup stops the upgrade (TM-1054). Asserted on the
+#     database, and a failed backup stops the upgrade. Asserted on the
 #     render: the hook is a PreSync hook (and a Helm pre-install/pre-upgrade
 #     hook), its ServiceAccount, Role and RoleBinding are PreSync hooks in an
 #     earlier wave, the Role can read the named Clusters and workloads and
@@ -52,7 +52,7 @@
 #     LIMIT: no cluster. That CNPG's barman-cloud plugin completes a Backup
 #     created this way, and that a failed PreSync hook stops an Argo sync before
 #     anything is applied, are the lab's to prove (the run sheet's forced-failure
-#     leg of TM-1054).
+#     leg).
 # F2  The Loki gateway must be able to roll on ONE node AND apply over a live
 #     0.6.2 Deployment: it must not surge (maxSurge 0, or strategy Recreate),
 #     must carry no REQUIRED podAntiAffinity, and must not be a strategy TYPE
@@ -64,7 +64,7 @@
 #     each run must be able to FAIL: activeDeadlineSeconds and backoffLimit both
 #     set and bounded. Rendered on an OPERATOR FIXTURE (the shipped `docs`
 #     entry plus a site of the operator's own with a `content.image`), because
-#     the product docs have no sync Job since TM-0808 (no published image,
+#     the product docs have no sync Job (no published image,
 #     ADR-0036) and a default render holds no sync CronJob at all: without the
 #     fixture this check would find nothing and go red on "no CronJob", or
 #     worse, be edited to accept nothing. `--selftest` proves it goes red on a
@@ -285,7 +285,7 @@ good() { echo "  ok $*"; }
 
 # ---------------------------------------------------------------- F1
 for f in templates/litellm-migrations-job.yaml templates/_litellm-migrations.tpl; do
-  [ ! -e "$AI_CHART/$f" ] || bad "F1: $AI_CHART/$f is back. Since TM-1196 the migrations Job is the subchart's own, as a Sync hook; a Tockmox-owned Job beside it would migrate one database twice"
+  [ ! -e "$AI_CHART/$f" ] || bad "F1: $AI_CHART/$f is back. Since then the migrations Job is the subchart's own, as a Sync hook; a Tockmox-owned Job beside it would migrate one database twice"
 done
 base=$(migration_jobs)
 if [ "$base" = "NOJOB" ]; then
@@ -384,7 +384,7 @@ a = j["metadata"].get("annotations") or {}
 pa = j["spec"]["template"]["metadata"].get("annotations") or {}
 for k, v in (("argocd.argoproj.io/hook", "Sync"), ("argocd.argoproj.io/hook-delete-policy", "BeforeHookCreation")):
     if a.get(k) != v:
-        print("FAIL F1b: the vendored litellm-helm does not put migrationJob.jobAnnotations[%s]=%s on the Job's own metadata (got %r). Upstream moved or dropped the seam TM-1196 relies on (BerriAI/litellm#42242); a Job with no hook wedges on 'field is immutable' at the next image bump" % (k, v, a.get(k))); sys.exit(1)
+        print("FAIL F1b: the vendored litellm-helm does not put migrationJob.jobAnnotations[%s]=%s on the Job's own metadata (got %r). Upstream moved or dropped the seam it relies on (BerriAI/litellm#42242); a Job with no hook wedges on 'field is immutable' at the next image bump" % (k, v, a.get(k))); sys.exit(1)
     if k in pa:
         print("FAIL F1b: %s is on the Job's pod template as well as its metadata" % k); sys.exit(1)
 print("  ok F1b: the vendored litellm-helm puts migrationJob.jobAnnotations on the Job's own metadata, not its pod template")
@@ -396,7 +396,7 @@ case "$MUT" in presync|hashname|nohook|wave) exit "$rc" ;; esac
 [ "${1:-}" != "--mutate-seam" ] && [ "${1:-}" != "--mutate-guard" ] || exit "$rc"
 
 # ---------------------------------------------------------------- F7
-# The pre-upgrade backup hook (TM-1054): its render, then its script run against a stub kubectl.
+# The pre-upgrade backup hook: its render, then its script run against a stub kubectl.
 helm template t "$AI_CHART" -f ci/values.yaml --set modelGateway.upgradeBackup.openWebuiClusterName=open-webui-db > "$tmp/ub.yaml"
 case "$MUT" in
   ub-hooksync)   sed 's#argocd.argoproj.io/hook: PreSync#argocd.argoproj.io/hook: Sync#' "$tmp/ub.yaml" > "$tmp/ub.mut" && mv "$tmp/ub.mut" "$tmp/ub.yaml" ;;
