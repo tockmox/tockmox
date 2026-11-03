@@ -25,6 +25,9 @@ python3 tockmox-ui/fuzz/redirects_fuzzer.py -max_total_time=60
 A failure writes the input that caused it to `crash-<sha1>` in the current
 directory. Pass that file as the only argument to replay it.
 
+In CI, a crash fails the pull request's `fuzz` check and ClusterFuzzLite keeps
+the input with the run's artifacts; download it and replay it the same way.
+
 ## Add a target
 
 Name it `<something>_fuzzer.py` in this directory; `.clusterfuzzlite/build.sh`
