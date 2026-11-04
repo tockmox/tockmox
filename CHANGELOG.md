@@ -84,6 +84,20 @@ costs you, with the reasoning in the documentation rather than here.
   `TockmoxSiteRepositoryNoOffsiteCopy`, which the console's new Site repository
   part can silence. New key: `siteForge` (observability).
 
+- **Experimental: a nightly forge dump beside the off-site copy.** With an
+  off-site destination set, `bootstrap-forge` also creates the CronJob
+  `tockmox-forge-dump` (21:15, the cluster's time zone) and runs it once before
+  it finishes, written and read back like the first copy. It dumps what git does
+  not carry, as the forge's own JSON: pull requests, their reviews and review
+  comments, the other comments, and the repository's settings as the forge reports
+  them. A bucket gets a new object under `dumps/` and a `latest-dump` pointer
+  (nothing is overwritten or deleted); a git remote gets a new commit on the
+  branch `forge-dump`, pushed without force. A night that fails leaves a failed
+  Job, which `KubeJobFailed` reports for a day. The machine user
+  `tockmox-offsite` gains `read:issue` (it still cannot write); re-run
+  `bootstrap-forge` to give an installed forge the new token. The dump is not yet
+  read by `--restore-from`.
+
 - **Experimental: people sign in to the built-in forge through Authentik, and
   only the admin group's approval merges a change.** `bootstrap-forge`
   gives the forge a browser address (`forge.<internalDomain>`, TLS from the

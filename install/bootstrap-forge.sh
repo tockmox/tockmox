@@ -477,7 +477,7 @@ if $DRY_RUN; then
     info "an Ingress at ${FORGE_HOST}; the OIDC client secret in ${FORGE_NS} and ${IDENTITY_NS};"
     info "Traefik (${PLATFORM_NS}) admitted through the fence; the sign-in source once Authentik answers"
   fi
-  if [[ -n "$OFFSITE" ]]; then info "off-site copy (${OFFSITE}) to ${OFFSITE_WHERE}: a CronJob every minute, then the first copy written and read back"
+  if [[ -n "$OFFSITE" ]]; then info "off-site copy (${OFFSITE}) to ${OFFSITE_WHERE}: a CronJob every minute, a nightly forge dump of pull requests, reviews and comments to the same place, then the first copy and the first dump written and read back"
   else info "no off-site copy (the console will raise No off-site copy until one is set)"; fi
   info "write the recovery kit to ${KIT_OUT}"
   exit 0
@@ -1098,7 +1098,7 @@ if [[ -n "$OFFSITE" ]]; then
   say "The off-site copy"
   IMAGE="$(kubectl "${K[@]}" -n "$FORGE_NS" get deploy "$RELEASE" -o jsonpath='{.spec.template.spec.containers[?(@.name=="forgejo")].image}')"
   [[ -n "$IMAGE" ]] || die "cannot read the forge's image from deploy/$RELEASE"
-  TOKEN_OFFSITE="$(mktoken "$BOT_OFFSITE" read:repository)"
+  TOKEN_OFFSITE="$(mktoken "$BOT_OFFSITE" read:repository read:issue)"
   [[ -n "$TOKEN_OFFSITE" ]] || die "minting a token for $BOT_OFFSITE returned none"
   if [[ "$OFFSITE" == bucket ]]; then
     secret_apply "$FORGE_NS" "${RELEASE}-offsite" "" forge-username="$BOT_OFFSITE" forge-token="$TOKEN_OFFSITE" \
@@ -1137,17 +1137,21 @@ if [[ -n "$OFFSITE" ]]; then
   kubectl "${K[@]}" -n "$FORGE_NS" create configmap "${RELEASE}-offsite-script" \
     --from-file=forge-offsite-copy.sh="$OFFSITE_SCRIPT" --dry-run=client -o yaml \
     | kubectl "${K[@]}" apply -f - >/dev/null
-  kubectl "${K[@]}" apply -f - >/dev/null <<CRON || die "could not apply the off-site CronJob"
+  # One job template, two CronJobs: the copy every minute, the forge dump once a night.
+  # cronjob NAME SCHEDULE TASK TTL-SECONDS DEADLINE-SECONDS
+  cronjob() {
+    local cname="$1" sched="$2" task="$3" ttl="$4" deadline="$5"
+    kubectl "${K[@]}" apply -f - >/dev/null <<CRON || die "could not apply the CronJob $cname"
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: ${RELEASE}-offsite
+  name: ${cname}
   namespace: ${FORGE_NS}
   labels:
-    app.kubernetes.io/name: ${RELEASE}-offsite
+    app.kubernetes.io/name: ${cname}
     app.kubernetes.io/managed-by: tockmox-install
 spec:
-  schedule: "* * * * *"
+  schedule: "${sched}"
   concurrencyPolicy: Forbid
   startingDeadlineSeconds: 120
   successfulJobsHistoryLimit: 1
@@ -1155,12 +1159,12 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 0
-      activeDeadlineSeconds: 600
-      ttlSecondsAfterFinished: 3600
+      activeDeadlineSeconds: ${deadline}
+      ttlSecondsAfterFinished: ${ttl}
       template:
         metadata:
           labels:
-            app.kubernetes.io/name: ${RELEASE}-offsite
+            app.kubernetes.io/name: ${cname}
         spec:
           restartPolicy: Never
           automountServiceAccountToken: false
@@ -1178,6 +1182,7 @@ spec:
               image: ${IMAGE}
               command: [/bin/sh, /opt/offsite/forge-offsite-copy.sh]
               env:
+                - { name: TASK, value: ${task} }
 ${ENV_YAML}
 ${CA_ENV}
                 - { name: FORGE_URL, value: "http://${RELEASE}-http.${FORGE_NS}.svc.cluster.local:3000" }
@@ -1200,7 +1205,13 @@ ${CA_MOUNT}
             - { name: tmp, emptyDir: { sizeLimit: 1Gi } }
 ${CA_VOL}
 CRON
+  }
+  cronjob "${RELEASE}-offsite" "* * * * *" copy 3600 600
+  # The dump keeps a failed Job for a day (until the next run), so KubeJobFailed, which
+  # reads every Job in the cluster, is the alert for a dump that did not work.
+  cronjob "${RELEASE}-dump" "15 21 * * *" dump 86400 1800
   ok "CronJob ${FORGE_NS}/${RELEASE}-offsite: every minute, ${OFFSITE} to ${OFFSITE_WHERE}"
+  ok "CronJob ${FORGE_NS}/${RELEASE}-dump: nightly at 21:15 (the cluster's time zone), the forge dump (pull requests, reviews, comments) to the same place"
   # The first copy, now, while you watch: written AND read back, or this run fails.
   FIRST="${RELEASE}-offsite-first-$(date -u +%H%M%S)"; FIRST_OK=false
   for try in 1 2 3; do
@@ -1217,6 +1228,20 @@ CRON
   $FIRST_OK || die "the off-site copy could not be written and read back. The CronJob stays and retries every
        minute, and the console will alert; fix the destination and re-run this command.
        Look at: kubectl --context $CTX -n $FORGE_NS logs -l app.kubernetes.io/name=${RELEASE}-offsite --tail=20"
+  # The first dump, now, the same way: written AND read back, or this run fails.
+  FIRSTD="${RELEASE}-dump-first-$(date -u +%H%M%S)"; FIRSTD_OK=false
+  for try in 1 2; do
+    kubectl "${K[@]}" -n "$FORGE_NS" create job "$FIRSTD-$try" --from="cronjob/${RELEASE}-dump" >/dev/null
+    if kubectl "${K[@]}" -n "$FORGE_NS" wait --for=condition=complete "job/$FIRSTD-$try" --timeout=180s >/dev/null 2>&1; then
+      ok "first forge dump: $(kubectl "${K[@]}" -n "$FORGE_NS" logs "job/$FIRSTD-$try" 2>/dev/null | tail -1)"
+      FIRSTD_OK=true; break
+    fi
+    warn "forge dump attempt $try did not succeed: $(kubectl "${K[@]}" -n "$FORGE_NS" logs "job/$FIRSTD-$try" 2>/dev/null | tail -2 | tr '\n' ' ')"
+    sleep 10
+  done
+  $FIRSTD_OK || die "the forge dump could not be written and read back. The CronJob stays and retries every night;
+       a night that fails leaves a failed Job, which the console's KubeJobFailed alert reports.
+       Look at: kubectl --context $CTX -n $FORGE_NS logs -l app.kubernetes.io/name=${RELEASE}-dump --tail=20"
 fi
 
 # ---------------------------------------------------------------- recovery kit
@@ -1284,7 +1309,7 @@ fi
 say "Done"
 ok "the built-in forge holds ${ORG}/${REPO}; ArgoCD reads it at ${REPO_URL}"
 if [[ -n "$OFFSITE" ]]; then
-  ok "off-site copy: ${OFFSITE} to ${OFFSITE_WHERE}, checked every minute; the console alerts after 15 minutes behind"
+  ok "off-site copy: ${OFFSITE} to ${OFFSITE_WHERE}, checked every minute; the console alerts after 15 minutes behind; a forge dump each night at 21:15"
 else
   warn "no off-site copy is set: until one is, losing this cluster loses the site's history, and the
        console says so (No off-site copy) until you add one: re-run with --offsite-s3-* or --offsite-git."

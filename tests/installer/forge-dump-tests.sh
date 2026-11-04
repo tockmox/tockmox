@@ -116,7 +116,7 @@ R="$D/root/remote/site.git"
 assert_artifact "two dumps are two commits on the remote's forge-dump branch" \
   "echo $DP_STATUS; PATH='$DP_PATH' git -C '$R' rev-list --count forge-dump" "$(printf '0\n2')"
 assert_artifact "the branch carries the manifest and the API's pages" \
-  "PATH='$DP_PATH' git -C '$R' ls-tree -r --name-only forge-dump | sort | tr '\n' ' '" \
+  "PATH='$DP_PATH' git -C '$R' ls-tree -r --name-only forge-dump | LC_ALL=C sort | tr '\n' ' '" \
   "dump/MANIFEST dump/issue-comments-1.json dump/pulls-1.json dump/repository.json dump/review-comments-1-10.json dump/review-comments-2-20.json dump/review-comments-3-30.json dump/reviews-1-1.json dump/reviews-2-1.json dump/reviews-3-1.json dump/version.json "
 assert_artifact "the dump never creates main on the remote: the push mirror owns it" \
   "PATH='$DP_PATH' git -C '$R' rev-parse --verify -q refs/heads/main >/dev/null && echo HAS-MAIN || echo no-main" "no-main"
