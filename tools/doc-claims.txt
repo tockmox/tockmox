@@ -162,38 +162,40 @@ test:   grep -h 'repository:' charts/*/Chart.yaml | grep -vc 'file://'
 expect: 18
 states: [0-9]+ dependencies
 
+# 2026-11-03: 44 -> 45, the built-in forge's image joined the list (gen-images.sh reads it
+# from install/bootstrap-forge.sh's pin).
 # THE IMAGE COUNT, phrased the ways the `images` class cannot match. Added
 # 2026-10-04: the list went 45 -> 44 in 0.7.1, the four sentences that
 # say "44 images" were updated, and the four below, which say the same number
 # another way, stayed at 45 and passed every gate. An outside reader found them.
 page:   docs/deployment/airgap.md
-claim:  carries 44 non-comment lines
+claim:  carries 45 non-comment lines
 test:   grep -v '^#' images.txt | grep -c .
-expect: 44
+expect: 45
 states: [0-9]+ non-comment lines
 
 page:   docs/deployment/airgap.md
-claim:  second prints 44 image references
+claim:  second prints 45 image references
 test:   grep -v '^#' images.txt | grep -c .
-expect: 44
+expect: 45
 states: [0-9]+ image references
 
 page:   docs/deployment/airgap.md
-claim:  `44 entries, 44 present, 0 missing`
+claim:  `45 entries, 45 present, 0 missing`
 test:   grep -v '^#' images.txt | grep -c .
-expect: 44
+expect: 45
 states: [0-9]+ entries, [0-9]+ present
 
 page:   docs/deployment/airgap.md
-claim:  | Tockmox's own workload images | 44 |
+claim:  | Tockmox's own workload images | 45 |
 test:   grep -v '^#' images.txt | grep -c .
-expect: 44
+expect: 45
 states: [0-9]+ \| `images\.txt`
 
 page:   docs/deployment/airgap.md
-claim:  The first prints 47 lines
+claim:  The first prints 48 lines
 test:   wc -l < images.txt | tr -d ' '
-expect: 47
+expect: 48
 states: [0-9]+ lines: every image reference
 
 # THE GATE COUNT, added 2026-09-02. `testing-standard.md` opens by naming how
@@ -269,10 +271,11 @@ expect: 40
 # 2026-10-28: 464 -> 465 and 42 -> 43 pages, administration/namespace-guard.md's one block: the read that the policy and its binding exist.
 # 2026-11-01: 467 -> 469, administration/identity.md's "From the console": the token mint and the admin-group refusal check.
 # 2026-11-02: 469 -> 471, administration/identity.md's "The built-in forge: sign-in and approvers": --connect-sign-in and the approver removal.
+# 2026-11-03: 471 -> 472, airgap.md's "Serve the charts repository from the built-in forge": one block.
 page:   tests/executed-docs/INVENTORY.md
 claim:  fenced bash blocks across
 test:   grep -rhE '^[ \t]*```bash$' docs/ | wc -l | tr -d ' '
-expect: 471
+expect: 472
 states: [0-9]+ fenced bash blocks
 
 # (2026-10-27): two sentences pinned so they cannot be edited

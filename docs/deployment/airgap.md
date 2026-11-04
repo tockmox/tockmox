@@ -41,7 +41,7 @@ what it buys you, is in
 |---|---|---|
 | A **connected host** with `skopeo` (or `crane`), `helm` and `git` | Steps 2, 3 and 4 all run there. `skopeo` is multi-arch correct with no daemon; `docker` copies only the running machine's architecture | `command -v skopeo helm git` prints three paths |
 | A **transfer path** from that host into the boundary | Every artifact below crosses it. A one-way diode is fine | You have moved a 1 GB file across it once, end to end |
-| A **registry inside the boundary**, with push access | 44 images land in it and the cluster pulls from it | `curl -fsS https://REGISTRY_HOST/v2/ -o /dev/null && echo reachable`, run from a node |
+| A **registry inside the boundary**, with push access | 45 images land in it and the cluster pulls from it | `curl -fsS https://REGISTRY_HOST/v2/ -o /dev/null && echo reachable`, run from a node |
 | A **git server inside the boundary** speaking git's **smart** protocol | ArgoCD reads two repositories on every reconcile, not just at install | See the smart-protocol test below. A static file server passes `git clone` and fails ArgoCD |
 | A **LAN time source** ([choosing one](time-sync.md#1-choose-the-time-source--required)) | Nothing on a disconnected network reaches `pool.ntp.org`, and clock drift breaks TLS and SSO with errors that name neither | `chronyd -Q -t 5 'server TIME_SOURCE_IP iburst'` reports an offset, or `ntpdate -q TIME_SOURCE_IP` answers |
 | An **internal CA**, and the key material for it | Public ACME issuance needs internet. Renewal has to work offline forever | You can name the `ClusterIssuer` you will create and you hold its key. See [TLS and trust](../administration/tls-and-trust.md) |
@@ -65,7 +65,7 @@ raw file bytes. Why the failure is worth catching now:
 [ArgoCD § a static file server fools the git CLI and not the repo-server](../administration/argocd.md#a-static-file-server-fools-the-git-cli-and-not-the-repo-server).
 
 **Estimate, not a measurement: half a day**, most of it the image copy and the
-transfer. The copy is 44 images; the chart archives are about 4 MB.
+transfer. The copy is 45 images; the chart archives are about 4 MB.
 
 ## The registry prerequisite
 
@@ -127,10 +127,10 @@ has a tool shipped with it.
 <!-- tockmox:airgap-surfaces:begin -->
 | # | Dependency | Size | What Tockmox ships for it | Step |
 |---|---|---|---|---|
-| 1 | Tockmox's own workload images | 44 | `images.txt` and `tools/mirror-images.sh` | [2](#2-mirror-the-images--required) |
+| 1 | Tockmox's own workload images | 45 | `images.txt` and `tools/mirror-images.sh` | [2](#2-mirror-the-images--required) |
 | 2 | Upstream Helm subcharts | 18 dependencies across 14 repositories | `tools/helm-deps.sh` | [3](#3-vendor-the-upstream-helm-subcharts--required) |
 | 3 | Prerequisites: ArgoCD, sealed-secrets, `kubeseal` | 2 charts and 1 binary | nothing | [4](#4-carry-in-the-three-prerequisites--required) |
-| 4 | The Tockmox charts git repository | 1 repository | `tockmox.repoURL` points at your copy | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |
+| 4 | The Tockmox charts git repository | 1 repository | `tockmox.repoURL` points at your copy; `bootstrap-forge --charts-repo` can serve it | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |
 | 5 | Your site git repository | 1 repository | [install](install.md) states the requirement | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |
 <!-- tockmox:airgap-surfaces:end -->
 
@@ -142,12 +142,12 @@ a tool that does not exist, a step heading that moved, a prerequisite its step
 never mentions. It reads the repository only; it does not look at your site, and
 it is a list, not an offline bundle.
 
-Counts re-read on 2026-10-04: `images.txt` carries 44 non-comment lines (its
+Counts re-read on 2026-11-03: `images.txt` carries 45 non-comment lines (its
 header names the day `tools/gen-images.sh` generated it); the `Chart.yaml` files carry 19
 non-local dependencies across 14 distinct upstream repositories. These move
 with the tree.
 
-**Row 3 is the one that stops you before you start.** Mirror all 44 images,
+**Row 3 is the one that stops you before you start.** Mirror all 45 images,
 vendor every chart, host both git repositories internally, and you still cannot
 begin, because the three things that must exist before Tockmox installs appear
 in no mirroring artefact Tockmox ships. That is why it is step 4 here and last
@@ -162,7 +162,7 @@ connected install and this one.
 | Point in the normal flow | What a disconnected site does differently | Step |
 |---|---|---|
 | Before you touch a node | Stand up a LAN time source and point every node at it | [1](#1-point-every-node-at-a-lan-time-source--required) |
-| Any time before the install, on a connected host | Mirror 44 images; vendor 19 chart archives; pull the two prerequisite charts and `kubeseal` | [2](#2-mirror-the-images--required), [3](#3-vendor-the-upstream-helm-subcharts--required), [4](#4-carry-in-the-three-prerequisites--required) |
+| Any time before the install, on a connected host | Mirror 45 images; vendor 19 chart archives; pull the two prerequisite charts and `kubeseal` | [2](#2-mirror-the-images--required), [3](#3-vendor-the-upstream-helm-subcharts--required), [4](#4-carry-in-the-three-prerequisites--required) |
 | [fresh-install § 6 install ArgoCD](fresh-install.md#6-install-argocd) and [§ 7 sealed-secrets](fresh-install.md#7-install-sealed-secrets-with-your-own-key) | `helm install` from the carried-in archives instead of from a repository URL | [4](#4-carry-in-the-three-prerequisites--required) |
 | [install § Phase 1 generate](install.md#phase-1--generate-your-site-repository) | Set `tockmox.repoURL` at your internal charts clone | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |
 | [install § Phase 2 publish it](install.md#phase-2--publish-it) | Push to your internal git server, not to GitHub. It must speak the smart protocol | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |
@@ -236,8 +236,8 @@ wc -l < images.txt
 grep -vcE '^[[:punct:]]|^$' images.txt
 ```
 
-The first prints 47 lines: every image reference, plus a three-line header. The
-second prints 44 image references, the number to mirror ... it drops the blank
+The first prints 48 lines: every image reference, plus a three-line header. The
+second prints 45 image references, the number to mirror ... it drops the blank
 lines and the header, whose lines open with a comment marker rather than with a
 registry path.
 
@@ -280,7 +280,7 @@ It also encodes the path handling that bites anyone rolling their own, because
 ./tools/mirror-images.sh --registry REGISTRY_HOST/mirror --verify
 ```
 
-It prints `44 entries, 44 present, 0 missing` and exits 0. **Every entry, not a
+It prints `45 entries, 45 present, 0 missing` and exits 0. **Every entry, not a
 catalogue count**: on 2026-08-24 a registry catalogue held 41 entries while 3
 of the 44 then in the list were unresolvable, because a repository appears in the catalogue
 as soon as one architecture variant lands. `--verify` asks for each entry's
@@ -468,12 +468,14 @@ not been run in an air-gapped environment.
 
 **If you use the built-in forge** (`site.forge: built-in`, experimental), it is
 one more prerequisite of the same kind: `bootstrap-forge` installs it beside
-ArgoCD, never through it, so its chart and image are not in `images.txt` either.
+ArgoCD, never through it, so its chart is not one of the archives of step 3.
 Pull chart 17.3.2 from `oci://code.forgejo.org/forgejo-helm/forgejo` (Forgejo
-15.0.11, the long-term-support line) and mirror its one image,
-`code.forgejo.org/forgejo/forgejo:15.0.11-rootless`, to
-`YOUR_REGISTRY/forgejo/forgejo:15.0.11-rootless` (the chart's other image,
-`busybox`, belongs to its `helm test` hook, which an install never runs). Then
+15.0.11, the long-term-support line). Its one image,
+`code.forgejo.org/forgejo/forgejo:15.0.11-rootless`, **is** in `images.txt`
+(the generator reads it from the installer's own pin, so the list cannot drift
+from what the installer pulls), which means step 2 already mirrored it, to
+`YOUR_REGISTRY/forgejo/forgejo:15.0.11-rootless`. (The chart's other image,
+`busybox`, belongs to its `helm test` hook, which an install never runs.) Then
 give both to the command: `--chart ./forgejo-17.3.2.tgz --image-registry
 YOUR_REGISTRY`. The off-site copy job runs in that same image, so it needs
 nothing more. The forge then serves your site repository inside the boundary,
@@ -536,7 +538,10 @@ cannot apply anything at all.
 - **The Tockmox charts repository.** `tockmox.repoURL` is a first-class setting
   precisely so you can point it at an internal copy. The installer resolves the
   revision against whatever you name before generating anything, so a wrong
-  value fails early and loudly rather than at sync time.
+  value fails early and loudly rather than at sync time. With the built-in
+  forge you do not need a second git host for it: `bootstrap-forge` can serve
+  it, see [the built-in forge route](#serve-the-charts-repository-from-the-built-in-forge)
+  below.
 
 ```yaml
 # site/tockmox.yaml
@@ -561,6 +566,28 @@ If you build the server inside the cluster, `alpine/git` ships neither
 `git-daemon` nor `git-http-backend`; the ArgoCD image has both under
 `/usr/lib/git-core/` and is already on the node, which makes it the choice that
 needs nothing carried in (same section).
+
+### Serve the charts repository from the built-in forge
+
+Experimental, and only with `site.forge: built-in`. Give `bootstrap-forge` your
+internal checkout of the charts repository (the one with the vendored chart
+archives from step 3) and the release tag it was cloned at:
+
+```bash
+tockmox-install.sh bootstrap-forge ... --charts-repo ./tockmox --charts-tag THE_TAG_YOU_CLONED
+```
+
+It creates `tockmox/charts` in the forge, readable by the same read-only machine
+user ArgoCD already uses for your site repository, pushes that tag and `main`,
+reads both back, and writes the second ArgoCD repository Secret
+(`tockmox-charts-repo`). Then name the address it prints as `tockmox.repoURL`
+and the same tag as `tockmox.revision`. It refuses, and changes nothing, if the
+tag is not in your checkout, if the checkout is not the Tockmox charts
+repository, if the forge already has that tag at a different commit (a tag the
+Applications trust is never moved), or if the forge's `main` holds history your
+checkout lacks. Re-running it with the same inputs changes nothing. Rebuild and
+repair of the forge do not reseed this repository yet. This path has not been
+run in an air-gapped environment.
 
 **Success condition**, run from inside the boundary, both repositories:
 

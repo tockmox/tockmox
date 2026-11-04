@@ -106,6 +106,27 @@ for c in charts:
             "description": f"Helm chart dependency of {c['name']}",
         })
 
+# THE BUILT-IN FORGE'S CHART. Installed by `tockmox-install.sh bootstrap-forge`, not
+# declared in any Chart.yaml under charts/, so the loop above cannot see it. Read from
+# the installer's pin (its image is already in images.txt, which is read above), so the
+# SBOM names what the installer would actually pull. A missing pin stops the generator.
+forge_pin = {}
+with open('install/bootstrap-forge.sh') as fh:
+    for line in fh:
+        m = re.match(r'^(CHART_REF_DEFAULT|CHART_VERSION_DEFAULT)="([^"]+)"$', line.strip())
+        if m:
+            forge_pin[m.group(1)] = m.group(2)
+if len(forge_pin) != 2:
+    sys.exit("gen-sbom: install/bootstrap-forge.sh has no CHART_REF_DEFAULT / CHART_VERSION_DEFAULT pin")
+forge_chart = forge_pin['CHART_REF_DEFAULT'].rsplit('/', 1)[-1]
+components.append({
+    "type": "application",
+    "name": forge_chart,
+    "version": forge_pin['CHART_VERSION_DEFAULT'],
+    "purl": f"pkg:generic/helm/{forge_chart}@{forge_pin['CHART_VERSION_DEFAULT']}",
+    "description": "Helm chart of the built-in site forge (installed by tockmox-install.sh bootstrap-forge)",
+})
+
 bom = {
     "bomFormat": "CycloneDX",
     "specVersion": "1.5",

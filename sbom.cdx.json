@@ -20,6 +20,12 @@
       "version": "2.0.2"
     },
     {
+      "name": "code.forgejo.org/forgejo/forgejo",
+      "purl": "pkg:oci/forgejo?repository_url=code.forgejo.org/forgejo/forgejo&tag=15.0.11-rootless",
+      "type": "container",
+      "version": "15.0.11-rootless"
+    },
+    {
       "name": "docker.io/aquasec/kube-bench",
       "purl": "pkg:oci/kube-bench?repository_url=docker.io/aquasec/kube-bench&tag=v0.16.0",
       "type": "container",
@@ -390,6 +396,13 @@
       "purl": "pkg:generic/helm/snapshot-controller@5.4.0",
       "type": "application",
       "version": "5.4.0"
+    },
+    {
+      "description": "Helm chart of the built-in site forge (installed by tockmox-install.sh bootstrap-forge)",
+      "name": "forgejo",
+      "purl": "pkg:generic/helm/forgejo@17.3.2",
+      "type": "application",
+      "version": "17.3.2"
     }
   ],
   "metadata": {
