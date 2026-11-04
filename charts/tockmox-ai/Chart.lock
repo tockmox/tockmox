@@ -4,9 +4,9 @@ dependencies:
   version: 0.8.0
 - name: open-webui
   repository: https://helm.openwebui.com
-  version: 17.5.0
+  version: 18.0.0
 - name: litellm-helm
   repository: oci://ghcr.io/berriai
   version: 1.106.6
-digest: sha256:336e18ebf360efc288907e7fc684cba036e0d7e06c4936958a991931f027e636
-generated: "2026-10-31T00:29:56.247141322Z"
+digest: sha256:dc9f890fd4bfd6f3e77c56e69571a2c194c008407499d545b916bb792827567d
+generated: "2026-11-03T23:20:08.110848459Z"
