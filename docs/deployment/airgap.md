@@ -573,6 +573,8 @@ Experimental, and only with `site.forge: built-in`. Give `bootstrap-forge` your
 internal checkout of the charts repository (the one with the vendored chart
 archives from step 3) and the release tag it was cloned at:
 
+**WORKSTATION** ... inside the boundary, in the directory that holds your charts checkout
+
 ```bash
 tockmox-install.sh bootstrap-forge ... --charts-repo ./tockmox --charts-tag THE_TAG_YOU_CLONED
 ```

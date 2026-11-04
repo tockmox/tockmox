@@ -631,7 +631,7 @@ expect: 6
 class:  images (digits)
 match:  [0-9]+ (runtime )?images\b
 test:   grep -v '^#' images.txt | grep -c .
-expect: 44
+expect: 45
 
 class:  chart repositories (digits)
 match:  [0-9]+ repositories\b
