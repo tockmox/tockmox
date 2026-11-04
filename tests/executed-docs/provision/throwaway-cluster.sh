@@ -28,7 +28,10 @@
 # substitute a cluster-side approximation. Substituting is the failure this
 # harness exists to prevent, so it gets a key instead: generated per run, public
 # half injected by cloud-init, private half deleted with the cluster. It is
-# never a stored secret and it never outlives the VM.
+# never a stored secret and it never outlives the VM. One opt-in, for a harness
+# that is not where the later steps run: TOCKMOX_KEY_SECRET=1 also keeps the
+# private half as the Secret ${VM_NAME}-ssh in the test namespace, beside the
+# guest's own ${VM_NAME}-kubeconfig, and destroy deletes it with the rest.
 #
 # SUBSTRATE. Any KubeVirt-capable cluster ... Harvester, OpenShift
 # Virtualization, or upstream KubeVirt on anything. The harness holds no
@@ -300,6 +303,17 @@ KUBECONFIG_OUT="${WORKDIR}/${VM_NAME}.kubeconfig"
 SSH_KEY="${WORKDIR}/${VM_NAME}.id_ed25519"
 SSH_USER="${TOCKMOX_VM_USER:-tockmox}"
 
+# ---- the per-run key as a Secret, opt-in ---------------------------------------
+# TOCKMOX_KEY_SECRET=1 (default 0) stores the private half of the per-run key as
+# Secret ${VM_NAME}-ssh (key id_ed25519) in the test namespace, labelled like the
+# harness's other Secrets so destroy's sweep removes it with the cluster. It is
+# for a later step that runs somewhere other than this harness: a jump pod in the
+# same namespace, say, that mounts the guest's kubeconfig Secret and this one and
+# reaches the guest from inside the substrate. The key is no wider than what it
+# opens (one disposable guest) and lives no longer than it. Anything other than 0
+# or 1 is refused before the hypervisor is touched.
+KEY_SECRET="${TOCKMOX_KEY_SECRET:-0}"
+
 # The Service that gives the harness a way IN to a masqueraded guest. Named
 # here rather than inline because create and destroy both need it and a
 # teardown that misses it leaves a NodePort allocated against a dead VM.
@@ -514,6 +528,23 @@ mint_ssh_key() {
   chmod 600 "$SSH_KEY"
 }
 
+store_ssh_key_secret() {
+  [ "$KEY_SECRET" = 1 ] || return 0
+  local name="${VM_NAME}-ssh" out
+  # A previous run's key under the same name would open nothing, but would read as
+  # this run's; replace it rather than keep it.
+  if ! out="$(kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" delete secret "$name" --ignore-not-found 2>&1)"; then
+    echo "REFUSING: could not clear an earlier ${NS}/${name}:" >&2; printf '  %s\n' "$out" >&2; exit 2
+  fi
+  kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" create secret generic "$name" \
+    --from-file=id_ed25519="$SSH_KEY" >/dev/null \
+    || { echo "REFUSING: could not store the per-run key as ${NS}/${name} (TOCKMOX_KEY_SECRET=1)" >&2; exit 2; }
+  kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" label secret "$name" \
+    tockmox.com/harness=executed-docs --overwrite >/dev/null \
+    || { echo "REFUSING: stored ${NS}/${name} but could not label it for destroy's sweep" >&2; exit 2; }
+  echo "  per-run key stored as ${NS}/${name} (TOCKMOX_KEY_SECRET=1; destroy removes it)" >&2
+}
+
 # ---- a stale handoff Secret is refused, never waited on ------------
 # fetch_kubeconfig polls ${VM_NAME}-kubeconfig and takes the first copy that
 # parses, and vm_ip reads the same Secret for the guest's address. Neither can
@@ -592,12 +623,15 @@ create() {
   # First, before preflight touches anything: nothing may be created or deleted
   # on behalf of a run whose token must not reach a guest.
   check_handoff_token
+  case "$KEY_SECRET" in 0|1) ;; *)
+    echo "REFUSING: TOCKMOX_KEY_SECRET must be 0 or 1, got '${KEY_SECRET}'" >&2; exit 2 ;; esac
   # The same rule for the registry mode: a nofallback run with no mirror, or an
   # unknown mode, is refused before it reaches the hypervisor.
   mirror_mode_check "$REGISTRY_MIRROR" "$REGISTRY_MODE" "$REGISTRY_DENY" || exit 2
   preflight
   clear_stale_handoff
   mint_ssh_key
+  store_ssh_key_secret
   local ver token manifest pubkey API_SERVER API_TOKEN GUEST_API_SERVER
   pubkey="$(cat "${SSH_KEY}.pub")"
   ver="$(resolve_k3s_version)"

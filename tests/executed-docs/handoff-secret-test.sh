@@ -91,7 +91,10 @@ case "$j" in
     shift 2
     for n in "$@"; do case "$n" in -*) ;; *) del_one "$n" ;; esac; done; exit 0 ;;
   "create secret generic "*)
-    for x in "$@"; do case "$x" in --from-file=userdata=*) cp "${x#--from-file=userdata=}" "$ST/userdata"; cp "$ST/userdata" "$ST/secrets/$4" ;; esac; done ;;
+    for x in "$@"; do case "$x" in
+      --from-file=userdata=*) cp "${x#--from-file=userdata=}" "$ST/userdata"; cp "$ST/userdata" "$ST/secrets/$4" ;;
+      --from-file=id_ed25519=*) cp "${x#--from-file=id_ed25519=}" "$ST/secrets/$4" ;;
+    esac; done ;;
   "label secret "*) exit 0 ;;
   "get secret "*" -o name")
     [ -f "$ST/secrets/$3" ] && { echo "secret/$3"; exit 0; }; notfound "$3" ;;
@@ -352,6 +355,49 @@ for verb in create destroy exec; do
         "rc=${RC}; $(wc -l <"$S/calls" 2>/dev/null | tr -d ' ') call(s) made; $(printf '%s' "$OUT" | tail -1)"
   fi
 done
+
+# ---- clause 4: the per-run key as a Secret, opt-in ---------------------------
+# TOCKMOX_KEY_SECRET=1 keeps the private half beside the guest's kubeconfig
+# Secret for a step that runs elsewhere (a jump pod in the namespace); unset, the
+# key never leaves the harness host; a bad value is refused before the hypervisor;
+# and destroy's sweep takes the key Secret with the rest.
+S="${TMP}/key-secret-on"; new_state "$S"
+TOCKMOX_KEY_SECRET=1 run_tc "$S" create
+if [ -f "$S/secrets/${VM}-ssh" ] && cmp -s "$S/secrets/${VM}-ssh" "$S/wd/${VM}.id_ed25519" \
+   && grep -q "label secret ${VM}-ssh tockmox.com/harness=executed-docs" "$S/calls"; then
+  ok "TOCKMOX_KEY_SECRET=1 stores this run's private key as ${VM}-ssh, labelled for destroy"
+else
+  bad "TOCKMOX_KEY_SECRET=1 stores this run's private key as ${VM}-ssh, labelled for destroy" \
+      "rc=${RC}; secrets: $(secrets_left "$S"); $(grep -c "${VM}-ssh" "$S/calls" 2>/dev/null) call(s) name it"
+fi
+if grep -q '^APPLY VirtualMachine' "$S/log"; then
+  ok "TOCKMOX_KEY_SECRET=1 still provisions"
+else
+  bad "TOCKMOX_KEY_SECRET=1 still provisions" "rc=${RC}: $(printf '%s' "$OUT" | tail -2)"
+fi
+run_tc "$S" destroy
+if [ ! -e "$S/secrets/${VM}-ssh" ]; then
+  ok "destroy removes the ${VM}-ssh key Secret"
+else
+  bad "destroy removes the ${VM}-ssh key Secret" "left: $(secrets_left "$S")"
+fi
+
+S="${TMP}/key-secret-off"; new_state "$S"
+run_tc "$S" create
+if [ ! -e "$S/secrets/${VM}-ssh" ] && ! grep -q -- "-ssh" "$S/calls"; then
+  ok "without TOCKMOX_KEY_SECRET the key never leaves the harness host"
+else
+  bad "without TOCKMOX_KEY_SECRET the key never leaves the harness host" "secrets: $(secrets_left "$S")"
+fi
+
+S="${TMP}/key-secret-bad"; new_state "$S"
+TOCKMOX_KEY_SECRET=yes run_tc "$S" create
+if [ "$RC" -eq 2 ] && ! grep -q '^APPLY VirtualMachine' "$S/log" && [ ! -e "$S/secrets/${VM}-ssh" ] \
+   && printf '%s' "$OUT" | grep "TOCKMOX_KEY_SECRET must be 0 or 1" >/dev/null; then
+  ok "TOCKMOX_KEY_SECRET other than 0 or 1 is refused before anything is created"
+else
+  bad "TOCKMOX_KEY_SECRET other than 0 or 1 is refused before anything is created" "rc=${RC}; $(printf '%s' "$OUT" | tail -1)"
+fi
 
 if grep -h 'STUB-UNHANDLED' "$TMP"/*/log 2>/dev/null | grep . >/dev/null; then
   printf 'note: calls the kubectl stub did not model:\n'; grep -h 'STUB-UNHANDLED' "$TMP"/*/log | sort -u | sed 's/^/  /'
