@@ -161,6 +161,8 @@ os_run --offsite-s3-endpoint https://s3.example.com --offsite-s3-bucket site-cop
 assert_artifact "F17 a dry run names the off-site copy it would make" \
   "echo $FS_STATUS; grep -c 'off-site copy (bucket) to https://s3.example.com/site-copy/lab/site' '$D/out/stdout'" "$(printf '0\n1')"
 assert_artifact "F17 ... and writes nothing to the cluster" "fs_writes" "0"
+assert_artifact "F17 ... and says the nightly forge dump goes to the same place" \
+  "grep -c 'nightly forge dump of pull requests, reviews and comments to the same place' '$D/out/stdout'" "1"
 
 # F18-F23. Sign-in through Authentik. Everything it needs comes from the
 # site, so a contradiction or a missing domain is refused before the cluster is touched.
