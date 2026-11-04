@@ -147,9 +147,9 @@
     },
     {
       "name": "ghcr.io/open-webui/open-webui",
-      "purl": "pkg:oci/open-webui?repository_url=ghcr.io/open-webui/open-webui&tag=v0.12.5",
+      "purl": "pkg:oci/open-webui?repository_url=ghcr.io/open-webui/open-webui&tag=v0.13.0",
       "type": "container",
-      "version": "v0.12.5"
+      "version": "v0.13.0"
     },
     {
       "name": "nginxinc/nginx-unprivileged",

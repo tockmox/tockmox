@@ -80,11 +80,12 @@ the chart, not from its own database (`ENABLE_PERSISTENT_CONFIG=False` in
 
 ### 3. The licence is not open source
 
-The Open WebUI version this release ships is `0.12.5`
-(`ghcr.io/open-webui/open-webui:v0.12.5`, `charts/tockmox-ai/values.yaml`). Its
+The Open WebUI version this release ships is `0.13.0`
+(`ghcr.io/open-webui/open-webui:v0.13.0`, `charts/tockmox-ai/values.yaml`). Its
 `LICENSE` at the
-[`v0.12.5` tag](https://github.com/open-webui/open-webui/blob/v0.12.5/LICENSE),
-checked 2026-10-29 (byte-identical to `v0.12.4`, checked 2026-10-28, to
+[`v0.13.0` tag](https://github.com/open-webui/open-webui/blob/v0.13.0/LICENSE),
+checked 2026-11-03 (byte-identical to `v0.12.5`, checked 2026-10-29, to
+`v0.12.4`, checked 2026-10-28, to
 `v0.12.3`, checked 2026-10-17, to `v0.12.0`, checked 2026-10-11, and
 unchanged from `v0.11.3`, checked 2026-10-07), is
 BSD-3-Clause with an added branding clause:
