@@ -8,6 +8,11 @@
 # Run every minute by the CronJob tockmox-forge-offsite, which is created by
 # install/bootstrap-forge.sh. The exit code is the health signal.
 #
+# TASK=dump (default copy) is the same script run once a night by the CronJob
+# tockmox-forge-dump: it writes the forge dump (pull requests, reviews and comments,
+# which git does not carry) to the same destination instead. See "the nightly forge
+# dump" below; a failed dump leaves a failed Job, which KubeJobFailed reports.
+#
 # Exit codes:
 #   0  in step: the off-site copy holds the forge's current main
 #   1  behind, or anything failed or was doubtful
@@ -150,6 +155,11 @@ sha_of() {
 
 # ---- configuration ----------------------------------------------------
 
+TASK=${TASK:-copy}
+case $TASK in
+copy | dump) ;;
+*) die_cfg "TASK must be copy or dump" ;;
+esac
 MODE=${MODE:-}
 case $MODE in
 bucket | git) ;;
@@ -212,6 +222,164 @@ until out=$(forge_git ls-remote "$FORGE_URL/$REPO.git" "refs/heads/$BRANCH" 2>"$
 done
 HEAD=$(printf '%s\n' "$out" | first_sha)
 is_sha "$HEAD" || die "cannot read the forge's main"
+
+# ---- the nightly forge dump (TASK=dump) -----------------------------------
+#
+# What git does not carry: the pull requests, the reviews and the comments on them,
+# and the repository's settings as the forge reports them. The forge has no
+# `forgejo restore`, and `forgejo dump` needs the forge's volume, which this job
+# does not mount; the API is what a read-only machine user can reach, so the dump is
+# the API's own JSON, stored as received (one file per page) beside a MANIFEST that
+# counts what it holds. It goes to the same place as the copy: a bucket (a new
+# object under dumps/, never overwritten or deleted, and a small `latest-dump`
+# pointer replaced last) or the git remote (a new commit on the branch forge-dump,
+# pushed without force). The job exits 0 only when the dump was written and read back.
+
+FORGE_API_ERR=""
+
+# forge_api PATH OUTFILE: GET <forge>/api/v1PATH into OUTFILE; 0 on 2xx. The credential
+# reaches curl as a config on stdin, never in argv.
+forge_api() {
+	fa_code=$(printf 'header = "%s"\n' "$FORGE_HDR" |
+		curl -sS -K - --connect-timeout 15 --max-time 120 -o "$2" -w '%{http_code}' \
+			"$FORGE_URL/api/v1$1" 2>"$WORK/api.err") || fa_code=000
+	case $fa_code in
+	2??) return 0 ;;
+	esac
+	FORGE_API_ERR="forge API $1 failed: HTTP $fa_code $(head -c 200 "$WORK/api.err" | tr '\n' ' ')"
+	return 1
+}
+
+# fetch_pages PATHPREFIX NAME: PATHPREFIX ends in ? or &; pages of 50 go to
+# $DUMP/NAME-<page>.json until the forge answers an empty list.
+fetch_pages() {
+	fp_n=1
+	while :; do
+		forge_api "${1}limit=50&page=$fp_n" "$DUMP/$2-$fp_n.json" || die "$FORGE_API_ERR"
+		if [ "$(tr -d ' \r\n\t' <"$DUMP/$2-$fp_n.json")" = "[]" ]; then
+			rm -f "$DUMP/$2-$fp_n.json"
+			break
+		fi
+		fp_n=$((fp_n + 1))
+		[ "$fp_n" -le 400 ] || die "more than 400 pages of $2; refusing to go on"
+	done
+}
+
+# count_in PATTERN FILE...: how many times PATTERN occurs (JSON is one line, so grep -c is no count).
+count_in() {
+	ci_p=$1
+	shift
+	cat "$@" 2>/dev/null | grep -o "$ci_p" | wc -l | tr -d ' '
+}
+
+if [ "$TASK" = dump ]; then
+	STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+	DUMP=$WORK/dump
+	mkdir "$DUMP" || die "cannot create dump dir"
+
+	forge_api "/version" "$DUMP/version.json" || die "$FORGE_API_ERR"
+	forge_api "/repos/$REPO" "$DUMP/repository.json" || die "$FORGE_API_ERR"
+	fetch_pages "/repos/$REPO/pulls?state=all&" pulls
+	fetch_pages "/repos/$REPO/issues/comments?" issue-comments
+
+	NPRS=0
+	NREV=0
+	if ls "$DUMP"/pulls-*.json >/dev/null 2>&1; then
+		prs=$(cat "$DUMP"/pulls-*.json | grep -o '"html_url": *"[^"]*/pulls/[0-9]*"' |
+			sed 's/.*\/pulls\/\([0-9]*\)"$/\1/' | sort -un)
+		for n in $prs; do
+			NPRS=$((NPRS + 1))
+			fetch_pages "/repos/$REPO/pulls/$n/reviews?" "reviews-$n"
+			ls "$DUMP/reviews-$n"-*.json >/dev/null 2>&1 || continue
+			# A review is the only object that opens {"id":N,"user":; its pull_request_url
+			# appears once per review, so the two counts must agree or the ids were misread.
+			ids=$(cat "$DUMP/reviews-$n"-*.json | grep -o '{"id": *[0-9]*, *"user":' | sed 's/[^0-9]//g')
+			have=$(printf '%s\n' "$ids" | grep -c . || true)
+			want=$(count_in '"pull_request_url"' "$DUMP/reviews-$n"-*.json)
+			[ "$have" = "$want" ] || die "pull request $n: read $have review ids but $want reviews; the forge's review format changed"
+			for rid in $ids; do
+				NREV=$((NREV + 1))
+				forge_api "/repos/$REPO/pulls/$n/reviews/$rid/comments" "$DUMP/review-comments-$n-$rid.json" || die "$FORGE_API_ERR"
+			done
+		done
+	fi
+	NRC=$(count_in '"diff_hunk"' "$DUMP"/review-comments-*.json)
+	NIC=$(count_in '"issue_url"' "$DUMP"/issue-comments-*.json)
+
+	{
+		echo "format tockmox-forge-dump v1"
+		echo "repository $REPO"
+		echo "created $STAMP"
+		echo "forge-main $HEAD"
+		echo "pull-requests $NPRS"
+		echo "reviews $NREV"
+		echo "review-comments $NRC"
+		echo "issue-comments $NIC"
+		echo "settings repository.json (the repository as the forge reports it); branch rules, teams and sign-in are recreated by bootstrap-forge, not dumped"
+	} >"$DUMP/MANIFEST"
+
+	tar -C "$DUMP" -czf "$WORK/dump.tar.gz" . || die "cannot pack the dump"
+	tar -tzf "$WORK/dump.tar.gz" >/dev/null || die "the packed dump does not read back"
+	DSUM=$(sha_of "$WORK/dump.tar.gz")
+	DBYTES=$(wc -c <"$WORK/dump.tar.gz" | tr -d ' ')
+	SUMMARY="$NPRS pull requests, $NREV reviews, $NRC review comments, $NIC issue comments"
+
+	if [ "$MODE" = git ]; then
+		GD=$WORK/dumprepo
+		git init -q "$GD" || die "cannot init dump repo"
+		rsha=""
+		if out=$(remote_git ls-remote "$GIT_REMOTE_URL" refs/heads/forge-dump 2>/dev/null); then
+			rsha=$(printf '%s\n' "$out" | first_sha)
+		fi
+		if is_sha "$rsha"; then
+			remote_git -C "$GD" fetch -q "$GIT_REMOTE_URL" forge-dump || die "cannot fetch the remote's forge-dump branch"
+			git -C "$GD" checkout -q -B forge-dump FETCH_HEAD || die "cannot check out forge-dump"
+		else
+			git -C "$GD" checkout -q --orphan forge-dump || die "cannot start forge-dump"
+		fi
+		rm -rf "$GD/dump"
+		mkdir "$GD/dump"
+		tar -C "$GD/dump" -xzf "$WORK/dump.tar.gz" || die "cannot unpack the dump for the remote"
+		git -C "$GD" add -A dump
+		git -C "$GD" -c user.name=tockmox-forge-dump -c user.email=tockmox-forge-dump@localhost.invalid \
+			commit -q --allow-empty -m "Forge dump $STAMP" || die "cannot commit the dump"
+		# No --force: a remote that refuses rewrites keeps every earlier dump.
+		remote_git -C "$GD" push -q "$GIT_REMOTE_URL" forge-dump || die "push of forge-dump to $GIT_REMOTE_URL failed"
+		want=$(git -C "$GD" rev-parse HEAD)
+		out=$(remote_git ls-remote "$GIT_REMOTE_URL" refs/heads/forge-dump) || die "cannot read back forge-dump"
+		got=$(printf '%s\n' "$out" | first_sha)
+		[ "$got" = "$want" ] || die "forge-dump on the remote is $(short "$got"), not the $(short "$want") just pushed"
+		echo "dumped: $SUMMARY, to $GIT_REMOTE_URL forge-dump ($(short "$want"))"
+		exit 0
+	fi
+
+	DKEY=$(key_of "dumps/$STAMP.tar.gz")
+	s3 PUT "$DKEY" "$WORK/dump.tar.gz" >/dev/null
+	need_2xx "upload of dump"
+	printf '%s  dump.tar.gz\n' "$DSUM" >"$WORK/dump.sha256"
+	s3 PUT "$DKEY.sha256" "$WORK/dump.sha256" >/dev/null
+	need_2xx "upload of dump checksum"
+	s3 GET "$DKEY" "" "$WORK/back.tar.gz" >/dev/null
+	need_2xx "read-back of dump"
+	[ "$(sha_of "$WORK/back.tar.gz")" = "$DSUM" ] || die "dump read-back checksum mismatch"
+	{
+		echo "format tockmox-forge-dump v1"
+		echo "dump $DKEY"
+		echo "sha256 $DSUM"
+		echo "created $STAMP"
+		echo "repository $REPO"
+		echo "forge-main $HEAD"
+	} >"$WORK/latest-dump.new"
+	LDUMP=$(key_of latest-dump)
+	s3 PUT "$LDUMP" "$WORK/latest-dump.new" >/dev/null
+	need_2xx "upload of latest-dump"
+	s3 GET "$LDUMP" "" "$WORK/latest-dump.back" >/dev/null
+	need_2xx "read-back of latest-dump"
+	got=$(awk '$1=="dump"{print $2; exit}' "$WORK/latest-dump.back")
+	[ "$got" = "$DKEY" ] || die "latest-dump read-back does not name $DKEY"
+	echo "dumped: $SUMMARY, to $DKEY ($DBYTES bytes, sha256 $(short "$DSUM"))"
+	exit 0
+fi
 
 # ---- step 2: git mode (verify only) -----------------------------------
 
