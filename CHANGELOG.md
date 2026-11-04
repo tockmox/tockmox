@@ -98,6 +98,24 @@ costs you, with the reasoning in the documentation rather than here.
   `bootstrap-forge` to give an installed forge the new token. The dump is not yet
   read by `--restore-from`.
 
+- **Experimental: the built-in forge's image and chart in the air-gap list, and the
+  charts repository served by the forge.** The forge's image,
+  `code.forgejo.org/forgejo/forgejo:15.0.11-rootless`, is now pinned in
+  `install/bootstrap-forge.sh` and appears in `images.txt` (45 images, was 44), so
+  `tools/mirror-images.sh` carries it with the rest. `tools/gen-images.sh` and
+  `tools/gen-sbom.sh` read the pin from the installer, so the list and the SBOM cannot
+  say one thing while the installer pulls another; the SBOM also names the forge's
+  chart. `bootstrap-forge --charts-repo DIR --charts-tag TAG` pushes your internal
+  checkout of the Tockmox charts repository to the forge as `tockmox/charts`, reads
+  it back, and writes the second Argo CD repository Secret, so a site with no route
+  to GitHub needs no other git host for it. It refuses, before anything changes, a
+  tag that is missing from the checkout, a checkout that is not the charts
+  repository, a tag the forge already holds at another commit (a tag the
+  Applications read is never moved), and a forge `main` the checkout does not
+  contain; a re-run with the same inputs changes nothing. `docs/deployment/airgap.md`
+  says all of this. Rebuild and repair of the forge do not reseed the charts
+  repository yet.
+
 - **Experimental: people sign in to the built-in forge through Authentik, and
   only the admin group's approval merges a change.** `bootstrap-forge`
   gives the forge a browser address (`forge.<internalDomain>`, TLS from the

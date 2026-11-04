@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Sourced by run.sh. Groups F1-F24: install/bootstrap-forge.sh.
+# Sourced by run.sh. Groups F1-F30: install/bootstrap-forge.sh.
 #
 # HERMETIC, and deliberately narrow: every case here is a REFUSAL, and the
 # assertion that matters in each is that the refusal came before any write to a
@@ -223,3 +223,56 @@ fs_run --site "$D/site" --kit-out "$D/kits/k" --passphrase-file "$D/inputs/pass"
 assert_artifact "F24 --no-sign-in with sso.apps.forge on is refused, naming the key" \
   "echo $FS_STATUS; fs_err | grep -c 'Set sso.apps.forge.enabled: false'" "$(printf '1\n1')"
 assert_artifact "F24 ... before any write to the cluster" "fs_writes" "0"
+
+# F25-F30. The Tockmox charts repository, for a site with no route to GitHub:
+# --charts-repo and --charts-tag are checked before the cluster is touched. A real
+# (tiny) git repository is built with the real git, so the tag and the file at the
+# tag are read the way the installer reads them.
+# run.sh stubs git to always fail (offline determinism); these cases need the real one,
+# so the stub's directory is taken off PATH for the calls below and only for them.
+REAL_PATH="${PATH//$STUB:/}"
+mk_charts() {  # DIR [with-chart|without-chart]  -> repo at DIR, tag v9.9.9 on its one commit
+  local d="$1"; mkdir -p "$d/charts/tockmox-platform"
+  if [ "${2:-with-chart}" = with-chart ]; then
+    printf 'apiVersion: v2\nname: tockmox-platform\nversion: 9.9.9\n' > "$d/charts/tockmox-platform/Chart.yaml"
+  else
+    printf 'nothing here\n' > "$d/README"
+  fi
+  ( cd "$d" && export PATH="$REAL_PATH" GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null && git init -q -b main . \
+      && git add -A && git -c user.name=t -c user.email=t@example.com commit -q -m seed && git tag v9.9.9 )
+}
+ch_run() { PATH="$REAL_PATH" fs_run --site "$D/site" --kit-out "$D/kits/k" --passphrase-file "$D/inputs/pass" --sealing-key-backup "$D/inputs/seal.enc" "${FS_OK[@]}" "$@"; }
+
+fs_case f25; mk_charts "$D/charts-src"
+ch_run --charts-repo "$D/charts-src"
+assert_artifact "F25 --charts-repo without --charts-tag is refused" \
+  "echo $FS_STATUS; fs_err | grep -c 'go together'" "$(printf '1\n1')"
+assert_artifact "F25 ... before any write to the cluster" "fs_writes" "0"
+
+fs_case f26; mk_charts "$D/charts-src"
+ch_run --charts-repo "$D/charts-src" --charts-tag v0.0.0
+assert_artifact "F26 a tag that is not in the checkout is refused, naming it" \
+  "echo $FS_STATUS; fs_err | grep -c \"no tag 'v0.0.0'\"" "$(printf '1\n1')"
+assert_artifact "F26 ... before any write to the cluster" "fs_writes" "0"
+
+fs_case f27; mk_charts "$D/charts-src" without-chart
+ch_run --charts-repo "$D/charts-src" --charts-tag v9.9.9
+assert_artifact "F27 a checkout that is not the Tockmox charts repository is refused" \
+  "echo $FS_STATUS; fs_err | grep -c 'not the Tockmox charts repository'" "$(printf '1\n1')"
+assert_artifact "F27 ... before any write to the cluster" "fs_writes" "0"
+
+fs_case f28; mkdir -p "$D/not-git"
+ch_run --charts-repo "$D/not-git" --charts-tag v9.9.9
+assert_artifact "F28 a directory that is not a git checkout is refused" \
+  "echo $FS_STATUS; fs_err | grep -c 'is not a git checkout'" "$(printf '1\n1')"
+
+fs_case f29; mk_charts "$D/charts-src"
+ch_run --charts-repo "$D/charts-src" --charts-tag 'v9 9'
+assert_artifact "F29 a tag that is not a tag name is refused" \
+  "echo $FS_STATUS; fs_err | grep -c 'is not a tag name'" "$(printf '1\n1')"
+
+fs_case f30; mk_charts "$D/charts-src"
+ch_run --charts-repo "$D/charts-src" --charts-tag v9.9.9 --dry-run
+assert_artifact "F30 a dry run with a good checkout exits clean and names the charts repository and tag" \
+  "echo $FS_STATUS; grep -c 'create tockmox/charts (read by' '$D/out/stdout'; grep -c 'push tag v9.9.9 and main' '$D/out/stdout'" "$(printf '0\n1\n1')"
+assert_artifact "F30 ... and writes nothing to the cluster" "fs_writes" "0"

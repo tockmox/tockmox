@@ -96,7 +96,7 @@ schedule rather than when someone remembers.
 
 **A release lock: the resolved digest of every container the release gate
 actually ran.** A signed source tag proves which chart text was released, not
-which bytes executed, because 43 of the 44 runtime images are addressed by tag.
+which bytes executed, because 44 of the 45 runtime images are addressed by tag.
 The intent is a lock file generated from the greenfield gate install at each
 tag ... every running container's resolved digest, including the images that
 controllers pull on their own and no template names ... published beside the
@@ -113,7 +113,7 @@ gateway runs non-root on a read-only root filesystem since 0.8.0. Still ahead:
 observing a violating pod actually refused on a live cluster.
 
 **Image references pinned by digest, checked against the release lock.** Of the
-44 runtime images, one is currently digest-pinned; `docs/deployment/registry.md`
+45 runtime images, one is currently digest-pinned; `docs/deployment/registry.md`
 states that scope, and the SBOM carries it. The lock above comes first because
 it answers the question a reviewer actually asks ... which bytes ran ... so that
 each pin can be checked against it rather than trusted.

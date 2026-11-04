@@ -27,7 +27,7 @@
       for a Markdown-only change.
 - [ ] Any claim added to a page that states a **count** of something in the tree
       is either registered in `tools/doc-claims.txt` or written in a form one
-      of its `class:` patterns matches ("44 images", "9 layers"). A count
+      of its `class:` patterns matches ("45 images", "9 layers"). A count
       phrased any other way is checked by nothing, and stale counts are the
       defect class this repository has shipped most often.
 - [ ] Documentation follows [the documentation standard](../docs/documentation-standard.md).

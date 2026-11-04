@@ -65,9 +65,11 @@ surfaces:
     size: items
     items:
       - {name: "the Tockmox charts repository", kind: repository, mention: "The Tockmox charts repository"}
-    ships: "`tockmox.repoURL` points at your copy"
+    ships: "`tockmox.repoURL` points at your copy; `bootstrap-forge --charts-repo` can serve it"
+    tools: [install/bootstrap-forge.sh]
     evidence:
       - {file: install/tockmox.yaml.example, contains: "repoURL"}
+      - {file: install/bootstrap-forge.sh, contains: "--charts-tag"}
     step: {number: 5, anchor: "5-serve-both-git-repositories-inside-the-boundary--required"}
 
   - id: 5

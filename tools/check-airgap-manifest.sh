@@ -236,6 +236,7 @@ selftest() {
     cp docs/deployment/airgap.md "$d/docs/deployment/"
     cp docs/deployment/install.md "$d/docs/deployment/"
     cp install/tockmox.yaml.example "$d/install/"
+    cp install/bootstrap-forge.sh "$d/install/"
     cp images.txt "$d/"
     for f in tools/mirror-images.sh tools/gen-images.sh tools/helm-deps.sh; do : >"$d/$f"; chmod +x "$d/$f"; done
     for f in charts/*/Chart.yaml; do mkdir -p "$d/$(dirname "$f")"; cp "$f" "$d/$f"; done

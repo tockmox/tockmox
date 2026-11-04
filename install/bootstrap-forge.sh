@@ -122,6 +122,14 @@ set -euo pipefail
 # operators call the upstream one; chart 17.3.2 ships app 15.0.11.
 CHART_REF_DEFAULT="oci://code.forgejo.org/forgejo-helm/forgejo"
 CHART_VERSION_DEFAULT="17.3.2"
+# The forge's image, pinned beside its chart: the one the chart picks on its own (its
+# appVersion, rootless), named here so that images.txt, the air-gap list and the SBOM can
+# carry it (tools/gen-images.sh, tools/gen-sbom.sh and tools/check-airgap.sh read these two
+# lines) and so that a chart bump cannot move the image unseen. It is not an Argo CD
+# workload, so no chart under charts/ renders it.
+# shellcheck disable=SC2034 # read by tools/gen-images.sh, which greps this line; the chart takes the repository from its own default
+FORGE_IMAGE_REPO_DEFAULT="code.forgejo.org/forgejo/forgejo"
+FORGE_IMAGE_TAG_DEFAULT="15.0.11"
 FORGE_NS_DEFAULT="tockmox-forge"
 RELEASE="tockmox-forge"
 ORG="tockmox"
@@ -201,6 +209,13 @@ the encrypted recovery kit.
                          identity layer's ingress.apps.authentik.host is overridden)
   --no-sign-in           no sign-in, no Ingress: the forge answers only in the cluster
 
+ The Tockmox charts repository, for a site with no route to GitHub
+  --charts-repo DIR      a git checkout of the Tockmox charts repository (your internal copy, with the
+                         vendored chart archives, if you made one). It is pushed to the forge as
+                         ${ORG}/${CHARTS_REPO}, where the Applications can read it
+  --charts-tag TAG       the release tag in DIR that tockmox.revision names. Required with --charts-repo;
+                         it must exist in DIR, and a tag already in the forge is never moved
+
  Forge
   --namespace NS         default ${FORGE_NS_DEFAULT} (the in-cluster address names it;
                          change it only if you also change every Application)
@@ -228,6 +243,7 @@ OS_GIT_URL=""; OS_GIT_CREDS=""
 IMAGE_REGISTRY=""; STORAGE_CLASS=""; ARGO_NS="argocd"; AI_NS="tockmox-ai"; WAIT_SECONDS=300; DRY_RUN=false
 CONNECT_ONLY=false; NO_SIGN_IN=false; REPLACE_ARGO_CRED=false; FORGE_HOST=""; ADMIN_GROUP="tockmox-admins"
 IDENTITY_NS="tockmox-authentik"; PLATFORM_NS="tockmox-platform"; AUTH_HOST=""
+CHARTS_REPO="charts"; CHARTS_DIR=""; CHARTS_TAG=""; CHARTS_COMMIT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -259,6 +275,8 @@ while [[ $# -gt 0 ]]; do
     --wait-seconds) WAIT_SECONDS="${2:?--wait-seconds needs a number}"; shift 2 ;;
     --connect-sign-in) CONNECT_ONLY=true; shift ;;
     --replace-argocd-credential) REPLACE_ARGO_CRED=true; shift ;;
+    --charts-repo) CHARTS_DIR="${2:?--charts-repo needs a directory}"; shift 2 ;;
+    --charts-tag) CHARTS_TAG="${2:?--charts-tag needs a tag}"; shift 2 ;;
     --no-sign-in) NO_SIGN_IN=true; shift ;;
     --forge-host) FORGE_HOST="${2:?--forge-host needs a host name}"; shift 2 ;;
     --admin-group) ADMIN_GROUP="${2:?--admin-group needs a group name}"; shift 2 ;;
@@ -445,6 +463,17 @@ need tar "packs the recovery kit"
 CTX_CUR="$(kubectl config current-context 2>/dev/null || true)"
 CTX="${CONTEXT:-$CTX_CUR}"
 [[ -n "$CTX" ]] || die "no kubectl context is set and none was given. Name one with --context."
+if [[ -n "$CHARTS_DIR$CHARTS_TAG" ]]; then
+  $CONNECT_ONLY && die "--charts-repo and --charts-tag belong to the full run, not --connect-sign-in"
+  [[ -n "$CHARTS_DIR" && -n "$CHARTS_TAG" ]] || die "--charts-repo DIR and --charts-tag TAG go together: the Applications name a tag, so the forge needs that tag"
+  [[ "$CHARTS_TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "--charts-tag is not a tag name: '$CHARTS_TAG'"
+  git -C "$CHARTS_DIR" rev-parse --git-dir >/dev/null 2>&1 || die "--charts-repo $CHARTS_DIR is not a git checkout"
+  CHARTS_COMMIT="$(git -C "$CHARTS_DIR" rev-parse -q --verify "refs/tags/${CHARTS_TAG}^{commit}" 2>/dev/null)" \
+    || die "there is no tag '$CHARTS_TAG' in $CHARTS_DIR. The Applications read tockmox.revision from the forge, so push nothing until the tag exists there."
+  git -C "$CHARTS_DIR" cat-file -e "${CHARTS_COMMIT}:charts/tockmox-platform/Chart.yaml" 2>/dev/null \
+    || die "tag '$CHARTS_TAG' in $CHARTS_DIR has no charts/tockmox-platform/Chart.yaml: this is not the Tockmox charts repository"
+  ok "charts repository: tag ${CHARTS_TAG} (${CHARTS_COMMIT:0:12}) in ${CHARTS_DIR}"
+fi
 ok "request is consistent"
 
 # ---------------------------------------------------------------- context
@@ -455,6 +484,7 @@ info "API server  ${SERVER:-unknown}"
 info "site        ${SITE}"
 info "forge       release ${RELEASE} in namespace ${FORGE_NS}, chart ${CHART_REF} ${CHART_VERSION}"
 info "repository  ${REPO_URL}"
+[[ -z "$CHARTS_DIR" ]] || info "charts      ${CHARTS_DIR} at ${CHARTS_TAG}, to ${ORG}/${CHARTS_REPO}"
 if $SIGN_IN; then
   info "sign-in     ${FORGE_URL} through Authentik at ${AUTH_HOST}; ${ADMIN_GROUP} -> team ${APPROVERS_TEAM}"
 else
@@ -472,6 +502,7 @@ if $DRY_RUN; then
   info "install or adopt the forge; fence its port to ArgoCD (${ARGO_NS}), the AI layer (${AI_NS}) and its own namespace"
   info "create ${ORG}/${REPO}, ${BOT_READ}, ${BOT_CHANGE}, team ${APPROVERS_TEAM}"
   info "push ${SITE} as main; protect main; write the ArgoCD repository Secret in ${ARGO_NS}"
+  [[ -z "$CHARTS_DIR" ]] || info "create ${ORG}/${CHARTS_REPO} (read by ${BOT_READ}); push tag ${CHARTS_TAG} and main from ${CHARTS_DIR}; write the ArgoCD repository Secret tockmox-charts-repo in ${ARGO_NS}"
   info "give the model watcher the change bot's token: Secret ${RELEASE}-change-bot in ${AI_NS}"
   if $SIGN_IN; then
     info "an Ingress at ${FORGE_HOST}; the OIDC client secret in ${FORGE_NS} and ${IDENTITY_NS};"
@@ -522,6 +553,21 @@ if ! $CONNECT_ONLY; then
        refresh. Nothing was touched. If this cluster is moving its site to the built-in forge, keep a copy of
        that Secret and re-run with --replace-argocd-credential; to try the forge beside a running site, use
        another cluster."
+    warn "replacing ArgoCD's credential for ${CUR_URL} (--replace-argocd-credential)"
+  fi
+fi
+
+CHARTS_REPO_URL="http://${RELEASE}-http.${FORGE_NS}.svc.cluster.local:3000/${ORG}/${CHARTS_REPO}.git"
+if [[ -n "$CHARTS_DIR" ]]; then
+  CUR_ERR="$(kubectl "${K[@]}" -n "$ARGO_NS" get secret tockmox-charts-repo -o name 2>&1 >/dev/null)" \
+    || [[ "$CUR_ERR" == *NotFound* ]] \
+    || die "cannot read ${ARGO_NS}/tockmox-charts-repo to check what it holds: ${CUR_ERR}. Nothing was touched."
+  CUR_URL="$(kubectl "${K[@]}" -n "$ARGO_NS" get secret tockmox-charts-repo -o jsonpath='{.data.url}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  if [[ -n "$CUR_URL" && "$CUR_URL" != "$CHARTS_REPO_URL" ]]; then
+    $REPLACE_ARGO_CRED || die "${ARGO_NS}/tockmox-charts-repo already holds ArgoCD's credential for
+         ${CUR_URL}
+       This run would replace it with the built-in forge's. Nothing was touched; re-run with --replace-argocd-credential
+       if that is what you mean."
     warn "replacing ArgoCD's credential for ${CUR_URL} (--replace-argocd-credential)"
   fi
 fi
@@ -668,7 +714,9 @@ fullnameOverride: ${RELEASE}
 replicaCount: 1
 strategy:
   type: Recreate
-$( [[ -n "$IMAGE_REGISTRY" ]] && printf 'image:\n  registry: %s\n' "$IMAGE_REGISTRY" )
+image:
+  tag: "${FORGE_IMAGE_TAG_DEFAULT}"
+$( [[ -n "$IMAGE_REGISTRY" ]] && printf '  registry: %s\n' "$IMAGE_REGISTRY" )
 persistence:
   enabled: true
   size: 5Gi
@@ -1064,6 +1112,52 @@ else
   warn "nobody can join $APPROVERS_TEAM without sign-in (${SIGN_IN_WHY}): add approvers in the forge as its admin"
 fi
 
+# ---------------------------------------------------------------- charts
+# The Tockmox charts repository, for a site that cannot reach GitHub: every Application's
+# first source is tockmox.repoURL at tockmox.revision, and ArgoCD reads it on every
+# reconcile. The forge serves it beside the site, and the same read-only machine user
+# reads both. Nothing is rewritten and nothing is moved: a tag already in the forge that
+# names another commit stops the run, because a tag the Applications trust must not change.
+if [[ -n "$CHARTS_DIR" ]]; then
+  say "The Tockmox charts repository"
+  api GET "/repos/$ORG/$CHARTS_REPO" >/dev/null
+  if [[ "$(status)" == 404 ]]; then
+    api POST "/orgs/$ORG/repos" "{\"name\":\"$CHARTS_REPO\",\"private\":true,\"default_branch\":\"main\",\"auto_init\":false}" >/dev/null
+    expect "creating repository $ORG/$CHARTS_REPO" 201
+    ok "repository $ORG/$CHARTS_REPO created (private, empty)"
+  else
+    expect "reading repository $ORG/$CHARTS_REPO" 200
+    ok "repository $ORG/$CHARTS_REPO exists"
+  fi
+  READERS_ID="$(api GET "/orgs/$ORG/teams/search?q=readers" | sed -n 's/.*"id":\([0-9]*\),"name":"readers".*/\1/p' | head -1)"
+  [[ -n "$READERS_ID" ]] || die "cannot find team readers"
+  api PUT "/teams/$READERS_ID/repos/$ORG/$CHARTS_REPO" >/dev/null; expect "adding $ORG/$CHARTS_REPO to team readers" 204
+  CH_URL="http://127.0.0.1:${PORT}/${ORG}/${CHARTS_REPO}.git"
+  CH_MAIN="$(gita ls-remote "$CH_URL" refs/heads/main 2>/dev/null | cut -f1 || true)"
+  # An annotated tag lists twice; the last line is the commit it names.
+  CH_TAG="$(gita ls-remote "$CH_URL" "refs/tags/${CHARTS_TAG}" "refs/tags/${CHARTS_TAG}^{}" 2>/dev/null | tail -1 | cut -f1 || true)"
+  if [[ -n "$CH_TAG" && "$CH_TAG" != "$CHARTS_COMMIT" ]]; then
+    die "the forge already has tag ${CHARTS_TAG} at ${CH_TAG}, and ${CHARTS_DIR} has it at ${CHARTS_COMMIT}.
+       A tag the Applications read is never moved. Use a new tag, or delete that tag in the forge yourself."
+  fi
+  if [[ -n "$CH_MAIN" && "$CH_MAIN" != "$CHARTS_COMMIT" ]]; then
+    git -C "$CHARTS_DIR" merge-base --is-ancestor "$CH_MAIN" "$CHARTS_COMMIT" 2>/dev/null \
+      || die "the forge's ${CHARTS_REPO} main (${CH_MAIN}) is not an ancestor of tag ${CHARTS_TAG} (${CHARTS_COMMIT}) in ${CHARTS_DIR}.
+       The forge holds history this checkout does not. Refusing to overwrite it."
+  fi
+  if [[ "$CH_MAIN" == "$CHARTS_COMMIT" && "$CH_TAG" == "$CHARTS_COMMIT" ]]; then
+    ok "the forge already holds ${CHARTS_REPO} at tag ${CHARTS_TAG} (${CHARTS_COMMIT:0:12})"
+  else
+    gita -C "$CHARTS_DIR" push -q "$CH_URL" "${CHARTS_COMMIT}:refs/heads/main" "refs/tags/${CHARTS_TAG}:refs/tags/${CHARTS_TAG}" \
+      || die "pushing the charts repository to the forge failed"
+    ok "charts repository pushed: tag ${CHARTS_TAG} and main at ${CHARTS_COMMIT:0:12}"
+  fi
+  CH_MAIN="$(gita ls-remote "$CH_URL" refs/heads/main | cut -f1)"
+  CH_TAG="$(gita ls-remote "$CH_URL" "refs/tags/${CHARTS_TAG}" "refs/tags/${CHARTS_TAG}^{}" | tail -1 | cut -f1)"
+  [[ "$CH_MAIN" == "$CHARTS_COMMIT" && "$CH_TAG" == "$CHARTS_COMMIT" ]] \
+    || die "after the push the forge's ${CHARTS_REPO} has main '$CH_MAIN' and tag '$CH_TAG', not '$CHARTS_COMMIT'"
+fi
+
 # ---------------------------------------------------------------- credentials
 say "ArgoCD's read credential and the console's change identity"
 secret_apply "$ARGO_NS" tockmox-site-repo "argocd.argoproj.io/secret-type: repository" \
@@ -1071,6 +1165,13 @@ secret_apply "$ARGO_NS" tockmox-site-repo "argocd.argoproj.io/secret-type: repos
 LBL="$(kubectl "${K[@]}" -n "$ARGO_NS" get secret tockmox-site-repo -o jsonpath='{.metadata.labels.argocd\.argoproj\.io/secret-type}')"
 [[ "$LBL" == repository ]] || die "the ArgoCD repository Secret does not carry its label; ArgoCD would never read it"
 ok "ArgoCD repository Secret ${ARGO_NS}/tockmox-site-repo (user $BOT_READ, read only)"
+if [[ -n "$CHARTS_DIR" ]]; then
+  secret_apply "$ARGO_NS" tockmox-charts-repo "argocd.argoproj.io/secret-type: repository" \
+    type=git url="$CHARTS_REPO_URL" username="$BOT_READ" password="$TOKEN_READ"
+  LBL="$(kubectl "${K[@]}" -n "$ARGO_NS" get secret tockmox-charts-repo -o jsonpath='{.metadata.labels.argocd\.argoproj\.io/secret-type}')"
+  [[ "$LBL" == repository ]] || die "the ArgoCD repository Secret for the charts does not carry its label; ArgoCD would never read it"
+  ok "ArgoCD repository Secret ${ARGO_NS}/tockmox-charts-repo (user $BOT_READ, read only)"
+fi
 secret_apply "$FORGE_NS" "${RELEASE}-change-bot" "" \
   username="$BOT_CHANGE" token="$TOKEN_CHANGE" \
   url="http://${RELEASE}-http.${FORGE_NS}.svc.cluster.local:3000" repository="$ORG/$REPO"
@@ -1313,6 +1414,10 @@ if [[ -n "$OFFSITE" ]]; then
 else
   warn "no off-site copy is set: until one is, losing this cluster loses the site's history, and the
        console says so (No off-site copy) until you add one: re-run with --offsite-s3-* or --offsite-git."
+fi
+if [[ -n "$CHARTS_DIR" ]]; then
+  ok "the Tockmox charts repository is in the forge at tag ${CHARTS_TAG}: ${CHARTS_REPO_URL}"
+  info "a site generated for it names that address as tockmox.repoURL and ${CHARTS_TAG} as tockmox.revision"
 fi
 info "next: kubectl --context $CTX apply -f $SITE/bootstrap/root.yaml"
 if $SIGN_IN && ! $SIGNED_IN; then
