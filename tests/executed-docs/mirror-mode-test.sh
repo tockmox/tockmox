@@ -136,11 +136,12 @@ chmod +x "${BIN}"/*
 
 new_state() { rm -rf "$1"; mkdir -p "$1/secrets"; : >"$1/log"; }
 run_tc() {  # state-dir verb [extra env as VAR=val ...] -> $OUT, $RC
+  # The capacity preflight has its own test (capacity-preflight-test.sh); this stub serves no capacity data.
   local st="$1" verb="$2"; shift 2
   OUT="$(env STUB_STATE="$st" PATH="${BIN}:${PATH}" KUBECONFIG="${TMP}/substrate.kubeconfig" \
          TOCKMOX_SUBSTRATE_CONTEXT="stub-substrate" \
          TOCKMOX_WORKDIR="$st/wd" TOCKMOX_K3S_VERSION=v0.0.0-stub TOCKMOX_K3S_TIMEOUT=2 \
-         TOCKMOX_TEST_VM="$VM" TMPDIR="$st" "$@" bash "$TC" "$verb" 2>&1)"
+         TOCKMOX_CAPACITY_CHECK=skip TOCKMOX_TEST_VM="$VM" TMPDIR="$st" "$@" bash "$TC" "$verb" 2>&1)"
   RC=$?
 }
 vm_applied() { grep -c '^APPLY VirtualMachine' "$1/log" || true; }

@@ -303,9 +303,56 @@ test, and a run that cannot retrieve a kubeconfig produces no evidence at all.
 | `TOCKMOX_REGISTRY_MIRROR` | *(empty)* | `host[:port]` of a registry that mirrors docker.io, quay.io, ghcr.io and registry.k8s.io. Empty means every image pulls anonymously from upstream |
 | `TOCKMOX_REGISTRY_MODE` | `cache` | `cache`: the mirror is tried first and the upstream is the fallback. `nofallback`: the mirror is the only registry and upstream traffic is denied and counted (see "Registry mirror" below) |
 | `TOCKMOX_UPSTREAM_DENY` | `node` | nofallback only. `node`: the guest rejects and counts attempts to the upstream registries. `edge`: it does not, because the network does (a firewall that blocks and logs), so that firewall sees the attempt. Pass the same value to `mirror-proof` |
+| `TOCKMOX_CAPACITY_CHECK` | `enforce` | `enforce`: `create` refuses a run that does not fit (see "Capacity preflight"). `skip`: run unchecked, with a warning on every run |
+| `TOCKMOX_CAPACITY_STOP_PERCENT` | `85` | the per-disk stop line, as a percentage of a Longhorn disk's `storageMaximum`, 1 to 100 |
+| `TOCKMOX_CAPACITY_REPLICAS` | `1` | replicas the VM's storage class keeps; that many distinct disks must each fit the VM disk. Set it to match `TOCKMOX_VM_STORAGECLASS` |
+| `TOCKMOX_CAPACITY_ALLOW_OTHER_VMS` | `0` | `1` lets another harness VM stand in the namespace |
 | `TOCKMOX_KEEP_CLUSTER` | `0` | `1` leaves the cluster standing for inspection |
 | `TOCKMOX_EXPECTED_DEFAULT_COUNT` | `0` | expected count of default StorageClasses after P03 un-defaults `local-path` (1 once a platform layer is installed) |
 | `TOCKMOX_P08_EXPECTED_DEFAULT_COUNT` | `1` | what P08 expects `existing-cluster.md` Check 3 to find: `local-path` on a stock k3s throwaway. Set `0` when P03 has run first |
+
+## Capacity preflight
+
+`create` refuses a run that does not fit on the substrate **before it creates or
+deletes anything**. The reach and verb checks say the credential can talk to the
+substrate; they say nothing about whether the substrate can hold the machine
+this run asks for, and a run that does not fit fails late in someone else's
+clothes: a replica Longhorn will not schedule shows up as a database in
+`CrashLoopBackOff`, and a VM that cannot be placed shows up as a provision that
+never finishes. Both read as a product defect, and a false finding is worse
+than none.
+
+The check is sized from the run's own declared need, `TOCKMOX_VM_DISK` and
+`TOCKMOX_VM_MEMORY`, and has three parts (`lib/capacity-check.py` holds the rule):
+
+| Check | Passes when |
+|---|---|
+| `storage` | some one schedulable Longhorn disk has `floor(stop% * storageMaximum) - storageScheduled` at least the VM disk. Longhorn puts a replica on one disk, so a node-level sum never decides: two half-full disks do not make one disk that holds the replica. With `TOCKMOX_CAPACITY_REPLICAS=N`, N distinct disks must each fit |
+| `memory` | some one schedulable node has allocatable memory minus the memory requests of its non-terminated pods at least the VM memory. This is the scheduler's own view and needs no metrics API |
+| `harness` | no other harness-labelled VM stands in the run's namespace. A crashed run's leftover still holds its disk and memory |
+
+A run that does not fit prints `BLOCKED: <check>: <numbers>` and exits **4**.
+Nothing has been created. A capacity source that cannot be read, or reads as
+nonsense, prints `INFRA_ERROR: capacity-source: ...` and exits **5**; it is never
+a pass. A bad setting exits 2 like every other refusal. A run that fits is
+unchanged.
+
+**What the credential must be able to read.** The check reads `nodes.longhorn.io`
+in `longhorn-system`, Nodes, Pods in every namespace and the harness's own
+VirtualMachines. A credential scoped to one namespace, as this harness intends,
+can read only the last. That is `INFRA_ERROR`, on purpose: the choice is between
+a narrow, read-only grant on the substrate (`get` and `list` on `nodes`, `pods`
+and `nodes.longhorn.io`, bound to the harness identity and no write verb) and an
+explicit `TOCKMOX_CAPACITY_CHECK=skip`, which prints a warning on every run so an
+unchecked run is never mistaken for a checked one. An empty all-namespace pod
+list is also `INFRA_ERROR`: some API front ends answer a list the credential may
+not make with an empty list instead of `Forbidden`, and an empty list would read
+as an idle rig.
+
+**What it does not do.** It reads a moment in time; another tenant can take the
+capacity between the check and the first replica. It does not size anything
+inside the guest. And the 85 percent default is Longhorn's own practice for a
+stop line, not a measurement of any particular rig: lower it deliberately.
 
 ## Adding a path
 

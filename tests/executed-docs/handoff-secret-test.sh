@@ -145,11 +145,12 @@ secrets_left() {  # state-dir -> names of Secrets still present
   return 0
 }
 run_tc() {  # state-dir verb -> stdout+stderr in $OUT, rc in $RC
+  # The capacity preflight has its own test (capacity-preflight-test.sh); this stub serves no capacity data.
   # SUBSTRATE_CTX="" runs the verb with the required context empty.
   OUT="$(STUB_STATE="$1" PATH="${BIN}:${PATH}" KUBECONFIG="${TMP}/substrate.kubeconfig" \
          TOCKMOX_SUBSTRATE_CONTEXT="${SUBSTRATE_CTX-stub-substrate}" \
          TOCKMOX_WORKDIR="$1/wd" TOCKMOX_K3S_VERSION=v0.0.0-stub TOCKMOX_K3S_TIMEOUT=2 \
-         TOCKMOX_TEST_VM="$VM" TMPDIR="$1" bash "$TC" "$2" 2>&1)"
+         TOCKMOX_CAPACITY_CHECK=skip TOCKMOX_TEST_VM="$VM" TMPDIR="$1" bash "$TC" "$2" 2>&1)"
   RC=$?
 }
 

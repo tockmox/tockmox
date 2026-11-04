@@ -142,6 +142,10 @@ REGISTRY_MODE="${TOCKMOX_REGISTRY_MODE:-cache}"
 REGISTRY_DENY="${TOCKMOX_UPSTREAM_DENY:-node}"
 # shellcheck source=/dev/null
 . "$(dirname "${BASH_SOURCE[0]}")/profiles/registry-mirror.sh"
+# The capacity preflight: refuse a run that does not fit, before anything is
+# created. Defines capacity_preflight and reads TOCKMOX_CAPACITY_*; see the file.
+# shellcheck source=/dev/null
+. "$(dirname "${BASH_SOURCE[0]}")/profiles/capacity-preflight.sh"
 CPU_CORES="${TOCKMOX_VM_CORES:-8}"
 MEMORY="${TOCKMOX_VM_MEMORY:-24Gi}"
 STORAGE_CLASS="${TOCKMOX_VM_STORAGECLASS:-harvester-longhorn-r1}"
@@ -629,6 +633,9 @@ create() {
   # unknown mode, is refused before it reaches the hypervisor.
   mirror_mode_check "$REGISTRY_MIRROR" "$REGISTRY_MODE" "$REGISTRY_DENY" || exit 2
   preflight
+  # Before the first thing this run creates or deletes: a run that does not fit
+  # on the substrate refuses here (exit 4 BLOCKED, exit 5 INFRA_ERROR).
+  capacity_preflight
   clear_stale_handoff
   mint_ssh_key
   store_ssh_key_secret
