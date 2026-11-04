@@ -1152,5 +1152,27 @@ if [ "$MM_CASES" -eq 0 ] || { [ "$MM_RC" -ne 0 ] && ! printf '%s\n' "$MM_OUT" | 
   bad "mirror-mode-test.sh ran its cases" "rc=${MM_RC}, ${MM_CASES} case(s): $(printf '%s' "$MM_OUT" | tail -3)"
 fi
 
+# ---------------------------------------------------------------------------
+# The capacity preflight.
+#
+# `create` refuses a run that does not fit on the substrate (BLOCKED, exit 4) or
+# whose capacity cannot be read (INFRA_ERROR, exit 5), before it creates or
+# deletes anything. Folded in the same way as the cases above, for the same
+# reason: the per-commit gate runs them, every case counts as one of this file's
+# own, and a run that yields no case is a failure.
+CP_OUT="$(bash "${HERE}/capacity-preflight-test.sh" 2>&1)"; CP_RC=$?
+CP_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) CP_CASES=$((CP_CASES+1)); ok "capacity preflight: ${line#ok   }" ;;
+    "FAIL "*) CP_CASES=$((CP_CASES+1)); bad "capacity preflight: ${line#FAIL }" "run tests/executed-docs/capacity-preflight-test.sh for detail" ;;
+  esac
+done <<EOF_CP
+$CP_OUT
+EOF_CP
+if [ "$CP_CASES" -eq 0 ] || { [ "$CP_RC" -ne 0 ] && ! printf '%s\n' "$CP_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "capacity-preflight-test.sh ran its cases" "rc=${CP_RC}, ${CP_CASES} case(s): $(printf '%s' "$CP_OUT" | tail -3)"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
