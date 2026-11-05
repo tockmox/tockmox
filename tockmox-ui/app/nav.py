@@ -17,6 +17,7 @@ class Item:
     prefixes: tuple[str, ...] = ()   # paths that light this item up; the longest matching prefix wins
     count: int | None = None
     state: str | None = None         # a warning the rail shows on the item (Capabilities disagreeing)
+    marker: str | None = None        # a release marker in words (SPEC section 10): "Private" today
 
     def matches(self, path: str) -> int:
         """Length of the longest prefix of `path` this item claims, 0 for none. Exact href counts too."""
@@ -33,8 +34,13 @@ class Group:
     items: tuple[Item, ...] = field(default_factory=tuple)
 
 
-def section_of(path: str) -> str | None:
-    """Which top-bar section a path belongs to; None for pages outside every section (About, Recovery)."""
+def section_of(path: str, contributed: dict | None = None) -> str | None:
+    """Which top-bar section a path belongs to; None for pages outside every section (About, Recovery).
+    `contributed` maps a feature id to where its pages sit (feature_pages.py): "f:<id>" for a section of its
+    own, or "ai" / "platform" for a rail contribution."""
+    if path.startswith("/f/"):
+        fid = path[3:].split("/", 1)[0]
+        return (contributed or {}).get(fid)
     if path == "/":
         return "home"
     if path == "/status" or path.startswith("/status/"):
@@ -52,16 +58,22 @@ def platform_home(platform_on: bool) -> str:
     return "/platform" if platform_on else "/capabilities"
 
 
-def sections(is_admin: bool, platform_on: bool, user_tabs=()) -> list[Item]:
+def sections(is_admin: bool, platform_on: bool, user_tabs=(), contributed_sections=(), rail_prefixes=None) -> list[Item]:
     """The top bar. Admins get the four sections; everyone else gets Home plus any first-party feature a
-    non-admin may open (absent, not locked: a section a user cannot open is not shown)."""
+    non-admin may open (absent, not locked: a section a user cannot open is not shown). A feature that adds a
+    section of its own (at most two, checked at start-up) follows Platform; `contributed_sections` is
+    (label, first page href, feature id, marker) for the ones this user may open. `rail_prefixes` adds the
+    paths of pages features put in the AI or Platform rail, so that section lights up on them."""
+    rp = rail_prefixes or {}
     out = [Item("Home", "/")]
     if is_admin:
-        out += [Item("Status", "/status", ("/status",)), Item("AI", "/models", ("/models", "/nodes")),
+        out += [Item("Status", "/status", ("/status",)),
+                Item("AI", "/models", ("/models", "/nodes") + tuple(rp.get("ai", ()))),
                 Item("Platform", platform_home(platform_on),
-                     ("/platform", "/capabilities", "/upgrade", "/version", "/tabs"))]
+                     ("/platform", "/capabilities", "/upgrade", "/version", "/tabs") + tuple(rp.get("platform", ())))]
     else:
         out += [Item(t.name, f"/tabs/{t.id}") for t in user_tabs if not getattr(t, "admin_only", True)]
+    out += [Item(label, href, (f"/f/{fid}",), marker=marker) for label, href, fid, marker in contributed_sections]
     return out
 
 
@@ -76,8 +88,14 @@ def current(items, path: str):
 
 
 def rail(section: str | None, is_admin: bool, platform_on: bool, admin_tabs=(), inbox_count: int | None = None,
-         capabilities_state: str | None = None, activity: bool = False, identity: bool = False) -> list[Group]:
-    """The page list on the left of a section, or [] when the section has one page (Home, Status)."""
+         capabilities_state: str | None = None, activity: bool = False, identity: bool = False,
+         contributed: dict | None = None) -> list[Group]:
+    """The page list on the left of a section, or [] when the section has one page (Home, Status).
+    `contributed` maps a section key to the Groups features add to it (feature_pages.py): a feature's own
+    section ("f:<id>") is only its group; "ai" and "platform" get theirs after the built-in groups."""
+    extra = list((contributed or {}).get(section, ()))
+    if section and section.startswith("f:"):
+        return extra
     if not is_admin:
         return []
     if section == "ai":
@@ -91,7 +109,7 @@ def rail(section: str | None, is_admin: bool, platform_on: bool, admin_tabs=(), 
                 Item("Profiles", "/models/profiles"),
             )),
             Group("Hardware", (Item("Inference nodes", "/nodes", ("/nodes",)),)),
-        ]
+        ] + extra
     if section == "platform":
         groups = []
         if platform_on:
@@ -110,7 +128,7 @@ def rail(section: str | None, is_admin: bool, platform_on: bool, admin_tabs=(), 
         if activity:                    # what was done from the console
             conf.append(Item("Activity", "/platform/activity"))
         groups.append(Group("Configuration", tuple(conf)))
-        return groups
+        return groups + extra
     return []
 
 
@@ -159,6 +177,7 @@ HELP_MAP: dict[str, str] = {
     "/upgrade": "deployment/upgrade.md",
     "/tabs/posture": "administration/posture-probe.md",
     "/about": "administration/tockmox-ui.md",
+    "/f/": "administration/feature-pages.md",
     "/recovery": "operations/troubleshooting.md",
 }
 

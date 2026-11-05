@@ -575,3 +575,47 @@ table.grouped td.num { white-space: nowrap; }
 details.menu-d { margin-top: 0; }
 .util .hpill { min-height: 36px; }
 .account-line { margin-top: 1.25rem; }
+
+/* Feature pages (feature_pages.py, SPEC section 9). Release markers are words in the copper trim, never a state
+   colour (SPEC section 10). Charts reuse the trend palette (--ch-0..5) and are aria-hidden; the text under each
+   carries every number. */
+.fmark { display: inline-block; margin-left: .45rem; padding: 0 .4rem; border: 1px solid var(--tx-trim); border-radius: 999px; color: var(--tx-copper-400); font-size: var(--fs-0, .75rem); font-weight: 600; letter-spacing: .03em; line-height: 1.5; vertical-align: middle; white-space: nowrap; }
+[data-theme="light"] .fmark { color: var(--tx-copper-700); }
+.fp-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: .25rem .5rem; }
+.fp-head h1 { margin-bottom: .25rem; }
+.fp-src { margin: 0 0 1.25rem; }
+.fp-block { margin: 1.5rem 0; }
+.fp-block > h2, .fp-chart figcaption h2 { font-size: var(--fs-3); margin: 0 0 .6rem; }
+.fp-unit { font-size: var(--fs-2); font-weight: 400; color: var(--tx-text-muted); }
+.stat .value .ico { width: .8em; height: .8em; margin-right: .3rem; vertical-align: -.05em; }
+.stat.fs-ok .value .ico { color: var(--st-ok); } .stat.fs-warning { border-color: var(--st-warning); }
+.stat.fs-warning .value .ico { color: var(--st-warning); } .stat.fs-critical { border-color: var(--st-critical); }
+.stat.fs-critical .value .ico { color: var(--st-critical); } .stat.fs-unknown { border-style: dashed; }
+.fp-delta.good::before { content: "\25B2\00A0"; font-size: .7em; } .fp-delta.bad::before { content: "\25BC\00A0"; font-size: .7em; }
+.fp-chart { margin: 0; padding: .75rem 1rem; border: 1px solid var(--tx-border); border-radius: var(--tx-radius-lg, 10px); background: var(--tx-surface); }
+.fp-chart figcaption { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; }
+.fp-svg { display: block; width: 100%; height: auto; max-height: 240px; overflow: visible; }
+.fp-svg polyline { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.fp-svg .axis { stroke: var(--tx-border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.fp-svg text { fill: var(--tx-text-muted); font-size: 11px; font-family: inherit; }
+.fp-svg .grid { stroke: var(--tx-border); stroke-width: 1; stroke-dasharray: 2 4; vector-effect: non-scaling-stroke; }
+.fp-svg .s0 { stroke: var(--ch-0); } .fp-svg .s1 { stroke: var(--ch-1); } .fp-svg .s2 { stroke: var(--ch-2); }
+.fp-svg .s3 { stroke: var(--ch-3); } .fp-svg .s4 { stroke: var(--ch-4); } .fp-svg .s5 { stroke: var(--ch-5); }
+.fp-svg rect.s0, .fp-svg circle.s0 { fill: var(--ch-0); stroke: none; } .fp-svg rect.s1, .fp-svg circle.s1 { fill: var(--ch-1); stroke: none; }
+.fp-svg rect.s2, .fp-svg circle.s2 { fill: var(--ch-2); stroke: none; } .fp-svg rect.s3, .fp-svg circle.s3 { fill: var(--ch-3); stroke: none; }
+.fp-svg rect.s4, .fp-svg circle.s4 { fill: var(--ch-4); stroke: none; } .fp-svg rect.s5, .fp-svg circle.s5 { fill: var(--ch-5); stroke: none; }
+.fp-legend { display: flex; flex-wrap: wrap; gap: .15rem .9rem; margin: .35rem 0 0; padding: 0; font-size: var(--fs-1); color: var(--tx-text-muted); }
+.fp-legend li { display: inline-flex; align-items: center; gap: .35rem; }
+.fp-legend .sw { width: .9rem; height: .55rem; display: inline-block; border-radius: 2px; }
+.fp-legend .s0 .sw { background: var(--ch-0); } .fp-legend .s1 .sw { background: var(--ch-1); } .fp-legend .s2 .sw { background: var(--ch-2); }
+.fp-legend .s3 .sw { background: var(--ch-3); } .fp-legend .s4 .sw { background: var(--ch-4); } .fp-legend .s5 .sw { background: var(--ch-5); }
+.fp-lanes { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: .75rem; align-items: start; }
+.fp-lane { padding: .6rem .7rem; border: 1px solid var(--tx-border); border-radius: var(--tx-radius-lg, 10px); background: var(--tx-surface); min-width: 0; }
+.fp-lane.fs-warning { border-color: var(--st-warning); } .fp-lane.fs-critical { border-color: var(--st-critical); }
+.fp-lane h3 { font-size: var(--fs-1); text-transform: uppercase; letter-spacing: .05em; color: var(--tx-text-muted); margin: 0 0 .5rem; display: flex; justify-content: space-between; }
+.fp-lane h3 .n { font-variant-numeric: tabular-nums; }
+.fp-card { padding: .45rem .5rem; margin: 0 0 .4rem; border: 1px solid var(--tx-border); border-radius: var(--tx-radius-sm); background: var(--tx-surface-raised); overflow-wrap: anywhere; }
+.fp-card.fs-warning { border-left: 3px solid var(--st-warning); } .fp-card.fs-critical { border-left: 3px solid var(--st-critical); }
+.fp-card.fs-ok { border-left: 3px solid var(--st-ok); }
+.fp-tag { display: inline-block; margin-right: .35rem; font-family: var(--tx-font-mono, monospace); font-size: var(--fs-0, .75rem); color: var(--tx-text-muted); }
+.fp-note.fs-warning { border-color: var(--st-warning); } .fp-note.fs-critical { border-color: var(--st-critical); }

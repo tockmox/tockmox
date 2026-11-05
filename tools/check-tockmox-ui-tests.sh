@@ -37,5 +37,14 @@ if [ "$n" -eq 0 ]; then
   exit 1
 fi
 cd tockmox-ui
-"$py" -m pytest tests -q -p no:cacheprovider
-echo "check-tockmox-ui-tests: ok ($n test file(s))"
+# Parallel when pytest-xdist is installed (tools/requirements-gates.txt carries it): about 3x faster on a 4-CPU
+# runner. tests/conftest.py makes every test hermetic (no real network; loopback only for a test's own server), and
+# test ids hold no clock, so every worker collects the same tests. TOCKMOX_UI_TEST_WORKERS=0 runs them serially.
+workers="${TOCKMOX_UI_TEST_WORKERS:-auto}"
+if [ "$workers" != "0" ] && "$py" -c 'import xdist' >/dev/null 2>&1; then
+  "$py" -m pytest tests -q -p no:cacheprovider -n "$workers"
+  echo "check-tockmox-ui-tests: ok ($n test file(s), $workers workers)"
+else
+  "$py" -m pytest tests -q -p no:cacheprovider
+  echo "check-tockmox-ui-tests: ok ($n test file(s), serial)"
+fi

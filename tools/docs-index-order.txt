@@ -54,6 +54,7 @@ customising
 adding-an-application
 removing-an-application
 serving-static-sites
+feature-pages
 group: AI & inference — experimental
 inference-nodes
 ai-nodes
