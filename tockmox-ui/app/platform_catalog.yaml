@@ -33,7 +33,7 @@
 #   `or on() vector(0)`: that turns a missing metric into a healthy 0. `or (count(<metric>) * 0)` is zero
 #   only while the metric exists.
 version: 2
-specialistsSource: {file: roles/platform-roles.yaml, sha256: 8584bf47dc6aa4476c1b7a71901771d0d53c12955a28caf1ec1c65d9fb51e24d}   # generated: tools/gen-platform-specialists.py
+specialistsSource: {file: roles/platform-roles.yaml, sha256: a85fb6dbadfac28c8798a8bbf85e0730910fa45c7662e604062372d2ba888b66}   # generated: tools/gen-platform-specialists.py
 
 teams:
   # ------------------------------------------------------------------ RUN
@@ -92,7 +92,7 @@ teams:
       - id: problem
         name: Problem Manager
         agentRole: problem-manager   # generated: tools/gen-platform-specialists.py
-        specialists: [{id: problem-analyst, state: built}, {id: qa, state: specced}, {id: gitops-engineer, state: built}, {id: telemetry-reader, state: built}]
+        specialists: [{id: problem-analyst, state: built}, {id: qa, state: built}, {id: gitops-engineer, state: built}, {id: telemetry-reader, state: built}]
         reference: {itil: "Problem management", fitsm: "PM"}
         mission: >-
           Looks across incidents for the ones that keep coming back, finds the underlying cause and
@@ -291,7 +291,7 @@ teams:
       - id: test
         name: Test Manager
         agentRole: test-manager   # generated: tools/gen-platform-specialists.py
-        specialists: [{id: qa, state: specced}]
+        specialists: [{id: qa, state: built}]
         reference: {itil: "Service validation and testing", fitsm: "-"}
         mission: >-
           Proves changes work before they reach you: quick checks on a change, the full suite on a
@@ -357,7 +357,7 @@ teams:
       id: improvement-manager
       name: Improvement Manager
       agentRole: improvement-manager   # generated: tools/gen-platform-specialists.py
-      specialists: [{id: improvement-analyst, state: proposed}]
+      specialists: [{id: improvement-analyst, state: built}, {id: sms-assessor, state: built}]
       reference: {itil: "Continual improvement; Measurement and reporting; Strategy management", fitsm: "CSI, SMS governance"}
       mission: >-
         Asks whether the platform is being run well and getting better. Re-scores service management
