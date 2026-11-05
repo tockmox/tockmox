@@ -69,6 +69,7 @@ jobs:
   regen:
     if: ${{ github.actor == 'renovate[bot]' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15   # 13 recent runs: slowest 2 min for the whole workflow
     outputs:
       changed: ${{ steps.diff.outputs.changed }}
       images: ${{ steps.diff.outputs.images }}
@@ -133,6 +134,7 @@ jobs:
     needs: regen
     if: ${{ needs.regen.outputs.changed == 'true' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # one commit and a push
     steps:
       - name: mint a token for this repository only
         id: app
