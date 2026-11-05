@@ -1326,8 +1326,17 @@ CRON
   # The dump keeps a failed Job for a day (until the next run), so KubeJobFailed, which
   # reads every Job in the cluster, is the alert for a dump that did not work.
   cronjob "${RELEASE}-dump" "15 21 * * *" dump 86400 1800
+  # The rebuild drill's record, read each morning. It fails when the last drill
+  # failed or is older than a quarter, and TockmoxSiteRebuildDrillOverdue fires a day later.
+  # A site with no drill yet has a quarter from now (DRILL_SINCE) before that counts.
+  CA_ENV_BASE="$CA_ENV"
+  CA_ENV="${CA_ENV_BASE}
+                - { name: DRILL_SINCE, value: \"$(date -u +%Y%m%dT%H%M%SZ)\" }"
+  cronjob "${RELEASE}-drill-check" "15 6 * * *" drill-check 86400 600
+  CA_ENV="$CA_ENV_BASE"
   ok "CronJob ${FORGE_NS}/${RELEASE}-offsite: every minute, ${OFFSITE} to ${OFFSITE_WHERE}"
   ok "CronJob ${FORGE_NS}/${RELEASE}-dump: nightly at 21:15 (the cluster's time zone), the forge dump (pull requests, reviews, comments) to the same place"
+  ok "CronJob ${FORGE_NS}/${RELEASE}-drill-check: each morning at 06:15, the last rebuild drill's record; the first drill is due within 92 days"
   # The first copy, now, while you watch: written AND read back, or this run fails.
   FIRST="${RELEASE}-offsite-first-$(date -u +%H%M%S)"; FIRST_OK=false
   for try in 1 2 3; do

@@ -82,6 +82,30 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **Forge upgrades for the built-in forge.** `tockmox-install.sh upgrade-forge`
+  takes a fresh off-site copy and waits for it, moves the forge to the chart and
+  Forgejo image this release pins with the values it already has, and checks the
+  forge answers at that version; a failure names the `repair-forge` command for
+  the copy it took (docs/deployment/upgrade.md, "On the built-in forge: upgrade
+  the forge first"). Renovate now proposes the forge's pin like any other image.
+  The forge's in-cluster address, the approvers mapping, the `Approved-by:` line
+  and the off-site copy's format are declared `stable`
+  (docs/administration/values-contract.md).
+
+- **The rebuild drill for the built-in forge.** `tockmox-install.sh rebuild-drill`
+  runs the real rebuild from the latest off-site copy and your recovery kit onto a
+  throwaway cluster. Before it, on the same copy and kit, it proves the three
+  refusals a rebuild promises (a stale copy named, a corrupt bundle refused, a
+  wrong passphrase stopping first), then waits for every Application to be
+  Synced and Healthy and writes its result beside the copy. The throwaway forge
+  is never set up to write to the site's destination. A daily
+  `tockmox-forge-drill-check` job reads that result, and the new
+  `TockmoxSiteRebuildDrillOverdue` alert fires when the last drill failed, is
+  more than 92 days old, or has never run on a site older than that
+  (docs/administration/site-forge-recovery.md, "Rehearse the rebuild: the drill";
+  `siteForge.drillCheckHours`). Sites that already have an off-site copy get the
+  job when `bootstrap-forge` runs again.
+
 - **Feature pages (experimental).** A feature under the Tockmox UI's
   `features.<id>` can contribute pages, in a top-bar section of its own or a
   group in the AI or Platform rail, served by its own read API as JSON page

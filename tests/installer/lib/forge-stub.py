@@ -9,6 +9,8 @@ One loopback server, three roles, told apart by path:
                 dump's review-id check, so it is the forge's order)
   /s3/<bucket>/<key>   an S3-compatible bucket, path style, in memory (PUT, GET, HEAD; the
                 request signature is not checked: the dump's correctness does not depend on it)
+  /tockmox-bkt/<key>   the same store, as the bucket tockmox-bkt at the endpoint's root, for a
+                client whose endpoint takes no path (forge-restore.sh and its rebuild drill)
   anything else  git over smart HTTP, served by `git http-backend` from ROOT: the forge's
                 repository at /tockmox/site.git and an off-site remote at /remote/site.git
 
@@ -114,6 +116,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
         p = u.path
+        if p.startswith("/tockmox-bkt/"):
+            # The same bucket at the endpoint's root, for a client that takes an endpoint
+            # with no path (forge-restore.sh, whose rebuild drill writes its record here).
+            p = "/s3" + p
         if p.startswith("/s3/"):
             k = p[4:]
             if self.command == "PUT":

@@ -15,6 +15,9 @@
 #      same forge WITH the CronJob does not.
 #   5  The scrape guard: with no kube-state-metrics series for the namespace,
 #      neither rule fires (a dead kube-state-metrics alerts on its own).
+#   6  RebuildDrillOverdue: a drill-check that succeeds each morning never
+#      fires; one that stops fires 26 hours after its last success (plus for: 1m),
+#      not before; one that never succeeded fires once it is 26 hours old.
 
 evaluation_interval: 1m
 
@@ -121,3 +124,59 @@ tests:
       - eval_time: 25m
         alertname: TockmoxSiteRepositoryNoOffsiteCopy
         exp_alerts: []
+
+  # 6a: drill-check succeeds at t=0 and at t=24h, then stops. Overdue once
+  # time() - 86400 > 93600 (26 h), i.e. after t=50h; for: 1m. Samples every minute,
+  # since an hourly series goes stale between samples (5-minute lookback).
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_status_last_successful_time{namespace="tockmox-forge",cronjob="tockmox-forge-drill-check"}'
+        values: '0x1439 86400x1700'
+      - series: 'kube_cronjob_created{namespace="tockmox-forge",cronjob="tockmox-forge-drill-check"}'
+        values: '0x3200'
+      - series: 'kube_namespace_status_phase{namespace="tockmox-forge",phase="Active"}'
+        values: '1x3200'
+    alert_rule_test:
+      - eval_time: 25h
+        alertname: TockmoxSiteRebuildDrillOverdue
+        exp_alerts: []
+      - eval_time: 49h
+        alertname: TockmoxSiteRebuildDrillOverdue
+        exp_alerts: []
+      - eval_time: 52h
+        alertname: TockmoxSiteRebuildDrillOverdue
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tockmox_component: site-repository
+              namespace: tockmox-forge
+              cronjob: tockmox-forge-drill-check
+            exp_annotations:
+              summary: "The site's rebuild drill failed or is overdue"
+              description: "The drill-check job tockmox-forge/tockmox-forge-drill-check has not succeeded for more than 26 hours: the last rebuild drill failed, or passed more than a quarter ago, or none has been run. Until one passes, nobody knows the off-site copy and the recovery kit can rebuild this site. Its log names which: kubectl -n tockmox-forge logs -l app.kubernetes.io/name=tockmox-forge-drill-check --tail=5. Run tockmox-install.sh rebuild-drill on a throwaway cluster (docs/administration/site-forge-recovery.md, The rebuild drill)."
+      - eval_time: 52h
+        alertname: TockmoxSiteRepositoryCopyBehind
+        exp_alerts: []
+
+  # 6b: created at t=0, never succeeded: fires after 26 h (plus for: 1m).
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_created{namespace="tockmox-forge",cronjob="tockmox-forge-drill-check"}'
+        values: '0x1700'
+      - series: 'kube_namespace_status_phase{namespace="tockmox-forge",phase="Active"}'
+        values: '1x1700'
+    alert_rule_test:
+      - eval_time: 25h
+        alertname: TockmoxSiteRebuildDrillOverdue
+        exp_alerts: []
+      - eval_time: 28h
+        alertname: TockmoxSiteRebuildDrillOverdue
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tockmox_component: site-repository
+              namespace: tockmox-forge
+              cronjob: tockmox-forge-drill-check
+            exp_annotations:
+              summary: "The site's rebuild drill failed or is overdue"
+              description: "The drill-check job tockmox-forge/tockmox-forge-drill-check has not succeeded for more than 26 hours: the last rebuild drill failed, or passed more than a quarter ago, or none has been run. Until one passes, nobody knows the off-site copy and the recovery kit can rebuild this site. Its log names which: kubectl -n tockmox-forge logs -l app.kubernetes.io/name=tockmox-forge-drill-check --tail=5. Run tockmox-install.sh rebuild-drill on a throwaway cluster (docs/administration/site-forge-recovery.md, The rebuild drill)."

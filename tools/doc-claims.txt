@@ -274,10 +274,11 @@ expect: 40
 # 2026-11-03: 471 -> 472, airgap.md's "Serve the charts repository from the built-in forge": one block.
 # 2026-11-04: 472 -> 480 and 43 -> 44 pages, the built-in forge as the default: install.md's "Publish to the built-in forge" (the key-backup export, bootstrap-forge, its success read) and "Connect the built-in forge's sign-in", and the new administration/site-forge-recovery.md (set these once, the dry-run check, the rebuild, the forge repair).
 # 2026-11-04: 480 -> 483 and 44 -> 45 pages, administration/site-forge.md's "Changing your site": the clone from the forge, the branch, the push of the branch.
+# 2026-11-05: 483 -> 485, administration/site-forge-recovery.md's "Rehearse the rebuild: the drill" (the rebuild-drill command) and upgrade.md's "On the built-in forge: upgrade the forge first" (upgrade-forge).
 page:   tests/executed-docs/INVENTORY.md
 claim:  fenced bash blocks across
 test:   grep -rhE '^[ \t]*```bash$' docs/ | wc -l | tr -d ' '
-expect: 483
+expect: 485
 states: [0-9]+ fenced bash blocks
 
 # (2026-10-27): two sentences pinned so they cannot be edited

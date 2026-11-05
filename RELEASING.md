@@ -445,6 +445,11 @@ afterwards, not from memory:
 - what was deliberately not tested;
 - for a patch, the "what taking this patch costs" block
   ([the patch train](#checklist-rows-the-train-adds));
+- **a Forgejo major, when the built-in forge's pin moves to one**, named in the
+  release notes' first section (with the Breaking entries), together with the
+  `tockmox-install.sh upgrade-forge` step that applies it; a major moves only in a
+  minor, never in a patch (the pin is `FORGE_IMAGE_TAG_DEFAULT` and
+  `CHART_VERSION_DEFAULT` in `install/bootstrap-forge.sh`);
 - a **Component versions** list, in every release (minor and patch): one
   bullet per deployed component whose version changed since the previous final
   tag, written `name old -> new`. It covers the open-source software Tockmox

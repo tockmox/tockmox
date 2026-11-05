@@ -52,6 +52,7 @@ where a rebuild or a repair would put them back.
 |---|---|
 | `TockmoxSiteRepositoryCopyBehind` | The off-site copy's latest commit has differed from the forge's for more than 15 minutes |
 | `TockmoxSiteRepositoryNoOffsiteCopy` | The site has no off-site copy at all. It persists, and you can snooze or dismiss it like any other alert |
+| `TockmoxSiteRebuildDrillOverdue` | The last [rebuild drill](#rehearse-the-rebuild-the-drill) failed, or passed more than 92 days ago, or the site is older than 92 days and has never had one. The daily `tockmox-forge-drill-check` job reads the drill's record from the destination; its log says which |
 
 Both go wherever the site's other alerts go. A failed copy or dump job also leaves
 a failed Job, which the platform's failed-Job alert reports.
@@ -196,6 +197,47 @@ already holds the copy's commit** (there is nothing to repair; `--force` overrid
 that), and it refuses when the forge is down but its volume is intact, which is a
 restart, not a repair.
 
+## Rehearse the rebuild: the drill
+
+**Once a quarter, on a throwaway cluster.** The drill is the rebuild above, run for
+real from the latest off-site copy and your real recovery kit, onto a cluster you
+then throw away. Before the rebuild it proves the three refusals on the same copy
+and kit, each as a dry run that touches no cluster: a stale copy is named as
+stale, a corrupt bundle is refused, a wrong passphrase stops before anything is
+installed. It then rebuilds, waits for every Application to be `Synced` and
+`Healthy`, and writes its result next to the copy (`drill/latest` in the bucket,
+or the `forge-drill` branch on a git remote). The site's daily
+`tockmox-forge-drill-check` job reads that record, and
+`TockmoxSiteRebuildDrillOverdue` fires when the drill failed or is due.
+
+**The throwaway forge only reads the destination.** The drill rebuilds with
+`--no-offsite-setup`, so the second forge never writes to the site's copy.
+Delete the throwaway cluster when the drill ends.
+
+**WORKSTATION**
+
+```bash
+: "${TOCKMOX:?export TOCKMOX first, see Set these once}"
+: "${S3_ENDPOINT:?export S3_ENDPOINT first, see Set these once}"
+: "${KIT:?export KIT first, see Set these once}"
+: "${DRILL_CONTEXT:?export DRILL_CONTEXT first: a THROWAWAY cluster with Argo CD and nothing else}"
+"$TOCKMOX/install/tockmox-install.sh" rebuild-drill --restore-from offsite \
+  --offsite-s3-endpoint "$S3_ENDPOINT" --offsite-s3-bucket "$S3_BUCKET" \
+  --offsite-s3-credentials "$S3_CREDENTIALS" \
+  --kit "$KIT" --age-identity "$AGE_IDENTITY" \
+  --kit-out "$(mktemp -d)/drill-kit.tar.age" \
+  --site-out "$(mktemp -d)/tockmox-site-drill" \
+  --context "$DRILL_CONTEXT"
+```
+
+**Success condition:** it ends with `rebuild drill PASSED in <seconds> s from
+<commit>; refusals proven: stale,corrupt,passphrase` and `record written to ...
+and read back`. A drill that fails writes its record too, with the reason, so the
+alert fires a day later instead of nobody knowing. The kit this run writes belongs
+to the throwaway forge; it is not your site's kit, so it goes to a temporary
+directory. `--drill-wait-minutes N` (default 45) is how long it waits for the
+Applications.
+
 ## What is not certified here
 
 - The rebuild has been proven on lab clusters with virtual clusters standing in
@@ -205,8 +247,11 @@ restart, not a repair.
 - The wrong-passphrase refusal was proven on the lab. The corrupt-bundle,
   tampered-file and stale-copy refusals are proven by the installer's tests, with
   real bundles and kits, not yet on the lab.
-- There is no scheduled rebuild drill in this release. Until there is, the dry run
-  above is the regular check that the copy and the kit still open.
+- The rebuild drill's refusals and its record are proven by the installer's tests
+  with real bundles and kits; its rebuild and its wait for the Applications have
+  not yet been run on the lab. Scheduling it is yours: the drill-check job and its
+  alert only say when one is due. The disconnected variant, a copy carried in on
+  media with the uplink cut, is not part of the drill yet.
 
 <!-- tockmox:footer:begin -->
 

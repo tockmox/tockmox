@@ -336,6 +336,35 @@ has been restored at least once, per
 [backup and restore](../operations/backup-restore.md). A backup nobody has
 restored is a claim, not a backup.
 
+### On the built-in forge: upgrade the forge first
+
+**Only for a site on the built-in forge** (`site.forge: built-in`, the default
+from 0.9.0). Each Tockmox release pins one Forgejo on its long-term-support line,
+and the installer upgrades the forge, never Argo CD. Run it from a Tockmox clone
+checked out at the revision you are moving to, so it carries that release's pin.
+It takes a fresh off-site copy and waits for it to succeed, upgrades the forge's
+Helm release to the pinned chart and image with the values it already has, and
+checks the forge answers at the pinned version. It refuses a site with no off-site
+copy unless you pass `--without-copy`.
+
+**WORKSTATION**
+
+```bash
+: "${KUBE_CONTEXT:?export KUBE_CONTEXT first, see Before you begin}"
+: "${TOCKMOX:?export TOCKMOX first: a Tockmox clone checked out at TARGET_REVISION}"
+git -C "$TOCKMOX" describe --tags --always
+"$TOCKMOX/install/tockmox-install.sh" upgrade-forge --context "$KUBE_CONTEXT"
+```
+
+**Success condition:** `git describe` prints the revision you are moving to, and
+the upgrade ends with `the forge answers as Forgejo <version>`, or says the forge
+already runs the pinned one. **If it fails, do not move the revision:** the
+forge's data may already be migrated forward, so the way back is a forge repair
+from the copy the command took first
+([repair only the forge](../administration/site-forge-recovery.md#repair-only-the-forge)),
+which the error message spells out. A Forgejo **major** moves only in a Tockmox
+minor, and that release's notes name it in their first section.
+
 ## 3. Check your customisations
 
 **Conditional. Run this if** you use Kustomize patches, which is rung 3 of the

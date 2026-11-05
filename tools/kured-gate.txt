@@ -61,6 +61,7 @@ alert TockmoxResilientDrillAbsent         pass   # the resilient profile has no 
 alert TockmoxResilientNoPassingDrill      pass   # no drill has passed yet under the resilient profile; a claim is unproven, not a node at risk
 alert TockmoxSiteRepositoryCopyBehind     pass   # the off-site copy of the site repository is behind; a reboot neither causes nor cures it
 alert TockmoxSiteRepositoryNoOffsiteCopy  pass   # no off-site destination is set for the built-in forge; a standing condition, not a node at risk
+alert TockmoxSiteRebuildDrillOverdue      pass   # the rebuild drill failed or is due; a standing condition about the off-site copy and kit, not a node at risk
 alert TockmoxUISignInFailing              pass   # the console sign-in; a service fault, not node safety
 alert TockmoxUIUnreachable                pass   # the console is down; a service fault, not node safety
 

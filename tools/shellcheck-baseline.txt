@@ -41,7 +41,7 @@ tests/installer/bootstrap-secrets-tests.sh	SC2010	2
 tests/installer/bootstrap-secrets-tests.sh	SC2016	1
 tests/installer/bootstrap-secrets-tests.sh	SC2034	4
 tests/installer/bootstrap-secrets-tests.sh	SC2086	1
-tests/installer/run.sh	SC1091	5
+tests/installer/run.sh	SC1091	7
 tests/policy-gate/run.sh	SC2015	11
 tests/policy-gate/run.sh	SC2164	1
 tests/policy-gate/run.sh	SC2329	1
