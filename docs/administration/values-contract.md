@@ -452,6 +452,25 @@ Listing those integration points with a tier each, and a gate that catches
 drift, is planned for 0.9.0. Until it lands, treat anything not reached through a
 `stable` key as something to re-check at every upgrade.
 
+## The built-in forge's interface is `stable` too
+
+Four things about the built-in forge are not chart values, and a site, a tool or a
+person depends on each of them all the same. They carry the `stable` promise
+above: a change to any one is a breaking change, made only in a minor with a
+migration note at the top of its release section.
+
+| Promise | What it is |
+|---|---|
+| The in-cluster repository address | The forge's Service `tockmox-forge-http` in the namespace `tockmox-forge`, port 3000, repository `tockmox/site`: the address every Application names, the same on every site and after every rebuild (it is in `bootstrap/root.yaml`) |
+| The approvers mapping | The identity layer's admin group (`sso.adminGroup`) maps to the forge's `approvers` team, and only that team's approval merges into `main` |
+| The `Approved-by:` line | Every change merged through the console carries `Approved-by:` naming the person in its merge commit, so who approved what is in the history itself |
+| The off-site copy's format | `format tockmox-site-copy v1` (the `latest` pointer, the bundle and its `.sha256`, or `main` on a git remote) and the rebuild drill's `format tockmox-rebuild-drill v1` record |
+
+The Forgejo version under them is not part of the promise. Each release pins one
+on its long-term-support line, and `tockmox-install.sh upgrade-forge` moves a
+running site to it ([upgrade](../deployment/upgrade.md#on-the-built-in-forge-upgrade-the-forge-first)).
+A Forgejo major moves only in a Tockmox minor.
+
 ## What is still not covered
 
 Stated so nobody has to find out:

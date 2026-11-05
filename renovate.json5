@@ -195,6 +195,28 @@
       extractVersionTemplate: "^v(?<version>.+)$",
     },
     {
+      // THE BUILT-IN FORGE'S PIN lives in install/bootstrap-forge.sh, not under charts/
+      // (the forge is a prerequisite the installer installs, never an Argo CD layer), so
+      // no chart manager sees it. The image and the chart move together: the chart ships
+      // the image as its appVersion. tockmox-install.sh upgrade-forge applies a moved pin
+      // to a running site, after a fresh off-site copy. A Forgejo major moves only in a
+      // Tockmox minor, named first in its release notes (RELEASING.md).
+      customType: "regex",
+      description: "Built-in forge image pin in install/bootstrap-forge.sh",
+      managerFilePatterns: ["/^install/bootstrap-forge\\.sh$/"],
+      matchStrings: ["\\nFORGE_IMAGE_TAG_DEFAULT=\"(?<currentValue>[^\"]+)\""],
+      depNameTemplate: "code.forgejo.org/forgejo/forgejo",
+      datasourceTemplate: "docker",
+    },
+    {
+      customType: "regex",
+      description: "Built-in forge chart pin in install/bootstrap-forge.sh",
+      managerFilePatterns: ["/^install/bootstrap-forge\\.sh$/"],
+      matchStrings: ["\\nCHART_VERSION_DEFAULT=\"(?<currentValue>[^\"]+)\""],
+      depNameTemplate: "code.forgejo.org/forgejo-helm/forgejo",
+      datasourceTemplate: "docker",
+    },
+    {
       customType: "regex",
       description: "busybox wait-for-ca init container (registry threaded through tpl)",
       managerFilePatterns: ["/^charts/tockmox-devops/values\\.yaml$/"],

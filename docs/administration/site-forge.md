@@ -177,6 +177,43 @@ can also push your internal copy of the Tockmox charts repository into the forge
 so a site with no route to GitHub reads both its charts and its values from inside
 the cluster: [install with no internet access](../deployment/airgap.md).
 
+## Move to my own forge
+
+**When you would rather keep the site on a forge of your own** (GitHub, GitLab,
+your own Forgejo). The move takes the whole history, every branch and tag, not a
+snapshot, and Argo CD changes source in one change that an approver merges, like
+every other change to the site.
+
+**YOU SUPPLY:** an **empty** repository there (no README, no licence, no branch),
+its https address, and a file with two lines, a user and a token that can push to
+it. Give a second file with a read-only token as `--read-credentials` if you can:
+that one is the token Argo CD keeps.
+
+**WORKSTATION**
+
+```bash
+: "${TOCKMOX:?export TOCKMOX first: your Tockmox clone}"
+: "${KUBE_CONTEXT:?export KUBE_CONTEXT first: the site's cluster}"
+OWN_FORGE_URL=YOUR_EMPTY_REPOSITORY_URL
+"$TOCKMOX/install/tockmox-install.sh" move-forge --context "$KUBE_CONTEXT" \
+  --to "$OWN_FORGE_URL" --credentials "$HOME/tockmox-backup/own-forge-push"
+```
+
+It refuses a repository that is not empty, pushes every branch and tag and reads
+`main` back, gives Argo CD a read credential for the new repository, and opens
+one change on the built-in forge that names the new repository wherever the site
+named the forge. **Approve it in Platform › Changes.** The command waits for that
+(`--approval-wait-minutes`, default 60). Then it pushes the merged `main` to
+the new repository, applies the root Application from it, and **archives** the
+built-in forge's repository: read-only, nothing deleted.
+
+**Success condition:** it ends with `the built-in forge's repository is
+archived`, and Argo CD's Applications read the new address
+(`kubectl -n argocd get applications -o wide`). If you approve later, run the same
+command with `--finish`. Then, in `tockmox.yaml`, set `site.forge: external` with
+the new repository, so the installer does not generate a built-in-forge site
+again. The forge and its off-site copy job stay installed until you remove them.
+
 ## What it does not claim
 
 - **It does not make the cluster its own backup.** The off-site copy and the

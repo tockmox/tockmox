@@ -1454,3 +1454,6 @@ siteForge:
   namespace: tockmox-forge
   release: tockmox-forge
   copyBehindMinutes: 15
+  # Hours without a successful daily drill-check before
+  # TockmoxSiteRebuildDrillOverdue fires (the check runs at 06:15).
+  drillCheckHours: 26
