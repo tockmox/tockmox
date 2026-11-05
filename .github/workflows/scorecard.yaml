@@ -30,6 +30,7 @@ jobs:
   analysis:
     name: Scorecard analysis
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # 30 recent runs: all under 1 min
     permissions:
       security-events: write   # upload the SARIF to code scanning
       id-token: write          # sign the published result (OIDC)

@@ -9,6 +9,12 @@ on:
     # commit, so without this a release branch could never satisfy it.
     branches: [main, 'release-*']
 
+# A newer push to a pull request cancels its older run; pushes to main, release-* and tags
+# always run to the end (the same rule as check-all.yaml).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -34,6 +40,7 @@ jobs:
     # GitHub-hosted: free and unlimited on public repos, and safe against fork PRs.
     # Self-hosted runners must never serve pull_request from forks.
     runs-on: ubuntu-latest
+    timeout-minutes: 30   # 30 recent runs: the whole workflow took at most 9 min; without a limit a hung step holds a runner for 6 h
     # FOUR PARTS AT ONCE. Every named step below carries `matrix.part` in its `if:` and
     # runs in exactly one part, split by the time each step took on the first split run (2026-11-01:
     # the UI's tests and the alert rules each about a part on their own), so the job takes about a
@@ -758,6 +765,7 @@ jobs:
 
   secrets:
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # about 10 s today
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }
@@ -891,6 +899,7 @@ jobs:
     # upgrade applies. A separate check proves an upgrade.
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # under a minute today
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: { fetch-depth: 0 }   # tags, so the previous release resolves
