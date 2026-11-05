@@ -40,13 +40,17 @@
   // branch under "Pending Approval".
   dependencyDashboardApproval: false,
 
-  // One weekly batch rather than a trickle. Security PRs bypass this via
-  // vulnerabilityAlerts below.
+  // One weekly batch rather than a trickle, on Friday night: Fri 18:00 to
+  // Sat 05:59 CT (two windows, OR'd), so the batch is worked over the weekend
+  // rather than opening the week. Security PRs bypass this via
+  // vulnerabilityAlerts below. Release-line PRs open after that week's Friday
+  // cutoff, so a merged one rides the following Saturday's train (RELEASING.md
+  // "Cadence, skips, and security").
   // NOTE: `schedule` gates BRANCH CREATION, not scanning. Outside the window a
   // scan recomputes everything and writes nothing, parking items under
   // "Awaiting Schedule". Keep the window wide: a narrow one can be missed
   // entirely by the hosted scan cadence, silently rolling the whole batch over.
-  schedule: ["before 9am on monday"],
+  schedule: ["after 6pm on friday", "before 6am on saturday"],
 
   // Outside the window, leave existing branches alone as well: a PR's head
   // must not move after it has been approved for a patch train.
@@ -100,9 +104,9 @@
   // the first packageRule keeps it off them.
   // A pip-compile bump moves only the direct pins in the .in files; everything
   // they pull in moves only when the whole lockfile is re-resolved. Lock file
-  // maintenance does that once a week, as one PR, in the same Monday window as
-  // everything else (its own default is a narrower 4am window, which the hosted
-  // scan cadence can miss). Scoped to this manager: a Chart.lock refresh buys
+  // maintenance does that once a week, as one PR, in the same Friday-night
+  // window as everything else (its own default is a narrower before-4am-Monday
+  // window, which the hosted scan cadence can miss). Scoped to this manager: a Chart.lock refresh buys
   // nothing and costs an images.txt/SBOM regen. uv.toml at the root holds the
   // re-resolve to packages at least three days old, the same soak as below.
   "pip-compile": {
@@ -112,7 +116,7 @@
     ],
     lockFileMaintenance: {
       enabled: true,
-      schedule: ["before 9am on monday"],
+      schedule: ["after 6pm on friday", "before 6am on saturday"],
     },
   },
 
@@ -278,7 +282,7 @@
       // OPEN WEBUI TAKES EVERY RELEASE AS IT LANDS (maintainer ruling,
       // 2026-10-17); LITELLM DOES NOT, see the rule right below. Both ship
       // several releases a week and their fixes matter (spend accounting,
-      // access checks), so this rule sets no soak and no Monday window: a PR
+      // access checks), so this rule sets no soak and no weekly window: a PR
       // opens as soon as a stable release is out. That ruling stands for Open
       // WebUI; for LiteLLM the next rule puts three days back.
       // AFTER the non-major group on purpose, so this group name wins for
