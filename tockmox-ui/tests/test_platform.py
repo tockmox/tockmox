@@ -435,6 +435,23 @@ def test_cron_follows_robfig_day_semantics_and_refuses_empty_items():
             Cron(bad)
 
 
+def test_cron_fires_a_fall_back_repeated_wall_time_twice_and_never_a_skipped_one():
+    import datetime as dt
+    # robfig/cron (Kubernetes, Argo) steps in real time, so a fire time is any instant whose wall clock matches.
+    # 2026-11-01 in America/Chicago: 02:00 CDT falls back to 01:00 CST, so 01:30 happens at 06:30Z and at 07:30Z
+    c = Cron("30 1 * * *", "America/Chicago")
+    first = dt.datetime(2026, 11, 1, 6, 30, tzinfo=dt.timezone.utc).timestamp()
+    assert c.next_after(first - 60) == first
+    assert c.next_after(first) == first + 3600
+    assert c.prev_before(first + 3600 + 59) == first + 3600
+    # 2026-03-08: 02:00 CST springs to 03:00 CDT, so 02:30 never happens that day and the next one is on the 9th
+    c = Cron("30 2 * * *", "America/Chicago")
+    t = c.next_after(dt.datetime(2026, 3, 8, 7, 0, tzinfo=dt.timezone.utc).timestamp())
+    assert dt.datetime.fromtimestamp(t, ZoneInfo("America/Chicago")).strftime("%d %H:%M") == "09 02:30"
+    # ClusterFuzzLite's crash (2026-11-05): :01 hourly from inside Chatham's 1998 fall-back hour skipped the repeat
+    assert Cron("1 * * * *", "Pacific/Chatham").next_after(889883149) == 889884960
+
+
 def test_several_schedules_are_all_evaluated():
     now = Cron("30 * * * *").prev_before(NOW) + 1200    # 20 minutes after a :30 fire, past its grace
     it = item(schedule="0 * * * *", schedules=["0 * * * *", "30 * * * *"], last_run=now - 1200 - 1800,

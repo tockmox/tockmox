@@ -12,7 +12,7 @@ Not supported (refused with ValueError, never guessed): `L`, `W`, `#`, `?`, seco
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 _MACROS = {"@yearly": "0 0 1 1 *", "@annually": "0 0 1 1 *", "@monthly": "0 0 1 * *",
@@ -84,30 +84,34 @@ class Cron:
         return dom_ok and dow_ok        # robfig: either field starred means both must match
 
     def _scan(self, start_ts: float, direction: int) -> float | None:
-        """Walk local wall-clock time minute by minute, skipping whole days and hours that cannot
-        match, for at most a little over four years. Wall times that do not exist (spring-forward)
-        are skipped; ambiguous ones (fall-back) take the first occurrence."""
-        t = datetime.fromtimestamp(start_ts, self.tz).replace(second=0, microsecond=0, tzinfo=None)
-        t += timedelta(minutes=direction)
-        limit = 366 * 4 * 24 * 60
-        n = 0
-        while n < limit:
+        """Walk real time (UTC) minute by minute from the minute after (or, backward, at) start_ts, reading each
+        minute's local wall clock, for at most a little over four years. A fire time is any instant whose wall
+        clock matches, as robfig/cron steps in real time: a wall time a fall-back repeats fires in both
+        occurrences, and one a spring-forward skips never fires. Whole days and hours that cannot match are
+        skipped, but never across a change of UTC offset; there it steps minute by minute."""
+        m = int(start_ts // 60) * 60 + 60 * direction
+        end = m + direction * 366 * 4 * 86400
+        while (m <= end) if direction > 0 else (m >= end):
+            t = datetime.fromtimestamp(m, self.tz)
             if not self._day_ok(t):
-                t = (t.replace(hour=0, minute=0) + timedelta(days=1)) if direction > 0 else (t.replace(hour=23, minute=59) - timedelta(days=1))
-                n += 1440
+                m = self._hop(m, t, direction, (24 * 60 - (t.hour * 60 + t.minute)) if direction > 0
+                              else (t.hour * 60 + t.minute + 1))
                 continue
             if t.hour not in self.hours:
-                t = (t.replace(minute=0) + timedelta(hours=1)) if direction > 0 else (t.replace(minute=59) - timedelta(hours=1))
-                n += 60
+                m = self._hop(m, t, direction, (60 - t.minute) if direction > 0 else (t.minute + 1))
                 continue
-            if t.minute in self.minutes:
-                aware = t.replace(tzinfo=self.tz, fold=0)
-                back = aware.astimezone(timezone.utc).astimezone(self.tz).replace(tzinfo=None)
-                if back == t:   # a real wall time
-                    return aware.timestamp()
-            t += timedelta(minutes=direction)
-            n += 1
+            if t.minute in self.minutes and t.second == 0:
+                return float(m)
+            m += 60 * direction
         return None
+
+    def _hop(self, m: int, t: datetime, direction: int, minutes: int) -> int:
+        """`minutes` of wall clock ahead (or back) from t, in real time, when the UTC offset is the same at both ends;
+        one minute when it is not, so a fall-back's repeated wall times are walked, not jumped."""
+        target = m + direction * 60 * minutes
+        if datetime.fromtimestamp(target, self.tz).utcoffset() != t.utcoffset():
+            return m + 60 * direction
+        return target
 
     def next_after(self, ts: float) -> float | None:
         return self._scan(ts, +1)
