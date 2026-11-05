@@ -9,6 +9,8 @@ One loopback server, three roles, told apart by path:
                 dump's review-id check, so it is the forge's order)
   /s3/<bucket>/<key>   an S3-compatible bucket, path style, in memory (PUT, GET, HEAD; the
                 request signature is not checked: the dump's correctness does not depend on it)
+  /tockmox-bkt/<key>   the same store, as the bucket tockmox-bkt at the endpoint's root, for a
+                client whose endpoint takes no path (forge-restore.sh and its rebuild drill)
   anything else  git over smart HTTP, served by `git http-backend` from ROOT: the forge's
                 repository at /tockmox/site.git and an off-site remote at /remote/site.git
 
@@ -74,6 +76,11 @@ def page(items, q):
     return items[(p - 1) * n:p * n]
 
 
+def json_load(path):
+    with open(path) as fh:
+        return _json.load(fh)
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -110,10 +117,54 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, dumps([review_comment(int(m.group(1)), int(m.group(2)))]).encode())
         return self.send(404, b'{"message":"not found"}')
 
+    # move-forge (POST a pull request, read it back, PATCH the repository archived). MOVE=merge makes
+    # the stand-in merge the change the first time it is read, as an approver would; MOVE=wait never does.
+    def write_api(self, a):
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0)
+        d = _json.loads(body or b"{}")
+        if self.command == "POST" and a == "/repos/tockmox/site/pulls":
+            os.makedirs(os.path.join(ROOT, "moves"), exist_ok=True)
+            n = 100 + len(os.listdir(os.path.join(ROOT, "moves"))) + 1
+            rec = {"number": n, "state": "open", "merged": False, "title": d.get("title"), "head": {"ref": d.get("head")}}
+            with open(os.path.join(ROOT, "moves", "%d.json" % n), "w") as fh:
+                _json.dump(rec, fh)
+            return self.send(201, dumps(rec).encode())
+        if self.command == "PATCH" and a == "/repos/tockmox/site":
+            with open(os.path.join(ROOT, "archived"), "w") as fh:
+                fh.write("true" if d.get("archived") else "false")
+            return self.send(200, dumps(repo()).encode())
+        return self.send(404, b'{"message":"not found"}')
+
+    def move_pr(self, n):
+        path = os.path.join(ROOT, "moves", "%d.json" % n)
+        if not os.path.exists(path):
+            return self.send(404, b"{}")
+        rec = json_load(path)
+        mode = os.environ.get("MOVE", "")
+        if os.path.exists(os.path.join(ROOT, "move-mode")):   # a test switches it between runs
+            mode = open(os.path.join(ROOT, "move-mode")).read().strip()
+        if mode == "merge" and not rec["merged"]:
+            bare = os.path.join(ROOT, "tockmox", "site.git")
+            head = subprocess.run(["git", "--git-dir", bare, "rev-parse", "refs/heads/" + rec["head"]["ref"]],
+                                  capture_output=True, text=True).stdout.strip()
+            subprocess.run(["git", "--git-dir", bare, "update-ref", "refs/heads/main", head], check=True)
+            rec.update(state="closed", merged=True)
+            with open(path, "w") as fh:
+                _json.dump(rec, fh)
+        if mode == "close" and rec["state"] == "open":
+            rec.update(state="closed")
+            with open(path, "w") as fh:
+                _json.dump(rec, fh)
+        return self.send(200, dumps(rec).encode())
+
     def route(self):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
         p = u.path
+        if p.startswith("/tockmox-bkt/"):
+            # The same bucket at the endpoint's root, for a client that takes an endpoint
+            # with no path (forge-restore.sh, whose rebuild drill writes its record here).
+            p = "/s3" + p
         if p.startswith("/s3/"):
             k = p[4:]
             if self.command == "PUT":
@@ -125,7 +176,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     body = body + b"x"
                 return self.send(200, body, "application/octet-stream")
             return self.send(404, b"<Error>NoSuchKey</Error>")
+        if p.startswith("/api/v1") and self.command in ("POST", "PATCH"):
+            return self.write_api(p[7:])
         if p.startswith("/api/v1"):
+            m = re.fullmatch(r"/repos/tockmox/site/pulls/(\d+)", p[7:])
+            if m and os.path.exists(os.path.join(ROOT, "moves")):
+                return self.move_pr(int(m.group(1)))
+            if p[7:] == "/repos/tockmox/site/pulls" and os.path.exists(os.path.join(ROOT, "moves")):
+                return self.send(200, dumps([json_load(os.path.join(ROOT, "moves", f)) for f in sorted(os.listdir(os.path.join(ROOT, "moves")))]).encode())
             return self.api(p[7:], q)
         env = dict(os.environ, GIT_PROJECT_ROOT=ROOT, GIT_HTTP_EXPORT_ALL="1", PATH_INFO=p, QUERY_STRING=u.query,
                    REQUEST_METHOD=self.command, CONTENT_TYPE=self.headers.get("Content-Type", ""),
@@ -161,7 +219,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(out)
 
-    do_GET = do_PUT = do_POST = do_HEAD = route
+    do_GET = do_PUT = do_POST = do_HEAD = do_PATCH = route
 
 
 srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)

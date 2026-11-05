@@ -148,7 +148,7 @@ dp_stop
 dp_start d4c
 dp_run TASK=bogus MODE=git GIT_REMOTE_URL=http://127.0.0.1:1/x.git
 assert_artifact "an unknown TASK is a misconfiguration, exit 2" \
-  "echo $DP_STATUS; grep -c 'TASK must be copy or dump' '$D/out/stderr'" "$(printf '2\n1')"
+  "echo $DP_STATUS; grep -c 'TASK must be copy, dump or drill-check' '$D/out/stderr'" "$(printf '2\n1')"
 dp_stop
 
 # ---------------------------------------------------------------------- D5

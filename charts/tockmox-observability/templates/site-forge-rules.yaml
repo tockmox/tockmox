@@ -24,6 +24,12 @@ the installer set `siteForge.enabled`:
       stays until a destination exists, and the console's Silence on the Site
       repository part snoozes or dismisses it like any other alert.
 
+  TockmoxSiteRebuildDrillOverdue   the drill-check CronJob (<release>-drill-check,
+      each morning) has not SUCCEEDED for drillCheckHours (default 26). It fails
+      when the last rebuild drill (tockmox-install.sh rebuild-drill) failed, or
+      passed more than a quarter ago, or when there is none and the site is
+      older than a quarter. Its log names which.
+
 THE SCRAPE GUARD (`count(kube_namespace_status_phase...)`) is the same arm the
 resilience rules use: a dead kube-state-metrics, which alerts on its own, must
 not read as "no off-site copy" or as a copy that stopped.
@@ -35,6 +41,8 @@ not read as "no off-site copy" or as a copy that stopped.
 {{- $release := $sf.release | default "tockmox-forge" -}}
 {{- $cron := printf "%s-offsite" $release -}}
 {{- $mins := int ($sf.copyBehindMinutes | default 15) -}}
+{{- $drill := printf "%s-drill-check" $release -}}
+{{- $dhours := int ($sf.drillCheckHours | default 26) -}}
 # SPDX-License-Identifier: Apache-2.0
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -100,4 +108,33 @@ spec:
               tockmox-install.sh bootstrap-forge with --offsite-s3-* or
               --offsite-git. Snooze or dismiss this from the console's Site
               repository part if you keep a copy some other way.
+        - alert: TockmoxSiteRebuildDrillOverdue
+          # The same two arms as CopyBehind, on the daily drill-check job.
+          expr: >-
+            (
+              (time() - max by (namespace, cronjob) (kube_cronjob_status_last_successful_time{namespace={{ $ns | quote }}, cronjob={{ $drill | quote }}})) > {{ mul $dhours 3600 }}
+              or
+              (
+                (time() - max by (namespace, cronjob) (kube_cronjob_created{namespace={{ $ns | quote }}, cronjob={{ $drill | quote }}})) > {{ mul $dhours 3600 }}
+                unless on (namespace, cronjob)
+                kube_cronjob_status_last_successful_time{namespace={{ $ns | quote }}, cronjob={{ $drill | quote }}}
+              )
+            )
+            and on ()
+            (count(kube_namespace_status_phase{namespace={{ $ns | quote }}}) > 0)
+          for: 1m
+          labels:
+            severity: warning
+            tockmox_component: site-repository
+          annotations:
+            summary: "The site's rebuild drill failed or is overdue"
+            description: >-
+              The drill-check job {{ $ns }}/{{ $drill }} has not succeeded for
+              more than {{ $dhours }} hours: the last rebuild drill failed, or
+              passed more than a quarter ago, or none has been run. Until one
+              passes, nobody knows the off-site copy and the recovery kit can
+              rebuild this site. Its log names which:
+              kubectl -n {{ $ns }} logs -l app.kubernetes.io/name={{ $drill }} --tail=5.
+              Run tockmox-install.sh rebuild-drill on a throwaway cluster
+              (docs/administration/site-forge-recovery.md, The rebuild drill).
 {{- end }}

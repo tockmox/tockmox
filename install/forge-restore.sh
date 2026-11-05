@@ -74,7 +74,10 @@ die()  { err "$*"; exit 1; }
 info() { printf '    %s\n' "$*"; }
 
 ACTION="${1:-}"; shift || true
-case "$ACTION" in rebuild|repair) ;; *) die "internal: forge-restore.sh needs rebuild or repair first" ;; esac
+case "$ACTION" in rebuild|repair|drill) ;; *) die "internal: forge-restore.sh needs rebuild, repair or drill first" ;; esac
+ORIG_ARGS=("$@")
+DRILL=false
+if [[ "$ACTION" == drill ]]; then DRILL=true; ACTION=rebuild; fi   # a drill is a rebuild, checked the same way
 
 usage() {
   cat <<USAGE
@@ -121,6 +124,13 @@ Writes to a CLUSTER, after it has checked everything it can without one.
   --config FILE             read argocd.namespace from the installer's config
   --force                   (repair) reinstall a forge that answers and holds the copy's commit
   --dry-run                 fetch and check the copy and the kit; touch no cluster
+  --keep-copy FILE          keep the checked copy as FILE, with FILE.sha256 and FILE.commit beside it
+  --no-offsite-setup        (rebuild) read the copy from the destination, but do not set the new
+                            forge up to write to it (the drill's throwaway forge never does)
+
+ Rebuild drill (tockmox-install.sh rebuild-drill: the rebuild options above, plus)
+  --drill-wait-minutes N    wait up to N minutes for every Application to be Synced and
+                            Healthy (default 45; 0 records the time to the rebuild's end)
   -h, --help                this
 USAGE
 }
@@ -133,6 +143,7 @@ KIT=""; PASSFILE=""; AGE_IDENTITY=""; KEY_PASSFILE=""; KEY_AGE_IDENTITY=""
 KIT_OUT=""; AGE_RECIPIENT=""; SITE_OUT=""; SEAL_BACKUP=""; NO_SEAL_BACKUP=false
 CONTEXT=""; CONTEXT_GIVEN=false; YES_CONTEXT=""; YES_SERVER=""; NO_PROMPT=false
 FORGE_NS="tockmox-forge"; ARGO_NS=""; CONFIG=""; FORCE=false; DRY_RUN=false
+KEEP_COPY=""; DRILL_WAIT_MIN=45; NO_OFFSITE_SETUP=false
 PASS_FORGE=(); PASS_SECRETS=()
 
 while [[ $# -gt 0 ]]; do
@@ -172,6 +183,9 @@ while [[ $# -gt 0 ]]; do
     --config) CONFIG="${2:?--config needs a file}"; shift 2 ;;
     --force) FORCE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
+    --keep-copy) KEEP_COPY="${2:?--keep-copy needs a file}"; shift 2 ;;
+    --no-offsite-setup) NO_OFFSITE_SETUP=true; shift ;;
+    --drill-wait-minutes) DRILL_WAIT_MIN="${2:?--drill-wait-minutes needs a number}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage; die "unknown argument: $1" ;;
   esac
@@ -314,6 +328,161 @@ need helm "installs the forge"
 TMPD="$(mktemp -d "${TMPDIR:-/tmp}/tockmox-restore.XXXXXX")"
 ok "request is consistent"
 
+# ---------------------------------------------------------------- the rebuild drill
+# `tockmox-install.sh rebuild-drill`: the REAL rebuild command, against the REAL
+# latest off-site copy and the REAL recovery kit, on a throwaway cluster. Before it, the
+# three refusals a rebuild promises are proven on the same copy and kit, each one a dry
+# run that touches no cluster: a stale copy is named as stale, a corrupt bundle is
+# refused, a wrong passphrase stops before anything is installed. Then the rebuild runs,
+# the drill waits for every Application to be Synced and Healthy, and the result goes to
+# the off-site destination as drill/latest (the record format is in
+# forge-offsite-copy.sh), where the site's own drill-check job reads it every day and
+# TockmoxSiteRebuildDrillOverdue fires when it has failed or is a quarter old. A drill
+# that fails still writes its record, so a failure is never silent.
+if $DRILL; then
+  say "The rebuild drill"
+  [[ "$SRC" == offsite ]] || die "a rebuild drill reads the real latest off-site copy: give --restore-from offsite.
+       (The disconnected variant, a copy carried in on media, is a later step of this drill.)"
+  $CONTEXT_GIVEN && [[ -n "$CONTEXT" ]] || die "a rebuild drill runs on a THROWAWAY cluster: name it with --context.
+       Never the site's own cluster: the drill installs a second forge from the copy."
+  ! $DRY_RUN || die "--dry-run and a drill do not go together: the drill runs the dry-run checks itself, then the rebuild"
+  [[ "$DRILL_WAIT_MIN" =~ ^[0-9]+$ ]] || die "--drill-wait-minutes must be a whole number: '$DRILL_WAIT_MIN'"
+  SELF_SH="$HERE/forge-restore.sh"
+  STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+  # The run's own arguments, without the drill's: each probe and the rebuild get them.
+  BASE_ARGS=(); skip_next=false
+  for a in "${ORIG_ARGS[@]}"; do
+    if $skip_next; then skip_next=false; continue; fi
+    case "$a" in --drill-wait-minutes|--keep-copy) skip_next=true; continue ;; esac
+    BASE_ARGS+=("$a")
+  done
+  RESULT="pass"; REASON=""; PROVEN=(); COPY_COMMIT=""; SECS=0
+  fail() { RESULT="fail"; REASON="$*"; err "$*"; }
+  # probe NAME WANT RC ARGS...: a dry run with ARGS added must end with exit status RC
+  # (0, or 1 for a refusal) and say WANT; it never reaches a cluster.
+  probe() {
+    local name="$1" want="$2" rc_want="$3"; shift 3
+    local log="$TMPD/probe-$name.log" rc
+    set +e
+    NO_COLOR=1 bash "$SELF_SH" rebuild "${BASE_ARGS[@]}" --dry-run --site-out "$TMPD/probe-$name-site" "$@" >"$log" 2>&1
+    rc=$?
+    set -e
+    if [[ "$rc" -eq "$rc_want" ]] && grep -q -- "$want" "$log"; then
+      [[ "$name" == copy-and-kit ]] || PROVEN+=("$name")
+      ok "$name: $(grep -m1 -- "$want" "$log" | sed 's/^[[:space:]✓!✗]*//' | cut -c1-110)"
+      return 0
+    fi
+    fail "the $name check did not behave: exit $rc, wanted $rc_want and '$want'. Its log: $(tail -1 "$log" | cut -c1-200)"
+    return 1
+  }
+  KEEP="$TMPD/latest.bundle"
+  if probe copy-and-kit "the copy's main:" 0 --keep-copy "$KEEP"; then
+    COPY_COMMIT="$(cat "$KEEP.commit")"
+    probe stale "older than --max-age-hours 0" 0 --max-age-hours 0 || true
+    head -c "$(( $(wc -c < "$KEEP") - 100 ))" "$KEEP" > "$TMPD/corrupt.bundle"
+    cp "$KEEP.sha256" "$TMPD/corrupt.bundle.sha256"
+    probe corrupt "corrupt or was changed. Nothing was installed" 1 --restore-from "file:$TMPD/corrupt.bundle" || true
+    if [[ -n "$AGE_IDENTITY" ]]; then
+      need age-keygen "makes a wrong identity for the wrong-key check"
+      age-keygen -o "$TMPD/wrong.identity" >/dev/null 2>&1 || die "age-keygen could not make a wrong identity"
+      probe passphrase "the kit did not open whole" 1 --age-identity "$TMPD/wrong.identity" || true
+    else
+      ( umask 077; printf 'not-the-passphrase-%s\n' "$STAMP" > "$TMPD/wrong.pass" )
+      probe passphrase "the kit did not open whole" 1 --passphrase-file "$TMPD/wrong.pass" || true
+    fi
+  fi
+  if [[ "$RESULT" == pass ]]; then
+    say "The rebuild, on $CONTEXT"
+    T0="$(date +%s)"
+    set +e
+    if [[ -n "${TOCKMOX_DRILL_REBUILD:-}" ]]; then   # the hermetic tests' stand-in for the rebuild; never set it
+      bash -c "$TOCKMOX_DRILL_REBUILD" > "$TMPD/rebuild.log" 2>&1
+    else
+      # --no-offsite-setup: the throwaway forge must never write to the site's destination.
+      bash "$SELF_SH" rebuild "${BASE_ARGS[@]}" --no-offsite-setup 2>&1 | tee "$TMPD/rebuild.log"
+      (exit "${PIPESTATUS[0]}")
+    fi
+    rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+      fail "the rebuild command failed (exit $rc): $(grep -m1 '✗' "$TMPD/rebuild.log" | sed 's/^[[:space:]✗]*//' | cut -c1-200)"
+    elif [[ "$DRILL_WAIT_MIN" -gt 0 ]]; then
+      info "waiting up to $DRILL_WAIT_MIN min for every Application in $ARGO_NS to be Synced and Healthy"
+      deadline=$(( $(date +%s) + DRILL_WAIT_MIN * 60 )); apps=""
+      while :; do
+        apps="$(kubectl --context "$CONTEXT" -n "$ARGO_NS" get applications.argoproj.io \
+          -o jsonpath='{range .items[*]}{.metadata.name} {.status.sync.status} {.status.health.status}{"\n"}{end}' 2>/dev/null || true)"
+        total="$(printf '%s\n' "$apps" | grep -c . || true)"
+        good="$(printf '%s\n' "$apps" | awk '$2=="Synced" && $3=="Healthy"' | grep -c . || true)"
+        [[ "$total" -gt 0 && "$good" -eq "$total" ]] && break
+        if [[ "$(date +%s)" -ge "$deadline" ]]; then
+          fail "after $DRILL_WAIT_MIN min, $good of $total Applications are Synced and Healthy: $(printf '%s\n' "$apps" | awk '!($2=="Synced" && $3=="Healthy"){printf "%s %s/%s; ", $1, $2, $3}' | cut -c1-200)"
+          break
+        fi
+        sleep 15
+      done
+      [[ "$RESULT" == pass ]] && ok "all $total Applications Synced and Healthy"
+    fi
+    SECS=$(( $(date +%s) - T0 ))
+  fi
+
+  say "The drill's record"
+  {
+    echo "format tockmox-rebuild-drill v1"
+    echo "result $RESULT"
+    echo "created $STAMP"
+    echo "copy-commit ${COPY_COMMIT:-unknown}"
+    echo "seconds $SECS"
+    echo "refusals $(IFS=,; echo "${PROVEN[*]:-none}")"
+    [[ -z "$REASON" ]] || echo "reason $(printf '%s' "$REASON" | tr '\n' ' ' | cut -c1-300)"
+  } > "$TMPD/drill.record"
+  if [[ "$OFFSITE" == bucket ]]; then
+    AK="$(sed -n 1p "$OS_S3_CREDS")"; SK="$(sed -n 2p "$OS_S3_CREDS")"
+    dkey() { if [[ -n "$OS_S3_PREFIX" ]]; then printf '%s/%s' "$OS_S3_PREFIX" "$1"; else printf '%s' "$1"; fi; }
+    s3_call() {  # METHOD KEY FILE -> HTTP status; PUT uploads FILE, GET writes it
+      local -a a=(-sS -K - --aws-sigv4 "aws:amz:${OS_S3_REGION}:s3" --connect-timeout 15 --max-time 120 -w '%{http_code}')
+      [[ -z "$OS_S3_CA" ]] || a+=(--cacert "$OS_S3_CA")
+      if [[ "$1" == PUT ]]; then a+=(-o /dev/null --upload-file "$3"); else a+=(-o "$3"); fi
+      printf 'user = "%s:%s"\n' "$AK" "$SK" | curl "${a[@]}" "$OS_S3_ENDPOINT/$OS_S3_BUCKET/$2" || true
+    }
+    st="$(s3_call PUT "$(dkey "drill/$STAMP")" "$TMPD/drill.record")"
+    [[ "$st" == 2?? ]] || die "writing the drill's record $(dkey "drill/$STAMP") failed: HTTP $st. The drill's result ($RESULT) is in no record."
+    st="$(s3_call PUT "$(dkey drill/latest)" "$TMPD/drill.record")"
+    [[ "$st" == 2?? ]] || die "writing $(dkey drill/latest) failed: HTTP $st. The drill's result ($RESULT) is only in $(dkey "drill/$STAMP")."
+    st="$(s3_call GET "$(dkey drill/latest)" "$TMPD/drill.back")"
+    { [[ "$st" == 200 ]] && cmp -s "$TMPD/drill.record" "$TMPD/drill.back"; } || die "$(dkey drill/latest) does not read back as written (HTTP $st)"
+    WHERE="$OS_S3_BUCKET/$(dkey drill/latest)"
+  else
+    GH="Authorization: Basic $(printf '%s:%s' "$(sed -n 1p "$OS_GIT_CREDS")" "$(sed -n 2p "$OS_GIT_CREDS")" | base64 | tr -d '\n')"
+    rgit() { GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraHeader GIT_CONFIG_VALUE_0="$GH" GIT_TERMINAL_PROMPT=0 git "$@"; }
+    DR="$TMPD/drill-repo"; git init -q "$DR"
+    if rgit ls-remote --exit-code "$OS_GIT_URL" refs/heads/forge-drill >/dev/null 2>&1; then
+      rgit -C "$DR" fetch -q "$OS_GIT_URL" forge-drill || die "cannot fetch forge-drill from $OS_GIT_URL"
+      git -C "$DR" checkout -q -B forge-drill FETCH_HEAD
+    else
+      git -C "$DR" checkout -q --orphan forge-drill
+    fi
+    mkdir -p "$DR/drill"; cp "$TMPD/drill.record" "$DR/drill/$STAMP"; cp "$TMPD/drill.record" "$DR/drill/latest"
+    git -C "$DR" add drill
+    git -C "$DR" -c user.name=tockmox-rebuild-drill -c user.email=tockmox-rebuild-drill@localhost.invalid \
+      commit -q -m "Rebuild drill $STAMP: $RESULT"
+    # No --force: a remote that refuses rewrites keeps every earlier record.
+    rgit -C "$DR" push -q "$OS_GIT_URL" forge-drill || die "pushing the drill's record to $OS_GIT_URL forge-drill failed. The drill's result ($RESULT) is in no record."
+    got="$(rgit ls-remote "$OS_GIT_URL" refs/heads/forge-drill | awk 'NR==1{print $1}')"
+    [[ "$got" == "$(git -C "$DR" rev-parse HEAD)" ]] || die "forge-drill on $OS_GIT_URL is not the record just pushed"
+    WHERE="$OS_GIT_URL forge-drill"
+  fi
+  ok "record written to $WHERE and read back"
+  if [[ "$RESULT" == pass ]]; then
+    ok "rebuild drill PASSED in $SECS s from ${COPY_COMMIT:0:12}; refusals proven: $(IFS=,; echo "${PROVEN[*]}")"
+    info "the site's drill-check job reads this record daily; the next drill is due within 92 days"
+    exit 0
+  fi
+  err "rebuild drill FAILED: $REASON"
+  info "the record says so, and the site's TockmoxSiteRebuildDrillOverdue alert fires within a day"
+  exit 1
+fi
+
 # ---------------------------------------------------------------- the copy
 say "The off-site copy"
 BUNDLE="$TMPD/site.bundle"; WANT_COMMIT=""
@@ -379,6 +548,11 @@ MAIN="$(printf '%s\n' "$HEADS" | awk '$2=="refs/heads/main"{print $1; exit}')"
 [[ -n "$MAIN" ]] || die "the copy holds no main branch. Nothing was installed."
 if [[ -n "$WANT_COMMIT" && "$MAIN" != "$WANT_COMMIT" ]]; then
   die "the bundle's main is $MAIN, but the copy's pointer names $WANT_COMMIT. Nothing was installed."
+fi
+if [[ -n "$KEEP_COPY" ]]; then
+  { cp "$BUNDLE" "$KEEP_COPY" && printf '%s  site.bundle\n' "$(sha_of "$BUNDLE")" > "$KEEP_COPY.sha256" \
+    && printf '%s\n' "$MAIN" > "$KEEP_COPY.commit"; } || die "cannot keep the copy as $KEEP_COPY"
+  ok "copy kept as $KEEP_COPY (with .sha256 and .commit)"
 fi
 
 # The site: checked out where the operator can keep it (rebuild) or in the temp dir (repair).
@@ -494,7 +668,10 @@ ok "cluster reachable, Argo CD namespace $ARGO_NS present"
 FORGE_FLAGS=(--site "$SITE_ABS" --kit-out "$KIT_OUT" --argocd-namespace "$ARGO_NS" "${CONFIRM[@]}")
 case "$ENC" in age) FORGE_FLAGS+=(--age-recipient "$AGE_RECIPIENT") ;; openssl) FORGE_FLAGS+=(--passphrase-file "$PASSFILE") ;; esac
 if [[ -n "$SEAL_BACKUP" ]]; then FORGE_FLAGS+=(--sealing-key-backup "$SEAL_BACKUP"); else FORGE_FLAGS+=(--no-sealing-key-backup); fi
-case "$OFFSITE" in
+# The rebuild drill's throwaway forge reads the site's destination and never writes to it:
+# its push mirror would force-push its (older) main over the site's copy.
+$NO_OFFSITE_SETUP && OFFSITE_FOR_FORGE="" || OFFSITE_FOR_FORGE="$OFFSITE"
+case "$OFFSITE_FOR_FORGE" in
   bucket) FORGE_FLAGS+=(--offsite-s3-endpoint "$OS_S3_ENDPOINT" --offsite-s3-bucket "$OS_S3_BUCKET" \
             --offsite-s3-region "$OS_S3_REGION" --offsite-s3-credentials "$OS_S3_CREDS")
           [[ -z "$OS_S3_PREFIX" ]] || FORGE_FLAGS+=(--offsite-s3-prefix "$OS_S3_PREFIX")

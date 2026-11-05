@@ -13,6 +13,14 @@
 # which git does not carry) to the same destination instead. See "the nightly forge
 # dump" below; a failed dump leaves a failed Job, which KubeJobFailed reports.
 #
+# TASK=drill-check is run once a day by the CronJob tockmox-forge-drill-check. It
+# reads the record the last rebuild drill left at the destination (written by
+# `tockmox-install.sh --restore-from offsite --drill`) and succeeds only when that
+# drill passed and is younger than DRILL_MAX_DAYS (default 92, a quarter). Its
+# success is the health signal: TockmoxSiteRebuildDrillOverdue fires when it has
+# not succeeded for a day. A site with no drill on record yet is given one quarter
+# from its install (DRILL_SINCE). It reads the destination only, never the forge.
+#
 # Exit codes:
 #   0  in step: the off-site copy holds the forge's current main
 #   1  behind, or anything failed or was doubtful
@@ -32,6 +40,17 @@
 #
 # MODE=git: verify only. The forge's own push mirror does the pushing; this
 # script just compares the remote's main with the forge's main.
+#
+# The rebuild drill's record (TASK=drill-check reads it): the object drill/latest
+# in a bucket (beside drill/<STAMP>, written once), or the file drill/latest on the
+# git remote's branch forge-drill. One field per line:
+#   format tockmox-rebuild-drill v1
+#   result pass|fail
+#   created <UTC stamp, YYYYmmddTHHMMSSZ>
+#   copy-commit <40-hex sha the drill rebuilt from>
+#   seconds <wall time of the rebuild>
+#   refusals <the refusals the drill proved, comma-separated>
+#   reason <one line, on a fail>
 
 set -eu
 
@@ -157,8 +176,8 @@ sha_of() {
 
 TASK=${TASK:-copy}
 case $TASK in
-copy | dump) ;;
-*) die_cfg "TASK must be copy or dump" ;;
+copy | dump | drill-check) ;;
+*) die_cfg "TASK must be copy, dump or drill-check" ;;
 esac
 MODE=${MODE:-}
 case $MODE in
@@ -179,7 +198,13 @@ S3_ENDPOINT=${S3_ENDPOINT:-}
 S3_BUCKET=${S3_BUCKET:-}
 GIT_REMOTE_URL=${GIT_REMOTE_URL:-}
 
-FORGE_HDR=$(githdr "$SECRETS_DIR/forge-username" "$SECRETS_DIR/forge-token") || exit 2
+DRILL_MAX_DAYS=${DRILL_MAX_DAYS:-92}
+printf '%s\n' "$DRILL_MAX_DAYS" | grep -Eq '^[1-9][0-9]{0,3}$' || die_cfg "DRILL_MAX_DAYS must be a whole number of days, 1 to 9999"
+
+FORGE_HDR=""
+if [ "$TASK" != drill-check ]; then
+	FORGE_HDR=$(githdr "$SECRETS_DIR/forge-username" "$SECRETS_DIR/forge-token") || exit 2
+fi
 
 REMOTE_HDR=""
 AK=""
@@ -209,6 +234,76 @@ HOME_DIR=$(mktemp -d) || die "cannot create temp dir"
 WORK=$(mktemp -d) || die "cannot create work dir"
 HOME=$HOME_DIR
 export HOME
+
+# ---- the rebuild drill's record (TASK=drill-check) -------------------------
+#
+# A stamp is YYYYmmddTHHMMSSZ. Its age is worked out in awk, not with date -d,
+# which busybox date (the forge image's) reads differently from GNU date.
+stamp_secs() {
+	printf '%s\n' "$1" | awk '
+	/^[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z$/ {
+		y = substr($0, 1, 4) + 0; m = substr($0, 5, 2) + 0; d = substr($0, 7, 2) + 0
+		H = substr($0, 10, 2) + 0; M = substr($0, 12, 2) + 0; S = substr($0, 14, 2) + 0
+		if (m < 1 || m > 12 || d < 1 || d > 31 || H > 23 || M > 59 || S > 59) exit 1
+		if (m <= 2) { y -= 1; m += 12 }
+		days = 365 * y + int(y / 4) - int(y / 100) + int(y / 400) + int((153 * (m - 3) + 2) / 5) + d - 719469
+		print days * 86400 + H * 3600 + M * 60 + S; ok = 1
+	}
+	END { if (!ok) exit 1 }'
+}
+
+# field KEY FILE: the rest of the first line whose first word is KEY.
+field() {
+	awk -v k="$1" '$1 == k { sub(/^[^ ]+ /, ""); print; exit }' "$2"
+}
+
+# no_record WHAT: a site younger than a quarter (DRILL_SINCE, the install's stamp, set by
+# bootstrap-forge) is not overdue yet: it says when the first drill is due and succeeds.
+no_record() {
+	if [ -n "${DRILL_SINCE:-}" ] && ss=$(stamp_secs "$DRILL_SINCE"); then
+		left=$(((ss + DRILL_MAX_DAYS * 86400 - $(date -u +%s)) / 86400))
+		if [ "$left" -ge 0 ]; then
+			echo "rebuild drill: none on record yet ($1); the first is due within $left days (installed $DRILL_SINCE)"
+			exit 0
+		fi
+	fi
+	die "no rebuild drill on record: $1. Run the drill (docs/administration/site-forge-recovery.md, The rebuild drill)."
+}
+
+if [ "$TASK" = drill-check ]; then
+	REC=$WORK/drill-latest
+	if [ "$MODE" = git ]; then
+		DR=$WORK/drillrepo
+		git init -q "$DR" || die "cannot init a scratch repository"
+		out=$(remote_git ls-remote "$GIT_REMOTE_URL" refs/heads/forge-drill 2>"$WORK/ls.err") ||
+			die "cannot read $GIT_REMOTE_URL: $(tail -1 "$WORK/ls.err")"
+		rsha=$(printf '%s\n' "$out" | first_sha)
+		is_sha "$rsha" || no_record "$GIT_REMOTE_URL has no forge-drill branch"
+		remote_git -C "$DR" fetch -q --depth 1 "$GIT_REMOTE_URL" forge-drill || die "cannot fetch forge-drill from $GIT_REMOTE_URL"
+		git -C "$DR" show FETCH_HEAD:drill/latest >"$REC" 2>/dev/null || die "forge-drill on $GIT_REMOTE_URL holds no drill/latest"
+		WHERE="$GIT_REMOTE_URL forge-drill"
+	else
+		s3 GET "$(key_of drill/latest)" "" "$REC" >/dev/null
+		[ "$S3_STATUS" != 404 ] || no_record "$(key_of drill/latest) is not in $S3_BUCKET"
+		need_2xx "reading $(key_of drill/latest)"
+		WHERE="$S3_BUCKET/$(key_of drill/latest)"
+	fi
+	[ "$(sed -n 1p "$REC")" = "format tockmox-rebuild-drill v1" ] || die "$WHERE is not a rebuild-drill record (format tockmox-rebuild-drill v1)"
+	result=$(field result "$REC")
+	created=$(field created "$REC")
+	csecs=$(stamp_secs "$created") || die "$WHERE: created '$created' is not a YYYYmmddTHHMMSSZ stamp"
+	now=$(date -u +%s)
+	[ "$csecs" -le "$((now + 300))" ] || die "$WHERE: the drill's date $created is in the future; this clock or the record is wrong"
+	age_days=$(((now - csecs) / 86400))
+	case $result in
+	pass) ;;
+	fail) die "the last rebuild drill ($created) FAILED: $(field reason "$REC"). Fix it and run the drill again." ;;
+	*) die "$WHERE: result '$result' is neither pass nor fail" ;;
+	esac
+	[ "$age_days" -lt "$DRILL_MAX_DAYS" ] || die "the last rebuild drill passed on $created, $age_days days ago: overdue (one is due every $DRILL_MAX_DAYS days). Run it again."
+	echo "rebuild drill: passed $created ($age_days days ago) in $(field seconds "$REC") s, from $(short "$(field copy-commit "$REC")"); refusals proven: $(field refusals "$REC")"
+	exit 0
+fi
 
 # ---- step 1: the forge's main -----------------------------------------
 

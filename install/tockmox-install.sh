@@ -79,6 +79,16 @@ One subcommand DOES write to a cluster, and only when you name it:
                      (site.forge: built-in) rebuild a site on a cluster that has
                      ArgoCD and nothing else, from the off-site copy and the
                      recovery kit. Run '$0 --restore-from offsite --help'.
+  move-forge         (site.forge: built-in) move the site repository, with its whole
+                     history, to an EMPTY repository you own, and repoint ArgoCD
+                     at it in one change an approver merges. Run '$0 move-forge --help'.
+  upgrade-forge      (site.forge: built-in) take a fresh off-site copy, then move
+                     the built-in forge to the Forgejo this release pins and
+                     check it answers. Run it before you move the Tockmox pin.
+  rebuild-drill      (site.forge: built-in) on a THROWAWAY cluster: prove the
+                     rebuild's refusals, run the real rebuild from the latest
+                     off-site copy and kit, and write the result where the
+                     site's drill-check reads it. Same options as --restore-from.
   publish-docs       AFTER the platform layer is Healthy: build the product docs
                      from this checkout and upload them to the docs bucket
                      (tools/publish-docs.sh, which takes the same arguments:
@@ -346,6 +356,18 @@ fi
 if [[ "${1:-}" == "repair-forge" ]]; then
   shift
   exec bash "$SELF/forge-restore.sh" repair "$@"
+fi
+if [[ "${1:-}" == "move-forge" ]]; then
+  shift
+  exec bash "$SELF/forge-move.sh" "$@"
+fi
+if [[ "${1:-}" == "upgrade-forge" ]]; then
+  shift
+  exec bash "$SELF/forge-upgrade.sh" "$@"
+fi
+if [[ "${1:-}" == "rebuild-drill" ]]; then
+  shift
+  exec bash "$SELF/forge-restore.sh" drill "$@"
 fi
 for _a in "$@"; do
   if [[ "$_a" == "--restore-from" || "$_a" == --restore-from=* ]]; then

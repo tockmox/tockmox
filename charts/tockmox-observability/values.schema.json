@@ -694,6 +694,11 @@
           "type": "integer",
           "minimum": 5,
           "description": "Minutes without a successful off-site copy before TockmoxSiteRepositoryCopyBehind fires."
+        },
+        "drillCheckHours": {
+          "type": "integer",
+          "minimum": 25,
+          "description": "Hours without a successful daily drill-check (<release>-drill-check) before TockmoxSiteRebuildDrillOverdue fires. At least a day and an hour, since the check runs once a day."
         }
       }
     }
