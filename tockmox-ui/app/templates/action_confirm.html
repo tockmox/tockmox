@@ -28,7 +28,11 @@
       <legend>Good for</legend>
       {% for h, label in recovery_choices %}<label class="choice"><input type="radio" name="hours" value="{{ h }}" required{% if h == 24 %} checked{% endif %}> {{ label }}</label>{% endfor %}
     </fieldset>
+    {% elif kind == "decline-change" %}
+    <label for="reason">Why <span class="muted small">(optional; the forge keeps it as a comment on the change)</span></label>
+    <textarea id="reason" name="reason" rows="2" maxlength="300"></textarea>
     {% endif %}
+    {% if kind in ("approve-change", "decline-change") %}<p class="confirm-note"><strong>This goes through the site's forge as you.</strong> Your browser visits the forge's sign-in (Authentik's, so usually no prompt) and comes back, so the forge records you, not the console, as the one who {{ "approved" if kind == "approve-change" else "declined" }} it.</p>{% endif %}
     {% if step_up %}<p class="confirm-note"><strong>You may be asked to sign in again.</strong> This action needs a sign-in from the last {{ max_age_min }} minutes. If yours is older, Authentik asks for it, and then you come straight back to the result.</p>
     {% else %}<p class="muted small">Confirming passes through your sign-in, so the action carries your name.</p>{% endif %}
     <p class="muted small">It lands in <a href="/platform/activity">Activity</a>.</p>

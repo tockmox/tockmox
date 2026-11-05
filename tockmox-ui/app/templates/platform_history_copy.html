@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}A copy of the site · Platform{% endblock %}
+{% block main %}
+{#- Download a copy: main as one git bundle, made just now the way the off-site copy job makes it, with the SHA-256
+    line --restore-from file: checks. Keep the two files side by side, under these names. -#}
+<p class="crumb"><a href="/platform/history">Site history</a></p>
+<section class="panel" aria-labelledby="copy-h">
+  <h1 id="copy-h">A copy of main at {{ c.commit[:7] }}</h1>
+  <p>Made just now from the forge, {{ (c.bytes / 1024) | round(1) }} KiB. Keep both files together, under these names: a rebuild from media (<code>tockmox-install.sh --restore-from file:site.bundle</code>) checks the bundle against <code>site.bundle.sha256</code> before it uses it.</p>
+  <p class="row-acts">
+    <a class="pill primary" href="/platform/history/copy/{{ c.sha256 }}/site.bundle" download>Download site.bundle</a>
+    <a class="pill" href="/platform/history/copy/{{ c.sha256 }}/site.bundle.sha256" download>Download site.bundle.sha256</a>
+  </p>
+  <dl class="confirm-facts">
+    <dt>SHA-256</dt><dd><code>{{ c.sha256 }}</code></dd>
+    <dt>Commit</dt><dd><code>{{ c.commit }}</code></dd>
+  </dl>
+  <p class="muted small">Only the newest copy is kept for download; making another replaces this one. The copy holds the site's history, which names your hosts and settings but no secrets: those stay sealed in the cluster and in the recovery kit.</p>
+</section>
+{% endblock %}

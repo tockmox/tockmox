@@ -12,7 +12,18 @@ kinds on, an Authentik service account whose role can see users, make a recovery
 layer's reconciler has granted it (never an administrator), and change membership of the user group only.
 
 API (reachable from the UI pod only, by NetworkPolicy):
-  POST /v1/intents   {"intent": {...}, "id_token": "..."}   carry out one intent; 200 with the result
+  POST /v1/intents   {"intent": {...}, "id_token": "...", "forge": {"code", "verifier", "redirect_uri"}}
+                     carry out one intent; 200 with the result. "forge" only for approve-change and decline-change:
+                     the forge sign-in's code, which this service exchanges for that person's own forge token
+  GET  /v1/changes   the changes waiting on the site forge, and the last applied (changes on only); 503 "paused"
+                     when the forge does not answer
+  GET  /v1/changes/<n>/diff   one change's diff as text
+  POST /v1/forge/bundle       Download a copy: main as a git bundle, made now; answers its SHA-256 and commit
+  GET  /v1/forge/bundle/<sha256>   that bundle (only the newest is kept)
+  GET  /v1/forge/state        for Platform > Site history: the forge's main (commit and time), and the off-site copy's
+                     and the drill check's CronJobs as the forge namespace holds them (read by name, no Secret)
+                     (/v1/changes also carries "sign_in": the forge's authorize URL and the console's public client
+                     id, for the UI's redirect; the client secret stays here)
   GET  /v1/activity  the last actions, newest first
   GET  /v1/identity/users   the people Authentik knows, for the Identity page (identity kinds on only)
   GET  /healthz
@@ -48,6 +59,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from . import actions as act
 from .auth import OIDC
+from .forge import Forge, Paused
 
 log = logging.getLogger("tockmox.actions")
 SA = "/var/run/secrets/kubernetes.io/serviceaccount"
@@ -313,6 +325,7 @@ class Service:
         self.authentik = Authentik(self.cfg.identity_api or public, self.cfg.identity_token_file, self.admin_group,
                                    self.cfg.user_group, self.timeout, tp.get("authentik"), public_origin=public,
                                    recovery_groups=self.cfg.recovery_groups)
+        self.forge = Forge(self.cfg, self.timeout, tp.get("forge"))
         self.inflight: set = set()
         self.inflight_lock = threading.Lock()
         self.seen: dict = {}            # key -> (nonce, row, at): this process's memory, for a record that lost a row
@@ -483,6 +496,86 @@ class Service:
         t = it["target"]
         return {"ref": [t["username"]], "detail": self.authentik.membership(t["user"], t["username"], False)}
 
+    def _person(self, it, claims, forge_in) -> tuple[str, dict]:
+        """The person's own forge token, from the forge sign-in's code, and who the forge says it belongs to. It must
+        be the same person the identity provider signed in: the forge registers people from Authentik under their
+        Authentik username (bootstrap-forge's USERNAME: nickname), so the two names must match."""
+        f = forge_in if isinstance(forge_in, dict) else {}
+        tok = self.forge.person_token(str(f.get("code") or ""), str(f.get("verifier") or ""),
+                                      str(f.get("redirect_uri") or ""))
+        me = self.forge.whoami(tok)
+        want = {str(claims.get(k) or "").lower() for k in ("preferred_username", "nickname")} - {""}
+        if not me["login"] or me["login"].lower() not in want:
+            raise act.Refused(f"the forge signed you in as {me['login'] or 'nobody'}, not as "
+                              f"{claims.get('preferred_username') or claims.get('sub')}; nothing was done")
+        return tok, me
+
+    def forge_state(self) -> dict:
+        """What Site history shows that only this service can read: main from the forge, and the two CronJobs
+        bootstrap-forge makes (their destination and drill settings, from their env; never their Secret)."""
+        c = self.cfg
+        out = {"repo": c.changes_repo, "base": c.changes_base, "web": c.changes_web,
+               "in_cluster": (c.changes_api.removesuffix("/api/v1") + f"/{c.changes_repo}.git") if c.changes_api else "",
+               "main": None, "paused": False, "copy": None, "drill": None, "jobs_namespace": c.forge_namespace,
+               "unreadable": []}
+        try:
+            out["main"] = self.forge.main_state()
+        except Paused:
+            out["paused"] = True
+        except act.Refused as e:
+            out["main_error"] = e.reason
+        for key, name in (("copy", f"{c.forge_release}-offsite"), ("drill", f"{c.forge_release}-drill-check")):
+            try:
+                cj = self.kube.call("GET", f"/apis/batch/v1/namespaces/{c.forge_namespace}/cronjobs/{name}", allow_404=True)
+            except act.Refused:
+                out["unreadable"].append(name)               # no grant (an older chart) or the API refused: unknown
+                continue
+            if cj is None:
+                continue
+            ctr = (((((cj.get("spec") or {}).get("jobTemplate") or {}).get("spec") or {}).get("template") or {})
+                   .get("spec") or {}).get("containers") or [{}]
+            env = {str(e.get("name")): str(e.get("value", "")) for e in ctr[0].get("env") or [] if "value" in e}
+            row = {"name": name, "schedule": str((cj.get("spec") or {}).get("schedule", "")),
+                   "suspended": bool((cj.get("spec") or {}).get("suspend"))}
+            if key == "copy":
+                mode = env.get("MODE", "")
+                if mode == "bucket":
+                    where = "/".join(x for x in (env.get("S3_ENDPOINT", "").rstrip("/"), env.get("S3_BUCKET", ""),
+                                                 env.get("S3_PREFIX", "").strip("/")) if x)
+                else:
+                    import urllib.parse as up
+                    u = up.urlsplit(env.get("GIT_REMOTE_URL", ""))
+                    where = up.urlunsplit((u.scheme, u.hostname + (f":{u.port}" if u.port else ""), u.path, "", "")) \
+                        if u.hostname else ""                  # never the user or token a URL might carry
+                row.update(mode=mode, destination=where)
+            else:
+                row.update(max_days=env.get("DRILL_MAX_DAYS", "92"), since=env.get("DRILL_SINCE", ""))
+            out[key] = row
+        return out
+
+    def do_approve_change(self, it, who, claims=None, forge=None):
+        t = it["target"]
+        tok, me = self._person(it, claims or {}, forge)
+        try:
+            return self.forge.approve(t["number"], t["head"], tok, me)
+        except Paused as e:
+            raise act.Refused("the forge stopped answering; look at the change again before approving") from e
+
+    def do_decline_change(self, it, who, claims=None, forge=None):
+        t = it["target"]
+        tok, me = self._person(it, claims or {}, forge)
+        try:
+            return self.forge.decline(t["number"], t["head"], tok, me, str(it["params"].get("reason", "")).strip())
+        except Paused as e:
+            raise act.Refused("the forge stopped answering; the change may still be open") from e
+
+    def do_revert_change(self, it, who, claims=None, forge=None):
+        t = it["target"]
+        try:
+            return self.forge.revert(t["number"], t["merge"], who)
+        except Paused as e:
+            raise act.Refused("the forge stopped answering; nothing was opened") from e
+
     # ------------------------------------------------------------ one intent
 
     def handle(self, body) -> tuple[int, dict]:
@@ -500,7 +593,7 @@ class Service:
                     raise act.Refused("this action is already running; its result will be in Activity")
                 self.inflight.add(it["key"])
             try:
-                return self._once(it, sub, who)
+                return self._once(it, sub, who, claims=claims, forge=body.get("forge"))
             finally:
                 with self.inflight_lock:
                     self.inflight.discard(it["key"])
@@ -512,7 +605,7 @@ class Service:
             self.audit(it if isinstance(it, dict) else {}, sub, who, "failed", [], type(e).__name__)
             return 502, {"result": "failed", "reason": f"the action did not complete ({type(e).__name__})"}
 
-    def _once(self, it, sub, who) -> tuple[int, dict]:
+    def _once(self, it, sub, who, claims=None, forge=None) -> tuple[int, dict]:
         """Carry out a verified intent once. The key is RESERVED in the record before anything is done (no record,
         no action), and a key is bound to the intent it was first used for: the same key with another intent is
         refused, a replay of the same intent returns its first result."""
@@ -537,7 +630,8 @@ class Service:
             raise act.Refused(f"the action could not be recorded first ({type(e).__name__}), so it was not run") from e
         self.seen[it["key"]] = (nonce, row, now)
         try:
-            res = getattr(self, "do_" + it["kind"].replace("-", "_"))(it, who)
+            fn = getattr(self, "do_" + it["kind"].replace("-", "_"))
+            res = fn(it, who, claims=claims, forge=forge) if it["kind"] in act.CHANGE_KINDS else fn(it, who)
         except Exception as e:
             reason = e.reason if isinstance(e, act.Refused) else type(e).__name__
             self._finish(dict(row, result="failed", detail=reason[:300]))
@@ -564,8 +658,9 @@ class Service:
         print(json.dumps(line, separators=(",", ":"), sort_keys=True), flush=True)
 
 
-def create_service(doc: dict, transports: dict | None = None, now=time.time) -> FastAPI:
-    svc = Service(doc, transports, now)
+def create_service(doc: dict | None = None, transports: dict | None = None, now=time.time, service=None) -> FastAPI:
+    """The HTTP face of a Service (service: one already built, as the tests wire it)."""
+    svc = service or Service(doc or {}, transports, now)
     app = FastAPI(title="tockmox-actions", docs_url=None, redoc_url=None, openapi_url=None)
     app.state.service = svc
 
@@ -602,6 +697,86 @@ def create_service(doc: dict, transports: dict | None = None, now=time.time) -> 
         if why:
             return JSONResponse({"error": why}, status_code=503)
         return {"users": people, "userGroup": svc.cfg.user_group, "adminGroup": svc.admin_group}
+
+    @app.get("/v1/changes")
+    def changes():
+        if not svc.cfg.on("approve-change"):
+            return JSONResponse({"error": "the change actions are not turned on here"}, status_code=404)
+        why = svc.forge.unready()
+        if why:
+            return JSONResponse({"error": why}, status_code=503)
+        try:
+            out = svc.forge.changes()
+        except Paused:
+            return JSONResponse({"paused": True, "error": "the site forge is not answering"}, status_code=503)
+        except act.Refused as e:
+            return JSONResponse({"error": e.reason}, status_code=502)
+        except Exception:  # noqa: BLE001 - its text stays in this pod (CodeQL py/stack-trace-exposure)
+            log.warning("changes: the forge's answer could not be read", exc_info=True)
+            return JSONResponse({"error": "the forge's answer could not be read"}, status_code=502)
+        return dict(out, repo=svc.cfg.changes_repo, base=svc.cfg.changes_base, sign_in=svc.forge.sign_in())
+
+    @app.get("/v1/forge/state")
+    def forge_state():
+        if not svc.cfg.on("approve-change"):
+            return JSONResponse({"error": "the change actions are not turned on here"}, status_code=404)
+        why = svc.forge.unready()
+        if why:
+            return JSONResponse({"error": why}, status_code=503)
+        try:
+            return svc.forge_state()
+        except Exception:  # noqa: BLE001 - its text stays in this pod
+            log.warning("forge state: could not be read", exc_info=True)
+            return JSONResponse({"error": "the forge's state could not be read"}, status_code=502)
+
+    BUNDLES = os.environ.get("TOCKMOX_ACTIONS_BUNDLES", "/tmp/bundles")
+
+    @app.post("/v1/forge/bundle")
+    def forge_bundle():
+        """Download a copy, step one: make main's bundle now and say its SHA-256 (the UI is the only caller)."""
+        if not svc.cfg.on("approve-change"):
+            return JSONResponse({"error": "the change actions are not turned on here"}, status_code=404)
+        try:
+            out = svc.forge.bundle(BUNDLES)
+        except act.Refused as e:
+            return JSONResponse({"error": e.reason}, status_code=502)
+        except Exception:  # noqa: BLE001
+            log.warning("bundle: could not be made", exc_info=True)
+            return JSONResponse({"error": "the copy could not be made"}, status_code=502)
+        print(json.dumps({"event": "tockmox.copy", "commit": out["commit"], "sha256": out["sha256"], "bytes": out["bytes"]},
+                         separators=(",", ":"), sort_keys=True), flush=True)
+        return out
+
+    @app.get("/v1/forge/bundle/{digest}")
+    def forge_bundle_file(digest: str):
+        from fastapi.responses import FileResponse
+        import re as _re
+        # The path is never built from the request: the digest only picks one of the names the directory holds.
+        try:
+            held = [n for n in os.listdir(BUNDLES) if _re.fullmatch(r"[0-9a-f]{64}\.bundle", n)]
+        except OSError:
+            held = []
+        name = next((n for n in held if n == f"{digest}.bundle"), None)
+        if name is None:
+            return JSONResponse({"error": "no such copy; make one again"}, status_code=404)
+        return FileResponse(os.path.join(BUNDLES, name), media_type="application/octet-stream")
+
+    @app.get("/v1/changes/{number}/diff")
+    def change_diff(number: int):
+        if not svc.cfg.on("approve-change"):
+            return JSONResponse({"error": "the change actions are not turned on here"}, status_code=404)
+        if not 1 <= number <= 10_000_000:
+            return JSONResponse({"error": "no such change"}, status_code=404)
+        try:
+            text, cut = svc.forge.diff(number)
+        except Paused:
+            return JSONResponse({"paused": True, "error": "the site forge is not answering"}, status_code=503)
+        except act.Refused as e:
+            return JSONResponse({"error": e.reason}, status_code=404 if "no such" in e.reason else 502)
+        except Exception:  # noqa: BLE001
+            log.warning("diff: the forge's answer could not be read", exc_info=True)
+            return JSONResponse({"error": "the forge's answer could not be read"}, status_code=502)
+        return {"diff": text, "cut": cut}
 
     return app
 

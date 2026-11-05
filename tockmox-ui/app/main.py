@@ -352,6 +352,7 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         groups = nav.rail(sec, u.is_admin, platform_on(), admin_tabs=tabs, capabilities_state=cap_state,
                           activity=bool(s.actions and s.actions.any),
                           identity=bool(s.actions and s.actions.any and s.actions.on("recovery-link")),
+                          changes=bool(s.actions and s.actions.any and s.actions.on("approve-change")),
                           contributed=f_groups)
         out["rail"], out["rail_item"] = groups, nav.rail_current(groups, path) if groups else None
         if u.is_admin:
@@ -828,9 +829,11 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
 
     src_report = ModelReportSource(s.lifecycle.report_file, s.lifecycle.report_max_age_s)
     build_checks = BuildChecks(prober)       # the last build check: read by POST /models/builds, shown on the node pages
+    src_forge_jobs = platform_mod.CronJobsSource(s.prometheus_url, s.source_timeout_s, tp.prometheus)
     actions_routes.register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, oidc,
                             lambda: placed(readings()), transport=tp.actions,
-                            active_silences=lambda: src_am._console_silences())
+                            active_silences=lambda: src_am._console_silences(),
+                            forge_jobs=src_forge_jobs.read, alerts_now=src_am.read)
     nodes_routes.register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_inodes, prober, APP_VERSION,
                           src_report=src_report, build_checks=build_checks)
 

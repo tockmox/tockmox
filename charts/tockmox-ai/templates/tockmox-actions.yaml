@@ -53,6 +53,20 @@ Off means absent: with no kind on, none of this renders, and the UI shows no but
 {{- if $act.argocd.enabled -}}{{- $_ := set $svcActions.argocd "tokenFile" "/etc/tockmox-actions/argocd/token" -}}{{- end -}}
 {{- $idv := ($ui.actions | default dict).identity | default dict -}}
 {{- if $act.identity.enabled -}}{{- $_ := set $svcActions.identity "tokenFile" "/etc/tockmox-actions/identity/token" -}}{{- end -}}
+{{- $chv := ($ui.actions | default dict).changes | default dict -}}
+{{- $fRel := $chv.forgeRelease | default "tockmox-forge" -}}
+{{- $fNs := $chv.forgeNamespace | default "tockmox-forge" -}}
+{{- if $act.changes.enabled -}}
+{{- $dom := ((.Values.global | default dict).internalDomain) | default "" -}}
+{{- $web := ($chv.webUrl | default (ternary (printf "https://forge.%s" $dom) "" (ne $dom ""))) | trimSuffix "/" -}}
+{{- if not $web -}}{{- fail "tockmoxUi.actions.changes.enabled needs webUrl (the forge as a browser reaches it) or global.internalDomain: the person's sign-in to the forge goes there" -}}{{- end -}}
+{{- $in := printf "http://%s-http.%s.svc:3000" $fRel $fNs -}}
+{{- $_ := set $svcActions "changes" (dict "enabled" true "apiUrl" (printf "%s/api/v1" $in) "repo" ($chv.repository | default "tockmox/site")
+      "baseBranch" ($chv.baseBranch | default "main") "botTokenFile" "/etc/tockmox-actions/forge-bot/token" "webUrl" $web
+      "forgeNamespace" $fNs "forgeRelease" $fRel
+      "oauth" (dict "authorizeUrl" (printf "%s/login/oauth/authorize" $web) "tokenUrl" (printf "%s/login/oauth/access_token" $in)
+                    "clientIdFile" "/etc/tockmox-actions/forge-oauth/client_id" "clientSecretFile" "/etc/tockmox-actions/forge-oauth/client_secret")) -}}
+{{- end -}}
 {{- $svcCfg := dict
       "oidc" (dict "issuer" $cfg.oidc.issuer "clientId" ($cfg.oidc.clientId | default "tockmox-ui"))
       "roles" (dict "adminGroup" ((($cfg.roles | default dict).adminGroup) | default "tockmox-admins"))
@@ -405,6 +419,10 @@ spec:
             {{- if $act.identity.enabled }}
             - { name: identity, mountPath: /etc/tockmox-actions/identity, readOnly: true }
             {{- end }}
+            {{- if $act.changes.enabled }}
+            - { name: forge-bot, mountPath: /etc/tockmox-actions/forge-bot, readOnly: true }
+            - { name: forge-oauth, mountPath: /etc/tockmox-actions/forge-oauth, readOnly: true }
+            {{- end }}
       volumes:
         - name: tockmox-trust
           emptyDir: { sizeLimit: 4Mi }
@@ -416,7 +434,8 @@ spec:
         - name: config
           configMap: { name: tockmox-actions }
         - name: tmp
-          emptyDir: { sizeLimit: 16Mi }
+          # Download a copy makes one git bundle of the site's main here (only the newest is kept)
+          emptyDir: { sizeLimit: {{ ternary "256Mi" "16Mi" (eq (toString $act.changes.enabled) "true") }} }
         {{- if $act.argocd.enabled }}
         # optional: a missing Secret is an Argo CD action the service refuses with the reason, never a stuck pod
         - name: argocd
@@ -433,6 +452,21 @@ spec:
             secretName: {{ $idv.tokenSecret | default "tockmox-console-actions-token" | quote }}
             optional: true
             items: [{ key: token, path: token }]
+        {{- end }}
+        {{- if $act.changes.enabled }}
+        # optional, as above: bootstrap-forge writes both; until it has, the page says what is missing. The bot can
+        # open changes and cannot approve one; the OAuth2 client acts only as the person who signs in to the forge.
+        # No forge admin credential is mounted here or in the UI (tools/check-actions.py, check 6).
+        - name: forge-bot
+          secret:
+            secretName: {{ $chv.botSecret | default "tockmox-forge-actions-bot" | quote }}
+            optional: true
+            items: [{ key: token, path: token }]
+        - name: forge-oauth
+          secret:
+            secretName: {{ $chv.oauthSecret | default "tockmox-forge-console-oauth" | quote }}
+            optional: true
+            items: [{ key: client_id, path: client_id }, { key: client_secret, path: client_secret }]
         {{- end }}
 ---
 apiVersion: v1
@@ -503,6 +537,17 @@ spec:
             matchLabels: { app.kubernetes.io/name: argocd-server }
       ports:
         - { port: 8080, protocol: TCP }
+    {{- end }}
+    {{- if $act.changes.enabled }}
+    # The built-in forge, in-cluster: its API (as the bot, and as the person) and its token endpoint. The forge's
+    # own fence (bootstrap-forge) admits this pod by name.
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: {{ $fNs }} }
+          podSelector:
+            matchLabels: { app.kubernetes.io/instance: {{ $fRel }} }
+      ports:
+        - { port: 3000, protocol: TCP }
     {{- end }}
     {{- with $np.extraEgress }}
     {{- toYaml . | nindent 4 }}

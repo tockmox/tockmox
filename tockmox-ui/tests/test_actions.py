@@ -349,7 +349,7 @@ def test_the_service_will_not_start_without_an_issuer_or_namespace():
 
 # ---------------------------------------------------------------- the console
 
-def console(tmp_path, actions=None, groups=("tockmox-admins",), down=False, authentik=None):
+def console(tmp_path, actions=None, groups=("tockmox-admins",), down=False, authentik=None, forge=None):
     """The UI with actions on, its callback wired to a real Service in-process (authentik: a fake Authentik's
     handler, for the identity kinds)."""
     from fastapi.testclient import TestClient
@@ -361,6 +361,8 @@ def console(tmp_path, actions=None, groups=("tockmox-admins",), down=False, auth
     svc, _, _ = service(actions=actions, am=am, kube=kube, idp=idp)
     if authentik is not None:
         svc.authentik.transport = httpx.MockTransport(authentik)
+    if forge is not None:
+        svc.forge.transport = httpx.MockTransport(forge)
     sent = []
 
     def bridge(req: httpx.Request):
@@ -382,6 +384,12 @@ def console(tmp_path, actions=None, groups=("tockmox-admins",), down=False, auth
                 return httpx.Response(503, json={"error": why})
             return httpx.Response(200, json={"users": people, "userGroup": svc.cfg.user_group,
                                              "adminGroup": svc.admin_group})
+        if req.url.path.startswith(("/v1/changes", "/v1/forge/")):   # the service's own endpoints, in-process
+            from fastapi.testclient import TestClient as _TC
+            from app.actions_service import create_service
+            r = _TC(create_service(service=svc)).request(req.method, req.url.path, params=dict(req.url.params),
+                                                         content=req.content or None)
+            return httpx.Response(r.status_code, content=r.content, headers={"content-type": r.headers.get("content-type", "")})
         return httpx.Response(404)
 
     doc = yaml.safe_load((Path(__file__).resolve().parent.parent / "config.example.yaml").read_text())

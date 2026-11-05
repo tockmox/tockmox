@@ -8,12 +8,24 @@ confirmation to one intent, and Platform > Activity. Nothing here writes: the in
   (GET /auth/callback)         finish(): the ID token and the intent go to the service; the result is a page
   GET  /platform/activity      what was done, by whom, and how it ended
   GET  /platform/identity      the people Authentik knows, with a recovery link and user-group membership
+  GET  /platform/changes       the changes waiting on the site forge: summary, checks, the diff behind a fold, and
+                               Approve and apply, Decline and (for an applied change) Revert
+  GET  /platform/changes/<n>/diff   one change's diff, as text (the fold loads it)
+  POST /actions/site-copy      Download a copy: the service makes main's bundle; the page names its SHA-256, and
+                               /platform/history/copy/<sha256>/site.bundle(.sha256) hand the two files over
+  GET  /platform/history       Site history: where the history lives, the off-site copy (matches, pending, behind, none),
+                               the last rebuild drill, recently applied changes with Revert, and Copy now
+  GET  /actions/forge/callback for approve and decline only: the forge's own sign-in comes back here BEFORE the
+                               identity provider's step-up, so the service can act as that person in the forge
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
+import secrets
 import time
-from urllib.parse import quote
+from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
 from fastapi import Form, Request
@@ -23,6 +35,8 @@ from . import actions as act
 
 ACT_COOKIE = "__Host-tockmox_ui_act"
 DEV_ACT_COOKIE = "tockmox_ui_act"
+FORGE_COOKIE = "__Host-tockmox_ui_forge"
+DEV_FORGE_COOKIE = "tockmox_ui_forge"
 COOKIE_MAX = 3800
 SILENCE_CHOICES = ((1, "1 hour"), (4, "4 hours"), (24, "24 hours"), (168, "7 days"))
 RECOVERY_CHOICES = ((1, "1 hour"), (24, "24 hours"), (72, "3 days"))
@@ -85,7 +99,7 @@ def silences_on(pv) -> list[dict]:
 
 
 def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, oidc, placed_now, transport=None,
-             active_silences=lambda: {}):
+             active_silences=lambda: {}, forge_jobs=None, alerts_now=None):
     cfg: act.Config = s.actions or act.Config()
 
     def site_time(ts):
@@ -94,6 +108,36 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
         from zoneinfo import ZoneInfo
         return datetime.fromtimestamp(ts, ZoneInfo(s.timezone)).strftime("%H:%M %Z")
     cookie = ACT_COOKIE if s.secure_cookies else DEV_ACT_COOKIE
+    fcookie = FORGE_COOKIE if s.secure_cookies else DEV_FORGE_COOKIE
+    _o = urlsplit(s.oidc_redirect_url or "")
+    forge_redirect = f"{_o.scheme}://{_o.netloc}/actions/forge/callback" if _o.scheme and _o.netloc else ""
+
+    def service_get(path, params=None):
+        """(status, json) from tockmox-actions, or (0, {"error": ...}) when it did not answer."""
+        try:
+            with httpx.Client(base_url=cfg.url, timeout=max(s.source_timeout_s, 10), transport=transport) as c:
+                r = c.get(path, params=params)
+            return r.status_code, r.json()
+        except Exception as e:  # noqa: BLE001
+            return 0, {"error": f"the actions service did not answer ({type(e).__name__})"}
+
+    def forge_sign_in() -> dict:
+        """The forge's authorize URL and the console's client id, from the service (which reads what bootstrap-forge
+        registered); {} when there is none or the service did not answer."""
+        code, j = service_get("/v1/changes")
+        si = j.get("sign_in") if code == 200 else None
+        return si if isinstance(si, dict) and si.get("authorize_url", "").startswith(("https://", "http://")) \
+            and si.get("client_id") else {}
+
+    def change_row(number: int, applied: bool = False) -> dict:
+        code, j = service_get("/v1/changes")
+        if code != 200:
+            raise act.Refused("the site forge is not answering, so changes are paused" if j.get("paused")
+                              else str(j.get("error") or "the changes could not be read"))
+        row = next((x for x in j.get("applied" if applied else "open") or [] if x.get("number") == number), None)
+        if row is None:
+            raise act.Refused(f"#{number} is not {'among the applied changes' if applied else 'waiting'} any more")
+        return row
 
     def admin(request):
         u = user_of(request)
@@ -112,6 +156,17 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
         back = f"/status/{quote(part, safe='')}" if act.PART_ID.fullmatch(part) else _back(q.get("back", ""))
         if kind == "test-alert":
             return {}, _back(q.get("back", ""), "/status"), ""
+        if kind in act.CHANGE_KINDS:
+            n = str(q.get("number", ""))
+            n = int(n) if n.isdigit() and len(n) < 9 else 0
+            if kind == "revert-change":
+                row = change_row(n, applied=True)
+                return {"number": n, "title": row.get("title", ""), "merge": str(row.get("merge", ""))}, "/platform/changes", ""
+            row = change_row(n)
+            head = str(q.get("head", ""))
+            if head != row.get("head"):
+                raise act.Refused(f"#{n} changed since the page was drawn; look at it again")
+            return {"number": n, "title": row.get("title", ""), "head": head}, "/platform/changes", ""
         if kind in act.IDENTITY_KINDS:
             uid = str(q.get("user", ""))
             return {"user": int(uid) if uid.isdigit() else 0, "username": str(q.get("username", ""))}, "/platform/identity", ""
@@ -152,6 +207,8 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
         try:
             target, back, _ = target_for(request, u, kind, request.query_params)
             draft = {"hours": 4, "reason": "-"} if kind == "silence" else {"hours": 24} if kind == "recovery-link" else {}
+            if kind in act.FORGE_PERSON_KINDS and not (forge_sign_in() and forge_redirect):
+                raise act.Refused("the console has no sign-in to the site forge configured (actions.changes.oauth)")
             it = act.check(cfg, act.intent(kind, target, draft, u.sub))
         except act.Refused as e:
             return nope(request, u, f"This action cannot be offered: {e}.", 409)
@@ -187,15 +244,69 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
                 if h not in {c[0] for c in RECOVERY_CHOICES}:
                     raise act.Refused("choose how long the link lasts")
                 params = {"hours": h}
+            elif kind == "decline-change":
+                params = {"reason": reason.strip()[:300]}
             it = act.check(cfg, act.intent(kind, t, params, u.sub, key=key))
         except (ValueError, TypeError, act.Refused) as e:
             return nope(request, u, f"Not sent: {e}.", 400)
+        if kind in act.FORGE_PERSON_KINDS:
+            return to_forge(request, u, it, _back(back))
+        return to_idp(request, u, it, _back(back))
+
+    def to_forge(request, u, it, back):
+        """The forge's own sign-in first (Authentik behind it), with PKCE; the code comes back to forge_callback,
+        which then asks the identity provider for the step-up that binds the intent."""
+        si = forge_sign_in()
+        if not (si and forge_redirect):
+            return nope(request, u, "Not sent: the console has no sign-in to the site forge configured.", 409)
+        verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode()
+        state = secrets.token_urlsafe(24)
+        q = {"response_type": "code", "client_id": si["client_id"], "redirect_uri": forge_redirect,
+             "state": state, "code_challenge_method": "S256",
+             "code_challenge": base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()}
+        val = sessions.l.dumps({"state": state, "verifier": verifier, "intent": it, "back": back})
+        if len(val) > COOKIE_MAX:
+            return nope(request, u, "Not sent: this action names too much to carry through sign-in.", 400)
+        resp = RedirectResponse(si["authorize_url"] + "?" + urlencode(q), status_code=303)
+        resp.set_cookie(fcookie, val, max_age=600, **sessions.cookie_args())
+        return resp
+
+    @app.get("/actions/forge/callback")
+    def forge_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+        import hmac
+        u, deny = admin(request)
+        if deny:
+            return deny
+        raw = request.cookies.get(fcookie)
+        try:
+            st = sessions.l.loads(raw, max_age=600) if raw else None
+        except Exception:  # noqa: BLE001
+            st = None
+        if not st or not hmac.compare_digest(str(st.get("state", "")).encode(), str(state).encode()):
+            return nope(request, u, "This sign-in to the forge was not started here, or took too long. Nothing was done.", 400)
+        if error or not code or len(code) > 512:
+            r = render(request, "action_result.html", u, status_code=400, ok=False, d=None, back=st.get("back") or "/platform/changes",
+                       reason="the sign-in to the site forge was cancelled or refused")
+            r.delete_cookie(fcookie, path="/", secure=s.secure_cookies, httponly=True)
+            return r
+        it = st.get("intent") or {}
+        if it.get("sub") != u.sub:
+            return nope(request, u, "This action was started by someone else. Nothing was done.", 403)
+        resp = to_idp(request, u, it, st.get("back") or "/platform/changes",
+                      forge={"code": code, "verifier": st.get("verifier", ""), "redirect_uri": forge_redirect})
+        resp.delete_cookie(fcookie, path="/", secure=s.secure_cookies, httponly=True)
+        return resp
+
+    def to_idp(request, u, it, back, forge=None):
+        kind = it["kind"]
         try:
             url, st = oidc.begin(nonce=act.nonce_for(it), max_age=cfg.step_up_max_age if act.step_up(kind) else None)
         except Exception:  # noqa: BLE001
             return render(request, "error.html", u, status_code=503, title="Sign-in is unavailable",
                           message="The identity provider did not answer, so this action cannot be confirmed. Nothing was done.")
-        st.update(intent=it, back=_back(back))
+        st.update(intent=it, back=back)
+        if forge:
+            st["forge"] = forge
         val = sessions.l.dumps(st)
         if len(val) > COOKIE_MAX:
             return nope(request, u, "Not sent: this action names too much to carry through sign-in. Silence fewer alerts at a time.", 400)
@@ -235,7 +346,10 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
         d = act.describe(it, fmt_time=site_time)
         try:
             with httpx.Client(base_url=cfg.url, timeout=max(s.source_timeout_s, 10), transport=transport) as c:
-                r = c.post("/v1/intents", json={"intent": it, "id_token": claims.get("_id_token", "")})
+                body = {"intent": it, "id_token": claims.get("_id_token", "")}
+                if st.get("forge"):
+                    body["forge"] = st["forge"]
+                r = c.post("/v1/intents", json=body)
             out = r.json()
         except Exception as e:  # noqa: BLE001
             return done("action_result.html", 502, ok=False, d=d,
@@ -290,5 +404,124 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
             err = f"the actions service did not answer ({type(e).__name__})"
         admin_url = (s.oidc_issuer.split("/application/")[0] + "/if/admin/#/identity/users") if s.oidc_issuer else ""
         return render(request, "platform_identity.html", u, people=people, err=err, groups=groups, admin_url=admin_url)
+
+    @app.get("/platform/changes")
+    def changes(request: Request):
+        u, deny = admin(request)
+        if deny:
+            return deny
+        if not cfg.on("approve-change"):
+            return nope(request, u, "The change actions are not turned on here (tockmoxUi.actions.changes).")
+        code, j = service_get("/v1/changes")
+        paused = bool(j.get("paused"))
+        err = "" if code == 200 else ("" if paused else str(j.get("error") or f"the actions service answered {code}"))
+        opened = j.get("open") or []
+        for row in opened[:10]:                 # the diff behind each fold, read now (a waiting change is rarely large)
+            dc, dj = service_get(f"/v1/changes/{int(row.get('number', 0))}/diff")
+            row["diff"], row["diff_cut"] = (str(dj.get("diff", "")), bool(dj.get("cut"))) if dc == 200 else ("", False)
+            row["diff_err"] = "" if dc == 200 else str(dj.get("error") or "the diff could not be read")
+        return render(request, "platform_changes.html", u, paused=paused, err=err, opened=opened,
+                      applied=j.get("applied") or [], repo=j.get("repo", ""), base=j.get("base", ""),
+                      person_ok=bool(isinstance(j.get("sign_in"), dict) and j["sign_in"].get("client_id") and forge_redirect))
+
+    @app.get("/platform/history")
+    def history(request: Request):
+        from . import site_history
+        u, deny = admin(request)
+        if deny:
+            return deny
+        if not cfg.on("approve-change"):
+            return nope(request, u, "Site history needs the built-in forge's change actions (tockmoxUi.actions.changes).")
+        code, st = service_get("/v1/forge/state")
+        err = "" if code == 200 else str(st.get("error") or f"the actions service answered {code}")
+        jobs, jobs_known = [], False
+        if forge_jobs is not None:
+            rd = forge_jobs()
+            jobs, jobs_known = rd.data or [], rd.fetched_at is not None   # last good data is not this answer
+        alerts, alerts_known = [], False
+        if alerts_now is not None:
+            ra = alerts_now()
+            alerts, alerts_known = (ra.data or [], True) if ra.fetched_at is not None else ([], False)
+        v = site_history.view(st if code == 200 else None, jobs, alerts, time.time(), jobs_known, alerts_known)
+        ccode, ch = service_get("/v1/changes")
+        applied = (ch.get("applied") or []) if ccode == 200 else []
+        ns = (st or {}).get("jobs_namespace", "")
+        runnable = {(a, b) for a, b, _ in cfg.jobs} if cfg.on("run-job") else set()
+        copy_now = (st.get("copy") or {}).get("name") if code == 200 and st.get("copy") else ""
+        drill_now = (st.get("drill") or {}).get("name") if code == 200 and st.get("drill") else ""
+        return render(request, "platform_history.html", u, v=v, st=st if code == 200 else {}, err=err,
+                      applied=applied, ns=ns,
+                      copy_now=copy_now if (ns, copy_now) in runnable else "",
+                      drill_now=drill_now if (ns, drill_now) in runnable else "")
+
+    @app.post("/actions/site-copy")
+    def history_copy(request: Request, csrf: str = Form("")):
+        """Download a copy: the service makes main's bundle now; this page names its SHA-256 and links the two files
+        `--restore-from file:` wants side by side (site.bundle and site.bundle.sha256)."""
+        u, deny = admin(request)
+        if deny:
+            return deny
+        if not csrf_ok(u, csrf):
+            return nope(request, u, "The form expired. Open Site history again.", 400)
+        if not cfg.on("approve-change"):
+            return nope(request, u, "Site history is not turned on here.")
+        try:
+            with httpx.Client(base_url=cfg.url, timeout=max(s.source_timeout_s, 120), transport=transport) as c:
+                r = c.post("/v1/forge/bundle")
+            j = r.json()
+        except Exception as e:  # noqa: BLE001
+            return nope(request, u, f"The actions service did not answer ({type(e).__name__}). No copy was made.", 502)
+        if r.status_code != 200 or not str(j.get("sha256", "")).isalnum():
+            return nope(request, u, f"No copy was made: {j.get('error') or r.status_code}.", 502)
+        return render(request, "platform_history_copy.html", u, c=j)
+
+    @app.get("/platform/history/copy/{digest}/site.bundle")
+    def history_copy_file(request: Request, digest: str):
+        from fastapi.responses import StreamingResponse
+        import re as _re
+        u, deny = admin(request)
+        if deny:
+            return deny
+        if not cfg.on("approve-change") or not _re.fullmatch(r"[0-9a-f]{64}", digest):
+            return nope(request, u, "No such copy.")
+        c = httpx.Client(base_url=cfg.url, timeout=max(s.source_timeout_s, 120), transport=transport)
+        r = c.send(c.build_request("GET", f"/v1/forge/bundle/{digest}"), stream=True)
+        if r.status_code != 200:
+            r.close(); c.close()
+            return nope(request, u, "That copy is gone (only the newest is kept). Make another from Site history.")
+
+        def body():
+            try:
+                yield from r.iter_bytes()
+            finally:
+                r.close(); c.close()
+        return StreamingResponse(body(), media_type="application/octet-stream",
+                                 headers={"Content-Disposition": 'attachment; filename="site.bundle"'})
+
+    @app.get("/platform/history/copy/{digest}/site.bundle.sha256")
+    def history_copy_sum(request: Request, digest: str):
+        from fastapi.responses import PlainTextResponse
+        import re as _re
+        u, deny = admin(request)
+        if deny:
+            return deny
+        if not _re.fullmatch(r"[0-9a-f]{64}", digest):
+            return nope(request, u, "No such copy.")
+        return PlainTextResponse(f"{digest}  site.bundle\n",
+                                 headers={"Content-Disposition": 'attachment; filename="site.bundle.sha256"'})
+
+    @app.get("/platform/changes/{number}/diff")
+    def change_diff(request: Request, number: int):
+        from fastapi.responses import PlainTextResponse
+        u, deny = admin(request)
+        if deny:
+            return deny
+        if not cfg.on("approve-change") or not 1 <= number <= 10_000_000:
+            return nope(request, u, "No such change.")
+        code, j = service_get(f"/v1/changes/{number}/diff")
+        if code != 200:
+            return PlainTextResponse("The diff could not be read: " + str(j.get("error") or code) + ".", status_code=502)
+        text = str(j.get("diff", "")) + ("\n[cut here: open the change in the forge for the rest]\n" if j.get("cut") else "")
+        return PlainTextResponse(text, headers={"Content-Disposition": "inline", "X-Content-Type-Options": "nosniff"})
 
     return finish

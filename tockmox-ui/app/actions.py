@@ -21,6 +21,10 @@ Kinds (`actions.<kind>.enabled`; off means absent, never a disabled button):
   testAlert   one test alert down the same path as every other alert, to the phone
   identity    a recovery link for a person who is not an administrator, and membership of the user group, through a
               narrow Authentik service account; every one asks for a fresh sign-in
+  changes     approve and apply, or decline, a change waiting on Platform > Changes, as the person's OWN forge identity
+              (a second round trip, to the site's forge, whose sign-in is Authentik: the service exchanges its code
+              for that person's token and uses it once), and revert an applied change by opening the opposite one as
+              the change bot. Every one asks for a fresh sign-in. No forge admin credential is used anywhere
 """
 from __future__ import annotations
 
@@ -44,9 +48,19 @@ KINDS = {
     "recovery-link": ("identity", "medium", True, "Made a recovery link"),
     "add-member": ("identity", "medium", True, "Added to the user group"),
     "remove-member": ("identity", "medium", True, "Removed from the user group"),
+    "approve-change": ("changes", "medium", True, "Approved and applied"),
+    "decline-change": ("changes", "medium", True, "Declined"),
+    "revert-change": ("changes", "medium", True, "Opened a revert of"),
 }
-SWITCHES = ("silence", "runJob", "argocd", "restart", "testAlert", "identity")
+SWITCHES = ("silence", "runJob", "argocd", "restart", "testAlert", "identity", "changes")
 IDENTITY_KINDS = ("recovery-link", "add-member", "remove-member")
+CHANGE_KINDS = ("approve-change", "decline-change", "revert-change")
+# The kinds that act as the person in the forge: the UI takes the browser to the forge's own sign-in after the
+# identity provider's, and the service exchanges the code for that person's token. Revert opens a change as the bot,
+# and that change waits for an approval like any other.
+FORGE_PERSON_KINDS = ("approve-change", "decline-change")
+SHA = re.compile(r"[0-9a-f]{40}")
+REPO = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
 RECOVERY_HOURS = (1, 24, 72)
 # What may never be silenced: the alerts that prove the alert path works. Silencing one hides a dead pipeline.
 NEVER_SILENCE = frozenset({"Watchdog", "TockmoxHeartbeat", "TockmoxSelfCheckStale", "InfoInhibitor"})
@@ -89,6 +103,18 @@ class Config:
     identity_token_file: str = ""
     user_group: str = "tockmox-users"              # the one group membership actions may change
     recovery_groups: tuple = ()                    # groups besides the user group a recoverable person may be in
+    changes_api: str = ""                          # service side: the site forge's API, e.g. http://...:3000/api/v1
+    changes_repo: str = ""                         # owner/name of the site repository
+    changes_base: str = "main"
+    changes_bot_token_file: str = ""               # service side: the change bot's token (reads, and opens reverts)
+    changes_authorize_url: str = ""                # the forge's OAuth2 authorize URL, as a browser reaches it
+    changes_token_url: str = ""                    # the forge's token endpoint, as the pod reaches it
+    changes_client_id: str = ""                    # the console's OAuth2 application in the forge, inline or ...
+    changes_client_id_file: str = ""               # ... from a file (bootstrap-forge writes it; the forge makes it up)
+    changes_client_secret_file: str = ""           # service side only: the UI never holds it
+    changes_web: str = ""                          # the forge's web origin, for "open in the forge" links
+    forge_namespace: str = "tockmox-forge"         # service side: where the built-in forge and its copy jobs run
+    forge_release: str = "tockmox-forge"           # service side: its release (CronJobs <release>-offsite, -drill-check)
     activity_configmap: str = "tockmox-actions-activity"
     namespace: str = ""                            # service side: where the activity ConfigMap lives
     step_up_max_age: int = STEP_UP_MAX_AGE
@@ -117,6 +143,26 @@ def parse(raw) -> Config:
         if v.get("enabled"):
             on.add(sw)
     unknown = set(raw) - set(SWITCHES) - {"url", "activityConfigMap", "namespace", "stepUpMaxAgeSeconds"}
+    ch = raw.get("changes") or {}
+    ch_unknown = set(ch) - {"enabled", "apiUrl", "repo", "baseBranch", "botTokenFile", "webUrl", "oauth",
+                            "forgeNamespace", "forgeRelease"}
+    if ch_unknown:
+        raise ValueError(f"actions.changes: unknown key(s) {sorted(ch_unknown)}")
+    oa = ch.get("oauth") or {}
+    if not isinstance(oa, dict) or set(oa) - {"authorizeUrl", "tokenUrl", "clientId", "clientIdFile", "clientSecretFile"}:
+        raise ValueError("actions.changes.oauth: a mapping of authorizeUrl, tokenUrl, clientId or clientIdFile, and "
+                         "clientSecretFile")
+    for k, v in (("apiUrl", ch.get("apiUrl")), ("webUrl", ch.get("webUrl")), ("oauth.authorizeUrl", oa.get("authorizeUrl")),
+                 ("oauth.tokenUrl", oa.get("tokenUrl"))):
+        if v and not str(v).startswith(("http://", "https://")):
+            raise ValueError(f"actions.changes.{k} must be http:// or https://")
+    if ch.get("repo") and not REPO.fullmatch(str(ch["repo"])):
+        raise ValueError("actions.changes.repo must be owner/name")
+    if ch.get("baseBranch") and not re.fullmatch(r"[A-Za-z0-9._/-]{1,100}", str(ch["baseBranch"])):
+        raise ValueError("actions.changes.baseBranch must be a branch name")
+    for k in ("forgeNamespace", "forgeRelease"):
+        if ch.get(k) and not DNS_LABEL.fullmatch(str(ch[k])):
+            raise ValueError(f"actions.changes.{k} must be a DNS label")
     if unknown:
         raise ValueError(f"actions: unknown key(s) {sorted(unknown)}")
     jobs = []
@@ -155,6 +201,14 @@ def parse(raw) -> Config:
                   argocd_url=str(argo.get("url", "")).rstrip("/"), argocd_token_file=str(argo.get("tokenFile", "")),
                   identity_api=iapi, identity_token_file=str(ident.get("tokenFile", "")), user_group=ug,
                   recovery_groups=tuple(rg),
+                  changes_api=str(ch.get("apiUrl", "")).rstrip("/"), changes_repo=str(ch.get("repo", "")),
+                  changes_base=str(ch.get("baseBranch") or "main"), changes_bot_token_file=str(ch.get("botTokenFile", "")),
+                  changes_authorize_url=str(oa.get("authorizeUrl", "")), changes_token_url=str(oa.get("tokenUrl", "")),
+                  changes_client_id=str(oa.get("clientId", "")), changes_client_id_file=str(oa.get("clientIdFile", "")),
+                  changes_client_secret_file=str(oa.get("clientSecretFile", "")),
+                  changes_web=str(ch.get("webUrl", "")).rstrip("/"),
+                  forge_namespace=str(ch.get("forgeNamespace") or "tockmox-forge"),
+                  forge_release=str(ch.get("forgeRelease") or "tockmox-forge"),
                   activity_configmap=str(raw.get("activityConfigMap", "tockmox-actions-activity")),
                   namespace=str(raw.get("namespace", "")), step_up_max_age=age)
 
@@ -245,6 +299,21 @@ def check(cfg: Config, it: dict) -> dict:
                 raise Refused("a recovery link lasts 1, 24 or 72 hours")
         elif p:
             raise Refused("a membership change takes no parameters")
+    elif kind in CHANGE_KINDS:
+        n, title = t.get("number"), t.get("title", "")
+        if not isinstance(n, int) or isinstance(n, bool) or not 1 <= n <= 10_000_000:
+            raise Refused("a change is named by its number")
+        if not isinstance(title, str) or len(title) > 200 or any(ord(c) < 32 for c in title):
+            raise Refused("a change's title is one line of at most 200 characters")
+        need = "merge" if kind == "revert-change" else "head"
+        if not SHA.fullmatch(str(t.get(need, ""))) or set(t) - {"number", "title", need}:
+            raise Refused(f"a change action names the change's number, title and the {need} commit it was shown at")
+        if kind == "decline-change":
+            r = p.get("reason", "")
+            if set(p) - {"reason"} or not isinstance(r, str) or len(r) > 300:
+                raise Refused("a decline takes at most a reason of 300 characters")
+        elif p:
+            raise Refused(f"{kind} takes no parameters")
     return it
 
 
@@ -321,6 +390,24 @@ def describe(it: dict, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime
                           "already open in a console lasts until it ends. They can still sign in to Authentik itself; "
                           "to stop that, deactivate the account in Authentik's admin console.",
                 "undo": f"Add {u} to the user group again, here."}
+    if k in CHANGE_KINDS:
+        n, title = t.get("number"), t.get("title") or f"change #{t.get('number')}"
+        if k == "approve-change":
+            return {"title": f"Approve and apply #{n}?", "summary": f"Approved and applied #{n}: {title}",
+                    "target": f"#{n} {title}, at commit {str(t.get('head', ''))[:7]}",
+                    "effect": "Your approval is recorded in the site's forge as you, and the change merges with an "
+                              "Approved-by line naming you in the history. Argo CD applies it within minutes. Only the "
+                              "commit you were shown is approved: if the change moved since, nothing is done.",
+                    "undo": "Revert it from Platform > Changes: that opens the opposite change, which waits for an approval."}
+        if k == "decline-change":
+            return {"title": f"Decline #{n}?", "summary": f"Declined #{n}: {title}", "target": f"#{n} {title}",
+                    "effect": "The change is closed in the site's forge as you, with your reason. Nothing is applied.",
+                    "undo": "Reopen it in the forge, or ask for it again."}
+        return {"title": f"Revert #{n}?", "summary": f"Opened a revert of #{n}: {title}",
+                "target": f"#{n} {title}, applied as commit {str(t.get('merge', ''))[:7]}",
+                "effect": "Opens the opposite change: every file it changed goes back to what it was before. The "
+                          "revert waits on Platform > Changes for an approval, like any change; nothing is applied yet.",
+                "undo": "Decline the revert."}
     if k == "test-alert":
         return {"title": "Send a test alert to your phone?", "summary": "Sent a test alert",
                 "target": "the alert path: Alertmanager, the alert bridge, your phone",

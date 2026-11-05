@@ -88,7 +88,7 @@ def current(items, path: str):
 
 
 def rail(section: str | None, is_admin: bool, platform_on: bool, admin_tabs=(), inbox_count: int | None = None,
-         capabilities_state: str | None = None, activity: bool = False, identity: bool = False,
+         capabilities_state: str | None = None, activity: bool = False, identity: bool = False, changes: bool = False,
          contributed: dict | None = None) -> list[Group]:
     """The page list on the left of a section, or [] when the section has one page (Home, Status).
     `contributed` maps a section key to the Groups features add to it (feature_pages.py): a feature's own
@@ -120,7 +120,11 @@ def rail(section: str | None, is_admin: bool, platform_on: bool, admin_tabs=(), 
                 Item("Schedule", "/platform/schedule"),
                 Item("Specialists", "/platform/specialists"),
             )))
-        conf = [Item("Capabilities", "/capabilities", state=capabilities_state)]
+        conf = []
+        if changes:                     # the site's waiting changes: approve, decline, revert; and its history
+            conf.append(Item("Changes", "/platform/changes"))
+            conf.append(Item("Site history", "/platform/history"))
+        conf.append(Item("Capabilities", "/capabilities", state=capabilities_state))
         conf += [Item(t.name, f"/tabs/{t.id}") for t in admin_tabs]
         conf.append(Item("Updates", "/platform/updates", ("/upgrade", "/version")))
         if identity:                    # recovery links and user-group membership
@@ -173,6 +177,8 @@ HELP_MAP: dict[str, str] = {
     "/platform/updates": "deployment/upgrade.md",
     "/platform/activity": "administration/tockmox-ui.md",
     "/platform/identity": "administration/identity.md",
+    "/platform/changes": "administration/site-forge.md",
+    "/platform/history": "administration/site-forge-recovery.md",
     "/actions": "administration/tockmox-ui.md",
     "/upgrade": "deployment/upgrade.md",
     "/tabs/posture": "administration/posture-probe.md",

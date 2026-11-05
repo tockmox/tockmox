@@ -29,6 +29,18 @@ Alertmanager-reading observability capability for the Alertmanager kinds.
       (dict "namespace" $aiNs "name" "tockmox-health-watch" "part" "model-gateway")
       (dict "namespace" $aiNs "name" "tockmox-eval-scheduler" "part" "model-gateway")
       (dict "namespace" $aiNs "name" "tockmox-console-key-check" "part" "self-check") -}}
+{{- $ch := $a.changes | default dict -}}
+{{- /* On by default where the site's forge is the built-in one (global.siteForge, which tockmox-install.sh writes
+       into global.yaml), off elsewhere; an explicit true or false in the site's values wins either way. */ -}}
+{{- $chOn := eq (((.Values.global | default dict).siteForge) | default "") "built-in" -}}
+{{- if and (hasKey $ch "enabled") (not (kindIs "invalid" $ch.enabled)) -}}{{- $chOn = $ch.enabled -}}{{- end -}}
+{{- /* With the change kinds on, Site history's Copy now and Check the drill now: the built-in forge's own two
+       CronJobs (bootstrap-forge makes them), on the Site repository part. */ -}}
+{{- if $chOn -}}
+{{- $fRel := $ch.forgeRelease | default "tockmox-forge" -}}{{- $fNs := $ch.forgeNamespace | default "tockmox-forge" -}}
+{{- $jobs = append $jobs (dict "namespace" $fNs "name" (printf "%s-offsite" $fRel) "part" "site-repository") -}}
+{{- $jobs = append $jobs (dict "namespace" $fNs "name" (printf "%s-drill-check" $fRel) "part" "site-repository") -}}
+{{- end -}}
 {{- $jobs = concat $jobs ($rj.allow | default list) -}}
 {{- $rs := $a.restart | default dict -}}
 {{- $wl := list
@@ -47,6 +59,9 @@ Alertmanager-reading observability capability for the Alertmanager kinds.
 {{- $_ := set $out "argocd" (dict "enabled" (($ar.enabled) | default false) "url" ($ar.url | default "")) -}}
 {{- $id := $a.identity | default dict -}}
 {{- $_ := set $out "identity" (dict "enabled" (($id.enabled) | default false) "apiUrl" ($id.apiUrl | default "") "recoveryGroups" ($id.recoveryGroups | default list) "userGroup" (((.Values.sso | default dict).userGroup) | default "tockmox-users")) -}}
+{{- /* changes: the UI reads only the switch; the forge's addresses, the bot's token and the OAuth2 client are
+       the service's alone (templates/tockmox-actions.yaml), and the UI asks the service for the sign-in URL. */ -}}
+{{- $_ := set $out "changes" (dict "enabled" $chOn) -}}
 {{- end -}}
 {{- $out | toYaml -}}
 {{- end -}}

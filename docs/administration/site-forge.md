@@ -76,8 +76,10 @@ own.
 - **Taking someone out of the admin group** takes them out of `approvers` only at
   their next forge sign-in, which the default access rule then refuses, so remove
   them from the team by hand as well ([identity](identity.md)).
-- **Approving happens in the forge's own pages in this release.** Changes the
-  console and the model watcher open wait there for an approver.
+- **Approve in the forge's own pages, or in the console.** Changes the console
+  and the model watcher open wait in the forge for an approver; with the console's
+  Platform › Changes page on, they wait there too ([Approving in the
+  console](#approving-in-the-console)). Either way the forge's rule decides.
 
 ## Changing your site
 
@@ -132,10 +134,52 @@ git -C "$SITE_REPO" push -u origin HEAD
 The forge answers with a link to open the pull request. Open it, and an approver
 approves it in the forge. Changes that the model watcher and the console open
 arrive the same way, as pull requests from the change bot, waiting for an
-approver. Approving from the console itself is not in this release.
+approver, here or on the console's Platform › Changes page.
 
 These steps are Forgejo's own, and Tockmox's tests do not yet run them end to
 end; the branch rule they meet is tested on the lab.
+
+### Approving in the console
+
+**Platform › Changes lists every change waiting on `main`,** from the console,
+the model watcher and other bots: a plain-language summary, its checks, and the
+exact diff behind a fold, with **Approve and apply** and **Decline**. Recently
+applied changes are listed below with **Revert**.
+
+- **Approving goes through the forge as you, not as the console.** Your browser
+  visits the forge's sign-in (Authentik's, so with a live session you see no
+  prompt; the first time, the forge asks you once to allow the Tockmox console),
+  then Authentik for a fresh sign-in, and comes back. The console's actions
+  service exchanges the forge's answer for a token that is yours, approves
+  exactly the commit you were shown, and merges. The merge is a merge commit
+  whose message ends in an `Approved-by:` line naming you, so who approved
+  travels with the history and every off-site copy. Your token is used for that
+  one approval and kept nowhere; the forge expires it within ten minutes.
+- **The forge decides, not the console.** Someone outside `approvers` who
+  approves here is refused by the branch rule, and the page says so. A change
+  that moved after you opened it is refused before anything is done.
+- **Decline** closes the change, as you, with your reason as a comment.
+  **Revert** opens the opposite change, as the change bot: every file the change
+  touched, back as it was. It waits for an approval like any change. A file
+  that changed again since is not reverted here; revert that one by hand.
+- **No service holds an admin credential.** The actions service has the change
+  bot's token (which cannot approve) and the console's OAuth2 client, which acts
+  only as the person who signs in. The console itself holds no forge credential.
+- **While the forge does not answer**, the page reads **Changes paused** and
+  offers nothing. Argo CD keeps running what is already applied.
+
+**It is on wherever the console is,** on a site whose forge is built in: the
+installer writes `siteForge: built-in` into `global.yaml`, and the AI layer reads
+it. `bootstrap-forge` writes the two Secrets the page needs into the AI layer's
+namespace: `tockmox-forge-actions-bot` (the bot's token) and
+`tockmox-forge-console-oauth` (the console's OAuth2 application, which sends
+people back to `tockmox.<your internal domain>`; `--console-host` if yours is
+another). To turn the page off, set `tockmoxUi.actions.changes.enabled: false`
+in the AI layer's values, in the `tockmoxUi` block you already have.
+
+The approval round trip through the forge's sign-in is tested against a stand-in
+forge that models what was measured on Forgejo 15.0.11; it has not yet been run
+end to end on a lab site.
 
 ## Where its settings live
 
@@ -164,6 +208,23 @@ you set up:
 
 What each holds, the alerts that watch them, and what a rebuild can still lose are
 on [rebuilding from the off-site copy](site-forge-recovery.md).
+
+**Platform › Site history** shows all of it in one place: where the history
+lives and `main`'s last change, whether the off-site copy holds it (**Matches**,
+**Copy pending** for the first 15 minutes after a change, **Behind**, or **No
+off-site copy**, in the same words as the alerts), and whether the last rebuild
+drill passed or is overdue. Below that are the recently applied changes, each
+with **Revert**. From the page:
+
+- **Copy now** runs the copy job once, as its schedule would; **Check the drill
+  now** does the same for the daily drill check.
+- **Download a copy** makes a git bundle of `main` now, the way the copy job
+  does, and gives you `site.bundle` and `site.bundle.sha256`. Keep the two
+  together: `tockmox-install.sh --restore-from file:site.bundle` checks one
+  against the other before it uses the copy, which is how a disconnected site is
+  rebuilt from media. The copy is not signed yet; its SHA-256 is the check.
+
+The page is on wherever Platform › Changes is.
 
 **While the forge is down and the cluster is fine,** running apps keep running.
 ArgoCD reports `Unknown` with a `ComparisonError` and applies nothing new until the

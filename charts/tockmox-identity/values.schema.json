@@ -43,6 +43,11 @@
           "type": "string",
           "description": "StorageClass for data the application replicates itself or can re-derive. Empty uses the cluster default."
         },
+        "siteForge": {
+          "type": "string",
+          "enum": ["", "built-in", "external"],
+          "description": "Where the site repository lives, as tockmox-install.sh wrote it (site.forge). built-in turns on what needs the built-in forge by default, such as the console's Platform > Changes. Empty is read as external."
+        },
         "resilience": {
           "type": "object",
           "description": "The resilient claim. Set by profiles/resilient.yaml. With profile `resilient` the layers that have a backup refuse to render while it is off or points inside the cluster, and alert while no restore drill has passed. docs/deployment/profiles.md, \"The resilient profile\".",

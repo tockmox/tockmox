@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}Site history · Platform{% endblock %}
+{% block main %}
+{#- specs/site-forge/SPEC.md "Keeping it safe" and "Rebuilding": where the site's history lives, whether the off-site
+    copy holds it, and whether the last rebuild drill passed. Read through tockmox-actions and Prometheus; the words
+    for a missing or behind copy and an overdue drill are the alerts' own, so the page and the phone agree. -#}
+<h1>Site history</h1>
+<p class="lede">Every change to this site is a commit in its built-in forge. Here is where that history lives, whether its off-site copy holds it, and whether the last rebuild from that copy worked.</p>
+{% if err %}
+<p class="panel quiet">{{ badge("unknown", "Unknown") }} The forge's side could not be read: {{ err }}. That is not the same as there being no history.</p>
+{% endif %}
+{% if not v.sources.alerts %}<p class="muted small">Alertmanager did not answer, so the alerts below may be missing from this page.</p>{% endif %}
+
+<section class="panel" aria-labelledby="h-repo">
+  <h2 id="h-repo">Where it lives {{ badge(v.repo.state, v.repo.word) }}</h2>
+  <p>{{ v.repo.text }}</p>
+  <dl class="confirm-facts">
+    {% if st.in_cluster %}<dt>Address Argo CD reads</dt><dd><code>{{ st.in_cluster }}</code></dd>{% endif %}
+    {% if st.main and st.main.message %}<dt>Last change</dt><dd>{{ st.main.message }}</dd>{% endif %}
+    {% if st.web and st.repo %}<dt>In the forge</dt><dd><a href="{{ st.web }}/{{ st.repo }}">Open the repository (advanced)</a></dd>{% endif %}
+  </dl>
+</section>
+
+<section class="panel" aria-labelledby="h-copy">
+  <h2 id="h-copy">Off-site copy {{ badge(v.offsite.state, v.offsite.word) }}</h2>
+  <p>{{ v.offsite.text }}{% if v.offsite.silenced %} <span class="muted small">(silenced by {{ v.offsite.silenced.by }})</span>{% endif %}</p>
+  {% if v.offsite.none %}
+  <p class="muted small">Snooze or dismiss this warning from the <a href="/status/site-repository">Site repository</a> part on Status.</p>
+  {% elif v.offsite.destination %}
+  <dl class="confirm-facts">
+    <dt>Destination</dt><dd>{{ v.offsite.how }}: <code>{{ v.offsite.destination }}</code></dd>
+    <dt>Copied by</dt><dd>the CronJob <code>{{ ns }}/{{ v.offsite.name }}</code>, every minute; it succeeds only when the destination holds main</dd>
+  </dl>
+  {% endif %}
+  <div class="row-acts">
+    {%- if copy_now %}<a class="pill" href="/actions/confirm?kind=run-job&amp;ns={{ ns | urlencode }}&amp;name={{ copy_now | urlencode }}&amp;back=/platform/history">Copy now</a>{% endif %}
+  </div>
+  <form method="post" action="/actions/site-copy" class="row-acts">
+    <input type="hidden" name="csrf" value="{{ user.csrf }}">
+    <button class="pill" type="submit">Download a copy</button>
+    <span class="muted small">main as one file with its SHA-256, for a rebuild from media on a disconnected site</span>
+  </form>
+</section>
+
+<section class="panel" aria-labelledby="h-drill">
+  <h2 id="h-drill">Last rebuild drill {{ badge(v.drill.state, v.drill.word) }}</h2>
+  <p>{{ v.drill.text }}{% if v.drill.silenced %} <span class="muted small">(silenced by {{ v.drill.silenced.by }})</span>{% endif %}</p>
+  <p class="muted small">A drill rebuilds this site on a throwaway cluster from the real latest copy and recovery kit, and proves the refusals first (a stale copy, a corrupt one, a wrong passphrase). Run it from a workstation with <code>tockmox-install.sh rebuild-drill</code>; its record, with the date and time taken, is kept beside the copy.</p>
+  <div class="row-acts">
+    {%- if drill_now %}<a class="pill" href="/actions/confirm?kind=run-job&amp;ns={{ ns | urlencode }}&amp;name={{ drill_now | urlencode }}&amp;back=/platform/history">Check the drill now</a>{% endif %}
+  </div>
+</section>
+
+<section aria-labelledby="h-applied">
+<h2 id="h-applied">Recently applied</h2>
+{% if not applied %}
+<p class="panel quiet">No change has been applied through the forge yet, or the forge did not answer.</p>
+{% else %}
+<div class="table-wrap" tabindex="0" role="region" aria-labelledby="hist-cap">
+<table>
+  <caption id="hist-cap">The last {{ applied | length }} applied, newest first. Who approved each is in its merge commit.</caption>
+  <thead><tr><th scope="col">Change</th><th scope="col">Applied</th><th scope="col">Merged by</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+  <tbody>
+  {% for c in applied %}
+  <tr><th scope="row">#{{ c.number }} {{ c.title }}</th>
+    <td>{% if c.merged_at %}<time datetime="{{ c.merged_at }}">{{ c.merged_at[:16] | replace("T", " ") }}</time>{% endif %} <code>{{ c.merge[:7] }}</code></td>
+    <td>{{ c.merged_by or "?" }}</td>
+    <td><a class="pill" href="/actions/confirm?kind=revert-change&amp;number={{ c.number }}">Revert</a></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+</section>
+{% endblock %}

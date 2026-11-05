@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge %}
+{% block title %}Changes · Platform{% endblock %}
+{% block main %}
+{#- specs/site-forge/SPEC.md "Changing your site": every change to this site waits here, from the console, the model
+    watcher and other bots. Read and done through tockmox-actions; the UI holds no forge credential. Approve and
+    Decline act as YOU in the forge (its sign-in is Authentik's); the forge's branch rule is what decides. -#}
+<h1>Changes</h1>
+<p class="lede">Every change to this site waits here for a person: from the console, the model watcher and other bots. Approving records you as the approver and applies it; Argo CD picks it up within minutes. The site's forge enforces who may approve, not this page.</p>
+{% if paused %}
+<div class="panel" role="status">{{ badge("warning", "Changes paused") }} <strong>The site's forge is not answering.</strong> Nothing can be approved, declined or reverted until it is back. Argo CD keeps running what is already applied.</div>
+{% elif err %}
+<p class="panel quiet">{{ badge("unknown", "Unknown") }} The changes could not be read: {{ err }}. That is not the same as there being none.</p>
+{% else %}
+{% if not person_ok %}
+<p class="panel quiet">{{ badge("warning", "Read only") }} The console has no sign-in to the site's forge configured, so changes can be read here and approved only in the forge itself.</p>
+{% endif %}
+<h2 id="waiting">Waiting {% if opened %}<span class="muted small">({{ opened | length }})</span>{% endif %}</h2>
+{% if not opened %}
+<p class="panel quiet">Nothing is waiting. Changes the console or the model watcher open will appear here.</p>
+{% endif %}
+{% for c in opened %}
+<article class="panel change" aria-labelledby="ch-{{ c.number }}">
+  <h3 id="ch-{{ c.number }}">#{{ c.number }} {{ c.title }}</h3>
+  <p class="muted small">From {{ c.by }}{% if c.created %} · opened <time datetime="{{ c.created }}">{{ c.created[:16] | replace("T", " ") }}</time>{% endif %}{% if c.url %} · <a href="{{ c.url }}">in the forge</a>{% endif %}</p>
+  {% if c.summary %}<p>{{ c.summary }}</p>{% endif %}
+  <p><span class="sr-only">Checks: </span>
+  {%- if not c.checks %}{{ badge("unknown", "No checks reported") }}
+  {%- else %}{% for k in c.checks %}{{ badge("ok" if k.state == "success" else "critical" if k.state in ("failure", "error") else "unknown", k.context ~ ": " ~ (k.state or "pending")) }} {% endfor %}{% endif %}
+  {%- if c.mergeable == false %} {{ badge("warning", "Conflicts with " ~ (c.base or "main")) }}{% endif %}</p>
+  <details>
+    <summary>The exact change{% if c.diff_cut %} (cut: the rest is in the forge){% endif %}</summary>
+    {% if c.diff_err %}<p class="muted">The diff could not be read: {{ c.diff_err }}.</p>
+    {% elif c.diff %}<pre class="diff" tabindex="0" aria-label="Diff of #{{ c.number }}">{{ c.diff }}</pre>
+    {% else %}<p class="muted"><a href="/platform/changes/{{ c.number }}/diff">Open the diff</a></p>{% endif %}
+  </details>
+  {% if person_ok %}
+  <div class="row-acts">
+    {%- set q = "number=" ~ c.number ~ "&head=" ~ c.head -%}
+    <a class="pill primary" href="/actions/confirm?kind=approve-change&amp;{{ q | e }}">Approve and apply</a>
+    <a class="pill danger" href="/actions/confirm?kind=decline-change&amp;{{ q | e }}">Decline</a>
+  </div>
+  {% endif %}
+</article>
+{% endfor %}
+
+<h2 id="applied">Recently applied</h2>
+{% if not applied %}
+<p class="panel quiet">No change has been applied through the forge yet.</p>
+{% else %}
+<div class="table-wrap" tabindex="0" role="region" aria-labelledby="ap-cap">
+<table>
+  <caption id="ap-cap">The last {{ applied | length }} applied, newest first.</caption>
+  <thead><tr><th scope="col">Change</th><th scope="col">Applied</th><th scope="col">By</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+  <tbody>
+  {% for c in applied %}
+  <tr><th scope="row">#{{ c.number }} {{ c.title }}</th>
+    <td>{% if c.merged_at %}<time datetime="{{ c.merged_at }}">{{ c.merged_at[:16] | replace("T", " ") }}</time>{% endif %} <code>{{ c.merge[:7] }}</code></td>
+    <td>{{ c.merged_by or "?" }}</td>
+    <td><a class="pill" href="/actions/confirm?kind=revert-change&amp;number={{ c.number }}">Revert</a></td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
