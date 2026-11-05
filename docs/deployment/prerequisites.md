@@ -38,6 +38,12 @@ them and the first two fail the render.
 
 Both finish at [installation](install.md).
 
+**On your workstation.** The install pages ask your machine for a handful of
+tools (`kubectl`, `helm`, a `kubeseal` matching the controller, `git`,
+`openssl`). If you would rather install none of them, [the install
+kit](install-kit.md) carries them all in one container you build yourself, and
+your workstation needs only a container runtime.
+
 **Which shape is yours.** One deployment shape is gated: a single node running
 openSUSE MicroOS and k3s as a SUSE Harvester virtual machine. Every other shape
 on these pages is either documented without a release gate behind it, or not

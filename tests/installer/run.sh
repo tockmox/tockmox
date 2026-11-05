@@ -432,4 +432,9 @@ assert_artifact "with the platform rules off there is no S3 rule to miss, and it
 # shellcheck source=forge-move-tests.sh
 . "$HERE/forge-move-tests.sh"
 
+# ----------------------------------------------------------------
+# install/kit: the launcher's runtime request and the entrypoint's hand-off.
+# shellcheck source=kit-tests.sh
+. "$HERE/kit-tests.sh"
+
 assert_summary

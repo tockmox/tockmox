@@ -1,0 +1,19 @@
+# The build context is the repository root. The kit carries the tree of the tag it was built from, minus
+# what is not source: version control, local build output, caches and anything a working copy minted.
+# (BuildKit reads <Dockerfile>.dockerignore; the legacy builder ignores this file and sends everything.)
+.git
+build/
+**/__pycache__
+**/.pytest_cache
+**/node_modules
+**/.venv
+charts/*/charts/
+charts/*/tmpcharts-*/
+*.tgz
+*.log
+.DS_Store
+secrets/
+pub-sealed-secrets.pem
+sealed-secrets-key.backup.yaml
+tockmox-site/
+tockmox.yaml

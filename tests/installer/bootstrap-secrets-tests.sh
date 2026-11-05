@@ -141,9 +141,11 @@ assert_artifact \
   "the key backup is openssl ciphertext (Salted__ magic), not YAML" \
   "head -c 8 '$D/backup/key.enc'" \
   "Salted__"
+# sed, not head: head closes the pipe early and OpenSSL 3.5 (the install kit's) reports the broken pipe
+# on stderr, which the assertion captures. sed reads to the end.
 assert_artifact \
   "and it decrypts, with an independent openssl, to a Tockmox key backup" \
-  "'$REAL_OPENSSL' enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass file:'$D/inputs/pass' -in '$D/backup/key.enc' | head -1" \
+  "'$REAL_OPENSSL' enc -d -aes-256-cbc -pbkdf2 -iter 600000 -pass file:'$D/inputs/pass' -in '$D/backup/key.enc' | sed -n 1p" \
   "$KEY_MARKER_HEADER"
 assert_artifact \
   "the backup was exported BEFORE the first credential was sealed" \

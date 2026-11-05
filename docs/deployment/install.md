@@ -190,6 +190,11 @@ both close**. Neither is a defect to work around on the way past.
 Phase 2.5, after the site repository is already pushed, is the failure this
 table exists to prevent.
 
+**Or none of them:** [the install kit](install-kit.md) carries every tool in this
+table at the version this release was tested with, so the only thing to install
+is a container runtime. Run `./tockmox-kit` wherever this page runs
+`install/tockmox-install.sh`.
+
 | What you need | Why | How to check |
 |---|---|---|
 | A clone of the Tockmox source tree, at the release you intend to run | Phase 1 runs `install/tockmox-install.sh` from its root and Phase 2.5 runs `tools/mint-secrets.sh` beside it | `ls "$TOCKMOX/install/tockmox-install.sh" "$TOCKMOX/tools/mint-secrets.sh"`, after [set these once](#set-these-once) |

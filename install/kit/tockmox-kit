@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+#
+# Run the install kit: the installer and every tool it needs, in a container you built yourself.
+# docs/deployment/install-kit.md is the page. The one thing this machine needs is a container runtime
+# (Docker, Podman or nerdctl), running.
+#
+#   tockmox-kit build [--ref TAG] [--ca-file FILE]   build the kit image (from this clone, or from TAG on GitHub)
+#   tockmox-kit kit-check                           every tool present and at its pin
+#   tockmox-kit [launcher options] <installer arguments>
+#
+# Launcher options, before the installer's own arguments:
+#   --kubeconfig FILE   the kubeconfig to mount read-only (default: $KUBECONFIG, else ~/.kube/config)
+#   --ca-file FILE      a CA to trust inside the kit: a TLS-intercepting proxy's, or your site's private CA
+#   --image NAME        the image to run (default: tockmox-kit, or $TOCKMOX_KIT_IMAGE)
+#
+# Everything else goes to install/tockmox-install.sh unchanged, so `tockmox-kit --config tockmox.yaml`
+# is `./install/tockmox-install.sh --config tockmox.yaml`, and `tockmox-kit bootstrap-secrets ...` is the
+# same subcommand. The current directory is mounted as /work and is the only part of this machine the kit
+# can see, so give file arguments as paths relative to it.
+#
+# macOS bash 3.2 and BSD userland.
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+IMAGE="${TOCKMOX_KIT_IMAGE:-tockmox-kit}"
+KUBECFG=""
+CA_FILE=""
+
+die() { printf 'tockmox-kit: %s\n' "$*" >&2; exit 1; }
+note() { printf 'tockmox-kit: %s\n' "$*" >&2; }
+
+# A runtime whose daemon ANSWERS, not one whose CLI is merely on PATH (tools/mint-secrets.sh says why:
+# a stopped Colima leaves the docker CLI behind). TOCKMOX_KIT_RUNTIME picks one explicitly.
+pick_runtime() {
+  local r
+  if [ -n "${TOCKMOX_KIT_RUNTIME:-}" ]; then
+    command -v "$TOCKMOX_KIT_RUNTIME" >/dev/null 2>&1 || die "TOCKMOX_KIT_RUNTIME=$TOCKMOX_KIT_RUNTIME is not on PATH"
+    RT="$TOCKMOX_KIT_RUNTIME"; return 0
+  fi
+  for r in docker podman nerdctl; do
+    command -v "$r" >/dev/null 2>&1 || continue
+    if "$r" info >/dev/null 2>&1; then RT="$r"; return 0; fi
+    note "$r is on PATH but does not answer; trying the next"
+  done
+  die "no container runtime answered (docker, podman, nerdctl). Start one, or install one: docs/deployment/install-kit.md"
+}
+
+abs() { (cd "$(dirname "$1")" && printf '%s/%s\n' "$(pwd)" "$(basename "$1")"); }
+
+do_build() {
+  local ref="" ctx
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --ref) ref="${2:?--ref needs a tag}"; shift 2 ;;
+      --ca-file) CA_FILE="${2:?--ca-file needs a file}"; shift 2 ;;
+      --image) IMAGE="${2:?--image needs a name}"; shift 2 ;;
+      *) die "build: unknown argument $1" ;;
+    esac
+  done
+  if [ -n "$ref" ]; then
+    ctx="https://github.com/tockmox/tockmox.git#$ref"
+  elif [ -f "$SELF_DIR/../../install/tockmox-install.sh" ]; then
+    ctx="$(cd "$SELF_DIR/../.." && pwd)"
+  else
+    die "build: not inside a clone; give --ref TAG to build from GitHub"
+  fi
+  set -- build -t "$IMAGE" -f install/kit/Dockerfile
+  if [ -n "$CA_FILE" ]; then
+    [ -r "$CA_FILE" ] && [ -s "$CA_FILE" ] || die "--ca-file $CA_FILE is missing, empty or unreadable"
+    set -- "$@" --secret "id=ca,src=$(abs "$CA_FILE")"
+  fi
+  note "building $IMAGE with $RT from $ctx"
+  exec "$RT" "$@" "$ctx"
+}
+
+pick_runtime
+[ "${1:-}" = "build" ] && { shift; do_build "$@"; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --kubeconfig) KUBECFG="${2:?--kubeconfig needs a file}"; shift 2 ;;
+    --ca-file) CA_FILE="${2:?--ca-file needs a file}"; shift 2 ;;
+    --image) IMAGE="${2:?--image needs a name}"; shift 2 ;;
+    *) break ;;
+  esac
+done
+
+if [ -z "$KUBECFG" ]; then
+  case "${KUBECONFIG:-}" in
+    *:*) die "KUBECONFIG lists several files; the kit mounts one. Flatten them first:
+  kubectl config view --flatten > kit-kubeconfig && tockmox-kit --kubeconfig kit-kubeconfig ..." ;;
+    "") KUBECFG="$HOME/.kube/config" ;;
+    *) KUBECFG="$KUBECONFIG" ;;
+  esac
+fi
+
+RUN=(run --rm -i)
+[ -t 0 ] && [ -t 1 ] && RUN+=(-t)
+# Working material (generated credentials before they are sealed, HOME, caches) lives in memory and is
+# gone when the container exits. Only /work, your directory, is written on this machine.
+RUN+=(--tmpfs "/tmp:rw,nosuid,nodev,size=256m,mode=1777")
+RUN+=(-v "$(pwd):/work" -w /work -e TERM -e NO_COLOR -e "TOCKMOX_INVOKED_AS=$0")
+# Files the kit writes into /work are owned by you. Rootless Podman maps container ids through your
+# subordinate range, so it also needs keep-id; Docker Desktop on macOS maps ownership by itself.
+RUN+=(--user "$(id -u):$(id -g)")
+[ "$RT" = "podman" ] && RUN+=(--userns=keep-id)
+if [ -f "$KUBECFG" ]; then
+  RUN+=(-v "$(abs "$KUBECFG"):/kube/config:ro")
+  # Inside the kit, 127.0.0.1 is the container itself, so a cluster this kubeconfig reaches on loopback
+  # (a tunnel, a port-forward, a local cluster) is unreachable from it.
+  if grep -E 'server:[[:space:]]*https?://(127\.0\.0\.1|localhost|\[::1\])' "$KUBECFG" >/dev/null 2>&1; then
+    note "warning: $KUBECFG names a cluster on 127.0.0.1 or localhost, which inside the kit is the kit itself."
+    note "  Use the cluster's own address, or on Docker Desktop host.docker.internal (docs/deployment/install-kit.md)."
+  fi
+else
+  note "no kubeconfig at $KUBECFG; steps that reach a cluster will say so"
+fi
+if [ -n "$CA_FILE" ]; then
+  [ -r "$CA_FILE" ] && [ -s "$CA_FILE" ] || die "--ca-file $CA_FILE is missing, empty or unreadable"
+  RUN+=(-v "$(abs "$CA_FILE"):/kit/ca.pem:ro")
+fi
+
+# An absolute path names a file on this machine, which the kit cannot see.
+for a in "$@"; do
+  case "$a" in
+    /*) note "warning: '$a' is a path on this machine; the kit sees only $(pwd) (as /work). Use a relative path." ;;
+  esac
+done
+
+exec "$RT" "${RUN[@]}" "$IMAGE" "$@"

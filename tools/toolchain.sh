@@ -115,6 +115,22 @@ do_drift() {
   same "ci.yaml KUBECONFORM_VERSION"        "$(wf_env "$wf/ci.yaml" KUBECONFORM_VERSION)"        "$(pin kubeconform)"
   same "ci.yaml GITLEAKS_VERSION"           "$(wf_env "$wf/ci.yaml" GITLEAKS_VERSION)"           "$(pin gitleaks)"
   same "check-all.yaml SHELLCHECK_VERSION"  "$(wf_env "$wf/check-all.yaml" SHELLCHECK_VERSION)"  "$(pin shellcheck)"
+  # The install kit carries its own copies, each with its checksum beside it, and two of them follow
+  # something other than mise.toml: kubeseal follows the controller bootstrap-secrets.sh installs, and
+  # kubectl's minor follows the k3s the fresh-install page pins (kubectl supports one minor of skew).
+  local kit="$ROOT/install/kit/Dockerfile" ks ctl k3s
+  if [ -r "$kit" ]; then
+    kit_arg() { sed -n "s/^ARG $1=\"\([^\"]*\)\".*/\1/p" "$kit" | head -n 1; }
+    same "install/kit/Dockerfile HELM_VERSION" "$(kit_arg HELM_VERSION)" "v$(pin helm)"
+    ks="$(kit_arg KUBESEAL_VERSION)"
+    ctl="$(sed -n 's/^IMAGE_TAG_DEFAULT="\(.*\)"$/\1/p' "$ROOT/install/bootstrap-secrets.sh" 2>/dev/null)"
+    if [ -n "$ks" ] && [ "$ks" = "$ctl" ]; then echo "  ok    install/kit/Dockerfile KUBESEAL_VERSION = $ks, the controller bootstrap-secrets.sh installs"
+    else echo "  FAIL  install/kit/Dockerfile KUBESEAL_VERSION = ${ks:-not found}, bootstrap-secrets.sh installs controller ${ctl:-not found}"; fail=1; fi
+    ctl="$(kit_arg KUBECTL_VERSION | sed -n 's/^v\([0-9]*\.[0-9]*\)\..*/\1/p')"
+    k3s="$(sed -n 's/^export K3S_VERSION=v\([0-9]*\.[0-9]*\)\..*/\1/p' "$ROOT/docs/deployment/fresh-install.md" 2>/dev/null | head -n 1)"
+    if [ -n "$ctl" ] && [ "$ctl" = "$k3s" ]; then echo "  ok    install/kit/Dockerfile KUBECTL_VERSION minor $ctl = the k3s fresh-install.md pins"
+    else echo "  FAIL  install/kit/Dockerfile KUBECTL_VERSION minor ${ctl:-not found}, fresh-install.md pins k3s ${k3s:-not found}"; fail=1; fi
+  fi
   # No other workflow may carry its own copy: it reads --pins instead.
   for f in "$wf"/*.yaml; do
     case "$(basename "$f")" in ci.yaml|check-all.yaml) continue ;; esac
@@ -158,6 +174,10 @@ do_selftest() {
   cp "$MISE" "$T/repo/mise.toml"
   cp "$ROOT/.github/workflows/"*.yaml "$T/repo/.github/workflows/"
   cp "$ROOT/CONTRIBUTING.md" "$T/repo/CONTRIBUTING.md"
+  mkdir -p "$T/repo/install/kit" "$T/repo/docs/deployment"
+  cp "$ROOT/install/kit/Dockerfile" "$T/repo/install/kit/Dockerfile"
+  cp "$ROOT/install/bootstrap-secrets.sh" "$T/repo/install/bootstrap-secrets.sh"
+  cp "$ROOT/docs/deployment/fresh-install.md" "$T/repo/docs/deployment/fresh-install.md"
   # Fake tools that print exactly what the real ones print, at the pinned versions.
   local H K S G P
   H="$(pin helm)"; K="$(pin kubeconform)"; S="$(pin shellcheck)"; G="$(pin gitleaks)"; P="$(pin python)"
@@ -198,6 +218,13 @@ do_selftest() {
   printf '\nInstall Helm v3.16.3 first.\n' >> "$T/repo/CONTRIBUTING.md"
   expect 1 "--drift goes red on CONTRIBUTING.md naming another Helm" --drift
   cp "$ROOT/CONTRIBUTING.md" "$T/repo/CONTRIBUTING.md"
+  sed 's/^ARG HELM_VERSION="[^"]*"/ARG HELM_VERSION="v3.16.3"/' "$ROOT/install/kit/Dockerfile" > "$T/repo/install/kit/Dockerfile"
+  expect 1 "--drift goes red on the install kit's helm moving without mise.toml" --drift
+  sed 's/^ARG KUBESEAL_VERSION="[^"]*"/ARG KUBESEAL_VERSION="0.1.0"/' "$ROOT/install/kit/Dockerfile" > "$T/repo/install/kit/Dockerfile"
+  expect 1 "--drift goes red on the kit's kubeseal differing from the controller bootstrap-secrets.sh installs" --drift
+  sed 's/^ARG KUBECTL_VERSION="[^"]*"/ARG KUBECTL_VERSION="v1.20.0"/' "$ROOT/install/kit/Dockerfile" > "$T/repo/install/kit/Dockerfile"
+  expect 1 "--drift goes red on the kit's kubectl minor differing from the pinned k3s" --drift
+  cp "$ROOT/install/kit/Dockerfile" "$T/repo/install/kit/Dockerfile"
   expect 0 "--drift is green again once every copy is restored" --drift
   run --pins
   if grep "^HELM_VERSION=v$H\$" "$T/out" >/dev/null && grep "^PYTHON_VERSION=$P\$" "$T/out" >/dev/null; then
