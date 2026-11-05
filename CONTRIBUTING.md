@@ -330,6 +330,10 @@ Use a real name and a reachable address. Forgot on the last commit:
 force-push. A missing sign-off is the one review comment that is not a
 judgment call.
 
+A commit that reached `main` without one is not rewritten: its author adds the
+sign-off in [DCO-REMEDIATION.md](DCO-REMEDIATION.md), in a commit that is itself
+signed off.
+
 ### Sign-off at merge (the maintainer's App lane)
 
 Some changes reach `main` through the `tockmox-engineer` GitHub App: the
