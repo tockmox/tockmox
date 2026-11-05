@@ -80,6 +80,16 @@ on:
         description: 'leave the throwaway cluster standing for inspection'
         type: boolean
         default: false
+      lane:
+        description: 'all = every documented path (run.sh); p09 = install.md end to end on one throwaway (p09-lane.sh)'
+        type: choice
+        options: [all, p09]
+        default: all
+      p09_route:
+        description: 'the p09 lane only: where the site repository lives'
+        type: choice
+        options: [built-in, external]
+        default: built-in
 
 permissions:
   contents: read
@@ -335,7 +345,8 @@ jobs:
     # Never on pull_request: a self-hosted runner must not execute fork code.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: [self-hosted, tockmox-devtest]
-    timeout-minutes: 60
+    # The p09 lane is one create, P04 and P05, and P09's whole install (20 to 40 minutes measured on the lab).
+    timeout-minutes: ${{ github.event.inputs.lane == 'p09' && 120 || 60 }}
     concurrency:
       # One at a time. Since then the teardown only removes this run's own
       # VM (named below), but two runs would still compete for the substrate's
@@ -356,6 +367,8 @@ jobs:
       # context the runner's kubeconfig has current. Not a secret, so a variable.
       TOCKMOX_SUBSTRATE_CONTEXT: ${{ vars.TOCKMOX_SUBSTRATE_CONTEXT }}
       TOCKMOX_KEEP_CLUSTER: ${{ github.event.inputs.keep_cluster == 'true' && '1' || '0' }}
+      TOCKMOX_LANE: ${{ github.event.inputs.lane || 'all' }}
+      TOCKMOX_P09_ROUTE: ${{ github.event.inputs.p09_route || 'built-in' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -468,7 +481,12 @@ jobs:
 
       - name: run the documented paths
         shell: bash -euo pipefail {0}
-        run: bash tests/executed-docs/run.sh
+        run: |
+          case "$TOCKMOX_LANE" in
+            all) bash tests/executed-docs/run.sh ;;
+            p09) bash tests/executed-docs/p09-lane.sh ;;
+            *) echo "REFUSING: lane '${TOCKMOX_LANE}' is not all or p09"; exit 2 ;;
+          esac
 
       - name: upload the run report
         if: always()
