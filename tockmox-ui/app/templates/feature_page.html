@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{#- A feature page (feature_pages.py): every block is drawn here with the console's own components, from a page
+    document the feature's read API served. Nothing in the document is markup; Jinja escapes every string. -#}
+{% from "macros.html" import badge, state_icon %}
+{% block title %}{{ ref.title }} · {{ feature.name }}{% endblock %}
+{% block main %}
+{%- macro marker() -%}{% if private %}<span class="fmark" title="The maintainer's own extension, not in the open-source project">Private</span>{% endif %}{%- endmacro -%}
+<div class="fp-head">
+  <h1>{{ pg.title if pg else ref.title }}</h1>{{ marker() }}
+</div>
+{% if not pg %}
+<div class="panel quiet">
+  <p>{{ badge("unknown", "Unknown") }} {{ feature.name }} did not give this page: {{ reading.reason }}. That is not the same as nothing to show.</p>
+  <p class="muted">The console draws feature pages from the feature's own read API (<code>features.{{ feature.id }}.apiUrl</code>). See <a href="{{ shell.help_href or '#' }}">feature pages</a> for what it expects.</p>
+</div>
+{% else %}
+{% if pg.lede %}<p class="lede">{{ pg.lede }}</p>{% endif %}
+<p class="fp-src muted small">{% if pg.stale %}{{ badge("warning", "Stale") }} {% endif %}From {{ pg.source }}, generated <time datetime="{{ pg.generated_at | iso }}">{{ age }}</time>{% if pg.stale %}; it has not been regenerated on schedule, so read it as of then{% endif %}.</p>
+
+{% for b in pg.blocks %}
+{% set bid = "b" ~ loop.index %}
+{% if b.type == "stats" %}
+<section class="fp-block" {% if b.title %}aria-labelledby="{{ bid }}"{% else %}aria-label="Figures"{% endif %}>
+  {% if b.title %}<h2 id="{{ bid }}">{{ b.title }}</h2>{% endif %}
+  <div class="stats">
+  {% for it in b["items"] %}
+    <div class="stat{% if it.state %} fs-{{ it.state }}{% endif %}">
+      <div class="label">{{ it.label }}</div>
+      <div class="value">{% if it.state and it.state != "neutral" %}{{ state_icon(it.state) }}{% endif %}{{ it.value }}{% if it.unit %}<span class="fp-unit"> {{ it.unit }}</span>{% endif %}</div>
+      {% if it.delta %}<div class="sub fp-delta{% if it.trend %} {{ it.trend }}{% endif %}">{{ it.delta }} vs last week{% if it.trend %}<span class="visually-hidden">, {{ "better" if it.trend == "good" else "worse" }}</span>{% endif %}</div>{% endif %}
+      {% if it.note %}<div class="sub">{{ it.note }}</div>{% endif %}
+    </div>
+  {% endfor %}
+  </div>
+</section>
+{% elif b.type == "chart" %}
+<section class="fp-block" aria-labelledby="{{ bid }}">
+  <figure class="fp-chart">
+    <figcaption><h2 id="{{ bid }}">{{ b.title }}</h2>{% if b.unit %}<span class="muted small">{{ b.unit }}</span>{% endif %}</figcaption>
+    <svg viewBox="0 0 {{ b.svg.w }} {{ b.svg.h + 18 }}" aria-hidden="true" focusable="false" class="fp-svg">
+      <line class="axis" x1="0" x2="{{ b.svg.w }}" y1="{{ b.svg.zero }}" y2="{{ b.svg.zero }}"/>
+      <line class="grid" x1="0" x2="{{ b.svg.w }}" y1="{{ b.svg.top.y }}" y2="{{ b.svg.top.y }}"/>
+      <text class="ytop" x="2" y="{{ b.svg.top.y - 3 }}" text-anchor="start">{{ b.svg.top.t }}</text>
+      {% for ln in b.svg.lines %}{% for sg in ln.segs %}<polyline class="s{{ ln.n }}" points="{{ sg }}"/>{% endfor %}{% for d in ln.dots %}<circle class="s{{ ln.n }}" cx="{{ d.split(',')[0] }}" cy="{{ d.split(',')[1] }}" r="3"/>{% endfor %}{% endfor %}
+      {% for r in b.svg.bars %}<rect class="s{{ r.n }}" x="{{ r.x }}" y="{{ r.y }}" width="{{ r.w }}" height="{{ r.h }}"/>{% endfor %}
+      {% for t in b.svg.xlabels %}<text x="{{ t.x }}" y="{{ b.svg.h + 14 }}" text-anchor="middle">{{ t.t }}</text>{% endfor %}
+    </svg>
+    <ul class="legend-s plain fp-legend">{% for l in b.last %}<li class="s{{ loop.index0 }}"><span class="sw" aria-hidden="true"></span>{{ l.name }}: {{ l.value }} latest</li>{% endfor %}</ul>
+    <p class="visually-hidden">{{ b.alt }}</p>
+    {% if b.describe %}<p class="muted small">{{ b.describe }}</p>{% endif %}
+  </figure>
+</section>
+{% elif b.type == "table" %}
+<section class="fp-block" {% if b.title %}aria-labelledby="{{ bid }}"{% else %}aria-label="Table"{% endif %}>
+  {% if b.title %}<h2 id="{{ bid }}">{{ b.title }}</h2>{% endif %}
+  {% if b.rows %}
+  <div class="table-wrap" tabindex="0" role="region" {% if b.title %}aria-labelledby="{{ bid }}"{% else %}aria-label="Table"{% endif %}>
+  <table>
+    {% if b.caption %}<caption>{{ b.caption }}</caption>{% endif %}
+    <thead><tr>{% for c in b.columns %}<th scope="col"{% if c.align == "end" %} class="num"{% endif %}>{{ c.label }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for r in b.rows %}<tr>{% for c in r %}{% set col = b.columns[loop.index0] %}<td{% if col.align == "end" or c.num %} class="num"{% endif %}>
+      {%- if c.state %}{{ badge(c.state if c.state != "neutral" else "unknown", c.text) if c.state != "neutral" else "" }}{% endif -%}
+      {%- if not c.state or c.state == "neutral" -%}
+        {%- if c.href %}<a href="{{ c.href }}"{% if not c.href.startswith('/') %} rel="noopener"{% endif %}>{% if c.mono %}<code>{{ c.text }}</code>{% else %}{{ c.text }}{% endif %}</a>
+        {%- elif c.mono %}<code>{{ c.text }}</code>{% else %}{{ c.text }}{% endif -%}
+      {%- endif -%}
+      {%- if c.note %}<div class="muted small">{{ c.note }}</div>{% endif -%}
+    </td>{% endfor %}</tr>{% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}<p class="panel quiet">{{ b.caption or "Nothing to list." }}</p>{% endif %}
+</section>
+{% elif b.type == "lanes" %}
+<section class="fp-block" {% if b.title %}aria-labelledby="{{ bid }}"{% else %}aria-label="Lanes"{% endif %}>
+  {% if b.title %}<h2 id="{{ bid }}">{{ b.title }}</h2>{% endif %}
+  <div class="fp-lanes">
+  {% for ln in b.lanes %}
+    <section class="fp-lane{% if ln.state %} fs-{{ ln.state }}{% endif %}" aria-label="{{ ln.label }}, {{ ln["items"] | length }}">
+      <h3>{{ ln.label }} <span class="n">{{ ln["items"] | length }}</span></h3>
+      {% if ln["items"] %}<ul class="plain">
+      {% for it in ln["items"] %}<li class="fp-card{% if it.state %} fs-{{ it.state }}{% endif %}">
+        {% if it.tag %}<span class="fp-tag">{{ it.tag }}</span>{% endif %}
+        {% if it.href %}<a href="{{ it.href }}"{% if not it.href.startswith('/') %} rel="noopener"{% endif %}>{{ it.text }}</a>{% else %}<span>{{ it.text }}</span>{% endif %}
+        {% if it.state and it.state != "neutral" %} {{ badge(it.state) }}{% endif %}
+        {% if it.meta %}<div class="muted small">{{ it.meta }}</div>{% endif %}
+      </li>{% endfor %}
+      </ul>{% else %}<p class="muted small">{{ ln.empty or "None." }}</p>{% endif %}
+    </section>
+  {% endfor %}
+  </div>
+</section>
+{% elif b.type == "note" %}
+<section class="fp-block panel{% if b.state %} fp-note fs-{{ b.state }}{% else %} quiet{% endif %}" {% if b.title %}aria-labelledby="{{ bid }}"{% else %}aria-label="Note"{% endif %}>
+  {% if b.title %}<h2 id="{{ bid }}">{% if b.state and b.state != "neutral" %}{{ badge(b.state) }} {% endif %}{{ b.title }}</h2>{% endif %}
+  <p>{{ b.text }}</p>
+</section>
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endblock %}

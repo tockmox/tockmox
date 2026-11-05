@@ -49,6 +49,7 @@ from . import stack as stack_mod
 from . import status_api
 from . import capabilities as capmod
 from . import charts as charts_mod
+from . import feature_pages as fpages
 from . import telemetry
 from . import views
 from .auth import IDT_MAX_BYTES, OIDC, Sessions, User
@@ -153,6 +154,7 @@ class Transports:
     ledger: httpx.BaseTransport | None = None     # agent ledger (Platform Management)
     specialists: httpx.BaseTransport | None = None  # the specialist host: Service Desk and index (Platform Management)
     actions: httpx.BaseTransport | None = None    # the tockmox-actions service
+    features: httpx.BaseTransport | None = None   # feature pages' read APIs (feature_pages.py)
     resolver: object = None                       # DNS for the probe; None = socket.getaddrinfo
 
 
@@ -257,9 +259,35 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
 
     revoked: set = set()   # logged-out session ids; per process (one replica in v0), bounded by session max-age
 
+    contribs = fpages.registry(s.features, s.apps)     # features.<id>.contributes, checked now (start-up)
+
     def tabs_for(u: User):
-        # Platform Management is its own area (/platform), never a generic feature tab.
-        return [f for f in s.features if f.enabled and f.id != "platform" and (u.is_admin or not f.admin_only)]
+        # Platform Management is its own area (/platform), never a generic feature tab; a feature with pages
+        # (feature_pages.py) puts them where it contributes them, never as a tab.
+        return [f for f in s.features if f.enabled and f.id != "platform" and f.id not in contribs
+                and (u.is_admin or not f.admin_only)]
+
+    page_sources = fpages.sources_for(s.features, contribs, s.source_timeout_s, tp.features)
+
+    def paged_for(u: User):
+        """The enabled features with pages this user may open, in values order."""
+        return [f for f in s.features if f.id in page_sources and (u.is_admin or not f.admin_only)]
+
+    def feature_nav(u: User):
+        """-> (where each feature's pages sit, the top-bar sections features add, the rail groups by section)."""
+        where, secs, groups = {}, [], {}
+        for f in paged_for(u):
+            c = contribs[f.id]
+            marker = "Private" if f.options.get("origin") == "private" else None
+            items = tuple(nav.Item(p.title, f"/f/{f.id}/{p.id}", marker=marker) for p in c.pages)
+            key = f"f:{f.id}" if c.section else c.rail_section
+            where[f.id] = key
+            if c.section:
+                secs.append((f.name, items[0].href, f.id, marker))
+                groups.setdefault(key, []).append(nav.Group(f.name, items))
+            else:
+                groups.setdefault(key, []).append(nav.Group(c.rail_group, items))
+        return where, secs, groups
 
     def docs_repo_link() -> str:
         """The docs folder in the source repository AT THE RUNNING RELEASE, so the page a reader
@@ -304,8 +332,13 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         if u is None:
             return out
         tabs = tabs_for(u)
-        items = nav.sections(u.is_admin, platform_on(), tabs)
-        sec = nav.section_of(path)
+        f_where, f_secs, f_groups = feature_nav(u)
+        rail_px = {}
+        for fid, key in f_where.items():
+            if not key.startswith("f:"):
+                rail_px.setdefault(key, []).append(f"/f/{fid}")
+        items = nav.sections(u.is_admin, platform_on(), tabs, f_secs, rail_px)
+        sec = nav.section_of(path, f_where)
         out["sections"] = items
         out["section_item"] = nav.current(items, path)
         cap_state = None
@@ -318,7 +351,8 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
                 cap_state = "warning" if any(not x["agree"] for x in cap_rows) else None
         groups = nav.rail(sec, u.is_admin, platform_on(), admin_tabs=tabs, capabilities_state=cap_state,
                           activity=bool(s.actions and s.actions.any),
-                          identity=bool(s.actions and s.actions.any and s.actions.on("recovery-link")))
+                          identity=bool(s.actions and s.actions.any and s.actions.on("recovery-link")),
+                          contributed=f_groups)
         out["rail"], out["rail_item"] = groups, nav.rail_current(groups, path) if groups else None
         if u.is_admin:
             out["health"] = stack_mod.pill(placed(readings()))     # parts, not signals
@@ -760,6 +794,35 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
                 age = None
             return render(request, "tab_posture.html", u, feature=f, reading=rd, report_age=age)
         return render(request, "tab_generic.html", u, feature=f)
+
+    # ------------------------------------------------------------ feature pages (feature_pages.py)
+
+    @app.get("/f/{fid}", response_class=HTMLResponse)
+    def feature_home(request: Request, fid: str):
+        u = user_of(request)
+        if not u:
+            return need_login(request)
+        f = next((x for x in paged_for(u) if x.id == fid), None)
+        if f is None:
+            return render(request, "error.html", u, status_code=404, title="Not found", message="There is no such page.")
+        # built from the configured feature, never from the request's path (only a configured id reaches here)
+        return RedirectResponse(f"/f/{f.id}/{contribs[f.id].pages[0].id}", status_code=303)
+
+    @app.get("/f/{fid}/{pid}", response_class=HTMLResponse)
+    def feature_page(request: Request, fid: str, pid: str):
+        u = user_of(request)
+        if not u:
+            return need_login(request)
+        f = next((x for x in paged_for(u) if x.id == fid), None)
+        ref = next((p for p in contribs[fid].pages if p.id == pid), None) if f else None
+        if ref is None:
+            # absent, not locked: a feature that is off, or a page it does not list, has no page here
+            return render(request, "error.html", u, status_code=404, title="Not found", message="There is no such page.")
+        rd = page_sources[fid].read(pid)
+        pg = dict(rd.page, **fpages.freshness(rd.page)) if rd.page else None     # age as of now, not of the fetch
+        return render(request, "feature_page.html", u, feature=f, ref=ref, reading=rd, pg=pg,
+                      private=f.options.get("origin") == "private",
+                      age=fpages.age_words(pg["age_s"]) if pg else None)
 
     # ------------------------------------------------------------ inference nodes (REQ-0047)
 

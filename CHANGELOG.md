@@ -82,6 +82,16 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **Feature pages (experimental).** A feature under the Tockmox UI's
+  `features.<id>` can contribute pages, in a top-bar section of its own or a
+  group in the AI or Platform rail, served by its own read API as JSON page
+  documents (`tockmox.page/v1`: figures, charts, tables, lanes and notes) that
+  the console draws with its own components; nothing a feature ships runs in
+  the console's origin, and a document outside the format reads as Unknown with
+  the path of the first thing wrong. `origin: private` shows the Private
+  release marker. No change for a site that names no `contributes`
+  (docs/administration/feature-pages.md).
+
 - **Fuzzing for the console's two input parsers.** ClusterFuzzLite (`.github/workflows/fuzz.yaml`, build in `.clusterfuzzlite/`) runs atheris targets in `tockmox-ui/fuzz/` against the short-path redirect and the cron evaluator: for five minutes on a pull request that changes the console's code, and weekly for twenty. Each target asserts properties, not only "no exception": a redirect never leaves the configured host, never carries a control character, space or dot segment; a cron answer is a real fire time on the right side of now, with none skipped. Nothing ships in the image. `tockmox-ui/fuzz/README.md`.
 
 - **The console can send someone a password recovery link and change who is in the user group (experimental, off by default).** **Platform › Identity** lists the people Authentik knows. For a person who is not an administrator it makes a recovery link, good once for 1 hour, 24 hours or 3 days, shown to you once to send them and kept in no record or log line; and it adds a person to, or removes them from, the user group. Each asks for a fresh sign-in and lands in Activity. The bounds are Authentik's own: one service account, `tockmox-console-actions`, whose role sees users and nothing else globally, holds add and remove on the user group object only, and holds a recovery link only for the people a new CronJob, `tockmox-console-identity-grants`, grants it (active, a person, not a superuser, not in the admin group or a group under it), taking it back from everyone else and failing closed. Creating and deactivating users stay in Authentik's console, because Authentik 2026.8 cannot grant either without letting the account set a user's groups, the admin group included. Turn on with `tools/mint-secrets.sh --with-console-actions` (or the same flag on `install/bootstrap-secrets.sh`), then `sso.consoleActions.enabled` in the identity layer and `tockmoxUi.actions.identity.enabled` in the AI layer. docs/administration/identity.md, "From the console".

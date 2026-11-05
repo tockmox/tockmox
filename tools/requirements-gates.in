@@ -12,6 +12,8 @@
 pyyaml
 jsonschema
 pytest
+# The Tockmox UI's tests run in parallel workers when this is installed (tools/check-tockmox-ui-tests.sh).
+pytest-xdist
 # tools/check-namespace-guard.sh evaluates the guard's CEL with this exact release.
 cel-python==0.5.0
 # The Tockmox UI's tests and tools/check-ai-node-render.sh import the UI's packages.

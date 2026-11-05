@@ -60,6 +60,7 @@ The two experimental groups at the end are not covered by the stable values cont
 | [Adding an application](adding-an-application.md) | the full wiring, worked end to end |
 | [Removing an application](removing-an-application.md) | Take an application you added under apps/ back out of a running Tockmox, including the four things the site-apps prune leaves behind: backups, site values, Authentik objects and the DNS record |
 | [Serving documentation and static sites from Garage](serving-static-sites.md) | How the shipped Garage serves the product documentation at docs.<internalDomain> (published from your checkout by tools/publish-docs.sh, no image), and how to serve your own static sites from it with garage.web.sites |
+| [Feature pages](feature-pages.md) | How to let a feature contribute pages to the Tockmox UI by serving JSON page documents that the console draws with its own components |
 
 ### AI & inference — experimental
 

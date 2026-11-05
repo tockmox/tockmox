@@ -423,7 +423,9 @@ def test_inbox_parse_rules():
 @pytest.mark.parametrize("when,state,text_", [
     (day(12), "upcoming", "retires in 12 days"), (day(1), "upcoming", "retires in 1 day ("), (day(0), "upcoming", "retires today"),
     (day(-4), "retired", "retired on"), ("", "unknown", "retirement date not understood"), ("next spring", "unknown", "not understood (next spring)"),
-    (str(int((datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=40)).timestamp())), "upcoming", "retires in 4")])
+    (str(int((datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=40)).timestamp())), "upcoming", "retires in 4")],
+    # fixed ids: the values hold today's date and the clock, and parallel workers must collect the same test names
+    ids=["in-12-days", "in-1-day", "today", "4-days-ago", "empty", "words", "epoch-in-40-days"])
 def test_retirement_countdown(when, state, text_):
     r = ib.retirement(when, datetime.datetime.now(datetime.timezone.utc).date())
     assert r["state"] == state and text_ in r["text"]
