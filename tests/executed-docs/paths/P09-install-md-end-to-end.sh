@@ -538,6 +538,7 @@ if ! done_step "$S"; then budget_left || yield "S14f+"
   execute_begin "install.md publish to the built-in forge: bootstrap-forge"
   ZSH_PASTE_TIMEOUT=900 run_ws "$S" "$B" "${STATE}/${S}.answers"; execute_end $?
   record "$S" "Done opens with the forge holding tockmox/site at the in-cluster address" "1" "$(out_of "$S" | grep -c 'the built-in forge holds tockmox/site; ArgoCD reads it at http://tockmox-forge-http.tockmox-forge.svc.cluster.local:3000/tockmox/site.git' | tr -d ' ')"
+  # shellcheck disable=SC2016  # the needle is the page's own text; $HOME is matched, never expanded
   run_ws "${S}-success" "$(block 'ls -l "$HOME/tockmox-backup/tockmox-recovery-kit.tar.age"')"
   record "$S" "success: ArgoCD's repository Secret carries the repository label" "1" "$(out_of "${S}-success" | grep -c 'argocd.argoproj.io/secret-type.*repository' | tr -d ' ')"
   record "$S" "success: the recovery kit file exists" "1" "$(out_of "${S}-success" | grep -c 'tockmox-recovery-kit.tar.age$' | tr -d ' ')"
