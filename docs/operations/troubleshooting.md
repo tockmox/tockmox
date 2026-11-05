@@ -56,6 +56,8 @@ discovering halfway.
 | Read access to the `argocd` namespace | Most symptoms are read off an Application's status | `kubectl -n argocd get applications` returns a list rather than `forbidden` |
 | Your **site repository**, with push access, exported as `SITE_REPO` | Several fixes below are a values edit, and a values edit only counts once it is pushed | `export SITE_REPO=YOUR_SITE_REPO_PATH`, then `git -C "$SITE_REPO" push --dry-run` succeeds |
 
+**On the built-in forge** (the default), `main` takes no direct push, so every "commit and push" on this page means: start a branch, commit, push the branch, and open a pull request for an approver, as in [changing your site](../administration/site-forge.md#changing-your-site). `SITE_REPO` is then your clone from the forge.
+
 **YOU SUPPLY:** your site repository clone path and the failing layer's name,
 once each, in the block below. The values files named in the entries are
 relative to the first; the Application for a layer is `tockmox-$LAYER`, and the
@@ -110,7 +112,8 @@ kubectl get ns -l app.kubernetes.io/part-of=tockmox
   until it has run, and the wave ordering that makes that true is in
   [architecture § sync waves](../architecture.md#sync-waves).
 - **Policy is `Synced` and the namespace is still missing.** It is not in
-  `namespaces.create` in your policy values. Add it, commit, push.
+  `namespaces.create` in your policy values. Add it, commit, push (on the
+  built-in forge, a branch and a pull request: [changing your site](../administration/site-forge.md#changing-your-site)).
 
 **How you know it worked.** **YOU SUPPLY:** the namespace the error named.
 
@@ -228,6 +231,7 @@ diagnosis here.
 | `ComparisonError` naming `source 1 of 2` and `helm dependency build` or `could not download https://...` | An upstream chart fetch failed **once** while the repo-server built the layer's dependencies, and ArgoCD is now serving the cached failure | [An upstream chart download failed once, and the failure is cached](#an-upstream-chart-download-failed-once-and-the-failure-is-cached) |
 | `ComparisonError` naming `authentication required` or `repository not found` | ArgoCD cannot reach or authenticate to a repository | [ArgoCD § a missing repository credential names nothing useful](../administration/argocd.md#a-missing-repository-credential-names-nothing-useful) |
 | `rpc error ... repository not found` | Site repository URL wrong, or still `PLACEHOLDER_SITE_REPO_URL` | The `repoURL` in your Applications, and the page above |
+| `ComparisonError` on every layer naming `tockmox-forge-http` | The built-in forge is not answering (its pod, its volume or its node). Running apps keep running; nothing new is applied | `kubectl -n tockmox-forge get pods`, then [repair only the forge](../administration/site-forge-recovery.md#repair-only-the-forge) |
 | `values don't meet the specifications of the schema` | A required value is missing or the wrong type | [configuration](../administration/configuration.md) |
 | `namespaces "x" not found` | A namespace the policy layer did not create | [namespaces "tockmox-x" not found](#namespaces-tockmox-x-not-found) |
 | `Failed last sync attempt to [...]`, as a `SyncError` condition | The last sync of this revision failed, and automated sync will not try it again | [A failed sync stays pinned to its revision](#a-failed-sync-stays-pinned-to-its-revision) |
@@ -683,7 +687,7 @@ gateway, and four NetworkPolicy bundles that would guard nothing on a stock
 install are also off. The complete set, with the reasoning, is in
 [architecture § deliberately not shipped, deliberately off](../architecture.md#deliberately-not-shipped-deliberately-off).
 
-**Fix.** Turn it on in your site repository, then commit and push:
+**Fix.** Turn it on in your site repository, then commit and push (on the built-in forge, a branch and a pull request: [changing your site](../administration/site-forge.md#changing-your-site)):
 
 ```yaml
 # site/values/exporters.yaml, in your site repository
@@ -875,7 +879,7 @@ or scale-up, which can be days later.
 
 **Fix, in order of preference.** Make the pod meet the level, using the fields
 the error names. If it cannot, lower that one namespace deliberately in your
-site repository, then commit and push:
+site repository, then commit and push (on the built-in forge, a branch and a pull request: [changing your site](../administration/site-forge.md#changing-your-site)):
 
 ```yaml
 # site/values/policy.yaml, in your site repository

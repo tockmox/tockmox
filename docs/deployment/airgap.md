@@ -466,7 +466,7 @@ sealed-secrets by hand, it takes the archive and a mirror for the image:
 you mirrored the rest. Like ArgoCD's, it is not in `images.txt`. This path has
 not been run in an air-gapped environment.
 
-**If you use the built-in forge** (`site.forge: built-in`, experimental), it is
+**If you use the built-in forge** (`site.forge: built-in`, the default), it is
 one more prerequisite of the same kind: `bootstrap-forge` installs it beside
 ArgoCD, never through it, so its chart is not one of the archives of step 3.
 Pull chart 17.3.2 from `oci://code.forgejo.org/forgejo-helm/forgejo` (Forgejo
@@ -569,7 +569,7 @@ needs nothing carried in (same section).
 
 ### Serve the charts repository from the built-in forge
 
-Experimental, and only with `site.forge: built-in`. Give `bootstrap-forge` your
+Only with `site.forge: built-in`. Give `bootstrap-forge` your
 internal checkout of the charts repository (the one with the vendored chart
 archives from step 3) and the release tag it was cloned at:
 

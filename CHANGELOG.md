@@ -11,6 +11,27 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Breaking
 
+- **Breaking: the installer's default is the built-in forge.** `site.forge` now
+  defaults to `built-in`, in a config file that omits it and at the interactive
+  prompt, and the install pages lead with that route: there is no repository to
+  create, no placeholder to replace and no token to type; `bootstrap-forge`
+  publishes the site after the credentials are sealed
+  (docs/deployment/install.md, "Publish to the built-in forge"). The built-in
+  forge is supported from this release, not experimental. A new page covers the
+  off-site copy, the recovery kit, the rebuild, the forge repair and what a
+  rebuild can lose (docs/administration/site-forge-recovery.md). Bringing your
+  own forge is unchanged and stays supported (`site.forge: external`; install.md,
+  "Bring your own forge"). **Action, for a site on your own forge:** add
+  `forge: external` under `site:` in your `tockmox.yaml` before you run the
+  installer again, or a regenerated site names the built-in forge instead of your
+  repository. A site you do not regenerate is not affected. On the built-in
+  forge `main` takes no direct push, so every page that says "commit and push"
+  after install (day 2, upgrade and rollback, adding and removing an
+  application, troubleshooting, kube-bench) now says to push a branch and open
+  a pull request for an approver instead, and the forge page says how to clone
+  the site from the forge to do it (docs/administration/site-forge.md,
+  "Changing your site").
+
 - **Breaking: the restore drill's register moved from a ConfigMap to the shipped
   object store, a drill that cannot record its row now fails, and old rows are
   not carried over.** The model-gateway drill (`tockmox-ai`) and the Authentik
@@ -68,15 +89,14 @@ costs you, with the reasoning in the documentation rather than here.
 
 - **The console can act: silence a part's alerts, run a scheduled job now, restart a console, send a test alert, and with your Argo CD account refresh or sync (experimental).** A part's drawer on Status gains **Actions**, Help gains **Send a test alert to your phone**, and **Platform › Activity** lists what was done, by whom and how it ended. Every action opens a confirm panel naming the target, the effect and the undo. The UI stays write-free: confirming sends your browser through the identity provider with an OIDC nonce made from that one action, and a new Deployment, `tockmox-actions`, checks the issuer's token itself (signature, audience, freshness, the admin group, the nonce) before it acts with one narrow credential per kind: Alertmanager by NetworkPolicy; Jobs created only from allowlisted CronJobs; a patch of allowlisted Deployments and StatefulSets that ValidatingAdmissionPolicies bound to the `restartedAt` annotation; and an Argo CD account with get and sync only, which you provide. Sync and restart ask for a fresh sign-in after five minutes (`max_age`); an idempotency key, reserved before anything runs, makes a double click or a replay do nothing twice; one `tockmox.action` JSON line per attempt goes to the log, and the last 300 actions to a ConfigMap Activity reads. When Alertmanager, Argo CD, Authentik or the Kubernetes API refuses an action, the console and Activity show which one and its status code; the upstream's own error text goes to the `tockmox-actions` log only. A console silence keeps its alerts on Status, marked "Silenced by *name* until *time*"; a silence made in Alertmanager itself still hides them, as before. Switched per kind under `tockmoxUi.actions`, on by default for what Tockmox ships (silences and the test alert with observability; run-now for the AI layer's own CronJobs; restart for the gateway, the chat console and the UI) and off for Argo CD until you configure its account. Off means the button is absent. With the UI on, two things render that did not: the `tockmox-actions` Deployment, its Roles and three admission policies, and the policy layer's `allow-from-tockmox-actions` rule at Alertmanager. docs/administration/tockmox-ui.md, "Taking action".
 
-- **Experimental: the installer can run the site repository for you, on a
-  forge inside the cluster.** Set `site.forge: built-in` and every Application
-  names the forge's in-cluster address; `tockmox-install.sh bootstrap-forge`
-  installs Forgejo 15 LTS, publishes the site, protects `main` (one approval,
-  no direct pushes), gives ArgoCD a read-only token and writes an encrypted
-  recovery kit. No rebuild or console sign-in yet; the default stays
-  `external`.
+- **The installer runs the site repository for you, on a forge inside the
+  cluster.** With `site.forge: built-in` (the default, see Breaking) every
+  Application names the forge's in-cluster address; `tockmox-install.sh
+  bootstrap-forge` installs Forgejo 15 LTS, publishes the site, protects `main`
+  (one approval, no direct pushes), gives ArgoCD a read-only token and writes an
+  encrypted recovery kit. docs/administration/site-forge.md.
 
-- **Experimental: the built-in forge's off-site copy, and an alert when there
+- **The built-in forge's off-site copy, and an alert when there
   is none.** `bootstrap-forge --offsite-s3-*` copies `main` as a git bundle to
   an S3-compatible bucket every minute, read back before it counts;
   `--offsite-git` uses a push mirror and checks it. Copies more than 15
@@ -84,7 +104,7 @@ costs you, with the reasoning in the documentation rather than here.
   `TockmoxSiteRepositoryNoOffsiteCopy`, which the console's new Site repository
   part can silence. New key: `siteForge` (observability).
 
-- **Experimental: a nightly forge dump beside the off-site copy.** With an
+- **A nightly forge dump beside the off-site copy.** With an
   off-site destination set, `bootstrap-forge` also creates the CronJob
   `tockmox-forge-dump` (21:15, the cluster's time zone) and runs it once before
   it finishes, written and read back like the first copy. It dumps what git does
@@ -98,7 +118,7 @@ costs you, with the reasoning in the documentation rather than here.
   `bootstrap-forge` to give an installed forge the new token. The dump is not yet
   read by `--restore-from`.
 
-- **Experimental: the built-in forge's image and chart in the air-gap list, and the
+- **The built-in forge's image and chart in the air-gap list, and the
   charts repository served by the forge.** The forge's image,
   `code.forgejo.org/forgejo/forgejo:15.0.11-rootless`, is now pinned in
   `install/bootstrap-forge.sh` and appears in `images.txt` (45 images, was 44), so
@@ -116,7 +136,7 @@ costs you, with the reasoning in the documentation rather than here.
   says all of this. Rebuild and repair of the forge do not reseed the charts
   repository yet.
 
-- **Experimental: people sign in to the built-in forge through Authentik, and
+- **People sign in to the built-in forge through Authentik, and
   only the admin group's approval merges a change.** `bootstrap-forge`
   gives the forge a browser address (`forge.<internalDomain>`, TLS from the
   platform's CA), and `bootstrap-forge --connect-sign-in`, run once
@@ -133,7 +153,7 @@ costs you, with the reasoning in the documentation rather than here.
   `sso.apps.forge` (identity, off unless the generator turns it on);
   `site.forge: built-in` sites get it on.
 
-- **Experimental: rebuild a built-in-forge site, or repair just its forge, from
+- **Rebuild a built-in-forge site, or repair just its forge, from
   the off-site copy and the recovery kit.**
   `tockmox-install.sh --restore-from offsite|file:PATH` takes a cluster that
   has Argo CD and nothing else. It restores the sealing key before the
@@ -948,6 +968,15 @@ costs you, with the reasoning in the documentation rather than here.
   checked 2026-10-29), so the licence terms in `docs/frontend-posture.md` stand.
 
 ### Fixed
+
+- **`bootstrap-forge` and `repair-forge` refuse a sealing-key backup that is not
+  `bootstrap-secrets`' encrypted export.** The recovery kit carries the file as it
+  is, and a rebuild opens the key only from that export, so a plain YAML export
+  of the key (the kind `prepare a fresh cluster` § 7 has the reader write) made a
+  kit that looked complete and could not rebuild. The file must now be age or
+  openssl output; anything else is refused before the cluster is touched, naming
+  `bootstrap-secrets --mode reuse --backup-out FILE` as the way to write the
+  export. A repair checks it before it removes the old forge.
 
 - **Two eval runs of one build on one day no longer collide on their result
   files, and the evidence PR accepts quality twins.** A twin's file name was

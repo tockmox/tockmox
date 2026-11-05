@@ -14,8 +14,12 @@
 ci-interactive
 #  2 Write site repo to                               default ./tockmox-site
 
-#  3 Site repository (built-in or external)        default external
-
+#  3 Site repository (built-in or external)        default built-in; ANSWERED
+#    external here, so this run and every test that copies its site keep the
+#    placeholder route (the counts install.md's bring-your-own-forge section
+#    prints). run.sh I1d drives the same answers with this line blank to prove
+#    the default is built-in.
+external
 #  4 Tockmox release                                  default v<VERSION>
 
 #  5 Internal base domain                             REQUIRED

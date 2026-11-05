@@ -52,7 +52,7 @@ Two surfaces, and confusing them is the most common way this comes undone:
 
 | Marked | Runs where |
 |---|---|
-| **SITE REPO** | A file you commit and push. ArgoCD applies it. Every YAML block on this page is one of these |
+| **SITE REPO** | A file you commit and push (on the built-in forge, a branch and a pull request: [changing your site](../administration/site-forge.md#changing-your-site)). ArgoCD applies it. Every YAML block on this page is one of these |
 | **WORKSTATION** | `kubectl` against the cluster, for the assertions. These read; they do not configure |
 
 **Do not `kubectl apply` the YAML on this page directly.** ArgoCD's `selfHeal`

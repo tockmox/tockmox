@@ -1130,9 +1130,22 @@ kubectl --context="$KUBE_CONTEXT" -n argocd get deployment argocd-server \
 The wait reports `condition met`, the CRD exists, and the image tag is `v2.6` or
 newer. The third is the only one that actually proves the version floor.
 
+### Your site repository: nothing to create on the built-in forge
+
+**On the built-in forge, the default, skip this section and the next one.**
+Tockmox installs its own forge beside ArgoCD during
+[installation](install.md#publish-to-the-built-in-forge), creates the
+repository in it and gives ArgoCD its credential, so there is nothing to create
+here and no token to mint. Go on to
+[confirm ArgoCD's metrics came up](#confirm-argocds-metrics-came-up).
+What the built-in forge is: [the built-in site forge](../administration/site-forge.md).
+
+**Bringing your own forge** (`site.forge: external`, GitHub, GitLab or a forge you
+run)? Then create the repository now, below.
+
 ### Create your site repository
 
-**Do this now, before the token below**, because the token is scoped to a
+**Your own forge only.** **Do this now, before the token below**, because the token is scoped to a
 repository that has to exist first ([history](#history-the-site-repository-step)).
 
 On your own forge ... GitHub, Forgejo, GitLab, anything ArgoCD can reach ...
@@ -1151,7 +1164,7 @@ so that the token below has something to be scoped to.
 
 ### If your site repository will be private
 
-**Mint a read-only access token for it now**, scoped to that one repository.
+**Your own forge only.** **Mint a read-only access token for it now**, scoped to that one repository.
 ArgoCD needs a credential before its first sync, not after the first failure:
 without one, every Application goes to `Unknown` with a `ComparisonError` that
 does not distinguish a missing credential from a wrong URL from a bad revision,
@@ -1165,7 +1178,9 @@ URL. Shape and the three ways it goes wrong:
 **Success condition now:** you hold a token and it is read-only and scoped to
 one repository.
 
-**Confirm ArgoCD's metrics came up.** The install block above already turned
+### Confirm ArgoCD's metrics came up
+
+**Both routes.** The install block above already turned
 them on. Check it rather than assuming it, because this is half of a pair and
 the other half is still yours to set.
 

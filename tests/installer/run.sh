@@ -183,6 +183,48 @@ assert_artifact \
   "grep -c '^  ask ' '$INSTALLER'" \
   "$(grep -vc '^#' "$ANSWERS")"
 
+# ---------------------------------------------------------------------- I1d
+# The default is built-in since 0.9.0 (install.md leads with that route). The two
+# fixtures answer `external` so the placeholder counts above stay measurable; here
+# the same answers run with the site.forge answer left to its default, on BOTH
+# routes, and the site must name the built-in forge with no placeholder anywhere.
+path_begin "I1d" "a site.forge left to its default produces a built-in-forge site"
+FORGE_IN_CLUSTER="http://tockmox-forge-http.tockmox-forge.svc.cluster.local:3000/tockmox/site.git"
+ANSWERS_DEFAULT="$WORK/answers-default.txt"
+# Blank the third answer (prompt 3, Site repository): Enter, which takes the default.
+awk '/^#/ {print; next} {n++; if (n == 3) print ""; else print}' "$ANSWERS" > "$ANSWERS_DEFAULT"
+SITE_ID="$WORK/interactive-default"
+ANSWERS_SAVED="$ANSWERS"; ANSWERS="$ANSWERS_DEFAULT"
+drive_interactive "$SITE_ID" --no-cluster >/dev/null
+ANSWERS="$ANSWERS_SAVED"
+assert_artifact \
+  "I1d interactive, Enter at the site repository prompt: no file carries the placeholder" \
+  "{ grep -rl PLACEHOLDER_SITE_REPO_URL '$SITE_ID/tockmox-site' 2>/dev/null || true; } | wc -l | tr -d ' '" \
+  "0"
+assert_artifact \
+  "I1d interactive default: the root Application names the built-in forge's in-cluster address" \
+  "grep -c '$FORGE_IN_CLUSTER' '$SITE_ID/tockmox-site/bootstrap/root.yaml' 2>/dev/null || true" \
+  "1"
+SITE_CD="$WORK/config-default"; mkdir -p "$SITE_CD"
+grep -v '^  forge: external$' "$PARITY_CFG" > "$SITE_CD/tockmox.yaml"
+assert_artifact \
+  "I1d the config with site.forge removed differs from the fixture by that one line" \
+  "diff '$PARITY_CFG' '$SITE_CD/tockmox.yaml' | grep -c '^< '" \
+  "1"
+run_config "$SITE_CD" --config tockmox.yaml --no-cluster
+assert_artifact \
+  "I1d --config with no site.forge: the installer says the site is built-in" \
+  "grep -c 'site.forge is built-in' '$WORK/cfg-out.txt' || true" \
+  "1"
+assert_artifact \
+  "I1d --config with no site.forge: no file carries the placeholder" \
+  "{ grep -rl PLACEHOLDER_SITE_REPO_URL '$SITE_CD/tockmox-site' 2>/dev/null || true; } | wc -l | tr -d ' '" \
+  "0"
+assert_artifact \
+  "I1d both default routes write the same site (interactive and --config agree on the default too)" \
+  "diff -r '$SITE_ID/tockmox-site' '$SITE_CD/tockmox-site' >/dev/null 2>&1 && echo identical || diff -rq '$SITE_ID/tockmox-site' '$SITE_CD/tockmox-site' 2>&1 | head -5" \
+  "identical"
+
 # ---------------------------------------------------------------------- I2
 path_begin "I2" "interactive and --config are equal routes, so they must agree"
 SITE_C="$WORK/config"

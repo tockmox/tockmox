@@ -153,7 +153,7 @@ name must exist in the image; a name it does not contain fails the Job),
 `--data-dir`. If you rename the namespace, set `namespaces.kube_bench` to the
 same value in both files.
 
-Commit and push. ArgoCD applies both.
+Commit and push. ArgoCD applies both. **On the built-in forge** (the default), `main` takes no direct push: make the change on a branch, push the branch, and open a pull request for an approver ([changing your site](../administration/site-forge.md#changing-your-site)).
 
 **Success condition:**
 
@@ -400,7 +400,8 @@ no role, so it grants nothing; restart them to clear the finding.
 
 ## Turning it off
 
-Remove the two keys (or set both `enabled` to `false`) and push. The CronJob and
+Remove the two keys (or set both `enabled` to `false`) and push (on the built-in
+forge, a branch and a pull request: [changing your site](../administration/site-forge.md#changing-your-site)). The CronJob and
 the namespace with its network policy are removed by the next sync; finished
 Jobs are removed with the CronJob. A Job you created by hand in step 2 is owned
 by the CronJob and goes with it.

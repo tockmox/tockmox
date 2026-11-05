@@ -301,15 +301,22 @@ reading of the two counters is the measurement.
 
 ## Pointing the generated Applications at your site repository
 
-The installer writes `PLACEHOLDER_SITE_REPO_URL` into every generated
-Application instead of a real URL, and you replace it by hand before the first
-apply. The procedure is
+**Your own forge only (`site.forge: external`).** On the built-in forge, the
+default, every generated Application already names the forge's in-cluster
+address, which is the same on every site, so there is nothing to replace:
+[the built-in site forge](site-forge.md).
+
+On your own forge the installer writes `PLACEHOLDER_SITE_REPO_URL` into every
+generated Application instead of a real URL, and you replace it by hand before
+the first apply. The procedure is
 [install § Phase 2](../deployment/install.md#phase-2--publish-it); the reasoning
 is here.
 
 **Why a placeholder rather than asking?** A tool that creates and pushes to
 remote repositories on your behalf is a tool worth distrusting. You decide
-where your configuration lives.
+where your configuration lives. The built-in forge does not change that: it
+creates and pushes only to the forge it installed inside your own cluster, and
+never to a repository anywhere else.
 
 **Why `sh -c` rather than `sed -i` or `perl`.** `sed -i` takes an argument on
 BSD and not on GNU, so a single command cannot satisfy both. Perl can, and the

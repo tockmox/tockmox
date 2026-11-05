@@ -144,6 +144,15 @@ rs_run repair-forge --restore-from file:media/site.bundle --kit-out kits/new.kit
 assert_artifact "R11 repair-forge's dry run plans a forge-only reinstall, touching no cluster" \
   "echo $RS_STATUS; grep -c 'nothing else is touched' '$D/out/stdout'; rs_cluster_calls" "$(printf '0\n1\n0')"
 
+# R11c. A repair removes the old forge before it calls bootstrap-forge, so a sealing-key
+# backup that is not bootstrap-secrets' encrypted export must be refused HERE, before
+# any cluster contact, not by bootstrap-forge after the old forge is gone.
+rs_case r11c
+printf 'apiVersion: v1\nitems:\n- data:\n    tls.key: AAAA\n' > "$D/inputs/seal-yaml"
+rs_run repair-forge --restore-from file:media/site.bundle --kit-out kits/new.kit --passphrase-file inputs/pass --sealing-key-backup inputs/seal-yaml
+assert_artifact "R11c repair-forge refuses a plain YAML key export before touching the cluster" \
+  "echo $RS_STATUS; rs_err | grep -c 'is not bootstrap-secrets. encrypted key export'; rs_cluster_calls" "$(printf '1\n1\n0')"
+
 # R12. --restore-from offsite with no destination named has nowhere to read from.
 rs_case r12
 rs_run --restore-from offsite "${RS_KIT[@]}" --dry-run

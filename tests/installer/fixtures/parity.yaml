@@ -21,6 +21,10 @@
 site:
   name: ci-interactive
   path: ./tockmox-site
+  # Stated, not omitted: the default is built-in since 0.9.0, and this fixture
+  # (and every test that copies its site) holds the placeholder route.
+  # run.sh I1d proves the default with this line removed.
+  forge: external
 
 global:
   internalDomain: int.example.test
