@@ -288,6 +288,15 @@ elif [[ -n "$PASSFILE" ]]; then ENC="openssl"
 else die "no way to encrypt the new kit: give --passphrase-file F or --age-recipient R"; fi
 if [[ "$ACTION" == repair ]]; then
   if [[ -n "$SEAL_BACKUP" ]]; then [[ -r "$SEAL_BACKUP" && -s "$SEAL_BACKUP" ]] || die "cannot read --sealing-key-backup $SEAL_BACKUP"
+    # The same check bootstrap-forge makes, made HERE as well: a repair removes the old
+    # forge before it calls bootstrap-forge, so a refusal there would come too late.
+    case "$(head -c 34 "$SEAL_BACKUP" | tr -d '\0')" in
+      age-encryption.org/v1*|"-----BEGIN AGE ENCRYPTED FILE-----"*|Salted__*) : ;;
+      *) die "--sealing-key-backup $SEAL_BACKUP is not bootstrap-secrets' encrypted key export
+       (it is neither age nor openssl output; a plain YAML export of the key is the usual cause).
+       Write the export first with bootstrap-secrets --mode reuse --backup-out NEW-FILE, then pass
+       NEW-FILE here. Nothing was touched." ;;
+    esac
   elif ! $NO_SEAL_BACKUP; then
     die "--sealing-key-backup FILE is required for the new kit (bootstrap-secrets' encrypted export),
        or say you keep it elsewhere with --no-sealing-key-backup."

@@ -34,6 +34,8 @@ is stated in that task, as a test you can run.
 | Every layer already settled | Starting from a red cluster means you cannot tell your change from a failure that was already there | [The readiness bar](../deployment/install.md#the-readiness-bar), run twice, printing nothing both times |
 | The name of the layer you are changing | Values are per-layer, and the wrong file is a change that renders and does nothing | `ls "$SITE_REPO/site/values/"` lists `global.yaml` and one file per layer |
 
+**On the built-in forge** (the default), `main` takes no direct push, so every "commit and push" on this page means: start a branch, commit, push the branch, and open a pull request for an approver, as in [changing your site](../administration/site-forge.md#changing-your-site). `SITE_REPO` is then your clone from the forge.
+
 **YOU SUPPLY:** the path to your site repository clone and the name of the layer
 you are changing, once each. The path is the clone **on this machine**, not the
 repository URL. Both are exported rather than substituted into every block, so
@@ -80,7 +82,7 @@ Why the trade is worth making, and the two things on a Tockmox cluster it does
 
 **Required.** This is how every other change on this page is actually made. The
 file named below is one example: `global.yaml`, or any other layer's file under
-`site/values/`, is edited exactly the same way.
+`site/values/`, is edited exactly the same way. **On the built-in forge**, start a branch first and push it instead of `main` ([changing your site](../administration/site-forge.md#changing-your-site)); the change applies once an approver merges it.
 
 ```bash
 : "${SITE_REPO:?export SITE_REPO first, see Before you begin}"

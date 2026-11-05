@@ -2,7 +2,7 @@
 okf_version: "0.2"
 type: HowTo
 title: "Install Tockmox"
-description: "Where both preparation paths converge: generate a site repository, publish it, mint credentials, apply the bootstrap, and close the two states preparation deliberately left open."
+description: "Where both preparation paths converge: generate a site repository, publish it to the built-in forge (the default) or your own, mint credentials, apply the bootstrap, and close the two states preparation deliberately left open."
 tags: [installation, deployment, gitops, argocd, sealed-secrets, walkthrough]
 status: stable
 generated:
@@ -26,16 +26,32 @@ for this page.** A release gate runs one node on openSUSE MicroOS as a Harvester
 virtual machine. Every other shape, including a cluster you already run and
 three nodes, is documented and not gated: [deployment shapes](deployment-shapes.md).
 
-Three phases, in order, with no branch between them: **generate** your site
-repository, **publish** it, **apply** it. Everything else on this page hangs off
-one of those three.
+Three phases, in order: **generate** your site repository, **publish** it,
+**apply** it. Everything else on this page hangs off one of those three.
+
+**One choice changes the middle: where the site repository lives.**
+
+- **The built-in forge, the default.** Tockmox installs its own git forge beside
+  ArgoCD, creates the repository in it, and copies it off-site. There is no
+  repository to create, no URL to copy and no token to type. You seal your
+  credentials, then one command publishes the site:
+  [publish to the built-in forge](#publish-to-the-built-in-forge), at the end of
+  Phase 2.5. What the forge is and how it keeps your history is
+  [the built-in site forge](../administration/site-forge.md).
+- **Bring your own forge** (`site.forge: external`): the repository lives on
+  GitHub, GitLab or a forge you run. You create it, push the site and give
+  ArgoCD a credential: [2a to 2c](#bring-your-own-forge).
+
+Everything else on this page is the same on both.
 
 ```mermaid
 flowchart TD
     A["Prepare a fresh cluster"] --> C
     B["Prepare a cluster you already have"] --> C
-    C["Phase 1 ... generate your site repository"] --> D["Phase 2 ... publish it"]
+    C["Phase 1 ... generate your site repository"] --> D["Phase 2 ... publish it (your own forge: 2a to 2c)"]
     D --> E["Phase 2.5 ... mint your credentials"]
+    E --> P["built-in forge: bootstrap-forge publishes the site"]
+    P --> F
     E --> F["Phase 3 ... apply the bootstrap"]
     F --> G["MetalLB arrives, Traefik gets an address"]
     F --> H["one default StorageClass, unchanged by Tockmox"]
@@ -44,7 +60,9 @@ flowchart TD
 ```
 
 Text equivalent: the two preparation pages both feed Phase 1. Phases 1, 2, 2.5
-and 3 run in that order. Phase 3 is where the last loose end closes ... MetalLB
+and 3 run in that order. On the built-in forge Phase 2 has nothing to do, and
+publishing is the last step of Phase 2.5, because the site has to hold its
+sealed credentials before the forge receives it. Phase 3 is where the last loose end closes ... MetalLB
 gives Traefik a real address ... after which the next page is
 [getting started](../usage/getting-started.md).
 
@@ -80,12 +98,13 @@ pasteable exactly as printed. This is the same pattern
 [documentation standard § 5](../documentation-standard.md#5-commands-are-copy-pasteable-and-complete)
 is where it is written down.
 
-**YOU SUPPLY:** two of the three. The third is measured and shown to you.
+**YOU SUPPLY:** two of the three on your own forge, one on the built-in forge.
+The remaining one is measured and shown to you.
 
 | Variable | Class | Where it comes from |
 |---|---|---|
 | `KUBE_CONTEXT` | Measured, you confirm | Your current kubectl context. The block below prints the **server address** behind it, not just the name |
-| `SITE_REPO_URL` | **You supply** | The git URL of the repository you created on your own forge. Nothing on this page creates it for you |
+| `SITE_REPO_URL` | **You supply**, your own forge only | The git URL of the repository you created on your own forge. On the built-in forge, skip that line: no block on that route reads it |
 | `TOCKMOX` | **You supply** | The path to your clone of the Tockmox source tree. Phase 1 and Phase 2.5 both run scripts from it |
 
 **WORKSTATION**
@@ -238,7 +257,8 @@ where a copy button cannot take it and a screen reader reaches it
 
 ## What you will have at the end
 
-A site repository you own, pushed to a remote your cluster can reach; nine
+A site repository you own, in the built-in forge (with its recovery kit kept
+off the cluster) or on a forge of your own that your cluster can reach; nine
 ArgoCD Applications reporting `Synced` and `Healthy`; Traefik holding a real
 address from your pool; exactly one default StorageClass; and every credential
 sealed into your repository except one that cannot exist until the cluster does.
@@ -313,6 +333,13 @@ install stops in Phase 3 with the error above.
 |---|---|
 | **A config file** (recommended) | You want the run to be repeatable and reviewable, and you want the `--dry-run` preflight in 1b, which needs a file to read |
 | **Interactive** | You would rather be asked. It prompts for the same settings and skips 1b |
+
+**Both routes ask the one choice this page branches on: `site.forge`.** The
+example config sets `built-in`, and the interactive prompt
+`Site repository: built-in (Tockmox runs it) or external (yours)` defaults to
+it. Leave it to publish to the built-in forge. Set `external` (or answer it at
+the prompt) to bring your own forge, and follow [2a to 2c](#bring-your-own-forge)
+when you get there.
 
 **Interactive**, if that is you ... run this and skip to
 [1c's success condition](#1c-generate-the-site-repository):
@@ -465,12 +492,22 @@ ls "$SITE_REPO/site/values/"
 ```
 
 `root.yaml` exists, and `site/values/` holds `global.yaml` plus one file per
-layer you left enabled. The installer's own last three lines are:
+layer you left enabled. The installer's output ends with the next steps for the
+route you chose. **On the built-in forge** it says:
 
 ```
-  ✓ site repository written to ./tockmox-site
+  ✓ site.forge is built-in: every Application names the built-in forge's in-cluster address,
+      http://tockmox-forge-http.tockmox-forge.svc.cluster.local:3000/tockmox/site.git
+      so there is no placeholder to replace and no repository for you to create.
+```
+
+That address is the same on every site and after every rebuild, and nothing
+outside the cluster resolves it, so there is no DNS or certificate step for it.
+
+**On your own forge** it says instead:
+
+```
   ! The generated site carries PLACEHOLDER_SITE_REPO_URL in 13 files.
-  ✓ installer finished. Nothing was applied to your cluster.
 ```
 
 **That placeholder count is the installer's, not this page's.** It counts the
@@ -634,7 +671,23 @@ says what it costs.
 ArgoCD reads your values over git, so the repository must be reachable **from
 the cluster**, not merely from your workstation.
 
-### 2a. Push it
+### On the built-in forge: nothing to do yet
+
+**Skip to [Phase 2.5](#phase-25--mint-your-credentials).** The forge does not
+exist yet, and it should receive the site only once your sealed credentials are
+in it, because after that first push its `main` takes changes only through an
+approved pull request. Publishing is the last step of Phase 2.5:
+[publish to the built-in forge](#publish-to-the-built-in-forge). 2a, 2b and 2c
+below are not on your route.
+
+### Bring your own forge
+
+**Only with `site.forge: external`.** The three steps below create nothing on
+your forge: you made the repository during preparation
+([fresh-install.md § create your site repository](fresh-install.md#create-your-site-repository)).
+The built-in forge replaces all three with one command.
+
+#### 2a. Push it
 
 **Required.** `SITE_REPO_URL` is the one you exported in
 [set these once](#set-these-once) ... it is not re-typed here, and it is not
@@ -682,7 +735,7 @@ the error rather than continuing. The generated Applications name
 `targetRevision: main`, so the branch name is not yours to vary without also
 editing `bootstrap/applications/*.yaml`.
 
-### 2b. Replace the repository placeholder
+#### 2b. Replace the repository placeholder
 
 **Required.** The installer deliberately writes `PLACEHOLDER_SITE_REPO_URL`
 rather than asking for a URL and pushing on your behalf. Why it works that way,
@@ -734,7 +787,7 @@ the whole repository, which is what the installer counted, so the two numbers
 are comparable. Scoping either one to `bootstrap/` makes them disagree by one
 and the check stops meaning anything.
 
-### 2c. Give ArgoCD a credential ... private repositories only
+#### 2c. Give ArgoCD a credential ... private repositories only
 
 **Conditional. If** an unauthenticated clone of your site repository fails, do
 this step:
@@ -976,7 +1029,12 @@ Rotating one of them later, including the four that come in pairs, is
 [secrets § rotation](../administration/secrets.md#rotation).
 
 Then commit them. SealedSecrets are safe to commit; that is the whole point of
-them:
+them.
+
+**On the built-in forge, skip this block:** the next step,
+[publish to the built-in forge](#publish-to-the-built-in-forge), commits the
+whole site, `secrets/` included, and pushes it as the forge's first `main`.
+**On your own forge:**
 
 **WORKSTATION**
 
@@ -1009,11 +1067,142 @@ the AI layer creates it after the first sync, and
 [confirm the console's model-gateway key was minted](#mint-the-consoles-model-gateway-key)
 is the check that it did.
 
+### Publish to the built-in forge
+
+**Only with `site.forge: built-in`, the default, and only after the credentials
+above are sealed into `secrets/`.** On your own forge you already published in
+[2a to 2c](#bring-your-own-forge); go to [Phase 3](#phase-3--apply).
+
+`bootstrap-forge` replaces 2a, 2b and 2c with one command. Like
+`bootstrap-secrets` it **writes to a cluster**, so it is a subcommand you have to
+name, and it shows the kube context and API server and makes you confirm both.
+In order, each step refusing before the next, it:
+
+1. installs the forge (Forgejo on its long-term-support line, one replica,
+   pinned by this release) beside ArgoCD, in namespace `tockmox-forge`, behind a
+   NetworkPolicy that admits ArgoCD, the console's actions service, the model
+   watcher and the forge's own copy job, and nothing else;
+2. creates the private repository `tockmox/site` and pushes your site directory
+   to it as `main`, sealed credentials included;
+3. protects `main`: no direct pushes, and nothing merges without one approval
+   from the `approvers` team, which is your console's admin group;
+4. gives ArgoCD its read credential, and the console and the model watcher the
+   identity that opens changes and cannot approve them. **None of these is ever
+   typed or shown to you;**
+5. sets up the off-site copy, if you give it a destination (below);
+6. writes the **recovery kit**, one encrypted file holding the forge's own
+   secrets and your sealing-key backup, which a rebuild needs and no git copy
+   carries.
+
+**YOU SUPPLY:** where the recovery kit goes (`--kit-out`, outside the site
+repository) and how it is encrypted (`--age-recipient`, the same age public key
+as the key backup above, or `--passphrase-file`), plus the key backup that
+`bootstrap-secrets` just wrote (`--sealing-key-backup`), which the kit carries.
+It needs `kubectl`, `helm` (v3), `git`, `curl`, `openssl` and `tar`, and `age`
+when the kit is encrypted to an age key.
+
+**If you minted by the manual route** (`mint-secrets.sh`, with the controller you
+installed in [prepare a fresh cluster § 7](fresh-install.md#7-install-sealed-secrets-with-your-own-key)),
+you do not yet hold that backup: the export you made there is the controller's
+key as plain YAML, and a rebuild opens the key only from the encrypted export.
+Write it now. `--mode reuse` adopts your controller, installs nothing, leaves
+every sealed file byte-identical, and never generates a second key; it asks you
+to confirm the controller it found, as well as the context and API server.
+
+**WORKSTATION**
+
+```bash
+: "${SITE_REPO:?export SITE_REPO first, see 1c}"
+: "${TOCKMOX:?export TOCKMOX first, see Set these once}"
+: "${KUBE_CONTEXT:?export KUBE_CONTEXT first, see Set these once}"
+: "${AGE_PUBLIC_KEY:?export the age public key the backup is encrypted to}"
+"$TOCKMOX/install/tockmox-install.sh" bootstrap-secrets --mode reuse \
+  --site "$SITE_REPO" --context "$KUBE_CONTEXT" \
+  --backup-out "$HOME/tockmox-backup/sealed-secrets-key.enc" --age-recipient "$AGE_PUBLIC_KEY"
+```
+
+On the bootstrap route you already have it: it is the `--backup-out` file above.
+
+**WORKSTATION**
+
+```bash
+: "${SITE_REPO:?export SITE_REPO first, see 1c}"
+: "${TOCKMOX:?export TOCKMOX first, see Set these once}"
+: "${KUBE_CONTEXT:?export KUBE_CONTEXT first, see Set these once}"
+: "${AGE_PUBLIC_KEY:?export the age public key the backup is encrypted to}"
+"$TOCKMOX/install/tockmox-install.sh" bootstrap-forge \
+  --site "$SITE_REPO" --context "$KUBE_CONTEXT" \
+  --kit-out "$HOME/tockmox-backup/tockmox-recovery-kit.tar.age" --age-recipient "$AGE_PUBLIC_KEY" \
+  --sealing-key-backup "$HOME/tockmox-backup/sealed-secrets-key.enc" \
+  --dry-run
+```
+
+`--dry-run` shows the plan and changes nothing. Remove it to run for real; the
+script then asks you to type the context name and the API server address it
+printed. **Running it a second time is safe:** it adopts the forge it installed,
+finds the repository already holding your `main`, and changes nothing that is
+already right. **Give a second run a new `--kit-out` file name:** it never
+overwrites a recovery kit, and refuses before it touches the cluster if the file
+already exists.
+
+**The off-site copy is optional, and you can add it later.** With a destination,
+the forge's `main` is copied within about a minute of every merge, the run writes
+the first copy and reads it back before it reports done, and a forge dump (pull
+requests, reviews and their comments) goes to the same place every night. Add
+one of these to the command:
+
+| Destination | Flags |
+|---|---|
+| An S3-compatible bucket (MinIO on a NAS, Garage, a cloud bucket) | `--offsite-s3-endpoint URL --offsite-s3-bucket NAME --offsite-s3-credentials FILE` (the file holds the access key id, then the secret key, one per line) |
+| A git remote (protect its `main` from force pushes) | `--offsite-git URL --offsite-git-credentials FILE` (the user, then a token that can push) |
+
+**Without one the install still finishes**, and the console carries a persistent
+**No off-site copy** warning, which you can snooze or dismiss like any other
+alert. It means what it says: until a copy exists, losing this cluster loses the
+site's history. Re-run the command with a destination and a new `--kit-out` file
+name to add one. What the
+copy holds, what a rebuild needs and what one can lose are on
+[rebuilding from the off-site copy](../administration/site-forge-recovery.md).
+
+**Success condition:** the run's last section, `Done`, opens with
+
+```
+  ✓ the built-in forge holds tockmox/site; ArgoCD reads it at http://tockmox-forge-http.tockmox-forge.svc.cluster.local:3000/tockmox/site.git
+```
+
+and then names the off-site copy, or warns that there is none. Then read what it
+left behind:
+
+**WORKSTATION**
+
+```bash
+: "${KUBE_CONTEXT:?export KUBE_CONTEXT first, see Set these once}"
+kubectl --context="$KUBE_CONTEXT" -n argocd get secret tockmox-site-repo \
+  -o jsonpath='{.metadata.labels}{"\n"}'
+ls -l "$HOME/tockmox-backup/tockmox-recovery-kit.tar.age"
+```
+
+The labels include `argocd.argoproj.io/secret-type: repository`, and the kit
+file exists. **Move the kit off this machine, and keep it apart from the
+off-site copy.** It is what lets a rebuild open your sealed credentials and the
+forge's own data; it is encrypted, and it cannot hold the age identity or
+passphrase that opens it, so lose those and the kit is noise. Keeping it in the
+same bucket as the copy would mean one leaked bucket credential hands over both.
+
+**The forge's sign-in comes later.** It signs people in through Authentik, which
+does not exist until Phase 3 has run, so this run tries it at its end, says it is
+waiting, and leaves it for
+[connect the built-in forge's sign-in](#connect-the-built-in-forges-sign-in).
+
+**What is not proven.** `bootstrap-forge` has been run end to end on single-node
+k3s lab clusters only. Nothing here has been run against a multi-node cluster.
+
 ## Phase 3 ... apply
 
 ### 3a. Apply the root Application
 
-**Required.** This is the only thing you apply by hand.
+**Required.** This is the only thing you apply by hand. It is the same on both
+routes: `root.yaml` already names where the site repository lives.
 
 **WORKSTATION**
 
@@ -1456,6 +1645,32 @@ under your domain; the full hostname table is
 [configuration § hostnames and TLS](../administration/configuration.md#hostnames-and-tls).
 
 <a id="mint-the-consoles-model-gateway-key"></a>
+
+### Connect the built-in forge's sign-in
+
+**Only with `site.forge: built-in`, once `tockmox-identity` is `Synced` and
+`Healthy`.** The forge signs people in through Authentik, and Authentik did not
+exist when the forge was installed. This adds the sign-in to the forge, once;
+afterwards a forge that starts while Authentik is down still starts, and signs
+people in again as soon as Authentik answers.
+
+**WORKSTATION**
+
+```bash
+: "${SITE_REPO:?export SITE_REPO first, see 1c}"
+: "${TOCKMOX:?export TOCKMOX first, see Set these once}"
+: "${KUBE_CONTEXT:?export KUBE_CONTEXT first, see Set these once}"
+"$TOCKMOX/install/tockmox-install.sh" bootstrap-forge \
+  --site "$SITE_REPO" --context "$KUBE_CONTEXT" --connect-sign-in
+```
+
+**Success condition:** it ends with `sign-in: https://forge.<your internal
+domain> signs people in through Authentik; tockmox-admins members join approvers
+at sign-in`. Members of the console's admin group become approvers the first
+time they sign in to the forge; nobody is made the forge's administrator that
+way. **Taking someone out of the admin group does not yet take them out of
+`approvers` by itself:** remove them from the team by hand as well
+([identity](../administration/identity.md)).
 
 ### Confirm the console's model-gateway key was minted
 

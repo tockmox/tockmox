@@ -47,7 +47,7 @@ Then [sign in for the first time](../usage/getting-started.md).
 | Step | Page | What it covers |
 |---|---|---|
 | 1 | [Verify what you downloaded](verify.md) | Check a Tockmox release before you render it: verify the signed tag, check the archive checksum, and read the deployment SBOM |
-| 2 | [Install Tockmox](install.md) | Where both preparation paths converge: generate a site repository, publish it, mint credentials, apply the bootstrap, and close the two states preparation deliberately left open |
+| 2 | [Install Tockmox](install.md) | Where both preparation paths converge: generate a site repository, publish it to the built-in forge (the default) or your own, mint credentials, apply the bootstrap, and close the two states preparation deliberately left open |
 
 ### Special environments
 

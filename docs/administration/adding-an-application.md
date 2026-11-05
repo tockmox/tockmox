@@ -16,7 +16,10 @@ and check its success condition on your own cluster.
 
 Everything here lives in **your site repository** under `apps/`. The
 installer generates a `site-apps` Application that syncs that directory, so
-`git push` is the deploy button. Nothing below touches the Tockmox charts.
+a change reaching `main` is the deploy button: a `git push` on your own forge,
+an approved pull request on the built-in forge
+([changing your site](site-forge.md#changing-your-site)). Nothing below
+touches the Tockmox charts.
 To take an app back out, see [removing an application](removing-an-application.md).
 
 ## 0. The rules that keep upgrades free

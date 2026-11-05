@@ -27,6 +27,17 @@
 #      and re-exported here, so the next block's `${SITE_REPO:?}` guard sees
 #      what the previous block set, exactly as the reader's terminal does.
 #
+# TWO ROUTES. TOCKMOX_P09_ROUTE picks where the site repository lives, the one
+# branch the page has (site.forge):
+#   built-in   the installer's default since 0.9.0. 2a, 2b, 2c and the Phase 2.5
+#              commit are skipped, as the page says, and "Publish to the built-in
+#              forge" runs instead (the key-backup export, bootstrap-forge's
+#              dry run, then the real run), then the forge's sign-in once
+#              identity is Healthy. No site remote is needed.
+#   external   bring your own forge: 2a to 2c against the writable remote below.
+# Default external, so a runner that sets nothing keeps the route it measured;
+# the built-in route is the one the page leads with and needs its own run.
+#
 # WHAT IT NEEDS THAT THE PAGE DOES NOT NAME, all stated as GLUE in the log:
 #   - a git remote the workstation can PUSH to and the cluster can CLONE from,
 #     at ONE URL (the page uses SITE_REPO_URL at three call sites and warns that
@@ -98,9 +109,14 @@ path_begin "P09-install-md-end-to-end" \
 # failure and not silence: the nightly runner does not yet stand up the
 # writable remote this path needs, and a run must say so rather than count
 # this path as green or as broken.
+ROUTE="${TOCKMOX_P09_ROUTE:-external}"
+case "$ROUTE" in built-in|external) : ;; *)
+  _emit "INFRA: TOCKMOX_P09_ROUTE must be built-in or external, not '${ROUTE}'"
+  path_outcome INFRA_ERROR "bad TOCKMOX_P09_ROUTE"; exit 1 ;; esac
 missing=""
-for v in TOCKMOX_P09_SITE_REPO_URL TOCKMOX_P09_TOCKMOX_REPO_URL TOCKMOX_P09_TOCKMOX_REVISION \
-         TOCKMOX_P09_TOCKMOX_CLONE TOCKMOX_P09_LAN_CIDR TOCKMOX_P09_POOL; do
+NEED_VARS="TOCKMOX_P09_TOCKMOX_REPO_URL TOCKMOX_P09_TOCKMOX_REVISION TOCKMOX_P09_TOCKMOX_CLONE TOCKMOX_P09_LAN_CIDR TOCKMOX_P09_POOL"
+[ "$ROUTE" = external ] && NEED_VARS="TOCKMOX_P09_SITE_REPO_URL ${NEED_VARS}"
+for v in $NEED_VARS; do
   eval "[ -n \"\${${v}:-}\" ]" || missing="${missing}${missing:+ }${v}"
 done
 if [ -n "$missing" ]; then
@@ -110,7 +126,7 @@ if [ -n "$missing" ]; then
   path_outcome BLOCKED "no writable site remote configured for this run (${missing})"
   exit 0
 fi
-SITE_URL="$TOCKMOX_P09_SITE_REPO_URL"
+SITE_URL="${TOCKMOX_P09_SITE_REPO_URL:-}"
 TM_URL="$TOCKMOX_P09_TOCKMOX_REPO_URL"
 TM_REV="$TOCKMOX_P09_TOCKMOX_REVISION"
 TM_CLONE="$TOCKMOX_P09_TOCKMOX_CLONE"
@@ -124,7 +140,9 @@ if [ "$WS_SHELL" = "zsh" ] && ! command -v "${ZSH:-zsh}" >/dev/null 2>&1; then
   _emit "       TOCKMOX_WS_SHELL=bash to run a weaker version of this path."
   path_outcome INFRA_ERROR "no zsh on the runner"; exit 1
 fi
-for t in kubectl helm kubeseal openssl git python3; do
+P09_TOOLS="kubectl helm kubeseal openssl git python3"
+[ "$ROUTE" = built-in ] && P09_TOOLS="${P09_TOOLS} curl tar age age-keygen"
+for t in $P09_TOOLS; do
   command -v "$t" >/dev/null 2>&1 || { _emit "INFRA: '$t' is not on PATH"; path_outcome INFRA_ERROR "missing $t"; exit 1; }
 done
 
@@ -235,8 +253,12 @@ S=S01-set-these-once
 if ! done_step "$S"; then budget_left || yield "S01+"
   step_begin "$S" 'export SITE_REPO_URL=YOUR_SITE_REPO_URL' || exit 3
   B="$(block 'export SITE_REPO_URL=YOUR_SITE_REPO_URL')"
+  if [ "$ROUTE" = built-in ]; then
+    B="$(printf '%s\n' "$B" | grep -v '^export SITE_REPO_URL=')"
+    _emit "SKIPPED LINE: export SITE_REPO_URL=... (the page: on the built-in forge, skip that line)"
+  fi
   B="${B//YOUR_SITE_REPO_URL/$SITE_URL}"; B="${B//YOUR_TOCKMOX_CLONE_PATH/$TM_CLONE}"
-  _emit "SUBSTITUTION: YOUR_SITE_REPO_URL -> ${SITE_URL}; YOUR_TOCKMOX_CLONE_PATH -> ${TM_CLONE}  (both YOU SUPPLY on the page)"
+  _emit "SUBSTITUTION: YOUR_SITE_REPO_URL -> ${SITE_URL:-skipped}; YOUR_TOCKMOX_CLONE_PATH -> ${TM_CLONE}  (YOU SUPPLY on the page)"
   execute_begin "install.md Set these once"; run_ws "$S" "$B"; execute_end $?
   want="$(kubectl --context="$KUBE_CONTEXT" config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
   got="$(out_of "$S" | grep -m1 '^https://' || true)"
@@ -313,11 +335,12 @@ s=setk(s,'global.lanCIDR','${LAN_CIDR_V}')
 s=setk(s,'addressPool.range','${POOL_V}')
 s=setk(s,'tockmox.revision','${TM_REV}')
 s=setk(s,'tockmox.repoURL','${TM_URL}')
+s=setk(s,'site.forge','${ROUTE}')
 open(p,'w').write(s)
 PY
 EOF
   chmod +x "$EDITOR_GLUE"; export EDITOR="$EDITOR_GLUE"
-  _emit "GLUE: EDITOR=${EDITOR_GLUE} writes site.name=${SITE_NAME_V} internalDomain=${INTERNAL_DOMAIN_V} lanCIDR=${LAN_CIDR_V} addressPool.range=${POOL_V} tockmox.revision=${TM_REV} tockmox.repoURL=${TM_URL}"
+  _emit "GLUE: EDITOR=${EDITOR_GLUE} writes site.name=${SITE_NAME_V} internalDomain=${INTERNAL_DOMAIN_V} lanCIDR=${LAN_CIDR_V} addressPool.range=${POOL_V} tockmox.revision=${TM_REV} tockmox.repoURL=${TM_URL} site.forge=${ROUTE}"
   rm -f "${TM_CLONE}/tockmox.yaml"; rm -rf "${TM_CLONE}/tockmox-site"
   execute_begin "install.md 1a config-file route"; run_ws "$S" "$(block 'cp install/tockmox.yaml.example tockmox.yaml')"; execute_end $?
   nonempty=0
@@ -346,10 +369,15 @@ if ! done_step "$S"; then budget_left || yield "S07+"
   step_begin "$S" 'export SITE_REPO="$TOCKMOX/tockmox-site"' || exit 3
   execute_begin "install.md 1c generate the site repository"; run_ws "$S" "$(block 'export SITE_REPO="$TOCKMOX/tockmox-site"')"; execute_end $?
   record "$S" "1c: 'site repository written to'" "1" "$(out_of "$S" | grep -c 'site repository written to' | tr -d ' ')"
+  if [ "$ROUTE" = built-in ]; then
+    record "$S" "1c (built-in forge): the installer says every Application names the built-in forge" "1" "$(out_of "$S" | grep -c 'site.forge is built-in' | tr -d ' ')"
+    record "$S" "1c (built-in forge): no generated file carries the placeholder" "0" "$( { grep -rl PLACEHOLDER_SITE_REPO_URL "${SITE_REPO:-/nonexistent}" 2>/dev/null || true; } | wc -l | tr -d ' ')"
+  else
   n="$(out_of "$S" | sed -nE 's/.*PLACEHOLDER_SITE_REPO_URL in ([0-9]+) files.*/\1/p' | head -1)"
   printf '%s' "${n:-}" > "${STATE}/placeholder-count"
   record "$S" "1c: the installer names its placeholder count (a number)" "number" "$( [ -n "${n:-}" ] && echo number || echo none )"
   note "S07: installer placeholder count = ${n:-?} (the page says thirteen on a stock install with all nine layers on; 2b compares against this number, not the page's)"
+  fi
   record "$S" "1c: SITE_REPO is exported into the session" "set" "$( [ -n "${SITE_REPO:-}" ] && echo set || echo unset )"
   mark_done "$S"
 fi
@@ -389,6 +417,9 @@ fi
 
 # S10 ... 2a push, then its success condition.
 S=S10-push
+if [ "$ROUTE" = built-in ] && ! done_step "$S"; then
+  note "S10: skipped on the built-in forge, as the page says (bring your own forge only)"; mark_done "$S"
+fi
 if ! done_step "$S"; then budget_left || yield "S10+"
   step_begin "$S" 'git push -u origin main' || exit 3
   export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-p09}" GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-p09@example.invalid}"
@@ -404,6 +435,9 @@ fi
 
 # S11 ... 2b replace the placeholder, then its success condition.
 S=S11-placeholder
+if [ "$ROUTE" = built-in ] && ! done_step "$S"; then
+  note "S11: skipped on the built-in forge, as the page says (bring your own forge only)"; mark_done "$S"
+fi
 if ! done_step "$S"; then budget_left || yield "S11+"
   step_begin "$S" 'git grep -l PLACEHOLDER_SITE_REPO_URL | while' || exit 3
   execute_begin "install.md 2b replace the placeholder"; run_ws "$S" "$(block 'git grep -l PLACEHOLDER_SITE_REPO_URL | while')"; execute_end $?
@@ -418,6 +452,9 @@ fi
 # git:// carries no authentication and the reader's rule ("if you know it is
 # private, do it regardless") is what this run is exercising, not the need.
 S=S12-credential
+if [ "$ROUTE" = built-in ] && ! done_step "$S"; then
+  note "S12: skipped on the built-in forge, as the page says (bring your own forge only)"; mark_done "$S"
+fi
 if ! done_step "$S"; then budget_left || yield "S12+"
   step_begin "$S" 'read -rs READ_ONLY_TOKEN' || exit 3
   run_ws "${S}-gate" "$(block 'echo "public: skip this step"')"
@@ -457,11 +494,57 @@ fi
 
 # S14 ... commit and push the sealed credentials.
 S=S14-commit-secrets
+if [ "$ROUTE" = built-in ] && ! done_step "$S"; then
+  note "S14: skipped on the built-in forge, as the page says (bring your own forge only)"; mark_done "$S"
+fi
 if ! done_step "$S"; then budget_left || yield "S14+"
   step_begin "$S" 'git add secrets/ && git commit -m "sealed credentials" && git push' || exit 3
   execute_begin "install.md Phase 2.5 commit"; run_ws "$S" "$(block 'git add secrets/ && git commit -m "sealed credentials" && git push')"; execute_end $?
   record "$S" "2.5 commit: the remote's main equals the local HEAD after the push" "$(git -C "$SITE_REPO" rev-parse HEAD)" "$(git ls-remote "$SITE_URL" refs/heads/main | cut -f1)"
   record "$S" "2.5 commit: the sealed files are tracked at the remote" "$(cat "${STATE}/minted-count")" "$(git -C "$SITE_REPO" ls-tree -r --name-only HEAD secrets/ | grep -c '\.sealed\.yaml' | tr -d ' ')"
+  mark_done "$S"
+fi
+
+# S14f ... built-in forge only: "Publish to the built-in forge". The key-backup
+# export (the page's manual-route block, because this path minted with
+# mint-secrets.sh against the controller fresh-install.md 7 installed), then
+# bootstrap-forge as printed (its --dry-run), then the same block with --dry-run
+# removed, as the page says to; both confirmations typed at the terminal.
+S=S14f-publish-built-in
+if [ "$ROUTE" = external ] && ! done_step "$S"; then
+  note "S14f: skipped on your own forge (2a to 2c published the site)"; mark_done "$S"
+fi
+if ! done_step "$S"; then budget_left || yield "S14f+"
+  step_begin "$S" 'tockmox-recovery-kit.tar.age" --age-recipient' || exit 3
+  AGE_ID="${STATE}/p09-age-identity.txt"
+  [ -s "$AGE_ID" ] || age-keygen -o "$AGE_ID" >/dev/null 2>&1
+  AGE_PUBLIC_KEY="$(age-keygen -y "$AGE_ID")"; export AGE_PUBLIC_KEY
+  _emit "GLUE: AGE_PUBLIC_KEY from a throwaway age identity the harness made (${AGE_ID}); a reader exports their own"
+  mkdir -p "$HOME/tockmox-backup"
+  SERVER_V="$(kubectl --context="$KUBE_CONTEXT" config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
+  CTRL_V="$(kubectl --context="$KUBE_CONTEXT" get deploy -A -l app.kubernetes.io/name=sealed-secrets -o jsonpath='{.items[0].metadata.namespace}/{.items[0].metadata.name}' 2>/dev/null)"
+  printf 'Type the context name\t%s\nType the API server\t%s\nType NAMESPACE/NAME\t%s\n' "$KUBE_CONTEXT" "$SERVER_V" "$CTRL_V" > "${STATE}/${S}-reuse.answers"
+  printf 'Type the context name\t%s\nType the API server\t%s\n' "$KUBE_CONTEXT" "$SERVER_V" > "${STATE}/${S}.answers"
+  _emit "GLUE: the context, API server and controller confirmations are typed at the terminal, as a reader would"
+  execute_begin "install.md publish to the built-in forge: the key-backup export (--mode reuse)"
+  run_ws "${S}-reuse" "$(block 'bootstrap-secrets --mode reuse')" "${STATE}/${S}-reuse.answers"; execute_end $?
+  record "$S" "the key backup the kit carries exists and is bootstrap-secrets' encrypted export (age armour or binary, never YAML)" "yes" "$( [ -s "$HOME/tockmox-backup/sealed-secrets-key.enc" ] && ! grep -q 'tls.key' "$HOME/tockmox-backup/sealed-secrets-key.enc" && echo yes || echo no )"
+  B="$(block 'tockmox-recovery-kit.tar.age" --age-recipient')"
+  execute_begin "install.md publish to the built-in forge: bootstrap-forge --dry-run"
+  run_ws "${S}-dry" "$B"; execute_end $?
+  record "$S" "the dry run changes nothing: no tockmox-forge namespace yet" "absent" "$(kubectl --context="$KUBE_CONTEXT" get ns tockmox-forge >/dev/null 2>&1 && echo present || echo absent)"
+  B="$(printf '%s\n' "$B" | python3 -c 'import sys; L=sys.stdin.read().rstrip("\n").split("\n"); i=L.index("  --dry-run"); L[i-1]=L[i-1].rstrip(" \\"); del L[i]; print("\n".join(L))')"
+  _emit "EDIT AS THE PAGE SAYS: --dry-run removed to run for real"
+  execute_begin "install.md publish to the built-in forge: bootstrap-forge"
+  ZSH_PASTE_TIMEOUT=900 run_ws "$S" "$B" "${STATE}/${S}.answers"; execute_end $?
+  record "$S" "Done opens with the forge holding tockmox/site at the in-cluster address" "1" "$(out_of "$S" | grep -c 'the built-in forge holds tockmox/site; ArgoCD reads it at http://tockmox-forge-http.tockmox-forge.svc.cluster.local:3000/tockmox/site.git' | tr -d ' ')"
+  # shellcheck disable=SC2016  # the needle is the page's own text; $HOME is matched, never expanded
+  run_ws "${S}-success" "$(block 'ls -l "$HOME/tockmox-backup/tockmox-recovery-kit.tar.age"')"
+  record "$S" "success: ArgoCD's repository Secret carries the repository label" "1" "$(out_of "${S}-success" | grep -c 'argocd.argoproj.io/secret-type.*repository' | tr -d ' ')"
+  record "$S" "success: the recovery kit file exists" "1" "$(out_of "${S}-success" | grep -c 'tockmox-recovery-kit.tar.age$' | tr -d ' ')"
+  record "$S" "the kit opens with the age identity and carries the sealing-key backup section" "1" "$(age -d -i "$AGE_ID" "$HOME/tockmox-backup/tockmox-recovery-kit.tar.age" 2>/dev/null | grep -c '^=== sealed-secrets.key.enc' | tr -d ' ')"
+  record "$S" "the commit bootstrap-forge pushed as main is the site's HEAD" "$(git -C "$SITE_REPO" rev-parse --short HEAD 2>/dev/null)" "$(out_of "$S" | sed -nE 's/.*site pushed as main \(([0-9a-f]+)\).*/\1/p; s/.*the forge already holds this site.s main \(([0-9a-f]+)\).*/\1/p' | head -1)"
+  record "$S" "the generated site's sealed files are committed" "$(cat "${STATE}/minted-count" 2>/dev/null)" "$(git -C "$SITE_REPO" ls-tree -r --name-only HEAD secrets/ 2>/dev/null | grep -c '\.sealed\.yaml' | tr -d ' ')"
   mark_done "$S"
 fi
 
@@ -627,6 +710,25 @@ if ! done_step "$S"; then budget_left || yield "S21b+"
 fi
 
 # S22 ... model-gateway key gate (a Service exists?) and verify what Tockmox authored.
+# S21c ... built-in forge only: connect the forge's sign-in, once identity is Healthy.
+S=S21c-forge-sign-in
+if [ "$ROUTE" = external ] && ! done_step "$S"; then
+  note "S21c: skipped on your own forge"; mark_done "$S"
+fi
+if ! done_step "$S"; then budget_left || yield "S21c+"
+  step_begin "$S" '--connect-sign-in' || exit 3
+  idh="$(kubectl --context="$KUBE_CONTEXT" -n argocd get application tockmox-identity -o jsonpath='{.status.sync.status}/{.status.health.status}' 2>/dev/null)"
+  note "S21c: tockmox-identity reads ${idh:-absent} (the page's gate is Synced/Healthy)"
+  if [ "$idh" = "Synced/Healthy" ]; then
+    printf 'Type the context name\t%s\nType the API server\t%s\n' "$KUBE_CONTEXT" "$(kubectl --context="$KUBE_CONTEXT" config view --minify -o jsonpath='{.clusters[0].cluster.server}')" > "${STATE}/${S}.answers"
+    execute_begin "install.md connect the built-in forge's sign-in"; run_ws "$S" "$(block '--connect-sign-in')" "${STATE}/${S}.answers"; execute_end $?
+    record "$S" "sign-in: the forge signs people in through Authentik" "1" "$(out_of "$S" | grep -c 'signs people in through Authentik' | tr -d ' ')"
+  else
+    record "$S" "the page's gate for the sign-in step is met (tockmox-identity Synced/Healthy)" "Synced/Healthy" "${idh:-absent}"
+  fi
+  mark_done "$S"
+fi
+
 S=S22-verify-authored
 if ! done_step "$S"; then budget_left || yield "S22+"
   step_begin "$S" 'get ns -l app.kubernetes.io/part-of=tockmox' || exit 3

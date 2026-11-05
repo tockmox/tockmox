@@ -51,15 +51,16 @@ default for the four values ... a wrong guess is worse than a question.
 | Do you have a Kubernetes cluster already, or machines with no cluster | Picks the preparation page: [fresh-install](../../deployment/fresh-install.md) or [existing-cluster](../../deployment/existing-cluster.md). Say which row of [deployment shapes](../../deployment/deployment-shapes.md) the answer lands in: only one node on MicroOS as a Harvester VM is gated, and an existing cluster is documented, not gated |
 | How many nodes | At three or more, the Longhorn replica counts must be raised and soft anti-affinity turned off, in the same change. At one or two the shipped defaults are right |
 | Physical or virtual | Virtual means reading [virtual machines](../../deployment/virtual-machines.md) **before** phase 1. Four hypervisor defaults break Tockmox with errors naming the wrong component |
-| Will the site repository be private | Decides whether a read-only token and the ArgoCD repository Secret are needed |
+| The built-in forge (the default) or their own | The built-in forge needs no repository, token or URL: `bootstrap-forge` publishes the site at the end of Phase 2.5. Their own forge (`site.forge: external`) means 2a to 2c, and then: will the repository be private, which decides whether a read-only token and the ArgoCD repository Secret are needed |
+| Where the off-site copy goes, on the built-in forge | Optional: an S3-compatible bucket or a git remote. Without one the console warns until there is one, and a lost cluster cannot be rebuilt |
 | Do you have internet access at the site | If no, switch to the [air-gap preparation](../airgap-prep/SKILL.md) skill first. It is the same install with six things done differently, not a separate procedure |
 | Your internal DNS zone, LAN CIDR, and a free address range | Three settings with no defaults, where a wrong guess is worse than a question. Ask; never invent. The installer also wants a `site.name`, but that one only labels generated files and nothing derives from it |
 | Where the AI plane should point, if anywhere | Optional, and "nowhere" is the shipped state and a fine answer while evaluating |
 
 ## The shape of the walk
 
-Three phases with no branch between them, plus a 2.5 that is easy to skip and
-expensive to skip. Confirm each phase's own success condition on the page before
+Three phases, plus a 2.5 that is easy to skip and expensive to skip. One choice
+changes the middle: the built-in forge (the default) or the operator's own. Confirm each phase's own success condition on the page before
 moving on.
 
 1. **Confirm the handoff.** One block of five reads and no writes, on
@@ -73,14 +74,20 @@ moving on.
    ... and that preflight resolves the Tockmox revision against the remote, which
    is the one wrong value that is accepted by every schema and surfaces three
    phases later as nine layers that cannot find their source.
-3. **Phase 2, publish it.** The repository must be reachable **from the
+3. **Phase 2, publish it.** On the built-in forge there is nothing to do yet:
+   the site is published at the end of Phase 2.5, once it holds its sealed
+   credentials. On their own forge the repository must be reachable **from the
    cluster**, not merely from the operator's workstation. Then replace
    `PLACEHOLDER_SITE_REPO_URL`, matching the URL character for character
    including a trailing `.git`.
 4. **Phase 2.5, mint credentials.** Run `mint-secrets.sh` from **inside the site
    repository**; it writes to `./secrets` relative to where it is invoked, not
    where it lives. Naming the kubectl context is not optional and has no
-   default. Commit the sealed secrets, and do not apply them yet.
+   default. On their own forge, commit the sealed secrets, and do not apply them
+   yet. On the built-in forge, run `bootstrap-forge` next
+   ([install § publish to the built-in forge](../../deployment/install.md#publish-to-the-built-in-forge)):
+   it commits and pushes the whole site and writes the **recovery kit**, which
+   the operator must move off the machine and keep apart from the off-site copy.
 5. **Phase 3, apply.** `kubectl apply -f bootstrap/root.yaml` is the only thing
    applied by hand. Watch the waves. Apply the sealed secrets as soon as the
    policy layer is `Synced`. Then MetalLB gives Traefik a real address, which is
@@ -94,7 +101,9 @@ moving on.
 6. **After the first sync.** DNS at Traefik's address, in the resolver **the
    cluster uses** as well as the operator's. Then confirm the console's
    model-gateway key was minted (a Job in the AI layer does it since 0.8.0;
-   the manual block is the fallback). Then verify what Tockmox authored.
+   the manual block is the fallback). On the built-in forge, connect its
+   sign-in once `tockmox-identity` is `Healthy`. Then verify what Tockmox
+   authored.
 
 ## Where operators actually lose time
 

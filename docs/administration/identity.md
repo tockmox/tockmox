@@ -219,7 +219,8 @@ rather than merged.
 ## The built-in forge: sign-in and approvers
 
 A site whose repository lives in the forge Tockmox installs (`site.forge:
-built-in`, experimental) signs people in to that forge through Authentik. The
+built-in`, the default; [the built-in site forge](site-forge.md)) signs people
+in to that forge through Authentik. The
 generator turns on its application in `site/values/identity.yaml`:
 
 ```yaml

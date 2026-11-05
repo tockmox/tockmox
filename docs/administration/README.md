@@ -46,6 +46,8 @@ The two experimental groups at the end are not covered by the stable values cont
 | Page | What it covers |
 |---|---|
 | [ArgoCD, and why Tockmox does not manage it](argocd.md) | Why ArgoCD is a prerequisite rather than a component, what the 2.6 floor is for, why the raw-manifest install needs server-side apply, and what a missing repository credential looks like |
+| [The built-in site forge](site-forge.md) | The git forge Tockmox installs beside ArgoCD to hold your site repository: why it is a prerequisite and not a layer, who can approve a change, where its settings live, how it is kept safe, and what it does not claim |
+| [Rebuilding from the off-site copy](site-forge-recovery.md) | What the built-in forge keeps off the cluster (the off-site copy, the nightly forge dump, the recovery kit), the alerts that watch them, what a rebuild can lose, and the two commands: rebuild a lost cluster, or repair only its forge |
 | [Load balancing and the address pool](load-balancing.md) | Why exactly one LoadBalancer controller may run, what happens when k3s ServiceLB and MetalLB both do, and how to choose the address range MetalLB hands out |
 | [Storage](storage.md) | Which volumes are replicated, which are node-local and why, the Longhorn replica count rule, and the two-default-StorageClass problem on k3s |
 | [External integrations](external-integrations.md) | The equipment around the cluster ... firewall, DNS, switch, storage, power, inference host and a registry ... and the exact value each one needs from you |

@@ -31,6 +31,16 @@ site:
   # Default: ./tockmox-site
   path: ./tockmox-site
 
+  # Where the site repository lives once it is written.
+  #   built-in   Tockmox installs its own git forge beside ArgoCD
+  #              (`tockmox-install.sh bootstrap-forge`), creates the repository in
+  #              it and copies it off-site; no outside account, no token to type.
+  #   external   your own forge (GitHub, GitLab, a Forgejo you run): you create the
+  #              repository and point the generated files at it. install.md,
+  #              "Bring your own forge".
+  # Default: built-in
+  forge: built-in
+
 
 # ----------------------------------------------------------------------------
 # tockmox ... which release you are running

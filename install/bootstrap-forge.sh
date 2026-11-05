@@ -106,9 +106,9 @@
 # the last HTTP status and the last ERROR body (a success body can carry a token,
 # so it is never written), and a trap removes it on every exit path.
 #
-# WHAT THIS DOES NOT DO (yet, each its own card): the nightly forge dump;
-# rebuild and forge repair; approving in the console as yourself;
-# upgrades. Taking someone OUT of the admin group takes them out of
+# WHAT THIS DOES NOT DO: rebuild and forge repair (install/forge-restore.sh, reached
+# as --restore-from and repair-forge); and, not built yet, approving in the console
+# as yourself, or upgrading the forge. Taking someone OUT of the admin group takes them out of
 # `approvers` only at their next forge sign-in, and with sso.apps.forge.access: admin
 # (the default) that sign-in is refused, so it never happens: until a reconciler
 # exists, remove them from the team by hand as well (docs/administration/identity.md). Proven on one single-node k3s
@@ -405,6 +405,21 @@ esac
 KIT_OUT="$KIT_ABS"
 if [[ -n "$SEAL_BACKUP" ]]; then
   [[ -r "$SEAL_BACKUP" && -s "$SEAL_BACKUP" ]] || die "cannot read --sealing-key-backup $SEAL_BACKUP, or it is empty"
+  # The kit carries this file as it is, and a rebuild opens it with bootstrap-secrets
+  # --mode recover, which reads only bootstrap-secrets' own export: age or openssl
+  # output with its marker inside. The marker cannot be read here without the key, but
+  # the encryption can: anything else (above all the plain YAML that
+  # `kubectl get secret ... -o yaml` writes, fresh-install.md 7) would make a kit that
+  # cannot rebuild, and nothing would say so until the day it is needed.
+  SEAL_HEAD="$(head -c 34 "$SEAL_BACKUP" | tr -d '\0')"
+  case "$SEAL_HEAD" in
+    age-encryption.org/v1*|"-----BEGIN AGE ENCRYPTED FILE-----"*|Salted__*) : ;;
+    *) die "--sealing-key-backup $SEAL_BACKUP is not bootstrap-secrets' encrypted key export
+       (it is neither age nor openssl output; a plain YAML export of the key is the usual cause).
+       A rebuild could not restore the sealing key from it. Write the export first:
+         $HERE/tockmox-install.sh bootstrap-secrets --mode reuse --site $SITE --backup-out NEW-FILE --age-recipient AGE_PUBLIC_KEY
+       then pass NEW-FILE here. Nothing was touched." ;;
+  esac
 elif ! $NO_SEAL_BACKUP; then
   die "--sealing-key-backup FILE is required: the encrypted key export bootstrap-secrets wrote.
        A rebuild needs it to open every SealedSecret in the site, so the kit carries it.

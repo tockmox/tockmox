@@ -44,6 +44,8 @@ api-endpoint
 audit-logging
 group: Infrastructure
 argocd
+site-forge
+site-forge-recovery
 load-balancing
 storage
 external-integrations

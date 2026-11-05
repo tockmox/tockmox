@@ -369,7 +369,7 @@ Three things worth knowing on day one:
 
 | To do this | Do this | Why it is not `kubectl edit` |
 |---|---|---|
-| Add a model | Add an entry to `litellm.proxy_config.model_list` in your site repo's `ai.yaml` ([the shape](ai-plane.md#point-the-console-at-the-gateway)), commit, push | You never log into a server to add a model, and the change is reviewable in git |
+| Add a model | Add an entry to `litellm.proxy_config.model_list` in your site repo's `ai.yaml` ([the shape](ai-plane.md#point-the-console-at-the-gateway)), commit, push (a pull request on the built-in forge: [changing your site](../administration/site-forge.md#changing-your-site)) | You never log into a server to add a model, and the change is reviewable in git |
 | Add a person | Create the user in Authentik, add them to a group | Removing them from the group removes their access everywhere at once |
 | Add your own application | Drop a manifest in your site repo's `apps/` directory; the `site-apps` Application syncs it | Worked example in [adding an application](../administration/adding-an-application.md) |
 | Change configuration | Always in the site repo | ArgoCD's `selfHeal` reverts live edits, which is the feature working. Why an in-cluster edit does not stick is in [architecture](../architecture.md#why-an-edit-made-in-the-cluster-does-not-stick) |

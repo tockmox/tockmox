@@ -31,7 +31,9 @@ fs_case() {  # name [built-in|external]  ->  $D with a site and inputs
   fi
   : > "$D/state/calls.log"
   printf 'KITPASSMARKER-1\n' > "$D/inputs/pass"
-  printf 'not a real backup\n' > "$D/inputs/seal.enc"
+  # Shaped like bootstrap-secrets' export (age output), which bootstrap-forge now checks
+  # for; the payload is not a real key, and nothing here decrypts it.
+  printf 'age-encryption.org/v1\nnot a real backup\n' > "$D/inputs/seal.enc"
 }
 FS_STATUS=0
 fs_run() {
@@ -78,6 +80,23 @@ fs_case f6; printf 'older kit\n' > "$D/kits/k"
 fs_run --site "$D/site" --kit-out "$D/kits/k" --passphrase-file "$D/inputs/pass" --sealing-key-backup "$D/inputs/seal.enc" "${FS_OK[@]}"
 assert_artifact "F6 an existing kit file is refused and left as it was" \
   "echo $FS_STATUS; fs_err | grep -c 'already exists'; cat '$D/kits/k'" "$(printf '1\n1\nolder kit')"
+
+# F6b. A sealing-key backup that is not bootstrap-secrets' encrypted export would make a
+# kit no rebuild can open the key from. The usual one is the plain YAML that
+# fresh-install.md 7 has the reader write: refused before anything, and no kit written.
+fs_case f6b
+printf 'apiVersion: v1\nitems:\n- apiVersion: v1\n  data:\n    tls.key: AAAA\n' > "$D/inputs/seal-yaml"
+fs_run --site "$D/site" --kit-out "$D/kits/k" --passphrase-file "$D/inputs/pass" --sealing-key-backup "$D/inputs/seal-yaml" "${FS_OK[@]}"
+assert_artifact "F6b a plain YAML key export is refused as --sealing-key-backup, naming the fix" \
+  "echo $FS_STATUS; fs_err | grep -c 'is not bootstrap-secrets. encrypted key export'; fs_err | grep -c 'bootstrap-secrets --mode reuse'" "$(printf '1\n1\n1')"
+assert_artifact "F6b ... no kit was written and nothing was written to the cluster" \
+  "test -e '$D/kits/k' && echo kit || echo none; fs_writes" "$(printf 'none\n0')"
+for magic in 'age-encryption.org/v1' '-----BEGIN AGE ENCRYPTED FILE-----' 'Salted__'; do
+  fs_case f6b-ok; printf '%s\nx\n' "$magic" > "$D/inputs/seal-ok"
+  fs_run --site "$D/site" --kit-out "$D/kits/k" --passphrase-file "$D/inputs/pass" --sealing-key-backup "$D/inputs/seal-ok" --dry-run "${FS_OK[@]}"
+  assert_artifact "F6b an encrypted export ($magic) passes the check" \
+    "fs_err | grep -c 'is not bootstrap-secrets. encrypted key export' || true" "0"
+done
 
 # F7. An empty --context is what an unset shell variable produces; never fall back.
 fs_case f7

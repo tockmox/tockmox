@@ -187,6 +187,8 @@ order and the procedures are in
 | The release notes for every version between here and there | Breaking changes are per-release and do not accumulate into the latest one | [CHANGELOG.md](../../CHANGELOG.md) opens |
 | The cluster's kubeconfig context, exported as `KUBE_CONTEXT` | Every success condition on this page reads cluster state, and every block names the cluster rather than trusting the current context | After the export below, the printed API server is the cluster you mean |
 
+**On the built-in forge** (the default), `main` takes no direct push, so every "commit and push" on this page means: start a branch, commit, push the branch, and open a pull request for an approver, as in [changing your site](../administration/site-forge.md#changing-your-site). `SITE_REPO` is then your clone from the forge. An upgrade is then one pull request, and a rollback another.
+
 **YOU SUPPLY:** four values, once, exported so that every block below is
 pasteable as printed. `KUBE_CONTEXT` is the kubeconfig context of the cluster
 you are upgrading. `SITE_REPO` is the clone **on this machine**, not the URL.
@@ -403,6 +405,8 @@ grep -rn 'targetRevision' bootstrap/applications/
 The lines naming `$CURRENT_REVISION` are the ones to change. **Leave the lines
 reading `targetRevision: main` alone** ... those are the second source, which is
 this repository, and they must keep tracking your default branch.
+
+**On the built-in forge**, start a branch first and push it instead of `main` ([changing your site](../administration/site-forge.md#changing-your-site)); the change applies once an approver merges it.
 
 **WORKSTATION ... SITE REPO**
 
@@ -1204,7 +1208,7 @@ swap:
 | Moved Authentik's database to CloudNativePG, and you have not yet done step 6 of that move | The move has its own way back | [Rolling back, before step 6](#move-authentiks-database-to-cloudnativepg) |
 
 The rest of this section is the first row: the same procedure with the two
-revisions swapped.
+revisions swapped. **On the built-in forge**, start a branch first and push it instead of `main` ([changing your site](../administration/site-forge.md#changing-your-site)); the change applies once an approver merges it.
 
 **WORKSTATION ... SITE REPO**
 

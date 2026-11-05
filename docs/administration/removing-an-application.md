@@ -80,6 +80,8 @@ application nor the provider.
 
 ## 3. Remove the files and push
 
+**On the built-in forge** (the default), `main` takes no direct push: make the change on a branch, push the branch, and open a pull request for an approver ([changing your site](site-forge.md#changing-your-site)).
+
 Do this in one commit:
 
 - Delete the app's files from `apps/`: the manifests, the sealed `miniflux-oauth`

@@ -28,7 +28,9 @@ of them are not what a general Kubernetes instinct produces.
 ## Where everything goes
 
 **Their site repository, under `apps/`.** The installer generates a `site-apps`
-Application that syncs that directory, so `git push` is the deploy button.
+Application that syncs that directory, so a change reaching `main` is the deploy
+button: a `git push` on their own forge, an approved pull request on the built-in
+forge ([changing your site](../../administration/site-forge.md#changing-your-site)).
 Nothing about adding an application touches the Tockmox charts, and a change
 that seems to require touching them is the wrong shape.
 

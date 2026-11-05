@@ -553,7 +553,7 @@ else
   DEF_SC="$(default_storage_class)"
   ask SITE_NAME "Deployment name"                     ""              true
   ask SITE_PATH "Write site repo to"                  "./tockmox-site"
-  ask SITE_FORGE "Site repository: built-in (Tockmox runs it) or external (yours)" "external"
+  ask SITE_FORGE "Site repository: built-in (Tockmox runs it) or external (yours)" "built-in"
   ask TM_REV    "Tockmox release (a tag, not a branch)" "v${VERSION}"
   TM_REPO="https://github.com/tockmox/tockmox.git"
   printf '\n'
@@ -580,9 +580,11 @@ SITE_PATH="${SITE_PATH:-./tockmox-site}"; TM_REV="${TM_REV:-v$VERSION}"
 #              repository in it; every Application names its IN-CLUSTER address,
 #              which is the same on every site and after every rebuild, so nothing
 #              is left to replace and nothing outside the cluster resolves it
-# The default stays external until the install pages lead with the built-in route
-#: a default that changes ahead of its documentation is a trap.
-SITE_FORGE="${SITE_FORGE:-external}"
+# The default is built-in since 0.9.0, when the install pages began to lead with
+# that route (docs/deployment/install.md, Phase 2). It waited for them on purpose: a
+# default that changes ahead of its documentation is a trap. `external` is one
+# answer away, and its steps are the page's "Bring your own forge" section.
+SITE_FORGE="${SITE_FORGE:-built-in}"
 FORGE_NS="tockmox-forge"
 FORGE_REPO_URL="http://tockmox-forge-http.${FORGE_NS}.svc.cluster.local:3000/tockmox/site.git"
 TM_REPO="${TM_REPO:-https://github.com/tockmox/tockmox.git}"

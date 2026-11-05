@@ -78,10 +78,11 @@ A retrieval index for the AI plane that your own applications can query.
 document Q&A, off by default and experimental; it is not that service.
 
 **The built-in forge has shipped and is not on this list.** `site.forge:
-built-in` has the installer run a forge beside ArgoCD that holds your site
-repository, with sign-in through the identity layer, an off-site copy and a
-rebuild path; see [install with no internet access](../deployment/airgap.md)
-for what it adds to a disconnected install.
+built-in`, the installer's default, has it run a forge beside ArgoCD that holds
+your site repository, with sign-in through the identity layer, an off-site copy
+and a rebuild path: [the built-in site forge](../administration/site-forge.md).
+[Install with no internet access](../deployment/airgap.md) says what it adds to
+a disconnected install.
 
 **Corrected 2026-09-03.** This list also carried the three Grafana boards that
 know Tockmox's own shapes ... the drill register, the storage contract, the
