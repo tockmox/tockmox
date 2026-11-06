@@ -1340,20 +1340,26 @@ SYNC=Synced HEALTH=Healthy
 Succeeded: successfully synced (all tasks run)
 --- resources ---
      48 NetworkPolicy
-      7 Namespace
-      4 ValidatingAdmissionPolicy
+      9 ServiceAccount
+      8 Namespace
       4 ValidatingAdmissionPolicyBinding
+      4 ValidatingAdmissionPolicy
       3 PriorityClass
       1 PrometheusRule
-      1 ServiceAccount
-      1 ClusterRole
       1 ClusterRoleBinding
+      1 ClusterRole
 ```
 
-**Measured 2026-09-14** on the 0.6.0-rc4 tree, and pinned in
-`tools/doc-claims.txt` so it cannot drift silently. The checkable form is to
-render the chart yourself and compare, which is true at whatever version you
-are on ([history](#history-the-policy-render-table)):
+**Rendered 2026-11-06** from this tree, with the NetworkPolicy, Namespace and
+ServiceAccount lines pinned in `tools/doc-claims.txt` so they cannot drift
+silently. **Measured live the same day** on a lab cluster at 0.8.3: the
+`tockmox-policy` Application's resources matched 0.8.3's render of the block
+below kind for kind (43 NetworkPolicy, 8 ServiceAccount, 7 Namespace, the rest
+as above). What this tree adds since is the node agents' namespace (its
+ServiceAccount, its default deny and its Prometheus allow) and three allows into
+the monitoring namespace. The checkable form is to render the chart yourself and
+compare, which is true at whatever version you are on
+([history](#history-the-policy-render-table)):
 
 **WORKSTATION**, from your Tockmox clone at the revision you installed. The three
 `--set` values are arbitrary ... the chart refuses to render without them, and
@@ -2016,8 +2022,10 @@ it. Specifically, and stated rather than left for you to discover:
   than from GitHub, and the DNS steps could not run. The earlier dated
   observations on this page (2026-08-18, 2026-08-19) remain claims about those
   runs.
-- **The resource-count block in [3c](#3c-watch-the-waves) carries no date or
-  cluster.** Render the chart and compare rather than trusting it.
+- **The resource-count block in [3c](#3c-watch-the-waves) was measured on a
+  live cluster once, at 0.8.3** (2026-11-06, a lab cluster). The figures shown
+  are this tree's render; render the chart at your revision and compare rather
+  than trusting either.
 - **The Longhorn replica-count success conditions in
   [1d](#1d-set-the-longhorn-replica-counts--three-or-more-nodes-only) are
   derived from the chart source in this tree, not from a run.** In particular,
@@ -2149,6 +2157,13 @@ The NetworkPolicy line read 32 from 2026-09-12 until 2026-09-14, the fourth
 page found restating a count the layer's own README had already corrected to
 33. Correcting an owner does not correct the pages that repeat it,
 which is why the number is now a registered claim rather than prose.
+
+The Namespace and ServiceAccount lines read 7 and 1 until 2026-11-06 while
+the chart rendered 8 and 9: only the NetworkPolicy line was a registered claim,
+so the others drifted as namespaces were added. Both are registered now. The
+same day, a live 0.8.3 install's policy Application was read and matched that
+release's render kind for kind, the first time the block was checked against
+a cluster rather than a render.
 
 The render-and-compare block itself did not run from a fresh clone from 0.8.0
 until 2026-11-06, for two reasons, the second hidden behind the first. A fresh
