@@ -82,6 +82,34 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **Opening a capability switch and a release upgrade as changes from the
+  console.** With `changes` on, **Platform › Capabilities** offers **Turn on**
+  and **Turn off** for each capability: one change setting only
+  `capabilities.<name>.enabled` in `site/values/global.yaml`, refused (naming
+  the file) when a layer's own values file also sets it; single sign-on is never
+  turned off from the console. **Platform › Updates** offers **Open the upgrade
+  as a change** when the release feed is verified, the preflight is green and no
+  release on the way lists a breaking change: one change moving every layer's
+  `targetRevision` from the running release to the target in
+  `bootstrap/applications`, leaving the lines that track the site's own branch
+  alone, refused when a layer is on a third release. Its description carries
+  the preflight and lists what only a person can check (the release notes, the
+  built-in forge upgraded first, and the guide's backup steps for the kind of
+  bump). Both open as the change bot and wait on Platform › Changes for an
+  approval; both need a fresh sign-in
+  (docs/administration/site-forge.md, "Opening a change from a page";
+  docs/deployment/upgrade.md, step 5).
+
+- **Platform Management's switch and "Give to a role" from the console.** With
+  `changes` on, **Platform › Capabilities** lists Platform Management under
+  **Console features** with **Turn on** or **Turn off**, a change to
+  `tockmoxUi.config.features.platform.enabled` in `site/values/ai.yaml`. A new
+  key, `features.platform.assign` (job name to role id), gives scheduled work
+  to a role ahead of the catalog's patterns, behind a `tockmox.com/practice`
+  label; on **Platform › Overview**, each job with no owner has **Give to a
+  role**, which opens a change adding one entry. Both wait on Platform ›
+  Changes for an approval (docs/administration/platform-management.md).
+
 - **Approving the site's changes in the console (Platform › Changes).** On by
   default on a built-in-forge site (the installer now writes
   `global.siteForge: built-in` into `global.yaml`; an explicit

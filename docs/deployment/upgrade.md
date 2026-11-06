@@ -437,6 +437,15 @@ this repository, and they must keep tracking your default branch.
 
 **On the built-in forge**, start a branch first and push it instead of `main` ([changing your site](../administration/site-forge.md#changing-your-site)); the change applies once an approver merges it.
 
+**Or let the console open it.** With the console's `changes` actions on,
+**Platform › Updates** offers **Open the upgrade as a change** once the feed is
+verified, its preflight is green and no release on the way lists a breaking
+change. It makes exactly the edit below, as one change waiting for an approval,
+and lists in its description what only you can check (steps 1 and 2, and steps
+3 and 4 for the kinds of bump that need them). Do those before you approve, then
+carry on at step 6
+([site forge, "Opening a change from a page"](../administration/site-forge.md#opening-a-change-from-a-page)).
+
 **WORKSTATION ... SITE REPO**
 
 ```bash

@@ -508,6 +508,72 @@ class Forge:
         except (ValueError, UnicodeDecodeError) as e:
             raise act.Refused(f"{path} is not UTF-8 text") from e
 
+    def bump_plan(self, folder: str, cur: str, tgt: str) -> list[dict]:
+        """The release bump the upgrade guide does by hand (docs/deployment/upgrade.md, step 5): in every Application
+        under folder, a line `targetRevision: <cur>` becomes `<tgt>`, keeping its indent, quotes and comment; a line
+        naming the site's own branch (`main`) is left alone. Refused when no file names cur, or when a layer names a
+        third revision (the layers are not on one release, and the guide does not cover moving from a mix)."""
+        line = re.compile(r"^(\s*targetRevision:\s*)([\"']?)([^\s\"'#]+)\2(\s*(?:#.*)?)$")
+        out, mixed = [], []
+        with self._bot() as c:
+            for path in self.yaml_files(c, folder, self.base):
+                before = self._text(c, path, self.base)
+                lines, changed = before.split("\n"), False
+                for i, ln in enumerate(lines):
+                    m = line.match(ln)
+                    if not m or m.group(3) == self.base:
+                        continue
+                    if m.group(3) == cur:
+                        lines[i] = f"{m.group(1)}{m.group(2)}{tgt}{m.group(2)}{m.group(4)}"
+                        changed = True
+                    elif m.group(3) != tgt:
+                        mixed.append(f"{path} ({m.group(3)})")
+                if changed:
+                    out.append({"path": path, "before": before, "after": "\n".join(lines),
+                                "blob": self._blob(c, path, self.base)})
+        if mixed:
+            raise act.Refused(f"not every layer is on {cur}: {', '.join(mixed[:5])}; the guide moves one release to "
+                              "another, so move these by hand first")
+        if not out:
+            raise act.Refused(f"no Application under {folder} on {self.base} names {cur}; nothing to move")
+        return out
+
+    def open_files(self, files: list[dict], title: str, summary: str, by: str, slug: str, requested: str = "") -> dict:
+        """One commit on a new branch (as the change bot) writing each file whole, and a change for it that waits for an
+        approval. Named for the result, like open_change, so asking twice opens nothing new."""
+        digest = hashlib.sha256(b"".join(f["path"].encode() + b"\0" + f["after"].encode() + b"\0"
+                                         for f in files)).hexdigest()
+        branch = f"tockmox/console-{slug}-{digest[:12]}"
+        with self._bot() as c:
+            r = self._get(c, f"/repos/{self.repo}/pulls", state="open", limit=LIST_MAX)
+            if r.status_code >= 300:
+                raise self._refuse(r, "the list of changes")
+            same = next((pr for pr in r.json() or [] if (pr.get("head") or {}).get("ref") == branch), None)
+            if same:
+                return {"ref": [f"#{same.get('number')}"], "number": same.get("number"),
+                        "detail": f"already open as #{same.get('number')}; nothing new was opened"}
+            ops = [{"operation": "update", "path": f["path"], "sha": f["blob"],
+                    "content": base64.b64encode(f["after"].encode("utf-8")).decode()} for f in files]
+            msg = f"{title}\n\n{summary}\n\nAsked for in the Tockmox console by {by}.\n\n{trailers(requested)}\n"
+            try:
+                r = c.post(f"/repos/{self.repo}/contents", json={"branch": self.base, "new_branch": branch,
+                                                                  "message": msg, "files": ops})
+                if r.status_code == 422 and "exist" in r.text.lower():
+                    raise act.Refused(f"the branch {branch} is already in the forge with no open change: delete it "
+                                      "there, or reopen its change")
+                if r.status_code >= 300:
+                    raise self._refuse(r, "the change's commit")
+                r = c.post(f"/repos/{self.repo}/pulls", json={
+                    "base": self.base, "head": branch, "title": title[:200],
+                    "body": f"{summary}\n\nAsked for in the Tockmox console by {by}.\n\n{trailers(requested)}"})
+            except httpx.HTTPError as e:
+                raise act.Refused("the forge did not answer; the change may be half made (look for its branch)") from e
+            if r.status_code >= 300:
+                raise self._refuse(r, "opening the change")
+            new = r.json() or {}
+        return {"ref": [f"#{new.get('number')}"], "number": new.get("number"),
+                "detail": f"opened as #{new.get('number')}, waiting for an approval"}
+
     def yaml_files(self, c, folder: str, ref: str) -> list[str]:
         """The .yaml and .yml files directly in folder at ref, as repository paths; [] when the folder is absent."""
         r = self._get(c, f"/repos/{self.repo}/contents/{folder}", ref=ref)

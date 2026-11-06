@@ -94,8 +94,14 @@
 {% if unowned %}
 <section aria-labelledby="unowned">
   <h2 id="unowned">Scheduled work with no owner</h2>
-  <p class="muted">These run on the cluster but match no role. Add a catalog pattern that matches the name, or, for an Argo CronWorkflow, a <code>tockmox.com/practice</code> label, so someone owns them.</p>
-  <ul class="plain">{% for x in unowned %}<li>{{ sched_badge(x.state, sched_words) }} <code>{{ x.namespace }}/{{ x.name }}</code> <span class="muted">· {{ x.cadence }}</span></li>{% endfor %}</ul>
+  <p class="muted">These run on the cluster but match no role. {% if assign_on %}<strong>Give to a role</strong> opens a change naming the job under <code>features.platform.assign</code> in the AI layer's values, which waits on Platform › Changes for an approval. {% endif %}A catalog pattern that matches the name, or a <code>tockmox.com/practice</code> label on the workload, does the same by hand.</p>
+  <ul class="plain">{% for x in unowned %}<li>{{ sched_badge(x.state, sched_words) }} <code>{{ x.namespace }}/{{ x.name }}</code> <span class="muted">· {{ x.cadence }}</span>
+    {%- if assign_on %}
+    <form class="inline" method="get" action="/actions/confirm"><input type="hidden" name="kind" value="assign-job"><input type="hidden" name="job" value="{{ x.name }}">
+      <label for="role-{{ loop.index }}" class="sr-only">Role for {{ x.name }}</label>
+      <select id="role-{{ loop.index }}" name="role">{% for rid, rname in assign_roles %}<option value="{{ rid }}">{{ rname }}</option>{% endfor %}</select>
+      <button type="submit" class="pill">Give to a role</button></form>
+    {%- endif %}</li>{% endfor %}</ul>
 </section>
 {% endif %}
 

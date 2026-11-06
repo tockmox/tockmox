@@ -29,5 +29,25 @@
   </tbody>
 </table>
 </div>
+<h2 id="console-features">Console features</h2>
+<p class="muted">Areas of this console you switch on in the AI layer's values. They change what the console shows, not what the platform runs.</p>
+<div class="table-wrap" role="region" aria-labelledby="feat-cap" tabindex="0">
+<table>
+  <caption id="feat-cap">Console features</caption>
+  <thead><tr><th scope="col">Feature</th><th scope="col">This console</th><th scope="col">What it is</th>{% if feature_change_on %}<th scope="col"><span class="sr-only">Change</span></th>{% endif %}</tr></thead>
+  <tbody>
+  {% for f in features %}
+    <tr>
+      <th scope="row">{{ f.name }}<br><code class="muted">{{ f.key }}</code></th>
+      <td>{% if f.on %}{{ badge("ok", "On") }}{% else %}{{ badge("unknown", "Off") }}{% endif %}</td>
+      <td>{{ f.what }}</td>
+      {%- if feature_change_on %}
+      <td><a class="pill" href="/actions/confirm?kind=set-feature&amp;feature={{ f.id | urlencode }}&amp;enabled={{ 'false' if f.on else 'true' }}">{{ "Turn off" if f.on else "Turn on" }}</a></td>
+      {%- endif %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
 <p class="muted">{% if change_on %}<strong>Turn on</strong> and <strong>Turn off</strong> open a change to <code>capabilities.&lt;name&gt;.enabled</code> in <code>site/values/global.yaml</code> that waits on Platform › Changes for an approval; nothing changes until then. Single sign-on is not turned off from here, because the console signs in through it.{% else %}To change a capability, set <code>capabilities.&lt;name&gt;.enabled</code> in your site values and commit it; this page changes nothing.{% endif %} A site may set it in one layer's values file only, so the AI layer's view can differ from another layer's, which this page would show as a disagreement.</p>
 {% endblock %}

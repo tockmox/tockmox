@@ -458,9 +458,15 @@ def _usd(v) -> float:
     return 0.0 if math.isnan(f) else f
 
 
-def owner_of(item: dict, cat: Catalog) -> str | None:
+def owner_of(item: dict, cat: Catalog, assign: dict | None = None) -> str | None:
+    """The role a scheduled job belongs to: its tockmox.com/practice label, then features.platform.assign (the
+    console's "Give to a role"), then the first role whose pattern matches its name. A label or an assignment
+    naming no role in the catalog is passed over."""
     if item.get("practice") and cat.get(item["practice"]):
         return item["practice"]
+    given = (assign or {}).get(item["name"])
+    if given and cat.get(given):
+        return given
     for a in cat.all():
         if any(p.fullmatch(item["name"]) for p in a.match):
             return a.id
@@ -585,7 +591,8 @@ class AgentView:
     cost: float | None = None
 
 
-def build(cat: Catalog, readings: dict, now: float | None = None, ledger_configured: bool = False, tz: str = "UTC"):
+def build(cat: Catalog, readings: dict, now: float | None = None, ledger_configured: bool = False, tz: str = "UTC",
+          assign: dict | None = None):
     """Assemble one AgentView per manager plus the unowned scheduled work."""
     now = now or time.time()
     views = {a.id: AgentView(a) for a in cat.all()}
@@ -599,7 +606,7 @@ def build(cat: Catalog, readings: dict, now: float | None = None, ledger_configu
         st, why, exp, nxt = schedule_state(it, now)
         row = dict(it, state=st, why=why, expected=exp, next=nxt,
                    cadence="; ".join(describe(e) for e in (it.get("schedules") or [it["schedule"]])),
-                   owner=owner_of(it, cat), source="cluster")
+                   owner=owner_of(it, cat, assign), source="cluster")
         (views[row["owner"]].schedules if row["owner"] else unowned).append(row)
     for a in cat.all():
         v = views[a.id]
@@ -847,10 +854,13 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
     tz = str(opt.get("timezone", "UTC"))
     grafana = s.app("grafana")
     app.state.platform = {"catalog": cat, "sources": srcs}
+    raw = opt.get("assign")
+    assign = {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+    assign_on = bool(s.actions and s.actions.on("assign-job"))
 
     def snapshot():
         r = {k: v.read() for k, v in srcs.items() if k not in ("desk", "index")}
-        views, unowned = build(cat, r, ledger_configured=srcs["ledger"].configured(), tz=tz)
+        views, unowned = build(cat, r, ledger_configured=srcs["ledger"].configured(), tz=tz, assign=assign)
         if not srcs["ledger"].configured() and srcs["index"].configured():
             # No orchestrator ledger, but the specialist host answers: say which of the role's built specialists it
             # serves instead of a bare Not connected. Served is not healthy (their call health is not read here),
@@ -867,6 +877,8 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
                                   "how their calls are going is not read on this page yet")
         return r, views, unowned
 
+    app.state.platform["unowned"] = lambda: [x["name"] for x in snapshot()[2]]
+
     def common(u):
         g = grafana if (grafana and grafana.visible_to(set(u.groups))) else None
         return {"interface_url": interface_url, "grafana": g, "modes": MODES, "sched_words": SCHED_WORDS,
@@ -874,7 +886,8 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
                 "wait_words": platform_cases.WAIT_WORDS, "reason_words": platform_cases.REASON_WORDS,
                 "state_words": platform_cases.STATE_WORDS, "type_words": platform_cases.TYPE_WORDS,
                 "cases_on": srcs["desk"].configured(), "by_agent_role": platform_cases.roles_by_agent_role(cat),
-                "spec_roles": platform_cases.specialist_roles(cat)}
+                "spec_roles": platform_cases.specialist_roles(cat),
+                "assign_on": assign_on, "assign_roles": [(a.id, a.name) for a in cat.all()]}
 
     def desk():
         r = srcs["desk"].read()

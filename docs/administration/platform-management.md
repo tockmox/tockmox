@@ -48,7 +48,11 @@ tockmoxUi:
 ```
 
 Only administrators (`roles.adminGroup`) see it. With the switch off there is
-no route and no menu entry: `/platform` answers 404.
+no route and no menu entry: `/platform` answers 404. With the console's
+`changes` actions on, **Platform › Capabilities** lists it under **Console
+features** and opens this change for you (**Turn on** or **Turn off**); it waits
+for an approval like any change
+([site forge](site-forge.md#opening-a-change-from-a-page)).
 
 Optional keys under `config.features.platform`:
 
@@ -58,6 +62,7 @@ Optional keys under `config.features.platform`:
 | `interfaceUrl` | Where a person answers an agent's question. The page links there; approving never happens on this page. |
 | `clusterTimezone` | The zone your cluster's controller manager runs in, default UTC. A CronJob that sets no `timeZone` fires in that zone, and kube-state-metrics reports it only as `local`, so the page needs telling. |
 | `specialistsUrl` | A specialist host (its base URL). Turns on the **Cases** pages and the specialists' served state: see "Cases" below. Unset, every Cases view reads **Not connected**, never an empty list. Must be an absolute `http(s)` URL. |
+| `assign` | A map of scheduled-job name to role id: `{nightly-thing: continuity}`. That job belongs to that role ahead of the catalog's patterns; a `tockmox.com/practice` label on the workload still wins. A role id the catalog does not have is ignored. **Give to a role** on the Overview writes one entry here as a change. |
 | `workflowSuccessQuery` | A PromQL query returning each Argo CronWorkflow's last success time, labelled `namespace` and `cronworkflow`. Unset, a CronWorkflow's last run shows but not whether it passed, and it reads Unknown. |
 
 The ledger is yours, so the chart does not know its address or its token:
@@ -126,8 +131,10 @@ and the release notes folded by section).
   pattern matches its name. An Argo CronWorkflow labelled
   `tockmox.com/practice: <role id>` belongs to that role whatever its name (CronJobs
   are read through kube-state-metrics, which does not carry their labels, so they
-  match by name only). Work no role owns is listed as **No owner**, so nothing
-  scheduled is invisible.
+  match by name only). Between the two, a name listed in `assign` belongs to the
+  role it names. Work no role owns is listed as **No owner**, so nothing
+  scheduled is invisible. With the console's `changes` actions on, each one has
+  **Give to a role**, which opens a change adding it to `assign`.
 - **Planned and external.** Work a role will own but that is not deployed shows
   as **Planned**. Work that runs somewhere this page cannot see (another tool)
   can be listed as external; it is never shown healthy.
@@ -222,7 +229,8 @@ the UI (`kubectl -n <ai namespace> rollout restart deployment/tockmox-ui`).
 Start from the product's file, `tockmox-ui/app/platform_catalog.yaml`, whose
 header documents every field. Adding a role is a row there, not a deployment.
 To give one Argo CronWorkflow to a role without touching the catalog, label it
-`tockmox.com/practice: <role id>`.
+`tockmox.com/practice: <role id>`; for any scheduled job, name it under
+`assign` (above).
 
 ## The default catalog
 
