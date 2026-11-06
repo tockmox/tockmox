@@ -5,8 +5,17 @@
 {#- the people Authentik knows, a recovery link for anyone who is not an administrator, and membership of
     the user group. Read and done through tockmox-actions; the UI holds no Authentik credential. -#}
 <h1>Identity</h1>
-<p class="lede">Send someone a link to set a new password, or let them into the consoles open to users. Administrators are set in Git (<code>sso.adminUsers</code>); creating, deactivating and recovering an administrator are in {% if admin_url %}<a href="{{ admin_url }}">Authentik's admin console</a>{% else %}Authentik's admin console{% endif %}.</p>
-{% if err %}
+<p class="lede">{% if people_on %}Send someone a link to set a new password, or let them into the consoles open to users. {% endif %}Administrators are set in Git (<code>sso.adminUsers</code>){% if admin_on %}: making someone one opens a change for an administrator to approve{% endif %}; creating, deactivating and recovering an administrator are in {% if admin_url %}<a href="{{ admin_url }}">Authentik's admin console</a>{% else %}Authentik's admin console{% endif %}.</p>
+{% if admin_on %}
+<form method="get" action="/actions/confirm" class="row-acts" aria-label="Make someone an administrator">
+  <input type="hidden" name="kind" value="add-admin">
+  <label for="adm-u">Username</label> <input id="adm-u" name="username" required maxlength="150" pattern="\S+" autocomplete="off" spellcheck="false">
+  <button class="pill" type="submit">Make an administrator</button>
+  <span class="muted small">the next page shows the change to <code>sso.adminUsers</code> before anything is opened</span>
+</form>
+{% endif %}
+{% if not people_on %}
+{% elif err %}
 <p class="panel quiet">{{ badge("unknown", "Unknown") }} The people could not be read: {{ err }}.</p>
 {% elif not people %}
 <p class="panel quiet">Authentik lists nobody yet.</p>
@@ -27,6 +36,7 @@
     <td role="cell" data-label="Actions"><div class="row-acts">
       {%- set q = "user=" ~ p.pk ~ "&username=" ~ (p.username | urlencode) -%}
       {%- if p.recoverable %}<a class="pill" href="/actions/confirm?kind=recovery-link&amp;{{ q | e }}">Recovery link</a>{% elif p.why_not and not p.admin and p.active %}<span class="muted small">No link here: {{ p.why_not }}</span>{% endif %}
+      {%- if admin_on and not p.admin and p.active %} <a class="pill" href="/actions/confirm?kind=add-admin&amp;username={{ p.username | urlencode }}">Make an administrator</a>{% endif %}
       {%- if p.member %} <a class="pill danger" href="/actions/confirm?kind=remove-member&amp;{{ q | e }}">Remove from users</a>{% else %} <a class="pill" href="/actions/confirm?kind=add-member&amp;{{ q | e }}">Add to users</a>{% endif %}
     </div></td>
   </tr>

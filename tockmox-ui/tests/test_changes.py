@@ -57,6 +57,7 @@ class Forge:
     def __init__(self):
         self.users = {BOT_TOKEN: {"login": "tockmox-change-bot", "full_name": "", "email": "bot@forge.invalid"}}
         self.approvers = {"jeff"}
+        self.teams_readable = True          # the person's token can list the approvers team (self-approval check)
         self.codes = {}                     # code -> (login, challenge)
         self.down = False
         self.files = {"main": {"site/values/models.yaml": "models: [a]\n", "README.md": "# site\n"},
@@ -110,6 +111,16 @@ class Forge:
         p = p.removeprefix("/api/v1")
         if p == "/user":
             return httpx.Response(200, json=me)
+        org = REPO.split("/")[0]
+        if p == f"/orgs/{org}/teams/search" and m == "GET":
+            if not self.teams_readable:
+                return httpx.Response(403, json={"message": "token does not have at least one of required scope(s)"})
+            q = req.url.params.get("q", "")
+            return httpx.Response(200, json={"ok": True, "data": [{"id": 3, "name": "approvers"}] if q in "approvers" else []})
+        if p == "/teams/3/members" and m == "GET":
+            if not self.teams_readable:
+                return httpx.Response(403, json={"message": "forbidden"})
+            return httpx.Response(200, json=[{"login": x} for x in sorted(self.approvers)])
         base_ = f"/repos/{REPO}"
         if p == base_ + "/pulls" and m == "GET":
             st = req.url.params.get("state")

@@ -147,6 +147,14 @@ def _parse_ts(v):
         return None
 
 
+def _site_revision(srcs: list, sync: dict) -> str:
+    revs = sync.get("revisions") or []
+    for i, src in enumerate(srcs):
+        if isinstance(src, dict) and src.get("ref") == "site" and i < len(revs):
+            return str(revs[i] or "")
+    return ""
+
+
 class ApplicationsSource(Source):
     """Argo CD Application CRs.
 
@@ -178,6 +186,10 @@ class ApplicationsSource(Source):
                 "repo": str(first.get("repoURL", "")),
                 "path": str(first.get("path", "")),
                 "revision": str(first.get("targetRevision", "")),
+                # The site repository's commit Argo CD last synced for this app: the source with `ref: site` (the
+                # installer's), at the same index in status.sync.revisions. A page that renders a change from the
+                # applied values names it, so a change merged since is never undone by one opened from the page.
+                "site_revision": _site_revision(srcs, st.get("sync") or {}),
                 "sync": (st.get("sync") or {}).get("status") or "Unknown",
                 "health": (st.get("health") or {}).get("status") or "Unknown",
                 "reconciledAt": _parse_ts(st.get("reconciledAt")),

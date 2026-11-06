@@ -349,7 +349,8 @@ def test_the_service_will_not_start_without_an_issuer_or_namespace():
 
 # ---------------------------------------------------------------- the console
 
-def console(tmp_path, actions=None, groups=("tockmox-admins",), down=False, authentik=None, forge=None):
+def console(tmp_path, actions=None, groups=("tockmox-admins",), down=False, authentik=None, forge=None, extra=None,
+            apps=None):
     """The UI with actions on, its callback wired to a real Service in-process (authentik: a fake Authentik's
     handler, for the identity kinds)."""
     from fastapi.testclient import TestClient
@@ -358,6 +359,8 @@ def console(tmp_path, actions=None, groups=("tockmox-admins",), down=False, auth
     from app.main import Transports, create_app
     idp, am, kube, world = IdP(), AM(), Kube(), World()
     world.alerts = am.alerts
+    if apps is not None:                                 # the Argo CD Applications the console reads
+        world.apps = world.apps + apps
     svc, _, _ = service(actions=actions, am=am, kube=kube, idp=idp)
     if authentik is not None:
         svc.authentik.transport = httpx.MockTransport(authentik)
@@ -401,6 +404,7 @@ def console(tmp_path, actions=None, groups=("tockmox-admins",), down=False, auth
     doc["sources"]["kubernetes"].update({"url": "https://kube.test", "tokenFile": "/nonexistent", "caFile": "/nonexistent"})
     doc["sources"]["timeoutSeconds"] = 1
     doc["actions"] = dict(copy.deepcopy(actions or ACTIONS), url="http://actions.test")
+    doc.update(copy.deepcopy(extra or {}))                # more configuration (the models and nodes pages')
     s = config.parse(doc)
     tp = Transports(kube=httpx.MockTransport(world.handler("kube")), prometheus=httpx.MockTransport(world.handler("prometheus")),
                     alertmanager=httpx.MockTransport(am.handler), oidc=httpx.MockTransport(idp.handler),

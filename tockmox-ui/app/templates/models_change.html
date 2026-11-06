@@ -2,7 +2,7 @@
 {% block title %}Your change{% endblock %}
 {% block main %}
 <h1>{{ title }}</h1>
-<p class="lede">Nothing has changed yet. Commit this to <code>{{ values_file }}</code> in your site repository; Argo CD applies it.</p>
+<p class="lede">Nothing has changed yet. {% if can_open %}Open it as a change for an administrator to approve, or download it and commit it to <code>{{ values_file }}</code> yourself{% else %}Commit this to <code>{{ values_file }}</code> in your site repository{% endif %}; Argo CD applies it.</p>
 {% if notes %}<section class="panel" aria-labelledby="n-h"><h2 id="n-h">Before you commit</h2><ul>{% for n in notes %}<li>{{ n }}</li>{% endfor %}</ul></section>{% endif %}
 {% if model_list or prod_hosted or prod_removed %}
 <section class="panel steps" aria-labelledby="ml-h">
@@ -26,11 +26,20 @@
 {% endif %}
 <section class="panel steps" aria-labelledby="y-h">
   <h2 id="y-h">The values blocks</h2>
+  {% if can_open %}
+  <form method="post" action="{{ path }}">
+    <input type="hidden" name="csrf" value="{{ user.csrf }}">
+    {% for k, v in form_fields.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+    <input type="hidden" name="fmt" value="open">
+    <button class="btn" type="submit">Open as a change</button>
+    <span class="muted small">the next page shows the exact edit to the file on main before anything is opened</span>
+  </form>
+  {% endif %}
   <form method="post" action="{{ path }}">
     <input type="hidden" name="csrf" value="{{ user.csrf }}">
     {% for k, v in form_fields.items() %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
     <input type="hidden" name="fmt" value="yaml">
-    <button class="btn" type="submit">Download it</button>
+    <button class="{{ 'btn-ghost' if can_open else 'btn' }}" type="submit">Download it</button>
   </form>
   <details><summary>Show the blocks</summary>
 <pre tabindex="0"><code>{{ text }}</code></pre>

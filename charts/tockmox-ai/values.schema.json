@@ -1895,7 +1895,10 @@
                 "baseBranch": { "type": "string", "pattern": "^[A-Za-z0-9._/-]{1,100}$" },
                 "webUrl": { "type": "string", "pattern": "^(https?://[^\\s/]+/?)?$", "description": "The forge as a browser reaches it. Empty: https://forge.<global.internalDomain>." },
                 "botSecret": { "type": "string", "description": "A Secret in the AI namespace, key token: the change bot's token for tockmox-actions. The bot opens changes and cannot approve them." },
-                "oauthSecret": { "type": "string", "description": "A Secret in the AI namespace, keys client_id and client_secret: the console's OAuth2 application in the forge." }
+                "oauthSecret": { "type": "string", "description": "A Secret in the AI namespace, keys client_id and client_secret: the console's OAuth2 application in the forge." },
+                "modelsFile": { "type": "string", "pattern": "^$|^([A-Za-z0-9_-][A-Za-z0-9._-]{0,99}/){0,9}[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}\\.ya?ml$", "description": "The site repository file holding modelLifecycle and inferenceNodes, which the models and nodes pages open their changes against. Empty: modelLifecycle.watch.pullRequests.valuesPath, else site/values/ai.yaml." },
+                "selfApproval": { "type": "string", "enum": ["", "sole-approver-only", "never"], "description": "Whether the person who asked for a change may approve it. sole-approver-only (the default): no, unless they are the only member of the forge's approvers team, and then the merge says Self-approved: sole approver. never: no, even then. Empty: sole-approver-only." },
+                "identityFile": { "type": "string", "pattern": "^$|^([A-Za-z0-9_-][A-Za-z0-9._-]{0,99}/){0,9}[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}\\.ya?ml$", "description": "The site repository file holding the identity layer's sso.adminUsers, which Make an administrator changes. Empty: site/values/identity.yaml." }
               }
             }
           }

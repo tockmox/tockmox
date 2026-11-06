@@ -63,7 +63,9 @@ Off means absent: with no kind on, none of this renders, and the UI shows no but
 {{- $in := printf "http://%s-http.%s.svc:3000" $fRel $fNs -}}
 {{- $_ := set $svcActions "changes" (dict "enabled" true "apiUrl" (printf "%s/api/v1" $in) "repo" ($chv.repository | default "tockmox/site")
       "baseBranch" ($chv.baseBranch | default "main") "botTokenFile" "/etc/tockmox-actions/forge-bot/token" "webUrl" $web
-      "forgeNamespace" $fNs "forgeRelease" $fRel
+      "forgeNamespace" $fNs "forgeRelease" $fRel "selfApproval" ($chv.selfApproval | default "sole-approver-only")
+      "valuesFiles" (dict "models" ($chv.modelsFile | default ((((.Values.modelLifecycle | default dict).watch | default dict).pullRequests | default dict).valuesPath) | default "site/values/ai.yaml")
+                          "identity" ($chv.identityFile | default "site/values/identity.yaml"))
       "oauth" (dict "authorizeUrl" (printf "%s/login/oauth/authorize" $web) "tokenUrl" (printf "%s/login/oauth/access_token" $in)
                     "clientIdFile" "/etc/tockmox-actions/forge-oauth/client_id" "clientSecretFile" "/etc/tockmox-actions/forge-oauth/client_secret")) -}}
 {{- end -}}
