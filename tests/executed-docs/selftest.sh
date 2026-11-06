@@ -1174,5 +1174,25 @@ if [ "$CP_CASES" -eq 0 ] || { [ "$CP_RC" -ne 0 ] && ! printf '%s\n' "$CP_OUT" | 
   bad "capacity-preflight-test.sh ran its cases" "rc=${CP_RC}, ${CP_CASES} case(s): $(printf '%s' "$CP_OUT" | tail -3)"
 fi
 
+# ---------------------------------------------------------------------------
+# A path that went missing part way (2026-11-05).
+#
+# A late step whose block no longer resolves must fail the path with what it already recorded,
+# not turn it into "not documented at this ref"; and an UNDECLARED absence must fail run.sh.
+# Run 42074588954 was green with both wrong. Folded in like the capacity preflight above.
+LA_OUT="$(bash "${HERE}/late-absence-test.sh" 2>&1)"; LA_RC=$?
+LA_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) LA_CASES=$((LA_CASES+1)); ok "late absence: ${line#ok   }" ;;
+    "FAIL "*) LA_CASES=$((LA_CASES+1)); bad "late absence: ${line#FAIL }" "run tests/executed-docs/late-absence-test.sh for detail" ;;
+  esac
+done <<EOF_LA
+$LA_OUT
+EOF_LA
+if [ "$LA_CASES" -eq 0 ] || { [ "$LA_RC" -ne 0 ] && ! printf '%s\n' "$LA_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "late-absence-test.sh ran its cases" "rc=${LA_RC}, ${LA_CASES} case(s): $(printf '%s' "$LA_OUT" | tail -3)"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

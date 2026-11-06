@@ -533,6 +533,15 @@ done
   resume_mark "group.${route}" 0
 done
 
+# Undeclared absences, counted here rather than inside the summary block below (that block runs in
+# a pipeline subshell, so a count made there would not reach the exit decision).
+UNDECLARED=0; undeclared_names=""
+for _a in $ABSENT_NAMES; do
+  [ -s "${ABSENCE_RECEIPT_DIR}/${_a}" ] && continue
+  UNDECLARED=$((UNDECLARED + 1)); undeclared_names="${undeclared_names}
+  - ${_a}"
+done
+
 {
   echo ""
   echo "================================================================"
@@ -597,6 +606,24 @@ if [ "$UNCONVERTED" -gt 0 ]; then
     echo "command it exists to test had installed nothing."
     echo ""
     echo "Convert the path, or mark it a declared exception. Do not relax this."
+  } | tee -a "$REPORT"
+  exit 1
+fi
+
+# An UNDECLARED absence fails the run (2026-11-05). The summary above already called it "testing
+# nothing", and the run still exited 0: run 42074588954 showed every job green while its one path
+# was absent this way, after recording three failures that the absence threw away. A declared
+# absence (declare_absence, a recorded decision) stays a pass; an undeclared one is coverage that
+# left without anyone deciding it should, and the person who reads only the job colour must see it.
+if [ "$UNDECLARED" -gt 0 ]; then
+  {
+    echo ""
+    echo "THIS RUN CANNOT REPORT SUCCESS."
+    echo ""
+    echo "${UNDECLARED} path(s) found no documented section at ${REF}, and nothing declares that as intended:${undeclared_names}"
+    echo ""
+    echo "Re-point the path at where its procedure moved, retire it, or declare the"
+    echo "absence (declare_absence, naming where the decision is written down)."
   } | tee -a "$REPORT"
   exit 1
 fi

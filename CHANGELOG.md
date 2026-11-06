@@ -1014,6 +1014,17 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **The executed-docs harness no longer reports a run green when a path went missing part way.**
+  A P09 step whose block no longer resolved to exactly one block on the page exited the way a
+  path with no documented section does, so the failures P09 had already recorded were never
+  replayed and the runner counted the path as absent; `run.sh` then exited 0 with that
+  undeclared absence in its summary. Run 42074588954 was green this way after P09 had recorded
+  three failures. A late missing or ambiguous block is now a failure of the path, replayed with
+  what it recorded; a missing first block still means the section is gone. An undeclared
+  absence fails the run, and a declared one (a recorded decision) still passes.
+  `tests/executed-docs/late-absence-test.sh`, run by the harness selftest on every commit,
+  covers both halves and goes red with either fix removed.
+
 - **`bootstrap-forge` and `repair-forge` refuse a sealing-key backup that is not
   `bootstrap-secrets`' encrypted export.** The recovery kit carries the file as it
   is, and a rebuild opens the key only from that export, so a plain YAML export

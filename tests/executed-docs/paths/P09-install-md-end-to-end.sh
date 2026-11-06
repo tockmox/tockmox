@@ -245,13 +245,69 @@ step_begin() {
   provenance "$( [ "$FROM_TREE" = "1" ] && echo "WORKTREE (uncommitted; not evidence about ${REF})" || echo "$REF" )" "$PAGE" "block containing: ${needle}" "-" "$sha"
 }
 
+# block_gone STEP ... a step's block did not resolve to exactly one block on the page.
+#
+# Before 2026-11-05 every step said `|| exit 3`, and the runner books exit 3 as "this path is not
+# documented at this ref". That is right for the FIRST step (the page or its section is gone), and
+# wrong for any later one: the steps before it already ran and recorded verdicts, and exit 3 threw
+# them away. Run 42074588954 recorded three failures, then S20's needle matched two blocks, and the
+# job went green with "paths executed: 0". A late missing or ambiguous block is a failure of this
+# path, recorded as one, and the verdicts recorded so far are replayed with it.
+block_gone() {
+  if [ -s "${STATE}/verdicts.tsv" ]; then
+    record "$1" "the step's block resolves to exactly one block of ${PAGE} (missing or ambiguous; earlier steps already ran)" "one block" "none or several"
+    _emit "FAIL:     ${1}'s block did not resolve after earlier steps ran; replaying their verdicts and stopping here"
+    finish_path
+    exit $?
+  fi
+  exit 3
+}
+
+# finish_path ... replay every recorded verdict, then declare the outcome. The normal end of
+# the path, and also where block_gone sends a path whose later block went missing.
+finish_path() {
+  # The execute phase is a per-invocation fact in lib/assert.sh; a resumed final
+  # call that only replays would otherwise be refused a PASS. Persist the last
+  # execute_end's rc and re-declare it from state, saying so.
+  [ "$EXEC_PHASE_COMPLETED" -eq 1 ] && printf '%s' "$EXEC_LAST_RC" > "${STATE}/last-execute-rc"
+  if [ "$EXEC_PHASE_STARTED" -eq 0 ] && [ -f "${STATE}/last-execute-rc" ]; then
+    execute_begin "replayed from state: the documented blocks ran in earlier invocations of this path (see STEP logs above in the same report)"
+    execute_end "$(cat "${STATE}/last-execute-rc")"
+  fi
+  # ================================================================= REPLAY
+  _emit ""; _emit "=== REPLAY of every recorded verdict through lib/assert.sh ==========="
+  while IFS=$'\t' read -r st desc exp act flag; do
+    _replay_val="$act"
+    if [ "$flag" = "xfail" ]; then
+      assert_artifact_xfail "[${st}] ${desc}" 'printf %s "$_replay_val"' "$exp"
+    else
+      assert_artifact "[${st}] ${desc}" 'printf %s "$_replay_val"' "$exp"
+    fi
+  done < "${STATE}/verdicts.tsv"
+  _emit ""; _emit "NOTES (from the run):"; sed 's/^NOTE\t/  - /' "${STATE}/notes.txt" 2>/dev/null | while IFS= read -r l; do _emit "$l"; done
+
+  does_not_prove \
+    "Anything about GitHub's copy of the product repository or the published tag: source 1 was a harness snapshot of the working tree served from inside the cluster under test (S04's note names the URL and revision). The credential path for a PRIVATE product repository is not exercised." \
+    "That the page's NODE step (the .skip file) works: node-local, not reachable from this harness, and gated off on a stock install anyway (S19)." \
+    "The DNS success condition (S21b, a random label from the workstation and a pod) unless TOCKMOX_P09_LAN_RESOLVER named a resolver holding the wildcard; the model-gateway key (LiteLLM off by default), or the ntfy subscription: each needs a device, a resolver or a Service this throwaway does not have. Lab only." \
+    "Anything about the interactive installer route (1a's first block): only the config-file route ran. tests/installer covers the interactive prompts hermetically." \
+    "That the render in S18 matches the page's illustrative table; the page itself says that table is not a dated verification." \
+    "That a reader with a REAL editor lands the same four values: \$EDITOR was a script (glue) writing them. The block was unchanged." \
+    "That the 2c credential Secret is CONSUMED by ArgoCD: it was created, measured, and removed, because a git:// remote carries no authentication. What is proven is the block's byte count and the Secret's password length (the rc4 clause), not the clone through it."
+
+  parity_caveat \
+    "The workstation shell was ${WS_SHELL} $( [ "$WS_SHELL" = zsh ] && "${ZSH:-zsh}" -c 'echo $ZSH_VERSION' 2>/dev/null ) on Linux/arm64, pasted through a pty with bracketed paste. macOS ships zsh 5.9; INTERACTIVE_COMMENTS, read -p, word-splitting and NOMATCH behave the same in both. The guest is an Ubuntu cloud image on KubeVirt, single node."
+
+  path_finish
+}
+
 # ============================================================== THE STEPS
 # Each step: gate on done_step, gate on budget, run, record, mark_done.
 
 # S01 ... Set these once. Two placeholders are the page's own YOU SUPPLY.
 S=S01-set-these-once
 if ! done_step "$S"; then budget_left || yield "S01+"
-  step_begin "$S" 'export SITE_REPO_URL=YOUR_SITE_REPO_URL' || exit 3
+  step_begin "$S" 'export SITE_REPO_URL=YOUR_SITE_REPO_URL' || block_gone "$S"
   B="$(block 'export SITE_REPO_URL=YOUR_SITE_REPO_URL')"
   if [ "$ROUTE" = built-in ]; then
     B="$(printf '%s\n' "$B" | grep -v '^export SITE_REPO_URL=')"
@@ -270,7 +326,7 @@ fi
 # S02 ... Confirm the handoff, in one block (five reads).
 S=S02-confirm-handoff
 if ! done_step "$S"; then budget_left || yield "S02+"
-  step_begin "$S" "grep -Ei 'metallb|kube-vip|purelb|svclb'" || exit 3
+  step_begin "$S" "grep -Ei 'metallb|kube-vip|purelb|svclb'" || block_gone "$S"
   execute_begin "install.md Confirm the handoff"; run_ws "$S" "$(block "grep -Ei 'metallb|kube-vip|purelb|svclb'")"; execute_end $?
   record "$S" "handoff: every node Ready (no node line without Ready)" "0" "$(out_of "$S" | awk '$2 ~ /^(Ready|NotReady)/' | grep -vc ' Ready ' | tr -d ' ')"
   record "$S" "handoff: ArgoCD image tag is v2.6 or newer (major >= 3, or 2.x with minor >= 6)" "yes" "$(out_of "$S" | grep -m1 'argocd' | sed -E 's/.*:v([0-9]+)\.([0-9]+).*/\1 \2/' | awk '{ if ($1>2 || ($1==2 && $2>=6)) print "yes"; else print "no" }')"
@@ -283,7 +339,7 @@ fi
 # S03 ... the kubeseal check.
 S=S03-kubeseal-version
 if ! done_step "$S"; then budget_left || yield "S03+"
-  step_begin "$S" 'kubeseal --version' || exit 3
+  step_begin "$S" 'kubeseal --version' || block_gone "$S"
   execute_begin "install.md kubeseal check"; run_ws "$S" "$(block 'kubeseal --version')"; execute_end $?
   cli="$(out_of "$S" | grep -m1 -i 'kubeseal version' | sed -E 's/.*([0-9]+\.[0-9]+)\.[0-9]+.*/\1/')"
   ctl="$(out_of "$S" | grep -m1 'sealed-secrets-controller' | sed -E 's/.*:([0-9]+\.[0-9]+)\.[0-9]+.*/\1/')"
@@ -297,7 +353,7 @@ fi
 # here and pinned as xfail so the day it starts passing is visible.
 S=S04-ls-remote-github
 if ! done_step "$S"; then budget_left || yield "S04+"
-  step_begin "$S" 'git ls-remote https://github.com/tockmox/tockmox.git refs/tags/v0.8.0' || exit 3
+  step_begin "$S" 'git ls-remote https://github.com/tockmox/tockmox.git refs/tags/v0.8.0' || block_gone "$S"
   execute_begin "install.md Phase 1 precondition ls-remote"; GIT_TERMINAL_PROMPT=0 run_ws "$S" "$(block 'git ls-remote https://github.com/tockmox/tockmox.git refs/tags/v0.8.0')"; execute_end $?
   record "$S" "ls-remote of the public repo prints a SHA and the tag (xfail before the tag is pushed: this path runs on the candidate)" "prints" "$(out_of "$S" | grep -E '^[0-9a-f]{40}' >/dev/null && echo prints || echo nothing)" xfail
   note "S04: source 1 for this run is ${TM_URL} @ ${TM_REV}, a harness snapshot of the tree under test, NOT the published tag. Nothing below is evidence about GitHub's copy."
@@ -307,7 +363,7 @@ fi
 # S05 ... 1a, the config-file route. $EDITOR is the glue that writes the four values.
 S=S05-config-file
 if ! done_step "$S"; then budget_left || yield "S05+"
-  step_begin "$S" 'cp install/tockmox.yaml.example tockmox.yaml' || exit 3
+  step_begin "$S" 'cp install/tockmox.yaml.example tockmox.yaml' || block_gone "$S"
   EDITOR_GLUE="${STATE}/editor-glue.sh"
   cat > "$EDITOR_GLUE" <<EOF
 #!/usr/bin/env bash
@@ -354,7 +410,7 @@ fi
 # S06 ... 1b, the dry-run preflight.
 S=S06-dry-run
 if ! done_step "$S"; then budget_left || yield "S06+"
-  step_begin "$S" '--config tockmox.yaml --dry-run' || exit 3
+  step_begin "$S" '--config tockmox.yaml --dry-run' || block_gone "$S"
   execute_begin "install.md 1b --dry-run"; run_ws "$S" "$(block '--config tockmox.yaml --dry-run')"; execute_end $?
   record "$S" "1b: 'revision ${TM_REV} resolves in ${TM_URL}'" "1" "$(out_of "$S" | grep -c "revision ${TM_REV} resolves in" | tr -d ' ')"
   record "$S" "1b: 'settings valid'" "1" "$(out_of "$S" | grep -c 'settings valid' | tr -d ' ')"
@@ -366,7 +422,7 @@ fi
 # S07 ... 1c, generate. The block exports SITE_REPO; the session carries it.
 S=S07-generate
 if ! done_step "$S"; then budget_left || yield "S07+"
-  step_begin "$S" 'export SITE_REPO="$TOCKMOX/tockmox-site"' || exit 3
+  step_begin "$S" 'export SITE_REPO="$TOCKMOX/tockmox-site"' || block_gone "$S"
   execute_begin "install.md 1c generate the site repository"; run_ws "$S" "$(block 'export SITE_REPO="$TOCKMOX/tockmox-site"')"; execute_end $?
   record "$S" "1c: 'site repository written to'" "1" "$(out_of "$S" | grep -c 'site repository written to' | tr -d ' ')"
   if [ "$ROUTE" = built-in ]; then
@@ -385,7 +441,7 @@ fi
 # S08 ... 1c success condition.
 S=S08-generate-success
 if ! done_step "$S"; then budget_left || yield "S08+"
-  step_begin "$S" 'ls "$SITE_REPO/site/values/"' || exit 3
+  step_begin "$S" 'ls "$SITE_REPO/site/values/"' || block_gone "$S"
   execute_begin "install.md 1c success condition"; run_ws "$S" "$(block 'ls "$SITE_REPO/site/values/"')"; execute_end $?
   record "$S" "1c success: root.yaml listed" "1" "$(out_of "$S" | grep -c 'bootstrap/root.yaml' | tr -d ' ')"
   record "$S" "1c success: site/values/ holds global.yaml" "1" "$(out_of "$S" | grep -cw 'global.yaml' | tr -d ' ')"
@@ -395,7 +451,7 @@ fi
 # S09 ... 1d gate: node count.
 S=S09-node-count
 if ! done_step "$S"; then budget_left || yield "S09+"
-  step_begin "$S" 'get nodes --no-headers | wc -l' || exit 3
+  step_begin "$S" 'get nodes --no-headers | wc -l' || block_gone "$S"
   execute_begin "install.md 1d gate"; run_ws "$S" "$(block 'get nodes --no-headers | wc -l')"; execute_end $?
   nodes="$(out_of "$S" | grep -Ex '\s*[0-9]+\s*' | tr -d ' ' | head -1)"
   note "S09: node count reads ${nodes:-?}; 1d applies at 3 or more and is $( [ "${nodes:-0}" -ge 3 ] && echo APPLIED || echo SKIPPED ) per the page's own gate"
@@ -408,7 +464,7 @@ fi
 #. Appends to policy.yaml before the push, so S10 commits it.
 S=S09b-node-sources
 if ! done_step "$S"; then budget_left || yield "S09b+"
-  step_begin "$S" '--print-netpol-node-sources' || exit 3
+  step_begin "$S" '--print-netpol-node-sources' || block_gone "$S"
   execute_begin "install.md 1f node gateway addresses"; run_ws "$S" "$(block '--print-netpol-node-sources')"; execute_end $?
   run_ws "${S}-success" "$(block "grep -A8 '^platformNetpol:'")"
   record "$S" "1f success: one /31 per node" "${nodes:-$(cat "${STATE}/node-count" 2>/dev/null || echo '?')}" "$(out_of "${S}-success" | grep -Ex '\s*[0-9]+\s*' | tr -d ' ' | tail -1)"
@@ -421,7 +477,7 @@ if [ "$ROUTE" = built-in ] && ! done_step "$S"; then
   note "S10: skipped on the built-in forge, as the page says (bring your own forge only)"; mark_done "$S"
 fi
 if ! done_step "$S"; then budget_left || yield "S10+"
-  step_begin "$S" 'git push -u origin main' || exit 3
+  step_begin "$S" 'git push -u origin main' || block_gone "$S"
   export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-p09}" GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-p09@example.invalid}"
   export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME" GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
   _emit "GLUE: git identity via GIT_AUTHOR_*/GIT_COMMITTER_* (a reader's workstation has one configured)"
@@ -439,7 +495,7 @@ if [ "$ROUTE" = built-in ] && ! done_step "$S"; then
   note "S11: skipped on the built-in forge, as the page says (bring your own forge only)"; mark_done "$S"
 fi
 if ! done_step "$S"; then budget_left || yield "S11+"
-  step_begin "$S" 'git grep -l PLACEHOLDER_SITE_REPO_URL | while' || exit 3
+  step_begin "$S" 'git grep -l PLACEHOLDER_SITE_REPO_URL | while' || block_gone "$S"
   execute_begin "install.md 2b replace the placeholder"; run_ws "$S" "$(block 'git grep -l PLACEHOLDER_SITE_REPO_URL | while')"; execute_end $?
   run_ws "${S}-success" "$(block 'grep -l "$SITE_REPO_URL" | wc -l')"
   record "$S" "2b success: 'no file still carries the placeholder'" "1" "$(out_of "${S}-success" | grep -c 'no file still carries the placeholder' | tr -d ' ')"
@@ -456,7 +512,7 @@ if [ "$ROUTE" = built-in ] && ! done_step "$S"; then
   note "S12: skipped on the built-in forge, as the page says (bring your own forge only)"; mark_done "$S"
 fi
 if ! done_step "$S"; then budget_left || yield "S12+"
-  step_begin "$S" 'read -rs READ_ONLY_TOKEN' || exit 3
+  step_begin "$S" 'read -rs READ_ONLY_TOKEN' || block_gone "$S"
   run_ws "${S}-gate" "$(block 'echo "public: skip this step"')"
   note "S12: 2c gate printed: $(out_of "${S}-gate" | grep -E 'public|private' | head -1)"
   TOK="p09-synthetic-$(openssl rand -hex 8)"
@@ -476,7 +532,7 @@ fi
 # S13 ... Phase 2.5 mint (dry-run then real; the seal-target prompt answered y).
 S=S13-mint
 if ! done_step "$S"; then budget_left || yield "S13+"
-  step_begin "$S" 'mint-secrets.sh" --context "$KUBE_CONTEXT" --dry-run' || exit 3
+  step_begin "$S" 'mint-secrets.sh" --context "$KUBE_CONTEXT" --dry-run' || block_gone "$S"
   NTFY_PW="p09-ntfy-$(openssl rand -hex 6)"
   printf 'Seal against \ty\npassword (empty to skip ntfy): \t%s\nagain: \t%s\n' "$NTFY_PW" "$NTFY_PW" > "${STATE}/${S}.answers"
   _emit "GLUE: the 'Seal against <context>? [y/N]' prompt is answered y at the terminal, as a reader would;"
@@ -498,7 +554,7 @@ if [ "$ROUTE" = built-in ] && ! done_step "$S"; then
   note "S14: skipped on the built-in forge, as the page says (bring your own forge only)"; mark_done "$S"
 fi
 if ! done_step "$S"; then budget_left || yield "S14+"
-  step_begin "$S" 'git add secrets/ && git commit -m "sealed credentials" && git push' || exit 3
+  step_begin "$S" 'git add secrets/ && git commit -m "sealed credentials" && git push' || block_gone "$S"
   execute_begin "install.md Phase 2.5 commit"; run_ws "$S" "$(block 'git add secrets/ && git commit -m "sealed credentials" && git push')"; execute_end $?
   record "$S" "2.5 commit: the remote's main equals the local HEAD after the push" "$(git -C "$SITE_REPO" rev-parse HEAD)" "$(git ls-remote "$SITE_URL" refs/heads/main | cut -f1)"
   record "$S" "2.5 commit: the sealed files are tracked at the remote" "$(cat "${STATE}/minted-count")" "$(git -C "$SITE_REPO" ls-tree -r --name-only HEAD secrets/ | grep -c '\.sealed\.yaml' | tr -d ' ')"
@@ -515,7 +571,7 @@ if [ "$ROUTE" = external ] && ! done_step "$S"; then
   note "S14f: skipped on your own forge (2a to 2c published the site)"; mark_done "$S"
 fi
 if ! done_step "$S"; then budget_left || yield "S14f+"
-  step_begin "$S" 'tockmox-recovery-kit.tar.age" --age-recipient' || exit 3
+  step_begin "$S" 'tockmox-recovery-kit.tar.age" --age-recipient' || block_gone "$S"
   AGE_ID="${STATE}/p09-age-identity.txt"
   [ -s "$AGE_ID" ] || age-keygen -o "$AGE_ID" >/dev/null 2>&1
   AGE_PUBLIC_KEY="$(age-keygen -y "$AGE_ID")"; export AGE_PUBLIC_KEY
@@ -551,7 +607,7 @@ fi
 # S15 ... 3a apply root.yaml + success condition.
 S=S15-apply-root
 if ! done_step "$S"; then budget_left || yield "S15+"
-  step_begin "$S" 'apply -f "$SITE_REPO/bootstrap/root.yaml"' || exit 3
+  step_begin "$S" 'apply -f "$SITE_REPO/bootstrap/root.yaml"' || block_gone "$S"
   execute_begin "install.md 3a apply the root Application"; run_ws "$S" "$(block 'apply -f "$SITE_REPO/bootstrap/root.yaml"')"; execute_end $?
   date +%s > "${STATE}/root-applied-at"
   run_ws "${S}-success" "$(block 'get application tockmox-root')"
@@ -563,7 +619,7 @@ fi
 # then the success condition (sealedsecrets listed, a real Secret produced).
 S=S16-site-secrets
 if ! done_step "$S"; then budget_left || yield "S16+"
-  step_begin "$S" 'get application site-secrets' || exit 3
+  step_begin "$S" 'get application site-secrets' || block_gone "$S"
   deadline=$(( $(date +%s) + 600 )); sync=""
   while :; do
     run_ws "$S" "$(block 'get application site-secrets')" >/dev/null
@@ -589,7 +645,7 @@ fi
 # 40 minutes pass since root.yaml was applied.
 S=S17-watch-waves
 if ! done_step "$S"; then budget_left || yield "S17+"
-  step_begin "$S" 'get applications -w' || exit 3
+  step_begin "$S" 'get applications -w' || block_gone "$S"
   if [ ! -f "${STATE}/${S}.out" ]; then
     execute_expect_nonzero "a -w watch only returns on Ctrl-C (130), which is how the page's reader leaves it"
     execute_begin "install.md 3c watch the waves (20s, then Ctrl-C)"; ZSH_PASTE_INTERRUPT=20 run_ws "$S" "$(block 'get applications -w')"; execute_end $?
@@ -643,7 +699,7 @@ fi
 # S18 ... 3c's render-and-compare block for the policy layer.
 S=S18-policy-render
 if ! done_step "$S"; then budget_left || yield "S18+"
-  step_begin "$S" 'helm template "$TOCKMOX/charts/tockmox-policy"' || exit 3
+  step_begin "$S" 'helm template "$TOCKMOX/charts/tockmox-policy"' || block_gone "$S"
   execute_begin "install.md 3c render the policy layer"; run_ws "$S" "$(block 'helm template "$TOCKMOX/charts/tockmox-policy"')"; execute_end $?
   record "$S" "3c render: the policy chart renders NetworkPolicy objects" "yes" "$(out_of "$S" | grep 'kind: NetworkPolicy' >/dev/null && echo yes || echo no)"
   note "S18: rendered kinds: $(out_of "$S" | grep 'kind:' | sed 's/^ *//' | tr '\n' ';' | cut -c1-240)  (the page's own table is 'illustrative rather than a measurement')"
@@ -655,7 +711,7 @@ S=S19-default-gate
 if ! done_step "$S"; then budget_left || yield "S19+"
   UNDEF_SECTION="### Then un-default k3s's StorageClass"
   _emit ""; _emit "=== STEP ${S} =============================================="
-  sha="$(block_in_sha "$UNDEF_SECTION" 1)" || { _emit "EXCEPTION: no block 1 under '${UNDEF_SECTION}'"; exit 3; }
+  sha="$(block_in_sha "$UNDEF_SECTION" 1)" || { _emit "EXCEPTION: no block 1 under '${UNDEF_SECTION}'"; block_gone "$S"; }
   provenance "$( [ "$FROM_TREE" = "1" ] && echo "WORKTREE (uncommitted; not evidence about ${REF})" || echo "$REF" )" "$PAGE" "$UNDEF_SECTION" 1 "$sha"
   execute_begin "install.md un-default gate"; run_ws "$S" "$(block_in "$UNDEF_SECTION" 1)"; execute_end $?
   defaults="$(out_of "$S" | grep -c '(default)' | tr -d ' ')"
@@ -667,7 +723,7 @@ fi
 # S20 ... what is expected to look broken: the devops log tail (read only).
 S=S20-devops-log
 if ! done_step "$S"; then budget_left || yield "S20+"
-  step_begin "$S" 'logs deploy/tockmox-devops-argo-workflows-server --tail=3' || exit 3
+  step_begin "$S" 'logs deploy/tockmox-devops-argo-workflows-server --tail=3' || block_gone "$S"
   execute_begin "install.md expected-broken read"; run_ws "$S" "$(block 'logs deploy/tockmox-devops-argo-workflows-server --tail=3')"; execute_end $?
   note "S20: argo-workflows-server tail: $(out_of "$S" | tail -3 | tr '\n' ' ' | cut -c1-240)"
   record "$S" "expected-broken read: the log block ran against an existing Deployment" "0" "$(out_of "$S" | grep -c 'NotFound' | tr -d ' ')"
@@ -677,7 +733,7 @@ fi
 # S21 ... Point DNS at Traefik's address: the Service read, and the domain read.
 S=S21-traefik-and-domain
 if ! done_step "$S"; then budget_left || yield "S21+"
-  step_begin "$S" '-l app.kubernetes.io/name=traefik' || exit 3
+  step_begin "$S" '-l app.kubernetes.io/name=traefik' || block_gone "$S"
   execute_begin "install.md Traefik Service read"; run_ws "$S" "$(block '-l app.kubernetes.io/name=traefik')"; execute_end $?
   ext="$(out_of "$S" | awk '/LoadBalancer/{print $4}' | head -1)"
   record "$S" "Traefik Service shows an EXTERNAL-IP from the pool rather than <pending> (MetalLB installed and assigning)" "assigned" "$( printf '%s' "$ext" | grep -E '^[0-9]+\.' >/dev/null && echo assigned || echo "${ext:-none}" )"
@@ -698,7 +754,7 @@ if ! done_step "$S"; then budget_left || yield "S21b+"
   if [ -z "${TOCKMOX_P09_LAN_RESOLVER:-}" ]; then
     note "S21b: the DNS success condition (random label, workstation and pod) needs a LAN resolver the cluster's nodes use, holding *.${INTERNAL_DOMAIN_V}; none on a throwaway (TOCKMOX_P09_LAN_RESOLVER unset), so it is not run (lab only)"
   else
-    step_begin "$S" 'tockmox-probe-$RANDOM' || exit 3
+    step_begin "$S" 'tockmox-probe-$RANDOM' || block_gone "$S"
     ext="$(out_of S21-traefik-and-domain | awk '/LoadBalancer/{print $4}' | head -1)"
     execute_begin "install.md DNS success condition"; run_ws "$S" "$(block 'tockmox-probe-$RANDOM')"; execute_end $?
     probe="$(out_of "$S" | awk '/^probe:/{print $2; exit}')"
@@ -716,7 +772,7 @@ if [ "$ROUTE" = external ] && ! done_step "$S"; then
   note "S21c: skipped on your own forge"; mark_done "$S"
 fi
 if ! done_step "$S"; then budget_left || yield "S21c+"
-  step_begin "$S" '--connect-sign-in' || exit 3
+  step_begin "$S" '--connect-sign-in' || block_gone "$S"
   idh="$(kubectl --context="$KUBE_CONTEXT" -n argocd get application tockmox-identity -o jsonpath='{.status.sync.status}/{.status.health.status}' 2>/dev/null)"
   note "S21c: tockmox-identity reads ${idh:-absent} (the page's gate is Synced/Healthy)"
   if [ "$idh" = "Synced/Healthy" ]; then
@@ -731,7 +787,7 @@ fi
 
 S=S22-verify-authored
 if ! done_step "$S"; then budget_left || yield "S22+"
-  step_begin "$S" 'get ns -l app.kubernetes.io/part-of=tockmox' || exit 3
+  step_begin "$S" 'get ns -l app.kubernetes.io/part-of=tockmox' || block_gone "$S"
   execute_begin "install.md Verify what Tockmox authored"; run_ws "$S" "$(block 'get ns -l app.kubernetes.io/part-of=tockmox')"; execute_end $?
   record "$S" "verify: namespaces with the reserved tockmox- prefix are listed" "yes" "$(out_of "$S" | grep '^tockmox-' >/dev/null && echo yes || echo no)"
   record "$S" "verify: NetworkPolicies carrying the part-of label exist" "yes" "$(out_of "$S" | awk '$1 ~ /^tockmox-/ && $2 ~ /./ {n++} END{print (n>0)?"yes":"no"}')"
@@ -739,36 +795,5 @@ if ! done_step "$S"; then budget_left || yield "S22+"
   mark_done "$S"
 fi
 
-# The execute phase is a per-invocation fact in lib/assert.sh; a resumed final
-# call that only replays would otherwise be refused a PASS. Persist the last
-# execute_end's rc and re-declare it from state, saying so.
-[ "$EXEC_PHASE_COMPLETED" -eq 1 ] && printf '%s' "$EXEC_LAST_RC" > "${STATE}/last-execute-rc"
-if [ "$EXEC_PHASE_STARTED" -eq 0 ] && [ -f "${STATE}/last-execute-rc" ]; then
-  execute_begin "replayed from state: the documented blocks ran in earlier invocations of this path (see STEP logs above in the same report)"
-  execute_end "$(cat "${STATE}/last-execute-rc")"
-fi
-# ================================================================= REPLAY
-_emit ""; _emit "=== REPLAY of every recorded verdict through lib/assert.sh ==========="
-while IFS=$'\t' read -r st desc exp act flag; do
-  _replay_val="$act"
-  if [ "$flag" = "xfail" ]; then
-    assert_artifact_xfail "[${st}] ${desc}" 'printf %s "$_replay_val"' "$exp"
-  else
-    assert_artifact "[${st}] ${desc}" 'printf %s "$_replay_val"' "$exp"
-  fi
-done < "${STATE}/verdicts.tsv"
-_emit ""; _emit "NOTES (from the run):"; sed 's/^NOTE\t/  - /' "${STATE}/notes.txt" 2>/dev/null | while IFS= read -r l; do _emit "$l"; done
-
-does_not_prove \
-  "Anything about GitHub's copy of the product repository or the published tag: source 1 was a harness snapshot of the working tree served from inside the cluster under test (S04's note names the URL and revision). The credential path for a PRIVATE product repository is not exercised." \
-  "That the page's NODE step (the .skip file) works: node-local, not reachable from this harness, and gated off on a stock install anyway (S19)." \
-  "The DNS success condition (S21b, a random label from the workstation and a pod) unless TOCKMOX_P09_LAN_RESOLVER named a resolver holding the wildcard; the model-gateway key (LiteLLM off by default), or the ntfy subscription: each needs a device, a resolver or a Service this throwaway does not have. Lab only." \
-  "Anything about the interactive installer route (1a's first block): only the config-file route ran. tests/installer covers the interactive prompts hermetically." \
-  "That the render in S18 matches the page's illustrative table; the page itself says that table is not a dated verification." \
-  "That a reader with a REAL editor lands the same four values: \$EDITOR was a script (glue) writing them. The block was unchanged." \
-  "That the 2c credential Secret is CONSUMED by ArgoCD: it was created, measured, and removed, because a git:// remote carries no authentication. What is proven is the block's byte count and the Secret's password length (the rc4 clause), not the clone through it."
-
-parity_caveat \
-  "The workstation shell was ${WS_SHELL} $( [ "$WS_SHELL" = zsh ] && "${ZSH:-zsh}" -c 'echo $ZSH_VERSION' 2>/dev/null ) on Linux/arm64, pasted through a pty with bracketed paste. macOS ships zsh 5.9; INTERACTIVE_COMMENTS, read -p, word-splitting and NOMATCH behave the same in both. The guest is an Ubuntu cloud image on KubeVirt, single node."
-
-path_finish
+finish_path
+exit $?
