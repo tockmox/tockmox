@@ -37,6 +37,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from . import actions as act
 from . import actions_routes
 from . import feed as feedmod
 from . import models_routes
@@ -662,7 +663,9 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         if not u.is_admin:
             return forbidden(request, u)
         rd, rows = capability_rows()
-        return render(request, "capabilities.html", u, rows=rows, apps_reading=rd)
+        change_on = bool(s.actions and s.actions.any and s.actions.on("set-capability"))
+        return render(request, "capabilities.html", u, rows=rows, apps_reading=rd, change_on=change_on,
+                      never_off=act.NEVER_OFF_FROM_THE_CONSOLE)
 
     @app.get("/version")
     def version_moved(request: Request):

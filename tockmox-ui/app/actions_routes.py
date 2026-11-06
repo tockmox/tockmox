@@ -183,6 +183,10 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
                     "applied": str(q.get("applied", ""))}, _back(q.get("back", ""), "/platform/changes"), ""
         if kind == "add-admin":
             return {"username": str(q.get("username", ""))}, "/platform/identity", ""
+        if kind == "set-capability":
+            en = str(q.get("enabled", ""))
+            return {"capability": str(q.get("capability", "")), "enabled": en == "true" if en in ("true", "false") else en}, \
+                "/capabilities", ""
         if kind in act.IDENTITY_KINDS:
             uid = str(q.get("user", ""))
             return {"user": int(uid) if uid.isdigit() else 0, "username": str(q.get("username", ""))}, "/platform/identity", ""

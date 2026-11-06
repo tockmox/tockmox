@@ -64,7 +64,7 @@ from .forge import Forge, Paused
 from . import values_edit as ve
 
 # The kinds that open a change as the change bot; each records the person who asked (Tockmox-Requested-By).
-OPENS = ("open-change", "add-admin")
+OPENS = ("open-change", "add-admin", "set-capability")
 
 
 def _username(claims) -> str:
@@ -692,7 +692,44 @@ class Service:
                     "title": f"Make {u} an administrator",
                     "summary": f"Adds {u} to sso.adminUsers, so the identity layer's next sync adds {u} to the admin group.",
                     "slug": "admin", "applied": ""}
+        if kind == "set-capability":
+            return self._capability_plan(str(t.get("capability", "")), bool(t.get("enabled")))
         raise act.Refused(f"{kind} does not open a change")
+
+    def _capability_plan(self, cap: str, en: bool) -> dict:
+        """capabilities.<cap>.enabled in the file every layer reads. Refused when a layer's own values file also sets
+        it: Argo CD gives each layer global.yaml first and its own file after, so that layer would keep the old value
+        and the change would say one thing while the site did another."""
+        from .capabilities import CATALOG
+        path = self.cfg.values_file("global")
+        folder = path.rsplit("/", 1)[0] if "/" in path else ""
+        base = self.cfg.changes_base
+        others = []
+        with self.forge._bot() as c:
+            for f in self.forge.yaml_files(c, folder, base):
+                if f == path:
+                    continue
+                text = self.forge._text(c, f, base)
+                try:
+                    doc = yaml.safe_load(text) if text.strip() else {}
+                except yaml.YAMLError as e:
+                    raise act.Refused(f"{f} is not valid YAML on {base}, so whether it sets capabilities.{cap} "
+                                      "cannot be told; fix it first") from e
+                caps = doc.get("capabilities") if isinstance(doc, dict) else None
+                if isinstance(caps, dict) and cap in caps:
+                    others.append(f)
+        if others:
+            raise act.Refused(f"capabilities.{cap} is also set in {', '.join(others)}, which that layer reads after "
+                              f"{path}; change it there by hand, or take it out of there first")
+        c = next((x for x in CATALOG if x.key == cap), None)
+        name = c.name if c else cap
+        word = "on" if en else "off"
+        return {"path": path, "edits": [(["capabilities", cap, "enabled"], en)],
+                "title": f"Turn {name} {word}",
+                "summary": f"Sets capabilities.{cap}.enabled to {str(en).lower()} in {path}, the file every layer "
+                           f"reads. Once applied, Argo CD {'adds' if en else 'removes'} what {name} owns across every "
+                           f"layer ({c.components if c else 'its components'}).",
+                "slug": f"capability-{cap.lower()}", "applied": ""}
 
     def preview(self, kind: str, t: dict) -> dict:
         """The confirm panel's diff: exactly what the change would do to the file on main now."""
@@ -718,6 +755,9 @@ class Service:
         return self._open(it, who, claims)
 
     def do_add_admin(self, it, who, claims=None):
+        return self._open(it, who, claims)
+
+    def do_set_capability(self, it, who, claims=None):
         return self._open(it, who, claims)
 
     # ------------------------------------------------------------ one intent

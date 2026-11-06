@@ -508,6 +508,16 @@ class Forge:
         except (ValueError, UnicodeDecodeError) as e:
             raise act.Refused(f"{path} is not UTF-8 text") from e
 
+    def yaml_files(self, c, folder: str, ref: str) -> list[str]:
+        """The .yaml and .yml files directly in folder at ref, as repository paths; [] when the folder is absent."""
+        r = self._get(c, f"/repos/{self.repo}/contents/{folder}", ref=ref)
+        if r.status_code == 404:
+            return []
+        if r.status_code >= 300 or not isinstance(r.json(), list):
+            raise self._refuse(r, f"listing {folder}")
+        return sorted(str(x.get("path", "")) for x in r.json()
+                      if x.get("type") == "file" and str(x.get("name", "")).endswith((".yaml", ".yml")))
+
     def plan_change(self, path: str, edits: list, applied: str = "") -> dict:
         """What opening this change would do, without doing it: {"path", "before", "after", "blob"}. Refused when the
         file cannot be edited safely, when main already says it, or, with `applied` (the site commit Argo CD last
