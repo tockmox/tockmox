@@ -724,6 +724,22 @@ test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_
 expect: 48
 states: [0-9]+ NetworkPolicy$
 
+# The same block's Namespace and ServiceAccount lines, registered 2026-11-06
+# after they were found reading 7 and 1 while the chart rendered 8 and 9: only
+# the NetworkPolicy line above was pinned, so each namespace added since moved
+# the other two silently.
+page:   docs/deployment/install.md
+claim:  Namespace
+test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c '^kind: Namespace' | tr -d ' '
+expect: 8
+states: [0-9]+ Namespace$
+
+page:   docs/deployment/install.md
+claim:  ServiceAccount
+test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c '^kind: ServiceAccount' | tr -d ' '
+expect: 9
+states: [0-9]+ ServiceAccount$
+
 # Pod Security: the label says `restricted` on all eight namespaces and, from
 # 0.7.0, `enforce` is set on seven (five at 0.7.0; monitoring joined and the node
 # agents' namespace was added). The two numbers make the distinction
