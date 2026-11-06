@@ -82,6 +82,22 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **Approving the site's changes in the console (Platform › Changes).** On by
+  default on a built-in-forge site (the installer now writes
+  `global.siteForge: built-in` into `global.yaml`; an explicit
+  `tockmoxUi.actions.changes.enabled` wins either way), every change
+  waiting on `main` is listed with its summary, its checks and the diff behind a
+  fold, with **Approve and apply**, **Decline** and, for an applied change,
+  **Revert**. Approve and Decline go through the forge as the person (the
+  forge's own sign-in, then a fresh Authentik sign-in bound to that one action),
+  approve exactly the commit shown, and merge with a merge commit that ends in
+  `Approved-by:` naming them. Revert opens the opposite change as the change
+  bot. No service holds a forge admin credential; `tools/check-actions.py`
+  fails the render if a pod names one. A forge that does not answer reads
+  **Changes paused**. `bootstrap-forge` writes the two Secrets it needs
+  (`--console-host` if the console is not at `tockmox.<internalDomain>`)
+  (docs/administration/site-forge.md, "Approving in the console").
+
 - **Moving the site to a forge you own ("Move to my own forge").**
   `tockmox-install.sh move-forge --to URL` pushes the
   site repository's whole history (every branch and tag) from the built-in forge
@@ -116,6 +132,14 @@ costs you, with the reasoning in the documentation rather than here.
   (docs/administration/site-forge-recovery.md, "Rehearse the rebuild: the drill";
   `siteForge.drillCheckHours`). Sites that already have an off-site copy get the
   job when `bootstrap-forge` runs again.
+
+- **The install kit.** An optional container that carries the installer and every
+  tool it needs (`kubectl`, `helm`, a `kubeseal` matching the controller, `git`,
+  `openssl`, `age`, bash 5) at checksum-verified, pinned versions, so a
+  workstation needs only a running container runtime: Docker, Podman or
+  nerdctl. You build it yourself from the release's source; no image is
+  published. `install/kit/tockmox-kit` runs the same installer with the same
+  arguments (docs/deployment/install-kit.md). The native route is unchanged.
 
 - **Feature pages (experimental).** A feature under the Tockmox UI's
   `features.<id>` can contribute pages, in a top-bar section of its own or a
