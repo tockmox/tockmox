@@ -1049,6 +1049,20 @@ costs you, with the reasoning in the documentation rather than here.
   `tests/executed-docs/late-absence-test.sh`, run by the harness selftest on every commit,
   covers both halves and goes red with either fix removed.
 
+- **Every block P09 asks install.md for is now checked on every commit.** The ambiguity that
+  run hit, P09's devops log read matching two install.md blocks, was found only in a live lab
+  run. That step now names its section (The readiness bar) as well as its command, and
+  `tests/executed-docs/needle-canary-test.sh`, run by the harness selftest, resolves each of
+  P09's lookups against the page and goes red on one that is gone or matches twice.
+
+- **P09 no longer records a failure for a revision check the installer cannot make in the lane.**
+  The p09 lane serves the product repository inside the cluster under test, which the workstation
+  running the installer cannot reach, so the installer rightly says it is not confirming the
+  revision. P09 expected "revision ... resolves in ..." anyway and recorded a FAIL. With an
+  in-cluster address that row is now a known gap, and the installer's warning is what is asserted;
+  with a reachable address it is a plain check as before. `tests/executed-docs/revision-row-test.sh`
+  exercises both.
+
 - **`bootstrap-forge` and `repair-forge` refuse a sealing-key backup that is not
   `bootstrap-secrets`' encrypted export.** The recovery kit carries the file as it
   is, and a rebuild opens the key only from that export, so a plain YAML export

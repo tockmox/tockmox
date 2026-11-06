@@ -1194,5 +1194,41 @@ if [ "$LA_CASES" -eq 0 ] || { [ "$LA_RC" -ne 0 ] && ! printf '%s\n' "$LA_OUT" | 
   bad "late-absence-test.sh ran its cases" "rc=${LA_RC}, ${LA_CASES} case(s): $(printf '%s' "$LA_OUT" | tail -3)"
 fi
 
+# ---------------------------------------------------------------------------
+# Every block a path asks its page for still resolves (2026-11-06).
+#
+# Run 42074588954 found S20's needle matching two install.md blocks only in a live lab run. The
+# canary lists every lookup P09 makes and resolves each against the working tree's install.md, so a
+# needle that is gone or ambiguous goes red on the commit that broke it. Folded in like the two above.
+NC_OUT="$(bash "${HERE}/needle-canary-test.sh" 2>&1)"; NC_RC=$?
+NC_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) NC_CASES=$((NC_CASES+1)); ok "needles: ${line#ok   }" ;;
+    "FAIL "*) NC_CASES=$((NC_CASES+1)); bad "needles: ${line#FAIL }" "run tests/executed-docs/needle-canary-test.sh for detail" ;;
+  esac
+done <<EOF_NC
+$NC_OUT
+EOF_NC
+if [ "$NC_CASES" -eq 0 ] || { [ "$NC_RC" -ne 0 ] && ! printf '%s\n' "$NC_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "needle-canary-test.sh ran its cases" "rc=${NC_RC}, ${NC_CASES} case(s): $(printf '%s' "$NC_OUT" | tail -3)"
+fi
+
+# P09's 1b revision row in the lane's two shapes (2026-11-06): with the product repository served
+# inside the cluster under test the row is a known gap and the installer's warning is asserted.
+RR_OUT="$(bash "${HERE}/revision-row-test.sh" 2>&1)"; RR_RC=$?
+RR_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) RR_CASES=$((RR_CASES+1)); ok "revision row: ${line#ok   }" ;;
+    "FAIL "*) RR_CASES=$((RR_CASES+1)); bad "revision row: ${line#FAIL }" "run tests/executed-docs/revision-row-test.sh for detail" ;;
+  esac
+done <<EOF_RR
+$RR_OUT
+EOF_RR
+if [ "$RR_CASES" -eq 0 ] || { [ "$RR_RC" -ne 0 ] && ! printf '%s\n' "$RR_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "revision-row-test.sh ran its cases" "rc=${RR_RC}, ${RR_CASES} case(s): $(printf '%s' "$RR_OUT" | tail -3)"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
