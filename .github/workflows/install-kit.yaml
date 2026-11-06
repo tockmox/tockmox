@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The install kit builds and works on both architectures operators run it on.
+#
+# install/kit/Dockerfile is built here exactly as docs/deployment/install-kit.md tells an operator to
+# build it, on an amd64 and an arm64 runner (an Apple-silicon Mac builds the arm64 image). Then, inside
+# the image just built: kit-check (every tool present and at its pin) and the installer's own hermetic
+# test tier, so the kit is proven to run the same scripts the native route runs, with the kit's tools.
+#
+# Its own workflow, not a step in ci.yaml: ci.yaml's named steps are a counted surface
+# (tools/doc-claims.txt), and this builds an image rather than checking the tree.
+name: install-kit
+on:
+  pull_request:
+    paths:
+      - 'install/**'
+      - 'tools/mint-secrets.sh'
+      - 'tests/installer/**'
+      - 'mise.toml'
+      - '.github/workflows/install-kit.yaml'
+  push:
+    branches: [main]
+    paths:
+      - 'install/**'
+      - 'tools/mint-secrets.sh'
+      - 'tests/installer/**'
+      - 'mise.toml'
+      - '.github/workflows/install-kit.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kit:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: build the kit from this tree, as the install-kit page says
+        run: docker build -t tockmox-kit -f install/kit/Dockerfile .
+      - name: the image is the architecture of the runner that built it
+        run: |
+          want="$(uname -m)"; got="$(docker run --rm --entrypoint uname tockmox-kit -m)"
+          echo "runner $want, image $got"; [ "$want" = "$got" ]
+      - name: every tool is present and at its pin
+        run: docker run --rm tockmox-kit kit-check
+      - name: the installer's own tests pass inside the kit, with the kit's tools
+        # Read-only source. Two packages are added that only the test harness needs (PyYAML for its
+        # assertions, git's http-backend for the forge stand-in), and /tmp is exec because the
+        # harness runs its shims from there; neither is part of an operator's run.
+        run: |
+          docker run --rm --user 0 --tmpfs /tmp:rw,exec,nosuid,nodev,size=512m,mode=1777 \
+            -v "$PWD:/src:ro" -w /src --entrypoint bash tockmox-kit \
+            -c 'apk add --no-cache -q py3-yaml git-daemon && bash tests/installer/run.sh'

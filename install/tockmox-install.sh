@@ -22,9 +22,14 @@
 # the kube context and makes you confirm it. Nothing in THIS file's own
 # behaviour changed: run without the subcommand it still applies nothing.
 #
-# Deliberately bash: a bootstrap installer that first requires you to install a
-# runtime is a worse bootstrap installer. Needs kubectl only for the cluster
-# preflight, which is skipped when there is no cluster to check against.
+# Bash, and runnable natively with no container runtime. A workstation that would
+# rather not install this script's tools (kubectl, helm, kubeseal, git, openssl,
+# age, bash 4+) can run it from the install kit instead: install/kit/ carries
+# them at pinned versions and runs THIS file unchanged
+# (docs/deployment/install-kit.md). This header used to say a runtime made a
+# worse bootstrap installer; that held while the runtime was the only extra, not
+# once the alternative was six tools to install and version-match. Needs kubectl
+# only for the cluster preflight, which is skipped when there is no cluster.
 # ============================================================================
 set -euo pipefail
 
@@ -37,6 +42,9 @@ set -euo pipefail
 VERSION="0.8.0"
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SELF/.." && pwd)"
+# The name the next steps print. A launcher that runs this script on your behalf (install/kit/tockmox-kit)
+# sets it, so the commands shown are ones you can run where you are, not paths inside its container.
+ME="${TOCKMOX_INVOKED_AS:-$0}"
 
 # NO_CLUSTER was called APPLY until 2026-09-01, initialised true, and set false
 # by a --no-apply flag. That named a decision this script does not make: it has
@@ -67,21 +75,21 @@ One subcommand DOES write to a cluster, and only when you name it:
 
   bootstrap-secrets  install or reuse the sealed-secrets controller, export its
                      key encrypted, and seal your credentials into the site.
-                     Run '$0 bootstrap-secrets --help'.
+                     Run '$ME bootstrap-secrets --help'.
   bootstrap-forge    (site.forge: built-in) install the built-in forge beside
                      ArgoCD, create the site repository in it, push the site,
                      give ArgoCD its read credential, and write the encrypted
-                     recovery kit. Run '$0 bootstrap-forge --help'.
+                     recovery kit. Run '$ME bootstrap-forge --help'.
   repair-forge       (site.forge: built-in) reinstall ONLY the built-in forge and
                      seed it from the off-site copy, while the rest of the
-                     cluster runs. Run '$0 repair-forge --help'.
+                     cluster runs. Run '$ME repair-forge --help'.
   --restore-from offsite|file:PATH
                      (site.forge: built-in) rebuild a site on a cluster that has
                      ArgoCD and nothing else, from the off-site copy and the
-                     recovery kit. Run '$0 --restore-from offsite --help'.
+                     recovery kit. Run '$ME --restore-from offsite --help'.
   move-forge         (site.forge: built-in) move the site repository, with its whole
                      history, to an EMPTY repository you own, and repoint ArgoCD
-                     at it in one change an approver merges. Run '$0 move-forge --help'.
+                     at it in one change an approver merges. Run '$ME move-forge --help'.
   upgrade-forge      (site.forge: built-in) take a fresh off-site copy, then move
                      the built-in forge to the Forgejo this release pins and
                      check it answers. Run it before you move the Tockmox pin.
@@ -111,12 +119,12 @@ One subcommand DOES write to a cluster, and only when you name it:
   -h, --help        this
 
 Examples
-  $0
-  $0 --config tockmox.yaml
-  $0 --config tockmox.yaml --dry-run
-  $0 --config tockmox.yaml --no-cluster
-  $0 --lint ./tockmox-site
-  $0 --print-netpol-node-sources [--context NAME]
+  $ME
+  $ME --config tockmox.yaml
+  $ME --config tockmox.yaml --dry-run
+  $ME --config tockmox.yaml --no-cluster
+  $ME --lint ./tockmox-site
+  $ME --print-netpol-node-sources [--context NAME]
 USAGE
 }
 
@@ -498,7 +506,7 @@ ask() {  # var, prompt, default, required
     Use a config file instead, which is repeatable and reviewable anyway:
       cp install/tockmox.yaml.example tockmox.yaml
       \$EDITOR tockmox.yaml
-      $0 --config tockmox.yaml"
+      $ME --config tockmox.yaml"
   fi
   exec 3<&-
   while true; do
@@ -1309,7 +1317,7 @@ printf '\n'
 # any` (measured 2026-09-14). The Applications this script just wrote target
 # `main`, so the branch name is not the operator's to vary.
 info "0. seal your credentials (writes to a CLUSTER; confirms the context first):"
-info "     $0 bootstrap-secrets --mode new --site $SITE_PATH --backup-out KEYFILE --age-recipient AGE_PUBLIC_KEY"
+info "     $ME bootstrap-secrets --mode new --site $SITE_PATH --backup-out KEYFILE --age-recipient AGE_PUBLIC_KEY"
 info "   --mode recover restores an existing deployment's key; --mode reuse uses a running"
 info "   controller. Prefer to do it by hand? docs/administration/secrets.md still works."
 # since 0.8.0 the policy layer refuses to render the platform
@@ -1320,14 +1328,14 @@ info "   controller. Prefer to do it by hand? docs/administration/secrets.md sti
 if [[ " ${LAYERS_ON[*]} " == *" policy "* ]]; then
   info "0b. give the policy layer each node's gateway address (required since 0.8.0;"
   info "    reads the cluster, prints only; install.md step 1f):"
-  info "     $0 --print-netpol-node-sources --context YOUR_KUBECONTEXT >> $SITE_PATH/site/values/policy.yaml"
+  info "     $ME --print-netpol-node-sources --context YOUR_KUBECONTEXT >> $SITE_PATH/site/values/policy.yaml"
   info "    No per-node podCIDR on your CNI? Set apps.platform_netpol.enabled=false there instead."
 fi
 if [[ "$SITE_FORGE" == built-in ]]; then
 info "1. install the built-in forge and publish this site to it (writes to a CLUSTER; confirms"
 info "   the context first; needs ArgoCD installed, and runs after step 0 so the sealed"
 info "   credentials are in what it pushes):"
-info "     $0 bootstrap-forge --site $SITE_PATH --kit-out RECOVERY_KIT_FILE --age-recipient AGE_PUBLIC_KEY \\"
+info "     $ME bootstrap-forge --site $SITE_PATH --kit-out RECOVERY_KIT_FILE --age-recipient AGE_PUBLIC_KEY \\"
 info "       --sealing-key-backup KEYFILE"
 info "   It writes the recovery kit: the forge's secrets and your sealing-key backup in one"
 info "   encrypted file. Keep it off this cluster and away from any off-site copy."
@@ -1358,11 +1366,11 @@ info "4. kubectl apply -f $SITE_PATH/bootstrap/root.yaml"
 info "5. watch it land: kubectl -n ${ARGO_NS} get applications -w"
 info "6. when tockmox-platform is Synced and Healthy, publish the product docs from this"
 info "   checkout (they are not in any image; the docs site shows a placeholder until then):"
-info "     $0 publish-docs --context YOUR_KUBECONTEXT --config ${CONFIG:-tockmox.yaml} --wait 600"
+info "     $ME publish-docs --context YOUR_KUBECONTEXT --config ${CONFIG:-tockmox.yaml} --wait 600"
 if [[ "$SITE_FORGE" == built-in && " ${LAYERS_ON[*]} " == *" identity "* ]]; then
 info "7. when tockmox-identity is Synced and Healthy, connect the forge's sign-in, so the"
 info "   admin group's members can sign in to it and approve changes:"
-info "     $0 bootstrap-forge --site $SITE_PATH --context YOUR_KUBECONTEXT --connect-sign-in"
+info "     $ME bootstrap-forge --site $SITE_PATH --context YOUR_KUBECONTEXT --connect-sign-in"
 fi
 printf '\n'
 ok "installer finished. Nothing was applied to your cluster."

@@ -18,6 +18,7 @@ sizing
 fresh-install
 existing-cluster
 profiles
+install-kit
 steps: Install :: Then [sign in for the first time](../usage/getting-started.md).
 verify
 install
