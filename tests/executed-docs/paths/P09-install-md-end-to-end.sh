@@ -224,6 +224,35 @@ run_ws() {
 }
 out_of() { cat "${STATE}/${1}.out" 2>/dev/null; }
 
+# in_cluster_url URL ... true when URL's host is a Service inside the cluster under test (a host
+# ending in .svc, or in .svc and the default cluster domain), whatever the scheme, user, port or path.
+in_cluster_url() {
+  local h="${1#*://}"
+  h="${h%%/*}"; h="${h##*@}"; h="${h%%:*}"
+  case "$h" in
+    *.svc|*.svc.cluster.local) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# record_revision_row STEP ... 1b's "revision resolves" row. The installer checks the revision with
+# git ls-remote from the WORKSTATION. The p09 lane serves the product repository inside the cluster
+# under test, which the workstation cannot reach, so there the installer rightly says it is not
+# confirming the revision; that row is then a known gap (xfail, so the run goes red the day the
+# installer starts confirming it there), and what is asserted instead is the warning itself.
+# A reachable URL keeps the row a plain PASS/FAIL.
+record_revision_row() {
+  local s="$1" said
+  said="$(out_of "$s" | grep -cF "revision ${TM_REV} resolves in" | tr -d ' ')"
+  if in_cluster_url "$TM_URL"; then
+    record "$s" "1b: 'revision ${TM_REV} resolves in ${TM_URL}' is not expected: the lane serves the product repository inside the cluster under test, which the workstation cannot reach" "1" "$said" xfail
+    record "$s" "1b: the installer says it cannot reach ${TM_URL} and is not confirming ${TM_REV}" "1" \
+      "$(out_of "$s" | grep -cF "cannot reach ${TM_URL} ... not confirming '${TM_REV}'" | tr -d ' ')"
+  else
+    record "$s" "1b: 'revision ${TM_REV} resolves in ${TM_URL}'" "1" "$said"
+  fi
+}
+
 # block_in SECTION N ... ordinal extraction inside a named sub-section, for the
 # one block on the page that is byte-identical to another (the un-default gate
 # and its success condition are the same two lines), where --containing
@@ -237,12 +266,32 @@ block_in_sha() {
   else "$EXTRACT" --ref "$REF" --page "$PAGE" --section "$1" --lang bash --block "$2" --sha 2>/dev/null; fi
 }
 
+# block_sec SECTION NEEDLE ... the block containing NEEDLE inside a named sub-section, for a command the
+# page repeats in another section on purpose. S20's read (the devops log tail) is also inside the 3c
+# first-sight block, so the whole-page needle matched two blocks (run 42074588954) and the extractor
+# rightly refused; the section says which of the two the step means, and the content still names it.
+block_sec() {
+  if [ "$FROM_TREE" = "1" ]; then "$EXTRACT" --file "$PAGE" --section "$1" --lang bash --containing "$2" 2>/dev/null
+  else "$EXTRACT" --ref "$REF" --page "$PAGE" --section "$1" --lang bash --containing "$2" 2>/dev/null; fi
+}
+block_sec_sha() {
+  if [ "$FROM_TREE" = "1" ]; then "$EXTRACT" --file "$PAGE" --section "$1" --lang bash --containing "$2" --sha 2>/dev/null
+  else "$EXTRACT" --ref "$REF" --page "$PAGE" --section "$1" --lang bash --containing "$2" --sha 2>/dev/null; fi
+}
+
 # step NAME NEEDLE ... provenance + verbatim, then the caller runs it
 step_begin() {
   local name="$1" needle="$2" sha
   _emit ""; _emit "=== STEP ${name} =============================================="
   sha="$(block_sha "$needle")" || { _emit "EXCEPTION: no block containing '${needle}' in ${PAGE} @ ${REF}"; return 1; }
   provenance "$( [ "$FROM_TREE" = "1" ] && echo "WORKTREE (uncommitted; not evidence about ${REF})" || echo "$REF" )" "$PAGE" "block containing: ${needle}" "-" "$sha"
+}
+# step_begin_sec NAME SECTION NEEDLE ... the same, for a block_sec step.
+step_begin_sec() {
+  local name="$1" sec="$2" needle="$3" sha
+  _emit ""; _emit "=== STEP ${name} =============================================="
+  sha="$(block_sec_sha "$sec" "$needle")" || { _emit "EXCEPTION: no single block containing '${needle}' under '${sec}' in ${PAGE} @ ${REF}"; return 1; }
+  provenance "$( [ "$FROM_TREE" = "1" ] && echo "WORKTREE (uncommitted; not evidence about ${REF})" || echo "$REF" )" "$PAGE" "block containing: ${needle} under ${sec}" "-" "$sha"
 }
 
 # block_gone STEP ... a step's block did not resolve to exactly one block on the page.
@@ -412,7 +461,7 @@ S=S06-dry-run
 if ! done_step "$S"; then budget_left || yield "S06+"
   step_begin "$S" '--config tockmox.yaml --dry-run' || block_gone "$S"
   execute_begin "install.md 1b --dry-run"; run_ws "$S" "$(block '--config tockmox.yaml --dry-run')"; execute_end $?
-  record "$S" "1b: 'revision ${TM_REV} resolves in ${TM_URL}'" "1" "$(out_of "$S" | grep -c "revision ${TM_REV} resolves in" | tr -d ' ')"
+  record_revision_row "$S"
   record "$S" "1b: 'settings valid'" "1" "$(out_of "$S" | grep -c 'settings valid' | tr -d ' ')"
   record "$S" "1b: 'dry-run: nothing will be written'" "1" "$(out_of "$S" | grep -c 'dry-run: nothing will be written' | tr -d ' ')"
   record "$S" "1b: 'installer finished. Nothing was applied to your cluster.'" "1" "$(out_of "$S" | grep -c 'installer finished. Nothing was applied' | tr -d ' ')"
@@ -723,8 +772,9 @@ fi
 # S20 ... what is expected to look broken: the devops log tail (read only).
 S=S20-devops-log
 if ! done_step "$S"; then budget_left || yield "S20+"
-  step_begin "$S" 'logs deploy/tockmox-devops-argo-workflows-server --tail=3' || block_gone "$S"
-  execute_begin "install.md expected-broken read"; run_ws "$S" "$(block 'logs deploy/tockmox-devops-argo-workflows-server --tail=3')"; execute_end $?
+  S20_SECTION="### The readiness bar"     # the single-command read under the expected-broken table
+  step_begin_sec "$S" "$S20_SECTION" 'logs deploy/tockmox-devops-argo-workflows-server --tail=3' || block_gone "$S"
+  execute_begin "install.md expected-broken read"; run_ws "$S" "$(block_sec "$S20_SECTION" 'logs deploy/tockmox-devops-argo-workflows-server --tail=3')"; execute_end $?
   note "S20: argo-workflows-server tail: $(out_of "$S" | tail -3 | tr '\n' ' ' | cut -c1-240)"
   record "$S" "expected-broken read: the log block ran against an existing Deployment" "0" "$(out_of "$S" | grep -c 'NotFound' | tr -d ' ')"
   mark_done "$S"
