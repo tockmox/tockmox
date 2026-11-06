@@ -55,6 +55,7 @@ KINDS = {
     "revert-change": ("changes", "medium", True, "Opened a revert of"),
     "open-change": ("changes", "low", False, "Opened a change"),
     "add-admin": ("changes", "medium", True, "Opened a change adding an administrator"),
+    "set-capability": ("changes", "low", False, "Opened a change setting"),
 }
 SWITCHES = ("silence", "runJob", "argocd", "restart", "testAlert", "identity", "changes")
 IDENTITY_KINDS = ("recovery-link", "add-member", "remove-member")
@@ -66,12 +67,19 @@ FORGE_PERSON_KINDS = ("approve-change", "decline-change")
 # The kinds that OPEN a change as the change bot from a page that renders one; it waits for an approval like any other.
 # open-change carries a draft the page staged with the service (its digest); add-admin is computed by the service from
 # what main says now.
-OPEN_KINDS = ("open-change", "add-admin")
+OPEN_KINDS = ("open-change", "add-admin", "set-capability")
 DRAFT_WHATS = ("models", "nodes")
 DIGEST = re.compile(r"[0-9a-f]{64}")
 ADMIN_USERNAME = re.compile(r"[^\s\x00-\x1f\x7f]{1,150}")   # sso.adminUsers' own schema: no whitespace
 VALUES_PATH = re.compile(r"([A-Za-z0-9_-][A-Za-z0-9._-]{0,99}/){0,9}[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}\.ya?ml")   # no segment starts with a dot
-VALUES_FILES = {"models": "site/values/ai.yaml", "identity": "site/values/identity.yaml"}
+VALUES_FILES = {"models": "site/values/ai.yaml", "identity": "site/values/identity.yaml",
+                "global": "site/values/global.yaml"}
+# set-capability: the capability switches (docs/administration/capabilities.md), each in the file every layer reads.
+# identity is the console's own sign-in, so the console never opens a change turning it OFF (that change would lock
+# out the person approving it); it may turn it on.
+CAPABILITIES = ("identity", "observability", "notifications", "aiPlane", "dataProtection", "hardwareTelemetry",
+                "workflowAutomation", "networkPolicy")
+NEVER_OFF_FROM_THE_CONSOLE = ("identity",)
 SHA = re.compile(r"[0-9a-f]{40}")
 REPO = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
 RECOVERY_HOURS = (1, 24, 72)
@@ -360,6 +368,16 @@ def check(cfg: Config, it: dict) -> dict:
             raise Refused("the applied revision is not a commit")
         if p:
             raise Refused("opening a change takes no parameters")
+    elif kind == "set-capability":
+        cap, en = t.get("capability"), t.get("enabled")
+        if cap not in CAPABILITIES or not isinstance(en, bool) or set(t) - {"capability", "enabled"}:
+            raise Refused("setting a capability names one of the eight capabilities and on or off")
+        if cap in NEVER_OFF_FROM_THE_CONSOLE and not en:
+            raise Refused(f"{cap} is how you sign in to this console, so it is not turned off from here: that change "
+                          f"would lock out whoever approves it. Set capabilities.{cap}.enabled in site/values/global.yaml "
+                          "by hand if you mean it")
+        if p:
+            raise Refused("setting a capability takes no parameters")
     elif kind == "add-admin":
         if not ADMIN_USERNAME.fullmatch(str(t.get("username", ""))) or set(t) - {"username"}:
             raise Refused("adding an administrator names one username, with no spaces")
@@ -474,6 +492,20 @@ def describe(it: dict, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime
                           f"(a name Authentik does not know yet is skipped and logged).",
                 "undo": f"Decline the change. Once applied, taking it out of sso.adminUsers does not remove {u} from "
                         "the admin group (the job only adds): remove them in Authentik's admin console as well."}
+    if k == "set-capability":
+        from .capabilities import CATALOG
+        cap, en = t.get("capability", ""), bool(t.get("enabled"))
+        c = next((x for x in CATALOG if x.key == cap), None)
+        name, comps = (c.name, c.components) if c else (cap, "its components")
+        word = "on" if en else "off"
+        return {"title": f"Turn {name} {word}?", "summary": f"Opened a change turning {name} {word}",
+                "target": f"capabilities.{cap}.enabled: {str(en).lower()} in the site values every layer reads",
+                "effect": f"Opens a change setting only capabilities.{cap}.enabled to {str(en).lower()} in "
+                          f"site/values/global.yaml, as the change bot. Nothing changes until an administrator "
+                          f"approves it; then Argo CD {'adds' if en else 'removes'} what {name} owns, across every "
+                          f"layer: {comps}.",
+                "undo": f"Decline the change. Once applied, turn {name} {'off' if en else 'on'} again from Platform > "
+                        "Capabilities, which opens the opposite change."}
     if k == "test-alert":
         return {"title": "Send a test alert to your phone?", "summary": "Sent a test alert",
                 "target": "the alert path: Alertmanager, the alert bridge, your phone",

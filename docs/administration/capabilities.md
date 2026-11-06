@@ -77,7 +77,11 @@ exporters to the layer you already run; there is nothing else to install.
 The block is closed, so a typo is refused rather than ignored ... see
 [the capabilities block is closed](#the-capabilities-block-is-closed).
 
-Set it in your site values, in the file every layer reads:
+Set it in your site values, in the file every layer reads. On a site whose
+forge is built in, **Platform › Capabilities** in the console opens this change
+for you (**Turn off** or **Turn on**), and it waits for an approval like any
+change ([site forge](site-forge.md#opening-a-change-from-a-page)); single sign-on
+is the one it will not turn off. By hand:
 
 ```yaml
 # site/values/global.yaml

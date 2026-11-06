@@ -183,6 +183,10 @@ class Forge:
             tree = self.files.get(req.url.params.get("ref", "main"), {})
             body = tree.get(mt.group(1))
             if body is None:
+                pre = mt.group(1).rstrip("/") + "/"
+                kids = sorted(k for k in tree if k.startswith(pre) and "/" not in k[len(pre):])
+                if kids:                                  # a folder: its direct files, as Forgejo lists them
+                    return httpx.Response(200, json=[{"type": "file", "name": k[len(pre):], "path": k} for k in kids])
                 return httpx.Response(404, json={"message": "not found"})
             return httpx.Response(200, json={"type": "file", "encoding": "base64", "content": b64(body), "sha": sha_of(body)})
         if p == base_ + "/contents" and m == "POST":
