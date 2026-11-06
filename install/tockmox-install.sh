@@ -811,6 +811,9 @@ global:
   # log chunks, a Postgres cluster that is already streaming to its replicas.
   # Node-local by design. Do not point it at anything whose loss you would mind.
   localStorageClass: $(q "${G_LSC}")
+  # Where the site repository lives (site.forge). built-in turns on, by default,
+  # what needs the built-in forge: the console's Platform > Changes page.
+  siteForge: ${SITE_FORGE}
 EOF
   for l in "${LAYERS_ON[@]}"; do
     if [[ "$l" == "policy" && -n "${NS_OVERRIDES:-}" ]]; then
