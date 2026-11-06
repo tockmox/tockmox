@@ -715,8 +715,9 @@ states: [A-Za-z0-9]+ NetworkPolicies
 
 # A FOURTH restating page, found 2026-09-14 by executing install.md's own
 # render-and-compare block (P09): its illustrative table still read 32 two days
-# after the three entries above were pinned. The page's block renders with two
-# arbitrary --set values rather than ci/values.yaml, and gives the same count.
+# after the three entries above were pinned. The page's block renders with three
+# arbitrary --set values rather than ci/values.yaml (the third a stand-in for
+# nodeOriginSources, required since 0.8.0), and gives the same count.
 page:   docs/deployment/install.md
 claim:  NetworkPolicy
 test:   helm template p charts/tockmox-policy -f ci/values.yaml --set apps.kube_bench.enabled=false 2>/dev/null | grep -c '^kind: NetworkPolicy' | tr -d ' '

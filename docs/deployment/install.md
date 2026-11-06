@@ -1355,14 +1355,23 @@ Succeeded: successfully synced (all tasks run)
 render the chart yourself and compare, which is true at whatever version you
 are on ([history](#history-the-policy-render-table)):
 
-**WORKSTATION**, from your Tockmox clone at the revision you installed. The two
+**WORKSTATION**, from your Tockmox clone at the revision you installed. The three
 `--set` values are arbitrary ... the chart refuses to render without them, and
-nothing here depends on what they are.
+nothing here depends on what they are. The third stands in for the block
+`--print-netpol-node-sources` printed for your site in
+[1f](#1f-name-each-nodes-gateway-address-for-the-policy-layer). The first
+command packages the chart's one dependency, `tockmox-common`, from beside it
+in the same clone: a fresh clone does not carry that packaged copy, and
+without it `helm template` stops with `missing in charts/ directory:
+tockmox-common`. It reads nothing from the network, and running it again
+changes nothing.
 
 ```bash
 : "${TOCKMOX:?export TOCKMOX first, see Set these once}"
+helm dependency build "$TOCKMOX/charts/tockmox-policy" >/dev/null
 helm template "$TOCKMOX/charts/tockmox-policy" \
   --set global.lanCIDR=10.0.0.0/24 --set global.internalDomain=example.com \
+  --set 'platformNetpol.nodeOriginSources={192.0.2.0/24}' \
   | grep '^kind:' | sort | uniq -c | sort -rn
 ```
 
@@ -2140,6 +2149,14 @@ The NetworkPolicy line read 32 from 2026-09-12 until 2026-09-14, the fourth
 page found restating a count the layer's own README had already corrected to
 33. Correcting an owner does not correct the pages that repeat it,
 which is why the number is now a registered claim rather than prose.
+
+The render-and-compare block itself did not run from a fresh clone from 0.8.0
+until 2026-11-06, for two reasons, the second hidden behind the first. A fresh
+clone does not carry the policy chart's packaged dependency (`tockmox-common`,
+gitignored), so `helm template` stopped first; and since 0.8.0 the chart also
+refuses to render with no `platformNetpol.nodeOriginSources`. The block now
+builds the dependency and sets a stand-in for that list. The executed-docs P09
+path found the first; fixing it showed the second.
 
 <a id="history-the-readiness-bar"></a>
 
