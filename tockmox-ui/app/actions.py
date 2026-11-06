@@ -56,6 +56,9 @@ KINDS = {
     "open-change": ("changes", "low", False, "Opened a change"),
     "add-admin": ("changes", "medium", True, "Opened a change adding an administrator"),
     "set-capability": ("changes", "low", False, "Opened a change setting"),
+    "bump-release": ("changes", "medium", True, "Opened a change upgrading Tockmox"),
+    "set-feature": ("changes", "low", False, "Opened a change setting"),
+    "assign-job": ("changes", "low", False, "Opened a change giving"),
 }
 SWITCHES = ("silence", "runJob", "argocd", "restart", "testAlert", "identity", "changes")
 IDENTITY_KINDS = ("recovery-link", "add-member", "remove-member")
@@ -67,19 +70,32 @@ FORGE_PERSON_KINDS = ("approve-change", "decline-change")
 # The kinds that OPEN a change as the change bot from a page that renders one; it waits for an approval like any other.
 # open-change carries a draft the page staged with the service (its digest); add-admin is computed by the service from
 # what main says now.
-OPEN_KINDS = ("open-change", "add-admin", "set-capability")
+OPEN_KINDS = ("open-change", "add-admin", "set-capability", "bump-release", "set-feature", "assign-job")
 DRAFT_WHATS = ("models", "nodes")
 DIGEST = re.compile(r"[0-9a-f]{64}")
 ADMIN_USERNAME = re.compile(r"[^\s\x00-\x1f\x7f]{1,150}")   # sso.adminUsers' own schema: no whitespace
 VALUES_PATH = re.compile(r"([A-Za-z0-9_-][A-Za-z0-9._-]{0,99}/){0,9}[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}\.ya?ml")   # no segment starts with a dot
 VALUES_FILES = {"models": "site/values/ai.yaml", "identity": "site/values/identity.yaml",
-                "global": "site/values/global.yaml"}
+                "global": "site/values/global.yaml", "ai": "site/values/ai.yaml"}
 # set-capability: the capability switches (docs/administration/capabilities.md), each in the file every layer reads.
 # identity is the console's own sign-in, so the console never opens a change turning it OFF (that change would lock
 # out the person approving it); it may turn it on.
 CAPABILITIES = ("identity", "observability", "notifications", "aiPlane", "dataProtection", "hardwareTelemetry",
                 "workflowAutomation", "networkPolicy")
 NEVER_OFF_FROM_THE_CONSOLE = ("identity",)
+# set-feature: the console's own optional areas, each one key in the AI layer's values (where tockmoxUi lives).
+FEATURES = {"platform": ("Platform Management", ("tockmoxUi", "config", "features", "platform", "enabled"))}
+# assign-job: scheduled work with no owner, given to a role by name in features.platform.assign (docs/administration/
+# platform-management.md). A CronJob or CronWorkflow name, and a catalog role id (platform.py's own rule).
+ASSIGN_PATH = ("tockmoxUi", "config", "features", "platform", "assign")
+JOB_NAME = re.compile(r"[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?")
+ROLE_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,31}")
+# bump-release: a release tag, as the installer writes it into each layer's Application (targetRevision: v0.8.3), and
+# the preflight the Upgrade page drew, which the change carries in its description.
+RELEASE_TAG = re.compile(r"v\d{1,4}\.\d{1,4}\.\d{1,4}(?:-[0-9A-Za-z.]{1,40})?")
+BUMP_KINDS = ("patch", "minor", "major")
+PREFLIGHT_STATES = ("ok", "critical", "warning", "unknown")
+APPLICATIONS_FOLDER = "bootstrap/applications"
 SHA = re.compile(r"[0-9a-f]{40}")
 REPO = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
 RECOVERY_HOURS = (1, 24, 72)
@@ -378,6 +394,35 @@ def check(cfg: Config, it: dict) -> dict:
                           "by hand if you mean it")
         if p:
             raise Refused("setting a capability takes no parameters")
+    elif kind == "set-feature":
+        f, en = t.get("feature"), t.get("enabled")
+        if f not in FEATURES or not isinstance(en, bool) or set(t) - {"feature", "enabled"}:
+            raise Refused(f"setting a console feature names one of {sorted(FEATURES)} and on or off")
+        if p:
+            raise Refused("setting a console feature takes no parameters")
+    elif kind == "assign-job":
+        job, role = t.get("job"), t.get("role")
+        if not (isinstance(job, str) and JOB_NAME.fullmatch(job) and isinstance(role, str) and ROLE_ID.fullmatch(role)) \
+                or set(t) - {"job", "role"}:
+            raise Refused("giving work to a role names one scheduled job and one role")
+        if p:
+            raise Refused("giving work to a role takes no parameters")
+    elif kind == "bump-release":
+        frm, to, bk, pf = t.get("from"), t.get("to"), t.get("kind"), t.get("preflight")
+        if not (isinstance(frm, str) and RELEASE_TAG.fullmatch(frm) and isinstance(to, str) and RELEASE_TAG.fullmatch(to)) \
+                or frm == to or bk not in BUMP_KINDS or set(t) - {"from", "to", "kind", "preflight"}:
+            raise Refused("an upgrade names the release you are on, the one to move to, and the kind of upgrade")
+        if not isinstance(pf, list) or not 1 <= len(pf) <= 12:
+            raise Refused("an upgrade carries the Upgrade page's preflight")
+        for c in pf:
+            if not isinstance(c, dict) or set(c) != {"label", "state", "manual"} or not isinstance(c["label"], str) \
+                    or not 0 < len(c["label"]) <= 200 or any(ord(x) < 32 for x in c["label"]) \
+                    or c["state"] not in PREFLIGHT_STATES or not isinstance(c["manual"], bool):
+                raise Refused("a preflight check is a label, a state and whether it is checked by hand")
+            if not c["manual"] and c["state"] != "ok":
+                raise Refused(f"the preflight is not green ({c['label']}); open the Upgrade page again")
+        if p:
+            raise Refused("an upgrade takes no parameters")
     elif kind == "add-admin":
         if not ADMIN_USERNAME.fullmatch(str(t.get("username", ""))) or set(t) - {"username"}:
             raise Refused("adding an administrator names one username, with no spaces")
@@ -506,6 +551,44 @@ def describe(it: dict, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime
                           f"layer: {comps}.",
                 "undo": f"Decline the change. Once applied, turn {name} {'off' if en else 'on'} again from Platform > "
                         "Capabilities, which opens the opposite change."}
+    if k == "set-feature":
+        f, en = t.get("feature", ""), bool(t.get("enabled"))
+        name = FEATURES.get(f, (f,))[0]
+        word = "on" if en else "off"
+        key = ".".join(FEATURES[f][1]) if f in FEATURES else f
+        return {"title": f"Turn {name} {word}?", "summary": f"Opened a change turning {name} {word}",
+                "target": f"{key}: {str(en).lower()} in the AI layer's site values",
+                "effect": f"Opens a change setting only {key} to {str(en).lower()} in site/values/ai.yaml, as the change "
+                          "bot. Nothing changes until an administrator approves it; then Argo CD restarts the console "
+                          + ("with the Platform area (Overview, Organization, Schedule, and Cases and Specialists where "
+                             "they are connected) for administrators." if en else
+                             "without the Platform area: its pages answer 404 and leave the menu."),
+                "undo": f"Decline the change. Once applied, turn {name} {'off' if en else 'on'} again from Platform > "
+                        "Capabilities, which opens the opposite change."}
+    if k == "assign-job":
+        job, role = t.get("job", ""), t.get("role", "")
+        key = ".".join(ASSIGN_PATH)
+        return {"title": f"Give {job} to {role}?", "summary": f"Opened a change giving {job} to {role}",
+                "target": f"{key}.{job}: {role} in the AI layer's site values",
+                "effect": f"Opens a change setting only {key}.{job} to {role} in site/values/ai.yaml, as the change bot. "
+                          f"Nothing changes until an administrator approves it; then the console restarts and lists "
+                          f"{job} under {role}, whose numbers and schedule now count it. A tockmox.com/practice label on "
+                          "the workload still wins over this.",
+                "undo": f"Decline the change. Once applied, delete the {job} line under {key} in site/values/ai.yaml, "
+                        "and the job reads as having no owner again."}
+    if k == "bump-release":
+        frm, to, bk = t.get("from", ""), t.get("to", ""), t.get("kind", "")
+        hand = [c["label"] for c in t.get("preflight") or [] if c.get("manual")]
+        return {"title": f"Upgrade Tockmox from {frm} to {to}?", "summary": f"Opened a change upgrading Tockmox to {to}",
+                "target": f"every layer's Application, {frm} to {to} ({bk} upgrade)",
+                "effect": f"Opens a change, as the change bot, that moves every layer's targetRevision from {frm} to {to} "
+                          f"in {APPLICATIONS_FOLDER}, and nothing else; the preflight goes in its description. Nothing "
+                          "changes until an administrator approves it; then Argo CD moves each layer, wave by wave, and the guide's steps "
+                          "6 and 7 confirm it landed."
+                          + (f" Before approving, do what the console cannot check: {'; '.join(hand)}." if hand else ""),
+                "undo": "Decline the change. Once applied, follow Roll back in docs/deployment/upgrade.md: swapping the "
+                        "revisions puts every manifest back, and a release that migrated a database needs the backup "
+                        "from the guide's step 2 first."}
     if k == "test-alert":
         return {"title": "Send a test alert to your phone?", "summary": "Sent a test alert",
                 "target": "the alert path: Alertmanager, the alert bridge, your phone",

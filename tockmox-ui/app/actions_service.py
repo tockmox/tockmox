@@ -64,7 +64,7 @@ from .forge import Forge, Paused
 from . import values_edit as ve
 
 # The kinds that open a change as the change bot; each records the person who asked (Tockmox-Requested-By).
-OPENS = ("open-change", "add-admin", "set-capability")
+OPENS = ("open-change", "add-admin", "set-capability", "bump-release", "set-feature", "assign-job")
 
 
 def _username(claims) -> str:
@@ -694,6 +694,21 @@ class Service:
                     "slug": "admin", "applied": ""}
         if kind == "set-capability":
             return self._capability_plan(str(t.get("capability", "")), bool(t.get("enabled")))
+        if kind == "set-feature":
+            f, en = str(t.get("feature", "")), bool(t.get("enabled"))
+            name, keys = act.FEATURES[f]
+            word = "on" if en else "off"
+            return {"path": self.cfg.values_file("ai"), "edits": [(list(keys), en)], "title": f"Turn {name} {word}",
+                    "summary": f"Sets {'.'.join(keys)} to {str(en).lower()} in {self.cfg.values_file('ai')}. Once "
+                               f"applied, Argo CD restarts the console {'with' if en else 'without'} the {name} area.",
+                    "slug": f"feature-{f}", "applied": ""}
+        if kind == "assign-job":
+            job, role = str(t.get("job", "")), str(t.get("role", ""))
+            return {"path": self.cfg.values_file("ai"), "edits": [(list(act.ASSIGN_PATH) + [job], role)],
+                    "title": f"Give {job} to {role}",
+                    "summary": f"Sets {'.'.join(act.ASSIGN_PATH)}.{job} to {role} in {self.cfg.values_file('ai')}, so "
+                               f"Platform Management lists the scheduled job {job}, which matched no role, under {role}.",
+                    "slug": "assign-job", "applied": ""}
         raise act.Refused(f"{kind} does not open a change")
 
     def _capability_plan(self, cap: str, en: bool) -> dict:
@@ -731,9 +746,38 @@ class Service:
                            f"layer ({c.components if c else 'its components'}).",
                 "slug": f"capability-{cap.lower()}", "applied": ""}
 
+    def _bump(self, t: dict) -> dict:
+        """bump-release: every layer's Application moved from one release to the next (forge.bump_plan), with the
+        preflight the Upgrade page drew as the change's description."""
+        frm, to, bk = str(t.get("from", "")), str(t.get("to", "")), str(t.get("kind", ""))
+        files = self.forge.bump_plan(act.APPLICATIONS_FOLDER, frm, to)
+        words = {"ok": "ok", "critical": "NOT OK", "warning": "warning", "unknown": "unknown"}
+        auto = [c for c in t.get("preflight") or [] if not c.get("manual")]
+        hand = [c for c in t.get("preflight") or [] if c.get("manual")]
+        lines = [f"Moves every layer's targetRevision from {frm} to {to} ({bk} upgrade) in "
+                 f"{act.APPLICATIONS_FOLDER}, and nothing else: {len(files)} file(s). Lines naming the site's own "
+                 f"branch ({self.cfg.changes_base}) are left alone.", "",
+                 "Preflight the console checked when this was opened (Platform > Updates):"]
+        lines += [f"- {words.get(c['state'], c['state'])}: {c['label']}" for c in auto]
+        if hand:
+            lines += ["", "Before approving, check by hand (the console cannot):"]
+            lines += [f"- {c['label']}" for c in hand]
+        lines += ["", "The upgrade guide: docs/deployment/upgrade.md."]
+        return {"files": files, "title": f"Upgrade Tockmox from {frm} to {to}", "summary": "\n".join(lines),
+                "slug": f"upgrade-{to.lower()}"}
+
     def preview(self, kind: str, t: dict) -> dict:
         """The confirm panel's diff: exactly what the change would do to the file on main now."""
         import difflib
+        if kind == "bump-release":
+            try:
+                b = self._bump(t)
+            except Paused as e:
+                raise act.Refused("the site forge is not answering, so nothing can be opened now") from e
+            diff = "".join("".join(difflib.unified_diff(f["before"].splitlines(True), f["after"].splitlines(True),
+                                                        f"a/{f['path']}", f"b/{f['path']}", n=2)) for f in b["files"])
+            return {"path": act.APPLICATIONS_FOLDER, "title": b["title"], "diff": diff[:200_000],
+                    "cut": len(diff) > 200_000}
         pl = self.change_plan(kind, t)
         try:
             plan = self.forge.plan_change(pl["path"], pl["edits"], pl["applied"])
@@ -744,6 +788,13 @@ class Service:
         return {"path": plan["path"], "title": pl["title"], "diff": diff[:200_000], "cut": len(diff) > 200_000}
 
     def _open(self, it, who, claims=None):
+        if it["kind"] == "bump-release":
+            try:
+                b = self._bump(it["target"])
+                return self.forge.open_files(b["files"], b["title"], b["summary"], who, b["slug"],
+                                             requested=_username(claims))
+            except Paused as e:
+                raise act.Refused("the forge stopped answering; nothing was opened") from e
         pl = self.change_plan(it["kind"], it["target"])
         try:
             return self.forge.open_change(pl["path"], pl["edits"], pl["title"], pl["summary"], who, pl["slug"],
@@ -758,6 +809,15 @@ class Service:
         return self._open(it, who, claims)
 
     def do_set_capability(self, it, who, claims=None):
+        return self._open(it, who, claims)
+
+    def do_bump_release(self, it, who, claims=None):
+        return self._open(it, who, claims)
+
+    def do_set_feature(self, it, who, claims=None):
+        return self._open(it, who, claims)
+
+    def do_assign_job(self, it, who, claims=None):
         return self._open(it, who, claims)
 
     # ------------------------------------------------------------ one intent

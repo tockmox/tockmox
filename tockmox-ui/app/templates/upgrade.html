@@ -3,7 +3,7 @@
 {% block title %}Upgrade{% endblock %}
 {% block main %}
 <h1>Upgrade{% if tgt %} to {{ tgt_rev }}{% endif %}</h1>
-<p class="lede">This page changes nothing. It checks your platform, then shows the steps from the upgrade guide with your versions filled in. The upgrade itself is a one-line commit to your site repository, which Argo CD then applies.</p>
+<p class="lede">{% if bump_on %}This page checks your platform, shows the steps from the upgrade guide with your versions filled in, and can open the version bump as a change you approve. Nothing is applied until someone approves it.{% else %}This page changes nothing. It checks your platform, then shows the steps from the upgrade guide with your versions filled in. The upgrade itself is a one-line commit to your site repository, which Argo CD then applies.{% endif %}</p>
 
 {% if not cur %}
 <p>{{ badge("unknown", "Version unknown") }} The running version could not be read, so the steps below keep their placeholders.</p>
@@ -28,6 +28,18 @@
   {% endfor %}
   </ul>
 </section>
+
+{% if bump_on and tgt %}
+<section class="panel" aria-labelledby="bump-h">
+  <h2 id="bump-h">Open the upgrade as a change</h2>
+  {% if verified and ready and not breaking and cur_rev and tgt_rev and kind in ("patch", "minor", "major") %}
+  <p>The console can open step 5 for you: a change that moves every layer's revision from <strong>{{ cur_rev }}</strong> to <strong>{{ tgt_rev }}</strong> and nothing else, with these checks in its description. It waits on Platform › Changes for an approval; nothing is applied until then. Upgrade the built-in forge first{% if kind != "patch" %}, and do the guide's steps 2 to 4,{% endif %} before you approve it.</p>
+  <p><a class="pill primary" href="/actions/confirm?kind=bump-release&amp;to={{ tgt | urlencode }}">Open the upgrade as a change</a></p>
+  {% else %}
+  <p class="muted">The console opens the upgrade as a change only when the release feed is verified, every check above passes, and no release on the way lists a breaking change (those edits go in the same commit as the bump, by hand). {% if not verified %}The feed is not verified here.{% elif breaking %}A release on the way lists breaking changes.{% elif not ready %}A check above is not passing.{% else %}The running release is not known.{% endif %} Follow the steps below instead.</p>
+  {% endif %}
+</section>
+{% endif %}
 
 {% if breaking %}
 <section class="panel warnbox" aria-labelledby="brk-h">

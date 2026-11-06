@@ -664,8 +664,13 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
             return forbidden(request, u)
         rd, rows = capability_rows()
         change_on = bool(s.actions and s.actions.any and s.actions.on("set-capability"))
+        feats = [{"id": "platform", "name": act.FEATURES["platform"][0],
+                  "key": ".".join(act.FEATURES["platform"][1][1:]), "on": platform_on(),
+                  "what": "The operations view: the platform's roles, the scheduled work each owns, the numbers each "
+                          "watches, and the agents' cases. Administrators only."}]
         return render(request, "capabilities.html", u, rows=rows, apps_reading=rd, change_on=change_on,
-                      never_off=act.NEVER_OFF_FROM_THE_CONSOLE)
+                      never_off=act.NEVER_OFF_FROM_THE_CONSOLE, features=feats,
+                      feature_change_on=bool(s.actions and s.actions.any and s.actions.on("set-feature")))
 
     @app.get("/version")
     def version_moved(request: Request):
@@ -712,18 +717,14 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         checker.check(force=True)
         return RedirectResponse("/platform/updates", status_code=303)
 
-    @app.get("/upgrade", response_class=HTMLResponse)
-    def upgrade(request: Request, to: str = ""):
-        u = user_of(request)
-        if not u:
-            return need_login(request)
-        if not u.is_admin:
-            return forbidden(request, u)
+    def upgrade_plan(to: str = "") -> dict:
+        """The Upgrade page's preflight for a target release, as data: the page draws it, and the console's upgrade
+        change (bump-release) carries it. Performs nothing."""
         r = readings()
         ver = running_version(r["apps"])
         cur = ver.get("version")
         st = checker.state
-        tgt = to.strip()
+        tgt = (to or "").strip()
         if tgt and not feedmod.parse_version(tgt):
             tgt = ""
         if not tgt:
@@ -770,11 +771,25 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         for rr in path:
             for b in rr.get("breaking") or []:
                 breaking.append((rr["version"], str(b)))
-        return render(request, "upgrade.html", u, cur=cur, tgt=tgt, kind=kind, steps=steps,
-                      checks=checks, ready=all(c["state"] == OK for c in checks if not c["manual"]),
-                      breaking=breaking, feed=st, ver=ver, argocd_ns=s.argocd_namespace,
-                      cur_rev=("v" + cur.lstrip("v")) if cur and feedmod.parse_version(cur) else None,
-                      tgt_rev=("v" + tgt.lstrip("v")) if tgt and not tgt.startswith("v") else tgt)
+        return dict(cur=cur, tgt=tgt, kind=kind, steps=steps, checks=checks,
+                    ready=all(c["state"] == OK for c in checks if not c["manual"]),
+                    breaking=breaking, feed=st, ver=ver, verified=bool(st.verified),
+                    cur_rev=("v" + cur.lstrip("v")) if cur and feedmod.parse_version(cur) else None,
+                    tgt_rev=("v" + tgt.lstrip("v")) if tgt and not tgt.startswith("v") else tgt)
+
+    @app.get("/upgrade", response_class=HTMLResponse)
+    def upgrade(request: Request, to: str = ""):
+        u = user_of(request)
+        if not u:
+            return need_login(request)
+        if not u.is_admin:
+            return forbidden(request, u)
+        pl = upgrade_plan(to)
+        bump_on = bool(s.actions and s.actions.any and s.actions.on("bump-release"))
+        return render(request, "upgrade.html", u, cur=pl["cur"], tgt=pl["tgt"], kind=pl["kind"], steps=pl["steps"],
+                      checks=pl["checks"], ready=pl["ready"], breaking=pl["breaking"], feed=pl["feed"], ver=pl["ver"],
+                      argocd_ns=s.argocd_namespace, cur_rev=pl["cur_rev"], tgt_rev=pl["tgt_rev"],
+                      bump_on=bump_on, verified=pl["verified"])
 
     @app.get("/tabs/{fid}", response_class=HTMLResponse)
     def tab(request: Request, fid: str):
@@ -845,7 +860,8 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
     actions_routes.register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, oidc,
                             lambda: placed(readings()), transport=tp.actions,
                             active_silences=lambda: src_am._console_silences(),
-                            forge_jobs=src_forge_jobs.read, alerts_now=src_am.read, site_revision=ai_site_revision)
+                            forge_jobs=src_forge_jobs.read, alerts_now=src_am.read, site_revision=ai_site_revision,
+                            upgrade_plan=upgrade_plan)
     nodes_routes.register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_inodes, prober, APP_VERSION,
                           src_report=src_report, build_checks=build_checks)
 

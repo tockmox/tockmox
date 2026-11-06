@@ -101,7 +101,7 @@ def silences_on(pv) -> list[dict]:
 
 
 def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, oidc, placed_now, transport=None,
-             active_silences=lambda: {}, forge_jobs=None, alerts_now=None, site_revision=None):
+             active_silences=lambda: {}, forge_jobs=None, alerts_now=None, site_revision=None, upgrade_plan=None):
     cfg: act.Config = s.actions or act.Config()
 
     def site_time(ts):
@@ -183,6 +183,22 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
                     "applied": str(q.get("applied", ""))}, _back(q.get("back", ""), "/platform/changes"), ""
         if kind == "add-admin":
             return {"username": str(q.get("username", ""))}, "/platform/identity", ""
+        if kind == "bump-release":
+            return bump_target(str(q.get("to", "")))
+        if kind == "set-feature":
+            en = str(q.get("enabled", ""))
+            return {"feature": str(q.get("feature", "")), "enabled": en == "true" if en in ("true", "false") else en}, \
+                "/capabilities", ""
+        if kind == "assign-job":
+            job, role = str(q.get("job", "")), str(q.get("role", ""))
+            pl = getattr(request.app.state, "platform", None) or {}
+            if "unowned" not in pl:
+                raise act.Refused("Platform Management is not on here, so there is no unowned work to give")
+            if not pl["catalog"].get(role):
+                raise act.Refused(f"there is no role {role!r} in this platform's catalog")
+            if job not in pl["unowned"]():
+                raise act.Refused(f"{job} is not listed as scheduled work with no owner now; see Platform > Overview")
+            return {"job": job, "role": role}, "/platform", ""
         if kind == "set-capability":
             en = str(q.get("enabled", ""))
             return {"capability": str(q.get("capability", "")), "enabled": en == "true" if en in ("true", "false") else en}, \
@@ -216,6 +232,36 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
                 raise act.Refused("that silence is not on this part now")
             return {"silence": sid, "label": f"{', '.join(sorted(set(row['alerts'])))} (silenced by {row['by']})"}, back, ""
         raise act.Refused(f"no such action {kind!r}")
+
+    def bump_target(to: str):
+        """The upgrade change's target, from the Upgrade page's own preflight drawn now. Offered only when the release
+        feed is verified, the preflight is green, and no release on the way lists a breaking change (those edits go
+        in the same commit by hand, which a console cannot write). What only a person can check is carried as such."""
+        if upgrade_plan is None:
+            raise act.Refused("this console has no upgrade preflight to carry")
+        pl = upgrade_plan(to)
+        cur, tgt = pl.get("cur_rev"), pl.get("tgt_rev")
+        if not pl.get("verified"):
+            raise act.Refused("the release feed is not verified here, so the console does not open an upgrade")
+        if not (cur and tgt and act.RELEASE_TAG.fullmatch(cur) and act.RELEASE_TAG.fullmatch(tgt)):
+            raise act.Refused("the running release or the one to move to is not known")
+        if pl.get("breaking"):
+            raise act.Refused("a release on the way lists breaking changes, whose edits go in the same commit as the "
+                              "bump; follow the steps on the Upgrade page by hand")
+        if not pl.get("ready") or pl.get("kind") not in act.BUMP_KINDS:
+            raise act.Refused("the preflight is not green; see the Upgrade page")
+        pf = [{"label": str(c["label"])[:200], "state": str(c["state"]) if c["state"] in act.PREFLIGHT_STATES else "unknown",
+               "manual": bool(c.get("manual"))} for c in pl["checks"]]
+        hand = [f"The release notes read for every release on the way (the guide's step 1)",
+                f"The built-in forge is upgraded to {tgt}'s pinned Forgejo first: tockmox-install.sh upgrade-forge from "
+                f"a clone at {tgt} (the guide's step 2)",
+                {"patch": "A backup taken if the release notes move a bundled application that migrates its own "
+                          "database (the guide's step 2)",
+                 "minor": "A backup taken and your customisations checked (the guide's steps 2 and 3)",
+                 "major": "A backup taken, your customisations checked, the render diffed and the migration notes "
+                          "followed (the guide's steps 2 to 4)"}[pl["kind"]]]
+        pf += [{"label": h, "state": "unknown", "manual": True} for h in hand]
+        return {"from": cur, "to": tgt, "kind": pl["kind"], "preflight": pf[:12]}, f"/upgrade?to={quote(tgt, safe='')}", ""
 
     @app.get("/actions/confirm")
     def confirm(request: Request, kind: str = ""):

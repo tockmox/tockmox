@@ -20,7 +20,8 @@
 #          act      may run named, reversible actions on its own (no role has this in v1)
 #
 # schedules.match: which CronJobs and Argo CronWorkflows a role owns. A workload labelled
-#   tockmox.com/practice=<role id> always belongs to that role; otherwise the first role (in file
+#   tockmox.com/practice=<role id> always belongs to that role; then a name in the site's
+#   features.platform.assign (job name: role id) belongs to the role it names; otherwise the first role (in file
 #   order) whose pattern fully matches the name owns it. Unmatched work is listed as "No owner".
 # schedules.planned: work the design calls for that is not deployed yet. Shown as Planned.
 # schedules.external: work that runs where this page cannot see it (another tool). Never healthy here.

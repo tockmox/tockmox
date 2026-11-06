@@ -188,15 +188,19 @@ applied changes are listed below with **Revert**.
 **A page that renders a change can open it for you.** The models and
 inference-node pages offer **Open as a change** beside **Download it**, and
 **Platform › Identity** offers **Make an administrator**, which adds a name to
-`sso.adminUsers`, and **Platform › Capabilities** offers **Turn on** and **Turn
-off** for each capability. The confirm page shows the exact edit to the file on `main`
+`sso.adminUsers`, **Platform › Capabilities** offers **Turn on** and **Turn
+off** for each capability and for Platform Management, **Platform › Overview**
+offers **Give to a role** for scheduled work with no owner, and **Platform ›
+Updates** offers **Open the upgrade as a change**. The confirm page shows the exact edit to the file on `main`
 before anything is opened; confirming opens it as the change bot, and it waits
 on Platform › Changes for an approval like any other. Nothing is applied until
 an administrator approves it.
 
 - **Only what the page set changes.** The console edits the keys the change
   names (`modelLifecycle`, `inferenceNodes` and the gateway's rolling
-  annotation; `sso.adminUsers`; or one `capabilities.<name>.enabled`) and leaves every other line of the file as it
+  annotation; `sso.adminUsers`; one `capabilities.<name>.enabled`; or, in the
+  AI layer's `site/values/ai.yaml`, `tockmoxUi.config.features.platform.enabled`
+  or one `features.platform.assign` entry) and leaves every other line of the file as it
   was, comments included. A file it cannot edit that way (YAML anchors, a key
   written on one line in flow style, tabs) is refused with "edit it by hand",
   never edited approximately.
@@ -212,6 +216,16 @@ an administrator approves it.
   change would say one thing while the site did another. Single sign-on is never
   turned off from the console, because the console signs in through it and that
   change would lock out whoever approves it; set it by hand if you mean it.
+- **An upgrade moves every layer, and only the revision.** The change sets
+  `targetRevision` from the running release to the target in every file under
+  `bootstrap/applications` that names it, and leaves the lines reading
+  `targetRevision: main` alone, as
+  [step 5 of the upgrade guide](../deployment/upgrade.md#5-move-the-revision)
+  does by hand. It is offered only when the release feed is verified, the
+  preflight is green and no release on the way lists a breaking change (that
+  edit goes in the same commit, so make it by hand). A layer on a third release
+  is refused and named. The change's description carries the preflight and the
+  checks only a person can make; do them before you approve.
 - **Which files.** The models and nodes changes go to the file the model
   watcher writes (`modelLifecycle.watch.pullRequests.valuesPath`), or
   `site/values/ai.yaml` when that is unset; administrators go to
