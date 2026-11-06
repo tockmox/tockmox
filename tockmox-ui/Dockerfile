@@ -25,7 +25,10 @@ COPY tockmox-ui/requirements.txt .
 # requirements.txt is a lockfile compiled from requirements.in with a hash for every file, so pip installs
 # exactly the versions it names and refuses any file whose hash it does not list; --no-deps because the
 # lockfile already names every dependency.
+# git: tockmox-actions (the same image) makes Site history's "Download a copy", a git bundle of the site's main,
+# the way the off-site copy job does (app/forge.py, Forge.bundle). The console itself never runs it.
 RUN apk upgrade --no-cache \
+ && apk add --no-cache git \
  && pip install --no-cache-dir --require-hashes --no-deps -r requirements.txt \
  && pip uninstall -y pip \
  && rm -rf /usr/local/lib/python3.*/ensurepip

@@ -102,6 +102,7 @@ If you find yourself needing something not listed here, that is a gap worth
 | `global.lanCIDR` | **yes** | none | LAN/node network admitted by NetworkPolicies |
 | `global.storageClass` | **conditional** | `""` | StorageClass for replicated PersistentVolumeClaims. Required when Longhorn is enabled and not marked default ... see [Storage](#storage) |
 | `global.localStorageClass` | no | `local-path` | StorageClass for volumes the workload rebuilds by itself. Empty falls back to the cluster default, which undoes the storage policy without complaining |
+| `global.siteForge` | no | `""` | Where the site repository lives, as the installer wrote it: `built-in` or `external` (empty reads as external). `built-in` turns on Platform › Changes by default ([site forge](site-forge.md#approving-in-the-console)) |
 | `global.certIssuer` | no | `""` | cert-manager issuer. Empty skips certificates |
 | `global.clusterCIDR` | no | `10.42.0.0/16` | Pod network. k3s default |
 | `global.serviceCIDR` | no | `10.43.0.0/16` | Service network. k3s default |

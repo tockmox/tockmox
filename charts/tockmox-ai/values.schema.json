@@ -43,6 +43,11 @@
           "type": "string",
           "description": "StorageClass for data the application replicates itself or can re-derive. Empty uses the cluster default."
         },
+        "siteForge": {
+          "type": "string",
+          "enum": ["", "built-in", "external"],
+          "description": "Where the site repository lives, as tockmox-install.sh wrote it (site.forge). built-in turns on what needs the built-in forge by default, such as the console's Platform > Changes. Empty is read as external."
+        },
         "resilience": {
           "type": "object",
           "description": "The resilient claim. Set by profiles/resilient.yaml. With profile `resilient` the layers that have a backup refuse to render while it is off or points inside the cluster, and alert while no restore drill has passed. docs/deployment/profiles.md, \"The resilient profile\".",
@@ -1876,6 +1881,21 @@
                   "items": { "type": "string" },
                   "description": "Groups besides the user group that a person offered a recovery link may be in. A person in any other group, a group nested under the admin group included, is not offered one."
                 }
+              }
+            },
+            "changes": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Platform > Changes: approve and apply, decline and revert the site's changes as the person's own identity in the built-in forge. tockmox-install.sh turns it on for a built-in-forge site; bootstrap-forge writes botSecret and oauthSecret. See docs/administration/site-forge.md, \"Changing your site\".",
+              "properties": {
+                "enabled": { "type": ["boolean", "null"], "description": "Empty: on when global.siteForge is built-in. true or false wins." },
+                "forgeRelease": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,51}[a-z0-9])?$" },
+                "forgeNamespace": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$" },
+                "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$" },
+                "baseBranch": { "type": "string", "pattern": "^[A-Za-z0-9._/-]{1,100}$" },
+                "webUrl": { "type": "string", "pattern": "^(https?://[^\\s/]+/?)?$", "description": "The forge as a browser reaches it. Empty: https://forge.<global.internalDomain>." },
+                "botSecret": { "type": "string", "description": "A Secret in the AI namespace, key token: the change bot's token for tockmox-actions. The bot opens changes and cannot approve them." },
+                "oauthSecret": { "type": "string", "description": "A Secret in the AI namespace, keys client_id and client_secret: the console's OAuth2 application in the forge." }
               }
             }
           }

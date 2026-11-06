@@ -32,6 +32,14 @@ WHAT IT ASSERTS:
      exactly reset_user_password and the recovery endpoint's object-level add_user, excludes groups under the admin
      group and fails closed; the recovery flow signs nobody in and is refused without a link. Off: no console
      blueprint, no CronJob. With identity on, tockmox-actions may reach the issuer's host (Traefik).
+  8. THE CHANGE KINDS HOLD NO FORGE ADMIN CREDENTIAL (Forgejo 15.0.11 lets its admin merge past the branch
+     rule). With changes on: no pod in the AI layer names the forge's admin Secret (any Secret whose name holds
+     "forge-admin"); the change bot's token and the console's OAuth2 client are mounted into tockmox-actions and
+     into no other pod; the UI's own config carries the switch and nothing else of the forge (no token file, no
+     client secret: the UI asks the service for the sign-in URL); tockmox-actions may reach the forge's namespace
+     on port 3000 and nothing else of it.
+  9. THE CHANGE KINDS' DEFAULT FOLLOWS THE SITE'S FORGE: on with global.siteForge built-in and nothing set, off with
+     it external or empty, and an explicit tockmoxUi.actions.changes.enabled wins either way.
 Exit 2 (skipped) when helm or PyYAML is absent.
 """
 import copy
@@ -58,6 +66,8 @@ ON = {"global": {"internalDomain": "int.example.com", "lanCIDR": "10.0.0.0/24"},
 OFF = {"tockmoxUi": {"actions": {k: {"enabled": False} for k in ("silence", "testAlert", "runJob", "restart", "argocd")}}}
 ARGO_NO_ACCOUNT = {"tockmoxUi": {"actions": {"argocd": {"enabled": True}}}}
 IDENTITY_ON = {"tockmoxUi": {"actions": {"identity": {"enabled": True}}}}
+CHANGES_ON = {"global": {"siteForge": "built-in"}}           # the default on a built-in-forge site
+FORGE_SECRETS = ("tockmox-forge-actions-bot", "tockmox-forge-console-oauth")
 ID_CHART = os.path.join(ROOT, "charts", "tockmox-identity")
 CONSOLE_ON = {"sso": {"consoleActions": {"enabled": True}}}
 ROLE_GLOBAL = ["authentik_core.view_user"]
@@ -151,12 +161,12 @@ def check_on(docs) -> list:
     return errs
 
 
-TOKEN_SECRET = "tockmox-console-actions-token"
+IDENTITY_TOKEN_NAME = "tockmox-console-actions-token"   # the Secret's name, not a secret
 
 
 def check_identity_mount(docs) -> list:
     errs = []
-    secret = TOKEN_SECRET
+    secret = IDENTITY_TOKEN_NAME
     for d in docs:
         if d["kind"] not in ("Deployment", "StatefulSet", "Job", "CronJob"):
             continue
@@ -172,6 +182,50 @@ def check_identity_mount(docs) -> list:
     tos = [t for r in ((np or {}).get("spec") or {}).get("egress") or [] for t in r.get("to") or []]
     if not any(((t.get("podSelector") or {}).get("matchLabels") or {}).get("app.kubernetes.io/name") == "traefik" for t in tos):
         errs.append("6: identity actions are on but tockmox-actions cannot reach the issuer's host (Traefik)")
+    return errs
+
+
+def _pods(docs):
+    for d in docs:
+        if d["kind"] in ("Deployment", "StatefulSet", "Job", "CronJob", "DaemonSet"):
+            yield d, (d["spec"]["jobTemplate"]["spec"]["template"]["spec"] if d["kind"] == "CronJob" else d["spec"]["template"]["spec"])
+
+
+def _secrets_of(spec) -> set:
+    names = {(v.get("secret") or {}).get("secretName") for v in spec.get("volumes") or []}
+    for c in (spec.get("containers") or []) + (spec.get("initContainers") or []):
+        names |= {(e.get("secretRef") or {}).get("name") for e in c.get("envFrom") or []}
+        names |= {((e.get("valueFrom") or {}).get("secretKeyRef") or {}).get("name") for e in c.get("env") or []}
+    return names - {None}
+
+
+def check_changes(docs) -> list:
+    errs = []
+    for d, spec in _pods(docs):
+        held = _secrets_of(spec)
+        admin = sorted(n for n in held if "forge-admin" in n)
+        if admin:
+            errs.append(f"8: {d['kind']} {d['metadata']['name']} names the forge's admin Secret {admin}")
+        mine = held & set(FORGE_SECRETS)
+        if mine and d["metadata"]["name"] != "tockmox-actions":
+            errs.append(f"8: {d['kind']} {d['metadata']['name']} mounts {sorted(mine)}, the change kinds' credentials")
+    dep = next((d for d, _ in _pods(docs) if d["kind"] == "Deployment" and d["metadata"]["name"] == "tockmox-actions"), None)
+    if dep is None or not set(FORGE_SECRETS) <= _secrets_of(dep["spec"]["template"]["spec"]):
+        errs.append("8: changes are on but tockmox-actions does not mount the bot's token and the OAuth2 client")
+    ui = next((d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "tockmox-ui"), None)
+    uich = (((yaml.safe_load((ui or {}).get("data", {}).get("config.yaml", "")) or {}).get("actions") or {}).get("changes")) or {}
+    if uich != {"enabled": True}:
+        errs.append(f"8: the UI's config carries more of the forge than the switch: {sorted(uich)}")
+    svc = next((d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "tockmox-actions"), None)
+    sch = (((yaml.safe_load((svc or {}).get("data", {}).get("config.yaml", "")) or {}).get("actions") or {}).get("changes")) or {}
+    if not (sch.get("botTokenFile") and (sch.get("oauth") or {}).get("clientSecretFile") and
+            str(sch.get("apiUrl", "")).endswith(".svc:3000/api/v1")):
+        errs.append("8: the service's config has no in-cluster forge API, bot token file or client secret file")
+    np = next((d for d in docs if d["kind"] == "NetworkPolicy" and d["metadata"]["name"] == "tockmox-actions"), None)
+    to_forge = [r for r in ((np or {}).get("spec") or {}).get("egress") or [] for t in r.get("to") or []
+                if ((t.get("namespaceSelector") or {}).get("matchLabels") or {}).get("kubernetes.io/metadata.name") == "tockmox-forge"]
+    if not to_forge or any(r.get("ports") != [{"port": 3000, "protocol": "TCP"}] for r in to_forge):
+        errs.append("8: tockmox-actions cannot reach the forge on port 3000, or may reach more of it")
     return errs
 
 
@@ -229,7 +283,7 @@ def check_identity_layer(docs) -> list:
             cs_ = (ps_.get("containers") or []) + (ps_.get("initContainers") or [])
             refs = {(e.get("secretRef") or {}).get("name") for c in cs_ for e in c.get("envFrom") or []}
             refs |= {((e.get("valueFrom") or {}).get("secretKeyRef") or {}).get("name") for c in cs_ for e in c.get("env") or []}
-            if TOKEN_SECRET in refs:
+            if IDENTITY_TOKEN_NAME in refs:
                 errs.append(f"7: Authentik's {d['metadata']['name']} is given the console token: one owner, the grants CronJob")
     rec = blueprint(docs, "tockmox-recovery.yaml")
     if rec is None:
@@ -257,12 +311,12 @@ def check_identity_layer(docs) -> list:
         if "with_descendants()" not in script or "raise SystemExit(1)" not in script or "revoke_all(" not in script:
             errs.append("7: the recovery-grant CronJob does not exclude groups under the admin group, or does not fail closed")
         refs = {(e.get("secretRef") or {}).get("name") for e in ps["containers"][0].get("envFrom") or []}
-        optional = any((e.get("secretRef") or {}).get("name") == TOKEN_SECRET and (e.get("secretRef") or {}).get("optional") is True
+        optional = any((e.get("secretRef") or {}).get("name") == IDENTITY_TOKEN_NAME and (e.get("secretRef") or {}).get("optional") is True
                        for e in ps["containers"][0].get("envFrom") or [])
-        if TOKEN_SECRET in refs and not optional:
+        if IDENTITY_TOKEN_NAME in refs and not optional:
             errs.append("7: the grants CronJob needs the token's Secret: with it absent no run starts, and no grant is taken back")
         sets = 'Token.objects.create(identifier="tockmox-console-actions"'
-        if (TOKEN_SECRET not in refs or sets not in script or "tok.save()" not in script or '"expiring": False' not in script
+        if (IDENTITY_TOKEN_NAME not in refs or sets not in script or "tok.save()" not in script or '"expiring": False' not in script
                 or "TokenIntents.INTENT_API" not in script or "UserTypes.SERVICE_ACCOUNT" not in script
                 or 'Token.objects.filter(identifier="tockmox-console-actions").delete()' not in script):
             errs.append("7: the recovery-grant CronJob does not keep the console token: read its Secret, set one "
@@ -358,6 +412,36 @@ def selftest(docs) -> int:
         return 1
     docs[:] = iddocs
     planted("the UI mounts the identity token", ui_mounts, check_identity_mount, "6:")
+    rc, chdocs = render(ON, CHANGES_ON)
+    if rc:
+        print(f"  FAIL  the changes render failed: {chdocs}")
+        return 1
+    docs[:] = chdocs
+
+    def actions_admin(d):
+        x = next(y for y in d if y["kind"] == "Deployment" and y["metadata"]["name"] == "tockmox-actions")
+        x["spec"]["template"]["spec"]["volumes"].append({"name": "a", "secret": {"secretName": "tockmox-forge-admin"}})
+
+    def ui_oauth(d):
+        x = next(y for y in d if y["kind"] == "Deployment" and y["metadata"]["name"] == "tockmox-ui")
+        x["spec"]["template"]["spec"].setdefault("volumes", []).append({"name": "o", "secret": {"secretName": "tockmox-forge-console-oauth"}})
+
+    def ui_config_secret(d):
+        cm = next(y for y in d if y["kind"] == "ConfigMap" and y["metadata"]["name"] == "tockmox-ui")
+        c = yaml.safe_load(cm["data"]["config.yaml"])
+        c["actions"]["changes"]["oauth"] = {"clientSecretFile": "/x"}
+        cm["data"]["config.yaml"] = yaml.safe_dump(c)
+
+    def forge_wide(d):
+        np = next(y for y in d if y["kind"] == "NetworkPolicy" and y["metadata"]["name"] == "tockmox-actions")
+        for r in np["spec"]["egress"]:
+            if any(((t.get("namespaceSelector") or {}).get("matchLabels") or {}).get("kubernetes.io/metadata.name") == "tockmox-forge"
+                   for t in r.get("to") or []):
+                r.pop("ports")
+    planted("tockmox-actions mounts the forge's admin Secret", actions_admin, check_changes, "8:")
+    planted("the UI mounts the console's OAuth2 client", ui_oauth, check_changes, "8:")
+    planted("the UI's config carries the client secret file", ui_config_secret, check_changes, "8:")
+    planted("tockmox-actions may reach every port of the forge", forge_wide, check_changes, "8:")
     docs[:] = layer
     planted("the console role granted change_user", wide_role, check_identity_layer, "7:")
     planted("the console may change the admin group", admin_group, check_identity_layer, "7:")
@@ -382,11 +466,11 @@ def selftest(docs) -> int:
     def cronjob_no_token(d):
         cj = next(x for x in d if x["kind"] == "CronJob" and x["metadata"]["name"] == "tockmox-console-identity-grants")
         c = cj["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]
-        c["envFrom"] = [e for e in c["envFrom"] if (e.get("secretRef") or {}).get("name") != TOKEN_SECRET]
+        c["envFrom"] = [e for e in c["envFrom"] if (e.get("secretRef") or {}).get("name") != IDENTITY_TOKEN_NAME]
 
     def worker_gets_token(d):
         w = next(x for x in d if x["kind"] == "Deployment" and "authentik-worker" in x["metadata"]["name"])
-        w["spec"]["template"]["spec"]["containers"][0].setdefault("envFrom", []).append({"secretRef": {"name": TOKEN_SECRET}})
+        w["spec"]["template"]["spec"]["containers"][0].setdefault("envFrom", []).append({"secretRef": {"name": IDENTITY_TOKEN_NAME}})
     planted("the blueprint makes the console token", token_in_blueprint, check_identity_layer, "7:")
     planted("the grants CronJob does not read the token", cronjob_no_token, check_identity_layer, "7:")
     planted("the Authentik worker is given the token", worker_gets_token, check_identity_layer, "7:")
@@ -394,16 +478,16 @@ def selftest(docs) -> int:
     def server_gets_token(d):
         w = next(x for x in d if x["kind"] == "Deployment" and "authentik-server" in x["metadata"]["name"])
         w["spec"]["template"]["spec"]["containers"][0].setdefault("env", []).append(
-            {"name": "T", "valueFrom": {"secretKeyRef": {"name": TOKEN_SECRET, "key": "TOCKMOX_CONSOLE_ACTIONS_TOKEN"}}})
+            {"name": "T", "valueFrom": {"secretKeyRef": {"name": IDENTITY_TOKEN_NAME, "key": "TOCKMOX_CONSOLE_ACTIONS_TOKEN"}}})
 
     def token_required(d):
         cj = next(x for x in d if x["kind"] == "CronJob" and x["metadata"]["name"] == "tockmox-console-identity-grants")
         for e in cj["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]["envFrom"]:
-            if (e.get("secretRef") or {}).get("name") == TOKEN_SECRET:
+            if (e.get("secretRef") or {}).get("name") == IDENTITY_TOKEN_NAME:
                 e["secretRef"].pop("optional", None)
     planted("the Authentik server is given the token by key", server_gets_token, check_identity_layer, "7:")
     planted("the grants CronJob requires the token's Secret", token_required, check_identity_layer, "7:")
-    clean = check_on(iddocs) + check_identity_mount(iddocs) + check_identity_layer(layer)
+    clean = check_on(iddocs) + check_identity_mount(iddocs) + check_identity_layer(layer) + check_changes(chdocs)
     print(("  ok    " if not clean else "  FAIL  ") + "the real renders are green" + ("" if not clean else f": {clean}"))
     return 1 if fails or clean else 0
 
@@ -426,6 +510,21 @@ def main():
         errs.append("5: argocd turned on with no account rendered, instead of failing with the reason")
     rc, ident = render(ON, IDENTITY_ON)
     errs += [f"render with identity on failed: {ident}"] if rc else check_on(ident) + check_identity_mount(ident)
+    rc, ch = render(ON, CHANGES_ON)
+    errs += [f"render with changes on failed: {ch}"] if rc else check_on(ch) + check_changes(ch)
+    for label, overlays, want in (
+            ("built-in, nothing set", (CHANGES_ON,), True),
+            ("built-in, set off", (CHANGES_ON, {"tockmoxUi": {"actions": {"changes": {"enabled": False}}}}), False),
+            ("external, nothing set", ({"global": {"siteForge": "external"}},), False),
+            ("no siteForge, nothing set", (), False),
+            ("external, set on", ({"global": {"siteForge": "external"}}, {"tockmoxUi": {"actions": {"changes": {"enabled": True}}}}), True)):
+        rc, d = render(ON, *overlays)
+        if rc:
+            errs.append(f"9: the render with siteForge {label} failed: {d}")
+            continue
+        got = any(n == "tockmox-forge-console-oauth" for x, spec in _pods(d) for n in _secrets_of(spec))
+        if got != want:
+            errs.append(f"9: with siteForge {label}, the change kinds are {'on' if got else 'off'}, not {'on' if want else 'off'}")
     rc, layer = render(CONSOLE_ON, chart=ID_CHART, release="tockmox-identity", ns="tockmox-authentik")
     errs += [f"the identity layer with sso.consoleActions on failed to render: {layer}"] if rc else check_identity_layer(layer)
     rc, layer_off = render(chart=ID_CHART, release="tockmox-identity", ns="tockmox-authentik")

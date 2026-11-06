@@ -570,6 +570,7 @@ happen and how to undo it, and lands in **Platform › Activity**.
 | `testAlert` | One warning, `TockmoxTestAlert`, down the same path as every other alert; it resolves after five minutes | yes, with observability |
 | `argocd` | Refresh or sync an Argo CD application | no: needs your Argo CD account (below) |
 | `identity` | On **Platform › Identity**: a recovery link for anyone who is not an administrator, and adding to or removing from the user group | no: needs the identity layer's service account ([identity, "From the console"](identity.md#from-the-console)) |
+| `changes` | On **Platform › Changes**: approve and apply, or decline, a change waiting on the built-in site forge, as your own forge identity; revert an applied one by opening the opposite change | yes, on a built-in-forge site (`global.siteForge: built-in`), with the two Secrets `bootstrap-forge` writes ([site forge, "Approving in the console"](site-forge.md#approving-in-the-console)) |
 
 Off means absent: a kind that is off has no button, and the service refuses it.
 The alerts that prove the alert path works (`Watchdog`, `TockmoxHeartbeat`,
@@ -584,7 +585,7 @@ other. The UI hands the action and the token to a separate Deployment,
 `tockmox-actions`, which checks the token itself: the issuer's signature, the
 UI's client as audience, issued in the last ten minutes, your membership of the
 admin group, and the nonce. With a live sign-in the round trip is a redirect you
-do not see. **Sync, restart and the identity actions ask you to sign in again**
+do not see. **Sync, restart, the identity and the change actions ask you to sign in again**
 when your last sign-in was more than five minutes ago (`max_age`). Each action carries an idempotency
 key, so a double click or a replayed confirmation does nothing twice. With the
 identity provider down nobody can sign in, so no action runs; the way in then is
@@ -604,6 +605,10 @@ identity provider down nobody can sign in, so no action runs; the way in then is
 - With `identity` on, the API token of an Authentik service account whose own
   permissions keep it to non-administrators and the user group
   ([identity, "From the console"](identity.md#from-the-console)).
+- With `changes` on, the built-in forge's change bot's token (it opens changes
+  and cannot approve them) and the console's OAuth2 client secret, which acts
+  only as the person who signs in to the forge. No forge admin credential:
+  `tools/check-actions.py` fails the render if any pod in the AI layer names one.
 - `create` on ConfigMaps in its own namespace and `get`/`update` on its record,
   `tockmox-actions-activity`, which **Activity** reads (the last 300 actions).
 - Only the UI pod may reach it.

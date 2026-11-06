@@ -207,6 +207,9 @@ the encrypted recovery kit.
   --platform-namespace NS  where Traefik runs, admitted through the fence (default tockmox-platform)
   --auth-host HOST       Authentik's address (default auth.<internalDomain>; set it if the
                          identity layer's ingress.apps.authentik.host is overridden)
+  --console-host HOST    the Tockmox console's address (default tockmox.<internalDomain>; set it
+                         if tockmoxUi.ingress.host is overridden). Its Platform > Changes page
+                         sends people to the forge's sign-in and back to this host
   --no-sign-in           no sign-in, no Ingress: the forge answers only in the cluster
 
  The Tockmox charts repository, for a site with no route to GitHub
@@ -241,7 +244,7 @@ FORGE_NS="$FORGE_NS_DEFAULT"; CHART_REF="$CHART_REF_DEFAULT"; CHART_VERSION="$CH
 OS_S3_ENDPOINT=""; OS_S3_BUCKET=""; OS_S3_PREFIX=""; OS_S3_REGION="us-east-1"; OS_S3_CREDS=""; OS_S3_CA=""
 OS_GIT_URL=""; OS_GIT_CREDS=""
 IMAGE_REGISTRY=""; STORAGE_CLASS=""; ARGO_NS="argocd"; AI_NS="tockmox-ai"; WAIT_SECONDS=300; DRY_RUN=false
-CONNECT_ONLY=false; NO_SIGN_IN=false; REPLACE_ARGO_CRED=false; FORGE_HOST=""; ADMIN_GROUP="tockmox-admins"
+CONNECT_ONLY=false; NO_SIGN_IN=false; REPLACE_ARGO_CRED=false; FORGE_HOST=""; CONSOLE_HOST=""; ADMIN_GROUP="tockmox-admins"
 IDENTITY_NS="tockmox-authentik"; PLATFORM_NS="tockmox-platform"; AUTH_HOST=""
 CHARTS_REPO="charts"; CHARTS_DIR=""; CHARTS_TAG=""; CHARTS_COMMIT=""
 
@@ -283,6 +286,7 @@ while [[ $# -gt 0 ]]; do
     --identity-namespace) IDENTITY_NS="${2:?--identity-namespace needs a name}"; shift 2 ;;
     --platform-namespace) PLATFORM_NS="${2:?--platform-namespace needs a name}"; shift 2 ;;
     --auth-host) AUTH_HOST="${2:?--auth-host needs a host name}"; shift 2 ;;
+    --console-host) CONSOLE_HOST="${2:?--console-host needs a host name}"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage; die "unknown argument: $1" ;;
@@ -366,7 +370,9 @@ if $SIGN_IN; then
   [[ -n "$INTERNAL_DOMAIN" ]] || die "global.internalDomain is empty in $SITE/site/values/global.yaml.
        The forge's address (forge.<internalDomain>) and Authentik's come from it. Set it, or run with --no-sign-in."
   FORGE_HOST="${FORGE_HOST:-forge.${INTERNAL_DOMAIN}}"; AUTH_HOST="${AUTH_HOST:-auth.${INTERNAL_DOMAIN}}"
+  CONSOLE_HOST="${CONSOLE_HOST:-tockmox.${INTERNAL_DOMAIN}}"
   [[ "$FORGE_HOST" =~ $HOST_RE ]] || die "--forge-host is not a host name: '$FORGE_HOST'"
+  [[ "$CONSOLE_HOST" =~ $HOST_RE ]] || die "--console-host is not a host name: '$CONSOLE_HOST'"
   [[ "$AUTH_HOST" =~ $HOST_RE ]] || die "--auth-host is not a host name: '$AUTH_HOST'"
   [[ "$ADMIN_GROUP" =~ ^[A-Za-z0-9._-]+$ ]] || die "--admin-group must be letters, digits, '.', '_' or '-': '$ADMIN_GROUP'"
   [[ "$IDENTITY_NS" =~ $NS_RE ]] || die "--identity-namespace is not a namespace name: '$IDENTITY_NS'"
@@ -519,8 +525,10 @@ if $DRY_RUN; then
   info "push ${SITE} as main; protect main; write the ArgoCD repository Secret in ${ARGO_NS}"
   [[ -z "$CHARTS_DIR" ]] || info "create ${ORG}/${CHARTS_REPO} (read by ${BOT_READ}); push tag ${CHARTS_TAG} and main from ${CHARTS_DIR}; write the ArgoCD repository Secret tockmox-charts-repo in ${ARGO_NS}"
   info "give the model watcher the change bot's token: Secret ${RELEASE}-change-bot in ${AI_NS}"
+  info "give tockmox-actions its own token for the same bot: Secret ${RELEASE}-actions-bot in ${AI_NS}"
   if $SIGN_IN; then
     info "an Ingress at ${FORGE_HOST}; the OIDC client secret in ${FORGE_NS} and ${IDENTITY_NS};"
+    info "the console's OAuth2 application (back to ${CONSOLE_HOST}): Secret ${RELEASE}-console-oauth in ${AI_NS}"
     info "Traefik (${PLATFORM_NS}) admitted through the fence; the sign-in source once Authentik answers"
   fi
   if [[ -n "$OFFSITE" ]]; then info "off-site copy (${OFFSITE}) to ${OFFSITE_WHERE}: a CronJob every minute, a nightly forge dump of pull requests, reviews and comments to the same place, then the first copy and the first dump written and read back"
@@ -839,6 +847,10 @@ gitea:
       # basic auth, which this script uses through its port-forward, still works
       # (measured on 15.0.11). Off only with sign-in: without it the form is the only way in.
       ENABLE_INTERNAL_SIGNIN: $( $SIGN_IN && printf false || printf true )
+    oauth2:
+      # A person's token from the console's OAuth2 application (Platform > Changes) is used for one review and one
+      # merge; ten minutes is plenty, and a token the console never stores expires soon after it was used.
+      ACCESS_TOKEN_EXPIRATION_TIME: 600
     oauth2_client:
       ENABLE_AUTO_REGISTRATION: true
       # Never sign someone in as an existing forge user because the names match.
@@ -1053,7 +1065,10 @@ TOKEN_CHANGE="$(mktoken "$BOT_CHANGE" write:repository write:issue)"
 # The model watcher opens its changes as the same bot, with a token of its own, so
 # either can be revoked without the other.
 TOKEN_WATCH="$(TOKEN_NAME="bootstrap-watch-$STAMP" mktoken "$BOT_CHANGE" write:repository write:issue)"
-[[ -n "$TOKEN_READ" && -n "$TOKEN_CHANGE" && -n "$TOKEN_WATCH" ]] || die "a token came back empty"
+# And the console's actions service (Platform > Changes) its own: it reads the waiting changes and opens a revert.
+# It cannot approve: approving is done as the person, through the console's OAuth2 application (below).
+TOKEN_ACTIONS="$(TOKEN_NAME="bootstrap-actions-$STAMP" mktoken "$BOT_CHANGE" write:repository write:issue)"
+[[ -n "$TOKEN_READ" && -n "$TOKEN_CHANGE" && -n "$TOKEN_WATCH" && -n "$TOKEN_ACTIONS" ]] || die "a token came back empty"
 ok "tokens minted for $BOT_READ (read:repository) and $BOT_CHANGE (write:repository, write:issue; one for the console, one for the model watcher)"
 # The older tokens are revoked only once the new ones are in their Secrets (below).
 # Revoking here, as this script first did, left a re-run that stopped in between (a
@@ -1199,8 +1214,41 @@ secret_apply "$AI_NS" "${RELEASE}-change-bot" "" \
   username="$BOT_CHANGE" token="$TOKEN_WATCH" \
   url="http://${RELEASE}-http.${FORGE_NS}.svc.cluster.local:3000" repository="$ORG/$REPO"
 ok "model watcher's identity ${AI_NS}/${RELEASE}-change-bot (the same bot, its own token)"
+secret_apply "$AI_NS" "${RELEASE}-actions-bot" "" \
+  username="$BOT_CHANGE" token="$TOKEN_ACTIONS" \
+  url="http://${RELEASE}-http.${FORGE_NS}.svc.cluster.local:3000" repository="$ORG/$REPO"
+ok "the console's change identity ${AI_NS}/${RELEASE}-actions-bot (the same bot, its own token)"
 revoke_old "$BOT_READ" "bootstrap-$STAMP"
-revoke_old "$BOT_CHANGE" "bootstrap-$STAMP" "bootstrap-watch-$STAMP"
+revoke_old "$BOT_CHANGE" "bootstrap-$STAMP" "bootstrap-watch-$STAMP" "bootstrap-actions-$STAMP"
+
+# ---------------------------------------------------------------- the console's OAuth2 application
+# Platform > Changes approves and declines as the PERSON: the browser goes to the forge's own sign-in
+# (Authentik's), comes back to the console with a code, and tockmox-actions exchanges it, with this client secret,
+# for that person's token. Never an admin token: Forgejo 15.0.11 lets its admin merge past the branch rule
+# (measured on the lab). Made once and kept: a re-run with the Secret in place and the application unchanged leaves
+# both alone; anything else (no Secret, another redirect, a client the Secret does not name) makes it afresh.
+if $SIGN_IN; then
+  OAUTH_APP="tockmox-console"
+  OAUTH_CB="${SCHEME}://${CONSOLE_HOST}/actions/forge/callback"
+  APPS="$(api GET "/user/applications/oauth2")"; expect "listing the forge's OAuth2 applications" 200
+  APP="$(printf '%s' "$APPS" | grep -oE '\{[^{}]*\}' | grep -F "\"name\":\"$OAUTH_APP\"" | head -1 || true)"
+  APP_ID="$(printf '%s' "$APP" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')"
+  APP_CID="$(printf '%s' "$APP" | json_field client_id)"
+  HAVE_CID="$(kubectl "${K[@]}" -n "$AI_NS" get secret "${RELEASE}-console-oauth" -o jsonpath='{.data.client_id}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  if [[ -n "$APP_ID" && -n "$HAVE_CID" && "$HAVE_CID" == "$APP_CID" && "$APP" == *"\"$OAUTH_CB\""* ]]; then
+    ok "the console's OAuth2 application ${OAUTH_APP} (unchanged; back to ${CONSOLE_HOST})"
+  else
+    if [[ -n "$APP_ID" ]]; then
+      api DELETE "/user/applications/oauth2/$APP_ID" >/dev/null; expect "removing the console's old OAuth2 application" 204
+    fi
+    APP="$(api POST "/user/applications/oauth2" "{\"name\":\"$OAUTH_APP\",\"redirect_uris\":[\"$OAUTH_CB\"],\"confidential_client\":true}")"
+    expect "making the console's OAuth2 application" 201
+    APP_CID="$(printf '%s' "$APP" | json_field client_id)"; APP_SECRET="$(printf '%s' "$APP" | json_field client_secret)"
+    [[ -n "$APP_CID" && -n "$APP_SECRET" ]] || die "the forge made the console's OAuth2 application but returned no client id or secret"
+    secret_apply "$AI_NS" "${RELEASE}-console-oauth" "" client_id="$APP_CID" client_secret="$APP_SECRET"
+    ok "the console's OAuth2 application ${OAUTH_APP}, back to ${CONSOLE_HOST}: Secret ${AI_NS}/${RELEASE}-console-oauth"
+  fi
+fi
 
 # ---------------------------------------------------------------- off-site copy
 # A CronJob in the forge namespace, every minute, running install/forge-offsite-copy.sh
