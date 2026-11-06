@@ -20,6 +20,7 @@ Do=squash drops it), so who approved travels with every off-site copy.
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 import os
 import re
@@ -27,12 +28,19 @@ import re
 import httpx
 
 from . import actions as act
+from . import values_edit as ve
 
 log = logging.getLogger("tockmox.actions.forge")
 DIFF_MAX = 400_000                  # a diff larger than this is shown cut, with the forge's link for the rest
 LIST_MAX = 50
 REVERT_FILES_MAX = 200
 ORIGIN = re.compile(r"^Tockmox-Origin:\s*([a-z0-9-]{1,40})\s*$", re.M | re.I)
+# Who asked for a change, as their identity provider username (the forge registers people under the same name). The
+# console writes it on every change it opens, so the person stays visible behind the change bot (separation of duties,
+# Jeff's ruling 2026-11-06: the person who asked does not approve, unless they are the only approver).
+REQUESTED = re.compile(r"^Tockmox-Requested-By:\s*([A-Za-z0-9_.@-]{1,100})\s*$", re.M)
+TRAILER = re.compile(r"^Tockmox-[A-Za-z-]+:\s")
+SELF_APPROVAL = ("sole-approver-only", "never")
 
 
 class Paused(Exception):
@@ -48,11 +56,21 @@ def summary_of(body: str) -> str:
             if para:
                 break
             continue
-        if s.startswith(("#", "<!--", "```")) or re.match(r"^[A-Za-z-]+:\s", s) and ORIGIN.match(s):
+        if s.startswith(("#", "<!--", "```")) or TRAILER.match(s):
             continue
         para.append(s)
     out = " ".join(para)
     return out[:400] + ("..." if len(out) > 400 else "")
+
+
+def requester_of(pr: dict) -> str:
+    """The username the console recorded as having asked for the change, or "" (a bot's change, or one opened by hand)."""
+    m = REQUESTED.search(str(pr.get("body") or ""))
+    return m.group(1) if m else ""
+
+
+def trailers(requested: str) -> str:
+    return (f"Tockmox-Requested-By: {requested}\n" if requested else "") + "Tockmox-Origin: console"
 
 
 def origin_of(pr: dict, bot: str) -> str:
@@ -153,6 +171,9 @@ class Forge:
                 "merged": bool(pr.get("merged")), "merge": str(pr.get("merge_commit_sha") or ""),
                 "merged_at": str(pr.get("merged_at") or ""),
                 "merged_by": str((pr.get("merged_by") or {}).get("full_name") or (pr.get("merged_by") or {}).get("login") or ""),
+                "requested_by": requester_of(pr),
+                "self_approved": bool(pr.get("merged") and requester_of(pr) and requester_of(pr).lower()
+                                      == str((pr.get("merged_by") or {}).get("login") or "").lower()),
                 "url": (f"{self.cfg.changes_web}/{self.repo}/pulls/{pr.get('number')}" if self.cfg.changes_web else "")}
 
     def changes(self) -> dict:
@@ -326,9 +347,17 @@ class Forge:
         line = f"Approved-by: {person['name']} <{person['email']}>" if person.get("email") else f"Approved-by: {person['name']}"
         with self._c(token) as c:
             pr = self._fresh(c, number, head)
+            asked = requester_of(pr)
+            alone = self._self_approval(c, number, asked, person)
+            if asked:
+                line = f"Requested-by: {asked}\n{line}"
+            if alone:
+                line += "\nSelf-approved: sole approver"
             try:
                 r = c.post(f"/repos/{self.repo}/pulls/{number}/reviews",
-                           json={"event": "APPROVED", "commit_id": head, "body": "Approved in the Tockmox console."})
+                           json={"event": "APPROVED", "commit_id": head,
+                                 "body": "Approved in the Tockmox console." + (" Self-approved: the only approver."
+                                                                               if alone else "")})
             except httpx.HTTPError as e:
                 raise act.Refused("the forge did not answer; nothing was approved") from e
             if r.status_code >= 300:
@@ -349,7 +378,43 @@ class Forge:
                 raise self._refuse(r, "the merge")
             merged = self._pull(c, number)
         return {"ref": [f"#{number}", str(merged.get("merge_commit_sha") or "")[:12]],
-                "detail": f"merged as {str(merged.get('merge_commit_sha') or '')[:7]}; {line}"}
+                "detail": f"merged as {str(merged.get('merge_commit_sha') or '')[:7]}; " + "; ".join(line.split("\n"))}
+
+    def _self_approval(self, c, number: int, asked: str, person: dict) -> bool:
+        """Separation of duties (Jeff's ruling 2026-11-06). The person who asked for a change does not approve it, so
+        this refuses before anything is posted; the one exception is a site whose approvers team has nobody else in
+        it, where refusing would leave the change with no one to approve it (selfApproval: sole-approver-only, the
+        default; never refuses that too). Answers True when the exception applies, so the merge says so.
+        Fail closed: a team this cannot read is not a team with one member."""
+        if not asked or asked.lower() != str(person.get("login", "")).lower():
+            return False
+        team = self.cfg.changes_approvers_team
+        if self.cfg.changes_self_approval == "never":
+            raise act.Refused(f"you asked for #{number}, so someone else in the {team} team must approve it "
+                              "(selfApproval: never)")
+        others = sorted(m for m in self._team(c, team) if m.lower() != asked.lower())
+        if others:
+            raise act.Refused(f"you asked for #{number}, so someone else in the {team} team must approve it: "
+                              + ", ".join(others[:5]) + (" and others" if len(others) > 5 else ""))
+        return True
+
+    def _team(self, c, team: str) -> list[str]:
+        """The logins in the site organization's team, read with the person's own token. Refused when unreadable."""
+        org = self.repo.split("/", 1)[0]
+        why = (f"could not read who is in the {team} team, so a change you asked for cannot be approved by you; "
+               "ask another approver, or approve it in the forge")
+        try:
+            r = self._get(c, f"/orgs/{org}/teams/search", q=team)
+            hit = next((t for t in ((r.json() or {}).get("data") or []) if str(t.get("name", "")) == team), None) \
+                if r.status_code < 300 else None
+            if not hit:
+                raise act.Refused(why)
+            r = self._get(c, f"/teams/{hit.get('id')}/members", limit=LIST_MAX)
+        except httpx.HTTPError as e:
+            raise act.Refused(why) from e
+        if r.status_code >= 300 or not isinstance(r.json(), list):
+            raise act.Refused(why)
+        return [str(u.get("login", "")) for u in r.json() if u.get("login")]
 
     def decline(self, number: int, head: str, token: str, person: dict, reason: str) -> dict:
         with self._c(token) as c:
@@ -368,7 +433,7 @@ class Forge:
 
     # ------------------------------------------------------------ revert, as the bot
 
-    def revert(self, number: int, merge: str, by: str) -> dict:
+    def revert(self, number: int, merge: str, by: str, requested: str = "") -> dict:
         """The opposite change: every file the merge changed, back to its first parent's content, as one commit on a
         new branch, opened as a change. Refused when a file changed again since (that revert is a person's call) or
         when the merge renamed a file."""
@@ -407,7 +472,7 @@ class Forge:
                     ops.append({"operation": "update", "path": path, "content": content, "sha": at_base})
             branch = f"tockmox/revert-{number}-{merge[:7]}"
             title = f"Revert: {str(pr.get('title', ''))[:180]}"
-            msg = f"{title}\n\nReverts #{number} (applied as {merge[:12]}), asked for by {by}.\n\nTockmox-Origin: console\n"
+            msg = f"{title}\n\nReverts #{number} (applied as {merge[:12]}), asked for by {by}.\n\n{trailers(requested)}\n"
             try:
                 r = c.post(f"/repos/{self.repo}/contents", json={"branch": self.base, "new_branch": branch,
                                                                   "message": msg, "files": ops})
@@ -418,13 +483,92 @@ class Forge:
                 r = c.post(f"/repos/{self.repo}/pulls", json={
                     "base": self.base, "head": branch, "title": title,
                     "body": f"Puts back every file #{number} changed, as it was before it was applied. Asked for in the "
-                            f"Tockmox console by {by}.\n\nTockmox-Origin: console"})
+                            f"Tockmox console by {by}.\n\n{trailers(requested)}"})
             except httpx.HTTPError as e:
                 raise act.Refused("the forge did not answer; the revert may be half made (look for its branch)") from e
             if r.status_code >= 300:
                 raise self._refuse(r, "opening the revert")
             new = r.json() or {}
         return {"ref": [f"#{number}", f"#{new.get('number')}"], "detail": f"revert opened as #{new.get('number')}"}
+
+    # ------------------------------------------------------------ open a change (the pages that render one)
+
+    def _text(self, c, path: str, ref: str) -> str:
+        """The file's text at ref, "" when it is absent there."""
+        r = self._get(c, f"/repos/{self.repo}/contents/{path}", ref=ref)
+        if r.status_code == 404:
+            return ""
+        if r.status_code >= 300:
+            raise self._refuse(r, f"reading {path}")
+        j = r.json() or {}
+        if j.get("type") != "file" or j.get("encoding") != "base64":
+            raise act.Refused(f"{path} is not a plain file in the site repository")
+        try:
+            return base64.b64decode(str(j.get("content", ""))).decode("utf-8")
+        except (ValueError, UnicodeDecodeError) as e:
+            raise act.Refused(f"{path} is not UTF-8 text") from e
+
+    def plan_change(self, path: str, edits: list, applied: str = "") -> dict:
+        """What opening this change would do, without doing it: {"path", "before", "after", "blob"}. Refused when the
+        file cannot be edited safely, when main already says it, or, with `applied` (the site commit Argo CD last
+        applied for the layer the page read), when the file changed on main since: the page was drawn from what is
+        applied, so a change merged but not applied yet would be undone by this one."""
+        with self._bot() as c:
+            blob = self._blob(c, path, self.base)
+            if applied:
+                then = self._blob(c, path, applied)
+                if then != blob:
+                    raise act.Refused(f"{path} has changed on {self.base} since Argo CD last applied it: wait for it to "
+                                      "apply, then open this page again")
+            before = self._text(c, path, self.base) if blob else ""
+        after = before
+        try:
+            for p, v in edits:
+                after = ve.set_path(after, list(p), v)
+        except ve.EditRefused as e:
+            raise act.Refused(f"{path}: {e}") from e
+        if after == before:
+            raise act.Refused(f"{self.base} already says this; there is nothing to change")
+        return {"path": path, "before": before, "after": after, "blob": blob}
+
+    def open_change(self, path: str, edits: list, title: str, summary: str, by: str, slug: str,
+                    applied: str = "", requested: str = "") -> dict:
+        """One commit on a new branch (as the change bot) that sets each (key path, value) in the one values file,
+        leaving the rest of the file alone, and a change for it that waits for an approval. The branch is named for
+        the result, so asking twice for the same change opens nothing new: the answer names the one already open."""
+        plan = self.plan_change(path, edits, applied)
+        digest = hashlib.sha256(path.encode() + b"\0" + plan["after"].encode()).hexdigest()
+        branch = f"tockmox/console-{slug}-{digest[:12]}"
+        with self._bot() as c:
+            r = self._get(c, f"/repos/{self.repo}/pulls", state="open", limit=LIST_MAX)
+            if r.status_code >= 300:
+                raise self._refuse(r, "the list of changes")
+            same = next((pr for pr in r.json() or [] if (pr.get("head") or {}).get("ref") == branch), None)
+            if same:
+                return {"ref": [f"#{same.get('number')}"], "number": same.get("number"),
+                        "detail": f"already open as #{same.get('number')}; nothing new was opened"}
+            op = {"operation": "update", "sha": plan["blob"]} if plan["blob"] else {"operation": "create"}
+            op.update(path=path, content=base64.b64encode(plan["after"].encode("utf-8")).decode())
+            msg = f"{title}\n\n{summary}\n\nAsked for in the Tockmox console by {by}.\n\n{trailers(requested)}\n"
+            try:
+                r = c.post(f"/repos/{self.repo}/contents", json={"branch": self.base, "new_branch": branch,
+                                                                  "message": msg, "files": [op]})
+                if r.status_code == 422 and "exist" in r.text.lower():
+                    raise act.Refused(f"the branch {branch} is already in the forge with no open change: delete it "
+                                      "there, or reopen its change")
+                if r.status_code >= 300:
+                    raise self._refuse(r, "the change's commit")
+                r = c.post(f"/repos/{self.repo}/pulls", json={
+                    "base": self.base, "head": branch, "title": title[:200],
+                    "body": f"{summary}\n\nAsked for in the Tockmox console by {by}. It changes only {path}, and in "
+                            f"it only what this page set; the rest of the file is as it was.\n\n{trailers(requested)}"})
+            except httpx.HTTPError as e:
+                raise act.Refused("the forge did not answer; the change may be half made (look for its branch)") from e
+            if r.status_code >= 300:
+                raise self._refuse(r, "opening the change")
+            new = r.json() or {}
+        return {"ref": [f"#{new.get('number')}"], "number": new.get("number"),
+                "detail": f"opened as #{new.get('number')}, waiting for an approval"}
 
     def _blob(self, c, path: str, ref: str) -> str:
         """The blob sha of path at ref, or "" when it is absent there."""

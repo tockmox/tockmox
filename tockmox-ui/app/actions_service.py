@@ -41,6 +41,7 @@ never written to the record, the log line or a replay's answer.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -60,8 +61,50 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from . import actions as act
 from .auth import OIDC
 from .forge import Forge, Paused
+from . import values_edit as ve
+
+# The kinds that open a change as the change bot; each records the person who asked (Tockmox-Requested-By).
+OPENS = ("open-change", "add-admin")
+
+
+def _username(claims) -> str:
+    """The identity provider username of the person acting: what the forge registers them under, so it can be
+    compared with the person the forge later signs in to approve."""
+    c = claims or {}
+    return str(c.get("preferred_username") or c.get("nickname") or "")[:100]
 
 log = logging.getLogger("tockmox.actions")
+
+# Changes a page stages to open (stage_draft): kept in this process for as long as a confirm can take.
+DRAFT_TTL_S = 30 * 60
+DRAFTS_MAX = 50
+DRAFT_BYTES_MAX = 512 * 1024
+_ROLL = ("litellm", "podAnnotations", "tockmox.com/node-routes")      # nodes.ROLL_ANNOTATION: rolls the gateway
+DRAFT_PATHS = {"models": {("modelLifecycle",), ("inferenceNodes",), _ROLL},
+               "nodes": {("inferenceNodes",), _ROLL}}
+
+
+def check_block(path: tuple, value) -> None:
+    """A staged block must be one the console itself would render: it parses with the same functions the pages and
+    the model watcher's PR opener use, so a draft cannot carry a block the chart would refuse."""
+    from . import models as ml
+    from . import nodes as nm
+    try:
+        if path == ("modelLifecycle",):
+            if not isinstance(value, dict):
+                raise act.Refused("modelLifecycle must be a mapping")
+            ml.parse(value)
+        elif path == ("inferenceNodes",):
+            if not isinstance(value, dict):
+                raise act.Refused("inferenceNodes must be a mapping")
+            nm.parse_inventory(value)
+        elif path == _ROLL:
+            if not (isinstance(value, str) and len(value) == 16 and all(c in "0123456789abcdef" for c in value)):
+                raise act.Refused("the gateway's rolling annotation is a 16-character hash")
+    except (ml.LifecycleError, nm.NodeError, KeyError, TypeError, ValueError, AttributeError) as e:
+        if isinstance(e, act.Refused):
+            raise
+        raise act.Refused(f"{'.'.join(path)} is not valid: {str(e)[:200]}") from e
 SA = "/var/run/secrets/kubernetes.io/serviceaccount"
 ACTIVITY_MAX = 300
 TOKEN_MAX_AGE = 600           # an ID token older than this is not a fresh confirmation, whatever its exp says
@@ -329,6 +372,8 @@ class Service:
         self.inflight: set = set()
         self.inflight_lock = threading.Lock()
         self.seen: dict = {}            # key -> (nonce, row, at): this process's memory, for a record that lost a row
+        self.drafts: dict = {}          # digest -> draft: changes a page staged to open (stage_draft)
+        self.drafts_lock = threading.Lock()
 
     # ------------------------------------------------------------ who is asking
 
@@ -572,9 +617,108 @@ class Service:
     def do_revert_change(self, it, who, claims=None, forge=None):
         t = it["target"]
         try:
-            return self.forge.revert(t["number"], t["merge"], who)
+            return self.forge.revert(t["number"], t["merge"], who, requested=_username(claims))
         except Paused as e:
             raise act.Refused("the forge stopped answering; nothing was opened") from e
+
+    # ------------------------------------------------------------ opening a change a page renders
+
+    def stage_draft(self, body) -> str:
+        """Keep a change a page rendered (the blocks it replaces, already built by the same functions the page shows
+        them with) until the person confirms it, and answer its digest; the intent names the digest, so the sign-in
+        binds exactly this draft. Staging does nothing else: the change is opened only by a confirmed intent."""
+        if not isinstance(body, dict) or set(body) - {"what", "title", "summary", "edits"}:
+            raise act.Refused("a draft is what, title, summary and edits")
+        what, title, summary = body.get("what"), str(body.get("title", "")), str(body.get("summary", ""))
+        if what not in act.DRAFT_WHATS:
+            raise act.Refused("no such kind of change")
+        if not title.strip() or len(title) > 200 or any(ord(c) < 32 for c in title) or len(summary) > 2000:
+            raise act.Refused("a draft's title is one line of at most 200 characters, its summary at most 2000")
+        edits = body.get("edits")
+        allowed = DRAFT_PATHS[what]
+        if not isinstance(edits, list) or not 1 <= len(edits) <= len(allowed):
+            raise act.Refused("a draft names the blocks it replaces")
+        seen = set()
+        for e in edits:
+            path = tuple(e.get("path") or ()) if isinstance(e, dict) else ()
+            if path not in allowed or path in seen or set(e) != {"path", "value"}:
+                raise act.Refused(f"a {what} change may not set {'.'.join(map(str, path)) or 'that'}")
+            seen.add(path)
+        for e in edits:
+            check_block(tuple(e["path"]), e["value"])
+        doc = {"what": what, "title": title.strip(), "summary": summary.strip(),
+               "edits": [{"path": list(e["path"]), "value": e["value"]} for e in edits]}
+        digest = hashlib.sha256(json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        now = self.now()
+        with self.drafts_lock:
+            self.drafts = {k: v for k, v in self.drafts.items() if now - v["at"] < DRAFT_TTL_S}
+            while len(self.drafts) >= DRAFTS_MAX:
+                self.drafts.pop(min(self.drafts, key=lambda k: self.drafts[k]["at"]))
+            self.drafts[digest] = dict(doc, at=now)
+        return digest
+
+    def _draft(self, digest: str) -> dict:
+        with self.drafts_lock:
+            d = self.drafts.get(digest)
+        if not d or self.now() - d["at"] >= DRAFT_TTL_S:
+            raise act.Refused("this change was drawn too long ago (or the service restarted since); open the page again")
+        return d
+
+    def change_plan(self, kind: str, t: dict) -> dict:
+        """{"path", "edits", "title", "summary", "slug", "applied"}: what a confirmed open-change or add-admin intent
+        would open. add-admin is computed here from main, so two people adding two names never undo each other."""
+        if kind == "open-change":
+            d = self._draft(str(t.get("draft", "")))
+            if d["what"] != t.get("what") or d["title"] != t.get("title"):
+                raise act.Refused("the draft is not the one this action names")
+            return {"path": self.cfg.values_file("models"), "edits": [(e["path"], e["value"]) for e in d["edits"]],
+                    "title": d["title"], "summary": d["summary"] or d["title"], "slug": d["what"],
+                    "applied": str(t.get("applied", ""))}
+        if kind == "add-admin":
+            u = str(t.get("username", ""))
+            path = self.cfg.values_file("identity")
+            with self.forge._bot() as c:
+                text = self.forge._text(c, path, self.cfg.changes_base)
+            try:
+                doc = yaml.safe_load(text) if text.strip() else {}
+            except yaml.YAMLError as e:
+                raise act.Refused(f"{path} is not valid YAML on {self.cfg.changes_base}") from e
+            now = ve.get_path(doc if isinstance(doc, dict) else {}, ["sso", "adminUsers"]) or []
+            if not isinstance(now, list):
+                raise act.Refused(f"sso.adminUsers in {path} is not a list; edit it by hand")
+            if u in now:
+                raise act.Refused(f"{u} is already in sso.adminUsers on {self.cfg.changes_base}")
+            return {"path": path, "edits": [(["sso", "adminUsers"], list(now) + [u])],
+                    "title": f"Make {u} an administrator",
+                    "summary": f"Adds {u} to sso.adminUsers, so the identity layer's next sync adds {u} to the admin group.",
+                    "slug": "admin", "applied": ""}
+        raise act.Refused(f"{kind} does not open a change")
+
+    def preview(self, kind: str, t: dict) -> dict:
+        """The confirm panel's diff: exactly what the change would do to the file on main now."""
+        import difflib
+        pl = self.change_plan(kind, t)
+        try:
+            plan = self.forge.plan_change(pl["path"], pl["edits"], pl["applied"])
+        except Paused as e:
+            raise act.Refused("the site forge is not answering, so nothing can be opened now") from e
+        diff = "".join(difflib.unified_diff(plan["before"].splitlines(True), plan["after"].splitlines(True),
+                                            f"a/{plan['path']}", f"b/{plan['path']}", n=3))
+        return {"path": plan["path"], "title": pl["title"], "diff": diff[:200_000], "cut": len(diff) > 200_000}
+
+    def _open(self, it, who, claims=None):
+        pl = self.change_plan(it["kind"], it["target"])
+        try:
+            return self.forge.open_change(pl["path"], pl["edits"], pl["title"], pl["summary"], who, pl["slug"],
+                                          pl["applied"], requested=_username(claims))
+        except Paused as e:
+            raise act.Refused("the forge stopped answering; nothing was opened") from e
+
+    def do_open_change(self, it, who, claims=None):
+        return self._open(it, who, claims)
+
+    def do_add_admin(self, it, who, claims=None):
+        return self._open(it, who, claims)
 
     # ------------------------------------------------------------ one intent
 
@@ -631,7 +775,12 @@ class Service:
         self.seen[it["key"]] = (nonce, row, now)
         try:
             fn = getattr(self, "do_" + it["kind"].replace("-", "_"))
-            res = fn(it, who, claims=claims, forge=forge) if it["kind"] in act.CHANGE_KINDS else fn(it, who)
+            if it["kind"] in act.CHANGE_KINDS:
+                res = fn(it, who, claims=claims, forge=forge)
+            elif it["kind"] in OPENS:
+                res = fn(it, who, claims=claims)      # the change records who asked (Tockmox-Requested-By)
+            else:
+                res = fn(it, who)
         except Exception as e:
             reason = e.reason if isinstance(e, act.Refused) else type(e).__name__
             self._finish(dict(row, result="failed", detail=reason[:300]))
@@ -715,6 +864,43 @@ def create_service(doc: dict | None = None, transports: dict | None = None, now=
             log.warning("changes: the forge's answer could not be read", exc_info=True)
             return JSONResponse({"error": "the forge's answer could not be read"}, status_code=502)
         return dict(out, repo=svc.cfg.changes_repo, base=svc.cfg.changes_base, sign_in=svc.forge.sign_in())
+
+    @app.post("/v1/changes/drafts")
+    async def stage(request: Request):
+        """A page's rendered change, kept for its confirm (the UI is the only caller). Opens nothing."""
+        if not svc.cfg.on("open-change"):
+            return JSONResponse({"error": "the change actions are not turned on here"}, status_code=404)
+        raw = await request.body()
+        if len(raw) > DRAFT_BYTES_MAX:
+            return JSONResponse({"error": "this change is too large to open from the console; download it"}, status_code=413)
+        try:
+            return {"draft": svc.stage_draft(json.loads(raw or b"{}"))}
+        except act.Refused as e:
+            return JSONResponse({"error": e.reason}, status_code=400)
+        except ValueError:
+            return JSONResponse({"error": "not JSON"}, status_code=400)
+
+    @app.post("/v1/changes/preview")
+    async def preview(request: Request):
+        """What a confirmed open-change or add-admin would open, as a diff of the file on main now. Opens nothing."""
+        try:
+            body = await request.json()
+        except ValueError:
+            return JSONResponse({"error": "not JSON"}, status_code=400)
+        kind, t = (body or {}).get("kind"), (body or {}).get("target") or {}
+        if kind not in act.OPEN_KINDS or not svc.cfg.on(kind) or not isinstance(t, dict):
+            return JSONResponse({"error": "the change actions are not turned on here"}, status_code=404)
+        why = svc.forge.unready()
+        if why:
+            return JSONResponse({"error": why}, status_code=503)
+        try:
+            act.check(svc.cfg, act.intent(kind, t, {}, "preview"))
+            return svc.preview(kind, t)
+        except act.Refused as e:
+            return JSONResponse({"error": e.reason}, status_code=409)
+        except Exception:  # noqa: BLE001 - its text stays in this pod
+            log.warning("preview: could not be made", exc_info=True)
+            return JSONResponse({"error": "the change could not be read from the forge"}, status_code=502)
 
     @app.get("/v1/forge/state")
     def forge_state():

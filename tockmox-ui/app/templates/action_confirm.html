@@ -10,6 +10,13 @@
     <dt>What happens</dt><dd>{{ d.effect }}</dd>
     <dt>Undo</dt><dd>{{ d.undo }}</dd>
   </dl>
+  {% if preview %}
+  {#- the exact edit the change makes, against main now: the rest of the file stays as it is -#}
+  <details open>
+    <summary>The exact change to <code>{{ preview.path }}</code>{% if preview.cut %} (cut: it is longer than the page shows){% endif %}</summary>
+    <pre class="diff" tabindex="0" aria-label="Diff of {{ preview.path }}">{{ preview.diff }}</pre>
+  </details>
+  {% endif %}
   <form method="post" action="/actions/go" class="stack">
     <input type="hidden" name="csrf" value="{{ user.csrf }}">
     <input type="hidden" name="kind" value="{{ kind }}">

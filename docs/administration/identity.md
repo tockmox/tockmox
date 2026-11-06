@@ -601,6 +601,12 @@ ConfigMap, the identity Application goes OutOfSync, its automated sync applies
 it, and the Job runs after that sync. On a running install, adding a name is
 therefore a values change and a push, nothing more.
 
+On a site whose forge is built in, **Platform › Identity** in the console makes
+that change for you: **Make an administrator** opens a change adding the name to
+`sso.adminUsers` in `site/values/identity.yaml`, and it waits for an
+administrator's approval like any other ([site forge, "Opening a change from a
+page"](site-forge.md#opening-a-change-from-a-page)).
+
 It only adds. It never removes a member, and a user who is already a member is
 left alone. A name that does not exist yet is not an error: the Job logs it and
 carries on, so you can list someone before they have signed in for the first

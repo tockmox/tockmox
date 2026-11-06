@@ -355,6 +355,16 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
         if fmt == "yaml":
             return Response(text, media_type="application/yaml",
                             headers={"Content-Disposition": 'attachment; filename="model-lifecycle.values.yaml"'})
+        # A hosted entry goes in a gateway's model_list by hand, outside these blocks: such a change is downloaded
+        hand = bool(new_lc.eval_gateway_entries or new_lc.production_gateway_entries or new_lc.production_gateway_removed)
+        if fmt == "open":
+            if hand:
+                return bad(request, u, "This change also needs a hand edit to a gateway's model_list, so it cannot be "
+                                       "opened from the console. Download it instead.")
+            summary = title + "." + "".join(f"\n\n- {n}" for n in notes or [])
+            edits = [(("modelLifecycle",), doc["modelLifecycle"]), (("inferenceNodes",), doc["inferenceNodes"]),
+                     (("litellm", "podAnnotations", nm.ROLL_ANNOTATION), doc["litellm"]["podAnnotations"][nm.ROLL_ANNOTATION])]
+            return request.app.state.open_change(request, u, "models", title, summary, edits)
         dump = lambda entries: yaml.dump({"model_list": entries}, Dumper=nm._Dumper, sort_keys=False) if entries else ""
         changed = {r.alias for r in new_inv.routes} ^ {r.alias for r in inv.routes} | {
             r.alias for r in new_inv.routes if any(x.alias == r.alias and x.model != r.model for x in inv.routes)}
@@ -365,7 +375,8 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
                       prod_removed=list(new_lc.production_gateway_removed),
                       model_list=nm.model_list_yaml(derived) if [r for r in nm.gateway_routes(derived) if r.alias in changed] else "",
                       eval_list=nm.model_list_yaml(derived, "eval") if nm.gateway_routes(derived, "eval") else "",
-                      form_fields=form_fields, values_file=s.nodes.values_file, path=path)
+                      form_fields=form_fields, values_file=s.nodes.values_file, path=path,
+                      can_open=bool(s.actions and s.actions.on("open-change")) and not hand)
 
     def replacement_candidate(dep, report):
         """(hosted Candidate, "") for the replacement a deprecation names, or (None, why). The report's own frontier candidate for it

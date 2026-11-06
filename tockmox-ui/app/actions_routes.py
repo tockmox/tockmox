@@ -15,6 +15,8 @@ confirmation to one intent, and Platform > Activity. Nothing here writes: the in
                                /platform/history/copy/<sha256>/site.bundle(.sha256) hand the two files over
   GET  /platform/history       Site history: where the history lives, the off-site copy (matches, pending, behind, none),
                                the last rebuild drill, recently applied changes with Revert, and Copy now
+  (app.state.open_change)      a page that renders a change (models, inference nodes) stages it with the service and
+                               sends the browser to the confirm panel, which shows the exact diff against main
   GET  /actions/forge/callback for approve and decline only: the forge's own sign-in comes back here BEFORE the
                                identity provider's step-up, so the service can act as that person in the forge
 """
@@ -99,7 +101,7 @@ def silences_on(pv) -> list[dict]:
 
 
 def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, oidc, placed_now, transport=None,
-             active_silences=lambda: {}, forge_jobs=None, alerts_now=None):
+             active_silences=lambda: {}, forge_jobs=None, alerts_now=None, site_revision=None):
     cfg: act.Config = s.actions or act.Config()
 
     def site_time(ts):
@@ -117,6 +119,15 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
         try:
             with httpx.Client(base_url=cfg.url, timeout=max(s.source_timeout_s, 10), transport=transport) as c:
                 r = c.get(path, params=params)
+            return r.status_code, r.json()
+        except Exception as e:  # noqa: BLE001
+            return 0, {"error": f"the actions service did not answer ({type(e).__name__})"}
+
+    def service_post(path, body):
+        """(status, json) from tockmox-actions, or (0, {"error": ...}) when it did not answer."""
+        try:
+            with httpx.Client(base_url=cfg.url, timeout=max(s.source_timeout_s, 10), transport=transport) as c:
+                r = c.post(path, content=json.dumps(body, default=str), headers={"Content-Type": "application/json"})
             return r.status_code, r.json()
         except Exception as e:  # noqa: BLE001
             return 0, {"error": f"the actions service did not answer ({type(e).__name__})"}
@@ -167,6 +178,11 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
             if head != row.get("head"):
                 raise act.Refused(f"#{n} changed since the page was drawn; look at it again")
             return {"number": n, "title": row.get("title", ""), "head": head}, "/platform/changes", ""
+        if kind == "open-change":
+            return {"what": str(q.get("what", "")), "draft": str(q.get("draft", "")), "title": str(q.get("title", "")),
+                    "applied": str(q.get("applied", ""))}, _back(q.get("back", ""), "/platform/changes"), ""
+        if kind == "add-admin":
+            return {"username": str(q.get("username", ""))}, "/platform/identity", ""
         if kind in act.IDENTITY_KINDS:
             uid = str(q.get("user", ""))
             return {"user": int(uid) if uid.isdigit() else 0, "username": str(q.get("username", ""))}, "/platform/identity", ""
@@ -210,10 +226,18 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
             if kind in act.FORGE_PERSON_KINDS and not (forge_sign_in() and forge_redirect):
                 raise act.Refused("the console has no sign-in to the site forge configured (actions.changes.oauth)")
             it = act.check(cfg, act.intent(kind, target, draft, u.sub))
+            preview = None
+            if kind in act.OPEN_KINDS:
+                # the exact edit, against main now: a refusal (main already says it, the file moved since it was
+                # applied, a layout the console cannot edit) is said here, before anyone signs in
+                code, preview = service_post("/v1/changes/preview", {"kind": kind, "target": target})
+                if code != 200:
+                    raise act.Refused(str(preview.get("error") or "the change could not be previewed"))
         except act.Refused as e:
-            return nope(request, u, f"This action cannot be offered: {e}.", 409)
+            return nope(request, u, f"This action cannot be offered: {e.reason}.", 409)
         d = act.describe(it, fmt_time=site_time, choosing=True)
         return render(request, "action_confirm.html", u, kind=kind, d=d, target_json=json.dumps(target, sort_keys=True),
+                      preview=preview,
                       key=it["key"], back=back, step_up=act.step_up(kind), max_age_min=cfg.step_up_max_age // 60,
                       choices=SILENCE_CHOICES, recovery_choices=RECOVERY_CHOICES, target=target)
 
@@ -361,6 +385,26 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
 
     app.state.action_finish = finish
 
+    def open_change(request, u, what: str, title: str, summary: str, edits: list):
+        """A page that renders a change hands it here instead of as a download: it is staged with the service and the
+        browser goes to the confirm panel. The page was drawn from what Argo CD applied, so the commit it applied for
+        the AI layer travels with it, and the service refuses if the file moved on main since."""
+        if not cfg.on("open-change"):
+            return nope(request, u, "Opening changes from the console is not turned on here; download the change instead.")
+        applied = (site_revision() if site_revision else "") or ""
+        if not act.SHA.fullmatch(applied):
+            return nope(request, u, "Not opened: the commit Argo CD last applied for the AI layer could not be read, so "
+                                    "this change could undo one merged since. Download it instead, or try again in a minute.", 409)
+        code, j = service_post("/v1/changes/drafts", {"what": what, "title": title[:200], "summary": summary[:2000],
+                                                       "edits": [{"path": list(p), "value": v} for p, v in edits]})
+        if code != 200 or not act.DIGEST.fullmatch(str(j.get("draft", ""))):
+            return nope(request, u, f"Not opened: {j.get('error') or 'the actions service did not take the change'}.", 409)
+        q = urlencode({"kind": "open-change", "what": what, "draft": j["draft"], "title": title[:200].strip(),
+                       "applied": applied, "back": "/models" if what == "models" else "/nodes"})
+        return RedirectResponse("/actions/confirm?" + q, status_code=303)
+
+    app.state.open_change = open_change
+
     @app.get("/platform/activity")
     def activity(request: Request):
         u, deny = admin(request)
@@ -390,9 +434,13 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
         u, deny = admin(request)
         if deny:
             return deny
-        if not cfg.on("recovery-link"):
+        people_on, admin_on = cfg.on("recovery-link"), cfg.on("add-admin")
+        if not (people_on or admin_on):
             return nope(request, u, "The identity actions are not turned on here (tockmoxUi.actions.identity).")
         people, err, groups = [], "", {}
+        if not people_on:
+            return render(request, "platform_identity.html", u, people=[], err="", groups={}, admin_url="",
+                          people_on=False, admin_on=admin_on)
         try:
             with httpx.Client(base_url=cfg.url, timeout=max(s.source_timeout_s, 10), transport=transport) as c:
                 r = c.get("/v1/identity/users")
@@ -403,7 +451,8 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
         except Exception as e:  # noqa: BLE001
             err = f"the actions service did not answer ({type(e).__name__})"
         admin_url = (s.oidc_issuer.split("/application/")[0] + "/if/admin/#/identity/users") if s.oidc_issuer else ""
-        return render(request, "platform_identity.html", u, people=people, err=err, groups=groups, admin_url=admin_url)
+        return render(request, "platform_identity.html", u, people=people, err=err, groups=groups, admin_url=admin_url,
+                      people_on=True, admin_on=admin_on)
 
     @app.get("/platform/changes")
     def changes(request: Request):

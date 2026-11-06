@@ -22,7 +22,7 @@
 {% for c in opened %}
 <article class="panel change" aria-labelledby="ch-{{ c.number }}">
   <h3 id="ch-{{ c.number }}">#{{ c.number }} {{ c.title }}</h3>
-  <p class="muted small">From {{ c.by }}{% if c.created %} · opened <time datetime="{{ c.created }}">{{ c.created[:16] | replace("T", " ") }}</time>{% endif %}{% if c.url %} · <a href="{{ c.url }}">in the forge</a>{% endif %}</p>
+  <p class="muted small">From {{ c.by }}{% if c.requested_by %}, asked for by {{ c.requested_by }}{% endif %}{% if c.created %} · opened <time datetime="{{ c.created }}">{{ c.created[:16] | replace("T", " ") }}</time>{% endif %}{% if c.url %} · <a href="{{ c.url }}">in the forge</a>{% endif %}</p>
   {% if c.summary %}<p>{{ c.summary }}</p>{% endif %}
   <p><span class="sr-only">Checks: </span>
   {%- if not c.checks %}{{ badge("unknown", "No checks reported") }}
@@ -51,12 +51,12 @@
 <div class="table-wrap" tabindex="0" role="region" aria-labelledby="ap-cap">
 <table>
   <caption id="ap-cap">The last {{ applied | length }} applied, newest first.</caption>
-  <thead><tr><th scope="col">Change</th><th scope="col">Applied</th><th scope="col">By</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+  <thead><tr><th scope="col">Change</th><th scope="col">Applied</th><th scope="col">Approved by</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
   <tbody>
   {% for c in applied %}
   <tr><th scope="row">#{{ c.number }} {{ c.title }}</th>
     <td>{% if c.merged_at %}<time datetime="{{ c.merged_at }}">{{ c.merged_at[:16] | replace("T", " ") }}</time>{% endif %} <code>{{ c.merge[:7] }}</code></td>
-    <td>{{ c.merged_by or "?" }}</td>
+    <td>{{ c.merged_by or "?" }}{% if c.requested_by %} <span class="muted small">(asked for by {{ c.requested_by }})</span>{% endif %}{% if c.self_approved %} {{ badge("warning", "Self-approved: sole approver") }}{% endif %}</td>
     <td><a class="pill" href="/actions/confirm?kind=revert-change&amp;number={{ c.number }}">Revert</a></td></tr>
   {% endfor %}
   </tbody>

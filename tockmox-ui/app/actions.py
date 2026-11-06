@@ -24,7 +24,9 @@ Kinds (`actions.<kind>.enabled`; off means absent, never a disabled button):
   changes     approve and apply, or decline, a change waiting on Platform > Changes, as the person's OWN forge identity
               (a second round trip, to the site's forge, whose sign-in is Authentik: the service exchanges its code
               for that person's token and uses it once), and revert an applied change by opening the opposite one as
-              the change bot. Every one asks for a fresh sign-in. No forge admin credential is used anywhere
+              the change bot; those three ask for a fresh sign-in. Open a change a page renders (models, inference
+              nodes) and add an administrator (sso.adminUsers, with a fresh sign-in) open one as the change bot, which
+              waits for an approval like any other. No forge admin credential is used anywhere
 """
 from __future__ import annotations
 
@@ -51,6 +53,8 @@ KINDS = {
     "approve-change": ("changes", "medium", True, "Approved and applied"),
     "decline-change": ("changes", "medium", True, "Declined"),
     "revert-change": ("changes", "medium", True, "Opened a revert of"),
+    "open-change": ("changes", "low", False, "Opened a change"),
+    "add-admin": ("changes", "medium", True, "Opened a change adding an administrator"),
 }
 SWITCHES = ("silence", "runJob", "argocd", "restart", "testAlert", "identity", "changes")
 IDENTITY_KINDS = ("recovery-link", "add-member", "remove-member")
@@ -59,6 +63,15 @@ CHANGE_KINDS = ("approve-change", "decline-change", "revert-change")
 # identity provider's, and the service exchanges the code for that person's token. Revert opens a change as the bot,
 # and that change waits for an approval like any other.
 FORGE_PERSON_KINDS = ("approve-change", "decline-change")
+# The kinds that OPEN a change as the change bot from a page that renders one; it waits for an approval like any other.
+# open-change carries a draft the page staged with the service (its digest); add-admin is computed by the service from
+# what main says now.
+OPEN_KINDS = ("open-change", "add-admin")
+DRAFT_WHATS = ("models", "nodes")
+DIGEST = re.compile(r"[0-9a-f]{64}")
+ADMIN_USERNAME = re.compile(r"[^\s\x00-\x1f\x7f]{1,150}")   # sso.adminUsers' own schema: no whitespace
+VALUES_PATH = re.compile(r"([A-Za-z0-9_-][A-Za-z0-9._-]{0,99}/){0,9}[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}\.ya?ml")   # no segment starts with a dot
+VALUES_FILES = {"models": "site/values/ai.yaml", "identity": "site/values/identity.yaml"}
 SHA = re.compile(r"[0-9a-f]{40}")
 REPO = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
 RECOVERY_HOURS = (1, 24, 72)
@@ -113,12 +126,18 @@ class Config:
     changes_client_id_file: str = ""               # ... from a file (bootstrap-forge writes it; the forge makes it up)
     changes_client_secret_file: str = ""           # service side only: the UI never holds it
     changes_web: str = ""                          # the forge's web origin, for "open in the forge" links
+    changes_self_approval: str = "sole-approver-only"  # sole-approver-only | never: may the asker approve (2026-11-06)
+    changes_approvers_team: str = "approvers"      # the forge team whose approval the branch rule wants
     forge_namespace: str = "tockmox-forge"         # service side: where the built-in forge and its copy jobs run
     forge_release: str = "tockmox-forge"           # service side: its release (CronJobs <release>-offsite, -drill-check)
+    values_files: tuple = tuple(VALUES_FILES.items())  # service side: (which, repo path) for the files a change edits
     activity_configmap: str = "tockmox-actions-activity"
     namespace: str = ""                            # service side: where the activity ConfigMap lives
     step_up_max_age: int = STEP_UP_MAX_AGE
     extra: dict = field(default_factory=dict)
+
+    def values_file(self, which: str) -> str:
+        return dict(self.values_files).get(which, "")
 
     def on(self, kind: str) -> bool:
         k = KINDS.get(kind)
@@ -145,7 +164,7 @@ def parse(raw) -> Config:
     unknown = set(raw) - set(SWITCHES) - {"url", "activityConfigMap", "namespace", "stepUpMaxAgeSeconds"}
     ch = raw.get("changes") or {}
     ch_unknown = set(ch) - {"enabled", "apiUrl", "repo", "baseBranch", "botTokenFile", "webUrl", "oauth",
-                            "forgeNamespace", "forgeRelease"}
+                            "forgeNamespace", "forgeRelease", "valuesFiles", "selfApproval", "approversTeam"}
     if ch_unknown:
         raise ValueError(f"actions.changes: unknown key(s) {sorted(ch_unknown)}")
     oa = ch.get("oauth") or {}
@@ -163,6 +182,19 @@ def parse(raw) -> Config:
     for k in ("forgeNamespace", "forgeRelease"):
         if ch.get(k) and not DNS_LABEL.fullmatch(str(ch[k])):
             raise ValueError(f"actions.changes.{k} must be a DNS label")
+    if ch.get("selfApproval") not in (None, "", "sole-approver-only", "never"):
+        raise ValueError("actions.changes.selfApproval must be sole-approver-only or never")
+    if ch.get("approversTeam") and not re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", str(ch["approversTeam"])):
+        raise ValueError("actions.changes.approversTeam must be a team name")
+    vf = ch.get("valuesFiles") or {}
+    if not isinstance(vf, dict) or set(vf) - set(VALUES_FILES):
+        raise ValueError(f"actions.changes.valuesFiles: a mapping of {sorted(VALUES_FILES)} to repo paths")
+    files = dict(VALUES_FILES)
+    for k, v in vf.items():
+        if v:
+            if not VALUES_PATH.fullmatch(str(v)):
+                raise ValueError(f"actions.changes.valuesFiles.{k} must be a .yaml path inside the site repository")
+            files[k] = str(v)
     if unknown:
         raise ValueError(f"actions: unknown key(s) {sorted(unknown)}")
     jobs = []
@@ -207,8 +239,11 @@ def parse(raw) -> Config:
                   changes_client_id=str(oa.get("clientId", "")), changes_client_id_file=str(oa.get("clientIdFile", "")),
                   changes_client_secret_file=str(oa.get("clientSecretFile", "")),
                   changes_web=str(ch.get("webUrl", "")).rstrip("/"),
+                  changes_self_approval=str(ch.get("selfApproval") or "sole-approver-only"),
+                  changes_approvers_team=str(ch.get("approversTeam") or "approvers"),
                   forge_namespace=str(ch.get("forgeNamespace") or "tockmox-forge"),
                   forge_release=str(ch.get("forgeRelease") or "tockmox-forge"),
+                  values_files=tuple(sorted(files.items())),
                   activity_configmap=str(raw.get("activityConfigMap", "tockmox-actions-activity")),
                   namespace=str(raw.get("namespace", "")), step_up_max_age=age)
 
@@ -314,6 +349,22 @@ def check(cfg: Config, it: dict) -> dict:
                 raise Refused("a decline takes at most a reason of 300 characters")
         elif p:
             raise Refused(f"{kind} takes no parameters")
+    elif kind == "open-change":
+        title, applied = t.get("title", ""), str(t.get("applied", ""))
+        if t.get("what") not in DRAFT_WHATS or not DIGEST.fullmatch(str(t.get("draft", ""))) or \
+                set(t) - {"what", "draft", "title", "applied"}:
+            raise Refused("opening a change names what it changes and the draft the page made")
+        if not isinstance(title, str) or not title.strip() or len(title) > 200 or any(ord(c) < 32 for c in title):
+            raise Refused("a change's title is one line of at most 200 characters")
+        if applied and not SHA.fullmatch(applied):
+            raise Refused("the applied revision is not a commit")
+        if p:
+            raise Refused("opening a change takes no parameters")
+    elif kind == "add-admin":
+        if not ADMIN_USERNAME.fullmatch(str(t.get("username", ""))) or set(t) - {"username"}:
+            raise Refused("adding an administrator names one username, with no spaces")
+        if p:
+            raise Refused("adding an administrator takes no parameters")
     return it
 
 
@@ -408,6 +459,21 @@ def describe(it: dict, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime
                 "effect": "Opens the opposite change: every file it changed goes back to what it was before. The "
                           "revert waits on Platform > Changes for an approval, like any change; nothing is applied yet.",
                 "undo": "Decline the revert."}
+    if k == "open-change":
+        title = t.get("title") or "a change"
+        return {"title": "Open this as a change?", "summary": f"Opened a change: {title}", "target": title,
+                "effect": "Opens a change in the site's forge with exactly the edit shown, as the change bot. Nothing "
+                          "is applied: it waits on Platform > Changes for an administrator's approval, like any change.",
+                "undo": "Decline it on Platform > Changes."}
+    if k == "add-admin":
+        u = t.get("username", "")
+        return {"title": f"Make {u} an administrator?", "summary": f"Opened a change making {u} an administrator",
+                "target": u,
+                "effect": f"Opens a change adding {u} to sso.adminUsers in the site's identity values. Nothing changes "
+                          f"until an administrator approves it; then Argo CD's next sync adds {u} to the admin group "
+                          f"(a name Authentik does not know yet is skipped and logged).",
+                "undo": f"Decline the change. Once applied, taking it out of sso.adminUsers does not remove {u} from "
+                        "the admin group (the job only adds): remove them in Authentik's admin console as well."}
     if k == "test-alert":
         return {"title": "Send a test alert to your phone?", "summary": "Sent a test alert",
                 "target": "the alert path: Alertmanager, the alert bridge, your phone",

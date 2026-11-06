@@ -17,11 +17,20 @@
 <section class="panel steps" aria-labelledby="yaml-h">
   <h2 id="yaml-h">The values block</h2>
   <p>The whole block, so it replaces what is there rather than merging by hand: {{ text.count("\n") }} lines.</p>
+  {% if can_open %}
+  <form method="post" action="/nodes/change">
+    <input type="hidden" name="csrf" value="{{ user.csrf }}">
+    <input type="hidden" name="draft" value="{{ draft }}">
+    <input type="hidden" name="format" value="open">
+    <button class="btn" type="submit">Open as a change</button>
+    <span class="muted small">for an administrator to approve; the next page shows the exact edit to the file on main first</span>
+  </form>
+  {% endif %}
   <form method="post" action="/nodes/change">
     <input type="hidden" name="csrf" value="{{ user.csrf }}">
     <input type="hidden" name="draft" value="{{ draft }}">
     <input type="hidden" name="format" value="yaml">
-    <button class="btn" type="submit">Download it</button>
+    <button class="{{ 'btn-ghost' if can_open else 'btn' }}" type="submit">Download it</button>
   </form>
   <details><summary>Show the block</summary>
 <pre tabindex="0"><code>{{ text }}</code></pre>

@@ -158,6 +158,21 @@ applied changes are listed below with **Revert**.
 - **The forge decides, not the console.** Someone outside `approvers` who
   approves here is refused by the branch rule, and the page says so. A change
   that moved after you opened it is refused before anything is done.
+- **The person who asked for a change does not approve it.** Every change the
+  console opens, and every revert, records who asked for it
+  (`Tockmox-Requested-By:`, their Authentik username), so the person is never
+  hidden behind the change bot, and the merge commit carries `Requested-by:`
+  beside `Approved-by:`. If you asked for a change, **Approve and apply** is
+  refused and names who else in `approvers` can approve it. The one exception is
+  a site where you are the only member of `approvers`: refusing would leave the
+  change with no one to approve it, so the approval goes through, the merge
+  commit ends in `Self-approved: sole approver`, and Recently applied shows the
+  change with a **Self-approved** badge. Adding a second approver ends the
+  exception by itself. `tockmoxUi.actions.changes.selfApproval: never` refuses
+  even then; the default is `sole-approver-only`. When the console cannot read
+  who is in `approvers`, it refuses rather than guess. The forge's own pages do
+  not apply this rule, because the change bot, not you, is the change's author
+  there; approve in the console for it to hold.
 - **Decline** closes the change, as you, with your reason as a comment.
   **Revert** opens the opposite change, as the change bot: every file the change
   touched, back as it was. It waits for an approval like any change. A file
@@ -167,6 +182,37 @@ applied changes are listed below with **Revert**.
   only as the person who signs in. The console itself holds no forge credential.
 - **While the forge does not answer**, the page reads **Changes paused** and
   offers nothing. Argo CD keeps running what is already applied.
+
+### Opening a change from a page
+
+**A page that renders a change can open it for you.** The models and
+inference-node pages offer **Open as a change** beside **Download it**, and
+**Platform › Identity** offers **Make an administrator**, which adds a name to
+`sso.adminUsers`. The confirm page shows the exact edit to the file on `main`
+before anything is opened; confirming opens it as the change bot, and it waits
+on Platform › Changes for an approval like any other. Nothing is applied until
+an administrator approves it.
+
+- **Only what the page set changes.** The console edits the keys the change
+  names (`modelLifecycle`, `inferenceNodes` and the gateway's rolling
+  annotation; or `sso.adminUsers`) and leaves every other line of the file as it
+  was, comments included. A file it cannot edit that way (YAML anchors, a key
+  written on one line in flow style, tabs) is refused with "edit it by hand",
+  never edited approximately.
+- **A change merged but not applied yet is never undone.** The models and nodes
+  pages are drawn from what Argo CD applied, so the change names the site commit
+  Argo CD last applied for the AI layer. If the file has changed on `main` since,
+  the confirm page refuses and asks you to wait for the sync.
+- **Asking twice opens one change.** The same edit asked for again answers with
+  the change already open.
+- **Which files.** The models and nodes changes go to the file the model
+  watcher writes (`modelLifecycle.watch.pullRequests.valuesPath`), or
+  `site/values/ai.yaml` when that is unset; administrators go to
+  `site/values/identity.yaml`. `tockmoxUi.actions.changes.modelsFile` and
+  `identityFile` set them.
+- **Not yet from a page:** a change that also needs a hand edit (a hosted model's
+  entry in a gateway's `model_list`, or enrolling a node, which adds the node's
+  own file). Those pages offer **Download it** only.
 
 **It is on wherever the console is,** on a site whose forge is built in: the
 installer writes `siteForge: built-in` into `global.yaml`, and the AI layer reads

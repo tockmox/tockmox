@@ -351,7 +351,7 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
                 cap_state = "warning" if any(not x["agree"] for x in cap_rows) else None
         groups = nav.rail(sec, u.is_admin, platform_on(), admin_tabs=tabs, capabilities_state=cap_state,
                           activity=bool(s.actions and s.actions.any),
-                          identity=bool(s.actions and s.actions.any and s.actions.on("recovery-link")),
+                          identity=bool(s.actions and s.actions.any and (s.actions.on("recovery-link") or s.actions.on("add-admin"))),
                           changes=bool(s.actions and s.actions.any and s.actions.on("approve-change")),
                           contributed=f_groups)
         out["rail"], out["rail_item"] = groups, nav.rail_current(groups, path) if groups else None
@@ -830,10 +830,19 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
     src_report = ModelReportSource(s.lifecycle.report_file, s.lifecycle.report_max_age_s)
     build_checks = BuildChecks(prober)       # the last build check: read by POST /models/builds, shown on the node pages
     src_forge_jobs = platform_mod.CronJobsSource(s.prometheus_url, s.source_timeout_s, tp.prometheus)
+    def ai_site_revision() -> str:
+        """The site commit Argo CD last synced for the AI layer (whose values the models and nodes pages render)."""
+        try:
+            apps = src_apps.read().data or []
+        except Exception:  # noqa: BLE001
+            return ""
+        ai = [a for a in apps if a.get("path", "").strip("/").endswith("charts/tockmox-ai")]
+        return str(ai[0].get("site_revision") or "") if len(ai) == 1 else ""
+
     actions_routes.register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, oidc,
                             lambda: placed(readings()), transport=tp.actions,
                             active_silences=lambda: src_am._console_silences(),
-                            forge_jobs=src_forge_jobs.read, alerts_now=src_am.read)
+                            forge_jobs=src_forge_jobs.read, alerts_now=src_am.read, site_revision=ai_site_revision)
     nodes_routes.register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_inodes, prober, APP_VERSION,
                           src_report=src_report, build_checks=build_checks)
 

@@ -339,6 +339,23 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_nodes,
                             headers={"Content-Disposition": f'attachment; filename="ai-node.{f["id"]}.yaml"'})
         before = {n.id for n in ns.inventory.nodes}
         before_r = {r.alias for r in ns.inventory.routes}
+        if form.get("format") == "open":
+            # an enrolment also adds the node's own files (ai-node.yaml, and desired.yaml CI renders from it): that
+            # one is downloaded and committed by hand
+            if enrolled_now:
+                return bad(request, u, "A change that enrols a node also adds the node's own file, so it cannot be "
+                                       "opened from the console yet. Download both and commit them together.")
+            block = {k: v for k, v in (ns.raw or {}).items() if k not in ("nodes", "routes")}
+            block.update(nm.inventory_to_doc(merged))
+            names = [n.name for n in add.nodes] + [r.alias for r in add.routes]
+            title = ("Inference nodes: " + ", ".join(names))[:200] if names else "Inference nodes"
+            sec = sorted({e.auth_secret for n in add.nodes for e in n.endpoints if e.auth_secret})
+            summary = (f"{title}." + (f"\n\nBefore approving, create {'this Secret' if len(sec) == 1 else 'these Secrets'} "
+                                      f"in the AI namespace, each holding the engine's token under the key token: "
+                                      + ", ".join(sec) + "." if sec else ""))
+            return request.app.state.open_change(request, u, "nodes", title, summary, [
+                (("inferenceNodes",), block),
+                (("litellm", "podAnnotations", nm.ROLL_ANNOTATION), nm.routes_hash(merged))])
         summary = {"new_nodes": [n for n in add.nodes if n.id not in before],
                    "enrolled": enrolled_now,
                    "changed_nodes": [n for n in add.nodes if n.id in before],
@@ -350,6 +367,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_nodes,
                       eval_list=nm.model_list_yaml(derived, "eval") if nm.gateway_routes(derived, "eval") else "",
                       draft=json.dumps(nm.inventory_to_doc(add)), values_file=ns.values_file,
                       secrets=sorted({e.auth_secret for n in add.nodes for e in n.endpoints if e.auth_secret}),
+                      can_open=bool(s.actions and s.actions.on("open-change")) and not enrolled_now,
                       ai_files=ai_files, ai_missing=ai_missing, ai_admin_cidrs_unset=not ns.inventory.ai.admin_cidrs)
 
     def _ai_node_files(enrolled, merged):

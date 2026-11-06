@@ -19,9 +19,10 @@ The Tockmox UI is the admin console for [inference nodes](inference-nodes.md)
 and [model lifecycle](model-lifecycle.md). It shows each node's health, imports
 an existing gateway's routes, proposes and promotes models, and generates the
 values change for each of those. **It never changes anything itself.** A change
-Git owns ends in YAML that an admin commits; the few runtime actions (a silence,
-a job run now, a restart, a test alert) go to a separate service that holds the
-credentials ([Taking action](#taking-action)).
+Git owns ends in YAML that an admin commits or, on a site whose forge is built in,
+in a change opened for an administrator to approve; the few runtime actions (a
+silence, a job run now, a restart, a test alert) go to a separate service that
+holds the credentials ([Taking action](#taking-action)).
 
 > **Experimental in 0.8.0, and off by default.** The values keys may change
 > before they are marked stable.
@@ -570,7 +571,7 @@ happen and how to undo it, and lands in **Platform › Activity**.
 | `testAlert` | One warning, `TockmoxTestAlert`, down the same path as every other alert; it resolves after five minutes | yes, with observability |
 | `argocd` | Refresh or sync an Argo CD application | no: needs your Argo CD account (below) |
 | `identity` | On **Platform › Identity**: a recovery link for anyone who is not an administrator, and adding to or removing from the user group | no: needs the identity layer's service account ([identity, "From the console"](identity.md#from-the-console)) |
-| `changes` | On **Platform › Changes**: approve and apply, or decline, a change waiting on the built-in site forge, as your own forge identity; revert an applied one by opening the opposite change | yes, on a built-in-forge site (`global.siteForge: built-in`), with the two Secrets `bootstrap-forge` writes ([site forge, "Approving in the console"](site-forge.md#approving-in-the-console)) |
+| `changes` | On **Platform › Changes**: approve and apply, or decline, a change waiting on the built-in site forge, as your own forge identity; revert an applied one by opening the opposite change. On the models and inference-node pages, **Open as a change** beside **Download it**; on **Platform › Identity**, **Make an administrator** (`sso.adminUsers`) | yes, on a built-in-forge site (`global.siteForge: built-in`), with the two Secrets `bootstrap-forge` writes ([site forge, "Approving in the console"](site-forge.md#approving-in-the-console)) |
 
 Off means absent: a kind that is off has no button, and the service refuses it.
 The alerts that prove the alert path works (`Watchdog`, `TockmoxHeartbeat`,
