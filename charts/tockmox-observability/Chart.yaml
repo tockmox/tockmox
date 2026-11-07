@@ -12,7 +12,7 @@ dependencies:
     version: 0.8.0
     repository: "file://../tockmox-common"
   - name: kube-prometheus-stack
-    version: 92.16.1
+    version: 92.17.1
     repository: "https://prometheus-community.github.io/helm-charts"
     condition: apps.kubePrometheusStack.enabled,capabilities.observability.enabled
   - name: loki

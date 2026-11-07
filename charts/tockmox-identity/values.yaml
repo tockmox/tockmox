@@ -255,7 +255,7 @@ databaseBackup:
   # tools/check-identity-seams.sh S10 now fails the build when the two majors
   # differ, and `grep -c postgres: images.txt` reads 1 when they agree.
   postgresImage: docker.io/library/postgres:17.11-bookworm
-  uploaderImage: alpine/k8s:1.37.1
+  uploaderImage: alpine/k8s:1.37.2
 
 # ---------------------------------------------------------------------------
 # THE IDENTITY DATABASE ON CLOUDNATIVEPG. Authentik's database as a
@@ -421,7 +421,7 @@ identity:
         # never hold a drill cluster at the same time. FIVE fields.
         schedule: "45 4 * * 1"
         suspend: false
-        image: alpine/k8s:1.37.1
+        image: alpine/k8s:1.37.2
         # WHERE THE DRILL RECORDS ITS ROW: one JSON object per run in
         # a bucket of its own in the shipped Garage, read back and checksummed
         # before the run may end as a PASS. A run whose row cannot be written or
