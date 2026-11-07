@@ -8,10 +8,16 @@
       "version": "1.37.1"
     },
     {
-      "name": "binwiederhier/ntfy",
-      "purl": "pkg:oci/ntfy?repository_url=binwiederhier/ntfy&tag=v2.35.0",
+      "name": "alpine/k8s",
+      "purl": "pkg:oci/k8s?repository_url=alpine/k8s&tag=1.37.2",
       "type": "container",
-      "version": "v2.35.0"
+      "version": "1.37.2"
+    },
+    {
+      "name": "binwiederhier/ntfy",
+      "purl": "pkg:oci/ntfy?repository_url=binwiederhier/ntfy&tag=v2.37.2",
+      "type": "container",
+      "version": "v2.37.2"
     },
     {
       "name": "caronc/apprise",
@@ -201,9 +207,9 @@
     },
     {
       "name": "quay.io/kiwigrid/k8s-sidecar",
-      "purl": "pkg:oci/k8s-sidecar?repository_url=quay.io/kiwigrid/k8s-sidecar&tag=2.14.1",
+      "purl": "pkg:oci/k8s-sidecar?repository_url=quay.io/kiwigrid/k8s-sidecar&tag=2.14.3",
       "type": "container",
-      "version": "2.14.1"
+      "version": "2.14.3"
     },
     {
       "name": "quay.io/metallb/controller",
@@ -295,9 +301,9 @@
     {
       "description": "Helm chart dependency of tockmox-devops",
       "name": "argo-workflows",
-      "purl": "pkg:generic/helm/argo-workflows@2.0.15",
+      "purl": "pkg:generic/helm/argo-workflows@2.0.16",
       "type": "application",
-      "version": "2.0.15"
+      "version": "2.0.16"
     },
     {
       "description": "Helm chart dependency of tockmox-exporters",
@@ -323,9 +329,9 @@
     {
       "description": "Helm chart dependency of tockmox-observability",
       "name": "kube-prometheus-stack",
-      "purl": "pkg:generic/helm/kube-prometheus-stack@92.16.1",
+      "purl": "pkg:generic/helm/kube-prometheus-stack@92.17.1",
       "type": "application",
-      "version": "92.16.1"
+      "version": "92.17.1"
     },
     {
       "description": "Helm chart dependency of tockmox-observability",

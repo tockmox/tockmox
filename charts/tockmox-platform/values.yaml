@@ -1048,7 +1048,7 @@ garage:
     # configures the BackupTarget by another route. The Garage and the database
     # backup path are unaffected either way.
     wireLonghornBackupTarget: true
-    image: alpine/k8s:1.37.1
+    image: alpine/k8s:1.37.2
 
   # ---------------------------------------------------------------------------
   # STATIC SITES SERVED FROM GARAGE: the web endpoint, and the list of
