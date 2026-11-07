@@ -1230,5 +1230,22 @@ if [ "$RR_CASES" -eq 0 ] || { [ "$RR_RC" -ne 0 ] && ! printf '%s\n' "$RR_OUT" | 
   bad "revision-row-test.sh ran its cases" "rc=${RR_RC}, ${RR_CASES} case(s): $(printf '%s' "$RR_OUT" | tail -3)"
 fi
 
+# Two P09 rows whose expectation depends on where the path runs (2026-11-06): S04's tag row is a
+# plain pass once the tag is published, and S21c's sign-in row is BLOCKED by the environment only when
+# a throwaway with no resolver cannot look up auth.<domain>.
+ER_OUT="$(bash "${HERE}/env-rows-test.sh" 2>&1)"; ER_RC=$?
+ER_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) ER_CASES=$((ER_CASES+1)); ok "environment rows: ${line#ok   }" ;;
+    "FAIL "*) ER_CASES=$((ER_CASES+1)); bad "environment rows: ${line#FAIL }" "run tests/executed-docs/env-rows-test.sh for detail" ;;
+  esac
+done <<EOF_ER
+$ER_OUT
+EOF_ER
+if [ "$ER_CASES" -eq 0 ] || { [ "$ER_RC" -ne 0 ] && ! printf '%s\n' "$ER_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "env-rows-test.sh ran its cases" "rc=${ER_RC}, ${ER_CASES} case(s): $(printf '%s' "$ER_OUT" | tail -3)"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
