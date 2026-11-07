@@ -289,9 +289,9 @@
     {
       "description": "Helm chart dependency of tockmox-devops",
       "name": "argo-workflows",
-      "purl": "pkg:generic/helm/argo-workflows@2.0.14",
+      "purl": "pkg:generic/helm/argo-workflows@2.0.15",
       "type": "application",
-      "version": "2.0.14"
+      "version": "2.0.15"
     },
     {
       "description": "Helm chart dependency of tockmox-exporters",
