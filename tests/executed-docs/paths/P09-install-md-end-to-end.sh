@@ -253,6 +253,37 @@ record_revision_row() {
   fi
 }
 
+# record_tag_row STEP ... S04's "the public repository has the release tag" row. The path runs on a
+# candidate as well as after a release: before the tag is pushed the block prints nothing, a known gap
+# (xfail); once the tag is published the row is a plain PASS. A run on main after the release recorded
+# that pass as "a known defect has started passing", which was the row's expectation going stale, not
+# a product finding.
+record_tag_row() {
+  local s="$1" got
+  got="$(out_of "$s" | grep -E '^[0-9a-f]{40}[[:space:]]+refs/tags/' >/dev/null && echo prints || echo nothing)"
+  if [ "$got" = prints ]; then
+    record "$s" "ls-remote of the public repo prints a SHA and the tag (the tag is published)" "prints" "$got"
+  else
+    record "$s" "ls-remote of the public repo prints a SHA and the tag (xfail before the tag is pushed: this path runs on the candidate)" "prints" "$got" xfail
+  fi
+}
+
+# record_sign_in_row STEP ... S21c's "the forge signs people in through Authentik" row. The forge looks
+# up auth.<domain> from inside the cluster, and a throwaway has no resolver for the site's domain
+# (TOCKMOX_P09_LAN_RESOLVER unset: the limit S21b and S20 already name). There, and only when the
+# refusal is that lookup failing, the row is BLOCKED by the environment (xfail). Any other answer, or
+# the same answer with a resolver named, stays a plain PASS/FAIL.
+record_sign_in_row() {
+  local s="$1" n
+  n="$(out_of "$s" | grep -c 'signs people in through Authentik' | tr -d ' ')"
+  if [ "$n" != 1 ] && [ -z "${TOCKMOX_P09_LAN_RESOLVER:-}" ] \
+     && out_of "$s" | grep -F "lookup auth.${INTERNAL_DOMAIN_V}" | grep -q 'no such host'; then
+    record "$s" "sign-in: the forge signs people in through Authentik ... BLOCKED by the environment: the forge cannot resolve auth.${INTERNAL_DOMAIN_V} in the cluster without a LAN resolver (lab only)" "1" "$n" xfail
+  else
+    record "$s" "sign-in: the forge signs people in through Authentik" "1" "$n"
+  fi
+}
+
 # block_in SECTION N ... ordinal extraction inside a named sub-section, for the
 # one block on the page that is byte-identical to another (the un-default gate
 # and its success condition are the same two lines), where --containing
@@ -338,7 +369,7 @@ finish_path() {
   does_not_prove \
     "Anything about GitHub's copy of the product repository or the published tag: source 1 was a harness snapshot of the working tree served from inside the cluster under test (S04's note names the URL and revision). The credential path for a PRIVATE product repository is not exercised." \
     "That the page's NODE step (the .skip file) works: node-local, not reachable from this harness, and gated off on a stock install anyway (S19)." \
-    "The DNS success condition (S21b, a random label from the workstation and a pod) unless TOCKMOX_P09_LAN_RESOLVER named a resolver holding the wildcard; the model-gateway key (LiteLLM off by default), or the ntfy subscription: each needs a device, a resolver or a Service this throwaway does not have. Lab only." \
+    "The DNS success condition (S21b, a random label from the workstation and a pod), and the forge's sign-in (S21c, which looks up auth.<domain> inside the cluster), unless TOCKMOX_P09_LAN_RESOLVER named a resolver holding the wildcard; the model-gateway key (LiteLLM off by default), or the ntfy subscription: each needs a device, a resolver or a Service this throwaway does not have. Lab only." \
     "Anything about the interactive installer route (1a's first block): only the config-file route ran. tests/installer covers the interactive prompts hermetically." \
     "That the render in S18 matches the page's illustrative table; the page itself says that table is not a dated verification." \
     "That a reader with a REAL editor lands the same four values: \$EDITOR was a script (glue) writing them. The block was unchanged." \
@@ -404,7 +435,7 @@ S=S04-ls-remote-github
 if ! done_step "$S"; then budget_left || yield "S04+"
   step_begin "$S" 'git ls-remote https://github.com/tockmox/tockmox.git refs/tags/v0.8.0' || block_gone "$S"
   execute_begin "install.md Phase 1 precondition ls-remote"; GIT_TERMINAL_PROMPT=0 run_ws "$S" "$(block 'git ls-remote https://github.com/tockmox/tockmox.git refs/tags/v0.8.0')"; execute_end $?
-  record "$S" "ls-remote of the public repo prints a SHA and the tag (xfail before the tag is pushed: this path runs on the candidate)" "prints" "$(out_of "$S" | grep -E '^[0-9a-f]{40}' >/dev/null && echo prints || echo nothing)" xfail
+  record_tag_row "$S"
   note "S04: source 1 for this run is ${TM_URL} @ ${TM_REV}, a harness snapshot of the tree under test, NOT the published tag. Nothing below is evidence about GitHub's copy."
   mark_done "$S"
 fi
@@ -828,7 +859,7 @@ if ! done_step "$S"; then budget_left || yield "S21c+"
   if [ "$idh" = "Synced/Healthy" ]; then
     printf 'Type the context name\t%s\nType the API server\t%s\n' "$KUBE_CONTEXT" "$(kubectl --context="$KUBE_CONTEXT" config view --minify -o jsonpath='{.clusters[0].cluster.server}')" > "${STATE}/${S}.answers"
     execute_begin "install.md connect the built-in forge's sign-in"; run_ws "$S" "$(block '--connect-sign-in')" "${STATE}/${S}.answers"; execute_end $?
-    record "$S" "sign-in: the forge signs people in through Authentik" "1" "$(out_of "$S" | grep -c 'signs people in through Authentik' | tr -d ' ')"
+    record_sign_in_row "$S"
   else
     record "$S" "the page's gate for the sign-in step is met (tockmox-identity Synced/Healthy)" "Synced/Healthy" "${idh:-absent}"
   fi

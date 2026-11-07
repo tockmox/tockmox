@@ -1083,6 +1083,15 @@ costs you, with the reasoning in the documentation rather than here.
   `tests/executed-docs/needle-canary-test.sh`, run by the harness selftest, resolves each of
   P09's lookups against the page and goes red on one that is gone or matches twice.
 
+- **Two P09 rows no longer fail for where the path runs.** On main after a release, the
+  row expecting the public repository's tag to be missing recorded the published tag as "a
+  known defect has started passing"; it is now a plain pass once the tag exists and a known gap
+  on a candidate before it. On a throwaway with no resolver for the site's domain, the forge's
+  sign-in step failed because the forge cannot look up `auth.<domain>` inside the cluster;
+  that one refusal is now recorded as blocked by the environment, as the DNS check beside it
+  already is, and any other refusal (or the same one with a resolver named) still fails.
+  `tests/executed-docs/env-rows-test.sh`, run by the harness selftest, covers both rows.
+
 - **P09 no longer records a failure for a revision check the installer cannot make in the lane.**
   The p09 lane serves the product repository inside the cluster under test, which the workstation
   running the installer cannot reach, so the installer rightly says it is not confirming the
