@@ -53,8 +53,8 @@ rather than assumed, and a written-down list of what you gave up.
 |---|---|---|
 | `reference.yaml` | You want the whole platform and would rather the defaults be written down than inherited | Everything on, stated explicitly |
 | `minimal.yaml` | You want the AI plane and the platform under it, and do not want log aggregation, replicated storage, or an identity provider | The smallest deployment that is still Tockmox |
-| `household-sso.yaml` | One node, a few people, and you want each of them to sign in once | `minimal.yaml` with Authentik and single sign-on put back. Measured on a running single-node cluster (0.8.0 lab, 2026-10-06): every layer Synced and Healthy, and a browser signed in through Authentik and got a streamed reply from a model host on the network, through the gateway (TM-0276). A household user sees no model until an administrator grants it ([identity](../administration/identity.md)) |
-| `observability-off.yaml` | You already monitor the cluster elsewhere, or want neither Prometheus nor Loki, and the cluster has no Prometheus operator CRDs | Declines the observability capability and turns off every vendored subchart's own monitor switch. **Add it after another profile; it does not replace one.** Without it, the platform and identity layers refuse to render with the capability off. Measured on a cluster with no Prometheus operator CRDs (0.7.1-rc2 gate): every layer synced. **Your own site applications must leave their monitors out too**: a ServiceMonitor in `apps/` stops `site-apps` with "could not find monitoring.coreos.com/ServiceMonitor" (TM-0825) |
+| `household-sso.yaml` | One node, a few people, and you want each of them to sign in once | `minimal.yaml` with Authentik and single sign-on put back. Measured on a running single-node cluster (0.8.0 lab, 2026-10-06): every layer Synced and Healthy, and a browser signed in through Authentik and got a streamed reply from a model host on the network, through the gateway. A household user sees no model until an administrator grants it ([identity](../administration/identity.md)) |
+| `observability-off.yaml` | You already monitor the cluster elsewhere, or want neither Prometheus nor Loki, and the cluster has no Prometheus operator CRDs | Declines the observability capability and turns off every vendored subchart's own monitor switch. **Add it after another profile; it does not replace one.** Without it, the platform and identity layers refuse to render with the capability off. Measured on a cluster with no Prometheus operator CRDs (0.7.1-rc2 gate): every layer synced. **Your own site applications must leave their monitors out too**: a ServiceMonitor in `apps/` stops `site-apps` with "could not find monitoring.coreos.com/ServiceMonitor" |
 
 **None of them is a fork, and none is a separate product.** Each is a file in
 `profiles/`, each sets keys you could set yourself, and reading one tells you
@@ -287,7 +287,7 @@ The floor. The policy layer, the CloudNativePG operator and the backup path,
 cert-manager and the TLS on-ramp, Traefik, Prometheus and Grafana, the
 self-check spine, and the AI plane, the model gateway included.
 
-**The model gateway is on in every profile since 0.8.0** (TM-0460, ruled
+**The model gateway is on in every profile since 0.8.0** (ruled
 2026-10-08): `apps.litellm` follows `capabilities.aiPlane`, the console goes
 through it on a key the chart mints, and neither profile sets it. It costs the
 proxy and a one-instance CloudNativePG, about 0.5Gi, which the projected

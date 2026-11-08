@@ -51,7 +51,7 @@
 # defect. Assert on the SIZE and CONTENT of what came back, never on the Job
 # having succeeded.
 set -euo pipefail
-# TM-0797: every kubectl call below names its cluster with --context from this
+# every kubectl call below names its cluster with --context from this
 # variable; an empty value is refused rather than falling back to the current context.
 : "${KUBE_CONTEXT:?KUBE_CONTEXT is empty: export the context of the cluster under test}"
 

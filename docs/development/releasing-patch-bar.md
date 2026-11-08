@@ -42,7 +42,7 @@ The read once ran as the latter: a quoted pathspec containing a wildcard is
 wildmatched against the WHOLE path rather than given directory-prefix
 treatment, so a pattern ending in `templates/` only matches a path that ENDS
 in `templates/`, which no file path does, and the read returned empty for
-every commit range it was ever run against (TM-0756).
+every commit range it was ever run against.
 
 A dashboard JSON, an alert rule's text, a documentation page and a generated
 site file are outside that list. A dashboard change instead carries the rendered
@@ -66,12 +66,12 @@ cluster by the previous release cannot take the new label in place, and the
 sync fails on upgrade while a fresh install, which never had the old Job,
 passes. On 0.6.1-rc1 this stopped `tockmox-platform` converging on an upgraded
 install, with no template file changed and every item in the list above
-reading clean (TM-0753, fixed in `ec6ddbb` by putting the chart version in the
+reading clean (fixed in `ec6ddbb` by putting the chart version in the
 Job's name). The same class includes `spec.selector` on a Deployment,
 DaemonSet or StatefulSet, and a StatefulSet's `serviceName` and
 `volumeClaimTemplates`.
 
-**`tools/check-immutable-fields.sh` reads the rendered output (TM-0754).** It
+**`tools/check-immutable-fields.sh` reads the rendered output.** It
 renders every layer chart at the baseline tag and at the candidate, with each
 side's own `ci/values.yaml` and the all-on overlay, and names any object present
 at both whose immutable field differs: a Job's `spec.template`, a Deployment,
@@ -156,7 +156,7 @@ version stamped there is a false statement about the trunk.
 
 ### How bars are written here
 
-A release bar names **a property to hold, not a number to beat.** TM-0157's
+A release bar names **a property to hold, not a number to beat.** An earlier bar's
 fourth clause asked for "a named number lower than 21" against a list
 `tools/check-airgap.sh` itself calls a documented limitation expected to
 persist. The gate passed and the target did not, and the clause had to be

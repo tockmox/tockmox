@@ -22,7 +22,7 @@ Anything set to "" is skipped, so an operator can drop a namespace they do not
 want by blanking its value.
 */ -}}
 {{- /*
-POD SECURITY LABELS come from `podSecurity` in values (TM-0135). warn and audit
+POD SECURITY LABELS come from `podSecurity` in values. warn and audit
 observe without blocking; enforce REFUSES, and is rendered only where the values
 name a level for the namespace's key. tools/check-pod-security.sh fails if an
 enforce level is stricter than what the pods rendered into that namespace pass.
@@ -30,7 +30,7 @@ Reasons per namespace are in values.yaml beside the key.
 */ -}}
 {{- $ps := .Values.podSecurity }}
 {{- /*
-global.namespaceLabels (TM-0816): a site's extra labels on EVERY namespace this
+global.namespaceLabels: a site's extra labels on EVERY namespace this
 chart creates, for admission mutators keyed on namespace labels (Zarf's
 `zarf.dev/agent: ignore`, Istio injection, Kyverno). Appended after the chart's
 own labels; a key the chart already sets is refused rather than silently
@@ -69,7 +69,7 @@ metadata:
     {{ $k | quote }}: {{ $v | quote }}
 {{- end }}
 ---
-# TM-0759 (CIS 5.1.5): the namespace controller creates `default`; rendering it here lets it carry
+# (CIS 5.1.5): the namespace controller creates `default`; rendering it here lets it carry
 # automountServiceAccountToken: false. Prune=false,Delete=false: removing this object must never
 # delete the account, which Kubernetes recreates anyway; no Tockmox pod runs as it, and no
 # Role or ClusterRole binds it (tools/check-sa-tokens.sh asserts the first).

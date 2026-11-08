@@ -45,7 +45,7 @@
 #                   which a blanket sed would break), and the README's
 #                   "Pinned to" line names the tag; then REPORTS, without
 #                   failing, whether that tag resolves on the Tockmox
-#                   repository the template points at (TM-0738). Three states:
+#                   repository the template points at. Three states:
 #                   RESOLVES, WINDOW OPEN (the remote answered and has no such
 #                   tag: expected, because the re-pin precedes the tag) and
 #                   CANNOT CONFIRM (private repository, no network, no git).
@@ -309,7 +309,7 @@ check_sums() {
 # The `main` count is therefore N + however many site-only Applications the
 # template ships, and that number is NOT hard-coded ... it derives from
 # ST_SITE_ONLY below. It was `N + 1` until 0.6.1, when the template gained
-# site-secrets.yaml (TM-0698) and this check refused a correctly re-pinned
+# site-secrets.yaml and this check refused a correctly re-pinned
 # tree: it wanted 10 `main` lines against 11, and demanded a release pin in
 # site-secrets.yaml, which must never carry one. Adding a site-only
 # Application is now ONE edit, to the list.
@@ -587,7 +587,7 @@ selftest() {
   probe "the pin count is derived from the layer count, not a literal" fail check_site_template "$s" "$V" 2
 
   if command -v git >/dev/null 2>&1; then
-    echo "selftest: does the pinned ref resolve (TM-0738)"
+    echo "selftest: does the pinned ref resolve"
     probe_rc() { # probe_rc LABEL WANT_RC COMMAND...  ... exact exit code, the three states differ
       pr_label="$1"; pr_want="$2"; shift 2
       pr_o=$("$@" 2>&1); pr_c=$?

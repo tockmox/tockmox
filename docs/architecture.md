@@ -447,7 +447,7 @@ reaches:
 | `tockmox-selfcheck` | restricted | restricted | One shipped pod |
 | `tockmox-devops` | restricted | baseline | Argo Workflows builds pods from Workflow objects at run time, and those are yours |
 | `tockmox-diagnostic` | no pod ships here | baseline | Where a site's diagnostic agents run |
-| `tockmox-ai` | restricted | baseline | The model gateway and its migrations Job run as uid 1000 on a read-only root (TM-0596); the `enforce` label moves with TM-0487 |
+| `tockmox-ai` | restricted | baseline | The model gateway and its migrations Job run as uid 1000 on a read-only root; the `enforce` label is expected to move |
 | `tockmox-monitoring` | privileged | none | node-exporter, Alloy and the SMART exporter need host namespaces or `hostPath` |
 | `tockmox-platform` | privileged | none | Longhorn is privileged by necessity; kured needs `hostPID`, the MetalLB speaker `hostNetwork` |
 

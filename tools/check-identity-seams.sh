@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # The identity and AI-layer seams a migrating site needs, asserted on the render
-# (TM-0820, TM-0669).
+#.
 #
 #   ./tools/check-identity-seams.sh              render and assert
 #   ./tools/check-identity-seams.sh --selftest   prove every assertion can go red
@@ -25,11 +25,11 @@
 #       true, without which Grafana ignores GrafanaAdmin from role_attribute_path
 #       and the mapping silently lands on org Admin. sso.adminGroup is followed.
 #       The same file sets email_attribute_path to `email || preferred_username`
-#       (TM-0667), so a user with no email claim ends Grafana's email lookup in
+#      , so a user with no email claim ends Grafana's email lookup in
 #       the claim and never reaches its GitHub-style `<api_url>/emails` request,
 #       which Authentik answers with a 404 that fails the whole login.
 #   S7  modelGateway.database.backup.enabled is the capability tri-state
-#       (TM-0312): unset follows capabilities.dataProtection, so a stock render
+#      : unset follows capabilities.dataProtection, so a stock render
 #       carries the ObjectStore, the plugin wiring, the ScheduledBackup and the
 #       restore drill and NOT the unbacked-database alert; false, or the
 #       capability declined, drops all four and renders the alert instead; true
@@ -40,7 +40,7 @@
 #       its config Secret, non-root, no privilege escalation, every capability
 #       dropped, a seccomp profile; it carries the usernames and sso.adminGroup;
 #       sso.enabled=false or a username with whitespace renders none / fails
-#       (TM-0820 A3); it waits for the system/bootstrap.yaml blueprint before
+#       and it waits for the system/bootstrap.yaml blueprint before
 #       looking names up, or a fresh install reports akadmin not-found
 #       (0.7.1-rc3 gate).
 #   S9  the same list is ALSO an ordinary ConfigMap (tockmox-admin-users-list):
@@ -49,21 +49,21 @@
 #       ConfigMap is no hook, carries the usernames and the group, changes when
 #       the list changes, and is absent at the default.
 #   S10 the bundled PostgreSQL server and the pg_dump client in the backup
-#       CronJob run the same MAJOR (TM-1023). They are two pins: the server tag
+#       CronJob run the same MAJOR. They are two pins: the server tag
 #       comes from authentik's vendored subchart, the client is
 #       databaseBackup.postgresImage. pg_dump refuses a server newer than itself,
 #       and in a CronJob that refusal is a log line, so the nightly dump stops
 #       and only the freshness alert says so.
 #   S5  tools/mint-secrets.sh --only sso mints the four sso files and nothing
 #       else, and refuses an unknown group.
-#   S11 the Authentik worker restarts onto a changed blueprint (TM-1058). The
+#   S11 the Authentik worker restarts onto a changed blueprint. The
 #       scripts the chart puts on the worker (postStart records a hash of
 #       /blueprints/mounted, the liveness probe compares it) are EXTRACTED from the
 #       render and RUN against a scratch mount: unchanged passes, an edited file in
 #       any mounted directory, a new file, fails; a failing `ak healthcheck` still
 #       fails; a missing baseline is recorded rather than failing. Read as text it
 #       would pass a probe that never compares anything.
-#   S12 the Authentik worker never runs beside its replacement (TM-1060). Its
+#   S12 the Authentik worker never runs beside its replacement. Its
 #       Deployment renders a RollingUpdate with maxSurge 0 and maxUnavailable
 #       100%: the old worker is gone before the new one starts, so the startup
 #       discovery a new pod queues cannot be taken by an old worker that lacks
@@ -338,10 +338,10 @@ selftest() {
   sed "s/&& 'GrafanaAdmin' ||/\&\& 'Admin' ||/" "$t/ob" > "$t/m"; red "S6 mapping back to org Admin" s6_default "$t/m"
   sed 's/ALLOW_ASSIGN_GRAFANA_ADMIN: "true"/ALLOW_ASSIGN_GRAFANA_ADMIN: "false"/' "$t/ob" > "$t/m"; red "S6 allow_assign_grafana_admin off" s6_default "$t/m"
   sed "s/'site-admins'/'tockmox-admins'/" "$t/obg" > "$t/m"; red "S6 adminGroup ignored" s6_group "$t/m"
-  # S6 (TM-0667): the email fallback dropped; weakened to the bare claim.
+  # S6: the email fallback dropped; weakened to the bare claim.
   grep -v 'EMAIL_ATTRIBUTE_PATH' "$t/ob" > "$t/m"; red "S6 email_attribute_path dropped" s6_default "$t/m"
   sed 's/email || preferred_username/email/' "$t/ob" > "$t/m"; red "S6 email_attribute_path has no username fallback" s6_default "$t/m"
-  # S7 (TM-0312): rendered text first, then a REAL mutation of the helper.
+  # S7: rendered text first, then a REAL mutation of the helper.
   grep -v 'kind: ScheduledBackup' "$t/ai7" > "$t/m"; red "S7 ScheduledBackup dropped from a stock render" s7_backed "$t/m"
   sed 's/barmanObjectName/barmanObjectNam/' "$t/ai7" > "$t/m"; red "S7 plugin wiring dropped" s7_backed "$t/m"
   sed 's/name: tockmox-litellm-db-drill/name: x/' "$t/ai7" > "$t/m"; red "S7 restore drill dropped" s7_backed "$t/m"
@@ -352,7 +352,7 @@ selftest() {
   # The default itself, mutated in the chart (a copy, never the tree): the helper
   # ignores the capability, which is the old `false` default in new clothes.
   mkdir -p "$t/mut"; cp -r "$AIC" "$t/mut/tockmox-ai"
-  # Write and move, not bare `sed -i`: BSD sed reads -i's next argument as a suffix (TM-0996).
+  # Write and move, not bare `sed -i`: BSD sed reads -i's next argument as a suffix.
   sed 's/"override" \.Values\.modelGateway\.database\.backup\.enabled/"override" false/' "$t/mut/tockmox-ai/templates/_backup.tpl" > "$t/mut/_backup.tpl" && mv "$t/mut/_backup.tpl" "$t/mut/tockmox-ai/templates/_backup.tpl"
   render "$t/mut/tockmox-ai" -f $CI > "$t/m"; red "S7 chart default pinned off (helper mutated)" s7_backed "$t/m"
   # S8: a Job at the default; the hook gone; the delete policy gone; run as root;
@@ -379,7 +379,7 @@ selftest() {
   # S10: the client moved a major alone (the Renovate PR the hold exists to stop); the client gone.
   render $IDC -f $CI --set databaseBackup.postgresImage=docker.io/library/postgres:18.6-bookworm > "$t/m"; red "S10 pg_dump client on 18, server on 17" s10_majors "$t/m"
   awk '/image: .*\/postgres:/ && !d {d=1; next} {print}' "$t/s8d" > "$t/m"; red "S10 only one postgres image left to compare" s10_majors "$t/m"
-  # S11 (TM-1058): the comparison made unable to fail; the glob narrowed to one
+  # S11: the comparison made unable to fail; the glob narrowed to one
   # directory; the content replaced by a listing; the healthcheck dropped; the
   # probe removed. Each is a plausible edit, each must leave the probe unable to
   # do its job.
@@ -388,7 +388,7 @@ selftest() {
   sed 's#cat /blueprints/mounted#ls /blueprints/mounted#g' "$t/s8d" > "$t/m"; red "S11 file names hashed, not content" s11_probe "$t/m"
   sed 's/ak healthcheck || exit 1/true/' "$t/s8d" > "$t/m"; red "S11 the healthcheck dropped from the probe" s11_probe "$t/m"
   sed '/ak healthcheck || exit 1/,/^ *fi$/d' "$t/s8d" > "$t/m"; red "S11 liveness script gone" s11_probe "$t/m"
-  # S12 (TM-1060): the default surge back; the number loosened; the rolling
+  # S12: the default surge back; the number loosened; the rolling
   # numbers gone; the type switched to the one Argo CD cannot apply.
   sed '/component: "*worker"*/,$ s/maxSurge: 0/maxSurge: 1/' "$t/s8d" > "$t/m"; red "S12 worker surges a new pod beside the old one" s12_strategy "$t/m"
   sed '/component: "*worker"*/,$ s/maxUnavailable: 100%/maxUnavailable: 0/' "$t/s8d" > "$t/m"; red "S12 worker never lets the old pod go first" s12_strategy "$t/m"

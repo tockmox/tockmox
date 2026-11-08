@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# THE POLICY GATE, PROVEN (TM-0383). Its own workflow rather than a ci.yaml step
+# THE POLICY GATE, PROVEN. Its own workflow rather than a ci.yaml step
 # because it installs and runs a real LiteLLM proxy, which ci.yaml's static
 # gates deliberately do not, and because a failure here should read as "the
 # sovereignty claim broke", not as one red line among forty.

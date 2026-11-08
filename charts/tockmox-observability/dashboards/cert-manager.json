@@ -71,7 +71,7 @@
       ],
       "title": "Certificates total",
       "type": "stat",
-      "description": "Distinct Certificate resources. Grouped by name AND BOTH namespace labels on purpose: cert-manager's ServiceMonitor ships without honorLabels, so on a Tockmox install the certificate's real namespace arrives as `exported_namespace` while `namespace` is the constant namespace cert-manager itself runs in; on a cluster that does honor labels there is no `exported_namespace` and `namespace` carries the truth. Grouping by both yields one group per certificate either way. Before 2026-09-15 this panel was count(all series)/count(distinct) ... a RATIO, not a count, which collapsed to the number of condition values cert-manager emits per certificate and therefore read 3 on every install regardless of how many certificates existed (TM-0639; measured at exactly 3)."
+      "description": "Distinct Certificate resources. Grouped by name AND BOTH namespace labels on purpose: cert-manager's ServiceMonitor ships without honorLabels, so on a Tockmox install the certificate's real namespace arrives as `exported_namespace` while `namespace` is the constant namespace cert-manager itself runs in; on a cluster that does honor labels there is no `exported_namespace` and `namespace` carries the truth. Grouping by both yields one group per certificate either way. Before 2026-09-15 this panel was count(all series)/count(distinct) ... a RATIO, not a count, which collapsed to the number of condition values cert-manager emits per certificate and therefore read 3 on every install regardless of how many certificates existed (measured at exactly 3)."
     },
     {
       "datasource": {
@@ -452,7 +452,7 @@
       ],
       "title": "ACME http request rate by status (5m) ... empty unless you use an ACME issuer",
       "type": "timeseries",
-      "description": "Empty is the expected reading on a stock install. Tockmox ships a local CA (the tockmox-ca ClusterIssuer), which mints certificates without ever talking to an ACME server, so cert-manager emits no certmanager_http_acme_client_request_count at all. This panel has data only if you pointed global.certIssuer at your own ACME issuer, such as Let's Encrypt. Labelled at 0.6.1 (TM-0701): a panel that is permanently 'No data' by construction teaches a reader to ignore empty panels, including the ones where empty is a finding."
+      "description": "Empty is the expected reading on a stock install. Tockmox ships a local CA (the tockmox-ca ClusterIssuer), which mints certificates without ever talking to an ACME server, so cert-manager emits no certmanager_http_acme_client_request_count at all. This panel has data only if you pointed global.certIssuer at your own ACME issuer, such as Let's Encrypt. Labelled at 0.6.1: a panel that is permanently 'No data' by construction teaches a reader to ignore empty panels, including the ones where empty is a finding."
     }
   ],
   "refresh": "30s",

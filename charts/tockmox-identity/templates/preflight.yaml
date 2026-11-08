@@ -16,7 +16,7 @@ and beats silently promoting the capability back on because of one key.
 */ -}}
 {{- include "tockmox.capabilityCoherent" (dict "ctx" $ "capability" "identity" "apps" (list "authentik")) -}}
 {{- /*
-SUBCHART MONITORS DO NOT FOLLOW THE CAPABILITY, SO REFUSE THE HALF-OFF STATE (TM-0825).
+SUBCHART MONITORS DO NOT FOLLOW THE CAPABILITY, SO REFUSE THE HALF-OFF STATE.
 `capabilities.observability.enabled: false` stops every ServiceMonitor,
 PodMonitor and PrometheusRule this chart's OWN templates write. The monitors a
 vendored subchart writes come from the subchart's own switch, and a subchart's

@@ -142,7 +142,7 @@ belong to a project with its own release cadence.
 **What Tockmox promises about the defaults it ships inside them:** those defaults
 are a Tockmox decision and are covered like any other. `open-webui.openaiBaseApiUrl`
 naming this release's gateway is a promise (and changing it from empty in 0.8.0
-cost a Breaking entry, TM-0460). `open-webui.image.repository` is not, because
+cost a Breaking entry). `open-webui.image.repository` is not, because
 Tockmox does not set it.
 
 Upstream chart versions are pinned in each layer's `Chart.yaml` and moved
@@ -182,7 +182,7 @@ $ helm lint charts/tockmox-ai -f my-values.yaml
 Before this, that typo installed a chart with the default configuration and told
 you nothing.
 
-**A misspelt component name under `apps` is caught too**, since 0.8.0 (TM-0404).
+**A misspelt component name under `apps` is caught too**, since 0.8.0.
 Every layer's `apps` accepts the component names that some layer declares and
 nothing else, so `apps.open_webui` and `apps.openwebui` fail the render the way
 `opnWebui` does:

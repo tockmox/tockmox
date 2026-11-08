@@ -9,7 +9,7 @@
 # a live cluster. This asks a different question: "does the installer, as a
 # program, behave?" It needs no cluster, so folding it into a nightly
 # cluster-backed job would make a one-second check wait on a twenty-minute one
-# and inherit its substrate blockers (TM-0345).
+# and inherit its substrate blockers.
 #
 # The two defects this tier was written after, both found 2026-09-10 and both
 # invisible to all 31 static gates:
@@ -261,7 +261,7 @@ assert_artifact \
 
 # ---------------------------------------------------------------------- I5
 path_begin "I5" "a second run over an existing site refuses; --force regenerates it byte-identically"
-# TM-0277's DoD asserts that a second run "rotates nothing": the generated tree
+# DoD asserts that a second run "rotates nothing": the generated tree
 # is a pure function of the config. That stays true under --force. WITHOUT it a
 # second run now refuses (L1, 0.8.0 lab pass: a second --config, run for a grep,
 # silently overwrote the policy.yaml the operator had edited by hand in install.md
@@ -327,7 +327,7 @@ assert_artifact \
   "1"
 
 # ---------------------------------------------------------------------- I6
-path_begin "I6" "the installer's publish-docs step never fails an install over documentation (TM-0807)"
+path_begin "I6" "the installer's publish-docs step never fails an install over documentation"
 # The docs are published from the operator's checkout by tools/publish-docs.sh.
 # Without the pinned generator that script exits 2 and changes nothing, and the
 # installer's subcommand must turn that into a warning and exit 0. PYTHON points
@@ -346,7 +346,7 @@ assert_artifact   "and the two commands that would publish are printed"   "grep 
 assert_artifact   "the next-steps list of a generated site ends with the publish-docs step"   "grep -c 'publish-docs --context YOUR_KUBECONTEXT' '$WORK/cfg-out.txt' || true"   "1"
 
 # ---------------------------------------------------------------------- I7
-path_begin "I7" "--lint names a credentials namespace the policy layer does not admit to S3 (TM-1032)"
+path_begin "I7" "--lint names a credentials namespace the policy layer does not admit to S3"
 # The two keys live in different layers' files, so no chart can see both; this is
 # the 0.8.0-rc1 greenfield's news/miniflux-db, which archived nothing once
 # nodeOriginSources was set and read healthy throughout.
@@ -369,7 +369,7 @@ assert_artifact "and the message names the namespace and the key to add it to" \
 assert_artifact "listed in extraS3ClientNamespaces (flow and block lists, quoted names) it passes" "cat '$WORK/lint-ok/lint-rc'" "0"
 assert_artifact "with the platform rules off there is no S3 rule to miss, and it passes" "cat '$WORK/lint-off/lint-rc'" "0"
 
-# ---------------------------------------------------------------- TM-0277
+# ----------------------------------------------------------------
 # install/bootstrap-secrets.sh. Its own file: it is long, and its shims are not
 # the per-test kubectl stubs above.
 # shellcheck source=bootstrap-secrets-tests.sh

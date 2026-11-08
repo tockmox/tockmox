@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# THE POLICY-GATE FIXTURE (TM-0383). Applied ON TOP of ci/values.yaml by
+# THE POLICY-GATE FIXTURE. Applied ON TOP of ci/values.yaml by
 # tools/check-policy-gate.sh (render invariants) and tests/policy-gate/run.sh
 # (a real LiteLLM proxy, with the local backend killed mid-test).
 #

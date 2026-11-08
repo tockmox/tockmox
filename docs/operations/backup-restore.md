@@ -596,7 +596,7 @@ base backup in the store. Rows written before 0.7.1 have no `backup=` field.
 
 **A PASS leaves error-level lines behind, and they are expected.** Three come
 from the drill cluster being created and deleted inside a minute, and none
-means a failed backup or restore (TM-0673, TM-0672):
+means a failed backup or restore:
 
 - At create, the barman-cloud plugin logs `Error while handling GRPC request`
   for `ReconcilerHooks/Pre` with `Role.rbac.authorization.k8s.io
@@ -780,7 +780,7 @@ page:
   gateway's database, the chat console's volume and the object store's
   metadata volume. That is step 5 of the restore order, for every volume, on
   a six-node cluster in daily use.
-- **2026-10-10**, the maintainer's single-node lab, two drills (TM-0598):
+- **2026-10-10**, the maintainer's single-node lab, two drills:
   - **Authentik's `pg_dump`.** The shipped backup CronJob was run once by
     hand (`authentik-db/authentik-sat.sql.gz`, 4,765,419 bytes, local and
     remote byte counts equal). The dump was fetched into a fresh PostgreSQL 17

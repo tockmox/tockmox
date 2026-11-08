@@ -161,7 +161,7 @@ fieldset.plainset { border: 0; padding: 0; margin: .75rem 0; } fieldset.plainset
 label.check { font-weight: 400; display: flex; align-items: center; min-height: 32px; }
 .cands { list-style: none; padding: 0; margin: 0; } .cands li { border-top: 1px solid var(--tx-border); padding: .5rem 0; } .cands li p { margin: .2rem 0; }
 
-/* TM-1014: the footer's "new version" pill, and the documentation links on home. */
+/* The footer's "new version" pill, and the documentation links on home. */
 .pill { display: inline-block; margin-left: .35rem; padding: 0 .5rem; border: 1px solid var(--tx-accent); border-radius: 999px; color: var(--tx-accent-text); font-weight: 600; text-decoration: none; }
 .pill:hover, .pill:focus-visible { background: var(--tx-accent); color: var(--tx-btn-text); }
 .docs-links { display: flex; flex-wrap: wrap; gap: .75rem 1.5rem; padding: 0; list-style: none; }

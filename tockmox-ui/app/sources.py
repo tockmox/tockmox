@@ -150,7 +150,7 @@ class ApplicationsSource(Source):
 
     The CRs keep their LAST status when the application controller stops, so a
     reader that trusts sync/health alone reports a frozen cluster as healthy.
-    Found in the lab (TM-0901, 2026-10-05): controller scaled to 0 and a layer's
+    Found in the lab (2026-10-05): controller scaled to 0 and a layer's
     workload scaled to 0, and the UI still said "All systems healthy". Every app
     must therefore carry a recent status.reconciledAt, or it reads Unknown.
     """
@@ -178,7 +178,7 @@ class ApplicationsSource(Source):
                 "health": (st.get("health") or {}).get("status") or "Unknown",
                 "reconciledAt": _parse_ts(st.get("reconciledAt")),
                 # What the application manages, as Argo CD lists it: kind and name only. The
-                # capabilities page (TM-1017) reads which components a layer really deployed
+                # capabilities page reads which components a layer really deployed
                 # from this, so it needs no Kubernetes permission beyond the Applications.
                 "resources": tuple(sorted({(str(r.get("kind", "")), str(r.get("name", "")))
                                            for r in (st.get("resources") or []) if isinstance(r, dict)})),
@@ -203,7 +203,7 @@ class ApplicationsSource(Source):
         stale = self.stale(apps)
         stale_names = {a["name"] for a in stale}
         layers = self.tockmox_layers(apps)
-        # STALENESS IS JUDGED PER APPLICATION (TM-0904). It used to be all or
+        # STALENESS IS JUDGED PER APPLICATION. It used to be all or
         # nothing: ONE stale application read "Argo CD has stopped reconciling"
         # and, through running_version, blanked the version, as a drill leftover
         # stuck deleting did in the first browser walk while all ten layers were
@@ -243,7 +243,7 @@ class ApplicationsSource(Source):
         Unset (the shipped default), the ones whose first source path is
         charts/tockmox-<layer>, so a site that serves the product tree from a
         mirror, a forge of its own or an in-cluster git daemon (every
-        air-gapped site) is read the same as one on github.com (TM-0979).
+        air-gapped site) is read the same as one on github.com.
         """
         if self.repo:
             norm = lambda u: u.rstrip("/").removesuffix(".git").lower()
@@ -323,7 +323,7 @@ class PrometheusSource(_HttpSource):
 
 
 # Alerts that fire ALWAYS, on purpose, to prove a path works: never a problem, never a row in
-# "Alerts firing" (TM-1014). Watchdog is kube-prometheus-stack's (Prometheus to Alertmanager);
+# "Alerts firing". Watchdog is kube-prometheus-stack's (Prometheus to Alertmanager);
 # TockmoxHeartbeat is tockmox-selfcheck's (the cluster to the off-cluster dead-man's switch);
 # InfoInhibitor is upstream's inhibition helper. The configured heartbeat joins them.
 ALWAYS_FIRING = ("Watchdog", "TockmoxHeartbeat", "InfoInhibitor")

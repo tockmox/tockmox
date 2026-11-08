@@ -3,7 +3,7 @@
 #
 # Assert, ON THE RENDERED ARTIFACT, that no pod Tockmox owns runs as a
 # namespace's `default` ServiceAccount or mounts an API token it does not need
-# (TM-0759: kube-bench CIS 5.1.5 and 5.1.6 failed on the lab host).
+# (kube-bench CIS 5.1.5 and 5.1.6 failed on the lab host).
 #
 #   ./tools/check-sa-tokens.sh              the gate
 #   ./tools/check-sa-tokens.sh --selftest   prove it goes red, and green
@@ -27,7 +27,7 @@
 # site fixture that gives the platform layer a garage-web sync CronJob (the one
 # pod the other two never render). Pods from vendored subcharts are NOT asserted
 # (their charts own them); the run prints how many it left alone, and the
-# waivers are in the TM-0759 report and the values comments.
+# waivers are in the values comments.
 #
 # WHAT IT DOES NOT PROVE. That a pod really needs no API access (read the
 # container's script), or what a live cluster's default ServiceAccounts hold:
@@ -43,8 +43,8 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 cat > "$tmp/allow.txt" <<'ALLOW'
 CronJob tockmox-litellm-db-drill   # restore drill: kubectl creates and deletes the drill Cluster, reads and patches the register ConfigMap (Role in restore-drill.yaml)
 Job     tockmox-garage-bootstrap   # bootstrap Job: kubectl reads and creates Secrets, patches the Longhorn BackupTarget, starts sync Jobs from CronJobs
-Deployment tockmox-ui              # the Tockmox UI: get/list nodes, and Argo CD applications in their namespace (ClusterRole tockmox-ui-read, Role tockmox-ui-read-applications in tockmox-ui.yaml); first rendered here when the all-on overlay turned it on (TM-1013)
-Job     t-gateway-key-*            # console-key Job (TM-0460): kubectl gets, creates or replaces the console's virtual-key Secret and restarts the console's pods on a replaced key (Role in gateway-key.yaml); named after its pod template like the migrations Job
+Deployment tockmox-ui              # the Tockmox UI: get/list nodes, and Argo CD applications in their namespace (ClusterRole tockmox-ui-read, Role tockmox-ui-read-applications in tockmox-ui.yaml); first rendered here when the all-on overlay turned it on
+Job     t-gateway-key-*            # console-key Job: kubectl gets, creates or replaces the console's virtual-key Secret and restarts the console's pods on a replaced key (Role in gateway-key.yaml); named after its pod template like the migrations Job
 ALLOW
 
 # IMPLICIT: pods that need the token but may leave the field unset, because writing
@@ -58,7 +58,7 @@ Deployment t-authentik-server   # serves HTTP, never calls the API (the worker h
 PIN
 
 cat > "$tmp/implicit.txt" <<'IMPL'
-Job tockmox-garage-credentials-* # named after its own pod template (TM-1022). Needs the API (kubectl creates Secrets), so it keeps the default mount.
+Job tockmox-garage-credentials-* # named after its own pod template. Needs the API (kubectl creates Secrets), so it keeps the default mount.
 IMPL
 
 render() {  # render <dir>

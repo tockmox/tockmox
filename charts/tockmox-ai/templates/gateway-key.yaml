@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-THE CONSOLE'S VIRTUAL KEY, MINTED BY THE CHART (TM-0460 ruling B1, 2026-10-08).
+THE CONSOLE'S VIRTUAL KEY, MINTED BY THE CHART (ruling B1, 2026-10-08).
 
 Open WebUI authenticates to the model gateway with a LiteLLM virtual key, and
 LiteLLM is the only thing that can issue one, so the Secret cannot exist before
@@ -19,7 +19,7 @@ What it does, in order, and what each step refuses:
      the key (GET /v1/models with it). 200: say so, exit 0, so a re-sync, an
      upgrade or a new Job name never rotates a working key. 401: the key is
      dead (the gateway was turned off and on again, which prunes its database
-     and every key in it, TM-0977), so carry on and replace it. Anything
+     and every key in it), so carry on and replace it. Anything
      else: exit 1 and let the backoff retry, because a key this Job cannot
      prove dead is never deleted.
   3. POST /key/generate with the master key from the environment. If LiteLLM
@@ -52,7 +52,7 @@ against the Job's backoff.
 {{- $secretKey := $ck.secretKey | default "api-key" -}}
 {{- /* Whether the Job renders, and the three refusals, live in
        tockmox-ai.consoleKeyOn (_gateway-key.tpl) so the check CronJob in
-       console-key-check.yaml (TM-0982) follows exactly the same answer. */ -}}
+       console-key-check.yaml follows exactly the same answer. */ -}}
 {{- $on := eq (include "tockmox-ai.consoleKeyOn" .) "true" -}}
 {{- if $on }}
 {{- $ns := .Values.namespaces.ai -}}
@@ -126,7 +126,7 @@ subjects:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  # Named after its own pod template, like the migrations Job (TM-0596): a
+  # Named after its own pod template, like the migrations Job: a
   # changed template is a new Job, never a `field is immutable` sync failure,
   # and the new Job finds the Secret, checks its key still works, and exits.
   name: {{ .Release.Name }}-gateway-key-{{ $pod | sha256sum | trunc 10 }}

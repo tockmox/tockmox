@@ -13,9 +13,9 @@
 # Generates a site repository from your answers. It does not apply anything:
 # the Applications it writes point at a git repository only you can create, so
 # there is nothing this script could usefully apply on your behalf. The README
-# and the walkthrough both say so; the flags used to say otherwise (TM-0271).
+# and the walkthrough both say so; the flags used to say otherwise.
 #
-# THE EXCEPTION IS A SUBCOMMAND, NOT A FLAG (TM-0277). `bootstrap-secrets`
+# THE EXCEPTION IS A SUBCOMMAND, NOT A FLAG. `bootstrap-secrets`
 # installs or reuses the sealed-secrets controller, exports its key encrypted,
 # and seals the site's credentials. It writes to a cluster, so it lives in its
 # own file (install/bootstrap-secrets.sh), must be named to be run, and shows
@@ -32,7 +32,7 @@ set -euo pipefail
 # version bump and it was missing from the list until 2026-09-01, so it read
 # 0.1.0 through two releases: every generated site file was stamped with a
 # version that had never existed, and the revision prompt below offered
-# "v0.1.0" as its default, which no remote could resolve (TM-0269). CI now
+# "v0.1.0" as its default, which no remote could resolve. CI now
 # compares the two, because a checklist is not a mechanism.
 VERSION="0.8.3"
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -42,7 +42,7 @@ REPO_ROOT="$(cd "$SELF/.." && pwd)"
 # by a --no-apply flag. That named a decision this script does not make: it has
 # never applied anything, so "do not apply" was switching off something that was
 # never on. What the flag actually does is skip the cluster preflight, which is
-# what it is now called (TM-0271).
+# what it is now called.
 CONFIG=""; DRY_RUN=false; NO_CLUSTER=false; FORCE=false; CONTEXT=""
 
 # ---------------------------------------------------------------- presentation
@@ -118,7 +118,7 @@ USAGE
 #    observability, policy and selfcheck then fail to render (loud, at least),
 #    and tockmox-ai renders CLEANLY with every app fallen through to its
 #    capability tier ... which at the time enabled the model gateway (it shipped
-#    off until 0.8.0, TM-0460) with zero NetworkPolicies over its PostgreSQL
+#    off until 0.8.0) with zero NetworkPolicies over its PostgreSQL
 #    database, and today silently undoes any component the site turned off.
 #    Every layer reports Synced and Healthy.
 #
@@ -176,7 +176,7 @@ for path in files:
                           f'Write "{key}: ' + '{}" if you meant "no overrides".'))
 
 # CROSS-LAYER: every namespace the platform layer hands Garage credentials to must
-# also be admitted to Garage's S3 port by the policy layer (TM-1032). The two keys
+# also be admitted to Garage's S3 port by the policy layer. The two keys
 # live in different layers' files, so neither chart can see the other's value.
 # 0.8.0 requires platformNetpol.nodeOriginSources, which drops the 0.7.x rule that
 # admitted the whole pod network; from then on the S3 port admits only
@@ -272,7 +272,7 @@ print(f"  site values lint: {len(files)} file(s) clean (no duplicate or null top
 PY
 }
 
-# ------------------------------------------------- netpol node sources (TM-0273)
+# ------------------------------------------------- netpol node sources
 # PRINTS the values block for platformNetpol.nodeOriginSources. It never writes
 # it anywhere: the list is a security decision and a site file is the operator's.
 #
@@ -321,7 +321,7 @@ if [[ "${1:-}" == "bootstrap-secrets" ]]; then
   exec bash "$SELF/bootstrap-secrets.sh" "$@"
 fi
 
-# publish-docs is the install's last step (TM-0807), and it is a subcommand for the
+# publish-docs is the install's last step, and it is a subcommand for the
 # same reason bootstrap-secrets is: this script applies nothing and waits for
 # nothing, so there is no moment inside it at which the platform layer is Healthy.
 # The operator runs it once that is true. It reads nothing secret to this machine
@@ -482,7 +482,7 @@ if [[ -n "$CONFIG" ]]; then
   SITE_NAME=$(yget site.name "$CONFIG");         SITE_PATH=$(yget site.path "$CONFIG")
   TM_REV=$(yget tockmox.revision "$CONFIG");     TM_REPO=$(yget tockmox.repoURL "$CONFIG")
   G_INT=$(yget global.internalDomain "$CONFIG"); G_ISSUER=$(yget global.certIssuer "$CONFIG")
-  # TM-0497, 2026-09-11. A config file that OMITS certIssuer gets the shipped
+  # 2026-09-11. A config file that OMITS certIssuer gets the shipped
   # default rather than "". Omission is not the same as `certIssuer: ""`, which
   # is a deliberate choice to serve plain HTTP and is honoured -- yget returns
   # empty for both, so the two cannot be told apart here, and the safe reading
@@ -611,7 +611,7 @@ info "site repo     ${SITE_PATH}"
 # generation below reads nothing from the cluster ... every value it writes
 # comes from the config file. So both --dry-run and --no-cluster skip them.
 #
-# The escape exists because of TM-0247: preparing a site repo AHEAD of a
+# The escape exists because preparing a site repo AHEAD of a
 # cluster is the sensible order, and it used to be impossible. --dry-run
 # skipped the checks but writes nothing, so no flag combination produced a
 # site repository without a live cluster. The prerequisite was enforced for a
@@ -671,7 +671,7 @@ fi   # SKIP_CLUSTER
 # ---------------------------------------------------------------- render
 # A SECOND RUN OVER AN EXISTING SITE REWRITES IT, silently, from the config: the
 # values files and every Application are regenerated, so a hand edit made after
-# the first run is lost. Found by the 0.8.0 lab pass (TM-0902's L1): the policy
+# the first run is lost. Found by the 0.8.0 lab pass (L1): the policy
 # layer's nodeOriginSources block, added by hand in install.md 1f, vanished when
 # the installer was run again for a grep, and tockmox-policy went to
 # ComparisonError. A directory with anything in it is the signal. --dry-run
@@ -951,7 +951,7 @@ EOF
   # An EMPTY secrets/ is fine and syncs to nothing ... the directory always
   # holds .gitkeep, so ArgoCD never sees a path that does not exist.
   #
-  # NAMESPACE TIMING (TM-0277). Each SealedSecret names its own namespace
+  # NAMESPACE TIMING. Each SealedSecret names its own namespace
   # (tockmox-monitoring, tockmox-authentik, ...), and those namespaces are
   # created by the POLICY layer, which is also wave 1. So this Application can
   # reach a namespace before policy has made it. `CreateNamespace=true` below
@@ -1130,7 +1130,7 @@ fi
 # 2026-09-01 there were two, differing only in whether the PLACEHOLDER warning
 # printed, plus a --verify block whose entire body explained that it had
 # nothing to verify. That block was the clearest evidence that the flags
-# described a phase this script does not have (TM-0271).
+# described a phase this script does not have.
 say "Next steps"
 if $DRY_RUN; then
   warn "--dry-run: nothing was written. Re-run without it to generate $SITE_PATH."
@@ -1167,7 +1167,7 @@ info "0. seal your credentials (writes to a CLUSTER; confirms the context first)
 info "     $0 bootstrap-secrets --mode new --site $SITE_PATH --backup-out KEYFILE --age-recipient AGE_PUBLIC_KEY"
 info "   --mode recover restores an existing deployment's key; --mode reuse uses a running"
 info "   controller. Prefer to do it by hand? docs/administration/secrets.md still works."
-# TM-0798: since 0.8.0 the policy layer refuses to render the platform
+# since 0.8.0 the policy layer refuses to render the platform
 # namespace's node-network rule without the per-node gateway list, and that list
 # can only be read from a running cluster. Site generation deliberately reads
 # nothing from one (see "THESE CHECKS ARE ADVICE" above), so it is a step the

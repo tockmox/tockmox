@@ -1,4 +1,4 @@
-# Rendered from chart values in a real install (TM-0902). Nothing here is read at request time
+# Rendered from chart values in a real install. Nothing here is read at request time
 # from the user, which is what keeps the launcher and the short-path redirects safe.
 site:
   name: "My Tockmox"

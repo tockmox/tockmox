@@ -1,5 +1,5 @@
 # The containers Tockmox renders under ci/values-all-on.yaml WITHOUT a memory
-# limit, each with the reason it has none (TM-0595). Read by
+# limit, each with the reason it has none. Read by
 # tools/check-memory-limits.sh, which fails on a container missing from this
 # list AND on an entry here that now carries a limit or no longer renders, so
 # the list only shrinks. The count of entries IS the accepted residue.
@@ -9,14 +9,14 @@
 # An entry without a `# no-limit:` reason fails the gate.
 #
 # The entries under the "no working-set sample" heading below are not an end
-# state. The 2026-10-08 lab pass (TM-0903) sized the rest on a household-sso
+# state. The 2026-10-08 lab pass sized the rest on a household-sso
 # install; these containers do not run under that profile (loki and alloy are
 # off, smartctl follows hardwareTelemetry), so no sample could be taken. Each
 # leaves this list when a lab run under a profile that starts it gives it a
 # limit. (argo-workflows-server's wait-for-ca was here too, and left on
 # 2026-10-09: it is the same shell-and-sleep init container the lab sampled in
 # three other pods, so it took their 32Mi floor.) Only these entries carry that
-# reason's keyword (TM-0903): keep it out of comments and out of other entries'
+# reason's keyword: keep it out of comments and out of other entries'
 # reasons, so counting it counts entries.
 
 # --- a Job or hook that runs once --------------------------------------------
@@ -38,7 +38,7 @@ platform      Deployment  longhorn-ui                longhorn-ui                
 # --- new upstream containers that have never run anywhere we can measure ----
 # Each leaves on the first lab or homelab run that samples it (a limit from the
 # measured peak, as above).
-platform      Deployment  longhorn-global-manager    longhorn-global-manager        # no-limit: new in longhorn 1.13.0 (TM-1010); unmeasured, and longhornGlobalManager.resources is empty upstream; size it from the homelab after the upgrade
+platform      Deployment  longhorn-global-manager    longhorn-global-manager        # no-limit: new in longhorn 1.13.0; unmeasured, and longhornGlobalManager.resources is empty upstream; size it from the homelab after the upgrade
 
 # --- no working-set sample, the lab pass could not reach them ----------------
 exporters     DaemonSet   t-prometheus-smartctl-exporter-0  main                    # no-limit: not run under the lab profile, 2026-10-08

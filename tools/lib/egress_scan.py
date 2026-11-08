@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 #
-# The scanning half of tools/check-cloud-egress.sh (TM-0671). Reads rendered
+# The scanning half of tools/check-cloud-egress.sh. Reads rendered
 # layers from a directory (<layer>.yaml and <layer>.allon.yaml, as the shell
 # half writes them) and answers two questions about what the tree can REACH.
 #
@@ -110,7 +110,7 @@ def scan_urls(files):
 # state KNOWN_ON  the off-switch regex must NOT match: it is on, and `why` says so
 #                 plainly. Turning it off is a values change; when it lands the
 #                 gate fails here until the entry moves to OFF. EMPTY since 0.7.1
-#                 (TM-0671 turned the last four off) and kept as the place the
+#                 (the last four were turned off) and kept as the place the
 #                 next audited-but-still-on phone-home goes; `--selftest` proves
 #                 the mechanism with a synthetic entry.
 # `dest` is the host the call goes to, as upstream documents it.
@@ -118,37 +118,37 @@ SWITCHES = [
   # name, layer, state, off-switch regex, dest, note
   ("Grafana update check", "observability", "OFF",
    r"(?m)^\s*check_for_updates\s*=\s*false\s*$", "grafana.com",
-   "[analytics] check_for_updates, shipped off in 0.6.0 (TM-0671)."),
+   "[analytics] check_for_updates, shipped off in 0.6.0."),
   ("Grafana usage reporting", "observability", "OFF",
    r"(?m)^\s*reporting_enabled\s*=\s*false\s*$", "stats.grafana.org",
-   "[analytics] reporting_enabled, shipped off in 0.6.0 (TM-0671)."),
+   "[analytics] reporting_enabled, shipped off in 0.6.0."),
   ("Grafana news feed", "observability", "OFF",
    r"(?m)^\s*news_feed_enabled\s*=\s*false\s*$", "grafana.com, a-us.storyblok.com (the operator's BROWSER fetches)",
-   "[news] news_feed_enabled, shipped off in 0.6.0 (TM-0671)."),
+   "[news] news_feed_enabled, shipped off in 0.6.0."),
   ("Open WebUI version check", "ai", "OFF",
    r"name: ENABLE_VERSION_UPDATE_CHECK\s*\n\s*value: ['\"]?False", "github.com (upstream release check)",
    "tockmox-ai values.yaml, with the measurement."),
   ("Traefik new-version check", "platform", "OFF",
    r"--global\.checkNewVersion=false", "update.traefik.io (upstream)",
-   "TM-0785."),
+   ""),
   ("authentik error reporting", "identity", "OFF",
    r"AUTHENTIK_ERROR_REPORTING__ENABLED: ['\"]?false", "sentry.io",
    "subchart default is also false; asserted so it cannot flip unseen."),
   ("Loki anonymous usage reporting", "observability", "OFF",
    r"(?m)^\s*analytics:\s*\n\s+reporting_enabled:\s*false\s*$", "stats.grafana.org",
-   "loki.loki.analytics.reporting_enabled: false; the default is true (TM-0671)."),
+   "loki.loki.analytics.reporting_enabled: false; the default is true."),
   ("Alloy usage reporting", "observability", "OFF",
    r"--disable-reporting(=true)?(\s|$)", "stats.grafana.org",
-   "alloy.alloy.enableReporting: false renders `--disable-reporting`; the default is on (TM-0671)."),
+   "alloy.alloy.enableReporting: false renders `--disable-reporting`; the default is on."),
   ("Longhorn upgrade checker", "platform", "OFF",
    r"(?m)^\s*upgrade-checker:\s*\"?false\"?\s*$", "longhorn-upgrade-responder.rancher.io",
-   "longhorn.defaultSettings.upgradeChecker: false; the default is on (TM-0671)."),
+   "longhorn.defaultSettings.upgradeChecker: false; the default is on."),
   ("authentik update check", "identity", "OFF",
    r"AUTHENTIK_DISABLE_UPDATE_CHECK: ['\"]?true", "authentik's version endpoint (host not stated in its docs)",
-   "authentik.authentik.disable_update_check: true (TM-0671)."),
+   "authentik.authentik.disable_update_check: true."),
   ("authentik startup analytics", "identity", "OFF",
    r"AUTHENTIK_DISABLE_STARTUP_ANALYTICS: ['\"]?true", "authentik's analytics endpoint (host not stated in its docs)",
-   "authentik.authentik.disable_startup_analytics: true (TM-0671)."),
+   "authentik.authentik.disable_startup_analytics: true."),
 ]
 
 # Named so nobody reads the list above as complete. Not examined, not clean.

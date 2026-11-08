@@ -108,16 +108,15 @@ expect: 0
 
 # The alternatives register names defaults the release does not ship (zot, Tempo,
 # Docling, SearXNG). It says so in a table, and the images list settles it.
-# TM-0749.
 page:   docs/alternatives.md
 claim:  | Container registry | zot | Not shipped
 test:   grep -ciE 'zot|tempo|docling|searxng' images.txt || true
 expect: 0
 
-# THE NARROW ONE, and the narrowness is the point (TM-0270).
+# THE NARROW ONE, and the narrowness is the point.
 #
 # The obvious form of this check is `grep -r v0.1.0 install/ docs/` returning
-# nothing, and that was the assert TM-0270 shipped with. It is wrong. A version
+# nothing, and that was the assert it shipped with. It is wrong. A version
 # grep cannot tell GUIDANCE from HISTORY: `configuration.md` legitimately
 # contains the string v0.1.0 inside a retrospective of the four claims that
 # page used to make falsely, and deleting the number would make the correction
@@ -132,7 +131,7 @@ claim:  revision: v0.8.3
 test:   grep -rhoE '^\s*(target)?[Rr]evision:\s*v0\.1\.0' install/ docs/ | wc -l
 expect: 0
 
-# The air-gap mirror list, added 2026-09-02 after the CNPG move (TM-0326)
+# The air-gap mirror list, added 2026-09-02 after the CNPG move
 # swapped one Helm repository for one OCI registry. The count stayed at 13,
 # which is exactly the kind of number that survives a change unnoticed and then
 # stops surviving the next one.
@@ -164,7 +163,7 @@ expect: 19
 states: [0-9]+ dependencies
 
 # THE IMAGE COUNT, phrased the ways the `images` class cannot match. Added
-# 2026-10-04 (TM-0887): the list went 45 -> 44 in 0.7.1, the four sentences that
+# 2026-10-04: the list went 45 -> 44 in 0.7.1, the four sentences that
 # say "44 images" were updated, and the four below, which say the same number
 # another way, stayed at 45 and passed every gate. An outside reader found them.
 page:   docs/deployment/airgap.md
@@ -210,7 +209,7 @@ states: [0-9]+ lines: every image reference
 # Counts NAMED steps in ci.yaml only. The unnamed `uses:` steps (checkout,
 # setup-helm) are plumbing rather than gates, and they carry no name precisely
 # because they assert nothing.
-# 2026-10-08: 38 -> 39, the Tockmox UI's test suite (TM-0975).
+# 2026-10-08: 38 -> 39, the Tockmox UI's test suite.
 # 2026-10-17: 39 -> 40, the images.txt freshness gate.
 page:   docs/testing-standard.md
 claim:  CI gates. Thirty-nine are static analysis
@@ -246,17 +245,17 @@ states: [0-9]+ CI gates
 # a fixture: the same bytes caught flush-left passed clean indented by two
 # spaces. Corrected 2026-09-13, both directions verified.
 # 2026-09-14: 335 -> 336, the one diagnostic block of troubleshooting.md's new
-# CRD-establishment-race entry (TM-0609). Recorded because the same session
+# CRD-establishment-race entry. Recorded because the same session
 # updated the PAGE first and left this `expect:` behind, and the gate duly went
 # red in CI: the page and the registry are two edits, not one, and a proxy grep
 # over the page proves only half of it.
-# 2026-10-06: 389 -> 392, upgrade.md's two 0.8.0 migrations-Job blocks (TM-0596)
-# and install.md's model-grant block (TM-0912).
-# 2026-10-07: 392 -> 393, uninstall.md's Name the cluster block (TM-0844).
-# 2026-10-08: 393 -> 394, fresh-install.md 4e's findmnt propagation check (TM-0623); fresh-install.md 41 -> 42 blocks, 28 -> 29 on a node.
-# 2026-10-08: 394 -> 410 and 36 -> 37 pages, upgrade-foundations.md (TM-0907).
-# 2026-10-09: 410 -> 414, fresh-install.md 42 -> 46 blocks, 29 -> 33 on a node: the MicroOS 4c/4d variants, the 4d worker unit block and 4e worker check (TM-0622).
-# 2026-10-09: 414 -> 416, ai-plane.md's two blocks under "When the gateway rejects the console's key" (TM-0982).
+# 2026-10-06: 389 -> 392, upgrade.md's two 0.8.0 migrations-Job blocks
+# and install.md's model-grant block.
+# 2026-10-07: 392 -> 393, uninstall.md's Name the cluster block.
+# 2026-10-08: 393 -> 394, fresh-install.md 4e's findmnt propagation check; fresh-install.md 41 -> 42 blocks, 28 -> 29 on a node.
+# 2026-10-08: 394 -> 410 and 36 -> 37 pages, upgrade-foundations.md.
+# 2026-10-09: 410 -> 414, fresh-install.md 42 -> 46 blocks, 29 -> 33 on a node: the MicroOS 4c/4d variants, the 4d worker unit block and 4e worker check.
+# 2026-10-09: 414 -> 416, ai-plane.md's two blocks under "When the gateway rejects the console's key".
 # 2026-10-12: 416 -> 415, verify.md's "verifying v0.5.0" block removed for the first public release.
 # 2026-10-20: 415 -> 417, identity.md's changed-blueprint section: the liveness-event read and the worker rollout restart.
 page:   tests/executed-docs/INVENTORY.md
@@ -265,7 +264,7 @@ test:   grep -rhE '^[ \t]*```bash$' docs/ | wc -l | tr -d ' '
 expect: 417
 states: [0-9]+ fenced bash blocks
 
-# TM-0469 added the KUBE_CONTEXT export block to fresh-install.md, which moved
+# added the KUBE_CONTEXT export block to fresh-install.md, which moved
 # the total above and ALSO moved a second, unregistered number in the same file
 # ... the "(30 bash blocks)" in the prose under "every procedure section". The
 # registered claim went red and the prose one did not, in the file whose whole
@@ -303,7 +302,7 @@ states: [0-9]+ console transcripts
 # ADDED 2026-09-03, after an external reviewer found three countable
 # contradictions in an hour that this gate was green on. All three were in its
 # stated remit and none was enumerated here, which is the real finding: a
-# registry only checks what somebody remembered to add. See TM-0394 for the
+# registry only checks what somebody remembered to add. Separately, the
 # structural fix; these four entries close the specific holes.
 # ---------------------------------------------------------------------------
 
@@ -361,7 +360,7 @@ expect: 40
 states: [0-9]+ gates
 
 # ---------------------------------------------------------------------------
-# ADDED 2026-09-04 (TM-0403). The site-repository clone path was the most
+# ADDED 2026-09-04. The site-repository clone path was the most
 # substituted value in the docs and was spelled two ways across pages, split
 # cleanly along page boundaries, so every page was internally consistent and
 # no reviewer could see it. It is now the exported variable SITE_REPO, and the
@@ -388,7 +387,7 @@ expect: 0
 # `-exec ... +`, which may split into several invocations each printing its
 # own END total. Only ```bash fences are read, which is the fence the
 # executed-docs denominator counts; a ```sh block is outside both.
-# 2026-09-11 (TM-0484): the match is now WORD-BOUNDARY aware. It used to read
+# 2026-09-11: the match is now WORD-BOUNDARY aware. It used to read
 # `$SITE_REPO` as a plain substring, so `$SITE_REPO_URL` -- introduced on
 # install.md when the site-repo URL became a variable alongside the path --
 # counted as an unguarded use of `$SITE_REPO`, and its own correct
@@ -401,7 +400,7 @@ claim:  carries the guard
 test:   find docs -name '*.md' -print0 | xargs -0 awk '{L=$0; sub(/^[ \t]+/,"",L)} L=="```bash"{b=1;u=0;g=0;next} L=="```"{if(b&&u&&!g)n++;b=0;next} b{if($0~/\$SITE_REPO([^A-Z_0-9]|$)/||$0~/\$\{SITE_REPO[:}]/)u=1;if($0~/\$\{SITE_REPO:\?/||$0~/^export SITE_REPO=/)g=1} END{print n+0}'
 expect: 0
 
-# TM-0498, 2026-09-11. Two pages told the reader to configure models under
+# 2026-09-11. Two pages told the reader to configure models under
 # `modelGateway`, which is a REAL key holding only `modelGateway.database` and
 # which does NOT close `additionalProperties`. So a model list written there was
 # accepted, rendered past and silently ignored: empty model list, console up,
@@ -431,7 +430,7 @@ test:   awk '/^modelGateway:/{M=1;next} M && /^[a-zA-Z]/{M=0} M && /model_list/{
 expect: 0
 
 # ---------------------------------------------------------------------------
-# CLASSES, added 2026-09-04 (TM-0394). The structural half of the 2026-09-03
+# CLASSES, added 2026-09-04. The structural half of the 2026-09-03
 # finding: the entries above check sentences somebody remembered to register,
 # and an outside reader found three countable contradictions in an hour on a
 # tree they were all green on. A class measures one kind of thing from the tree
@@ -560,8 +559,8 @@ match:  [0-9]+ (CI |static )?gates\b
 test:   grep -c '^      - name:' .github/workflows/ci.yaml | tr -d ' '
 expect: 40
 
-# The node/workstation SPLIT on fresh-install.md, pinned 2026-09-12 (TM-0470).
-# The comment above records TM-0469 moving an unregistered number in this same
+# The node/workstation SPLIT on fresh-install.md, pinned 2026-09-12.
+# The comment above records an unregistered number moving in this same
 # file while the registered one went red. This is the pair that was still
 # unregistered, and it had been wrong since before anyone noticed: the page
 # claimed 21 node blocks while routing 24. Counted by nearest preceding bold
@@ -587,8 +586,8 @@ states: [0-9]+ blocks run on your workstation
 # additions are stated beside them in charts/tockmox-policy/README.md.
 #
 # The policy layer's own counts, pinned 2026-09-12 (33), moved to 40 on 2026-09-29
-# by TM-0273: six AI-namespace egress policies and the platform S3 allow; 42 -> 43
-# on 2026-10-09 by TM-0982, the console-key check's egress rule.
+# adding six AI-namespace egress policies and the platform S3 allow; 42 -> 43
+# on 2026-10-09 by the console-key check's egress rule.
 # The NetworkPolicy number
 # read 24 over five namespaces while the chart rendered 33 over seven, under
 # BOTH ci/values.yaml and ci/values-all-on.yaml ... a stale count on a security
@@ -610,7 +609,7 @@ states: [0-9]+ over seven namespaces
 #
 # Entries run the same one-chart render. That is the price of not making this a
 # class yet; see the NetworkPolicies note in the CLASSES section. (The
-# docs/architecture.md restatement was removed by TM-0840: the layer table is now
+# docs/architecture.md restatement was removed: the layer table is now
 # generated and carries no count.)
 page:   docs/usage/what-you-get.md
 claim:  NetworkPolicies in total
@@ -666,7 +665,7 @@ states: [0-9]+ resources
 
 # The exemption count, registered 2026-09-13. It read 21 in prose while the
 # gate's list was about to become 22, and nothing connected the two ... the
-# exact drift TM-0533 describes: correcting a count in its owner leaves every
+# exact drift: correcting a count in its owner leaves every
 # page that restates it wrong. A site on the fallback path wires these images by
 # hand, so the number is operational, not decorative.
 page:   docs/deployment/airgap.md
@@ -675,7 +674,7 @@ test:   sed -n '/^EXEMPT="/,/^"/p' tools/check-airgap.sh | sed '1d;$d' | sed '/^
 expect: 22
 states: [0-9]+ exemptions
 
-# TM-0533. Every count that needs a render of ALL NINE charts, read from the
+# Every count that needs a render of ALL NINE charts, read from the
 # counts CI writes in "every layer renders a non-zero number of resources"
 # (tools/render-counts.sh), not rendered again here. --read prints STALE or
 # MISSING rather than a number when the file does not describe this tree, so
@@ -749,14 +748,14 @@ expect: 5
 states: [0-9]+ \| Alert rules for
 
 # frontend-posture.md states the shipped Open WebUI version because its licence
-# paragraph was checked against LICENSE at that tag (TM-0908). A bump makes this
+# paragraph was checked against LICENSE at that tag. A bump makes this
 # go red ON PURPOSE: re-read LICENSE at the new tag before changing `expect`.
 page:   docs/frontend-posture.md
 claim:  The Open WebUI version this release ships is `0.12.3`
 test:   grep -E '^\s+image: ghcr.io/open-webui/open-webui:' charts/tockmox-ai/values.yaml | head -1 | sed 's/.*://'
 expect: 0.12.3
 
-# THE MEASURED INSTALL TIME (TM-0284). A wall-clock time cannot be decided from
+# THE MEASURED INSTALL TIME. A wall-clock time cannot be decided from
 # the tree, so this entry guards the two things that can rot: the profile the
 # measurement names must still exist, and the sentence must keep saying the run
 # was scripted. If the profile is renamed or the label is edited away, the

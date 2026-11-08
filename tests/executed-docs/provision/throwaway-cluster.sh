@@ -14,7 +14,7 @@
 #   throwaway-cluster.sh destroy  ... delete every VM in the namespace
 #   throwaway-cluster.sh await    ... resume create's wait for a guest already provisioning
 #
-# MicroOS images only (provision/profiles/microos.sh, TM-0715):
+# MicroOS images only (provision/profiles/microos.sh):
 #
 #   throwaway-cluster.sh uninstall-proof ... run uninstall.md section 9 on the guest
 #   throwaway-cluster.sh evidence        ... copy the guest's beacon records out
@@ -50,13 +50,13 @@ fi
 NS="${TOCKMOX_TEST_NAMESPACE:-tockmox-test}"
 VM_NAME="${TOCKMOX_TEST_VM:-k3s-test-01}"
 K3S_VERSION="${TOCKMOX_K3S_VERSION:-}"
-# ---- defaults that RESOLVE, corrected 2026-09-04 (TM-0406) -----------------
+# ---- defaults that RESOLVE, corrected 2026-09-04 -----------------
 # The image default previously named a resource that does not exist, so a
 # `create` with no overrides failed cold for anyone who did not already know
 # the right value ... which is the opposite of what a default is for. The image
 # is `ubuntu-2204-cloud`, not `ubuntu-22-04-cloud`.
 IMAGE_ID="${TOCKMOX_VM_IMAGE_ID:-tockmox-test/ubuntu-2204-cloud}"
-# ---- the network default is `pod`, ruled 2026-09-04 (TM-0406) ---------------
+# ---- the network default is `pod`, ruled 2026-09-04 ---------------
 # Two attachments were measured the same day, from inside the guest, with the
 # beacon below. They differ in the ONE direction the `secret` handoff needs.
 #
@@ -106,7 +106,7 @@ DISK="${TOCKMOX_VM_DISK:-250Gi}"
 # is the default here.
 # Lower it deliberately if you are testing behaviour under pressure; do not
 # lower it to be polite to the host.
-# REGISTRY MIRROR, added 2026-09-13 (TM-0568). Empty by default: the tree must
+# REGISTRY MIRROR, added 2026-09-13. Empty by default: the tree must
 # carry no site specifics, so the mirror is named by the caller.
 #
 # WHY IT MATTERS MORE THAN SPEED. A by-the-book install pulls 44 images, 17 of
@@ -269,7 +269,7 @@ if [ -n "${TOCKMOX_SUBSTRATE_KUBECONFIG:-}" ]; then
   export KUBECONFIG
 fi
 
-# TM-0797: EVERY kubectl call in this file names its cluster. The hypervisor
+# EVERY kubectl call in this file names its cluster. The hypervisor
 # calls carry --context="$TOCKMOX_SUBSTRATE_CONTEXT"; the few calls that address
 # the guest carry the context read out of the guest's own kubeconfig. Nothing
 # here relies on the caller's current-context, which is whatever the last shell
@@ -363,7 +363,7 @@ nodeport_host() {
   if [ -n "${TOCKMOX_NODEPORT_HOST:-}" ]; then
     printf '%s' "$TOCKMOX_NODEPORT_HOST"; return
   fi
-  # PREFER THE NODE THE GUEST IS ACTUALLY ON, measured 2026-09-23 (TM-0715).
+  # PREFER THE NODE THE GUEST IS ACTUALLY ON, measured 2026-09-23.
   # The API host is not always a node: on a Harvester cluster the kubeconfig
   # names the cluster VIP, which fronts the API and refuses NodePorts outright
   # (`connection refused` on :30198 at the VIP, 401 from the same port on the
@@ -475,7 +475,7 @@ resolve_k3s_version() {
   #
   # Until 2026-10-10 this read k3s's stable channel live and, when that failed,
   # installed UNPINNED on the theory that the documented line was unpinned too.
-  # Neither half held. The page pins (it has since TM-0406's era), and an
+  # Neither half held. The page pins, and an
   # unpinned get.k3s.io install asks update.k3s.io for the version itself, so a
   # channel the harness could not read was a channel the guest could not read
   # either: on 2026-10-10 update.k3s.io served a self-signed TRAEFIK DEFAULT
@@ -494,7 +494,7 @@ mint_ssh_key() {
   chmod 600 "$SSH_KEY"
 }
 
-# ---- a stale handoff Secret is refused, never waited on (TM-0766) ------------
+# ---- a stale handoff Secret is refused, never waited on ------------
 # fetch_kubeconfig polls ${VM_NAME}-kubeconfig and takes the first copy that
 # parses, and vm_ip reads the same Secret for the guest's address. Neither can
 # tell a Secret THIS guest wrote from one a previous guest left behind. Observed
@@ -540,8 +540,7 @@ check_handoff_token() {
   API_TOKEN="$(kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" config view --minify --raw -o jsonpath='{.users[0].user.token}' 2>/dev/null)"
   [ -n "$API_TOKEN" ] || return 0   # create() refuses an empty token with its own message
   # THE TOKEN IS COPIED INTO THE GUEST, so it must be the narrow, namespace-scoped
-  # identity create() says it is, and that is checked rather than assumed (TM-0849,
-  # Harvester and testing council 2026-10-03, section 8b). Handed an admin
+  # identity create() says it is, and that is checked rather than assumed (# Harvester and testing council 2026-10-03, section 8b). Handed an admin
   # kubeconfig, this used to write a hypervisor admin token into a lab VM's
   # cloud-init. A ServiceAccount token names its subject in its own payload;
   # anything that is not a ServiceAccount of the disposable namespace, or not a
@@ -571,7 +570,7 @@ except Exception:
 
 create() {
   # First, before preflight touches anything: nothing may be created or deleted
-  # on behalf of a run whose token must not reach a guest (TM-0849).
+  # on behalf of a run whose token must not reach a guest.
   check_handoff_token
   preflight
   clear_stale_handoff
@@ -678,7 +677,7 @@ create() {
   fi
   STORAGE_CLASS="$image_sc"
 
-  # ---- the OS profile is DERIVED from the image too (TM-0715) --------------
+  # ---- the OS profile is DERIVED from the image too --------------
   # Same reasoning as the StorageClass above: the image is the fact, and
   # configuration that disagrees with it is refused rather than obeyed.
   #
@@ -700,7 +699,7 @@ create() {
   # `provision/profiles/microos.sh` carries the MicroOS lane: it EXTRACTS every
   # documented command from fresh-install.md rather than hand-writing any of
   # them, and drives the two-phase bring-up across the reboot the page itself
-  # prescribes. Wired in 2026-09-23 (TM-0715): a MicroOS image now builds the
+  # prescribes. Wired in 2026-09-23: a MicroOS image now builds the
   # profile's cloud-config instead of the Ubuntu one below, and everything
   # after the cloud-config (the Secret, the VM, the handoff, the NodePort, the
   # Ready assertion) is shared, because none of it is OS-specific.
@@ -973,7 +972,7 @@ create() {
       # which is the direction a segmented lab network breaks.
       echo "      B64=\$(base64 -w0 < /run/kc.yaml 2>/dev/null || base64 < /run/kc.yaml | tr -d '\\n')"
       echo "      IPB64=\$(printf '%s' \"\${IP}\" | base64 | tr -d '\\n')"
-      # 409 IS NOT SUCCESS (TM-0766). It means a Secret of this name already
+      # 409 IS NOT SUCCESS. It means a Secret of this name already
       # exists, which is a stale one from an earlier guest: it carries THAT
       # guest's credential, and treating 409 as done left it in place for the
       # harness to read. Replace it with this guest's copy (PUT), and count only
@@ -1057,7 +1056,7 @@ create() {
   # something that cannot work.
   if command -v python3 >/dev/null 2>&1; then
     # Exit 3 means THIS CHECK could not run, not that the document is bad
-    # (TM-0765). The import used to sit outside the try, so a runner without
+    #. The import used to sit outside the try, so a runner without
     # PyYAML died on ModuleNotFoundError and the harness reported "generated
     # cloud-config is invalid": a setup gap presented as a finding about the
     # document, which is the failure this block's comment warns against.
@@ -1333,7 +1332,7 @@ uninstall_proof() {
 # ---- resume the wait for a guest that is already provisioning -----------------
 # The second half of `create`, on its own: retrieve the handoff, publish it,
 # assert a Ready node, and (MicroOS) report the documented success conditions.
-# Added 2026-09-23 (TM-0715) because the half of `create` that WAITS belongs to
+# Added 2026-09-23 because the half of `create` that WAITS belongs to
 # the caller's session, and the guest's run does not: when that session drops,
 # the guest carries on unattended and nothing can collect its result short of
 # provisioning a second guest. This collects it. It creates nothing and
@@ -1560,7 +1559,7 @@ reboot() {
   exit 1
 }
 
-# ---- WHAT A TEARDOWN MAY TOUCH (TM-0587, 2026-10-06) ----------------------
+# ---- WHAT A TEARDOWN MAY TOUCH (2026-10-06) ----------------------
 # Everything this script creates on the substrate is named `${VM_NAME}` or
 # `${VM_NAME}-<something>`: the VM, its DataVolume, the cloud-init, boot and
 # kubeconfig Secrets (the last two written by the guest), the API Service,
@@ -1601,7 +1600,7 @@ owned_names() {
 
 # destroy's Secret sweep: this VM's three Secrets by name, plus any other
 # harness-labelled Secret whose name this VM owns. Every failure is counted and
-# printed (TM-0766): a refused delete must not read as a clean teardown.
+# printed: a refused delete must not read as a clean teardown.
 delete_harness_secrets() {
   local out names
   if ! names="$(owned_names secret -l tockmox.com/harness=executed-docs)"; then
@@ -1690,7 +1689,7 @@ destroy() {
   echo "EXPECTED: 0"
   echo "ACTUAL:   $(printf '%s' "$svcleft" | grep -c .)"
   [ -z "$svcleft" ] || { echo "RESULT:   FAIL ... teardown left a Service behind" >&2; exit 1; }
-  # Secrets are the one leak that POISONS the next run (TM-0766): a surviving
+  # Secrets are the one leak that POISONS the next run: a surviving
   # ${VM_NAME}-kubeconfig is read by the next create as its own.
   echo "ARTEFACT: secrets owned by ${VM_NAME} remaining in ${NS}"
   echo "EXPECTED: 0"
@@ -1706,7 +1705,7 @@ destroy() {
     exit 1
   fi
   # The snapshot query can be REFUSED (the harness credential may not list
-  # virtualmachinesnapshots; TM-0432). A refusal is "not counted", never a zero.
+  # virtualmachinesnapshots). A refusal is "not counted", never a zero.
   echo "ARTEFACT: snapshots owned by ${VM_NAME} remaining in ${NS}"
   echo "EXPECTED: 0"
   if snapleft="$(owned_names vmsnapshot 2>"$snaperrf")"; then
@@ -1958,7 +1957,7 @@ snapshots() {
     2>/dev/null || true
 }
 
-# TM-0797: refuse before any verb that reaches the hypervisor. `kubeconfig` only
+# refuse before any verb that reaches the hypervisor. `kubeconfig` only
 # prints a path and calls nothing.
 case "${1:-}" in
   kubeconfig) ;;

@@ -39,7 +39,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # The image extractor, shared with gen-images.sh. Sourced rather than copied:
 # the two used to carry the pipeline twice and the copies had drifted apart on a
-# GNU-only regex (TM-0646). Prove it with `bash tools/lib/extract-images.sh --selftest`.
+# GNU-only regex. Prove it with `bash tools/lib/extract-images.sh --selftest`.
 . "$(dirname "$0")/lib/extract-images.sh"
 SENTINEL="airgap-check.invalid"
 VALUES="${VALUES:-ci/values.yaml}"
@@ -66,7 +66,7 @@ LAYERS=(crds platform policy identity observability exporters ai devops selfchec
 # the site builds and names IN FULL in tockmoxUi.image, already in its own
 # registry (tockmox-ui.md, "Build the image"). Redirecting a reference the site
 # wrote would be wrong, so the chart does not; the gate first saw the UI when
-# the all-on overlay turned it on (TM-1013).
+# the all-on overlay turned it on.
 # ---------------------------------------------------------------------------
 EXEMPT="
 busybox
@@ -122,9 +122,9 @@ echo "  $TOTAL distinct images, $REDIRECTED redirected"
 # here as `'airgap-check.invalid/library/busybox`, failed the `^$SENTINEL`
 # test on the leading quote alone, and was reported as ignoring
 # global.imageRegistry when it had honoured it. A gate that goes red on a
-# correct tree teaches people to ignore it (TM-0630), and this one had no
+# correct tree teaches people to ignore it, and this one had no
 # single-quoted image to trip on until the Grafana and Argo `wait-for-ca`
-# containers arrived (TM-0632).
+# containers arrived.
 
 # strip tag and digest so the list survives a version bump
 strip() { sed -E 's/@sha256:[0-9a-f]+$//; s/:[^:\/]+$//'; }

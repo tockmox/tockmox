@@ -1,4 +1,4 @@
-# StaticSATokenRotationOverdue ... TM-0519.
+# StaticSATokenRotationOverdue.
 #
 # DO NOT SET rule_files. tools/check-alert-rules.sh injects the rules extracted
 # from `helm template`, so this case always tests the expression the tree

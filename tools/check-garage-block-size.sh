@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Assert, ON THE RENDERED ConfigMap, what garage.blockSize does (TM-0782).
+# Assert, ON THE RENDERED ConfigMap, what garage.blockSize does.
 #
 #   ./tools/check-garage-block-size.sh
 #
@@ -85,7 +85,7 @@ else
 import sys, re
 a = open(sys.argv[1]).read()
 b = open(sys.argv[2]).read()
-b2 = re.sub(r'\n# garage\.blockSize \(TM-0782\)[^\n]*\n#[^\n]*\nblock_size = "[^"]*"\n', '', b)
+b2 = re.sub(r'\n# garage\.blockSize[^\n]*\n#[^\n]*\nblock_size = "[^"]*"\n', '', b)
 sys.exit(0 if a == b2 else 1)
 PY
 

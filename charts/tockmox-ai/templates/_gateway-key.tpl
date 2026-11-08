@@ -2,7 +2,7 @@
 {{/*
 Whether the console-key Job renders: "true" or "". One answer for two
 templates, the Job (gateway-key.yaml) and the check CronJob that watches the
-key it minted (console-key-check.yaml, TM-0982), so the check can never run
+key it minted (console-key-check.yaml), so the check can never run
 against a key no Job owns. Unset follows the console AND the gateway AND the
 console reading `secretName`; true forces it on and refuses, with a sentence
 each, when there is nothing to mint for or the console would read another
@@ -56,7 +56,7 @@ spec:
   restartPolicy: OnFailure
   serviceAccountName: tockmox-gateway-key
   # Needs the API: kubectl reads and creates one Secret (the Role beside the
-  # Job). Token kept on purpose (TM-0759); gate allowlist in
+  # Job). Token kept on purpose; gate allowlist in
   # tools/check-sa-tokens.sh.
   automountServiceAccountToken: true
   {{- with $ctx.Values.modelGateway.database.priorityClassName }}
@@ -120,7 +120,7 @@ spec:
           #    an existing Secret is the job done only if the gateway still
           #    accepts its key. A gateway that was turned off and on again
           #    comes back with a fresh database that holds no keys at all, so
-          #    the Secret outlives the key it holds (TM-0977); a 401 here is
+          #    the Secret outlives the key it holds; a 401 here is
           #    that case, and the key is replaced. Any other answer leaves the
           #    Secret alone: this never deletes a key it cannot prove dead.
           remint=

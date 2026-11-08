@@ -9,7 +9,7 @@
 # THE ONE RULE THIS FILE EXISTS TO HOLD: the built site makes no network request
 # at view time. A Dark Site install has no internet, and documentation that
 # quietly reaches for a font or a script host has broken the claim the whole
-# feature is for (TM-0215). Each setting below is here because leaving it at the
+# feature is for. Each setting below is here because leaving it at the
 # theme's default breaks that, and tools/check-docs-offline.sh asserts on the
 # BUILT ARTIFACT rather than trusting this file.
 #
@@ -22,7 +22,7 @@
 #                            time a page has a diagram. Without the fence, a
 #                            ```mermaid block renders as a plain code block: the
 #                            source is readable, the drawing is not. Trade-off
-#                            recorded in the TM-0215 report; vendoring mermaid
+#                            recorded in the report; vendoring mermaid
 #                            is the follow-up if the drawings are wanted.
 #                            pymdownx.emoji is NOT loaded, for the same reason
 #                            (its twemoji index is a runtime CDN fetch).

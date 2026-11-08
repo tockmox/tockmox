@@ -24,7 +24,7 @@
 # (`fresh-install.md#7-install-sealed-secrets-with-your-own-key`) rather than
 # documenting a second install command, and both check the SAME release name
 # (`kubectl -n kube-system get deployment sealed-secrets`). So this is not the
-# TM-0299 shape (two independent routes, one never run) ... it is a stale
+# shape (two independent routes, one never run) ... it is a stale
 # citation in the run sheet, predating the prerequisites.md rewrite. Reported
 # here rather than silently reconciled; the run sheet is the thing to correct,
 # not this comment.
@@ -57,7 +57,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "${HERE}/../lib/assert.sh"
-# TM-0797: every kubectl and helm call below names its cluster with --context or
+# every kubectl and helm call below names its cluster with --context or
 # --kube-context from this variable, and an empty value is refused rather than
 # falling back to the current context (docs/deployment/fresh-install.md, "Name
 # the cluster"). run.sh exports it; a standalone run must export it itself.
@@ -82,7 +82,7 @@ provenance "$REF" "$PAGE" "$SECTION" 1 "$SHA1"
 verbatim "$CMD1"
 
 # Run in THIS shell and carry the export: the page derives
-# SEALED_SECRETS_CHART_VERSION here and block 2 guards on it (TM-0484).
+# SEALED_SECRETS_CHART_VERSION here and block 2 guards on it.
 _B1OUT="$(mktemp "${TMPDIR:-/tmp}/p05-b1.XXXXXX")"
 run_block_carrying_exports "$CMD1" > "$_B1OUT" 2>&1
 _P05_RC1=$?

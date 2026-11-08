@@ -2,7 +2,7 @@
 #
 # Runs when a release tag is pushed, and asserts what only a tag can be asked
 # about: that tockmox-site-template's `main` already pins the tag being cut
-# (TM-0534). A separate workflow on purpose: ci.yaml triggers on branches and
+#. A separate workflow on purpose: ci.yaml triggers on branches and
 # its step count is a pinned, documented number; this one is about the tag.
 #
 # A red run here does not stop the tag (it already exists); it is the alarm the

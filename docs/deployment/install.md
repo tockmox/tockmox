@@ -564,7 +564,7 @@ This is the fourth of the four values, and it is a three-way choice: name an
 inference host you already run in the gateway's `litellm.proxy_config.model_list`,
 let Tockmox run models in-cluster, or leave it unset. It lives in
 `site/values/ai.yaml`, not in `tockmox.yaml`. Since 0.8.0 the console goes
-through the gateway by default (TM-0460); the values, the trade-offs and the
+through the gateway by default; the values, the trade-offs and the
 way to run without the gateway are in [the AI plane](../usage/ai-plane.md).
 
 **Success condition:** whichever you chose, you can say which, and
@@ -576,7 +576,7 @@ way to run without the gateway are in [the AI plane](../usage/ai-plane.md).
 default. Since 0.8.0 the policy layer refuses to render without this list
 rather than falling back to admitting the whole pod network to the platform
 namespace, which let any pod in the cluster reach every platform pod on every
-port (TM-0798).
+port.
 
 The list is one `/31` per node: the two addresses a packet from that node's own
 host carries when it reaches a pod (its `cni0` and `flannel.1` addresses on
@@ -1469,7 +1469,7 @@ this. Skip to [verify what Tockmox authored](#verify-what-tockmox-authored).
 Open WebUI authenticates to the gateway with a LiteLLM *virtual key*, and a
 virtual key can only be issued by LiteLLM, which has to be running first. So
 this one Secret cannot be sealed in Phase 2.5. **Since 0.8.0 a Job in the AI
-layer mints it** (TM-0460): it waits for the gateway to answer, asks it for a
+layer mints it**: it waits for the gateway to answer, asks it for a
 key scoped to the console, and creates `tockmox-openwebui-gateway`. Until the
 gateway is up, the console alone sits in `CreateContainerConfigError` with:
 
@@ -1812,7 +1812,7 @@ it so; the body of the page said the opposite twice, and the change was
 recorded as breaking. The stale sentence survived because a text equivalent
 is the part a sighted reviewer skips and a screen-reader user gets as the
 *only* description of the diagram ... wrong in the one place least likely to be
-proof-read and most likely to be believed. TM-0499.
+proof-read and most likely to be believed.
 
 <a id="history-the-guard-line"></a>
 
@@ -1830,7 +1830,7 @@ fresh-install.md did, so the two pages match.
 `v0.39.1` beside a `0.40.0` controller is exactly what the reference lab held
 on 2026-09-12, found by this check before anything was sealed; the client was
 upgraded first. The check exists because "prints a version" is green at the
-moment you are about to fail (TM-0538).
+moment you are about to fail.
 
 <a id="history-why-no-comments-inside-blocks"></a>
 
@@ -1842,7 +1842,7 @@ macOS has shipped zsh as the default login shell since 10.15;
 is worse: `kubectl get nodes # wait for Ready` passes `#`, `wait` and `for` to
 `kubectl` as arguments, and `$EDITOR file.yaml # or another` opens the editor
 on four files with no error at all. Measured on a stock macOS zsh 2026-09-11
-(TM-0484); `tools/check-pasteable-blocks.sh` refuses the next one.
+; `tools/check-pasteable-blocks.sh` refuses the next one.
 
 <a id="history-the-placeholder-count"></a>
 
@@ -1887,7 +1887,7 @@ one-line form prints `read: -p: no coprocess` among the other output and
 carries on with the variable unset; on 2026-09-12 both repository Secrets on
 the reference lab were created with an empty password that way, each passed
 the label check, and the failure surfaced three phases later as nine layers in
-`ComparisonError` (TM-0537). Hence the byte count, and hence
+`ComparisonError`. Hence the byte count, and hence
 `tools/check-pasteable-blocks.sh` RULE 5.
 
 <a id="history-3b-and-the-secrets-timing"></a>
@@ -1912,7 +1912,7 @@ recovers on its own ... the alarming number is the harmless case.
 
 The NetworkPolicy line read 32 from 2026-09-12 until 2026-09-14, the fourth
 page found restating a count the layer's own README had already corrected to
-33. Correcting an owner does not correct the pages that repeat it (TM-0533),
+33. Correcting an owner does not correct the pages that repeat it,
 which is why the number is now a registered claim rather than prose.
 
 <a id="history-the-readiness-bar"></a>
@@ -1922,8 +1922,8 @@ which is why the number is now a registered claim rather than prose.
 Until 2026-09-12 three surfaces stated this precondition three different
 ways and, measured on a correct install, all three were false. A precondition
 a reader cannot satisfy teaches them to ignore preconditions, and this one sits
-at the highest-stakes moment in the documented path (TM-0496). "Read it twice"
-is there because a defect that recreated a Job every five minutes (TM-0495)
+at the highest-stakes moment in the documented path. "Read it twice"
+is there because a defect that recreated a Job every five minutes
 passed a release gate: every check happened to land in the half of the cycle
 that looked healthy. `site-apps` is excluded because an `apps/` holding only
 its README reports `Healthy` with zero resources (measured 2026-09-12), so the

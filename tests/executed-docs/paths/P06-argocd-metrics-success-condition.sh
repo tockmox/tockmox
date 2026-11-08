@@ -49,12 +49,12 @@
 # row is updated with the breakdown above rather than a single revised number,
 # because the breakdown is the part a reader needs.
 #
-# REWRITTEN AT 0.6.1 (TM-0628), AND THE REWRITE DELETED MORE THAN IT ADDED.
+# REWRITTEN AT 0.6.1, AND THE REWRITE DELETED MORE THAN IT ADDED.
 # Everything below this line supersedes the accounting above where they differ;
 # the text above is left as the record of the 2026-09-02 run.
 #
 # WHAT THE PAGE FIXED, WHICH IS WHAT THIS PATH EXISTED TO REPORT. This script
-# used to carry three apologies, and TM-0628 retired all three at once by
+# used to carry three apologies, and the page retired all three at once by
 # moving ArgoCD's metrics values into section 6's own `helm install` block as
 # six `--set` flags:
 #
@@ -176,7 +176,7 @@ _emit ""
 
 # --- the success-condition command, now a fenced block like any other -------
 # Was an inline code span pulled out with sed and a prose anchor until 0.6.1.
-# TM-0628 made it a labelled ```bash fence, so this is an ordinary extraction
+# made it a labelled ```bash fence, so this is an ordinary extraction
 # and the CI canary that guarded the anchor string is deleted with it.
 if ! CMD_METRICS_BLOCK="$("$EXTRACT" --ref "$REF" --page "$PAGE" --section "$SECTION" --lang bash --containing 'grep metrics' 2>/dev/null)"; then
   _emit "EXCEPTION: no bash block under '${SECTION}' in ${PAGE} at ${REF}"
@@ -205,11 +205,11 @@ assert_artifact \
   "3"
 
 does_not_prove \
-  "The page's own stock-install parenthetical, 'a stock install, without those --set flags, lists none'. This path used to assert it as claim (a) against section 6's install block. TM-0628 put the metrics flags INTO that block, so the documented path no longer produces a stock install and the baseline is now a counterfactual: reaching it needs an install this page does not document. Dropped deliberately rather than tested against a command the harness would have to author. If that parenthetical is worth proving, it needs its own documented path, not glue here." \
+  "The page's own stock-install parenthetical, 'a stock install, without those --set flags, lists none'. This path used to assert it as claim (a) against section 6's install block. The page put the metrics flags INTO that block, so the documented path no longer produces a stock install and the baseline is now a counterfactual: reaching it needs an install this page does not document. Dropped deliberately rather than tested against a command the harness would have to author. If that parenthetical is worth proving, it needs its own documented path, not glue here." \
   "That the three service names this run found are the exact names a different chart version would produce. Chart version resolved live (see substitution above), not pinned, same caveat as P04/B7." \
   "That turning ArgoCD metrics on this way matches Tockmox's own recommended path, which also wants apps.argocdMonitoring enabled on the Tockmox side to get a dashboard. That second half is not tested here -- this path stops at the chart's own Services existing, and the page's own callout says having one half gets you neither." \
   "Anything about ServiceMonitors, Prometheus actually scraping, or the dashboard administration/argocd.md describes as the deliberate pair." \
-  "That administration/argocd.md's YAML values and section 6's six --set flags still say the same thing. They were equivalent when TM-0628 moved them, and nothing asserts that they stay equivalent: a values key added to one and not the other drifts silently. This path now reads only the install block, so it would not notice. Worth a gate, and it is not this one." \
+  "That administration/argocd.md's YAML values and section 6's six --set flags still say the same thing. They were equivalent when they were moved, and nothing asserts that they stay equivalent: a values key added to one and not the other drifts silently. This path now reads only the install block, so it would not notice. Worth a gate, and it is not this one." \
   "Any of the twelve other 'Success condition' paragraphs on this page. See the header comment for the full accounting: seven are node-local exceptions, two state no command at all, and three are already covered by P04 and P05."
 
 parity_caveat \

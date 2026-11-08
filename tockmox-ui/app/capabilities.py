@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""What each Tockmox capability is set to, and what is actually deployed for it (TM-1017).
+"""What each Tockmox capability is set to, and what is actually deployed for it.
 
 Two facts per capability, kept apart on purpose, because they disagree in exactly the cases
 worth seeing:

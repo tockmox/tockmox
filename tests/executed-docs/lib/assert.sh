@@ -124,7 +124,7 @@ _assert_impl() {
 # docs/deployment/existing-cluster.md ... six checks, every one with a stated
 # "Passes when:" ... as stating none. That is the bad failure direction: the
 # harness would have written a documentation defect into the divergence list
-# against a page that was correct (TM-0351). Use this, never a bare grep, and
+# against a page that was correct. Use this, never a bare grep, and
 # add a phrasing HERE and in rule 4 together if the standard ever admits a
 # third.
 #
@@ -250,7 +250,7 @@ path_finish() {
 # EXPORTED into this path's environment so the next block sees it.
 #
 # WHY (2026-09-13). The documentation moved to a session model and this harness
-# did not. TM-0484 ruled that a derived value is derived once and reused ...
+# did not. A ruling held that a derived value is derived once and reused ...
 # `export ARGOCD_CHART_VERSION="$(helm search ...)"` in one block, then
 # `: "${ARGOCD_CHART_VERSION:?run the block above first}"` in the next. A reader
 # runs both in one terminal, so that works. The harness ran every block in a

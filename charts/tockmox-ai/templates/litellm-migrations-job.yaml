@@ -1,6 +1,6 @@
 {{- /*
 The LiteLLM schema migrations Job, owned by this chart rather than the
-litellm-helm subchart (TM-0596, ruled 2026-10-06).
+litellm-helm subchart (ruled 2026-10-06).
 
 WHY THIS CHART OWNS IT. A Job's `spec.template` is immutable once the Job
 exists. The subchart names its Job `<fullname>-migrations` whatever the

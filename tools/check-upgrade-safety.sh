@@ -11,7 +11,7 @@
 # F1  The LiteLLM migrations Job cannot wedge an upgrade. A Job's pod template
 #     is immutable once the Job exists, so a Job that keeps its name across a
 #     template change fails with 'field is immutable' and Argo stops retrying
-#     (0.7.0 lab pass). Since TM-0596 (2026-10-06) tockmox-ai owns the Job and
+#     (0.7.0 lab pass). Since 2026-10-06 tockmox-ai owns the Job and
 #     names it after a hash of its pod template. Asserted on the render:
 #     exactly one migrations Job, named <release>-litellm-migrations-<10 hex>;
 #     its name MOVES when the pod template moves (a pod label, a LiteLLM image
@@ -36,7 +36,7 @@
 #     each run must be able to FAIL: activeDeadlineSeconds and backoffLimit both
 #     set and bounded. Rendered on an OPERATOR FIXTURE (the shipped `docs`
 #     entry plus a site of the operator's own with a `content.image`), because
-#     the product docs have no sync Job since TM-0808 (no published image,
+#     the product docs have no sync Job (no published image,
 #     ADR-0036) and a default render holds no sync CronJob at all: without the
 #     fixture this check would find nothing and go red on "no CronJob", or
 #     worse, be edited to accept nothing. `--selftest` proves it goes red on a

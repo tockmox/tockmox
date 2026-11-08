@@ -277,7 +277,7 @@ spec:
         - protocol: TCP
           port: 3100
 ---
-# The Tockmox UI (tockmox-ai, TM-0920) -> Prometheus :9090 and Alertmanager :9093. It reads node health, targets and
+# The Tockmox UI (tockmox-ai) -> Prometheus :9090 and Alertmanager :9093. It reads node health, targets and
 # firing alerts from both; its own egress policy (tockmox-ai, templates/tockmox-ui.yaml) already allows exactly these,
 # and without this rule the default-deny above refused them, so every status read "unreachable" and node health
 # stayed Unknown (lab F8, 2026-10-08).
@@ -318,7 +318,7 @@ spec:
           port: 9093
 {{- with ($.Values.platformNetpol | default dict).extraMonitoringClientNamespaces }}
 ---
-# Site clients of the monitoring namespace (TM-0820, observability-cutover A1):
+# Site clients of the monitoring namespace (observability-cutover A1):
 # a site's own Alloy, capacity jobs or alert publishers living in namespaces of
 # their own. Listed in platformNetpol.extraMonitoringClientNamespaces, empty by
 # default so this object does not render. Reaches Prometheus :9090, Loki :3100,

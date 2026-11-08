@@ -98,7 +98,7 @@ the message sends you looking at a value you did not set.
     (dict "present" $hasMount "detail" "open-webui.volumeMounts.container does not mount `tockmox-trust`, so the application cannot read the bundle")
     (dict "present" $hasSslEnv "detail" "open-webui.extraEnvVars has no SSL_CERT_FILE, which is what httpx, aiohttp and urllib read")
     (dict "present" $hasReqEnv "detail" "open-webui.extraEnvVars has no REQUESTS_CA_BUNDLE, which is what `requests` reads ... it ignores SSL_CERT_FILE")
-    (dict "present" (or (not .Values.global.certIssuer) (contains "TOCKMOX_EXPECT_CA" (toYaml ((index .Values "open-webui").extraInitContainers | default list)))) "detail" "the open-webui trust-bundle initContainer does not read TOCKMOX_EXPECT_CA, so it cannot tell a CA that is seconds away from a plain-HTTP install where none is coming ... it builds the bundle without the CA and every https client in the pod is wrong for the life of the pod (TM-0632)")
+    (dict "present" (or (not .Values.global.certIssuer) (contains "TOCKMOX_EXPECT_CA" (toYaml ((index .Values "open-webui").extraInitContainers | default list)))) "detail" "the open-webui trust-bundle initContainer does not read TOCKMOX_EXPECT_CA, so it cannot tell a CA that is seconds away from a plain-HTTP install where none is coming ... it builds the bundle without the CA and every https client in the pod is wrong for the life of the pod")
   )) -}}
 {{- /*
 And the image the initContainer runs must be the image the application runs,
@@ -115,7 +115,7 @@ because the bundle it writes is that image's own trust store.
 {{- end -}}
 {{- end -}}
 {{- /*
-`serviceMonitors` is deliberately NOT guarded here (TM-0825). Declining the
+`serviceMonitors` is deliberately NOT guarded here. Declining the
 observability capability while pinning `apps.serviceMonitors.enabled: true` is
 the documented "run your own Prometheus operator" route: the capability says
 "do not deploy a monitoring stack", the component says "but render the monitors
@@ -123,7 +123,7 @@ and rules for the operator I already have". Refusing it made the route
 unreachable in every layer.
 */ -}}
 {{- /*
-SITE HOOKS FOR THE MODEL GATEWAY (TM-0787). Three things have to agree for a
+SITE HOOKS FOR THE MODEL GATEWAY. Three things have to agree for a
 hook to load, and they live in three different places: the files
 (modelGateway.hooks.files), the mount (litellm.volumes / litellm.volumeMounts,
 which are LISTS and so are replaced wholesale by a site that sets them), and the
@@ -179,7 +179,7 @@ business.
 {{- end -}}
 {{- end -}}
 {{- /*
-THE POLICY GATE (TM-0383). The module is generic and every decision it makes
+THE POLICY GATE. The module is generic and every decision it makes
 comes from config, so a config that cannot support the invariant must not
 render. These are REQ-0003 AC-3.2's checks, from config alone and with no model
 invoked, run on the site's own values at render time rather than in a CI job
@@ -253,7 +253,7 @@ reference site carries and this chart does not).
 {{- /*
 Open WebUI reaching the model gateway requires the gateway to exist. Since
 0.8.0 the shipped default points the console at this release's gateway
-(TM-0460), so a site that turns the gateway off and changes nothing else has a
+, so a site that turns the gateway off and changes nothing else has a
 console resolving nothing and showing an empty model list with no error. That
 is the case this refuses, and the message names the two ways out. Naming a
 gateway URL that is NOT this release's Service is not fatal ... the endpoint
@@ -266,10 +266,10 @@ gateway off and changing nothing else.
 {{- if and $consoleOn $owui.enableOpenaiApi (not (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm"))) -}}
 {{- $expected := printf "%s-litellm" .Release.Name -}}
 {{- if contains $expected $url -}}
-{{- fail (printf "open-webui.openaiBaseApiUrl points at %q, which is the Service this release renders for the model gateway, but apps.litellm.enabled is false so nothing renders it. Open WebUI would resolve nothing and show an empty model list with no error. Since 0.8.0 the gateway is the shipped default (TM-0460); to run without it set open-webui.enableOpenaiApi: false (a console with no backend) or point open-webui.openaiBaseApiUrl at a model host you run, and set apps.litellm.enabled: false in global.yaml so every layer sees it. Either re-opens REQ-0004 AC-4.1 on this site; docs/usage/ai-plane.md says what that costs." $expected) -}}
+{{- fail (printf "open-webui.openaiBaseApiUrl points at %q, which is the Service this release renders for the model gateway, but apps.litellm.enabled is false so nothing renders it. Open WebUI would resolve nothing and show an empty model list with no error. Since 0.8.0 the gateway is the shipped default; to run without it set open-webui.enableOpenaiApi: false (a console with no backend) or point open-webui.openaiBaseApiUrl at a model host you run, and set apps.litellm.enabled: false in global.yaml so every layer sees it. Either re-opens REQ-0004 AC-4.1 on this site; docs/usage/ai-plane.md says what that costs." $expected) -}}
 {{- end -}}
 {{- end -}}
-{{- /* THE SCRATCH VOLUME (TM-0596, TM-1005). The shipped envVars point TMPDIR at
+{{- /* THE SCRATCH VOLUME. The shipped envVars point TMPDIR at
 /scratch because the root filesystem is read-only, and the shipped volumes and
 volumeMounts lists carry the emptyDir behind it. A site that sets either list
 replaces it, drops the scratch entry, and the migrations Job (which gets no

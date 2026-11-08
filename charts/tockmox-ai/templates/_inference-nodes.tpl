@@ -12,8 +12,7 @@ ci/values-inference-nodes.yaml; tools/check-inference-nodes.sh fails when this t
 
 TWO GATEWAYS. A route whose alias ends in `-next` is a candidate (REQ-0048): it goes to the EVAL gateway
 only, beside the live route it is compared against. It never reaches the production gateway, because
-inside one LiteLLM a key with no model list can call every model the gateway has (measured on 1.100.3,
-TM-0936), so a candidate in the production gateway is reachable by any such key.
+inside one LiteLLM a key with no model list can call every model the gateway has (measured on 1.100.3), so a candidate in the production gateway is reachable by any such key.
 
 Call with (dict "root" $ "gateway" "production"|"eval"); returns a YAML list.
 */ -}}
@@ -44,7 +43,7 @@ Call with (dict "root" $ "gateway" "production"|"eval"); returns a YAML list.
 {{- $ep := dict -}}
 {{- range ($node.endpoints | default list) -}}{{- if eq .id $r.endpoint -}}{{- $ep = . -}}{{- end -}}{{- end -}}
 {{- if not $ep -}}{{- fail (printf "inferenceNodes.routes: route %s names endpoint %s/%s, which does not exist" $r.alias $r.node $r.endpoint) -}}{{- end -}}
-{{- /* EVERY OLLAMA ROUTE PINS ITS CONTEXT (TM-0957). With no num_ctx, current Ollama sizes the context from the node's
+{{- /* EVERY OLLAMA ROUTE PINS ITS CONTEXT. With no num_ctx, current Ollama sizes the context from the node's
 memory (under 24 GiB 4k tokens, 24-48 GiB 32k, 48 GiB or more 256k), and the KV cache for 256k can outweigh the model:
 Qwen3-Coder-30B at 262k is a 24 GiB KV cache beside 19 GiB of weights, and a lab route with none reached a 64 GiB node
 (2026-10-08). The schema types num_ctx but cannot
@@ -67,7 +66,7 @@ require it, because whether a route is Ollama's is known only from the endpoint 
 {{- $_ := set $lp "api_key" (printf "os.environ/NODE_KEY_%s" (regexReplaceAll "[^A-Z0-9]" (upper $ep.auth.secretRef) "_")) -}}
 {{- else if eq $prov "openai" -}}
 {{- /* LiteLLM's openai provider refuses to send a request with no api_key at all ("The api_key client option must be
-set"), even to a server that checks none (measured on 1.100.1, TM-0920 lab). A no-auth engine ignores the placeholder.
+set"), even to a server that checks none (measured on 1.100.1 in the lab). A no-auth engine ignores the placeholder.
 The UI does the same (app/nodes.py NO_AUTH_KEY). */ -}}
 {{- $_ := set $lp "api_key" "no-auth" -}}
 {{- end -}}

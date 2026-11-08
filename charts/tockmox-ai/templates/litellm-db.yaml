@@ -38,7 +38,7 @@ kubernetes.io/basic-auth.
 {{- /* The effective name, whichever way it was supplied. */ -}}
 {{- $storeName := $db.backup.objectStoreName | default $os.name -}}
 {{- /*
-RECOVERY (TM-0820 C1). `bootstrap.recovery` instead of `initdb`, reading a base
+RECOVERY. `bootstrap.recovery` instead of `initdb`, reading a base
 backup and WAL from an ObjectStore under the server name they were archived as.
 Off by default: the shipped bootstrap is unchanged.
 
@@ -80,7 +80,7 @@ spec:
   priorityClassName: {{ . | quote }}
   {{- end }}
   {{- with $db.resources }}
-  # The postgres container's requests and limits (TM-0595). CNPG rolls the
+  # The postgres container's requests and limits. CNPG rolls the
   # instance pods when this changes, so at instances: 1 a change is a restart.
   resources:
     {{- toYaml . | nindent 4 }}
@@ -309,7 +309,7 @@ spec:
 {{- end }}
 {{- if and (not $backupOn) (ne (toString $db.backup.unbackedAlert) "false") (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors")) }}
 ---
-# THE UNBACKED-DATABASE SIGNAL (TM-0312). This database holds the gateway's
+# THE UNBACKED-DATABASE SIGNAL. This database holds the gateway's
 # API keys, spend and teams. With backups off, no metric says so: every
 # cnpg_* series looks the same on a database that is backed up and one that is
 # not, and a restore drill that is not rendered cannot report that it never ran.

@@ -53,18 +53,18 @@ traefik:
 sso:
   # Off by default (an empty list renders nothing); on here so the PostSync Job
   # that adds admin members renders, and tools/check-pod-security.sh measures
-  # it against `restricted` in tockmox-authentik (TM-0820).
+  # it against `restricted` in tockmox-authentik.
   adminUsers:
     - admin
 
-# tockmox-observability: Grafana on CloudNativePG (TM-0786), so the CNPG
+# tockmox-observability: Grafana on CloudNativePG, so the CNPG
 # Cluster, its env Secret and the preflight's agreement checks are rendered and
 # linted, and the CNPG netpol, storage and memory gates see the database.
 grafanaDatabase:
   enabled: true
 
 # tockmox-ai: the Tockmox UI (experimental, off by default), so its objects and
-# its PrometheusRule (TM-1013: sign-in failures, unreachable UI) render here and
+# its PrometheusRule (sign-in failures, unreachable UI) render here and
 # tools/check-alert-rules.sh lints and unit-tests them. The image is a stand-in,
 # as in ci/values-inference-nodes.yaml.
 tockmoxUi:

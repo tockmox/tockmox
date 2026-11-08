@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-0934: the catalog's pinned build against what the node serving it actually holds.
+"""The catalog's pinned build against what the node serving it actually holds.
 
 Git holds the intended build, the node holds the actual one. A mismatch is a finding on /models; a
 comparison that cannot be made reads Unknown with its reason, never current. Reading the node rides the

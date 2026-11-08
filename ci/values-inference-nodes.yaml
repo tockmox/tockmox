@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# THE INFERENCE-NODES FIXTURE (REQ-0047, REQ-0048; TM-0920). Applied ON TOP of
+# THE INFERENCE-NODES FIXTURE (REQ-0047, REQ-0048). Applied ON TOP of
 # ci/values.yaml by tools/check-inference-nodes.sh, which asserts on the RENDER
 # that the gateway routes derived from inferenceNodes are exactly what the
 # Tockmox UI derives from the same block (tests/golden/), that a -next candidate
@@ -49,7 +49,7 @@ modelLifecycle:
       anthropic: {keyEnv: EXAMPLE_ANTHROPIC_KEY}
   watch:
     enabled: true
-    image: registry.example/tockmox/tockmox-ui:0.8.0-site   # a site-built image (TM-0902); placeholder
+    image: registry.example/tockmox/tockmox-ui:0.8.0-site   # a site-built image; placeholder
     providers: {openrouter: {allow: ["anthropic/*"]}}
     pullRequests:
       enabled: true

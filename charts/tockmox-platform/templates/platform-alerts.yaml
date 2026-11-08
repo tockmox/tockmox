@@ -126,7 +126,7 @@ spec:
           #   episodes), the latest within 15 minutes so it resolves once the
           #   flapping stops.
           #
-          #   A REBOOT (TM-0836, measured on the lab 2026-10-03): while
+          #   A REBOOT (measured on the lab 2026-10-03): while
           #   longhorn-manager starts, every volume reads faulted briefly, then
           #   healthy. On the lab that was 2 samples and 1 change per volume.
           #   One episode, however many samples it spans, never fires.
@@ -245,7 +245,7 @@ spec:
 {{- end }}
 
 {{- /*
-CNPG CLUSTER HEALTH ... the alert that did not exist on 2026-09-12 (TM-0518).
+CNPG CLUSTER HEALTH ... the alert that did not exist on 2026-09-12.
 
 A CNPG Cluster sat in `Instance Status Extraction Error: HTTP communication
 issue` for an entire install and NOTHING went red. The database itself was fine
@@ -286,7 +286,7 @@ the right direction to fail. Tested both ways in tests/rules/.
               `Cannot extract Pod status`, and check that
               `allow-cnpg-operator` exists in the database's namespace.
 {{/*
-CNPG BACKUP HEALTH ... the alert that did not exist on 2026-09-16 (TM-0659).
+CNPG BACKUP HEALTH ... the alert that did not exist on 2026-09-16.
 
 `news/miniflux-db` had `ContinuousArchiving=False` and a failed nightly Backup
 for the whole life of the rc4 install ... 2,215 failed ArchiveWAL calls ... and

@@ -2,11 +2,11 @@
 #
 # DELIBERATE DIFFERENCES between tockmox-site-template and what
 # install/tockmox-install.sh generates, read by tools/site-template-diff.sh
-# (TM-0621). Anything the diff finds that is NOT listed here fails it.
+#. Anything the diff finds that is NOT listed here fails it.
 #
 # The template is a hand-kept copy of installer output, published so a stranger
 # can click "Use this template". It drifts every time the installer moves, and
-# until TM-0621 nothing compared the two. This file is the written record the
+# until now nothing compared the two. This file is the written record the
 # card asked for: which differences are intended, and why, so the next release
 # reads only what changed since.
 #

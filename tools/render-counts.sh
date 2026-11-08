@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # RENDER EVERY LAYER ONCE, COUNT IT, AND LEAVE THE COUNT WHERE THE DOCS CHECK
-# CAN READ IT (TM-0533).
+# CAN READ IT.
 #
 #   tools/render-counts.sh               render all nine layers with
 #                                        ci/values.yaml, fail on any that renders

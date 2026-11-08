@@ -48,13 +48,13 @@
 <section class="panel" aria-labelledby="alerts-h">
   <h2 id="alerts-h">Alerts firing</h2>
   <p>{{ source_line(am) }}</p>
-  {# The heartbeat is the pipeline's "I am alive", not a problem (TM-0904): it is
+  {# The heartbeat is the pipeline's "I am alive", not a problem: it is
      named once as that, and never as a firing row. Which alert it is comes from
      config (sources.alertmanager.heartbeat), so a site that renamed it
      (TockmoxHeartbeat, DeadMansSwitch) is not shown its own heartbeat as a fault. #}
   {% set hb_on = (am.data or []) | selectattr("name", "equalto", heartbeat) | list %}
   {% if am.state != "unknown" or hb_on %}<p class="muted">{% if hb_on %}{{ badge("ok", "Alive") }} Alerting pipeline: <code>{{ heartbeat }}</code> is firing, as it always should.{% else %}{{ badge("unknown", "Silent") }} Alerting pipeline: <code>{{ heartbeat }}</code> is not firing, so nothing shows alerts can arrive.{% endif %}</p>{% endif %}
-  {# Every OTHER always-firing heartbeat (TockmoxHeartbeat, TM-1014) reads Alive when present, and is
+  {# Every OTHER always-firing heartbeat (TockmoxHeartbeat) reads Alive when present, and is
      never a firing row. Absent says nothing: the self-check is optional, and its own alerting is
      the dead-man's switch off-cluster, not this page. #}
   {% for name, why in hb_purpose.items() if name != heartbeat %}{% if (am.data or []) | selectattr("name", "equalto", name) | list %}

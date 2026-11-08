@@ -196,14 +196,14 @@ apps:
 # all.
 # ---------------------------------------------------------------------------
 argo-workflows:
-  # Scope the server AND the controller to this namespace (TM-0557). Top-level
+  # Scope the server AND the controller to this namespace. Top-level
   # on purpose: this is the subchart's own key, and it is what emits
   # `--namespaced` onto both Deployments. The full measurement is in the
   # `server:` block below.
   singleNamespace: true
   crds:
     install: true           # single-layer CRDs stay with their chart
-    # full: false (TM-0820). The subchart default (true) renders a pre-install
+    # full: false. The subchart default (true) renders a pre-install
     # hook Job that DOWNLOADS the full CRDs from the network at sync ... a dark
     # site has no route, and a hook Job that hangs blocks the whole sync. false
     # installs the minified CRDs bundled in the chart (x-kubernetes-preserve-
@@ -217,7 +217,7 @@ argo-workflows:
   # loudly, which is preferable to a metrics port nobody can turn on.
   controller:
     resources:
-      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # measured on the prod install 2026-10-05 (accepted for the lab):
       # peak 57.6 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2); average 49.8 MiB.
       # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
       # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -225,7 +225,7 @@ argo-workflows:
         memory: 64Mi
       limits:
         memory: 96Mi
-    # PRIORITY (TM-0820). The workflow controller and server run the restore
+    # PRIORITY. The workflow controller and server run the restore
     # drills and the console; under node pressure they should be evicted like
     # the rest of the platform control plane, not like user apps. This is the
     # PriorityClass tockmox-policy ships (priorityClasses.infrastructure); a
@@ -234,14 +234,14 @@ argo-workflows:
     priorityClassName: tockmox-infrastructure
     metricsConfig:
       enabled: true
-      # honorLabels: true (TM-0820). The restore-drill gauges carry a `service`
+      # honorLabels: true. The restore-drill gauges carry a `service`
       # label, and the ServiceMonitor target also has one. Without honorLabels
       # Prometheus renames the metric's to `exported_service` and every
       # `max by (service)` drill rollup and alert quietly stops matching.
       honorLabels: true
     serviceMonitor:
       enabled: true
-    # POD SECURITY (TM-0135). The controller and server containers already set
+    # POD SECURITY. The controller and server containers already set
     # runAsNonRoot, no privilege escalation and drop ALL; seccomp was the one
     # restricted field left unset, on both. Pod level is the seam the upstream
     # chart exposes. The workflow pods this controller CREATES are not covered
@@ -252,7 +252,7 @@ argo-workflows:
         type: RuntimeDefault
   server:
     resources:
-      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # measured on the prod install 2026-10-05 (accepted for the lab):
       # peak 39.0 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 62.5 MiB in the pre-migration namespace (30 days); average 37.9 MiB.
       # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
       # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -260,7 +260,7 @@ argo-workflows:
         memory: 48Mi
       limits:
         memory: 96Mi
-    priorityClassName: tockmox-infrastructure   # see controller.priorityClassName (TM-0820)
+    priorityClassName: tockmox-infrastructure   # see controller.priorityClassName
     podSecurityContext:
       seccompProfile:
         type: RuntimeDefault
@@ -288,7 +288,7 @@ argo-workflows:
     # sso RBAC annotations (tockmox-admins -> admin, tockmox-users -> read).
     authModes: ["client"]
     # ------------------------------------------------------------------------
-    # SCOPE THE SERVER TO ITS OWN NAMESPACE. Added 2026-09-13, TM-0557, after a
+    # SCOPE THE SERVER TO ITS OWN NAMESPACE. Added 2026-09-13, after a
     # signed-in user reached the console and could list nothing in it.
     #
     # MEASURED, not reasoned. The server was running unscoped, so the UI's
@@ -351,7 +351,7 @@ argo-workflows:
     extraEnv:
       - name: SSL_CERT_FILE
         value: /etc/tockmox/ca/ca.crt
-    # WAIT FOR THE CA. TM-0632.
+    # WAIT FOR THE CA.
     #
     # The comment above explains why there is no BUNDLE-BUILDING initContainer
     # here, and that reasoning still holds: Go unions SSL_CERT_FILE with the
@@ -412,7 +412,7 @@ argo-workflows:
               sleep 5
             done
             echo "CA present, $(wc -c < "$ca") bytes; starting."
-        # TM-0903: the same shell-and-sleep init container as the other
+        # the same shell-and-sleep init container as the other
         # wait-for-ca containers, which measured 0.6 MiB peak; 32Mi is the
         # init-container floor and 8Mi the request. This one was not sampled on
         # its own (it does not run under the lab profile), so the figure is

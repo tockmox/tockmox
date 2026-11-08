@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1014 and TM-1017: the fixes from the 0.8.0 testing pass on the reference site (2026-10-11).
+"""The fixes from the 0.8.0 testing pass on the reference site (2026-10-11).
 
   footer        the RUNNING Tockmox version, not the UI's own build number; a pill when newer exists
   heartbeat     TockmoxHeartbeat is an always-firing heartbeat: Alive, never a firing row
@@ -186,7 +186,7 @@ def test_sign_out_can_be_kept_local(tmp_path, world):
     assert r.status_code == 200 and "You are signed out" in r.text
 
 
-# ------------------------------------------------------------ capabilities (TM-1017)
+# ------------------------------------------------------------ capabilities
 
 CONF = {"identity": True, "observability": True, "notifications": True, "aiPlane": True,
         "dataProtection": True, "hardwareTelemetry": False, "workflowAutomation": True, "networkPolicy": True}

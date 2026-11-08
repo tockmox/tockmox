@@ -3,7 +3,7 @@
 
     python -m app.watcher CONFIG.yaml REPORT.json
 
-A separate process from the UI, run on a schedule (a CronJob, TM-0930), OFF unless the operator
+A separate process from the UI, run on a schedule (a CronJob), OFF unless the operator
 turns it on: it is the one Tockmox component that reaches the internet on its own, so it does so
 only to the hosts in WATCH_HOSTS, never follows a redirect, caps every answer, sends no
 identifiers, and carries a provider key only to that provider. Air-gapped sites leave it off.

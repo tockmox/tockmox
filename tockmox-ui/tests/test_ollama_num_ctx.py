@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-0958: every Ollama route the UI proposes carries params.num_ctx.
+"""Every Ollama route the UI proposes carries params.num_ctx.
 
-The chart (charts/tockmox-ai/templates/_inference-nodes.tpl, TM-0957) refuses an Ollama route with no
+The chart (charts/tockmox-ai/templates/_inference-nodes.tpl) refuses an Ollama route with no
 params.num_ctx, so a block the UI writes must already have one. Run from tockmox-ui/: python -m pytest tests
 """
 import html
@@ -107,7 +107,7 @@ def test_placing_a_model_on_an_ollama_endpoint_proposes_num_ctx(client):
     assert "num_ctx: 16384" in page
 
 
-# ---- TM-0980 (lab F-L1-11): the UI never writes a size its own parser refuses
+# ---- lab F-L1-11: the UI never writes a size its own parser refuses
 
 def test_a_model_an_engine_lists_at_a_few_bytes_still_makes_an_acceptable_draft():
     """The lab's stub Ollama listed a 123-byte model; the draft carried sizeGiB 0.0 and /nodes/change refused it

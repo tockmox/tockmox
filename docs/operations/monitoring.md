@@ -69,7 +69,7 @@ your ArgoCD, so it cannot fix that for you.
 
 So `apps.argocdMonitoring.enabled` gates the three ServiceMonitors, the board
 **and** the sync-state alert rules together. It follows the observability
-capability, so it is on by default (TM-0739; it was off until 0.7.1). An ArgoCD
+capability, so it is on by default (it was off until 0.7.1). An ArgoCD
 installed per [fresh-install § 6](../deployment/fresh-install.md#6-install-argocd)
 has its metrics on already. One you installed without them
 ([ArgoCD § its metrics are off until you turn them on](../administration/argocd.md#its-metrics-are-off-until-you-turn-them-on)
@@ -128,7 +128,7 @@ Jobs rather than the databases:
 | Alert | Fires when | Why it exists separately |
 |---|---|---|
 | `TockmoxRestoreDrillStale` | no PASS in 15 days | Two missed weekly cycles. One slot lost to a maintenance window stays silent; two never does |
-| `TockmoxRestoreDrillNeverRan` | no drill Job has ever completed, and the CronJob has passed a slot: scheduled over 26h ago, or its next scheduled time more than an hour gone | A freshness rule alone cannot see a drill that was never scheduled ... absence and health look identical from the metrics side. Keyed on the CronJob's own schedule, so a fresh install is silent until its first slot has come and gone (TM-0851; until 0.8.0 it fired for up to six days on every new install) |
+| `TockmoxRestoreDrillNeverRan` | no drill Job has ever completed, and the CronJob has passed a slot: scheduled over 26h ago, or its next scheduled time more than an hour gone | A freshness rule alone cannot see a drill that was never scheduled ... absence and health look identical from the metrics side. Keyed on the CronJob's own schedule, so a fresh install is silent until its first slot has come and gone (until 0.8.0 it fired for up to six days on every new install) |
 | `TockmoxRestoreDrillFailed` | the most recent drill ran and did not PASS | The other two see a drill that stopped or never started; neither sees one that ran and failed, and a failed drill that pages nobody is worse than no drill. Clears on the next PASS rather than when the failed Job is garbage-collected |
 
 All three are stated in `charts/tockmox-ai/values.yaml` beside the
@@ -178,7 +178,7 @@ once you give it URLs. It stays off until you do: an Apprise with no
 destinations accepts every alert, delivers none of them, and reports healthy
 while it does.
 
-**Until 0.8.0-rc2 the Apprise path never delivered** (TM-1020). The config was
+**Until 0.8.0-rc2 the Apprise path never delivered**. The config was
 mounted as `tockmox.txt`, and Apprise's simple mode reads only `.cfg` or `.yml`,
 so Apprise 1.5.4 answered every alert `204` and sent nothing while the bridge
 counted it delivered. The chart now mounts `tockmox.cfg` read-only, locks the
@@ -240,7 +240,7 @@ The chart therefore compares that literal against the Service it actually
 creates and **refuses to render** when they disagree, printing the corrected
 block. A deliberately invalid render beats a deliberately silent one.
 
-## Two Prometheus replicas and `ALERTS` (TM-0781)
+## Two Prometheus replicas and `ALERTS`
 
 Tockmox sets no `prometheusSpec.replicas`, so a default install runs **one**
 Prometheus (upstream's default) and nothing here applies. A site that raises it
@@ -304,9 +304,9 @@ both survive, and "deterministic" is not the same as "safe" for a gate.
 
 To check a live install, query the Service from one pod several times and
 compare, as in `tools/check-platform-seams.sh` S10 for the render and the lab
-steps in TM-0781 for the behaviour.
+steps for the behaviour.
 
-## Grafana on CloudNativePG, and more than one Grafana (TM-0786)
+## Grafana on CloudNativePG, and more than one Grafana
 
 **Optional, off by default, new in 0.8.0.** What you get: Grafana's own state
 (users, org membership, preferences, annotations, UI-made alert rules) in a

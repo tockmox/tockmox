@@ -215,7 +215,7 @@ class Prober:
             return Finding(port, None, url, reason=type(e).__name__)
 
     def read_builds(self, url: str, engine: str, token: str = "") -> "BuildReading":
-        """Which build of each model a committed endpoint holds (TM-0934). Same fences as probe(): raises
+        """Which build of each model a committed endpoint holds. Same fences as probe(): raises
         Refused when the address may not be probed, and otherwise returns a reading whose reason says why
         nothing could be read."""
         parts = urlsplit(url)
@@ -400,7 +400,7 @@ SIGNATURES = {"ollama": _sig_ollama, "lm-studio": _sig_lmstudio, "llama-server":
               "nim": _sig_nim, "tgi": _sig_tgi, "sglang": _sig_sglang, "vllm": _sig_vllm, "exo": _sig_exo}
 
 
-# ------------------------------------------------------------ which build a node holds (TM-0934)
+# ------------------------------------------------------------ which build a node holds
 # The catalog pins a build (an Ollama manifest digest, a Hugging Face commit); the node holds one. Reading
 # the node's side is a request to an address an admin committed, so it goes through the same fences as the
 # probe: the endpoint's host is resolved and checked by Prober.resolve, fixed GET paths, no redirects, the cap.

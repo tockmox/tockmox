@@ -223,7 +223,7 @@ values file points:
 | Secret | Namespace | Keys | Consumed by |
 |---|---|---|---|
 | `tockmox-grafana-admin` | `tockmox-monitoring` | `admin-user`, `admin-password` | Grafana local login (break-glass) |
-| `tockmox-openwebui-bootstrap-admin` | `tockmox-ai` | `WEBUI_ADMIN_EMAIL`, `WEBUI_ADMIN_PASSWORD`, `WEBUI_ADMIN_NAME` | Open WebUI's bootstrap administrator, created at startup only while it has no accounts, so the first SSO login cannot become the console's admin (TM-0859). Optional; `mint-secrets.sh` mints it with an address under `.invalid` that no Authentik user can hold. The console's break-glass login: read the password with `kubectl -n tockmox-ai get secret tockmox-openwebui-bootstrap-admin -o jsonpath='{.data.WEBUI_ADMIN_PASSWORD}'` and decode it |
+| `tockmox-openwebui-bootstrap-admin` | `tockmox-ai` | `WEBUI_ADMIN_EMAIL`, `WEBUI_ADMIN_PASSWORD`, `WEBUI_ADMIN_NAME` | Open WebUI's bootstrap administrator, created at startup only while it has no accounts, so the first SSO login cannot become the console's admin. Optional; `mint-secrets.sh` mints it with an address under `.invalid` that no Authentik user can hold. The console's break-glass login: read the password with `kubectl -n tockmox-ai get secret tockmox-openwebui-bootstrap-admin -o jsonpath='{.data.WEBUI_ADMIN_PASSWORD}'` and decode it |
 | `tockmox-authentik` | `tockmox-authentik` | `AUTHENTIK_SECRET_KEY`, `AUTHENTIK_POSTGRESQL__PASSWORD` | Authentik server + worker |
 | `tockmox-authentik-postgres` | `tockmox-authentik` | `password`, `postgres-password` | Authentik's bundled PostgreSQL. `password` must EQUAL `AUTHENTIK_POSTGRESQL__PASSWORD` above ... the database and the server must agree |
 | `tockmox-sso` | `tockmox-authentik` | `GRAFANA_CLIENT_SECRET`, `OPENWEBUI_CLIENT_SECRET`, `ARGO_CLIENT_SECRET` | The shipped SSO blueprints (via `!Env`) |
@@ -453,7 +453,7 @@ minted after the first sync, and until it exists the console alone stays in
 secret "tockmox-openwebui-gateway" not found
 ```
 
-**Since 0.8.0 the chart does the minting** (TM-0460 ruling B1). The AI layer
+**Since 0.8.0 the chart does the minting** (ruling B1). The AI layer
 renders a Job, `<release>-gateway-key-<hash>`, that waits for the gateway's
 readiness endpoint, calls `POST /key/generate` with the master key, and creates
 the Secret. It holds the master key for that one request. Its Role is `get`

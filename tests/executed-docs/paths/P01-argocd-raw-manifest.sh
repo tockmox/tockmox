@@ -10,7 +10,7 @@
 # a stranger picks, because it is listed first." At v0.6.0-rc1 the raw-manifest
 # route WAS listed first in prerequisites.md § "2. ArgoCD, 2.6 or newer", with
 # Helm introduced as "Or with Helm". The Helm route was exercised by use; this
-# one was not, and it cannot succeed (TM-0288).
+# one was not, and it cannot succeed.
 #
 # WHAT CHANGED, and why this path is now usually an exception. On 2026-09-01
 # (f2dd829) prerequisites.md was restructured into a signpost and carries zero
@@ -20,7 +20,7 @@
 # client-side command's FAILURE OUTPUT in a plain fence while publishing only
 # the server-side recovery as a runnable block. So at main there is no
 # documented client-side install command to extract, and the honest result is
-# an exception rather than a failure. See TM-0422.
+# an exception rather than a failure.
 #
 # This path is still worth keeping, for two reasons. It runs against any ref
 # where the route WAS documented (`TOCKMOX_DOCS_REF=24e3a9b` is the last one),
@@ -36,7 +36,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "${HERE}/../lib/assert.sh"
-# TM-0797: every kubectl and helm call below names its cluster with --context or
+# every kubectl and helm call below names its cluster with --context or
 # --kube-context from this variable, and an empty value is refused rather than
 # falling back to the current context (docs/deployment/fresh-install.md, "Name
 # the cluster"). run.sh exports it; a standalone run must export it itself.
@@ -74,7 +74,7 @@ if ! INSTALL_CMD="$("$EXTRACT" --ref "$REF" --page "$PAGE" --section "$SECTION" 
   _emit "           Or point it at another location with TOCKMOX_P01_PAGE and"
   _emit "           TOCKMOX_P01_SECTION."
   _emit ""
-  # Absence here is a RECORDED DECISION, not drift. INVENTORY.md (A1a, TM-0422,
+  # Absence here is a RECORDED DECISION, not drift. INVENTORY.md (A1a,
   # 2026-09-04) states that argocd.md documents Helm as the only route and shows
   # the client-side command solely as failure output, never as a runnable block,
   # so a skip at main is a fact about the docs rather than a coverage gap. The
@@ -82,7 +82,7 @@ if ! INSTALL_CMD="$("$EXTRACT" --ref "$REF" --page "$PAGE" --section "$SECTION" 
   # half-applied precondition. Without this call the runner would report P01 as
   # an UNDECLARED absence and tell a reader to re-point or retire it, which
   # would be a false accusation against a settled decision.
-  declare_absence "by design at main (INVENTORY.md A1a, TM-0422); exercise at ref 24e3a9b"
+  declare_absence "by design at main (INVENTORY.md A1a); exercise at ref 24e3a9b"
   exit 3
 fi
 INSTALL_SHA="$("$EXTRACT" --ref "$REF" --page "$PAGE" --section "$SECTION" --lang bash --containing 'kubectl apply -n argocd' --sha)"

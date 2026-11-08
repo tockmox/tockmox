@@ -306,7 +306,7 @@ being ignored. Run the whole suite, not the subset you reasoned was affected.
 
 This file, README.md, RELEASING.md, CONTRIBUTING.md and CHANGELOG.md are read by
 peers and strangers, so write them the way peer projects do: short and specific.
-These limits are reviewed against the peer benchmark recorded in TM-0802.
+These limits are reviewed against the recorded peer benchmark.
 
 - State the rule or the change, then stop. The reasoning goes in a linked page
   under `docs/` or a code comment, only where a reader needs it.

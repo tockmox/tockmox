@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""What the UI says about its own failures: a log line and a counter for each (TM-1013).
+"""What the UI says about its own failures: a log line and a counter for each.
 
 Until 0.8.0-rc1 every caught failure on the sign-in path rendered a friendly page and said
 nothing else: on the homelab (2026-10-11) /login answered 503 "The identity provider did not

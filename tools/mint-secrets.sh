@@ -28,7 +28,7 @@
 # of a pair, this script tells you which other file has to go with it, because
 # rotating one side alone is the failure it exists to prevent.
 #
-# TM-0277. Three properties this header PROMISED and the body did not keep, and
+# Three properties this header PROMISED and the body did not keep, and
 # one it did not promise at all:
 #   - The sentence above about pairs was aspirational. Nothing checked it: with
 #     one half of a pair on disk, the other half was minted from a FRESH value
@@ -64,7 +64,7 @@ CERT=""; CONTEXT=""; DRY=false; WITH_LITELLM=true; WITH_APPRISE=false; WITH_UI=f
 # is wrong for every install this repository documents: fresh-install.md #7
 # names the Helm release `sealed-secrets`, and the chart names the Service after
 # the release. Left at kubeseal's default, every seal below fails with
-# `services "sealed-secrets-controller" not found`. TM-0346.
+# `services "sealed-secrets-controller" not found`.
 #
 # These are OPTIONS rather than literals in seal() on purpose. Hardcoding the
 # name our own install happens to produce would make this script work by
@@ -78,7 +78,7 @@ NTFY_PASSWORD=""; NTFY_PASSWORD_FILE=""; NO_NEXT=false; NO_PROMPT=false
 # A secret value containing a control character is never correct, and every
 # stage after generation is capable of noticing one and none of them do: it
 # seals cleanly, commits cleanly, applies cleanly, and fails inside whatever
-# consumes it. TM-0662: `openssl rand -base64 60` wraps at 64 columns, the
+# consumes it. For example, `openssl rand -base64 60` wraps at 64 columns, the
 # newline rode all the way into `AUTHENTIK_SECRET_KEY`, and authentik's embedded
 # outpost ... which authenticates with that key, and cannot put a control
 # character in an HTTP header ... failed every five seconds for thirteen hours
@@ -88,7 +88,7 @@ NTFY_PASSWORD=""; NTFY_PASSWORD_FILE=""; NO_NEXT=false; NO_PROMPT=false
 # catches none of them.
 #
 # NOT `grep '[[:cntrl:]]'`. grep is line-oriented, so a newline is a record
-# separator and never a match ... the exact character that caused TM-0662 is the
+# separator and never a match ... the exact character that caused that failure is the
 # one a grep-based check cannot see. Length before and after `tr -d` can.
 assert_no_control_chars() {
   local key="$1" value="$2" stripped
@@ -177,7 +177,7 @@ usage: tools/mint-secrets.sh [options]
                      bootstrap-secrets prints its own, and its backup advice
                      differs from the plaintext one printed here)
   --with-litellm     mint the model gateway's key and database credential.
-                     THE DEFAULT since 0.8.0 (TM-0460): the gateway follows the
+                     THE DEFAULT since 0.8.0: the gateway follows the
                      aiPlane capability, so a site that never mentions it runs
                      it. Kept as a flag so older runbooks still work.
   --without-litellm  do not mint them: for a site that set
@@ -272,7 +272,7 @@ if [ -n "$NTFY_PASSWORD_FILE" ]; then
   IFS= read -r NTFY_PASSWORD < "$NTFY_PASSWORD_FILE" || true
 fi
 
-# TM-0631. ntfy stores a bcrypt hash of this password, and bcrypt cannot hash
+# ntfy stores a bcrypt hash of this password, and bcrypt cannot hash
 # more than 72 BYTES: ntfy 2.28.0 answers a longer one with "failed to hash
 # password: bcrypt: password length exceeds 72 bytes" (measured 2026-10-06).
 # Until this check, that surfaced after every other secret was generated, as
@@ -372,7 +372,7 @@ fi
 
 # The --cert branch never contacts a controller, so the --controller-* flags are
 # meaningless there and are deliberately not passed: the certificate IS the
-# target. The live branch needs them, per TM-0346.
+# target. The live branch needs them.
 seal() {
   if [ -n "$CERT" ]; then kubeseal --format yaml --cert "$CERT"
   else kubeseal --format yaml \
@@ -498,7 +498,7 @@ mk grafana-admin.sealed.yaml tockmox-monitoring tockmox-grafana-admin \
   --from-literal=admin-password="$(openssl rand -base64 24)"
 fi
 
-# The console's bootstrap administrator (TM-0859). Open WebUI creates it at
+# The console's bootstrap administrator. Open WebUI creates it at
 # startup only when it has no accounts, which closes the window in which the
 # first SSO login, whatever its groups, becomes the console's admin. The address
 # is under `.invalid` (RFC 2606), so no Authentik user can hold it and no SSO
@@ -556,7 +556,7 @@ fi
 # bcrypt hash and a token in its own tk_ format, and both come from the ntfy
 # binary, which means a container runtime.
 # --------------------------------------------------------------------------
-# SELECT BY PROVING THE DAEMON ANSWERS, NOT BY `command -v` (TM-0485).
+# SELECT BY PROVING THE DAEMON ANSWERS, NOT BY `command -v`.
 # `command -v docker` answers "is the CLI on PATH", which is a different question
 # from "is a runtime serving". A Mac with Colima installed and stopped has the
 # docker CLI and no daemon: the old loop picked docker, broke out, and never
@@ -646,7 +646,7 @@ elif [ -e "$OUT/ntfy-auth.sealed.yaml" ]; then
 elif [ -z "$NTFY_VIA" ]; then
   NOTMADE="${NOTMADE}tockmox-ntfy-auth ... no container runtime ANSWERED (docker, podman and nerdctl were each either absent or present-but-not-serving ... any 'daemon does not answer' note above says which), and --cert mode without --context has no cluster to borrow one from. If one of them is installed, start it and re-run; this is not the same as not having it. The bcrypt hash and tk_ token can only come from the ntfy binary; docs/administration/secrets.md has the manual block. UNTIL IT EXISTS NO ALERT REACHES ANYBODY: ntfy defaults to deny-all.\n"
 else
-  # READ IT TWICE (TM-0485). This value is typed once here, silently, and then
+  # READ IT TWICE. This value is typed once here, silently, and then
   # typed again days later into a phone. Nothing verifies it in between: the
   # bcrypt hash is computed from whatever was entered, sealed, committed and
   # applied, so a typo produces a perfectly healthy ntfy that refuses the one
@@ -734,7 +734,7 @@ else
 fi
 
 # --------------------------------------------------------------------------
-# The model gateway's two Secrets. Minted by default since 0.8.0 (TM-0460):
+# The model gateway's two Secrets. Minted by default since 0.8.0:
 # the gateway follows the aiPlane capability, and a site that never mentions
 # it runs it. --without-litellm is for a site that turned it off.
 # --------------------------------------------------------------------------

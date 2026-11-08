@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Every kubectl and helm call the executed-docs harness makes must name its
-# cluster. TM-0797.
+# cluster.
 #
 #   ./tools/check-harness-context.sh              scan the harness
 #   ./tools/check-harness-context.sh --selftest   prove the scan goes red
@@ -18,7 +18,7 @@
 #
 # WHAT IT ASSERTS, on the files under tests/executed-docs/ (shell scripts),
 # .github/workflows/executed-docs.yaml, which drives them, and tools/publish-docs.sh
-# (TM-0807, which creates and deletes a pod in an operator's cluster):
+# (which creates and deletes a pod in an operator's cluster):
 #
 #   1. Every kubectl or helm invocation in command position carries
 #      --context / --kube-context in the same command.
@@ -88,7 +88,7 @@ wf = os.path.join(root, ".github/workflows/executed-docs.yaml")
 if os.path.exists(wf):
     targets.append(wf)
 # Shipped scripts that an operator runs against their own cluster follow the same
-# rule (TM-0807): tools/publish-docs.sh creates and deletes a pod.
+# rule: tools/publish-docs.sh creates and deletes a pod.
 for extra in ("tools/publish-docs.sh",):
     if os.path.exists(os.path.join(root, extra)):
         targets.append(os.path.join(root, extra))

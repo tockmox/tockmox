@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # THE OBSERVABILITY-OFF PROFILE ... decline metrics, logs and alert rules, all
-# the way down (TM-0825).
+# the way down.
 #
 # Pass it to the platform and identity layers, after your global values and
 # before your per-layer overrides, the same way minimal.yaml is passed

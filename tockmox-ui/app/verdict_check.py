@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The CI half of the promotion gate (REQ-0048 AC-48.6, TM-0930).
+"""The CI half of the promotion gate (REQ-0048 AC-48.6).
 
 check_promotions() in app/models.py checks the RECORD: enough passing runs, each with a path and a sha256.
 It cannot open the files, so a hand-written record with an invented hash would pass it. This opens them:

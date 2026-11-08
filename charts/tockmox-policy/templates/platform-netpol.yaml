@@ -17,7 +17,7 @@ error naming neither this file nor the missing value.
 {{- $pn := .Values.platformNetpol | default dict -}}
 {{- $sources := $pn.nodeOriginSources | default list -}}
 {{- /*
-TM-0798, ruled 2026-09-29: 0.7.x kept the wide clusterCIDR rule when this list
+ruled 2026-09-29: 0.7.x kept the wide clusterCIDR rule when this list
 was empty, documented as the insecure default, while the reference site ran
 with the list set for a release. 0.8.0 refuses instead. The wide rule admits
 every pod in the cluster to every platform pod on every port (measured
@@ -33,7 +33,7 @@ default that has to be documented as insecure is not a default worth shipping.
 {{- end }}
 {{- end }}
 {{- /*
-TM-0790. The clusterCIDR ipBlock is not rendered (since 0.8.0 there is no
+The clusterCIDR ipBlock is not rendered (since 0.8.0 there is no
 mode that renders it), and that is the whole fix. It does nothing if global.lanCIDR is a
 supernet of the pod network: the lanCIDR ipBlock is rendered either way, so a
 lanCIDR of 10.0.0.0/8 still admits every address in 10.42.0.0/16 and the
@@ -42,7 +42,7 @@ Only a proven containment refuses: an unparseable or IPv6 value is not judged
 here (see tockmox.cidrContains).
 */ -}}
 {{- if and $sources (eq (include "tockmox.cidrContains" (dict "outer" $.Values.global.lanCIDR "inner" $.Values.global.clusterCIDR)) "true") }}
-{{- fail (printf "platformNetpol.nodeOriginSources is set, but global.lanCIDR (%s) contains global.clusterCIDR (%s). The lanCIDR ipBlock in allow-from-node-network is always rendered, so it re-admits every pod in the cluster and the narrowing you asked for does nothing. Set global.lanCIDR to the node/LAN range that does NOT include the pod network. (Leaving nodeOriginSources empty no longer renders the wide rule; since 0.8.0 it refuses, TM-0798.)" $.Values.global.lanCIDR $.Values.global.clusterCIDR) }}
+{{- fail (printf "platformNetpol.nodeOriginSources is set, but global.lanCIDR (%s) contains global.clusterCIDR (%s). The lanCIDR ipBlock in allow-from-node-network is always rendered, so it re-admits every pod in the cluster and the narrowing you asked for does nothing. Set global.lanCIDR to the node/LAN range that does NOT include the pod network. (Leaving nodeOriginSources empty no longer renders the wide rule; since 0.8.0 it refuses.)" $.Values.global.lanCIDR $.Values.global.clusterCIDR) }}
 {{- end }}
 ---
 # INGRESS-ONLY default-deny for the platform namespace.
@@ -131,7 +131,7 @@ spec:
 # the whole clusterCIDR to cover them also admits every real pod. Measured
 # 2026-09-29 (kube-router, chart 0.6.2-staged): a pod in namespace `default`
 # reached the object store's admin port 3903 (HTTP 200) and S3 port 3900 (403)
-# through this rule. TM-0273 fix 4.
+# through this rule.
 #
 # So the rule is lanCIDR + exactly the node gateway addresses listed in
 # platformNetpol.nodeOriginSources. The clusterCIDR is NOT admitted. Pods in
@@ -140,7 +140,7 @@ spec:
 #
 # Until 0.8.0 there was a second mode: an EMPTY list admitted lanCIDR plus the
 # whole clusterCIDR, kept so a 0.7.0 upgrade did not break a cluster nobody had
-# measured, and documented as the insecure default. It is gone (TM-0798); an
+# measured, and documented as the insecure default. It is gone; an
 # empty list now refuses to render, above.
 #
 # The clusterCIDR block used to carry two more legitimate paths, and both have
@@ -200,7 +200,7 @@ spec:
             matchLabels:
               app.kubernetes.io/name: prometheus
         {{- end }}
-      # THE METRICS PORTS THE SHIPPED MONITORS SCRAPE, and only those (TM-0273
+      # THE METRICS PORTS THE SHIPPED MONITORS SCRAPE, and only those
       # fix 3). Before, this rule selected every platform pod with no `ports:`
       # key, so a compromised Prometheus reached every platform pod on every
       # port. The list is platformNetpol.scrapePorts, derived from the rendered
@@ -209,7 +209,7 @@ spec:
       # Traefik 9100). NetworkPolicy matches the CONTAINER port, after DNAT.
       # Until 0.8.0 this narrowed nothing on a site that left
       # nodeOriginSources empty, because the clusterCIDR block above admitted
-      # Prometheus's pod address on every port. That block is gone (TM-0798).
+      # Prometheus's pod address on every port. That block is gone.
       ports:
         {{- range ($pn.scrapePorts | default (list 9402 8080 9500 9120 9100)) }}
         - protocol: TCP
@@ -217,7 +217,7 @@ spec:
         {{- end }}
 {{- if include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "dataProtection") }}
 ---
-# BACKUP CLIENTS -> THE OBJECT STORE, S3 PORT ONLY (TM-0273 fix 4).
+# BACKUP CLIENTS -> THE OBJECT STORE, S3 PORT ONLY.
 #
 # The AI layer's CNPG barman plugin and the identity layer's nightly database
 # dump both write to the shipped Garage, and both were admitted to it, on every

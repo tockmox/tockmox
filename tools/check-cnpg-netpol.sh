@@ -10,7 +10,7 @@
 # the ghost-policy and empty-selector gates already refuse, one rung further in.
 # Those gates ask "does anything live where this policy points" and "can this
 # selector match at all". Neither asks the inverse: does a database that DID
-# render have a policy pointing AT it. Found by inspection 2026-09-06 (TM-0224):
+# render have a policy pointing AT it. Found by inspection 2026-09-06:
 # ci/values.yaml turns apps.litellm on (so the model gateway's CNPG Cluster
 # renders) without apps.ai_cnpg_netpol (its ingress policy), so the CI render
 # shipped an unprotected database. The two flags are meant to be turned on

@@ -30,7 +30,7 @@
 #      of the three. Cheap, and it stops a new key from arriving untiered and
 #      inheriting whatever a reader assumes.
 #
-#   1b. RULINGS (TM-0909). Every key that is NOT `stable` also carries
+#   1b. RULINGS. Every key that is NOT `stable` also carries
 #      `x-tockmox-stability-ruled` (the date its tier was last decided, as
 #      YYYY-MM-DD) and `x-tockmox-stability-rerule` (the release by which it is
 #      decided again, as X.Y or X.Y.Z). A `provisional` tier with no ruling is a
@@ -50,7 +50,7 @@
 #      already says breaking changes appear at the top of their release with the
 #      action required. This gate makes the file keep its word.
 #
-#      "Top-most" and not "[Unreleased]" by name, deliberately (TM-0410). The
+#      "Top-most" and not "[Unreleased]" by name, deliberately. The
 #      section this gate wants is the one describing changes not yet in the
 #      baseline. Before a release that heading reads `[Unreleased]`; during one,
 #      the release procedure renames it to the version about to ship, and a gate
@@ -173,7 +173,7 @@ version_gt() {
 # check_coverage DIR [CHANGELOG]
 #
 # DIR holds charts/<layer>/values.schema.json. Returns non-zero if any
-# Tockmox key has no tier, or a tier outside the three, or (TM-0909) is not
+# Tockmox key has no tier, or a tier outside the three, or is not
 # `stable` and lacks a dated ruling and a re-rule release. CHANGELOG defaults to
 # DIR/CHANGELOG.md and supplies the release a re-rule must still be ahead of;
 # with no version heading in it, the overdue check has nothing to compare and
@@ -388,7 +388,7 @@ JSON
   printf '## [Unreleased]\n\n**Breaking: `namespaces` is renamed.** Action required: rename it.\n\n## [0.1.0]\n' > "$tmp/CHANGELOG.signalled.md"
   printf '## [Unreleased]\n\nAdds a field under `namespaces`, which is not a breaking change.\n\n## [0.1.0]\n' > "$tmp/CHANGELOG.mention.md"
 
-  # THE FIXTURES THAT WOULD HAVE CAUGHT TM-0410. The release procedure renames
+  # THE FIXTURES THAT WOULD HAVE CAUGHT THE ORIGINAL BUG. The release procedure renames
   # `[Unreleased]` to the version about to ship, so the announcement must be
   # found under a version-named heading too ... and ONLY under the top-most one.
   # An announcement in an older section is history, not a signal for this
@@ -437,7 +437,7 @@ JSON
   probe "a directory with no schemas is refused, not reported clean" fail \
         check_coverage "$tmp/empty"
 
-  # TM-0909: a non-stable key carries a dated ruling and a re-rule release.
+  # a non-stable key carries a dated ruling and a re-rule release.
   # One fixture per way of not having one, including the placeholder the
   # rulings arrive with, which must never pass for a ruling.
   ruling_fixture() { # ruling_fixture NAME TIER RULED RERULE  ("" omits the field)

@@ -230,7 +230,7 @@ databaseBackup:
   # failure surfaces in a log nobody reads rather than at install. Re-check
   # this line against the rendered StatefulSet on every authentik bump ...
   # tools/check-identity-seams.sh S10 now fails the build when the two majors
-  # differ (TM-1023), and `grep -c postgres: images.txt` reads 1 when they agree.
+  # differ, and `grep -c postgres: images.txt` reads 1 when they agree.
   postgresImage: docker.io/library/postgres:17.11-bookworm
   uploaderImage: alpine/k8s:1.37.1
 
@@ -240,7 +240,7 @@ sso:
   # the same defaults in their role mappings).
   adminGroup: tockmox-admins
   userGroup: tockmox-users
-  # Usernames to ADD to the admin group (TM-0820). Default empty renders nothing.
+  # Usernames to ADD to the admin group. Default empty renders nothing.
   # Non-empty renders one Argo PostSync Job that runs inside the Authentik server
   # image and, for each name, adds the user to the admin group: it never removes
   # a member, reports a name that does not exist yet as `not-found` in the Job
@@ -295,7 +295,7 @@ sso:
   # (`ingress.apps.openWebui.host` in the AI layer, and so on): the layers
   # cannot read each other's values, so a site that moves Open WebUI to
   # `llm.<domain>` states it twice, and a mismatch is a redirect_uri error at
-  # login (TM-0820).
+  # login.
   #
   # `subMode` is how Authentik derives the OIDC `sub` claim. Empty renders
   # nothing, and Authentik's own default (`hashed_user_id`) applies. A site
@@ -401,7 +401,7 @@ authentik:
   blueprints:
     configMaps:
       - tockmox-sso-blueprints
-  # No outbound version or usage calls (TM-0671): authentik checks for new
+  # No outbound version or usage calls: authentik checks for new
   # versions and sends startup analytics unless told not to. Sovereignty: no
   # unrequested outbound calls. (error_reporting is already off upstream.)
   authentik:
@@ -409,7 +409,7 @@ authentik:
     disable_startup_analytics: true
   server:
     resources:
-      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # measured on the prod install 2026-10-05 (accepted for the lab):
       # peak 859.7 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 870.0 MiB in the pre-migration namespace (30 days); average 769.8 MiB.
       # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
       # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -419,7 +419,7 @@ authentik:
         memory: 1408Mi
     ingress:
       enabled: false        # Tockmox renders its own; see ingress above
-    # ITS OWN SERVICEACCOUNT, NO TOKEN (TM-0759, found on the 0.7.1-rc2 gate).
+    # ITS OWN SERVICEACCOUNT, NO TOKEN (found on the 0.7.1-rc2 gate).
     # The server serves HTTP and never calls the Kubernetes API; the worker holds
     # the outpost RBAC (ServiceAccount `authentik`). Upstream leaves the server on
     # the namespace's `default` account, and 0.7.1 turns that account's token off
@@ -432,7 +432,7 @@ authentik:
     # serviceAccountName is set, which it now is.
     serviceAccountName: tockmox-authentik-server
     automountServiceAccountToken: false
-    # POD SECURITY (TM-0635). Upstream ships both contexts empty, which left the
+    # POD SECURITY. Upstream ships both contexts empty, which left the
     # server and the worker failing four `restricted` fields each:
     # allowPrivilegeEscalation, capabilities.drop, runAsNonRoot and
     # seccompProfile. Set here, in the chart an adopter inherits, so that
@@ -477,7 +477,7 @@ authentik:
       existingSecret: tockmox-authentik-postgres
     primary:
       resources:
-        # TM-0903, measured on a 0.8.0 greenfield (household-sso profile), 2026-10-08:
+        # measured on a 0.8.0 greenfield (household-sso profile), 2026-10-08:
         # peak 129.7 MiB working set over ~1 h of the lab's sign-ins and probes.
         # limit = peak x 1.5, rounded up to a 32Mi step (224Mi). The request,
         # 128Mi, is the peak rounded down to a 32Mi step: no average was
@@ -495,7 +495,7 @@ authentik:
           memory: 512Mi
   worker:
     resources:
-      # TM-0595, measured on the prod install 2026-10-05 (accepted for the lab):
+      # measured on the prod install 2026-10-05 (accepted for the lab):
       # peak 482.3 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 475.8 MiB in the pre-migration namespace (30 days); average 423.7 MiB.
       # limit = max peak x 1.5, rounded up (32Mi steps to 512Mi, 128Mi above);
       # request = average, rounded up to 16Mi. Re-measure before changing.
@@ -503,7 +503,7 @@ authentik:
         memory: 432Mi
       limits:
         memory: 768Mi
-    # POD SECURITY (TM-0635): same contexts, same reasoning and same INFERRED
+    # POD SECURITY: same contexts, same reasoning and same INFERRED
     # caveat as the server block above.
     securityContext:
       runAsNonRoot: true
@@ -516,7 +516,7 @@ authentik:
       allowPrivilegeEscalation: false
       capabilities:
         drop: ["ALL"]
-    # RESTART ONTO A CHANGED BLUEPRINT (TM-1058). Authentik applies a mounted
+    # RESTART ONTO A CHANGED BLUEPRINT. Authentik applies a mounted
     # blueprint two ways: its startup discovery, and a file watcher that fires
     # when kubelet swaps the ConfigMap volume. The watcher is a single thread
     # and it can die without a trace: on the homelab both workers lost it to a
@@ -571,7 +571,7 @@ authentik:
               echo "the mounted blueprints changed since this worker started: restarting onto them"
               exit 1
             fi
-    # AN UPGRADE THAT ADDS A BLUEPRINT (TM-1060). The default RollingUpdate
+    # AN UPGRADE THAT ADDS A BLUEPRINT. The default RollingUpdate
     # starts the new worker while the old one is still running, and for that
     # window two workers share one task queue in the database. The new pod
     # queues its startup discovery, the OLD worker takes it, looks in an image

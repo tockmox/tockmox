@@ -3,13 +3,13 @@
 #
 # Assert, ON THE RENDERED ARTIFACT, that every container Tockmox ships under
 # the all-on overlay carries a memory limit, or is on the residue list with the
-# reason it does not (TM-0595).
+# reason it does not.
 #
 #   ./tools/check-memory-limits.sh              the gate
 #   ./tools/check-memory-limits.sh --selftest   prove it goes red, and green
 #
 # WHY. On 2026-09-13 a Grafana memory limit that was too low presented as a
-# 502 from the gateway (TM-0553), and the same investigation counted 15 of 64
+# 502 from the gateway, and the same investigation counted 15 of 64
 # running containers with any memory limit at all. A container with no limit
 # is not safe either: one leak takes the node's memory, and every pod on that
 # node pays for it. So the default is a limit sized from a measurement, and the
@@ -34,7 +34,7 @@
 # unlimited subchart container exhausts a node exactly as well as ours.
 #
 # WHAT IT DOES NOT PROVE. That a limit is RIGHT. A limit is a claim about a
-# peak, and only a live install under load can test that claim (TM-0553's
+# peak, and only a live install under load can test that claim (the
 # Grafana rule: below 80% of the limit after a session, zero restarts). It does
 # not see pods an operator creates with no custom resource in the render
 # (Longhorn's instance-managers, the restore drill's throwaway Cluster).
@@ -96,7 +96,7 @@ for f in sorted(glob.glob(d + '/*.yaml')):
             total += 1
             if not ((c.get('resources') or {}).get('limits') or {}).get('memory'):
                 # The LiteLLM migrations Job is named after its pod template
-                # (TM-0596), so its hash suffix is not a stable key here.
+                # (2026-10-06), so its hash suffix is not a stable key here.
                 name = re.sub(r'-litellm-migrations-[0-9a-f]{10}$', '-litellm-migrations-<hash>', o['metadata']['name'])
                 unlimited.add((layer, o['kind'], name, c['name']))
 for k in sorted(unlimited - set(res)):
@@ -135,7 +135,7 @@ PY
   local out; out=$(python3 "$tmp/scan.py" "$tmp/m" "$tmp/res.txt" 2>&1) && { echo "selftest FAIL  $1: scan stayed GREEN"; fail=1; return; }
   if grep -q "$4" <<<"$out"; then echo "selftest ok    $1: RED on '$4'"; else echo "selftest FAIL  $1: red, but not for the expected reason"; echo "$out" | grep error | head -3 || true; fail=1; fi
 }
-# A limited container loses its limit (the TM-0553 container itself).
+# A limited container loses its limit.
 mutate "grafana loses its memory limit" observability.yaml "re.sub(r'(\n +- name: grafana\n(?: {10,}.*\n)*? +limits:\n +memory: )1536Mi', r'\1null', s, 1)" "t-grafana container grafana has no memory limit"
 # A new subchart container arrives with no limit.
 mutate "a new unlimited container appears" ai.yaml "s + '---\napiVersion: apps/v1\nkind: Deployment\nmetadata: {name: t-new}\nspec:\n  template:\n    spec:\n      containers: [{name: c, image: x}]\n'" "t-new container c has no memory limit"
