@@ -216,6 +216,27 @@
       depNameTemplate: "code.forgejo.org/forgejo-helm/forgejo",
       datasourceTemplate: "docker",
     },
+    // THE alpine/k8s PINS NO OTHER MANAGER SEES. helm-values reads `image: alpine/k8s:X` keys, but two
+    // more spellings of the same image ship: the `default "alpine/k8s:X"` fallbacks in chart templates
+    // (used when a site empties the value) and the wait-for-db init container in tockmox-ai's values,
+    // which threads the registry through tpl. Unmatched, a batch moved the keys and left these behind,
+    // so images.txt carried two alpine/k8s tags and the air-gap counts went red (PR #187, 2026-11-07).
+    {
+      customType: "regex",
+      description: "alpine/k8s fallbacks in chart templates (default \"alpine/k8s:X\")",
+      managerFilePatterns: ["/^charts/[^/]+/templates/.+\\.(ya?ml|tpl)$/"],
+      matchStrings: ["default \"alpine/k8s:(?<currentValue>[0-9][^\"\\s]*)\""],
+      depNameTemplate: "alpine/k8s",
+      datasourceTemplate: "docker",
+    },
+    {
+      customType: "regex",
+      description: "alpine/k8s wait-for-db init container in tockmox-ai (registry threaded through tpl)",
+      managerFilePatterns: ["/^charts/tockmox-ai/values\\.yaml$/"],
+      matchStrings: ["\\{\\{ end \\}\\}alpine/k8s:(?<currentValue>[0-9][^'\"\\s]*)'"],
+      depNameTemplate: "alpine/k8s",
+      datasourceTemplate: "docker",
+    },
     {
       customType: "regex",
       description: "busybox wait-for-ca init container (registry threaded through tpl)",

@@ -691,8 +691,8 @@ modelGateway:
     # covers it, docs/operations/backup-restore.md section 6). The Cluster must
     # already back up through the barman-cloud plugin.
     openWebuiClusterName: ""
-    # The image the hook runs kubectl and jq from. Empty is alpine/k8s:1.37.1,
-    # the one the restore drill and the console-key Job already use.
+    # The image the hook runs kubectl and jq from. Empty is the chart's alpine/k8s
+    # default, the one the restore drill and the console-key Job already use.
     image: ""
 
 # ---------------------------------------------------------------------------
