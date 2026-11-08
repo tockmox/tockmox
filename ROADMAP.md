@@ -17,9 +17,9 @@ Priorities change. When an item changes direction or is dropped, this page says
 so with a date rather than quietly losing the entry.
 
 Reviewed at every release, and whenever anything on it stops being true.
-**Last reviewed: 2026-11-02**, at 0.8.3, a dependency patch: no item changes
+**Last reviewed: 2026-11-08**, at 0.8.4, a dependency patch: no item changes
 direction, and the image counts above still hold (44, one pinned by digest).
-At 0.8.2, a patch and the first cut by the patch train: no item changes
+At 0.8.3, a dependency patch: no item changes direction. At 0.8.2, a patch and the first cut by the patch train: no item changes
 direction; the upgrade was measured from 0.8.1 and,
 skipping a patch, from 0.8.0. At 0.8.1: the upgrade from 0.8.0 was measured end
 to end (data checksums, volumes and sealed secrets read before and after). At

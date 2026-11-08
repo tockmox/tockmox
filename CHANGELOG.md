@@ -7,6 +7,115 @@ Breaking changes come first in their release, in their own section, each with
 the action required beneath it. Entries are bullets: what changed and what it
 costs you, with the reasoning in the documentation rather than here.
 
+## [0.8.4] ... 2026-11-08
+
+A patch release of dependency updates for the monitoring stack, the
+notification server and the object store, with internal tracker references
+removed from the shipped files. To upgrade from 0.8.3, change the nine
+`targetRevision` pins to `v0.8.4` and push. Nothing else is required.
+
+### What taking this patch costs
+
+- **Hand actions:** none beyond the nine `targetRevision` pins.
+- **Rollback:** a revision swap for every layer, with three components whose
+  rollback was not measured. ntfy moves from v2.30.0 to v2.36.0: on the way it
+  migrates its message cache to a newer schema (v2.31.1) and, at v2.36.0, zeroes
+  the user table's daily-usage columns. Grafana moves from 13.2.4 to 13.3.0
+  and may migrate its own database on first start. Garage moves from v2.4.1 to
+  v2.5.0. None of the three was rolled back for this release. If their state
+  matters to you, take the pre-upgrade backup that
+  [upgrade.md](docs/deployment/upgrade.md) describes before you change the pins.
+- **Images:** eight references in `images.txt` move, listed under Component
+  versions; the count stays at 44, and the SBOM changes only in those versions
+  and the Tockmox version it names.
+- **Contract:** no `stable` values key moved, and no immutable field differs
+  between the 0.8.3 and 0.8.4 renders.
+- **Air-gap:** the static image-redirect check passed on 2026-11-07. An
+  air-gapped install was not exercised for this release.
+
+### Security
+
+- **ntfy v2.36.0** carries the security fixes of the ntfy releases since
+  v2.30.0: a build on Go 1.27.3 with the Go 1.27.2 security fixes, a
+  subscription limited to 150 topics with duplicates ignored, every
+  subscription of a user ended when their access to a topic is reset or the
+  user is deleted, and Matrix push gateway requests refused unless their push
+  key names a valid topic.
+
+### Component versions
+
+- kube-prometheus-stack chart 92.8.0 -> 92.17.0: Grafana 13.2.4 -> 13.3.0
+  (`docker.io/grafana/grafana`, distroless), Alertmanager v0.34.1 -> v0.34.2,
+  prometheus-operator v0.94.1 -> v0.94.2 and its config reloader v0.94.0 ->
+  v0.94.2 (still pinned by digest)
+- alloy chart 1.13.1 -> 1.15.0 (`docker.io/grafana/alloy` v1.20.1 -> v1.21.3)
+- loki chart 18.16.0 -> 18.17.1 (Loki itself stays 3.7.8)
+- prometheus-snmp-exporter chart 9.18.1 -> 9.19.0
+- prometheus-smartctl-exporter chart 0.17.1 -> 0.19.0
+- argo-workflows chart 2.0.14 -> 2.0.15 (Argo Workflows itself stays v4.1.6)
+- `binwiederhier/ntfy` v2.30.0 -> v2.36.0
+- `dxflrs/garage` v2.4.1 -> v2.5.0
+- `ghcr.io/jkroepke/access-log-exporter` 0.5.0 -> 0.5.1
+- Documentation build: mkdocs-material 9.7.7 -> 9.8.0, platformdirs 4.13.5 ->
+  4.14.2
+- Tockmox's own components (the Tockmox UI, the Security Posture Probe) did not
+  change.
+
+### Changed
+
+- The shipped files no longer carry the project's internal tracker
+  references. Comments in the chart templates, values files, tools and
+  documentation now say what they meant to say without pointing at a tracker
+  outside this repository. The CHANGELOG keeps its history as written, and
+  `tools/check-no-site-specifics.sh` refuses a new reference anywhere else.
+  What this changes in a rendered install is text only: the alert bridge's
+  embedded script (docstrings) and several dashboard panel descriptions. Two
+  hook Jobs, the gateway-key mint and the object-store credentials, take a new
+  name because their name hashes the template text, so each runs once more on
+  upgrade. Both re-run on the measured upgrade without a hand action (the
+  layers they belong to reached Healthy), and both completed on the fresh
+  install.
+
+### How this release was tested
+
+- **Upgrade from 0.8.3**, on a single-node k3s lab restored to the state
+  recorded at 0.8.3's release, with a 5,001-row checksum table in each of its
+  two CloudNativePG databases: the nine revision pins and nothing else. Every
+  Application was Synced and Healthy on the candidate within four minutes of
+  the pins merging, with no hand action. Both
+  checksums read byte-identical afterwards, every volume claim stayed bound to
+  the same volume, every sealed secret still decrypted and no volume shrank.
+  All eight moved images ran with no restarts. On the upgraded install, a test
+  alert went from Alertmanager v0.34.2 through the alert bridge to ntfy v2.36.0,
+  Grafana 13.3.0 reported its database healthy, and an on-demand database
+  backup completed to Garage v2.5.0.
+- **Fresh install** of the candidate, on the same lab holding only k3s, Argo CD
+  and Sealed Secrets: one `root.yaml` applied, every Application Synced and
+  Healthy within nine minutes with no hand action. On that install: continuous
+  archiving on both CloudNativePG clusters, an on-demand database backup, a
+  restore drill that restored the database from the object store into a scratch
+  cluster and found 99 tables, every identity blueprint applied, and a test
+  alert delivered to the ntfy server.
+- The static checks on the candidate, including the comparison of the 0.8.3 and
+  0.8.4 renders for immutable fields (193 objects, none flagged), the values
+  contract against 0.8.3 (62 stable keys, none moved), the alert-rule unit
+  tests, and the documented installation paths run against a live cluster.
+
+### Known issues
+
+- LiteLLM's database migration Job still logs a `Read-only file system` error
+  from `prisma generate` after the migrations have applied; the Job completes.
+
+### Not tested for this release
+
+- Upgrading from 0.8.0, 0.8.1 or 0.8.2 straight to 0.8.4.
+- A rollback from 0.8.4 to 0.8.3, including the ntfy, Grafana and Garage
+  rollbacks named above.
+- An air-gapped install.
+- An alert reaching a phone: the test alerts were read on the ntfy server, not
+  on a subscribed client.
+- Anything multi-node: the lab is a single node.
+
 ## [0.8.3] ... 2026-11-02
 
 A patch release of dependency updates, carried for the cert-manager security
@@ -370,6 +479,7 @@ on what hardware, and what has not: [project-status.md](docs/project-status.md).
   by default.
 
 [Unreleased]: https://github.com/tockmox/tockmox/compare/v0.8.2...main
+[0.8.4]: https://github.com/tockmox/tockmox/releases/tag/v0.8.4
 [0.8.3]: https://github.com/tockmox/tockmox/releases/tag/v0.8.3
 [0.8.2]: https://github.com/tockmox/tockmox/releases/tag/v0.8.2
 [0.8.1]: https://github.com/tockmox/tockmox/releases/tag/v0.8.1
