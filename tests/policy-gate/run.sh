@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# THE POLICY GATE, AGAINST A REAL PROXY, WITH THE LOCAL BACKEND KILLED (TM-0383).
+# THE POLICY GATE, AGAINST A REAL PROXY, WITH THE LOCAL BACKEND KILLED.
 #
 # REQ-0002 AC-2.2 is the claim that a restricted request never reaches an
 # external endpoint, and the case that matters is the one where the local

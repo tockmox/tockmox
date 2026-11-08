@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# THE POLICY GATE'S CONFIG INVARIANT, ON THE RENDER (TM-0383; REQ-0003 AC-3.2).
+# THE POLICY GATE'S CONFIG INVARIANT, ON THE RENDER (REQ-0003 AC-3.2).
 #
 # The gate is a generic engine and every decision it makes comes from config:
 # the model list's tags and endpoint tiers, and the policy rendered from

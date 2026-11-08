@@ -419,7 +419,7 @@ The response, schema `tockmox-status/1`:
 | `nodes` | array or `null` | Kubernetes nodes, each `{name, ready, version}` |
 | `alerts` | array or `null` | the alerts firing in Alertmanager, heartbeat included, each `{name, severity, namespace, summary, startsAt}`; an empty list without the heartbeat makes `sources.alertmanager` `unknown` |
 | `inferenceNodes` | array or `null` | with `inferenceNodes.nodes` set, each node's `{id, state, reason, checks: [{what, state, reason}], memory}` as the nodes page reads them from Prometheus; `null` when none is configured |
-| `capabilities` | array | added in 0.8.0-rc2 (TM-1017): each capability's `{key, configured, deployed, agree, evidence}` as the [capabilities page](#the-capabilities-page) shows it; `configured` is `on`, `off` or `null`, `deployed` is `on`, `off` or `unknown` |
+| `capabilities` | array | added in 0.8.0-rc2: each capability's `{key, configured, deployed, agree, evidence}` as the [capabilities page](#the-capabilities-page) shows it; `configured` is `on`, `off` or `null`, `deployed` is `on`, `off` or `unknown` |
 
 Every `state` is one of `ok`, `warning`, `critical`, `unknown`. A healthy
 single-node install answers, cut down:

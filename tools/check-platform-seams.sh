@@ -3,42 +3,42 @@
 #
 # Assert, ON THE RENDERED ARTIFACT, the site-facing seams added for 0.7.1 that
 # no other gate covers. Each one was a gap a site worked around in its own
-# values or manifests (TM-0820), and each renders cleanly when it is wrong.
+# values or manifests, and each renders cleanly when it is wrong.
 #
 #   ./tools/check-platform-seams.sh             run the assertions
 #   ./tools/check-platform-seams.sh --selftest  prove each can go red
 #
 # S1  global.namespaceLabels lands on EVERY Namespace the policy and platform
-#     layers create, and a label the chart owns is refused (TM-0816).
+#     layers create, and a label the chart owns is refused.
 # S2  garage.credentialsNamespaceLabels lands on that one namespace only,
-#     including pod-security.kubernetes.io/* (TM-0815).
+#     including pod-security.kubernetes.io/*.
 # S3  The consoles Probe follows ingress.apps.<app>.host, and still derives
-#     <svc>.<domain> when unset (TM-0820, last row).
+#     <svc>.<domain> when unset (last row).
 # S4  Every chart dashboard ConfigMap key is prefixed `tockmox-`.
 # S5  The CNPG operator PodMonitor renders by default.
 # S6  apps.etcdScrapeConfig renders a ScrapeConfig job kube-etcd with the listed
 #     targets, and refuses an empty list.
 # S7  platformNetpol.extraPrometheusNamespaces adds a peer to the devops and
-#     platform scrape rules (TM-0820, inventory-devops 4.10 item 4).
-# S8  The shipped Longhorn StorageClass reclaims with Retain (TM-0789).
+#     platform scrape rules (inventory-devops 4.10 item 4).
+# S8  The shipped Longhorn StorageClass reclaims with Retain.
 # S9  platformNetpol.extraMonitoringClientNamespaces renders allow-from-site-clients
 #     in the monitoring namespace (observability-cutover A1).
 # S10 kube-prometheus-stack.prometheus.service.sessionAffinity=ClientIP renders on
 #     the Prometheus Service (the one that selects the Prometheus pods) with its
 #     timeout, beside prometheusSpec.replicas 2; and the DEFAULT render keeps one
-#     replica and no affinity, so the knob stays opt-in (TM-0781).
+#     replica and no affinity, so the knob stays opt-in.
 #
 # S11 The default Prometheus image is v3.15.0 or newer, not the subchart's
-#     v3.14.0 (TM-0820 A5; default change).
+#     v3.14.0 (default change).
 # S12 The consoles Probe uses a module that accepts 401 (and 200/301/302), and
-#     http_2xx is NOT widened for everyone (TM-0820 A6; default change).
+#     http_2xx is NOT widened for everyone (default change).
 # S13 devops renders the argo-workflows CRDs inline and no crd-install hook Job
-#     that downloads them (crds.full false, TM-0820; default change).
+#     that downloads them (crds.full false; default change).
 # S14 The workflow controller ServiceMonitor renders honorLabels: true
-#     (TM-0820; default change).
+#     (default change).
 # S15 The workflow controller and server both set the infrastructure
 #     PriorityClass, and tockmox-policy renders a PriorityClass of that name
-#     (TM-0820; default change).
+#     (default change).
 #
 # `--selftest` feeds each assertion the render it must refuse (the same chart
 # with the seam left unset, or the value reverted) and requires a non-zero
@@ -136,7 +136,7 @@ shared = set(mods.get("http_2xx", {}).get("http", {}).get("valid_status_codes") 
 sys.exit(0 if {200, 301, 302, 401} <= codes and 401 not in shared and m["http"].get("follow_redirects") is True else 1)
 PY
 }
-# S16 (TM-0905): Authentik's console is probed at its readiness endpoint, not at
+# S16: Authentik's console is probed at its readiness endpoint, not at
 # `/`, which redirects into whatever onboarding flow it is in (on the lab,
 # `/setup`, answering 500). Every other console target keeps no path.
 s16() { python3 - "$1" <<'PY'
@@ -155,8 +155,8 @@ PY
 # gateway's switch as every layer sees it. Through 0.7.x the AI layer shipped
 # `apps.litellm.enabled: false`, a default this layer could not see, so the
 # probe fell back to the aiPlane capability and paged TockmoxConsoleUnreachable
-# for llm.<domain> on every install that never deployed LiteLLM (TM-0910).
-# Since 0.8.0 the gateway follows the capability (TM-0460), so the smallest
+# for llm.<domain> on every install that never deployed LiteLLM.
+# Since 0.8.0 the gateway follows the capability, so the smallest
 # real site, which never mentions LiteLLM, IS probed; and a site that turns the
 # gateway off in a values file this layer reads is NOT. Both halves, because
 # either one alone holds on a probe that ignores the switch.

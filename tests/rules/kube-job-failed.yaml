@@ -1,4 +1,4 @@
-# KubeJobFailed, re-shipped with the console-key check's Jobs left out ... TM-0982
+# KubeJobFailed, re-shipped with the console-key check's Jobs left out
 # (lab L6 F-L6-2).
 #
 # DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.

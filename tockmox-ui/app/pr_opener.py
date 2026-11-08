@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The model watcher's PR opener (REQ-0048 third ruling, TM-0930). Turns what the watcher found, and what the eval
+"""The model watcher's PR opener (REQ-0048 third ruling). Turns what the watcher found, and what the eval
 runner has recorded, into pull requests on the site repo. Each PR is one of the two approvals, and still waits for
 a person to merge it:
 
@@ -75,7 +75,7 @@ BRANCH_SLUG_MAX = 40
 def branch_slug(s: str) -> str:
     """The branch-name part for a model id or alias. Short ones read as before; a long one is cut and given a
     hash of the WHOLE id, so two ids that agree in their first 40 characters never share a branch (a shared
-    branch reads as "a PR for it is already open", and the second candidate would never be offered; TM-0939)."""
+    branch reads as "a PR for it is already open", and the second candidate would never be offered)."""
     import hashlib
     full = re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-") or "model"
     if len(full) <= BRANCH_SLUG_MAX:

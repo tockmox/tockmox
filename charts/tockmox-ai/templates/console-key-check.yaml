@@ -1,10 +1,10 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-THE CONSOLE-KEY CHECK (TM-0982): a detective control for the key the Job in
+THE CONSOLE-KEY CHECK: a detective control for the key the Job in
 gateway-key.yaml minted.
 
-WHY. The console-key Job repairs a rejected key at sync time only (TM-0977).
+WHY. The console-key Job repairs a rejected key at sync time only.
 Between syncs nothing notices: the llm uptime probe carries no key, so it
 stayed green through the whole of the 0.8.0 upgrade lab's off-then-on cycle
 while the console could not chat, and every layer read Healthy. This CronJob
@@ -184,7 +184,7 @@ spec:
                   # refused for about its first second or two, until the policy
                   # controller has programmed it (the lab measured curl rc 7 in
                   # 1 ms as the container's first instruction), so a single
-                  # shot here lost most of its slots (TM-0982, lab L5). Ten
+                  # shot here lost most of its slots (lab L5). Ten
                   # attempts two seconds apart: a refused connect costs
                   # nothing, so the policy window is crossed in the first few;
                   # a gateway that is truly down ends in about 20 s; the worst

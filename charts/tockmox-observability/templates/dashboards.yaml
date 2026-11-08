@@ -39,7 +39,7 @@
 #
 # Rather than weaken the rule, the board moves behind the SAME key as its
 # ServiceMonitors (apps.argocdMonitoring, see argocd-monitoring.yaml), so the
-# scrape and the board arrive together. Since 0.7.1 (TM-0739) that key follows
+# scrape and the board arrive together. Since 0.7.1 that key follows
 # capabilities.observability instead of defaulting off, which relaxes the rule
 # for one case: an ArgoCD installed WITHOUT metrics gets the board and an empty
 # scrape. The documented install turns the metrics on; set the key false to drop

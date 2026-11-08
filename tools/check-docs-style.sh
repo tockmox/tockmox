@@ -5,8 +5,8 @@
 # this repository: no emoji that carries meaning on its own, the fixed form
 # and cap of the Maintainer's-note heading, and no first person outside those
 # two note zones (three rule blocks below; the third was added 2026-09-04,
-# TM-0401), and no correction history inside a how-to page's procedure (the
-# fourth, added 2026-09-14, TM-0590).
+# ), and no correction history inside a how-to page's procedure (the
+# fourth, added 2026-09-14).
 #
 # NOT ENFORCED, deliberately: em-dashes. They were gated here until 2026-08-18,
 # when the rule was relaxed for public-repo docs surfaces to normal editorial
@@ -248,7 +248,7 @@ def maintainer_note_violations(files):
 # reasonable exception at a time" (brand/voice-ruling-oss-surfaces-2026-08-14,
 # risk register). Until 2026-09-04 a paragraph written in "I" anywhere in the
 # reference docs passed CI, so the ruling's property ... first person stays
-# ATTRIBUTED and EXCISABLE ... was held by convention alone. TM-0401.
+# ATTRIBUTED and EXCISABLE ... was held by convention alone.
 #
 # THE HARD PART is that documentation legitimately speaks in the READER's first
 # person all the time: "How do I change this safely", "I want to | Go to",
@@ -299,7 +299,7 @@ LINK       = re.compile(r'!?\[[^\]]*\]\([^)]*\)')
 HTML_CMT   = re.compile(r'<!--.*?-->', re.S)
 HEADING_RE = re.compile(r'^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$')
 # ---------------------------------------------------------------------------
-# RULE 4 (TM-0590, 2026-09-14): a how-to page's procedure carries no history.
+# RULE 4 (2026-09-14): a how-to page's procedure carries no history.
 #
 # documentation-standard.md already says it: rationale, history and hard-won
 # gotchas accumulate inside a procedure until the steps are no longer visible,
@@ -372,7 +372,7 @@ def archaeology_violations(path, text):
         if ARCHAEOLOGY.search(joined):
             return (para_start, 'correction history inside a how-to procedure ... move it to '
                     '"## History and corrections" at the bottom of the page, or to the '
-                    'component page, and leave the decision beside the step (TM-0590)',
+                    'component page, and leave the decision beside the step',
                     joined[:120])
         return None
     for i, line in enumerate(lines[fm_end + 1:], start=fm_end + 2):
@@ -565,7 +565,7 @@ AR_SELFTEST = [
     # 2026-09-17 additions: the three shapes the overnight verification found
     # missing, plus the negative case it asked for (the same phrase, relocated
     # past the History heading, must be accepted).
-    (True, 'measured-on-a-later-run narrative (the exact miss, TM-0590)',
+    (True, 'measured-on-a-later-run narrative (the exact miss)',
      'docs/x.md', '---\ntype: HowTo\n---\n## 7f\n\n**Measured 2026-09-20 on a later run: this step behaved differently** than the first pass recorded, and the count above was wrong.\n'),
     (True, 'found-dated discovery narrative',
      'docs/x.md', '---\ntype: HowTo\n---\nFound 2026-09-13 by running this page end to end: the sweep ran clean and the listing still printed a name it should not have.\n'),
@@ -666,7 +666,7 @@ if total:
           f'First person: company voice in running prose everywhere except a '
           f'Maintainer\'s note and CONTRIBUTING.md; quote the reader\'s words.\n'
           f'History: a how-to procedure carries the decision, not the story of the '
-          f'correction; the story goes under "## History and corrections" (TM-0590).\n'
+          f'correction; the story goes under "## History and corrections".\n'
           f'See CONTRIBUTING.md, "Documentation style".',
           file=sys.stderr)
     sys.exit(1)

@@ -8,7 +8,7 @@
 # survives a restart, the harness restarts and re-checks. That single assertion
 # would have caught one of the two defects above."
 #
-# TM-0287 was a page that said a patch held, checked immediately after the patch,
+# was a page that said a patch held, checked immediately after the patch,
 # published with a date on it, and wrong. Every command on that page exited zero.
 # No arrangement of exit codes could have caught it, and no static gate could
 # either, because the tree was internally consistent about it. The only thing
@@ -23,7 +23,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "${HERE}/../lib/assert.sh"
-# TM-0797: every kubectl and helm call below names its cluster with --context or
+# every kubectl and helm call below names its cluster with --context or
 # --kube-context from this variable, and an empty value is refused rather than
 # falling back to the current context (docs/deployment/fresh-install.md, "Name
 # the cluster"). run.sh exports it; a standalone run must export it itself.
@@ -43,7 +43,7 @@ if ! CMD="$("$EXTRACT" --ref "$REF" --page "$PAGE" --section "$SECTION" --lang b
   _emit "           The durable procedure was written after the defect was found."
   _emit "           Against an earlier ref, set TOCKMOX_P03_PAGE and"
   _emit "           TOCKMOX_P03_SECTION to that ref's un-default block, and expect"
-  _emit "           the post-restart assertion to FAIL ... which is TM-0287."
+  _emit "           the post-restart assertion to FAIL."
   exit 3
 fi
 SHA="$("$EXTRACT" --ref "$REF" --page "$PAGE" --section "$SECTION" --lang bash --containing 'local-storage.yaml.skip' --sha)"
@@ -139,7 +139,7 @@ assert_artifact \
 # kured cycle or node rebuild", and a rebuild is the harshest member of that
 # set. Passing the harshest one covers the others; passing the mildest would
 # not.
-_emit ">>> restarting the node. This is the step TM-0287 did not have."
+_emit ">>> restarting the node. This is the step that was missing."
 "$CLUSTER" reboot
 
 assert_artifact \

@@ -151,7 +151,7 @@ class UpdateChecker:
                 if doc.get("schema") != 1 or not isinstance(doc.get("releases"), list):
                     new.error = "the update feed has an unknown format"
                 elif exp is not None and (not isinstance(exp, (int, float)) or exp < now()):
-                    # a replayed old feed can hide a newer release; producers set expires (TM-0900)
+                    # a replayed old feed can hide a newer release; producers set expires
                     new.error = "the update feed has expired"
                 else:
                     new.verified = True

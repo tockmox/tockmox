@@ -81,7 +81,7 @@ the chart shipped `apps.litellm: { enabled: false }` and this page called
 pointing the console at it "optional, and recommended". That default was the
 contradiction REQ-0004 AC-4.1 names: all AI traffic fronted by a local gateway
 is the mechanism the control claim rests on, and a shipped default that
-bypasses it makes the claim decorative. Ruled 2026-10-08 (TM-0460): the
+bypasses it makes the claim decorative. Ruled 2026-10-08: the
 gateway is required, in the sense this page now states under
 [the console goes through the gateway](#point-the-console-at-the-gateway).
 
@@ -410,7 +410,7 @@ wrote nothing while the callback was running.
 
 ## The policy gate
 
-**Optional, off by default, new in 0.8.0 (TM-0383).** What you get: every
+**Optional, off by default, new in 0.8.0.** What you get: every
 request through the gateway is given a class, and a request whose class forbids
 an external endpoint never reaches one, including when the local model it asked
 for is down and the client asks for a fallback. What you give up by turning it
@@ -557,7 +557,7 @@ a second bundle, below.
 
 ### The namespace egress default-deny
 
-Development after 0.6.2 (TM-0273 fix 1), behind the same toggle as the
+Development after 0.6.2, behind the same toggle as the
 namespace's ingress default-deny (`apps.ai_namespace`), with a rollback lever
 `aiEgress.namespaceDefaultDeny`. The earlier reasoning here was that a
 default-deny in front of the gateway and the database "buys no containment and

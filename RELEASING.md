@@ -53,7 +53,7 @@ as a defect:
 - **Leave `local-path` as the cluster default.** fresh-install.md keeps it
   default on purpose.
 
-A first sync that needs a hand is a gate failure (TM-0492). ArgoCD's own
+A first sync that needs a hand is a gate failure. ArgoCD's own
 automatic retry inside the operation is recorded in the gate report, not failed.
 
 ### The one gate CI cannot run
@@ -114,13 +114,12 @@ change, and no new image**. None of:
 
 A dashboard JSON, an alert rule's text, a documentation page and a generated
 site file are outside the list. **A patch that touches any item above takes the
-greenfield.** Quote the git pathspec as `'charts/*/templates/*'` (TM-0756).
+greenfield.** Quote the git pathspec as `'charts/*/templates/*'`.
 
 The list reads template source, not rendered output, and a version bump alone
 changes `helm.sh/chart` on every resource, which Kubernetes refuses on an
-immutable field (a Job's `spec.template`, a workload's `spec.selector`;
-TM-0753). **`tools/check-immutable-fields.sh` reads the rendered output
-(TM-0754):** run it with `BASELINE_REF`; a hit handled elsewhere goes in
+immutable field (a Job's `spec.template`, a workload's `spec.selector`). **`tools/check-immutable-fields.sh` reads the rendered output
+:** run it with `BASELINE_REF`; a hit handled elsewhere goes in
 `tools/immutable-fields-allow.txt` with its reason, and anything else is a
 template change recorded against the entry condition in the release notes.
 
@@ -158,7 +157,7 @@ five-edit version bump happens only on `release-X.Y`.
 
 ### How bars are written here
 
-A release bar names **a property to hold, not a number to beat** (TM-0157).
+A release bar names **a property to hold, not a number to beat**.
 
 ## The patch train
 
@@ -305,7 +304,7 @@ branch (see the orientation below).
 
 ### Orientation: `main` is the development trunk (option B)
 
-**Ruled 2026-09-17 (TM-0654): option B.** `main` is where development happens;
+**Ruled 2026-09-17: option B.** `main` is where development happens;
 `release-X.Y` is cut from it when a candidate is ready; a patch fix lands on
 `main` first and is cherry-picked back to `release-X.Y`. Skipping the port
 leaves a gap (the old release misses a fix `main` has), visible and
@@ -339,24 +338,24 @@ report ("Changed after the gate ran") is the model; see
 | Full CI (`ci.yaml`) | Every rc push | ... |
 | `tools/release-preflight.sh` | Once prose is expected final | Again, on the exact commit being tagged |
 | Greenfield gate on the lab | At least on the rc the tag is cut from | Not repeated if the tagged commit does not differ from that rc's gated commit |
-| **`tockmox-site-template` drift check** | **Yes** | Two halves, one automated: the template's `pin-consistency` workflow proves its nine `targetRevision` pins and README agree; the diff of the template against what `install/tockmox-install.sh` generates is `tools/site-template-diff.sh <template checkout>` on the rc (TM-0621), which fails on any difference not recorded in `tools/site-template-divergences.txt`. When any `v*` tag (rc included) is pushed, `.github/workflows/release-tag.yaml` runs `tools/site-pin-at-tag.sh`, which fails when the template's `main` does not pin the tag just pushed (TM-0534) |
+| **`tockmox-site-template` drift check** | **Yes** | Two halves, one automated: the template's `pin-consistency` workflow proves its nine `targetRevision` pins and README agree; the diff of the template against what `install/tockmox-install.sh` generates is `tools/site-template-diff.sh <template checkout>` on the rc, which fails on any difference not recorded in `tools/site-template-divergences.txt`. When any `v*` tag (rc included) is pushed, `.github/workflows/release-tag.yaml` runs `tools/site-pin-at-tag.sh`, which fails when the template's `main` does not pin the tag just pushed |
 | **Version-shaped-prose sweep** (`grep -rn 'v0\.'` across `install/`, `docs/`, `README.md`) | **Yes** | ... |
 | **Values-tier drift** (`tools/check-values-tiers.sh --drift-only`) | **Yes, but pass `BASELINE_REF`**, see below | Again at the tag, same override |
-| **Upgrade leg** (TM-0281) | **Required** once per cycle, on the rc the tag is cut from, carrying [the standing assertions](#the-upgrade-legs-standing-assertions) | Not repeated if the tagged commit is that rc's commit |
+| **Upgrade leg** | **Required** once per cycle, on the rc the tag is cut from, carrying [the standing assertions](#the-upgrade-legs-standing-assertions) | Not repeated if the tagged commit is that rc's commit |
 | **Immutable-field check** (`tools/check-immutable-fields.sh`, pass `BASELINE_REF`; [the patch bar](#entry-condition-what-a-patch-may-not-contain)) | **Yes**, on every rc whose chart version differs from the baseline | Not repeated if the tagged commit is that rc's commit |
 | Air-gap re-proof | ... | Once per release, or explicitly skipped in the notes |
 | `SHA256SUMS`, signed gate report | ... | Generated from the tag |
-| Outside-eyes pass (minor releases) | **Once, on the last rc** (TM-0685): the rc is what the final tag will be, so findings can still land in the release | Not run again on the final tag |
+| Outside-eyes pass (minor releases) | **Once, on the last rc**: the rc is what the final tag will be, so findings can still land in the release | Not run again on the final tag |
 
 The two bolded rows (site-template drift, version-shaped-prose sweep) belong in
 the per-RC column: a check run once, just before the tag, has no runway left to
-act on what it finds (TM-0675).
+act on what it finds.
 
 #### The re-pin window
 
 The template is re-pinned and merged **before** the tag is pushed, because
 preflight check 5 and the per-RC column above want the re-pin verified while it
-can still be fixed. That order is accepted (TM-0738), and it has a consequence
+can still be fixed. That order is accepted, and it has a consequence
 that is stated here rather than discovered: from the merge of the re-pin until
 the tag exists, the public `tockmox-site-template` names a `targetRevision` that
 does not resolve, and anyone who clones it in that time gets Applications
@@ -394,7 +393,7 @@ are added per release; these rows are on every leg, before and after the push:
 | **`stable` values keys survive** | the previous release's site values, setting at least one `stable` key per layer it configures, render and sync on the candidate with no edit beyond the documented ones; `BASELINE_REF=<previous tag> tools/check-values-tiers.sh --drift-only` | a `stable` key renamed, dropped, retyped or rejected by the schema, or a layer that needs an undocumented values edit |
 
 The last four were added after the 0.7.0 leg, which carried none of them
-(TM-0846). A row that cannot be read on the leg goes in the gate report as
+. A row that cannot be read on the leg goes in the gate report as
 UNVERIFIED with the reason, never as PASS.
 
 #### An rc tag silently disarms the values-tier drift gate
@@ -425,7 +424,7 @@ Promoting an rc to a final on the same commit is the normal pattern.
 
 ## The release text is written last, from the run sheet
 
-**Ruled 2026-09-29 (TM-0792).** The gate is where most of what the notes say is
+**Ruled 2026-09-29.** The gate is where most of what the notes say is
 learned, so a text commit after the last test is the normal order. Draft these
 into the run sheet while the gate runs, and write the CHANGELOG from it
 afterwards, not from memory:
@@ -537,7 +536,7 @@ distributes source, never compiled artifacts or container images, the
 documentation included. Nothing is built and pushed at the tag.
 
 `docs-image.yaml` was on main from 2026-09-30 and was deleted with
-`images/tockmox-docs/` (TM-0808). Do not bring either back. A `v*` tag must not
+`images/tockmox-docs/`. Do not bring either back. A `v*` tag must not
 start a build that pushes to a registry, and `tools/check-no-published-images.sh`
 (in `tools/check-all.sh` and in CI) fails the build if any workflow under
 `.github/workflows/` does. It looks for registry pushes, a `packages: write`
@@ -569,8 +568,8 @@ The release has three obligations and no artifact:
   and records the marker and the `/` 200 and missing-page 404 through the Ingress.
 
 Not proven: the publish script has run against one single-node lab cluster (the
-TM-0807 report), not on a dark site or an installer-generated cluster. Design:
-TM-0805, `product/docs-delivery-without-an-image-design-2026-09-30.md`.
+report), not on a dark site or an installer-generated cluster. Design:
+`product/docs-delivery-without-an-image-design-2026-09-30.md`.
 
 ## The GitHub Release is a second step, and nothing prompts for it
 
@@ -706,7 +705,7 @@ lands, is in [operator gates](docs/development/releasing-operator-gates.md).
   `bootstrap/applications/*.yaml` and one "Pinned to" line in the README of
   [`tockmox/tockmox-site-template`](https://github.com/tockmox/tockmox-site-template),
   re-pinned by hand. The tag push runs `tools/site-pin-at-tag.sh`
-  (`release-tag.yaml`, TM-0534) and goes red if the template's `main` does not
+  (`release-tag.yaml`) and goes red if the template's `main` does not
   pin that tag; it is an alarm, not a gate. The re-pin merges before the tag, so
   the template names an unresolvable ref for hours at every release
   ([the re-pin window](#the-re-pin-window)); preflight check 5 reports whether

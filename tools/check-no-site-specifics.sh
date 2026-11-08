@@ -31,7 +31,7 @@ cd "$(dirname "$0")/.."
 # Scanned paths: everything that ships. Deliberately excludes .git, and excludes
 # this file (it necessarily contains the patterns it hunts for).
 #
-# THE SCAN SET IS DERIVED, NOT LISTED. TM-0319, closed 2026-09-02.
+# THE SCAN SET IS DERIVED, NOT LISTED.
 #
 # This was an allow list until today, and that was the defect. A top-level entry
 # added after the list was written went unscanned and nothing said so: the gate
@@ -88,6 +88,7 @@ SCAN_EXCLUDE=""
 RULES="
 internal git host|git\.int\.
 internal hostname|[A-Za-z0-9_-]+\.int\.[A-Za-z0-9-]+\.[A-Za-z]{2,}
+internal tracker id|(^|[^A-Za-z0-9])([Tt][Mm]|[Hh][Ll])-?[0-9]{3,4}([^0-9]|$)
 "
 PATTERNS_FILE="${TOCKMOX_SITE_PATTERNS_FILE:-}"
 if [ -z "$PATTERNS_FILE" ] && [ -f "${HOME:-/nonexistent}/.config/tockmox/site-patterns" ]; then
@@ -135,20 +136,25 @@ if [ "${1:-}" = "--selftest" ]; then
   mkdir -p "$tmp/docs"
   fails=0
 
+  # probe() runs this script's own scan(), so it exercises RULES and the
+  # exemption filter as shipped. It used to grep with copies of the two
+  # regexes, which kept passing with a rule deleted or the filter removed.
   probe() {
-    name="$1"; content="$2"
+    name="$1"; content="$2"; label="$3"
     printf '%s\n' "$content" > "$tmp/docs/probe.md"
-    out=$(cd "$tmp" && grep -rInE "$3" docs 2>/dev/null | grep -viE "example\.(com|org)|192\.0\.2\.|198\.51\.100\.|203\.0\.113\." || true)
-    if [ -z "$out" ]; then
-      echo "  SELFTEST FAIL: pattern '$name' did not fire on: $content"
-      fails=1
-    else
+    out=$(cd "$tmp" && scan docs)
+    if grep -q "FAIL  $label" <<<"$out"; then
       echo "  selftest ok: $name"
+    else
+      echo "  SELFTEST FAIL: rule '$label' did not fire on: $content"
+      fails=1
     fi
   }
 
-  probe "git host"       "clone from git.int.example-internal"   'git\.int\.'
-  probe "internal host"  "see grafana.int.acme-lab.net for details" '[A-Za-z0-9_-]+\.int\.[A-Za-z0-9-]+\.[A-Za-z]{2,}'
+  probe "git host"       "clone from git.int.example-internal"   "internal git host"
+  probe "internal host"  "see grafana.int.acme-lab.net for details" "internal hostname"
+  probe "tracker id"     "fixed in the last release (TM-0123)"     "internal tracker id"
+  probe "tracker id, lc" "def test_tm0123_a_case():"                "internal tracker id"
 
   # A SITE RULE FILE IS LOADED, and a named file that is missing REFUSES. Uses a
   # synthetic pattern, never a real site's: the point is the loading path.
@@ -158,14 +164,20 @@ if [ "${1:-}" = "--selftest" ]; then
   ( cd "$tmp" && git init -q . && git add -A ) >/dev/null 2>&1
   mkdir -p "$tmp/tools"; cp "$0" "$tmp/tools/check.sh"
   out=$(TOCKMOX_SITE_PATTERNS_FILE="$tmp/site-patterns" bash "$tmp/tools/check.sh" 2>&1); rc=$?
-  if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q 'FAIL  selftest node name'; then
+  if [ "$rc" = 1 ] && printf '%s' "$out" | grep 'FAIL  selftest node name' >/dev/null; then
     echo "  selftest ok: a site rule file is loaded and its rule fires"
   else
     echo "  SELFTEST FAIL: a rule from TOCKMOX_SITE_PATTERNS_FILE did not fire (exit $rc): $out"; fails=1
   fi
-  rc=$(TOCKMOX_SITE_PATTERNS_FILE="$tmp/absent" bash "$tmp/tools/check.sh" >/dev/null 2>&1; echo $?)
-  if [ "$rc" = 2 ]; then echo "  selftest ok: a named but missing site rule file refuses (exit 2)"
-  else echo "  SELFTEST FAIL: a missing site rule file exited $rc, not 2"; fails=1; fi
+  # Exit 2 is also what a copy in the wrong place returns ("git tracked no files
+  # here"), so the code alone cannot tell the two refusals apart. Require this
+  # rule's own words, which name the missing file.
+  out=$(TOCKMOX_SITE_PATTERNS_FILE="$tmp/absent" bash "$tmp/tools/check.sh" 2>&1); rc=$?
+  if [ "$rc" = 2 ] && grep -qF "names '$tmp/absent'" <<<"$out"; then
+    echo "  selftest ok: a named but missing site rule file refuses (exit 2)"
+  else
+    echo "  SELFTEST FAIL: a missing site rule file was not refused by that rule (exit $rc; wanted 2 and a message naming the file): $out"; fails=1
+  fi
   rm -rf "$tmp/.git" "$tmp/tools" "$tmp/site-patterns"
 
   # The other direction, and it is the half that keeps the gate believed: the
@@ -181,11 +193,7 @@ serviceCIDR: 10.43.0.0/16
 report a vulnerability to security@example.org
 Signed-off-by: A Contributor <contributor@example.net>
 PROBE
-  clean_out=""
-  for rx in 'git\.int\.' '[A-Za-z0-9_-]+\.int\.[A-Za-z0-9-]+\.[A-Za-z]{2,}'; do
-    h=$(cd "$tmp" && grep -rInE "$rx" docs 2>/dev/null | grep -viE "example\.(com|org)|192\.0\.2\.|198\.51\.100\.|203\.0\.113\." || true)
-    [ -n "$h" ] && clean_out="$clean_out$h"
-  done
+  clean_out=$(cd "$tmp" && scan docs)
   if [ -n "$clean_out" ]; then
     echo "  SELFTEST FAIL: a legitimate example was flagged:"
     printf '%s\n' "$clean_out" | sed 's/^/            /'
@@ -219,7 +227,7 @@ PROBE
     # pass: it had never tested the scan set. Exit 1 and the rule's own label now.
     mkdir -p "$newdir/tools"; cp "$0" "$newdir/tools/check-no-site-specifics.sh"
     out=$(cd "$newdir" && TOCKMOX_SITE_PATTERNS_FILE= HOME=/nonexistent bash tools/check-no-site-specifics.sh 2>&1); rc=$?
-    if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q 'FAIL  internal git host'; then
+    if [ "$rc" = 1 ] && printf '%s' "$out" | grep 'FAIL  internal git host' >/dev/null; then
       echo "  selftest ok: a top-level directory this script never heard of is scanned"
     else
       echo "  SELFTEST FAIL: a NEW top-level directory carrying an internal host was not refused"

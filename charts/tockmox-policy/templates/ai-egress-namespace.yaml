@@ -2,7 +2,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-EGRESS DEFAULT-DENY FOR THE WHOLE AI NAMESPACE (TM-0273 fix 1).
+EGRESS DEFAULT-DENY FOR THE WHOLE AI NAMESPACE.
 
 ai-egress.yaml contains the chat console. This file closes the rest: the model
 gateway, which holds provider keys and is the pod the card named as the
@@ -20,8 +20,8 @@ deny cannot ship without:
   allow-egress-intra-namespace  the namespace itself, every pod not labelled tockmox.com/isolated
   allow-egress-cnpg             CNPG pods: Kubernetes API, Garage S3 (3900)
   allow-egress-restore-drill    the drill's kubectl: Kubernetes API
-  allow-egress-gateway-key      the console-key Job's kubectl: Kubernetes API (TM-0460)
-  allow-egress-console-key-check  the console-key check: the model gateway, port 4000 (TM-0982)
+  allow-egress-gateway-key      the console-key Job's kubectl: Kubernetes API
+  allow-egress-console-key-check  the console-key check: the model gateway, port 4000
   allow-egress-litellm          both gateways (production, eval): provider egress, LAN/cluster excluded
 
 The Open WebUI policy in ai-egress.yaml is additive to these and is NOT widened
@@ -80,7 +80,7 @@ spec:
 # restored. Measured 2026-09-07, not assumed.
 #
 # Pods labelled tockmox.com/isolated (the Tockmox UI, the model watcher, the
-# eval gateway; TM-0920) are left out, as they are from every namespace-wide
+# eval gateway) are left out, as they are from every namespace-wide
 # ingress allow in ai-default-deny.yaml. Their own NetworkPolicies say what they
 # may reach, and none of them needs a neighbour. With `podSelector: {}` here the
 # watcher, whose pages say it reaches "not the cluster", answered 200 from the
@@ -203,7 +203,7 @@ spec:
         - protocol: TCP
           port: 6443
 ---
-# The console-key Job (templates/gateway-key.yaml in the ai layer, TM-0460) runs
+# The console-key Job (templates/gateway-key.yaml in the ai layer) runs
 # kubectl once: it reads and creates the console's virtual-key Secret. The
 # gateway itself it reaches through allow-egress-intra-namespace. It needs the
 # API and nothing else. Same shape and the same address list as the drill's
@@ -241,7 +241,7 @@ spec:
           port: 6443
 ---
 # The console-key check (templates/console-key-check.yaml in the ai layer,
-# TM-0982) sends one request with the console's key to the production gateway
+# ) sends one request with the console's key to the production gateway
 # every quarter hour. Its pod carries tockmox.com/isolated, so the namespace
 # allow above does not reach it, and this is the ONLY path it has besides
 # DNS: the gateway's pods, on the proxy port. Not the API server (it has no

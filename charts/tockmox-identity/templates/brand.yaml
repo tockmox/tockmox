@@ -94,8 +94,7 @@ spec:
       annotations:
         tockmox.com/assets-hash: {{ (.Files.Glob "brand/*.svg").AsConfig | sha256sum | trunc 16 | quote }}
     spec:
-      # No Kubernetes API calls: a ServiceAccount of its own and no token (TM-0759,
-      # CIS 5.1.5 and 5.1.6).
+      # No Kubernetes API calls: a ServiceAccount of its own and no token (# CIS 5.1.5 and 5.1.6).
       serviceAccountName: tockmox-brand
       automountServiceAccountToken: false
       priorityClassName: {{ .Values.brand.priorityClassName }}
@@ -161,7 +160,7 @@ spec:
         - name: tmp
           emptyDir: {}
 ---
-# TM-0759: this workload's own identity, with no token. The namespace's `default`
+# this workload's own identity, with no token. The namespace's `default`
 # account is not used (CIS 5.1.5 and 5.1.6).
 apiVersion: v1
 kind: ServiceAccount

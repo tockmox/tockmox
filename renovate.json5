@@ -20,8 +20,8 @@
     "helpers:pinGitHubActionDigests",
   ],
 
-  // Name the development branch rather than lean on the repository default
-  // (TM-0686). RELEASING.md "Orientation": `main` is the development trunk and
+  // Name the development branch rather than lean on the repository default.
+  // RELEASING.md "Orientation": `main` is the development trunk and
   // `release-X.Y` branches are cut from it, so dependency bumps land on `main`
   // and reach a release line by cherry-pick, like any other fix. A release
   // branch is deliberately NOT listed: bumping a frozen line is a patch-bar
@@ -110,7 +110,7 @@
       // how tockmox-identity's databaseBackup.postgresImage names it; Renovate
       // matches the name as written, so "postgres" alone let a 17 -> 18 bump of
       // that pg_dump client through while the server it dumps stays on 17
-      // (TM-1010, 2026-10-11: dropped from the sweep).
+      // (2026-10-11: dropped from the sweep).
       matchDatasources: ["docker"],
       matchPackageNames: ["postgres", "docker.io/library/postgres", "ghcr.io/cloudnative-pg/postgresql"],
       matchUpdateTypes: ["major"],

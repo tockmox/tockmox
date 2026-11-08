@@ -14,8 +14,8 @@
 # and are not yet wired into ci.yaml: the two CNPG policy gates
 # (check-cnpg-netpol, check-cnpg-operator-reach), check-ingress-tls,
 # check-pod-security, check-dashboard-panels, check-litellm-hooks, the two check-harness-context.sh
-# runs (TM-0797; also run by executed-docs.yaml's hermetic selftest job) and the two check-docs-offline.sh
-# runs (TM-0215; the second skips without the pinned MkDocs toolchain, so a run
+# runs (also run by executed-docs.yaml's hermetic selftest job) and the two check-docs-offline.sh
+# runs (the second skips without the pinned MkDocs toolchain, so a run
 # with no docs venv reports it as skipped), and the 0.7.1 wave's four gates with
 # their selftests: check-identity-seams, check-platform-seams,
 # check-immutable-fields and check-action-pins, then wave 2's
@@ -56,7 +56,7 @@ failed_names=""
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
-# GATES RUN IN PARALLEL (TM-1021, Jeff 2026-10-11: "let's absolutely run the gates in parallel").
+# GATES RUN IN PARALLEL (Jeff 2026-10-11: "let's absolutely run the gates in parallel").
 # One run was about 45 minutes on a 2-CPU runner, gate after gate, while every gate is an
 # independent process that renders the charts into its own mktemp directory. Now up to
 # CHECK_ALL_JOBS gates run at once (default: the CPU count), each writing its output to its own
@@ -155,7 +155,7 @@ missing=""
 have helm || missing="${missing} helm"
 have python3 || missing="${missing} python3"
 # Many gates under tools/ import yaml. Without PyYAML they die mid-suite
-# with a traceback that reads like a broken gate (TM-0890), so ask up front.
+# with a traceback that reads like a broken gate, so ask up front.
 if have python3 && ! python3 -c 'import yaml' >/dev/null 2>&1; then
   missing="${missing} python3-yaml"
 fi
@@ -205,9 +205,9 @@ run_gate "every tool is executable" bash -c '
 # a cluster with nothing looking, and a self-test nobody invokes is the same as
 # no self-test. Neither needs helm, promtool, kubectl or a cluster, so they cost
 # nothing and can never be the reason this script skips.
-run_gate "the image extractor handles every quoting form (TM-0646)" \
+run_gate "the image extractor handles every quoting form" \
   bash tools/lib/extract-images.sh --selftest
-run_gate "mint-secrets refuses a value with a control character (TM-0662)" \
+run_gate "mint-secrets refuses a value with a control character" \
   bash tools/mint-secrets.sh --selftest
 
 # A TOOL THAT CANNOT RUN IS NOT A FINDING, added 2026-10-16. Four gates
@@ -248,7 +248,7 @@ run_gate "helm lint (all layer charts, both value sets)" bash -c '
   exit "$bad"'
 
 # ci.yaml's "every layer renders against the smallest real site" step. It was
-# missing here until 2026-10-06, which let a required key added by TM-0798 pass
+# missing here until 2026-10-06, which let a newly added required key pass
 # this script and fail CI (and render-diff, which renders the same file).
 run_gate "every layer renders against ci/values-site-minimal.yaml" bash -c '
   bad=0
@@ -270,75 +270,75 @@ run_gate "the alert rules we author are tested" bash tools/check-alert-rules.sh
 run_gate "every CNPG database has an ingress NetworkPolicy" bash tools/check-cnpg-netpol.sh
 run_gate "every CNPG database is reachable by its operator on :8000" bash tools/check-cnpg-operator-reach.sh
 run_gate "storage policy holds on the rendered claims" bash tools/check-storage-policy.sh
-run_gate "no namespace enforces a Pod Security level its pods fail (TM-0135)" bash tools/check-pod-security.sh
+run_gate "no namespace enforces a Pod Security level its pods fail" bash tools/check-pod-security.sh
 run_gate "every rendered Ingress terminates TLS" bash tools/check-ingress-tls.sh
 run_gate "every shipped table panel that hides columns also orders them" bash tools/check-dashboard-panels.sh
 run_gate "every OIDC console gets a trust bundle" bash tools/check-trust-wiring.sh
-run_gate "site LiteLLM hooks load through values alone (TM-0787)" bash tools/check-litellm-hooks.sh
-run_gate "inference-node routes match the UI and the eval gateway is fenced (TM-0920)" bash tools/check-inference-nodes.sh
-# The posture-probe add-on (TM-0874, TM-0882). Not in ci.yaml yet: wiring a CI
+run_gate "site LiteLLM hooks load through values alone" bash tools/check-litellm-hooks.sh
+run_gate "inference-node routes match the UI and the eval gateway is fenced" bash tools/check-inference-nodes.sh
+# The posture-probe add-on. Not in ci.yaml yet: wiring a CI
 # gate moves the counts doc-claims.txt pins, and that is its own change.
-run_gate "the posture-probe add-on stays observe-only: read-only role, confined policy, versioned report (TM-0874)" bash tools/check-posture-probe.sh
-run_gate "the posture-probe gate goes red on a write verb, a widened read, a leaked output and a broken contract (TM-0874)" bash tools/check-posture-probe.sh --selftest
+run_gate "the posture-probe add-on stays observe-only: read-only role, confined policy, versioned report" bash tools/check-posture-probe.sh
+run_gate "the posture-probe gate goes red on a write verb, a widened read, a leaked output and a broken contract" bash tools/check-posture-probe.sh --selftest
 run_gate "the upgrade-wedging shapes from the 0.7.0 lab pass stay fixed" bash tools/check-upgrade-safety.sh
 run_gate "the upgrade-safety gate goes red on a migrations Job that keeps its name or drifts from upstream" bash tools/check-upgrade-safety.sh --selftest
-run_gate "no bare kubectl or helm in the executed-docs harness (TM-0797)" bash tools/check-harness-context.sh
-run_gate "the harness-context gate goes red on a bare call (TM-0797)" bash tools/check-harness-context.sh --selftest
-run_gate "a lanCIDR containing the clusterCIDR is refused when nodeOriginSources is set (TM-0790)" bash tools/check-lan-cidr-overlap.sh
-run_gate "garage.blockSize renders block_size only when set, above the tables (TM-0782)" bash tools/check-garage-block-size.sh
+run_gate "no bare kubectl or helm in the executed-docs harness" bash tools/check-harness-context.sh
+run_gate "the harness-context gate goes red on a bare call" bash tools/check-harness-context.sh --selftest
+run_gate "a lanCIDR containing the clusterCIDR is refused when nodeOriginSources is set" bash tools/check-lan-cidr-overlap.sh
+run_gate "garage.blockSize renders block_size only when set, above the tables" bash tools/check-garage-block-size.sh
 run_gate "SSO blueprints are parseable YAML" bash tools/check-blueprint-discovery.sh
 run_gate "every SSO application is bound to a role group" bash tools/check-sso-bindings.sh
-run_gate "identity and AI seams: host, sub_mode, merge-by-email, DB recovery and backup default, Grafana email path, admin-users Job, mint --only (TM-0820, TM-0312, TM-0667)" bash tools/check-identity-seams.sh
-run_gate "the identity-seams gate goes red on every assertion (TM-0820)" bash tools/check-identity-seams.sh --selftest
-run_gate "platform seams: namespace labels, probe hosts, dashboard keys, CNPG PodMonitor, etcd, Retain (TM-0820)" bash tools/check-platform-seams.sh
-run_gate "the platform-seams gate goes red on every assertion (TM-0820)" bash tools/check-platform-seams.sh --selftest
-run_gate "no immutable field changes between the baseline tag and the tree (TM-0754)" bash tools/check-immutable-fields.sh
-run_gate "no Job keeps its name when its image changes inside one version (TM-1022)" bash tools/check-immutable-fields.sh --perturb-images
-run_gate "every ServiceMonitor and PodMonitor selects something the layers render (TM-1025)" bash tools/check-monitor-targets.sh
-run_gate "the monitor-targets gate goes red on an unlabelled Service, a missing port and an unmatched PodMonitor (TM-1025)" bash tools/check-monitor-targets.sh --selftest
-run_gate "the immutable-field gate goes red on a changed Job template (TM-0754)" bash tools/check-immutable-fields.sh --selftest
-run_gate "every action is SHA-pinned and every CI download is checksummed (TM-0592)" bash tools/check-action-pins.sh
-run_gate "the action-pin gate goes red on a moving tag and an unchecked download (TM-0592)" bash tools/check-action-pins.sh --selftest
-run_gate "observability off: refused without the profile, zero monitors with it, bring-your-own renders (TM-0825)" bash tools/check-capability-monitors.sh
-run_gate "the capability-monitors gate goes red on an ungated monitor (TM-0825)" bash tools/check-capability-monitors.sh --selftest
-run_gate "the rendered tree reaches no unlisted external host, and audited phone-homes are off or listed (TM-0671)" bash tools/check-cloud-egress.sh
-run_gate "the cloud-egress gate goes red on an unlisted host and a phone-home turned on (TM-0671)" bash tools/check-cloud-egress.sh --selftest
-run_gate "no Tockmox-owned pod uses the default ServiceAccount or an unlisted API token (TM-0759)" bash tools/check-sa-tokens.sh
-run_gate "the service-account token gate goes red on a default account, a missing field and an unlisted token (TM-0759)" bash tools/check-sa-tokens.sh --selftest
-run_gate "every rendered container has a memory limit or a written reason (TM-0595)" bash tools/check-memory-limits.sh
-run_gate "the memory-limit gate goes red on a dropped limit, a new container and a stale residue entry (TM-0595)" bash tools/check-memory-limits.sh --selftest
-run_gate "the alert bridge logs each delivery, ntfy stays single-replica, drill rows name their backup (TM-0779/0780/0794)" bash tools/check-notify-and-drill.sh
-run_gate "the notify-and-drill gate goes red on every mutation (TM-0779/0780/0794)" bash tools/check-notify-and-drill.sh --selftest
-# TM-0460 (REQ-0004 AC-4.1, ruled 2026-10-08): the gateway is the shipped
+run_gate "identity and AI seams: host, sub_mode, merge-by-email, DB recovery and backup default, Grafana email path, admin-users Job, mint --only" bash tools/check-identity-seams.sh
+run_gate "the identity-seams gate goes red on every assertion" bash tools/check-identity-seams.sh --selftest
+run_gate "platform seams: namespace labels, probe hosts, dashboard keys, CNPG PodMonitor, etcd, Retain" bash tools/check-platform-seams.sh
+run_gate "the platform-seams gate goes red on every assertion" bash tools/check-platform-seams.sh --selftest
+run_gate "no immutable field changes between the baseline tag and the tree" bash tools/check-immutable-fields.sh
+run_gate "no Job keeps its name when its image changes inside one version" bash tools/check-immutable-fields.sh --perturb-images
+run_gate "every ServiceMonitor and PodMonitor selects something the layers render" bash tools/check-monitor-targets.sh
+run_gate "the monitor-targets gate goes red on an unlabelled Service, a missing port and an unmatched PodMonitor" bash tools/check-monitor-targets.sh --selftest
+run_gate "the immutable-field gate goes red on a changed Job template" bash tools/check-immutable-fields.sh --selftest
+run_gate "every action is SHA-pinned and every CI download is checksummed" bash tools/check-action-pins.sh
+run_gate "the action-pin gate goes red on a moving tag and an unchecked download" bash tools/check-action-pins.sh --selftest
+run_gate "observability off: refused without the profile, zero monitors with it, bring-your-own renders" bash tools/check-capability-monitors.sh
+run_gate "the capability-monitors gate goes red on an ungated monitor" bash tools/check-capability-monitors.sh --selftest
+run_gate "the rendered tree reaches no unlisted external host, and audited phone-homes are off or listed" bash tools/check-cloud-egress.sh
+run_gate "the cloud-egress gate goes red on an unlisted host and a phone-home turned on" bash tools/check-cloud-egress.sh --selftest
+run_gate "no Tockmox-owned pod uses the default ServiceAccount or an unlisted API token" bash tools/check-sa-tokens.sh
+run_gate "the service-account token gate goes red on a default account, a missing field and an unlisted token" bash tools/check-sa-tokens.sh --selftest
+run_gate "every rendered container has a memory limit or a written reason" bash tools/check-memory-limits.sh
+run_gate "the memory-limit gate goes red on a dropped limit, a new container and a stale residue entry" bash tools/check-memory-limits.sh --selftest
+run_gate "the alert bridge logs each delivery, ntfy stays single-replica, drill rows name their backup" bash tools/check-notify-and-drill.sh
+run_gate "the notify-and-drill gate goes red on every mutation" bash tools/check-notify-and-drill.sh --selftest
+# (REQ-0004 AC-4.1, ruled 2026-10-08): the gateway is the shipped
 # default and the console goes through it on a chart-minted key. Not in
 # ci.yaml yet, for the reason at the top of this file.
-run_gate "the model gateway is the shipped default, the console goes through it, the console-key Job is scoped, a site may override (TM-0460)" bash tools/check-gateway-default.sh
-run_gate "the gateway-default gate goes red on every mutation (TM-0460)" bash tools/check-gateway-default.sh --selftest
+run_gate "the model gateway is the shipped default, the console goes through it, the console-key Job is scoped, a site may override" bash tools/check-gateway-default.sh
+run_gate "the gateway-default gate goes red on every mutation" bash tools/check-gateway-default.sh --selftest
 run_gate "global.imageRegistry redirects every image" bash tools/check-airgap.sh
 # The docs-site gates. The selftest needs only python3; the main run builds the
 # site and skips (2) when the pinned MkDocs toolchain is not installed, because a
 # laptop without a docs venv is not a tree with a defect. See
 # tools/check-docs-offline.sh for why it reads the built files and not the config.
-run_gate "the docs offline gate goes red on every external reference (TM-0215)" \
+run_gate "the docs offline gate goes red on every external reference" \
   bash tools/check-docs-offline.sh --selftest
-serial_gate "the built documentation site makes no network request (TM-0215)" \
+serial_gate "the built documentation site makes no network request" \
   bash tools/check-docs-offline.sh
 run_gate "the committed SBOM matches the tree" bash tools/gen-sbom.sh --check
 run_gate "the committed images.txt matches the charts" bash tools/gen-images.sh --check
 run_gate "documentation stamps are current" bash tools/stamp-docs.sh --check
-# TM-0228. The layer table and the four section READMEs are generated. The
+# The layer table and the four section READMEs are generated. The
 # selftest proves the check goes red on a flipped wave, a flipped installer
 # mapping, a hand-edited table and an unlisted page.
-run_gate "the docs index surfaces match a fresh render (TM-0228)" bash tools/gen-docs-index.sh --check
-run_gate "the docs index check goes red on drift (TM-0228)" bash tools/gen-docs-index.sh --selftest
+run_gate "the docs index surfaces match a fresh render" bash tools/gen-docs-index.sh --check
+run_gate "the docs index check goes red on drift" bash tools/gen-docs-index.sh --selftest
 run_gate "no site specifics in the published tree" bash tools/check-no-site-specifics.sh
-run_gate "no workflow publishes a container image (ADR-0036, TM-0098)" bash tools/check-no-published-images.sh
+run_gate "no workflow publishes a container image (ADR-0036)" bash tools/check-no-published-images.sh
 run_gate "the no-published-images gate goes red on every push pattern (ADR-0036)" bash tools/check-no-published-images.sh --selftest
-# The docs publish path (TM-0807): the content gate refuses anything that is not
+# The docs publish path: the content gate refuses anything that is not
 # static web content, and the publish script is run against a stub kubectl.
-serial_gate "the built documentation site holds only static web content (TM-0807)" bash tools/check-docs-site-contents.sh
-serial_gate "the docs site-contents gate goes red on every non-static file (TM-0807)" bash tools/check-docs-site-contents.sh --selftest
-serial_gate "the docs publish script refuses what it must and always removes its pod (TM-0807)" bash tools/publish-docs.sh --selftest
+serial_gate "the built documentation site holds only static web content" bash tools/check-docs-site-contents.sh
+serial_gate "the docs site-contents gate goes red on every non-static file" bash tools/check-docs-site-contents.sh --selftest
+serial_gate "the docs publish script refuses what it must and always removes its pod" bash tools/publish-docs.sh --selftest
 run_gate "documentation style" bash tools/check-docs-style.sh
 run_gate "documented commands paste as-is" bash tools/check-pasteable-blocks.sh
 # NEVER run_gate THIS EITHER. Reporting mode is deliberate and stays: `--enforce`
@@ -349,7 +349,7 @@ run_gate "documented commands paste as-is" bash tools/check-pasteable-blocks.sh
 # in every run's output and cannot be lost: staged enforcement is defensible,
 # staged awareness is not.
 #
-# What changed 2026-09-15 (TM-0611) is only the ACCOUNTING. Until then this was a
+# What changed 2026-09-15 is only the ACCOUNTING. Until then this was a
 # `run_gate`, so a line that reports and never tests was counted in the "passed"
 # total alongside gates that can go red ... the identical defect this file already
 # fixed for kubeconform fourteen lines below, for the reason written there. Found
@@ -371,7 +371,7 @@ run_gate "every documented block is accounted for" bash -c '
 run_gate "docs links resolve" bash tools/check-docs-links.sh
 run_gate "frontmatter contract holds" bash tools/check-frontmatter.sh
 # ci.yaml's "every layer renders a non-zero number of resources", which had no
-# twin here until TM-0533. It also writes build/render-counts.tsv, which the
+# twin here until this gate was added. It also writes build/render-counts.tsv, which the
 # next gate reads, so it must stay ahead of it.
 serial_gate "every layer renders a non-zero number of resources" bash tools/render-counts.sh
 serial_gate "documented counts still match the tree" bash tools/check-doc-claims.sh
@@ -380,11 +380,11 @@ serial_gate "documented counts still match the tree" bash tools/check-doc-claims
 # does not this reports the drift half as skipped rather than failing the run.
 run_gate "values stability tiers hold" bash tools/check-values-tiers.sh
 # ci.yaml's "values schema rejects an unknown top-level key or component name"
-# step. Until TM-0404 that step was inline in ci.yaml and had no twin here, so
+# step. That step used to be inline in ci.yaml and had no twin here, so
 # a contributor could pass this script and fail CI on it.
 run_gate "values schema rejects a misspelt key or component" bash tools/check-values-typos.sh
 run_gate "check-values-typos selftest" bash tools/check-values-typos.sh --selftest
-# TM-0383. The config half runs anywhere helm does. The forced-failure half
+# The config half runs anywhere helm does. The forced-failure half
 # needs the litellm CLI (LITELLM_BIN) and reports SKIPPED without it;
 # .github/workflows/policy-gate.yaml installs it and always runs both.
 # ci.yaml's "the Tockmox UI's tests pass". Exit 2 (skipped) without the UI's

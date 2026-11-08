@@ -34,7 +34,7 @@ reports healthy and only federated users are locked out.
     (dict "present" $hasCaVol "detail" "kube-prometheus-stack.grafana.extraContainerVolumes has no `tockmox-ca` entry, so the CA is never presented to the container")
     (dict "present" $hasMount "detail" "kube-prometheus-stack.grafana.extraVolumeMounts does not mount `tockmox-ca` at /etc/tockmox/ca")
     (dict "present" (eq (get $env "SSL_CERT_FILE") "/etc/tockmox/ca/ca.crt") "detail" "kube-prometheus-stack.grafana.env does not set SSL_CERT_FILE to /etc/tockmox/ca/ca.crt, which is what Go reads")
-    (dict "present" (or (not .Values.global.certIssuer) (contains "wait-for-ca" (toYaml ($graf.extraInitContainers | default list)))) "detail" "kube-prometheus-stack.grafana.extraInitContainers has no `wait-for-ca` container, so Grafana can start before cert-manager has written the CA, build its Go root pool from the public roots alone and never rebuild it ... SSO then fails permanently while the console reports healthy (TM-0632)")
+    (dict "present" (or (not .Values.global.certIssuer) (contains "wait-for-ca" (toYaml ($graf.extraInitContainers | default list)))) "detail" "kube-prometheus-stack.grafana.extraInitContainers has no `wait-for-ca` container, so Grafana can start before cert-manager has written the CA, build its Go root pool from the public roots alone and never rebuild it ... SSO then fails permanently while the console reports healthy")
   )) -}}
 {{- end -}}
 {{- /*
@@ -71,7 +71,7 @@ and beats silently promoting the capability back on because of one key.
 */ -}}
 {{- include "tockmox.capabilityCoherent" (dict "ctx" $ "capability" "observability" "apps" (list "kubePrometheusStack" "loki" "alloy" "dashboards" "argocdMonitoring")) -}}
 {{- /*
-`serviceMonitors` is deliberately NOT guarded here (TM-0825). Declining the
+`serviceMonitors` is deliberately NOT guarded here. Declining the
 observability capability while pinning `apps.serviceMonitors.enabled: true` is
 the documented "run your own Prometheus operator" route: the capability says
 "do not deploy a monitoring stack", the component says "but render the monitors
@@ -79,7 +79,7 @@ and rules for the operator I already have". Refusing it made the route
 unreachable in every layer.
 */ -}}
 {{- /*
-A GLOBAL THAT MOVED WHILE THE LITERAL BEHIND IT DID NOT (TM-0146).
+A GLOBAL THAT MOVED WHILE THE LITERAL BEHIND IT DID NOT.
 
 Three claims in this layer cannot follow the storage globals by themselves:
 Grafana and Loki because their charts do not run `tpl` over the class key, and
@@ -104,22 +104,22 @@ that has set the literal itself ... the homelab keeps Prometheus and Loki on
 {{- $lsc := .Values.global.localStorageClass | default "" -}}
 {{- $gp := $graf.persistence | default dict -}}
 {{- if and $gp.enabled (eq ($gp.storageClassName | default "") "longhorn") $sc (ne $sc "longhorn") -}}
-{{- fail (printf "kube-prometheus-stack.grafana.persistence.storageClassName is still the shipped `longhorn`, but global.storageClass is `%s`. The Grafana chart does not run tpl over this key, so it cannot follow the global by itself: set it to `%s` (or the class you actually mean) in this layer's values. As it stands the claim asks for a class this site does not name and, without Longhorn, Grafana stays Pending (TM-0146)." $sc $sc) -}}
+{{- fail (printf "kube-prometheus-stack.grafana.persistence.storageClassName is still the shipped `longhorn`, but global.storageClass is `%s`. The Grafana chart does not run tpl over this key, so it cannot follow the global by itself: set it to `%s` (or the class you actually mean) in this layer's values. As it stands the claim asks for a class this site does not name and, without Longhorn, Grafana stays Pending." $sc $sc) -}}
 {{- end -}}
 {{- $ps := ((((($kps.prometheus | default dict).prometheusSpec | default dict).storageSpec | default dict).volumeClaimTemplate | default dict).spec | default dict) -}}
 {{- if and (eq ($ps.storageClassName | default "") "local-path") $lsc (ne $lsc "local-path") -}}
-{{- fail (printf "kube-prometheus-stack.prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName is still the shipped `local-path`, but global.localStorageClass is `%s`. This key is a literal (values.yaml says why), so it does not follow the global: set it to `%s` in this layer's values, or set the global back. As it stands the TSDB asks for a class this site does not name (TM-0146)." $lsc $lsc) -}}
+{{- fail (printf "kube-prometheus-stack.prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName is still the shipped `local-path`, but global.localStorageClass is `%s`. This key is a literal (values.yaml says why), so it does not follow the global: set it to `%s` in this layer's values, or set the global back. As it stands the TSDB asks for a class this site does not name." $lsc $lsc) -}}
 {{- end -}}
 {{- end -}}
 {{- if (include "tockmox.appEnabled" (dict "ctx" $ "app" "loki")) -}}
 {{- $lsc := .Values.global.localStorageClass | default "" -}}
 {{- $lp := (((.Values.loki | default dict).singleBinary | default dict).persistence | default dict) -}}
 {{- if and (eq ($lp.storageClass | default "") "local-path") $lsc (ne $lsc "local-path") -}}
-{{- fail (printf "loki.singleBinary.persistence.storageClass is still the shipped `local-path`, but global.localStorageClass is `%s`. The Loki chart does not run tpl over this key, so it cannot follow the global by itself: set it to `%s` in this layer's values, or set the global back. As it stands Loki's chunks ask for a class this site does not name (TM-0146)." $lsc $lsc) -}}
+{{- fail (printf "loki.singleBinary.persistence.storageClass is still the shipped `local-path`, but global.localStorageClass is `%s`. The Loki chart does not run tpl over this key, so it cannot follow the global by itself: set it to `%s` in this layer's values, or set the global back. As it stands Loki's chunks ask for a class this site does not name." $lsc $lsc) -}}
 {{- end -}}
 {{- end -}}
 {{- /*
-GRAFANA ON CNPG (TM-0786). Three things live in three places: the database
+GRAFANA ON CNPG. Three things live in three places: the database
 (grafanaDatabase, this chart), the env that points Grafana at it and the
 password reference (kube-prometheus-stack.grafana, static subchart values a site
 can replace), and the replica count. Each wrong combination renders cleanly and
@@ -145,10 +145,10 @@ Grafanas on one SQLite file, so each is a sentence here.
 {{- /* A site may run Grafana on a database it manages itself, named in
 grafana.ini's [database] section (the reference homelab does: a site CNPG
 cluster). That is not SQLite, so it satisfies the same need as grafanaDatabase
-(TM-1005, found reading the reference site's values against 0.8.0). */ -}}
+(found reading the reference site's values against 0.8.0). */ -}}
 {{- $iniDb := lower (toString (dig "grafana.ini" "database" "type" "" $g)) -}}
 {{- if and (not $gd.enabled) (not (has $iniDb (list "postgres" "mysql"))) -}}
-{{- fail (printf "kube-prometheus-stack.grafana.replicas is %d, but grafanaDatabase is off and grafana.ini names no shared database, so every replica would open its own SQLite file: users, preferences and annotations would differ by which pod answered. Turn grafanaDatabase on first, or point grafana.ini's database section at a postgres or mysql you run (TM-0786, TM-1005)." $replicas) -}}
+{{- fail (printf "kube-prometheus-stack.grafana.replicas is %d, but grafanaDatabase is off and grafana.ini names no shared database, so every replica would open its own SQLite file: users, preferences and annotations would differ by which pod answered. Turn grafanaDatabase on first, or point grafana.ini's database section at a postgres or mysql you run." $replicas) -}}
 {{- end -}}
 {{- if ($g.persistence | default dict).enabled -}}
 {{- fail (printf "kube-prometheus-stack.grafana.replicas is %d with persistence still on. The Grafana volume is ReadWriteOnce, so the second replica cannot mount it and sits in ContainerCreating with a Multi-Attach error. With grafanaDatabase on the volume holds nothing that matters: set persistence.enabled to false." $replicas) -}}

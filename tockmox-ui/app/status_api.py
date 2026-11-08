@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The read-only status API (TM-0841). Provisional: the shape may change in a minor release.
+"""The read-only status API. Provisional: the shape may change in a minor release.
 
   GET /api/v1/status     what the home and status pages show, as JSON (admins)
 
@@ -10,7 +10,7 @@ that did not answer this time is reported as `unknown` with its reason, and the 
 have filled are null, not empty, so a consumer cannot read "no alerts" off a dead Alertmanager.
 
 Argo CD Application CRs keep their last sync and health when the application controller stops
-(lab, TM-0901 D4), so an application whose status.reconciledAt is older than
+(lab), so an application whose status.reconciledAt is older than
 sources.kubernetes.argocdStaleSeconds reads `unknown` here, whatever the CR says.
 """
 from __future__ import annotations
@@ -98,7 +98,7 @@ def register(app, user_of, readings, verdict, running_version, src_apps, app_ver
 
     @app.api_route("/api/{rest:path}", methods=WRITE_VERBS, include_in_schema=False)
     def refuse_write(rest: str = ""):
-        # A write verb is refused for everyone, signed in or not: there is no write path (TM-0814 line 5).
+        # A write verb is refused for everyone, signed in or not: there is no write path.
         return JSONResponse({"error": "this API is read-only"}, status_code=405, headers={"Allow": ALLOW})
 
     @app.get("/api/v1/status")
@@ -110,7 +110,7 @@ def register(app, user_of, readings, verdict, running_version, src_apps, app_ver
             return JSONResponse({"error": "this API is for platform administrators"}, status_code=403)
         r = readings()
         body = build(r, verdict(x.state for x in r.values()), running_version(r["apps"]), src_apps, app_version)
-        # Additive within tockmox-status/1 (TM-1017): what each capability is set to and whether its
+        # Additive within tockmox-status/1: what each capability is set to and whether its
         # layer deploys it, the rows the /capabilities page shows.
         body["capabilities"] = [{"key": c["key"], "configured": c["configured"], "deployed": c["deployed"],
                                  "agree": c["agree"], "evidence": c["evidence"]}

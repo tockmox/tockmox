@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Every ServiceMonitor and PodMonitor the layers render selects something the
-# layers render (TM-1025).
+# layers render.
 #
 #   ./tools/check-monitor-targets.sh             render every layer and check
 #   ./tools/check-monitor-targets.sh --selftest  prove it goes red

@@ -6,7 +6,7 @@ on:
     # release-* too: a point release is cut from its release branch, and the
     # tagging invariant in RELEASING.md needs a run on the exact commit that
     # gets tagged. A pull_request run tests a synthetic merge commit, not that
-    # commit, so without this a release branch could never satisfy it (TM-0775).
+    # commit, so without this a release branch could never satisfy it.
     branches: [main, 'release-*']
 
 permissions:
@@ -19,7 +19,7 @@ env:
   KUBECONFORM_VERSION: "0.8.0"
   GITLEAKS_VERSION: "8.30.1"
   PROMTOOL_VERSION: "3.14.0"
-  # SHA-256 of the exact release asset each download step fetches (TM-0592),
+  # SHA-256 of the exact release asset each download step fetches,
   # copied from the project's own published checksum file for that version and
   # confirmed against the downloaded bytes. A Renovate bump of a version above
   # fails its step on a checksum mismatch until the matching hash here is
@@ -91,7 +91,7 @@ jobs:
         shell: bash -euo pipefail {0}
         run: |
           # Assert on the ARTIFACT, not the exit code. helm lint passing tells
-          # you nothing about whether anything rendered. Since TM-0533 the
+          # you nothing about whether anything rendered. Since then the
           # counts are also written to build/render-counts.tsv, which
           # "documented counts still match the tree" below reads instead of
           # rendering all nine layers a second time. The selftest first: a
@@ -133,7 +133,7 @@ jobs:
         if: ${{ !cancelled() }}
         shell: bash -euo pipefail {0}
         run: |
-          # TM-0505. A stock install on 2026-09-11 logged six admission warnings
+          # A stock install on 2026-09-11 logged six admission warnings
           # from deny-rbac-aggregation-injection, every one of them against a
           # ClusterRole Tockmox had just created itself ... telling the operator
           # to allowlist objects the product ships. Nothing was blocked, because
@@ -167,7 +167,7 @@ jobs:
           # which is how a suite teaches people to ignore it.
           #
           # The cases live in tests/rules/ and must assert BOTH directions.
-          # TM-0519 is the seed case: the rule must fire on the static tokens we
+          # is the seed case: the rule must fire on the static tokens we
           # mint and must NOT fire on the one kube-prometheus-stack 90.1.1
           # started shipping. Proven to go red against the pre-fix expression.
           #
@@ -331,7 +331,7 @@ jobs:
           # used to grep three vendor hostnames in `value:` position, which could
           # not see a hostname that lives in a binary (Grafana's update check) or
           # any host nobody had named. The script asserts on what the rendered
-          # tree can reach (TM-0671); the same step name keeps the check count.
+          # tree can reach; the same step name keeps the check count.
           ./tools/check-cloud-egress.sh
           ./tools/check-cloud-egress.sh --selftest
 
@@ -355,7 +355,7 @@ jobs:
         if: ${{ !cancelled() }}
         shell: bash -euo pipefail {0}
         run: |
-          # The root of every layer schema is closed, and since TM-0404 so is the
+          # The root of every layer schema is closed, and since then so is the
           # set of component names under `apps`: a misspelt top-level key or a
           # misspelt switch is an error rather than a chart installed with
           # defaults and no complaint. Proven per layer with a control, because
@@ -396,7 +396,7 @@ jobs:
         if: ${{ !cancelled() }}
         shell: bash -euo pipefail {0}
         run: |
-          # tockmox-ui/ ships as source (TM-0902) and its tests ran only on a
+          # tockmox-ui/ ships as source and its tests ran only on a
           # laptop until this step. They are unit tests through FastAPI's
           # TestClient with every upstream mocked: no cluster, no network. The
           # venv is built here because the runner's python3 has none of the
@@ -468,7 +468,7 @@ jobs:
         shell: bash -euo pipefail {0}
         run: |
           # The layer table in docs/architecture.md and the page tables in the
-          # four section READMEs are GENERATED (TM-0228), from each chart's
+          # four section READMEs are GENERATED, from each chart's
           # sync-wave (asserted against the installer's wave()) and from page
           # frontmatter. The selftest flips a wave, the installer, a committed
           # table and the page list in a scratch copy and requires red on each.
@@ -479,7 +479,7 @@ jobs:
         # Independent step. stamp-docs.sh --check above covers the DOCS. It does
         # not cover install/tockmox-install.sh, which carries its own VERSION
         # and was never in the bump list -- so it read 0.1.0 through 0.5.0 and
-        # through the whole 0.6.0 cycle (TM-0269).
+        # through the whole 0.6.0 cycle.
         #
         # That is not a cosmetic string. Every file the installer generates is
         # stamped with it, AND it is the default offered for tockmox.revision,
@@ -527,7 +527,7 @@ jobs:
       - name: no git plumbing is tracked at the repo root
         # Independent step. FETCH_HEAD sat tracked at the root, zero bytes, from
         # some point before 2026-08-31 until an external reviewer found it on
-        # 2026-09-01 (TM-0268). Nothing broke -- which is precisely why nothing
+        # 2026-09-01. Nothing broke -- which is precisely why nothing
         # caught it, and precisely why it mattered on a repository whose opening
         # argument is "source, not binaries, read it".
         #
@@ -589,7 +589,7 @@ jobs:
       - name: no workflow publishes a container image (ADR-0036)
         # Independent step. The docs image workflow pushed ghcr.io/tockmox/tockmox-docs
         # on every v* tag and broke ADR-0036 (Tockmox publishes no container images)
-        # without any check noticing; TM-0098's close condition is a check that no
+        # without any check noticing; the close condition is a check that no
         # workflow pushes an image. --selftest first: it proves each push pattern
         # goes red on a fixture, and on one shaped like the deleted docs-image workflow.
         if: ${{ !cancelled() }}
@@ -598,7 +598,7 @@ jobs:
           ./tools/check-no-published-images.sh --selftest
           ./tools/check-no-published-images.sh
 
-      - name: the docs publish path refuses what it must (TM-0807)
+      - name: the docs publish path refuses what it must
         # Independent step. tools/publish-docs.sh copies a built site into the
         # cluster's docs bucket through a short-lived pod. --selftest runs the
         # real script against a stub kubectl and asserts on what it asks the
@@ -638,7 +638,7 @@ jobs:
         if: ${{ !cancelled() }}
         shell: bash -euo pipefail {0}
         run: |
-          # TM-0484. macOS ships zsh as the default login shell and
+          # macOS ships zsh as the default login shell and
           # INTERACTIVE_COMMENTS is off in an interactive zsh, so a `#` line
           # inside a copyable block is an error the reader gets instead of a
           # command. Reproduced on a stock macOS zsh 2026-09-11. A TRAILING
@@ -836,7 +836,7 @@ jobs:
 
   render-diff:
     # The previous release tag and this PR's candidate, rendered against the
-    # same real site's values and diffed (TM-0283). A values key that moved
+    # same real site's values and diffed. A values key that moved
     # between releases shows up here as a field a resource lost, a default it
     # gained, or an object that disappeared ... the most likely pre-1.0 upgrade
     # break, visible before anything is applied.
@@ -852,7 +852,7 @@ jobs:
     # tick; the script refuses it outright.
     #
     # The script prints its own caveat: a clean diff does not prove the
-    # upgrade applies. TM-0281 is the check that proves an upgrade.
+    # upgrade applies. A separate check proves an upgrade.
     if: ${{ github.event_name == 'pull_request' }}
     runs-on: ubuntu-latest
     steps:

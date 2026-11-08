@@ -34,7 +34,7 @@ Also version-shaped and NOT generated, so check them by hand at every bump:
 `install/tockmox.yaml.example`'s `revision:` and the `targetRevision` in
 `docs/deployment/profiles.md`. The example config shipped `main` with a
 thirteen-line explanation that no tag existed yet for thirteen days after
-0.5.0 was tagged (TM-0270). Prose does not get stamped.
+0.5.0 was tagged. Prose does not get stamped.
 
 **And a sixth, which breaks BY CONSTRUCTION every time you fix the two above:
 `tools/doc-claims.txt`.** One of its entries guards
@@ -71,7 +71,7 @@ topic (install.md), without which the alert row can only be read at the
 topic. **Leave `local-path` as the cluster default:** fresh-install.md keeps it
 default on purpose, and this paragraph told gate walkers to de-default it until
 2026-09-29. The first-platform-sync race that once needed a
-terminate-and-resync is closed (TM-0492): a first sync that needs a hand is
+terminate-and-resync is closed: a first sync that needs a hand is
 now a gate failure, and ArgoCD's own automatic retry inside the operation is
 recorded in the gate report, not failed.
 
@@ -141,7 +141,7 @@ branch; the orientation section below says what it did instead.)
 
 ## Orientation: `main` is the development trunk (option B)
 
-**Ruled 2026-09-17 (TM-0654): option B.** `main` is where development
+**Ruled 2026-09-17: option B.** `main` is where development
 happens; `release-X.Y` is cut from it when a candidate is ready; a patch fix
 lands on `main` first and is cherry-picked back to `release-X.Y`. **The 0.6.1
 cut did NOT exercise this, and this paragraph said it would.** A local
@@ -203,14 +203,14 @@ run.
 
 ## Which checks run per RC, and which run once at the tag
 
-| **`tockmox-site-template` drift check** | **Yes** | Two halves, and only one is automated: the template's own `pin-consistency` workflow proves its nine `targetRevision` pins and README agree with each other; the diff of the template against what `install/tockmox-install.sh` generates is still a manual step on the rc, and nothing in either repository runs it when an rc is cut. A third, narrower assertion runs when any `v*` tag (rc included) is pushed: `.github/workflows/release-tag.yaml` runs `tools/site-pin-at-tag.sh`, which fails when the template's `main` does not pin the tag just pushed (TM-0534) |
+| **`tockmox-site-template` drift check** | **Yes** | Two halves, and only one is automated: the template's own `pin-consistency` workflow proves its nine `targetRevision` pins and README agree with each other; the diff of the template against what `install/tockmox-install.sh` generates is still a manual step on the rc, and nothing in either repository runs it when an rc is cut. A third, narrower assertion runs when any `v*` tag (rc included) is pushed: `.github/workflows/release-tag.yaml` runs `tools/site-pin-at-tag.sh`, which fails when the template's `main` does not pin the tag just pushed |
 
 The two bolded rows never ran before 0.6.0's last three hours. Moving them
 into the per-RC column is the actual fix: a check run once, immediately
 before the tag, has no runway left to act on what it finds. The site-template
 drift check found a p1, adopter-facing defect in a public repository that
 shipping had to carry as a Known Issue for want of time to choose a fix
-(TM-0675) ... exactly the outcome running it earlier exists to prevent.
+ ... exactly the outcome running it earlier exists to prevent.
 
 ## An rc tag silently disarms the values-tier drift gate
 
@@ -248,7 +248,7 @@ window when both exist.
 
 ## The release text is written last, from the run sheet
 
-**Ruled 2026-09-29 (TM-0792).** The release gate is where most of what the
+**Ruled 2026-09-29.** The release gate is where most of what the
 release notes have to say is learned, so the notes cannot be final before it.
 Every release so far has needed a text commit after its last test: 0.6.2 needed
 one between rc1 and rc2 and another after the gate on rc2, and each time it was
@@ -284,7 +284,7 @@ distributes source, never compiled artifacts or container images, and that holds
 for the documentation too. There is nothing to build and push at the tag.
 
 The workflow that did, `docs-image.yaml`, was on main from 2026-09-30 and was
-deleted with `images/tockmox-docs/` (TM-0808). Do not bring either back. A `v*`
+deleted with `images/tockmox-docs/`. Do not bring either back. A `v*`
 tag must not start a build that pushes to a registry, and
 `tools/check-no-published-images.sh` (in `tools/check-all.sh` and in CI) fails
 the build if any workflow under `.github/workflows/` does. It looks for registry
@@ -299,7 +299,7 @@ package settings before the release is announced.
 **The documentation reaches an operator's cluster from their own checkout, not
 from the release.** The operator checks out the tag, runs `tools/build-docs.sh`
 and `tools/publish-docs.sh --context CTX`, and the script copies the built site
-into the docs bucket through a short-lived pod (design: TM-0805,
+into the docs bucket through a short-lived pod (design:
 `product/docs-delivery-without-an-image-design-2026-09-30.md`; procedure:
 [serving static sites](../administration/serving-static-sites.md#publishing-the-product-documentation)).
 The release therefore has three obligations and no artifact:
@@ -315,7 +315,7 @@ The release therefore has three obligations and no artifact:
   and records the marker and the `/` 200 and missing-page 404 through the Ingress.
 
 What this does not prove: a pull or publish of anything by a release. The
-publish script has been run against one single-node lab cluster (the TM-0807
+publish script has been run against one single-node lab cluster (the
 report), not on a dark site and not on an installer-generated cluster.
 
 ## The GitHub Release is a second step, and nothing prompts for it

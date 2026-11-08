@@ -16,7 +16,7 @@
 # is marked default-class, because "which class snapshots use" is a choice the
 # site should make visibly, the same argument as the StorageClass contract.
 #
-# TWO CLASSES, AND WHY (TM-0216, decided 2026-09-29).
+# TWO CLASSES, AND WHY (decided 2026-09-29).
 #
 # This file used to ship one class and argue that `type: bak` conflates "a
 # point-in-time copy" with "an off-volume backup". The argument was right about

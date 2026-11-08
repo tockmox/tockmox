@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Sourced by run.sh. Groups B1-B10: install/bootstrap-secrets.sh (TM-0277).
+# Sourced by run.sh. Groups B1-B10: install/bootstrap-secrets.sh.
 #
 # HERMETIC. kubectl, helm, kubeseal, docker, age and openssl are SHIMS in
 # lib/shims/, put in front of PATH for these runs only. The fake cluster is a
@@ -20,7 +20,7 @@
 # legitimately holds the controller key, as a cluster does.
 #
 # Each block below was proved by mutation before it was trusted (see
-# TM-0277's REPORT.md): break the behaviour, watch THAT block go red.
+# REPORT.md): break the behaviour, watch THAT block go red.
 
 SHIMS="$HERE/lib/shims"
 BS="$WORK/bootstrap"; mkdir -p "$BS"
@@ -552,7 +552,7 @@ assert_artifact \
   "0"
 
 # ===================================================================== B9b
-path_begin "B9b" "bootstrap-secrets: the ntfy password, against a dollar sign and bcrypt's 72-byte limit (TM-0631)"
+path_begin "B9b" "bootstrap-secrets: the ntfy password, against a dollar sign and bcrypt's 72-byte limit"
 does_not_prove \
   "what a real ntfy does with the resulting hash (the shim derives a fake one from the password)" \
   "the interactive prompt's re-ask on a long password (needs a terminal; the logic is the same function)"
@@ -616,7 +616,7 @@ assert_artifact \
 restore first"
 
 # ===================================================================== B13
-path_begin "B13" "bootstrap-secrets: the model gateway's credentials are minted by default, and --without-litellm leaves them out (TM-0460)"
+path_begin "B13" "bootstrap-secrets: the model gateway's credentials are minted by default, and --without-litellm leaves them out"
 parity_caveat \
   "Same shims as B1: this proves which files the script asks kubeseal for, not that a cluster accepts them."
 bs_case gwdefault; bs_common_args

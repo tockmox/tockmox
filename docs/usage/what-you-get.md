@@ -44,7 +44,7 @@ repository) are Applications too. Pod count, measured 2026-08-18: 47 healthy.
 That figure is a live-cluster measurement rather than a render, so it carries
 its date. The resource counts above are a render, and they are checked rather
 than re-typed: CI writes every layer's count to `build/render-counts.tsv` and
-`tools/doc-claims.txt` fails the build when a row here disagrees (TM-0533).
+`tools/doc-claims.txt` fails the build when a row here disagrees.
 Until 0.8.0 this sentence said they were "re-derived every release", while
 every row had drifted and the total read 528 against a render of 578.
 
@@ -57,7 +57,7 @@ table in [configuration](../administration/configuration.md).
 
 **The one decision a default install leaves you:** the AI plane ships with no
 model. Since 0.8.0 the model gateway is on and Open WebUI goes through it on a
-key the chart mints (TM-0460), but the gateway's model list ships empty, so a
+key the chart mints, but the gateway's model list ships empty, so a
 first install reaches `chat.<internalDomain>`, signs you in, and shows an
 empty model list. That is deliberate rather than an oversight: a model
 endpoint is an address on your network, and there is no honest default for
@@ -136,7 +136,7 @@ Two things carry `policyTypes: Egress` over workloads. The Open WebUI bundle is
 deliberately narrower than its namespace, for the reason
 [the AI plane](ai-plane.md) gives: Open WebUI is the pod that holds private
 data, renders untrusted model output, and can make outbound requests, which is
-ADR-0007's trifecta in one place. Since 0.7.0 (TM-0273) the
+ADR-0007's trifecta in one place. Since 0.7.0 the
 rest of the AI namespace is default-deny for egress too, so the model gateway,
 which holds provider keys, can reach DNS, its own namespace and its database,
 its provider on TCP 443 (never the cluster, the LAN or link-local ranges), and

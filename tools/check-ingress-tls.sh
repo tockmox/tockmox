@@ -8,7 +8,7 @@
 #
 # WHY THIS EXISTS, and it is a measurement rather than a policy preference.
 #
-# The web entrypoint redirects to websecure by default (TM-0558). That is the
+# The web entrypoint redirects to websecure by default. That is the
 # right default and it has a prerequisite the redirect itself cannot check: a
 # host with no certificate does NOT fail politely when it is redirected.
 # Traefik answers on :443 anyway, with its own self-signed

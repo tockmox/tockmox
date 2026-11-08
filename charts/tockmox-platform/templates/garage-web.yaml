@@ -2,7 +2,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-STATIC SITES FROM GARAGE (TM-0215): the way in, and the Job that fills a bucket.
+STATIC SITES FROM GARAGE: the way in, and the Job that fills a bucket.
 
 The endpoint itself is in garage.yaml ([s3_web], port 3902), and the buckets, the
 aliases, website access and writer keys are made by garage-bootstrap.yaml. This
@@ -10,7 +10,7 @@ file has the two things left: an Ingress per site that wants one, and a sync Job
 per site whose content ships as an image (`content.image`, the operator's own).
 The product documentation is neither: it has a bucket, a writer key and an
 Ingress here, and no sync Job. The operator publishes it from their checkout
-with tools/publish-docs.sh (TM-0805, ADR-0036: Tockmox publishes no image), and
+with tools/publish-docs.sh (ADR-0036: Tockmox publishes no image), and
 until then the bootstrap Job puts a placeholder page in the bucket.
 
 THE INGRESS is sync wave 8, AFTER the Traefik LoadBalancer Service (wave 7).
@@ -97,7 +97,7 @@ that keeps a page's byte length would never be published.
 {{- end }}
 {{- if $s.contentImage }}
 ---
-# TM-0759: this workload's own identity, with no token. The namespace's `default`
+# this workload's own identity, with no token. The namespace's `default`
 # account is not used (CIS 5.1.5 and 5.1.6).
 apiVersion: v1
 kind: ServiceAccount

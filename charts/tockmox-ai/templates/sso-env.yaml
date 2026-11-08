@@ -25,7 +25,7 @@ stringData:
   # RUNTIME. Without it the container cannot tell a CA that is three seconds
   # away from a plain-HTTP install where none will ever arrive, so it either
   # shrugs and loses the race (what it did before 2026-09-15) or waits out a
-  # timeout on every evaluation install. This key is the difference. TM-0632.
+  # timeout on every evaluation install. This key is the difference.
   TOCKMOX_EXPECT_CA: {{ ternary "true" "false" (ne .Values.global.certIssuer "") | quote }}
   ENABLE_OAUTH_SIGNUP: "true"
   OAUTH_PROVIDER_NAME: "Tockmox SSO"
@@ -40,6 +40,6 @@ stringData:
   OAUTH_ALLOWED_ROLES: "{{ .Values.sso.adminGroup }},{{ .Values.sso.userGroup }}"
   # OAuth users merge with an existing local account of the same email
   # rather than colliding with it.
-  {{- /* A value, default true (TM-0669); the risk is named at sso.mergeAccountsByEmail in values.yaml. */}}
+  {{- /* A value, default true; the risk is named at sso.mergeAccountsByEmail in values.yaml. */}}
   OAUTH_MERGE_ACCOUNTS_BY_EMAIL: {{ .Values.sso.mergeAccountsByEmail | quote }}
 {{- end }}

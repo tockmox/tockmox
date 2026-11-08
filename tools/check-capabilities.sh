@@ -43,8 +43,7 @@ set -euo pipefail
 #
 # and -- this is the part that matters -- `set -euo pipefail` does NOT stop the
 # script. Its sibling check-trust-wiring.sh has the same construct and was
-# measured EXITING 0 on a stock Mac while examining nothing at all (TM-0245,
-# 2026-08-31). A gate that fails is self-announcing. A gate that passes wrongly
+# measured EXITING 0 on a stock Mac while examining nothing at all (# 2026-08-31). A gate that fails is self-announcing. A gate that passes wrongly
 # is not, and this repo's whole argument for gates is that a control fed by an
 # unconnected wire looks identical to a control that works.
 #
@@ -103,7 +102,7 @@ declare -A OWNER=(
   [blackbox]=observability [prometheusOperatorCrds]=observability
   [serviceMonitors]=observability [dashboards]=observability
   # K8. Owned by observability like its siblings, and follows it by default
-  # since TM-0739 (it was shipped off before: ArgoCD is a PREREQUISITE, and the
+  # now (it was shipped off before: ArgoCD is a PREREQUISITE, and the
   # argo-cd chart ships its metrics services disabled). Exercised in the OFF
   # direction like the rest.
   [argocdMonitoring]=observability
@@ -145,7 +144,7 @@ DEFAULT_OFF=(hardwareTelemetry)
 # capability (check 3 asserts they RENDER instead). `serviceMonitors` is the
 # "run your own Prometheus operator" route the capability text documents:
 # decline the capability, pin the component, and Tockmox renders its monitors
-# for the operator you already have (TM-0825).
+# for the operator you already have.
 BYO=(serviceMonitors)
 
 # `|| true` is required, not sloppy: check 3 renders configurations that MUST
@@ -166,7 +165,7 @@ BYO=(serviceMonitors)
 # above it). The `|| true` was never the bug. Not knowing whether helm existed
 # was the bug, and it belongs here, once, before anything renders.
 #
-# PARTITION, NOT REFUSE (TM-0713, 2026-09-17). The refusal above was right
+# PARTITION, NOT REFUSE (2026-09-17). The refusal above was right
 # about checks 2 and 3 and wrong about the rest: checks 1, 4 and 5, and the
 # manifest half of 3, read values files and templates with awk and never call
 # helm, yet a missing helm stopped them too. So without helm the render checks
@@ -226,7 +225,7 @@ for l in "${LAYERS[@]}"; do
     bad "tockmox-$l capabilities block differs from tockmox-$refname"
     # `|| true`: diff exits 1 on the very difference being reported, and under
     # set -e with pipefail that ended the gate here, so one finding in check 1
-    # hid checks 2 to 5 (found 2026-09-23 proving TM-0713). Still exit 1.
+    # hid checks 2 to 5 (found 2026-09-23). Still exit 1.
     diff <(echo "$ref") <(echo "$blk") | head -12 | sed 's/^/        /' || true
   fi
 done
@@ -267,7 +266,7 @@ else
       done
       # Declining observability also needs the profile that turns off the
       # vendored subchart monitor switches: platform and identity REFUSE the
-      # half-off state (TM-0825), so without it they could never be measured.
+      # half-off state, so without it they could never be measured.
       prof=(); [ "$cap" = observability ] && [ "$set_to" = false ] && prof=(-f profiles/observability-off.yaml)
       out=$(render "$l" --set "capabilities.$cap.enabled=$set_to" ${clear[@]+"${clear[@]}"} ${prof[@]+"${prof[@]}"})
       if grep -q '^Error' <<<"$out"; then
@@ -314,7 +313,7 @@ for comp in "${!OWNER[@]}"; do
     # 4.0-4.3 (single-component capabilities such as identity hit this); the
     # bare "${clear[@]}" form aborts there with "unbound variable".
     out=$(render "$l" --set "capabilities.$cap.enabled=false" ${clear[@]+"${clear[@]}"} --set "apps.$comp.enabled=true")
-    # BYO components are the documented exception (TM-0825): the component is
+    # BYO components are the documented exception: the component is
     # the point and the capability is what the site declined, so the render
     # MUST succeed. Asserting the opposite direction keeps the exemption from
     # becoming a hole: a guard that comes back is red here.

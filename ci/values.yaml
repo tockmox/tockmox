@@ -17,7 +17,7 @@ global:
   # 10.0.0.0/16, not the 10.0.0.0/8 this file carried until 0.8.0. A /8 contains
   # the k3s pod network (10.42.0.0/16), and since 0.8.0 the policy layer needs
   # platformNetpol.nodeOriginSources (below), which refuses a lanCIDR that
-  # contains the pod network (TM-0790, TM-0798). The address pool sits inside it.
+  # contains the pod network. The address pool sits inside it.
   lanCIDR: 10.0.0.0/16
   # Required as of the storage contract: the platform layer refuses to render
   # when Longhorn is enabled, is not the cluster default, and nothing has named
@@ -43,7 +43,7 @@ notifications:
   apprise:
     enabled: true
 
-# LiteLLM follows the aiPlane capability since 0.8.0 (TM-0460); through 0.7.x
+# LiteLLM follows the aiPlane capability since 0.8.0; through 0.7.x
 # it shipped disabled and this line was what made CI render it at all. It stays
 # explicit here on purpose: a gate that reads this file must not depend on the
 # chart's default to see the gateway (the cloud-egress gate is only meaningful
@@ -78,7 +78,7 @@ apps:
     enabled: true
 
 # tockmox-policy: since 0.8.0 the platform namespace's node-network rule refuses
-# to render without the per-node gateway addresses (TM-0798). These are the
+# to render without the per-node gateway addresses. These are the
 # shape `install/tockmox-install.sh --print-netpol-node-sources` prints for a
 # three-node flannel cluster: one /31 per node podCIDR. Placeholders, like
 # everything else here.

@@ -14,7 +14,7 @@
 # -f is passed through in order, later files winning, exactly as the
 # installer's multi-source Applications do.
 #
-# WHAT THIS IS FOR (TM-0283). Pre-1.0, values keys can still move between
+# WHAT THIS IS FOR. Pre-1.0, values keys can still move between
 # releases, and a key that moved shows up in a render as a resource losing a
 # field, gaining a default, or disappearing. That is the single most likely
 # way an upgrade breaks, and it is visible before anything is applied. This
@@ -32,7 +32,7 @@
 # so a green result never reads as upgrade coverage: nothing about CRD
 # migrations, ArgoCD's sync behaviour on a changed resource, StatefulSet field
 # immutability, PVC retention, or data surviving. Those need an upgrade run
-# against a real deployment (TM-0281). A clean render diff says the desired
+# against a real deployment. A clean render diff says the desired
 # state did not move for this site's values, and nothing more.
 #
 # Exit codes:
@@ -215,7 +215,7 @@ echo "DOES NOT PROVE THE UPGRADE APPLIES. A clean render diff says the desired"
 echo "state did not move for these values. It says nothing about CRD migrations,"
 echo "ArgoCD's sync behaviour on a changed resource, StatefulSet field"
 echo "immutability, PVC retention, or data surviving. Only an upgrade run against"
-echo "a real deployment proves those (TM-0281). Read a changed layer's diff for"
+echo "a real deployment proves those. Read a changed layer's diff for"
 echo "a field that disappeared or a default that appeared: that is a values key"
 echo "that moved, and it belongs in the release notes."
 if [ "$rc" -ne 0 ]; then exit "$rc"; fi

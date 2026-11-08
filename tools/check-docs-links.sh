@@ -81,7 +81,7 @@ def slug(text):
     this repository actually uses: strip inline formatting, drop punctuation,
     lowercase, spaces to hyphens.
 
-    TWO CORRECTIONS, 2026-09-01 (TM-0311). This function disagreed with GitHub
+    TWO CORRECTIONS, 2026-09-01. This function disagreed with GitHub
     in two ways, and both were wrong in BOTH directions ... a link a reader
     could follow failed the build, and a link the gate accepted dropped a
     reader at the top of the page. That second one is the exact failure this
@@ -228,7 +228,7 @@ if mode == 'selftest':
             'and [selfgone](#no-such-section)\n'
             'and [fenced](sub/b.md#not-a-heading)\n'
             'and [dead file anchor](sub/nope.md#whatever)\n'
-            # TM-0311, the two GitHub-divergence corrections. Each is asserted
+            # the two GitHub-divergence corrections. Each is asserted
             # in BOTH directions: the GitHub spelling must be ACCEPTED, and the
             # old wrong spelling must now be REFUSED. An acceptance case alone
             # would still pass if slug() started accepting everything.
@@ -270,14 +270,14 @@ if mode == 'selftest':
                       'sub/b.md#not-a-heading' in frags))
         cases.append(('does not report an anchor on a file already reported missing',
                       all(not f.startswith('sub/nope.md') for f in frags)))
-        # TM-0311. Underscores are word characters to GitHub and to `\w`, and
+        # Underscores are word characters to GitHub and to `\w`, and
         # are only emphasis markers between words. Stripping them made the gate
         # accept an anchor that 404s and refuse one that works.
         cases.append(('accepts an underscore anchor the way GitHub spells it',
                       'sub/b.md#certificate_verify_failed' not in frags))
         cases.append(('refuses the old underscore-stripped spelling',
                       'sub/b.md#certificateverifyfailed' in frags))
-        # TM-0311. GitHub emits one hyphen PER SPACE. The house "..." separator
+        # GitHub emits one hyphen PER SPACE. The house "..." separator
         # leaves two spaces once punctuation is dropped, so this fires on the
         # project's own style rather than on an edge case.
         cases.append(('accepts one hyphen per space, as GitHub does',

@@ -204,7 +204,7 @@ case "$out" in
 esac
 
 # --- 11. the success-condition census accepts BOTH documented phrasings ---
-# TM-0351: an inline `grep -c -i 'success condition'` recorded a page that
+# an inline `grep -c -i 'success condition'` recorded a page that
 # states six "Passes when:" conditions as stating none. The helper must count
 # either form, and count zero only when neither is present.
 SC_FIX="${TMP}/sc.md"
@@ -219,7 +219,7 @@ if [ "$got" = "0" ]; then ok "success_condition_count is 0 when neither form is 
 else bad "success-condition absence" "expected 0, got: [${got}]"; fi
 
 # The synonym ALONE, through the recorder rather than the counter. This is the
-# exact shape of the TM-0351 defect: a page whose only phrasing is "Passes
+# exact shape of the defect: a page whose only phrasing is "Passes
 # when" must produce a record with no "states no success condition" note, since
 # that note is what a path script writes into the divergence list. Counting
 # correctly and recording a divergence anyway would be the same defect one
@@ -246,7 +246,7 @@ got="$( . "${HERE}/lib/assert.sh"; success_condition_count "${HERE}/../../docs/d
 if [ "${got:-0}" -gt 0 ]; then ok "existing-cluster.md is counted as stating success conditions (${got})"
 else bad "existing-cluster.md census" "got: [${got}]"; fi
 
-# --- 12. P08 is the path written against that page (TM-0351's DoD) --------
+# --- 12. P08 is the path written against that page --------
 # The citation stage of P08 needs no cluster, and the per-commit canary below
 # already proves its two sections resolve. What the card asked for is the
 # recorded run: it must not carry a "states no success condition" entry for a
@@ -268,8 +268,8 @@ case "$out" in
 esac
 
 
-# --- 13. NEGATIVE (TM-0576 / design §9): a pre-existing object must not ----
-#     satisfy an assertion. The TM-0562/TM-0581 shape: on a shared cluster, a
+# --- 13. NEGATIVE (design §9): a pre-existing object must not ----
+#     satisfy an assertion. The relevant shape: on a shared cluster, a
 #     sibling route's leftover must not be mistaken for THIS route's own
 #     artefact. Hermetic fixture -- no cluster, a directory stands in for one.
 NEG_STORE="$(mktemp -d)"
@@ -322,7 +322,7 @@ else
 fi
 rm -rf "$NEG_STORE"
 
-# --- 14. NEGATIVE (TM-0576 / design §9): a no-op target must not produce ---
+# --- 14. NEGATIVE (design §9): a no-op target must not produce ---
 #     PASS. A documented command that does nothing must not be scored PASS
 #     merely because its assertion reads a value that happened to already be
 #     true. Hermetic fixture: a counter file stands in for cluster state,
@@ -393,7 +393,7 @@ rm -rf "$NEG_STATE"
 
 # --- --under-label: selecting the block by the prose ABOVE it ---------------
 #
-# WHY THIS SELECTOR EXISTS (TM-0716). fresh-install.md section 4a carries two
+# WHY THIS SELECTOR EXISTS. fresh-install.md section 4a carries two
 # k3s install blocks that are byte-identical except for `--cluster-init`, and
 # the page tells them apart in the prose line above each fence. `--containing`
 # looks INSIDE a block and has no negation, so it cannot express "the one
@@ -507,7 +507,7 @@ else
   ok "label and content that match different blocks refuse rather than pick one"
 fi
 
-# --- indented fences: a block nested in a list item (TM-0722) --------------
+# --- indented fences: a block nested in a list item --------------
 #
 # WHY. The extractor once recognised a fence only at column 0, so a block
 # nested in a list item was invisible: fresh-install section 2's timer hold
@@ -624,27 +624,27 @@ refuses_with "a closing fence at a different indent is refused, naming the inden
   "does not keep its indentation" --file "$BADFIX" --section '## Wrong close' --lang bash --block 1
 
 # THE REAL PAGE, which is the card's own verification: fresh-install section
-# 2's timer hold, EXTRACT_ERROR_NO_MATCH before TM-0722.
+# 2's timer hold, EXTRACT_ERROR_NO_MATCH before it was fixed.
 FI_PAGE="${HERE}/../../docs/deployment/fresh-install.md"
 FI_S2='## 2. Install the storage packages, on every node'
 got="$(bash "$E" --file "$FI_PAGE" --section "$FI_S2" --lang bash --containing 'transactional-update.timer' 2>/dev/null)"
 if [ "$got" = "sudo systemctl disable --now transactional-update.timer rebootmgr.service" ]; then
-  ok "fresh-install section 2's indented timer hold extracts (TM-0722)"
+  ok "fresh-install section 2's indented timer hold extracts"
 else
   bad "fresh-install section 2's timer hold" "got: [${got}]"
 fi
 # And the post-reboot enable, selected by its label rather than its position
-# (TM-0721). Before the relabel this was EXTRACT_ERROR_AMBIGUOUS by content and
+#. Before the relabel this was EXTRACT_ERROR_AMBIGUOUS by content and
 # by label alike.
 got="$(bash "$E" --file "$FI_PAGE" --section "$FI_S2" --lang bash --under-label 'every node, on MicroOS' --containing 'systemctl enable --now iscsid' 2>/dev/null)"
 if [ "$got" = "sudo systemctl enable --now iscsid" ]; then
-  ok "fresh-install section 2's post-reboot enable is selected by label (TM-0721)"
+  ok "fresh-install section 2's post-reboot enable is selected by label"
 else
   bad "fresh-install section 2's post-reboot enable by label" "got: [${got}]"
 fi
 
 # ---------------------------------------------------------------------------
-# credential-life.py ... the paths job's credential-expiry preflight. TM-0345.
+# credential-life.py ... the paths job's credential-expiry preflight.
 #
 # WHY IT IS TESTED HERE AND NOT LEFT TO THE JOB. The only other way to exercise
 # it is to run the sixty-minute `paths` job against a credential in a state you
@@ -657,7 +657,7 @@ fi
 # runner README asserted such a floor
 # "can never fire" under the projected-token option. These cases said otherwise
 # on the first run: a projected token carries about an hour of life BY DESIGN,
-# so the floor refused every run under the option TM-0345 actually prefers. The
+# so the floor refused every run under the option that is actually preferred. The
 # `rotating` classification exists because of this test, not before it.
 CL="${HERE}/lib/credential-life.py"
 
@@ -693,7 +693,7 @@ cl_is "a JWT with no exp claim does not expire" \
 # permanently near zero, so a remaining-life floor refuses every single run.
 # Built into a variable first, not inline: bash 3.2 brace-expands the {a,b}
 # JSON when it sits literally inside a quoted argument of a quoted $(...)
-# command substitution, splitting one argument into several. TM-0758.
+# command substitution, splitting one argument into several.
 J="{\"iat\":${NOW},\"exp\":$((NOW + 3600))}"
 cl_is "a projected token (1h life) is rotating, not expiring" \
       "$(mkjwt "$J")" "rotating"
@@ -759,7 +759,7 @@ cl_is "a payload that is valid JSON but not an object is undecodable" \
       "$(mkjwt '"not-an-object"')" "undecodable"
 
 # ---------------------------------------------------------------------------
-# The MicroOS provisioner profile's OS derivation. TM-0715.
+# The MicroOS provisioner profile's OS derivation.
 #
 # WHY THIS IS IN THE HERMETIC GATE and not left to the provisioning run: the
 # guard's whole job is to refuse before a VM exists, so it can be proved
@@ -845,10 +845,9 @@ if [ -f "$PROFILE_LIB" ]; then
   if microos_handoff | bash -n 2>/dev/null; then ok "microos_handoff emits a script that parses"
   else bad "microos_handoff emits a script that parses" "bash -n failed"; fi
 
-  # ---- the wiring, 2026-09-23 (TM-0715) -----------------------------------
+  # ---- the wiring, 2026-09-23 -----------------------------------
   # LESSON 4: every documented block runs as the unprivileged reader, never as
-  # the root the per-boot hook runs as. Two defects this lane found (TM-0622,
-  # TM-0630) only exist for a sudo user, so a root run would hide the class.
+  # the root the per-boot hook runs as. Two defects this lane found only exist for a sudo user, so a root run would hide the class.
   # Asserted on the EMITTED driver: every line that executes a file from
   # blocks/ must go through runuser.
   mx_rootlines="$(microos_driver | grep -E 'bash[^|]*\$H/blocks/' | grep -v 'runuser -u "\$RUN_AS"' || true)"
@@ -863,7 +862,7 @@ if [ -f "$PROFILE_LIB" ]; then
   else
     bad "the driver polls 4a's success condition before recording it" "a point-in-time read right after install reads NotReady"
   fi
-  # SELinux, measured on run tm0715-microos-05: init_t may not EXECUTE a
+  # SELinux, measured on run microos-05: init_t may not EXECUTE a
   # var_lib_t file, so a transient unit pointed at the script itself dies
   # 203/EXEC the instant it starts, while systemd-run reports success. The unit
   # must run the script THROUGH the shell, and the spawn must be checked.
@@ -881,13 +880,13 @@ if [ -f "$PROFILE_LIB" ]; then
     ok "the env file refuses a value carrying a quote"
   fi
 
-  # LESSON 6, proven against pages rather than read. Since TM-0721 the
+  # LESSON 6, proven against pages rather than read. Since then the
   # post-reboot enable is selected by its label ANDed with its content, not by
   # ordinal: a fixture docs tree must extract it, the same tree with a block
   # inserted above it must extract the SAME block (the drift an ordinal cannot
   # survive), and a tree where it carries the section's shared label again must
   # REFUSE, which is what proves the label is load-bearing. The fixture carries
-  # section 2's two list-item fences as well (TM-0722), so the shared
+  # section 2's two list-item fences as well, so the shared
   # `every node, on MicroOS` label really is on three blocks here.
   MXD="${TMP}/mx-docs"
   mkdir -p "${MXD}/docs/deployment" "${MXD}/docs/operations"
@@ -1017,17 +1016,17 @@ MD
     bad "s2-iscsid extracts the post-reboot enable, not the success condition" \
         "got: $(cat "${TMP}/mx-good/blocks/s2-iscsid.sh" 2>/dev/null || echo '<refused>')"
   fi
-  # TM-0622: the 4e server success block and the crictl pull are table rows
+  # the 4e server success block and the crictl pull are table rows
   # now, so a page that loses either one must be a REFUSAL, and the fixture
   # must extract both.
   if grep -q 'k3s kubectl version' "${TMP}/mx-good/blocks/s4e-success.sh" 2>/dev/null \
      && grep -q 'k3s crictl pull' "${TMP}/mx-good/blocks/xi-crictl.sh" 2>/dev/null; then
-    ok "s4e-success and xi-crictl extract from their own sections (TM-0622)"
+    ok "s4e-success and xi-crictl extract from their own sections"
   else
-    bad "s4e-success and xi-crictl extract from their own sections (TM-0622)" \
+    bad "s4e-success and xi-crictl extract from their own sections" \
         "s4e: $(cat "${TMP}/mx-good/blocks/s4e-success.sh" 2>/dev/null || echo '<none>'); xi: $(cat "${TMP}/mx-good/blocks/xi-crictl.sh" 2>/dev/null || echo '<none>')"
   fi
-  # TM-0722: the timer hold comes out of the page, de-indented, and nothing in
+  # the timer hold comes out of the page, de-indented, and nothing in
   # provenance is declared transcribed. s2-pkg stays unique although the hold,
   # now visible, carries `transactional-update` too.
   if [ "$(cat "${TMP}/mx-good/blocks/s2-timer-hold.sh" 2>/dev/null)" = "sudo systemctl disable --now transactional-update.timer rebootmgr.service" ] \
@@ -1110,7 +1109,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# The guest kubeconfig handoff Secret. TM-0766.
+# The guest kubeconfig handoff Secret.
 #
 # Its cases live in handoff-secret-test.sh because they drive the provisioner
 # itself against stub kubectl/curl, and that script can be pointed (TC=) at an

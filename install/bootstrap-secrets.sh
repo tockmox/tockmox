@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 # ============================================================================
-# Tockmox secrets bootstrap (TM-0277)
+# Tockmox secrets bootstrap
 #
 #   ./install/tockmox-install.sh bootstrap-secrets --mode new --site ./my-site \
 #       --backup-out ~/keys/sealed-secrets.key.enc --age-recipient age1...

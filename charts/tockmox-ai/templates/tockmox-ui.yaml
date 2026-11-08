@@ -1,9 +1,9 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-The Tockmox UI (TM-0920, Jeff 2026-10-07: package it with 0.8.0). OFF by default: tockmoxUi.enabled. Experimental.
+The Tockmox UI (Jeff 2026-10-07: package it with 0.8.0). OFF by default: tockmoxUi.enabled. Experimental.
 
-The UI ships as source (TM-0902): the site builds its image and names it in tockmoxUi.image. It reads the cluster
+The UI ships as source: the site builds its image and names it in tockmoxUi.image. It reads the cluster
 (nodes, Argo CD applications), Prometheus and Alertmanager, and this chart's inferenceNodes and modelLifecycle
 blocks; it never changes anything itself, so every action ends in YAML an admin commits.
 
@@ -28,7 +28,7 @@ root (the update feed and the watcher's sources are public HTTPS). The tockmox-t
 UI's own image, writes that image's store plus the CA from the UI's Ingress certificate Secret. Unlike Open WebUI
 this template can decide at render time whether a CA is coming, so TOCKMOX_EXPECT_CA is set here directly.
 
-ITS OWN FAILURES ARE VISIBLE (TM-1013, homelab 2026-10-11). Sign-in answered 503 with nothing in the pod log, and
+ITS OWN FAILURES ARE VISIBLE (homelab 2026-10-11). Sign-in answered 503 with nothing in the pod log, and
 the cause (this policy refusing the issuer behind a LoadBalancer VIP) took an exec to find. The app now logs every
 caught sign-in and source failure and counts them on a separate metrics port (9464, TOCKMOX_UI_METRICS_PORT: the
 app port is routed whole to the Ingress host, so /metrics there would be public). With serviceMonitors on, a
@@ -37,7 +37,7 @@ ServiceMonitor scrapes it and a PrometheusRule alerts on failed sign-in steps an
 {{- $ui := .Values.tockmoxUi | default dict -}}
 {{- if $ui.enabled -}}
 {{- if not $ui.image -}}
-{{- fail "tockmoxUi.enabled is true but tockmoxUi.image is empty: the Tockmox UI ships as source (TM-0902). Build its image from the Dockerfile, push it to your registry, and name it here." -}}
+{{- fail "tockmoxUi.enabled is true but tockmoxUi.image is empty: the Tockmox UI ships as source. Build its image from the Dockerfile, push it to your registry, and name it here." -}}
 {{- end -}}
 {{- $ns := .Values.namespaces | default dict -}}
 {{- $monNs := $ns.monitoring | default "tockmox-monitoring" -}}
@@ -64,7 +64,7 @@ ServiceMonitor scrapes it and a PrometheusRule alerts on failed sign-in steps an
 {{- $_ := set $cfg "oidc" (merge (dict "clientSecretFile" "/etc/tockmox-ui/oidc/client-secret") (omit $cfg.oidc "clientSecretFile")) -}}
 {{- end -}}
 {{- /*
-DEFAULTS A SITE NO LONGER HAS TO WRITE (TM-1014, TM-1017; 0.8.0 testing, 2026-10-11: the reference
+DEFAULTS A SITE NO LONGER HAS TO WRITE (0.8.0 testing, 2026-10-11: the reference
 site's UI said "No apps are assigned to your account" because it set no tockmoxUi.config.apps).
   apps          with config.apps unset, one tile per console this release turns on, at its derived
                 host: chat and the gateway from this layer's own switches and ingress hosts; Grafana,
@@ -121,7 +121,7 @@ site's UI said "No apps are assigned to your account" because it set no tockmoxU
 {{- $ingOn := or (not (hasKey ($ui.ingress | default dict) "enabled")) ($ui.ingress | default dict).enabled -}}
 {{- $expectCa := and (ne ((.Values.global | default dict).certIssuer | default "") "") $ingOn -}}
 {{- $update := (($cfg.updateCheck | default dict).enabled) -}}
-{{- /* A feed read from a mounted file needs no egress; HTTPS out opens only for an https feed (TM-1027). */ -}}
+{{- /* A feed read from a mounted file needs no egress; HTTPS out opens only for an https feed. */ -}}
 {{- $updateHttps := and $update (hasPrefix "https://" ((($cfg.updateCheck | default dict).feedUrl) | default "")) -}}
 {{- $feedCm := (($ui.updateFeed | default dict).configMap) | default "" -}}
 apiVersion: v1
@@ -238,7 +238,7 @@ spec:
             - |
               set -eu
               ca=/tockmox-ca/ca.crt
-              # WAIT rather than shrug (TM-0632): a bundle built before cert-manager writes the CA is wrong for the
+              # WAIT rather than shrug: a bundle built before cert-manager writes the CA is wrong for the
               # life of the pod. Exiting non-zero after 300 s makes kubelet retry, visibly.
               if [ "${TOCKMOX_EXPECT_CA:-false}" = "true" ]; then
                 i=0
@@ -279,7 +279,7 @@ spec:
             # httpx and urllib read SSL_CERT_FILE; requests reads REQUESTS_CA_BUNDLE and ignores it. Both, always.
             - { name: SSL_CERT_FILE, value: /etc/tockmox/trust/ca-bundle.crt }
             - { name: REQUESTS_CA_BUNDLE, value: /etc/tockmox/trust/ca-bundle.crt }
-            # /metrics on its own port (TM-1013); the app port carries no /metrics.
+            # /metrics on its own port; the app port carries no /metrics.
             - { name: TOCKMOX_UI_METRICS_PORT, value: "9464" }
           ports:
             - { name: http, containerPort: 8080 }

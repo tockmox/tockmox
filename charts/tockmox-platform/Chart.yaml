@@ -32,7 +32,7 @@ dependencies:
     repository: "https://charts.longhorn.io"
     condition: apps.longhorn.enabled
 
-  # OCI, not the Pages URL, and the reason is not a preference (TM-0326).
+  # OCI, not the Pages URL, and the reason is not a preference.
   # `https://cloudnative-pg.github.io/charts` answers 301 to
   # `https://cloudnative-pg.io/charts/index.yaml` -- so the dependency was on a
   # vendor-controlled apex domain that nothing here disclosed. On 2026-09-02

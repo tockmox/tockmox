@@ -193,7 +193,7 @@ declining the capability sets `enabled: false` here as well.
 {{- $accessOn := dig "access" "enabled" true .Values.sso }}
 {{- $subModes := list "hashed_user_id" "user_id" "user_uuid" "user_username" "user_email" }}
 {{- range $app := (concat $apps $links) }}
-{{- /* Redirect host: an explicit sso.apps.<app>.host wins, else <prefix>.<domain>. Mirrors the per-app ingress host override in the layer that serves the app (TM-0820). */ -}}
+{{- /* Redirect host: an explicit sso.apps.<app>.host wins, else <prefix>.<domain>. Mirrors the per-app ingress host override in the layer that serves the app. */ -}}
 {{- $appHost := $app.host | default (printf "%s.%s" $app.hostPrefix $domain) }}
 {{- if and $app.subMode (not (has $app.subMode $subModes)) }}
 {{- fail (printf "sso.apps.%s.subMode (or sso.subMode) must be one of %s, got %q" $app.key (join ", " $subModes) $app.subMode) }}

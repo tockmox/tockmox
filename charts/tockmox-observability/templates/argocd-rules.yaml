@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-TM-0739 ... ALERT WHEN ARGOCD CANNOT READ WHAT IT IS MEANT TO RECONCILE.
+ALERT WHEN ARGOCD CANNOT READ WHAT IT IS MEANT TO RECONCILE.
 
 THE INCIDENT. 2026-09-17, on a lab install: an expired read-only token left nine
 Applications in `ComparisonError` for two and a half days. Every one of them
@@ -31,7 +31,7 @@ repo-server restart, which is the whole reason for the `for:` window below.
 
 SAME GATE AS THE SCRAPE, deliberately. The rules render with
 `apps.argocdMonitoring`, together with the monitors and the board, and since
-TM-0739 that key follows capabilities.observability, so they render on every
+then that key follows capabilities.observability, so they render on every
 install with observability on. ArgoCD's metrics services are off in a stock
 argo-cd chart (see argocd-monitoring.yaml); fresh-install.md §6 turns them on in
 the install command, an ArgoCD you installed yourself may not have them.
@@ -111,7 +111,7 @@ spec:
           # is the failure TockmoxArgoCDCannotCompare exists to catch.
           # `and on() count(kube_service_info ...)`: only while ArgoCD's metrics
           # Services exist. Without them metrics are simply off, and the rule
-          # now renders by default (TM-0739), so firing would be a false alert on
+          # now renders by default, so firing would be a false alert on
           # every install whose ArgoCD has no metrics. The regex matches the
           # three Service NAMES (argocd-server-metrics, argocd-repo-server-metrics,
           # argocd-application-controller-metrics).

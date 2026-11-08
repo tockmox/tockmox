@@ -9,14 +9,14 @@ The rules this module exists to hold (REQ-0048 as revised by Jeff's rulings of 2
 
   1. A candidate never replaces what an alias points at, and no agent can reach it. Proposing a
      candidate adds it to the catalog at stage `candidate` and a `<alias>-next` route beside the live
-     one, and `-next` routes render ONLY to the eval gateway (nodes.render_model_list). TM-0936 showed
+     one, and `-next` routes render ONLY to the eval gateway (nodes.render_model_list). Here is
      why: inside one LiteLLM, an access group fails open for any key with no model list, so the fence is
      the candidate not being in the production gateway at all.
   2. An alias moves only after `promotion.requiredPasses` passing comparisons of the candidate against
      the incumbent (default 3, per-class override), read from REQ-0045 comparative verdict records
-     (AC-45.9, proposed in TM-0935). A fail resets the count; inconclusive neither counts nor resets.
+     (AC-45.9, proposed). A fail resets the count; inconclusive neither counts nor resets.
      check_promotions() refuses values where an alias moved without that record; the UI refuses to start
-     on them, and the same function is the CI gate (TM-0930).
+     on them, and the same function is the CI gate.
   3. A new hosted model is a candidate too: it lands on the eval gateway with NO data-class tags. Its
      tags are chosen when it is promoted, through the same gate (the `open` default is withdrawn).
 
@@ -312,7 +312,7 @@ def check_promotions(lc: Lifecycle, inv: Inventory) -> list[str]:
     (a) its promotion record names this alias and carries enough passing comparisons (evidence_problem), or
     (b) it carries `adopted: <date>`: it was already in service when it entered the catalog, said in a reviewable line.
     A promoted hosted model is held to the same record. What this function cannot do is open the verdict files:
-    the record says WHICH bytes passed, and CI checks that the committed files hash to it (TM-0930).
+    the record says WHICH bytes passed, and CI checks that the committed files hash to it.
     (Review finding 2026-10-07: a stage flipped by hand, or a promotion for another alias, used to pass.)"""
     problems = []
     for r in inv.routes:
@@ -649,7 +649,7 @@ def propose(cand: Candidate, lc: Lifecycle, inv: Inventory, node: str = "", endp
             n = node or r.node
             ep = endpoint or r.endpoint
             # deep copies: a shallow dict shared the incumbent's tags LIST, which PyYAML then wrote as an anchor
-            # (&id001 / *id001) in the machine-owned values file (site PR #114, TM-0939)
+            # (&id001 / *id001) in the machine-owned values file (site PR #114)
             routes.append(Route(r.alias + NEXT, n, ep, cand.model, r.kind, r.provider, copy.deepcopy(r.params),
                                 copy.deepcopy(r.model_info), entry.size_gib))
         if not live:
@@ -680,7 +680,7 @@ def _propose_frontier(cand, lc, inv, taken=()):
     entry = Entry(_slug(f"{provider}-{mid}"), cand.model, cand.source, stage="candidate", track=("deprecation",))
     keyenv = (lc.frontier_providers.get(provider) or {}).get("keyEnv", f"{provider.upper()}_API_KEY")
     notes = ["admitted to the EVAL gateway only, with no data-class tags: no agent can call it (the production "
-             "gateway does not have it, which TM-0936 showed is the only fence that holds for every key)",
+             "gateway does not have it, which is the only fence that holds for every key)",
              f"start an evaluation against the alias it should compete for; after enough passing comparisons, promoting "
              f"it is a separate change, and that is where you choose its data-class tags"]
     eval_entry = {"model_name": alias, "litellm_params": {"model": cand.model, "api_key": f"os.environ/{keyenv}"},
@@ -836,7 +836,7 @@ def merge(base: Lifecycle, add: Lifecycle) -> Lifecycle:
     return res
 
 
-# ---------------------------------------------------------------- where a model comes from (TM-0938)
+# ---------------------------------------------------------------- where a model comes from
 
 HF_REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}/[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 OLLAMA_NAME = re.compile(r"^([a-z0-9][a-z0-9._-]{0,63}/)?[a-z0-9][a-z0-9._-]{0,63}$")
@@ -1042,7 +1042,7 @@ def render_ollama(plan: Plan, idle: str = "10m") -> dict:
             "env": {"OLLAMA_MAX_LOADED_MODELS": str(max(1, len(pinned_models) + 1)), "OLLAMA_KEEP_ALIVE": idle}}
 
 
-# ---------------------------------------------------------------- pinned build vs what a node serves (TM-0934)
+# ---------------------------------------------------------------- pinned build vs what a node serves
 # Git holds the intended build; the node holds the actual one. For every catalogued Ollama or Hugging Face
 # model with a pinned revision, each route that serves it is compared with what its node reports. The rule
 # this section holds: a comparison it cannot make reads UNKNOWN with the reason, never current.

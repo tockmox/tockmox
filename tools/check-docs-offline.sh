@@ -12,7 +12,7 @@
 # nothing to build; the same convention as every gate here, see check-all.sh).
 # `--site` never needs the generator, and neither does `--selftest`.
 #
-# WHY THIS READS THE SITE AND NOT docs-site/mkdocs.yml (TM-0215). MkDocs themes
+# WHY THIS READS THE SITE AND NOT docs-site/mkdocs.yml. MkDocs themes
 # fetch Google Fonts at page load. A Dark Site that renders a docs page and
 # silently reaches for fonts.googleapis.com has broken the claim the whole
 # feature exists to support, and `font: false` in the config only proves the

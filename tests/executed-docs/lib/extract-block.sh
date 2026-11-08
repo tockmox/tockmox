@@ -39,7 +39,7 @@
 # the blocks are distinguishable by their label and not by their content ...
 # section 4a's two k3s installs are byte-identical apart from --cluster-init,
 # and --containing has no negation, so nothing else can express "the one
-# without" (TM-0716). The label is the nearest non-blank line outside any fence;
+# without". The label is the nearest non-blank line outside any fence;
 # two adjacent fences therefore share the one above them. Combining
 # --under-label with --containing ANDs them: the label picks the shape, the
 # content confirms the command. Both refuse on zero matches or on more than one.
@@ -59,7 +59,7 @@
 # for fresh-install section 2's timer hold answered EXTRACT_ERROR_NO_MATCH
 # about a block the page has, and `--containing transactional-update` looked
 # unique only because the extractor could not see the second block carrying
-# that string (TM-0722). Now a fence opens at any indent, the indent is
+# that string. Now a fence opens at any indent, the indent is
 # recorded, the fence closes only on a closing marker at that SAME indent, and
 # exactly that indent is removed from every body line, so the bytes returned
 # are what a reader would paste rather than what the markdown nesting added.
@@ -257,7 +257,7 @@ BODY="$(
       # A FENCE MARKER IS NOT PROSE. Without this guard the ```bash line itself
       # becomes the label, because it is non-blank and arrives immediately
       # before the fence-open branch reads it. Caught on the first run.
-      # A fence opens at ANY indent (TM-0722): up to the three backticks is
+      # A fence opens at ANY indent: up to the three backticks is
       # the indent, and what follows them is the info string, which for a
       # backtick fence may not itself contain a backtick ... a line that does
       # is an inline code span in prose, not a fence.

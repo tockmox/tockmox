@@ -94,7 +94,7 @@ every sign-on. The first account is the exception, and it applies to SSO too.
 
 ### The first Open WebUI account is an administrator
 
-*Corrected 2026-10-04 (TM-0856).* This page used to say arrival order does not
+*Corrected 2026-10-04.* This page used to say arrival order does not
 matter for SSO. That was wrong. The 2026-08-18 check it rested on had a `tockmox-admins`
 member sign in **second**, after a local account already held the admin slot, so
 it never exercised an SSO login into an empty Open WebUI.
@@ -110,7 +110,7 @@ sign-in. Measured on a 0.7.1 greenfield (lab, 2026-10-04): a `tockmox-users`
 member signing in first read `admin`, `admin`, then `user` after an administrator
 had signed in.
 
-**Since 0.8.0 the window is closed by default** (TM-0859). The AI layer's
+**Since 0.8.0 the window is closed by default**. The AI layer's
 `open-webui.extraEnvFrom` carries an optional `tockmox-openwebui-bootstrap-admin`
 entry, and `tools/mint-secrets.sh` (so `tockmox-install.sh bootstrap-secrets`)
 mints that Secret with a random password and the address
@@ -133,7 +133,7 @@ model to everyone. Measured through the API: `POST /api/v1/models/model/access/u
 with `{"id": "<model>", "access_grants": [{"principal_type": "user",
 "principal_id": "*", "permission": "read"}]}`, after which the `user` saw the model
 and a browser chat streamed. The admin interface's equivalent was not checked.
-TM-0912 tracks whether the chart should do this for you.
+Whether the chart should do this for you is open.
 
 Before 0.8.0, and on a site that sets its own `extraEnvFrom`, the two ways to
 close the window:

@@ -47,7 +47,7 @@ global:
   # Empty falls back to the cluster default, which un-does the policy without
   # complaining. Set it to a class you have.
   localStorageClass: "local-path"
-  # Extra labels for EVERY namespace a chart here creates (TM-0816): the policy
+  # Extra labels for EVERY namespace a chart here creates: the policy
   # layer's namespaces and the platform layer's createCredentialsNamespaces.
   # For an admission mutator keyed on namespace labels, which would otherwise
   # act on the first chart pod before you could label the namespace: Zarf's
@@ -226,7 +226,7 @@ namespaces:
   kube_bench: tockmox-kube-bench
 
 # ---------------------------------------------------------------------------
-# POD SECURITY ADMISSION (TM-0135, TM-0487, TM-0635). Written into the
+# POD SECURITY ADMISSION. Written into the
 # `pod-security.kubernetes.io/*` labels of every namespace listed in
 # `namespaces.create` above. Labels only: nothing in this key changes a pod.
 #
@@ -245,11 +245,11 @@ namespaces:
 # at zero replicas with the reason in a ReplicaSet event.
 #
 #   ai                  baseline    the model gateway (LiteLLM) runs as root and
-#                                   its image ships no non-root user (TM-0596),
+#                                   its image ships no non-root user,
 #                                   so restricted cannot hold with it enabled.
 #                                   Raise to restricted once that is fixed.
 #   authentik           restricted  the server and worker set the four fields
-#                                   they left unset (TM-0635), from
+#                                   they left unset, from
 #                                   tockmox-identity values.
 #   diagnostic_identity baseline    no shipped pod lands here (measured: none).
 #                                   Baseline rather than restricted because
@@ -356,7 +356,7 @@ aiEgress:
     extraEgress: []
 
   # -------------------------------------------------------------------------
-  # EGRESS DEFAULT-DENY FOR THE WHOLE AI NAMESPACE (TM-0273 fix 1).
+  # EGRESS DEFAULT-DENY FOR THE WHOLE AI NAMESPACE.
   #
   # The block above contains the chat console only. This one closes the rest of
   # the namespace: an ordinary pod in it, and the model gateway above all, which
@@ -366,7 +366,7 @@ aiEgress:
   # capabilities.networkPolicy).
   #
   # WHAT IT ALLOWS, and each item was measured to be necessary, not guessed
-  # (card TM-0273, 2026-09-06 and 2026-09-07): cluster DNS; the namespace itself
+  # (2026-09-06 and 2026-09-07): cluster DNS; the namespace itself
   # (a bare egress deny also blocks a pod from reaching its OWN neighbours, so
   # Open WebUI -> LiteLLM and LiteLLM -> its database fail without it); the CNPG
   # instance's paths (the Kubernetes API for the instance manager, the Garage S3
@@ -432,7 +432,7 @@ diagnosticIdentity:
   # Extra API groups the identity may READ. Add a group here when an operator
   # you install brings a CRD the agent needs to see; it can never gain write.
   extraApiGroups: []
-  # THE KUBERNETES API ENDPOINT, as /32 (or narrow) CIDRs (TM-0273 fix 2).
+  # THE KUBERNETES API ENDPOINT, as /32 (or narrow) CIDRs.
   #
   # Empty is today's behaviour and it is wider than the comment on the policy
   # says: TCP 443 and 6443 to the WHOLE serviceCIDR and the WHOLE lanCIDR. "No
@@ -450,10 +450,10 @@ diagnosticIdentity:
   apiServerCIDRs: []
 
 # ---------------------------------------------------------------------------
-# The platform namespace's ingress allows (TM-0273 fixes 3 and 4).
+# The platform namespace's ingress allows.
 # ---------------------------------------------------------------------------
 platformNetpol:
-  # SOURCES OF NODE-ORIGINATED TRAFFIC, as CIDRs (TM-0273 fix 4).
+  # SOURCES OF NODE-ORIGINATED TRAFFIC, as CIDRs.
   #
   # `allow-from-node-network` has to admit traffic that comes from a NODE, not a
   # pod: the kube-apiserver's webhook calls (cert-manager, CNPG, Longhorn,
@@ -488,7 +488,7 @@ platformNetpol:
   # A wrong entry cannot open more than the clusterCIDR it sits inside.
   #
   # THE RENDER REFUSES, naming both values, when this list is set and
-  # global.lanCIDR CONTAINS global.clusterCIDR (TM-0790). The lanCIDR block is
+  # global.lanCIDR CONTAINS global.clusterCIDR. The lanCIDR block is
   # rendered in both modes, so a lanCIDR that is a supernet of the pod network
   # (10.0.0.0/8 against 10.42.0.0/16) admits every pod anyway and this key would
   # do nothing while looking done. IPv4 only; an IPv6 or malformed value is not
@@ -509,7 +509,7 @@ platformNetpol:
   # you add a database that backs up to the shipped Garage.
   extraS3ClientNamespaces: []
   # Namespaces, beyond `namespaces.monitoring`, whose Prometheus may scrape the
-  # platform and devops namespaces (TM-0820, inventory-devops 4.10). The scrape
+  # platform and devops namespaces (inventory-devops 4.10). The scrape
   # rules follow `namespaces.monitoring` already; this is for a site whose
   # Prometheus sits in a second namespace, for instance while an old stack and
   # the shipped one run side by side. Each is admitted for pods labelled
@@ -517,7 +517,7 @@ platformNetpol:
   extraPrometheusNamespaces: []
   # Namespaces outside the platform whose pods push logs, query metrics or
   # publish alerts INTO the monitoring namespace: a site's own Alloy, capacity
-  # jobs, publishers (TM-0820, observability-cutover A1). Renders one
+  # jobs, publishers (observability-cutover A1). Renders one
   # NetworkPolicy, allow-from-site-clients, to Prometheus :9090, Loki :3100 and
   # ntfy :80/:8080. Empty renders nothing.
   extraMonitoringClientNamespaces: []
@@ -634,7 +634,7 @@ apps:
   # capability ... so the one rule that lets the CNPG operator see its own
   # database was the only netpol off by default. A site that enabled the model
   # gateway got a database under default-deny with no allow for the operator, and
-  # the Cluster never left `Instance Status Extraction Error`. TM-0518.
+  # the Cluster never left `Instance Status Extraction Error`.
   #
   # The comment on the rule itself used to say "turn both on together". That is
   # now the chart's job rather than the reader's: a pairing documented only in a

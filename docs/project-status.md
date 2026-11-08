@@ -190,7 +190,7 @@ with a different compliance shape from keeping inference local, and Tockmox
 makes you make it rather than making it for you.
 
 The gateway is on by default since 0.8.0 and the console goes through it
-(TM-0460, REQ-0004): its master key is minted with the other credentials, and
+(REQ-0004): its master key is minted with the other credentials, and
 the console's own key is minted by a Job once the gateway answers. The model
 list still ships empty, because a model endpoint is an address on your
 network.

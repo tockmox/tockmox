@@ -199,7 +199,7 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         return f"{s.docs_repo_url}/tree/{ref}/docs"
 
     def footer_version(u: User | None) -> dict | None:
-        """What the footer says about the version (TM-1014): the RUNNING Tockmox release, read
+        """What the footer says about the version: the RUNNING Tockmox release, read
         from the layers' Argo CD revision through the same cached source as the pages, never the
         UI's own build number. Signed-in only, so an anonymous page never reaches Argo CD; the
         "new version" pill is the admins' (the update check is theirs)."""
@@ -239,7 +239,7 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
     def running_version(apps_reading):
         # Stale data never vouches for the running version (fresh-eyes review,
         # finding 2) ... but the data that has to be fresh is the TOCKMOX LAYERS'.
-        # Until TM-0904 any stale application, a drill leftover included, made
+        # Formerly any stale application, a drill leftover included, made
         # this refuse while every layer was fresh and on one release.
         apps = apps_reading.data
         if apps is None or apps_reading.fetched_at is None:
@@ -328,7 +328,7 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
             return PlainTextResponse("bad request", status_code=400)
         if u:
             revoked.add(u.sid)
-        # SIGN OUT ENDS THE IDENTITY PROVIDER'S SESSION TOO (TM-1014, 0.8.0 testing 2026-10-11):
+        # SIGN OUT ENDS THE IDENTITY PROVIDER'S SESSION TOO (0.8.0 testing 2026-10-11):
         # RP-initiated logout at the issuer's end_session_endpoint. Whether that ends the whole
         # Authentik session or only this application's is the provider's invalidation flow
         # (default-invalidation-flow ends it; default-provider-invalidation-flow, Authentik's default
@@ -527,7 +527,7 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
     models_routes.register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report, src_demand, APP_VERSION,
                            src_verdicts, prober)
 
-    # ------------------------------------------------------------ read-only status API (TM-0841)
+    # ------------------------------------------------------------ read-only status API
 
     status_api.register(app, user_of, readings, verdict, running_version, src_apps, APP_VERSION,
                         capabilities=lambda: capability_rows()[1])

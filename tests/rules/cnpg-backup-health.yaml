@@ -1,4 +1,4 @@
-# TockmoxCNPGBackupUnhealthy ... TM-0659.
+# TockmoxCNPGBackupUnhealthy.
 #
 # DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
 #

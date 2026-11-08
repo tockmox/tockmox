@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Supply-chain pins, asserted on the files themselves (TM-0592).
+# Supply-chain pins, asserted on the files themselves.
 #
 #   ./tools/check-action-pins.sh              run the assertions on this tree
 #   ./tools/check-action-pins.sh --root DIR   run them on another tree
@@ -22,7 +22,7 @@
 # LIMIT: this proves a check is WRITTEN after each download, not that it compares
 #     the right hash, and it does not see downloads made by an action's own code
 #     (azure/setup-helm fetches helm itself) or by a package manager. The live
-#     half is a mutated hash making the CI job fail; see TM-0592.
+#     half is a mutated hash making the CI job fail.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 command -v python3 >/dev/null 2>&1 || { echo "check-action-pins: python3 missing" >&2; exit 2; }

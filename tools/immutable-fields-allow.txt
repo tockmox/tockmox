@@ -1,5 +1,5 @@
 # Immutable-field hits that tools/check-immutable-fields.sh must not fail on
-# because they are handled elsewhere (TM-0754). One per line:
+# because they are handled elsewhere. One per line:
 #
 #   <layer> <Kind> <name> <field>     # why, and where the operator step lives
 #

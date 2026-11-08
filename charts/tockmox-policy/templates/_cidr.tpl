@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-IPv4 prefix containment, because Helm has no CIDR function (TM-0790).
+IPv4 prefix containment, because Helm has no CIDR function.
 
   {{ include "tockmox.cidrContains" (dict "outer" "10.0.0.0/8" "inner" "10.42.0.0/16") }}
 

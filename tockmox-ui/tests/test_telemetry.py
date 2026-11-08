@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""TM-1013: a failed sign-in step is logged and counted, not only rendered.
+"""A failed sign-in step is logged and counted, not only rendered.
 
 Found on the homelab 2026-10-11: /login answered 503 "The identity provider did not answer" with
 nothing in the pod log, and the cause (a NetworkPolicy refusing the pod's connection to the issuer)

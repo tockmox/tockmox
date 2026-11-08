@@ -5,7 +5,7 @@
 # aggregate-to-* label that Tockmox's own deny-rbac-aggregation-injection policy
 # does not allowlist.
 #
-# WHY THIS EXISTS. On a stock install, 2026-09-11 (TM-0505), the application
+# WHY THIS EXISTS. On a stock install, 2026-09-11, the application
 # controller logged six admission warnings against ClusterRoles Tockmox had just
 # created itself:
 #

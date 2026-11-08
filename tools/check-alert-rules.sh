@@ -11,7 +11,7 @@
 # one of them was found by a human noticing, never by a gate. An alert nobody
 # has watched fire is a claim, not a control.
 #
-# TM-0519 is the case that forced it. `StaticSATokenRotationOverdue` assumed a
+# is the case that forced it. `StaticSATokenRotationOverdue` assumed a
 # static ServiceAccount-token Secret in a `tockmox-*` namespace could only be one
 # WE minted for an off-cluster consumer. kube-prometheus-stack 90.1.1 broke that
 # by shipping its own, so the rule would have fired on a chart-managed Secret
@@ -22,7 +22,7 @@
 # TEST THE RENDERED EXPRESSION, NEVER A COPY OF IT. The test cases here point at
 # rules extracted from `helm template`, not at hand-written PromQL. A test
 # against a copy proves the copy works. The 2026-09-12 measurement that settled
-# TM-0519 was re-run against the rendered rule for exactly this reason, and the
+# was re-run against the rendered rule for exactly this reason, and the
 # escaping differs between the template source and the rendered output.
 #
 # EVERY CASE MUST ASSERT BOTH DIRECTIONS. A firing test alone admits a rule that
@@ -71,7 +71,7 @@ command -v python3  >/dev/null 2>&1 || { echo "check-alert-rules: REFUSING ... p
 # a build dependency of the chart, so a workstation without it skips rather than
 # fails; CI pins it and therefore always runs it.
 #
-# PARTITION, NOT REFUSE (TM-0713, 2026-09-17). Until then a missing helm or
+# PARTITION, NOT REFUSE (2026-09-17). Until then a missing helm or
 # promtool stopped the whole gate, so a tests/rules/ case could be authored and
 # never once parsed until CI saw it, and a chart that no longer renders its
 # rules went unnoticed on any machine without promtool. Now every step that

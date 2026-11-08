@@ -28,7 +28,7 @@ Observe-and-report only: reads files, writes a report. Contacts no cluster.
 import argparse, datetime, ipaddress, json, sys
 
 GATE_CLEAN, GATE_ERROR, GATE_DRIFT = 0, 1, 2
-# The report's published contract (TM-0882): schema/report-v0.schema.json. A
+# The report's published contract: schema/report-v0.schema.json. A
 # report names the schema it was written against, so an integrator can refuse a
 # major it does not know rather than misread it.
 SCHEMA_VERSION = "v0"

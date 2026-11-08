@@ -98,7 +98,7 @@
 
 <section class="panel" aria-labelledby="cat-h">
   <h2 id="cat-h">Catalog</h2>
-  <p>{{ badge("ok", "Promotion gate passes") if not gate else badge("critical", "Promotion gate fails") }} {% if gate %}{{ gate|join("; ") }}{% else %}Every live alias points at a model that was promoted with enough passing comparisons on record, or was already in service when it was catalogued (<code>adopted</code>). The record is checked here; that each committed verdict file matches its hash is checked in CI (TM-0930).{% endif %}</p>
+  <p>{{ badge("ok", "Promotion gate passes") if not gate else badge("critical", "Promotion gate fails") }} {% if gate %}{{ gate|join("; ") }}{% else %}Every live alias points at a model that was promoted with enough passing comparisons on record, or was already in service when it was catalogued (<code>adopted</code>). The record is checked here; that each committed verdict file matches its hash is checked in CI.{% endif %}</p>
   {% for n in gate_notes %}<p>{{ badge("warning", "Older bar") }} {{ n }}</p>{% endfor %}
   {% if catalog %}
   <div class="table-wrap" role="region" aria-labelledby="cat-cap" tabindex="0">

@@ -6,7 +6,7 @@
 # answer, run verbatim from the page and asserted against the page's own
 # "Passes when" conditions.
 #
-# WHY THIS PAGE, AND WHY THE CENSUS COMES FIRST (TM-0351). Every path script
+# WHY THIS PAGE, AND WHY THE CENSUS COMES FIRST. Every path script
 # records whether the page it tests states success conditions at all, because
 # a page that states none is a documentation defect before it is a testing gap.
 # The first shape of that record was an inline `grep -c -i 'success condition'`,
@@ -50,7 +50,7 @@
 #
 # NO CLUSTER IS AN EXCEPTION, NOT A FAILURE. Under run.sh a cluster is always
 # there (it refuses to start otherwise). Run by hand with no reachable API,
-# this script completes the citation stage ... the census is the part TM-0351
+# this script completes the citation stage ... the census is the part this path
 # is about and it needs no cluster ... then records an exception and exits 3,
 # which is the harness's "recorded as an exception" code. A red result here
 # would be a false accusation against the page.
@@ -58,7 +58,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "${HERE}/../lib/assert.sh"
-# TM-0797: every kubectl and helm call below names its cluster with --context or
+# every kubectl and helm call below names its cluster with --context or
 # --kube-context from this variable, and an empty value is refused rather than
 # falling back to the current context (docs/deployment/fresh-install.md, "Name
 # the cluster"). run.sh exports it; a standalone run must export it itself.

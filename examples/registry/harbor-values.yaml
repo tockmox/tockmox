@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Reference values for a Harbor you run YOURSELF as the mirror registry of an
-# air-gapped Tockmox install. Tockmox does not ship Harbor (TM-0130): a registry
+# air-gapped Tockmox install. Tockmox does not ship Harbor: a registry
 # is a prerequisite, not a component. See docs/deployment/airgap.md, "The
 # registry prerequisite", and docs/deployment/registry.md.
 #

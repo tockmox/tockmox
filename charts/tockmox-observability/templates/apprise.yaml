@@ -43,8 +43,7 @@ spec:
       annotations:
         tockmox.com/config-hash: {{ toYaml .Values.notifications.apprise | sha256sum | trunc 16 | quote }}
     spec:
-      # No Kubernetes API calls: a ServiceAccount of its own and no token (TM-0759,
-      # CIS 5.1.5 and 5.1.6).
+      # No Kubernetes API calls: a ServiceAccount of its own and no token (# CIS 5.1.5 and 5.1.6).
       serviceAccountName: tockmox-apprise
       automountServiceAccountToken: false
       priorityClassName: {{ .Values.notifications.priorityClassName }}
@@ -61,7 +60,7 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: { drop: ["ALL"] }
-          # THIS PATH HAD NEVER DELIVERED (TM-1020, measured 2026-10-11 on 1.5.4 and 2.0.1).
+          # THIS PATH HAD NEVER DELIVERED (measured 2026-10-11 on 1.5.4 and 2.0.1).
           # The Secret was mounted as <key>.txt; simple mode reads only <key>.cfg or <key>.yml,
           # so 1.5.4 answered every alert 204 and sent nothing (the bridge counted it delivered),
           # and /status answered 417 on the read-only mount. Each line below is one of the fixes;
@@ -123,7 +122,7 @@ spec:
         - name: tmp
           emptyDir: { sizeLimit: 16Mi }
 ---
-# TM-0759: this workload's own identity, with no token. The namespace's `default`
+# this workload's own identity, with no token. The namespace's `default`
 # account is not used (CIS 5.1.5 and 5.1.6).
 apiVersion: v1
 kind: ServiceAccount

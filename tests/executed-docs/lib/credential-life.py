@@ -33,7 +33,7 @@ trusted on inspection). As a module it is exercised by selftest.sh on every
 commit, including the expired and the malformed cases, which are the two that
 matter and the two nobody would ever reproduce by hand.
 
-CORRECT UNDER EVERY CREDENTIAL OPTION TM-0345 IS CHOOSING BETWEEN, which is
+CORRECT UNDER EVERY CREDENTIAL OPTION BEING CHOSEN BETWEEN, which is
 why it is worth writing before the option is settled:
 
   - projected SA token (option A): about an hour of life, replaced by kubelet,

@@ -1,7 +1,7 @@
 {{- /*
 SPDX-License-Identifier: Apache-2.0
 
-THE POLICY GATE (TM-0383), as files for the hooks ConfigMap.
+THE POLICY GATE, as files for the hooks ConfigMap.
 
 tockmox.ai.hookFiles returns, as YAML, every file the tockmox-litellm-hooks
 ConfigMap carries: the site's modelGateway.hooks.files, plus the gate's module

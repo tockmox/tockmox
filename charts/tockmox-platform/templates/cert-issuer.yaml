@@ -1,5 +1,5 @@
 {{- /*
-THE GUARD THAT MAKES THE NEW DEFAULT SAFE (2026-09-11, TM-0497).
+THE GUARD THAT MAKES THE NEW DEFAULT SAFE (2026-09-11).
 
 `global.certIssuer` now defaults to `tockmox-ca` rather than "". That closes the
 defect where a stock install BUILT this issuer and then pointed nothing at it:

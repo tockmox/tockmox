@@ -1,4 +1,4 @@
-# TockmoxArgoCDCannotCompare and TockmoxArgoCDMetricsAbsent ... TM-0739.
+# TockmoxArgoCDCannotCompare and TockmoxArgoCDMetricsAbsent.
 #
 # DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules
 # (the rule renders at the chart defaults, apps.argocdMonitoring following
@@ -28,7 +28,7 @@
 #      (kube_service_info) and no argocd_app_info series fires after 15m;
 #      present series (even Unknown ones) never fire it; and NO metrics Services
 #      means metrics are off, which must stay silent because the rule renders by
-#      default (TM-0739): a false alert on every install without ArgoCD metrics.
+#      default: a false alert on every install without ArgoCD metrics.
 evaluation_interval: 1m
 
 tests:

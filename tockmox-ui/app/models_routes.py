@@ -12,7 +12,7 @@ eval gateway, and promoting it to the production gateway after enough passing co
   GET  /models/promote-hosted?entry=  the same for a hosted candidate, choosing its alias and data-class tags
   POST /models/promote-hosted
   GET  /models/profiles             workload profiles -> a residency plan per node, and the engine configs
-  POST /models/builds               read which build each node holds for the pinned models it serves (TM-0934),
+  POST /models/builds               read which build each node holds for the pinned models it serves,
                                     through the probe's fences; the result lives in memory and goes stale
 """
 from __future__ import annotations
@@ -325,7 +325,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, src_report
     @app.get("/models/m/{eid}")
     def models_model(request: Request, eid: str):
         """One model: where it comes from (links built from the catalog, never fetched), the links the operator
-        added, which routes serve it on which gateway, and its promotion record (TM-0938)."""
+        added, which routes serve it on which gateway, and its promotion record."""
         u, deny = admin(request)
         if deny:
             return deny

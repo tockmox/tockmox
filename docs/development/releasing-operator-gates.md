@@ -60,7 +60,7 @@ two-source Application; the operator's own site source stays on `main`) and
 one "Pinned to" line in its README. Re-pinning proves that an evaluator who
 follows the template installs this release rather than the previous one.
 Nothing in either repository's CI notices when this step is skipped *before*
-the tag, which is why it is listed; since TM-0534 the tag push itself runs
+the tag, which is why it is listed; since then the tag push itself runs
 `tools/site-pin-at-tag.sh` (workflow `release-tag.yaml`) and goes red if the
 template's `main` does not pin that exact tag, rc or final. It is an alarm, not
 a gate: the tag already exists when it fires, so the cure is to merge the
@@ -68,7 +68,7 @@ re-pin and re-run the job. Evidence: the template repository's own history, and
 `grep -h 'targetRevision:' bootstrap/applications/*.yaml | sort | uniq -c`
 reading nine lines on the new tag and **eleven** on `main`.
 
-**The `main` count moved from ten to eleven at 0.6.1** (TM-0675 / TM-0698),
+**The `main` count moved from ten to eleven at 0.6.1**,
 when the template gained the `site-secrets` Application that
 `install/tockmox-install.sh` had been generating since 2026-09-12 and the
 template had never carried. It is single-source against the operator's own

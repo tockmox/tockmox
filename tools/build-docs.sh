@@ -5,7 +5,7 @@
 #
 #   ./tools/build-docs.sh [OUTDIR]     default OUTDIR is build/docs-site
 #
-# THE SITE IS WHAT tools/publish-docs.sh UPLOADS TO THE DOCS BUCKET (TM-0805).
+# THE SITE IS WHAT tools/publish-docs.sh UPLOADS TO THE DOCS BUCKET.
 # Garage serves it, so an air-gapped install has its manual at the moment it has
 # no network. Tockmox publishes no image and no tarball of it (ADR-0036): the
 # operator builds it from the checkout they deploy. Everything about this script
@@ -31,7 +31,7 @@
 # DETERMINISM. Pages are staged in sorted order, the locale and timezone are
 # pinned, and MkDocs writes no build timestamp into the pages it emits. Two
 # builds of one tree should be byte-identical; `diff -r` two output directories
-# to check, which is how this was verified (REPORT for TM-0215 has the output).
+# to check, which is how this was verified.
 #
 # OVERRIDES: TOCKMOX_DOCS_REF (default v<tockmox-common chart version>) is the
 # git ref that links to files outside the docs are pointed at;

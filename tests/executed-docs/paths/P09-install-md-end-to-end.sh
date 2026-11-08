@@ -14,7 +14,7 @@
 #   1. THE SHELL IS zsh, PASTED. Every WORKSTATION block is fed to an
 #      interactive zsh on a pseudo-terminal as a bracketed paste followed by
 #      Enter (lib/zsh-paste.py), because that is what the page's supported
-#      workstation does, and TM-0484/TM-0537 were both defects that bash
+#      workstation does, and there were two defects that bash
 #      cannot reproduce: `#` is not a comment in an interactive zsh, `read -p`
 #      means "coprocess", an unquoted $VAR does not word-split. A block that
 #      passes here passed the shell macOS ships, not a shell that resembles it.
@@ -23,7 +23,7 @@
 #      person types them, never through stdin.
 #
 #   2. IT IS A SESSION. The page's own model is one terminal, exports carried
-#      forward (TM-0484). Exports made by a block are captured after it returns
+#      forward. Exports made by a block are captured after it returns
 #      and re-exported here, so the next block's `${SITE_REPO:?}` guard sees
 #      what the previous block set, exactly as the reader's terminal does.
 #
@@ -67,7 +67,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "${HERE}/../lib/assert.sh"
-# TM-0797: every kubectl and helm call below names its cluster with --context or
+# every kubectl and helm call below names its cluster with --context or
 # --kube-context from this variable, and an empty value is refused rather than
 # falling back to the current context (docs/deployment/fresh-install.md, "Name
 # the cluster"). run.sh exports it; a standalone run must export it itself.
@@ -377,7 +377,7 @@ if ! done_step "$S"; then budget_left || yield "S09+"
 fi
 
 # S09b ... 1f, the per-node gateway list the policy layer needs since 0.8.0
-# (TM-0798). Appends to policy.yaml before the push, so S10 commits it.
+#. Appends to policy.yaml before the push, so S10 commits it.
 S=S09b-node-sources
 if ! done_step "$S"; then budget_left || yield "S09b+"
   step_begin "$S" '--print-netpol-node-sources' || exit 3
@@ -426,7 +426,7 @@ if ! done_step "$S"; then budget_left || yield "S12+"
   printf 'read-only token: \t%s\n' "$TOK" > "${STATE}/${S}.answers"
   _emit "GLUE: a synthetic 32-byte token is typed at the prompt (never a real credential)"
   execute_begin "install.md 2c credential Secret"; run_ws "$S" "$(block 'read -rs READ_ONLY_TOKEN')" "${STATE}/${S}.answers"; execute_end $?
-  record "$S" "2c: 'bytes read:' prints the token's length (TM-0537: the count is the stop signal)" "bytes read: ${#TOK}" "$(out_of "$S" | grep -m1 'bytes read:' | sed 's/^ *//')"
+  record "$S" "2c: 'bytes read:' prints the token's length (the count is the stop signal)" "bytes read: ${#TOK}" "$(out_of "$S" | grep -m1 'bytes read:' | sed 's/^ *//')"
   record "$S" "2c: no STOP line (the paste reached the variable)" "0" "$(out_of "$S" | grep -c 'STOP: nothing was read' | tr -d ' ')"
   run_ws "${S}-success" "$(block ".data.password}' | base64 -d | wc -c")"
   record "$S" "2c success: the repository label is present" "1" "$(out_of "${S}-success" | grep -c 'argocd.argoproj.io/secret-type.*repository' | tr -d ' ')"
@@ -604,7 +604,7 @@ if ! done_step "$S"; then budget_left || yield "S21+"
   mark_done "$S"
 fi
 
-# S21b ... the DNS success condition (TM-0897): a random label under the zone,
+# S21b ... the DNS success condition: a random label under the zone,
 # which only a wildcard record answers, resolves to Traefik's address from the
 # workstation (dig @LAN_RESOLVER) and from a pod (CoreDNS). It needs a resolver
 # the cluster's nodes also use, holding *.<internalDomain> at the pool address
@@ -664,7 +664,7 @@ does_not_prove \
   "Anything about the interactive installer route (1a's first block): only the config-file route ran. tests/installer covers the interactive prompts hermetically." \
   "That the render in S18 matches the page's illustrative table; the page itself says that table is not a dated verification." \
   "That a reader with a REAL editor lands the same four values: \$EDITOR was a script (glue) writing them. The block was unchanged." \
-  "That the 2c credential Secret is CONSUMED by ArgoCD: it was created, measured, and removed, because a git:// remote carries no authentication. What is proven is the block's byte count and the Secret's password length (TM-0537's rc4 clause), not the clone through it."
+  "That the 2c credential Secret is CONSUMED by ArgoCD: it was created, measured, and removed, because a git:// remote carries no authentication. What is proven is the block's byte count and the Secret's password length (the rc4 clause), not the clone through it."
 
 parity_caveat \
   "The workstation shell was ${WS_SHELL} $( [ "$WS_SHELL" = zsh ] && "${ZSH:-zsh}" -c 'echo $ZSH_VERSION' 2>/dev/null ) on Linux/arm64, pasted through a pty with bracketed paste. macOS ships zsh 5.9; INTERACTIVE_COMMENTS, read -p, word-splitting and NOMATCH behave the same in both. The guest is an Ubuntu cloud image on KubeVirt, single node."
