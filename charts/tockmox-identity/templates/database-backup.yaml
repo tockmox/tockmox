@@ -87,7 +87,7 @@ spec:
                   [ "$SIZE" -ge 10000 ] || { echo "dump implausibly small"; exit 1; }
           containers:
             - name: upload
-              image: {{ include "tockmox.image" (dict "ctx" $ "repo" ($db.uploaderImage | default "alpine/k8s:1.37.1")) }}
+              image: {{ include "tockmox.image" (dict "ctx" $ "repo" ($db.uploaderImage | default "alpine/k8s:1.37.2")) }}
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true

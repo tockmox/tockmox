@@ -414,7 +414,7 @@ modelGateway:
         # is a Kubernetes CronJob, unlike the CNPG six-field schedule above.
         schedule: "30 4 * * 1"
         suspend: false
-        image: alpine/k8s:1.37.1
+        image: alpine/k8s:1.37.2
         # WHERE THE DRILL RECORDS ITS ROW: one JSON object per run in
         # a bucket of its own in the shipped Garage, read back and checksummed
         # before the run may end as a PASS. A run whose row cannot be written or
@@ -631,7 +631,7 @@ modelGateway:
     # .defaultModels set the key sees only those models; name them here
     # ({"models": ["local-chat"]}) to widen or narrow that.
     generateExtra: {}
-    image: alpine/k8s:1.37.1
+    image: alpine/k8s:1.37.2
     # Same budget as litellm.migrationJob and for the same measured reason: a
     # cold install's database took 12 minutes to bootstrap on NVMe.
     backoffLimit: 20
@@ -1707,7 +1707,7 @@ litellm:
       # renders the vendored subchart on its own, where that helper (and
       # .Values.global) is absent.
       # Same result: global.imageRegistry, when set, prefixes the repository.
-      image: '{{ with dig "imageRegistry" "" (.Values.global | default dict) }}{{ trimSuffix "/" . }}/{{ end }}alpine/k8s:1.37.1'
+      image: '{{ with dig "imageRegistry" "" (.Values.global | default dict) }}{{ trimSuffix "/" . }}/{{ end }}alpine/k8s:1.37.2'
       imagePullPolicy: IfNotPresent
       env:
         - name: DB_HOST

@@ -18,7 +18,7 @@ dependencies:
     condition: apps.certManager.enabled
 
   - name: metallb
-    version: "0.16.1"
+    version: "0.16.2"
     repository: "https://metallb.github.io/metallb"
     condition: apps.metallb.enabled
 
