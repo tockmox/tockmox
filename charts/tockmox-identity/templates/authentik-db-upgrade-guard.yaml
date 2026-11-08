@@ -131,7 +131,7 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: guard
-          image: {{ include "tockmox.image" (dict "ctx" $ "repo" ($db.backup.restoreDrill.image | default "alpine/k8s:1.37.1")) }}
+          image: {{ include "tockmox.image" (dict "ctx" $ "repo" ($db.backup.restoreDrill.image | default "alpine/k8s:1.37.2")) }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

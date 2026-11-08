@@ -337,7 +337,7 @@ notifications:
 
   ntfy:
     enabled: true
-    image: binwiederhier/ntfy:v2.35.0
+    image: binwiederhier/ntfy:v2.37.2
     # The topic alerts are published to. Anything subscribed to it gets paged.
     topic: alerts
     host: ""              # override the derived ntfy.<internalDomain>
