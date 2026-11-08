@@ -16,7 +16,7 @@ docker.io/longhornio/longhorn-manager:v1.13.0
 docker.io/longhornio/longhorn-share-manager:v1.13.0
 docker.io/longhornio/longhorn-ui:v1.13.0
 docker.io/nginxinc/nginx-unprivileged:1.31-alpine
-docker.io/traefik:v3.7.14
+docker.io/traefik:v3.7.17
 dxflrs/garage:v2.5.0
 ghcr.io/berriai/litellm-database:1.106.6
 ghcr.io/cloudnative-pg/cloudnative-pg:1.30.1

@@ -93,9 +93,9 @@
     },
     {
       "name": "docker.io/traefik",
-      "purl": "pkg:oci/traefik?repository_url=docker.io/traefik&tag=v3.7.14",
+      "purl": "pkg:oci/traefik?repository_url=docker.io/traefik&tag=v3.7.17",
       "type": "container",
-      "version": "v3.7.14"
+      "version": "v3.7.17"
     },
     {
       "name": "dxflrs/garage",
@@ -358,9 +358,9 @@
     {
       "description": "Helm chart dependency of tockmox-platform",
       "name": "traefik",
-      "purl": "pkg:generic/helm/traefik@41.7.1",
+      "purl": "pkg:generic/helm/traefik@42.3.0",
       "type": "application",
-      "version": "41.7.1"
+      "version": "42.3.0"
     },
     {
       "description": "Helm chart dependency of tockmox-platform",
