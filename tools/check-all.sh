@@ -541,6 +541,8 @@ run_gate "the six no-cluster documentation pages execute: every bash block runs 
 run_gate "the no-cluster pages job goes red on a broken command, an unclassified block, a vanished section, a renamed placeholder and a wrong tag" bash tests/executed-docs/pages-no-cluster.sh --selftest
 run_gate "a lanCIDR containing the clusterCIDR is refused when nodeOriginSources is set" bash tools/check-lan-cidr-overlap.sh
 run_gate "garage.blockSize renders block_size only when set, above the tables" bash tools/check-garage-block-size.sh
+run_gate "Garage key rotation: the old key is deleted before the new Secret, no orphan keeps a grant, every copy follows, under the Job's own Roles" bash tests/garage-bootstrap/key-rotation.sh
+run_gate "the garage-key-rotation gate goes red on every mutation" bash tests/garage-bootstrap/key-rotation.sh --selftest
 run_gate "SSO blueprints are parseable YAML" bash tools/check-blueprint-discovery.sh
 run_gate "every SSO application is bound to a role group" bash tools/check-sso-bindings.sh
 run_gate "forward-auth consoles: provider, Middleware, callback and route name each other across layers" bash tools/check-forward-auth.sh
