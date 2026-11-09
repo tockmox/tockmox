@@ -153,6 +153,8 @@ paths/P*.sh            one documented path each, in dependency order
 run.sh                 provision, run selected paths, report, tear down
 provision/profiles/registry-mirror.sh  the mirror files both provisioner lanes write, and the guest's mirror-proof
 mirror-mode-test.sh    hermetic proof of the two mirror modes (also run by selftest.sh)
+lib/edge-deny-count.sh the air-gap lane's counter: the edge's deny lines for one guest over a window, from Loki
+edge-deny-count-test.sh hermetic proof of that counter (also run by selftest.sh)
 selftest.sh            hermetic proof of the machinery above
 pages-no-cluster.sh    the six no-cluster pages (values-contract, customising, capabilities,
                        configuration, platform-management, verify): every bash block extracted
