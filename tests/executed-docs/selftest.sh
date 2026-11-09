@@ -1152,6 +1152,22 @@ if [ "$MM_CASES" -eq 0 ] || { [ "$MM_RC" -ne 0 ] && ! printf '%s\n' "$MM_OUT" | 
   bad "mirror-mode-test.sh ran its cases" "rc=${MM_RC}, ${MM_CASES} case(s): $(printf '%s' "$MM_OUT" | tail -3)"
 fi
 
+# The air-gap lane's edge counter (lib/edge-deny-count.sh): its hermetic cases, folded in the same way, so the
+# per-commit gate holds the counter to "a non-answer is never a zero" and "192.0.2.6 is not 192.0.2.60".
+ED_OUT="$(bash "${HERE}/edge-deny-count-test.sh" 2>&1)"; ED_RC=$?
+ED_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "PASS "*) ED_CASES=$((ED_CASES+1)); ok "edge deny count: ${line#PASS }" ;;
+    "FAIL "*) ED_CASES=$((ED_CASES+1)); bad "edge deny count: ${line#FAIL }" "run tests/executed-docs/edge-deny-count-test.sh for detail" ;;
+  esac
+done <<EOF_ED
+$ED_OUT
+EOF_ED
+if [ "$ED_CASES" -eq 0 ] || { [ "$ED_RC" -ne 0 ] && ! printf '%s\n' "$ED_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "edge-deny-count-test.sh ran its cases" "rc=${ED_RC}, ${ED_CASES} case(s): $(printf '%s' "$ED_OUT" | tail -3)"
+fi
+
 # ---------------------------------------------------------------------------
 # The capacity preflight.
 #
