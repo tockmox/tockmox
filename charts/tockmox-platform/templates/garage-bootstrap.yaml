@@ -36,7 +36,14 @@ Helm hooks re-run on upgrade.
 
 IT NEVER OVERWRITES A CREDENTIAL. If the Secret exists, its values are used as
 they are. Rotating a key is a deliberate act: delete the Secret and let this
-run again, knowing that anything holding the old key stops working.
+run again, knowing that anything holding the old key stops working. The run
+deletes the old key in Garage before it writes the new Secret (Garage keeps
+every key ever minted under a name, so a rotation that only replaced the Secret
+would leave the old key with read and write on its bucket), deletes any key of
+that name no Secret holds (a run that died between CreateKey and the Secret
+create), and brings every copy of the Secret it made, in the credentials
+namespaces and Longhorn's, to the new key. A copy follows its source; it is
+never a credential of its own.
 */ -}}
 {{- $g := .Values.garage -}}
 {{- $name := "tockmox-garage" -}}
@@ -274,10 +281,13 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create"]
+  # patch: a copy follows its source, so after a rotation (or on a copy that
+  # predates REGION) the Job patches it to the source's values. By name, and
+  # only the Secrets this Job copies here.
   - apiGroups: [""]
     resources: ["secrets"]
     resourceNames: [{{ $g.credentialsSecretName | quote }}{{- if and $drOn (has $ns $drNamespaces) }}, {{ $drSecret | quote }}{{- end }}]
-    verbs: ["get"]
+    verbs: ["get", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -520,6 +530,44 @@ spec:
               fi
               BID=$(curl -s --max-time 10 -H "$AUTH" "$ADMIN/v2/GetBucketInfo?globalAlias=$BUCKET" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("id",""))')
 
+              # ---- keys and copies: the two rules rotation depends on --------
+              # garage_prune NAME KEEP deletes every Garage key called NAME except
+              # KEEP (KEEP empty: all of them). Garage keeps every key minted under
+              # a name, so this is what makes "delete the Secret and re-run" a
+              # rotation and not a second live key. Fatal on failure: a key that
+              # should be dead and is not is what this exists to prevent.
+              garage_prune() {
+                local ids id
+                ids=$(curl -sf --max-time 15 -H "$AUTH" "$ADMIN/v2/ListKeys" | python3 -c 'import sys,json; n,k=sys.argv[1],sys.argv[2]; print(" ".join(x["id"] for x in json.load(sys.stdin) if x.get("name")==n and x["id"]!=k))' "$1" "$2") || { say "FAIL: could not list keys to retire old $1 keys"; exit 1; }
+                for id in $ids; do
+                  curl -sf --max-time 15 -X POST -H "$AUTH" "$ADMIN/v2/DeleteKey?id=$id" >/dev/null || { say "FAIL: could not delete key $id ($1), which no Secret holds"; exit 1; }
+                  say "deleted key $id ($1): no Secret holds it"
+                done
+              }
+              # copy_secret SECRET TARGET: the copy in TARGET follows the source in
+              # $NS. Created when missing; patched when it holds another key (the
+              # source was rotated) or lacks REGION (a copy older than REGION).
+              copy_secret() {
+                local s=$1 t=$2 ak sk cak
+                ak=$(kubectl -n "$NS" get secret "$s" -o jsonpath='{.data.ACCESS_KEY_ID}' | base64 -d)
+                sk=$(kubectl -n "$NS" get secret "$s" -o jsonpath='{.data.ACCESS_SECRET_KEY}' | base64 -d)
+                if ! kubectl -n "$t" get secret "$s" >/dev/null 2>&1; then
+                  kubectl -n "$t" create secret generic "$s" \
+                    --from-literal=ACCESS_KEY_ID="$ak" --from-literal=ACCESS_SECRET_KEY="$sk" \
+                    --from-literal=REGION="$REGION"
+                  say "copied $s to $t"
+                  return 0
+                fi
+                cak=$(kubectl -n "$t" get secret "$s" -o jsonpath='{.data.ACCESS_KEY_ID}' | base64 -d)
+                if [ "$cak" != "$ak" ] || [ -z "$(kubectl -n "$t" get secret "$s" -o jsonpath='{.data.REGION}')" ]; then
+                  kubectl -n "$t" patch secret "$s" --type merge \
+                    -p "{\"stringData\":{\"ACCESS_KEY_ID\":\"$ak\",\"ACCESS_SECRET_KEY\":\"$sk\",\"REGION\":\"$REGION\"}}"
+                  say "updated $s in $t to the source's key"
+                else
+                  say "$s already present in $t"
+                fi
+              }
+
               # ---- 5. key + grant, and the Secret the ObjectStore reads -------
               if kubectl -n "$NS" get secret "$CREDS" >/dev/null 2>&1; then
                 say "credentials secret $CREDS exists, leaving it alone"
@@ -533,21 +581,38 @@ spec:
                   say "added REGION to $CREDS"
                 fi
               else
+                # Any key still called tockmox-backups is the rotated one or an
+                # orphan: retire it before the new Secret exists.
+                garage_prune tockmox-backups ""
                 say "creating access key"
                 KEY=$(curl -sf --max-time 15 -X POST -H "$AUTH" -H 'Content-Type: application/json' \
                   -d "{\"name\":\"tockmox-backups\"}" "$ADMIN/v2/CreateKey")
                 AK=$(echo "$KEY" | python3 -c 'import sys,json;print(json.load(sys.stdin)["accessKeyId"])')
                 SK=$(echo "$KEY" | python3 -c 'import sys,json;print(json.load(sys.stdin)["secretAccessKey"])')
-                say "granting read/write on $BUCKET"
-                curl -sf --max-time 15 -X POST -H "$AUTH" -H 'Content-Type: application/json' \
-                  -d "{\"bucketId\":\"$BID\",\"accessKeyId\":\"$AK\",\"permissions\":{\"read\":true,\"write\":true,\"owner\":false}}" \
-                  "$ADMIN/v2/AllowBucketKey" >/dev/null
                 kubectl -n "$NS" create secret generic "$CREDS" \
                   --from-literal=ACCESS_KEY_ID="$AK" \
                   --from-literal=ACCESS_SECRET_KEY="$SK" \
                   --from-literal=REGION="$REGION"
                 say "wrote $CREDS"
+                MINTED=1
               fi
+              # The grant follows the Secret, never the CreateKey: a run that dies
+              # between the two leaves a key with no grant, and the next run's
+              # prune deletes it. Repeated every run from the Secret's own key id
+              # (a grant is a set), which also gives a recreated bucket its key
+              # back. Fatal for a key this run minted; for an existing Secret whose
+              # key this Garage does not know, logged, as in step 5b.
+              AK=$(kubectl -n "$NS" get secret "$CREDS" -o jsonpath='{.data.ACCESS_KEY_ID}' | base64 -d)
+              if curl -sf --max-time 15 -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+                -d "{\"bucketId\":\"$BID\",\"accessKeyId\":\"$AK\",\"permissions\":{\"read\":true,\"write\":true,\"owner\":false}}" \
+                "$ADMIN/v2/AllowBucketKey" >/dev/null; then
+                say "backup key has read/write on $BUCKET"
+              elif [ "${MINTED:-0}" = 1 ]; then
+                say "FAIL: could not grant the key just minted on $BUCKET"; exit 1
+              else
+                say "WARN: could not grant $AK on $BUCKET (key unknown to this Garage?); backups will fail until $CREDS is deleted and this Job re-run"
+              fi
+              garage_prune tockmox-backups "$AK"
 
 {{- if $drOn }}
               # ---- 5b. the restore-drill register ------------------
@@ -574,6 +639,7 @@ spec:
                   say "added REGION to $DR_SEC"
                 fi
               else
+                garage_prune tockmox-drill-register ""
                 say "creating the register access key"
                 KEY=$(curl -sf --max-time 15 -X POST -H "$AUTH" -H 'Content-Type: application/json' \
                   -d "{\"name\":\"tockmox-drill-register\"}" "$ADMIN/v2/CreateKey")
@@ -597,44 +663,17 @@ spec:
               else
                 say "WARN: could not grant $AK on $DR_BUCKET (key unknown to this Garage?); the restore drill will fail on its first write until $DR_SEC is deleted and this Job re-run"
               fi
+              garage_prune tockmox-drill-register "$AK"
               for target in $DR_COPY_TO; do
                 [ "$target" = "$NS" ] && continue
-                if kubectl -n "$target" get secret "$DR_SEC" >/dev/null 2>&1; then
-                  say "$DR_SEC already present in $target"
-                  if [ -z "$(kubectl -n "$target" get secret "$DR_SEC" -o jsonpath='{.data.REGION}')" ]; then
-                    kubectl -n "$target" patch secret "$DR_SEC" --type merge \
-                      -p "{\"stringData\":{\"REGION\":\"$REGION\"}}"
-                    say "added REGION to $DR_SEC in $target"
-                  fi
-                else
-                  DRAK=$(kubectl -n "$NS" get secret "$DR_SEC" -o jsonpath='{.data.ACCESS_KEY_ID}' | base64 -d)
-                  DRSK=$(kubectl -n "$NS" get secret "$DR_SEC" -o jsonpath='{.data.ACCESS_SECRET_KEY}' | base64 -d)
-                  kubectl -n "$target" create secret generic "$DR_SEC" \
-                    --from-literal=ACCESS_KEY_ID="$DRAK" --from-literal=ACCESS_SECRET_KEY="$DRSK" \
-                    --from-literal=REGION="$REGION"
-                  say "copied $DR_SEC to $target"
-                fi
+                copy_secret "$DR_SEC" "$target"
               done
 {{- end }}
 
               # ---- 6. hand the credentials to the namespaces that consume them
               for target in $COPY_TO; do
                 [ "$target" = "$NS" ] && continue
-                if kubectl -n "$target" get secret "$CREDS" >/dev/null 2>&1; then
-                  say "$CREDS already present in $target"
-                  if [ -z "$(kubectl -n "$target" get secret "$CREDS" -o jsonpath='{.data.REGION}')" ]; then
-                    kubectl -n "$target" patch secret "$CREDS" --type merge \
-                      -p "{\"stringData\":{\"REGION\":\"$REGION\"}}"
-                    say "added REGION to $CREDS in $target"
-                  fi
-                else
-                  AK=$(kubectl -n "$NS" get secret "$CREDS" -o jsonpath='{.data.ACCESS_KEY_ID}' | base64 -d)
-                  SK=$(kubectl -n "$NS" get secret "$CREDS" -o jsonpath='{.data.ACCESS_SECRET_KEY}' | base64 -d)
-                  kubectl -n "$target" create secret generic "$CREDS" \
-                    --from-literal=ACCESS_KEY_ID="$AK" --from-literal=ACCESS_SECRET_KEY="$SK" \
-                    --from-literal=REGION="$REGION"
-                  say "copied $CREDS to $target"
-                fi
+                copy_secret "$CREDS" "$target"
               done
 
 {{- if $wireLH }}
@@ -647,11 +686,18 @@ spec:
               # backup-restore.md says so and this wiring does not argue).
               LH_SEC="tockmox-longhorn-backup"
               LH_URL="s3://${BUCKET}@${REGION}/longhorn"
+              AK=$(kubectl -n "$NS" get secret "$CREDS" -o jsonpath='{.data.ACCESS_KEY_ID}' | base64 -d)
+              SK=$(kubectl -n "$NS" get secret "$CREDS" -o jsonpath='{.data.ACCESS_SECRET_KEY}' | base64 -d)
               if kubectl -n "$NS" get secret "$LH_SEC" >/dev/null 2>&1; then
-                say "$LH_SEC exists"
+                # A copy of the backup key in Longhorn's format: it follows a rotation.
+                if [ "$(kubectl -n "$NS" get secret "$LH_SEC" -o jsonpath='{.data.AWS_ACCESS_KEY_ID}' | base64 -d)" != "$AK" ]; then
+                  kubectl -n "$NS" patch secret "$LH_SEC" --type merge \
+                    -p "{\"stringData\":{\"AWS_ACCESS_KEY_ID\":\"$AK\",\"AWS_SECRET_ACCESS_KEY\":\"$SK\"}}"
+                  say "updated $LH_SEC to the backup key"
+                else
+                  say "$LH_SEC exists"
+                fi
               else
-                AK=$(kubectl -n "$NS" get secret "$CREDS" -o jsonpath='{.data.ACCESS_KEY_ID}' | base64 -d)
-                SK=$(kubectl -n "$NS" get secret "$CREDS" -o jsonpath='{.data.ACCESS_SECRET_KEY}' | base64 -d)
                 kubectl -n "$NS" create secret generic "$LH_SEC" \
                   --from-literal=AWS_ACCESS_KEY_ID="$AK" \
                   --from-literal=AWS_SECRET_ACCESS_KEY="$SK" \
