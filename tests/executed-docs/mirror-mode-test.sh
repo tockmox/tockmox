@@ -20,7 +20,8 @@
 #   2. cache mode is byte-for-byte what the harness wrote before the modes existed
 #   3. nofallback names no upstream endpoint, in either lane, and writes the k3s
 #      drop-in and the per-boot deny script in both; cache writes neither
-#   4. the deny script blackholes every denied name and counts, and is idempotent
+#   4. the deny script blackholes every denied name and counts, and is idempotent;
+#      every mirrored registry's own name is one of the denied names
 #   5. the guest's `mirror-proof` is PASS only when configured AND the counter is
 #      zero, and FAIL for each way either can be false
 #   6. `create` refuses a bad mode before any VM is applied, and `mirror-proof`
@@ -210,6 +211,10 @@ mirrors:
     endpoint:
       - "https://${M}"
       - "https://code.forgejo.org"
+  ecr-public.aws.com:
+    endpoint:
+      - "https://${M}"
+      - "https://ecr-public.aws.com"
 GOLD
 )
 GOLD_NOFB=$(cat <<GOLD
@@ -227,6 +232,9 @@ mirrors:
     endpoint:
       - "https://${M}"
   code.forgejo.org:
+    endpoint:
+      - "https://${M}"
+  ecr-public.aws.com:
     endpoint:
       - "https://${M}"
 GOLD
@@ -259,18 +267,23 @@ mirrors:
       - "https://${M}"
     rewrite:
       "(.*)": "${P}/\$1"
+  ecr-public.aws.com:
+    endpoint:
+      - "https://${M}"
+    rewrite:
+      "(.*)": "${P}/\$1"
 GOLD
 )
 if [ "$(mirror_registries_yaml "$M" cache)" = "$GOLD_CACHE" ]; then
   ok "cache mode writes the registries.yaml the harness has always written (mirror first, upstream fallback)"
 else bad "cache mode writes the registries.yaml the harness has always written" "$(mirror_registries_yaml "$M" cache)"; fi
 if [ "$(mirror_registries_yaml "$M" nofallback)" = "$GOLD_NOFB" ]; then
-  ok "nofallback writes the mirror as the only endpoint of all five registries"
-else bad "nofallback writes the mirror as the only endpoint of all five registries" "$(mirror_registries_yaml "$M" nofallback)"; fi
+  ok "nofallback writes the mirror as the only endpoint of all six registries"
+else bad "nofallback writes the mirror as the only endpoint of all six registries" "$(mirror_registries_yaml "$M" nofallback)"; fi
 if [ "$(mirror_registries_yaml "$M/$P" nofallback)" = "$GOLD_NOFB_PREFIX" ]; then
   ok "a mirror with a project path: the host is the endpoint and every registry rewrites onto the project"
 else bad "a mirror with a project path: the host is the endpoint and every registry rewrites onto the project" "$(mirror_registries_yaml "$M/$P" nofallback)"; fi
-if [ "$(mirror_registries_yaml "$M/$P" cache | grep -c "\"(.*)\": \"${P}/")" -eq 5 ] && [ "$(mirror_registries_yaml "$M/$P" cache | grep -c 'https://docker.io')" -eq 1 ]; then
+if [ "$(mirror_registries_yaml "$M/$P" cache | grep -c "\"(.*)\": \"${P}/")" -eq 6 ] && [ "$(mirror_registries_yaml "$M/$P" cache | grep -c 'https://docker.io')" -eq 1 ]; then
   ok "cache mode with a project path rewrites too, and keeps the upstream fallback"
 else bad "cache mode with a project path rewrites too, and keeps the upstream fallback" "$(mirror_registries_yaml "$M/$P" cache | head -8 | tr '\n' ' ')"; fi
 if [ -z "$(mirror_k3s_dropin cache)" ] && [ "$(mirror_k3s_dropin nofallback)" = "disable-default-registry-endpoint: true" ]; then
@@ -438,6 +451,15 @@ if ! ( . "$PROFILE" && MX_OUTDIR="${TMP}/mx-cache.out" MX_PREFIX=t-01 MX_API=x M
 else bad "microos lane: an unknown mode is refused" "the build succeeded"; fi
 
 # ---- clause 4: the deny script, run against stubs --------------------------
+# A registry that is mirrored but not denied is the quiet repair nofallback exists to close: under the node
+# counter its pulls would reach upstream uncounted. So the two lists move together.
+undenied=""
+for up in $MIRROR_UPSTREAMS; do
+  case " $MIRROR_DENY_NAMES " in *" $up "*) ;; *) undenied="${undenied} ${up}" ;; esac
+done
+if [ -z "$undenied" ]; then
+  ok "deny names: every mirrored registry's own name is denied"
+else bad "deny names: every mirrored registry's own name is denied" "mirrored, not denied:${undenied}"; fi
 G="${TMP}/guest"; mkdir -p "$G/bin"
 : >"$G/hosts"; : >"$G/ipt.log"
 cat >"$G/bin/iptables" <<'IPT'
@@ -526,7 +548,7 @@ rm -f "$G/absent"
 # A mirror with a project path: the proof also asks for the rewrites, since without them every pull
 # reaches the registry and asks for a repository that is not there.
 PROOF_MIRROR="$M/$P" PROOF_DENY=edge proof_run "$GOLD_NOFB_PREFIX" "disable-default-registry-endpoint: true" "$GOODCOUNT"
-if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep '5 rewrite(s) onto airgap-090/' >/dev/null; then
+if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep '6 rewrite(s) onto airgap-090/' >/dev/null; then
   ok "mirror-proof, a mirror with a project path: PASS when every registry rewrites onto the project"
 else bad "mirror-proof, a mirror with a project path: PASS when every registry rewrites onto the project" "rc=${RC}: ${OUT}"; fi
 PROOF_MIRROR="$M/$P" PROOF_DENY=edge proof_run "$GOLD_NOFB" "disable-default-registry-endpoint: true" "$GOODCOUNT"

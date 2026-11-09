@@ -1168,6 +1168,22 @@ if [ "$ED_CASES" -eq 0 ] || { [ "$ED_RC" -ne 0 ] && ! printf '%s\n' "$ED_OUT" | 
   bad "edge-deny-count-test.sh ran its cases" "rc=${ED_RC}, ${ED_CASES} case(s): $(printf '%s' "$ED_OUT" | tail -3)"
 fi
 
+# The air-gap lane's image list (lib/closed-set.sh): its hermetic cases, folded in the same way, so the per-commit
+# gate holds the list to "pinned charts, never newest" and "every image from a mirrored registry, or a STOP".
+CS_OUT="$(bash "${HERE}/closed-set-test.sh" 2>&1)"; CS_RC=$?
+CS_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "PASS "*) CS_CASES=$((CS_CASES+1)); ok "closed set: ${line#PASS }" ;;
+    "FAIL "*) CS_CASES=$((CS_CASES+1)); bad "closed set: ${line#FAIL }" "run tests/executed-docs/closed-set-test.sh for detail" ;;
+  esac
+done <<EOF_CS
+$CS_OUT
+EOF_CS
+if [ "$CS_CASES" -eq 0 ] || { [ "$CS_RC" -ne 0 ] && ! printf '%s\n' "$CS_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "closed-set-test.sh ran its cases" "rc=${CS_RC}, ${CS_CASES} case(s): $(printf '%s' "$CS_OUT" | tail -3)"
+fi
+
 # ---------------------------------------------------------------------------
 # The capacity preflight.
 #
