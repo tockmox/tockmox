@@ -1080,6 +1080,18 @@ costs you, with the reasoning in the documentation rather than here.
   assignment; update promptly. Open WebUI's `LICENSE` at `v0.12.5` is byte-identical to
   `v0.12.4` (both sha256 `5f1bd74c48bf13ab0f82e177ad9e637313b92533d20ead2593d49347a47fc232`,
   checked 2026-10-29), so the licence terms in `docs/frontend-posture.md` stand.
+- **Open WebUI 0.13.3.** Upstream ships security fixes whose advisories follow CVE
+  assignment; update promptly. It also migrates the database forward: two new tables
+  (`auth_session`, `chat_view_state`) and three indexes on the channel message tables, all
+  additive. 0.13.0's migrations do not know those revisions, so treat a rollback as a
+  database restore, not an image swap. The pre-upgrade backup hook takes that backup when Open WebUI runs on
+  CloudNativePG (`modelGateway.upgradeBackup.openWebuiClusterName`); on the SQLite default
+  it is the volume's own backup. Upstream's retrieval defaults move where a site sets
+  nothing: `RAG_TOP_K` and `RAG_TOP_K_RERANKER` from 3 to 10, and `CHUNK_SIZE` from 1000 to
+  1024 for files processed from now on. Tockmox sets none of the three, so a site that
+  relies on the old values sets them in its Open WebUI env. The `LICENSE` at `v0.13.3` is
+  byte-identical to `v0.13.0` (sha256 `5f1bd74c48bf13ab0f82e177ad9e637313b92533d20ead2593d49347a47fc232`, checked 2026-11-09), so the licence terms
+  in `docs/frontend-posture.md` stand.
 
 ### Fixed
 
