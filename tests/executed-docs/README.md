@@ -155,6 +155,8 @@ provision/profiles/registry-mirror.sh  the mirror files both provisioner lanes w
 mirror-mode-test.sh    hermetic proof of the two mirror modes (also run by selftest.sh)
 lib/edge-deny-count.sh the air-gap lane's counter: the edge's deny lines for one guest over a window, from Loki
 edge-deny-count-test.sh hermetic proof of that counter (also run by selftest.sh)
+lib/closed-set.sh      the air-gap lane's image list: images.txt plus what the guest pulls before the product
+closed-set-test.sh     hermetic proof of that list (also run by selftest.sh)
 selftest.sh            hermetic proof of the machinery above
 pages-no-cluster.sh    the six no-cluster pages (values-contract, customising, capabilities,
                        configuration, platform-management, verify): every bash block extracted
@@ -198,7 +200,7 @@ runner that is not there.
 
 ## Registry mirror
 
-A by-the-book install pulls its images anonymously from five public registries,
+A by-the-book install pulls its images anonymously from six public registries,
 and an upstream rate limit then looks like a component that never became ready.
 `TOCKMOX_REGISTRY_MIRROR` points the node at a mirror you run. What that proves
 depends on the mode.
@@ -245,6 +247,14 @@ image pulls did not reach an upstream registry, not that the provision made no
 outbound connection at all. And the mirror has to be a closed set: a pull-through
 cache fetches from upstream on a miss, from its own side, which the node cannot
 see, so a cache in front of the registries makes a zero look better than it is.
+
+`lib/closed-set.sh` writes that closed set, one image per line, for
+`tools/mirror-images.sh --images`: `images.txt`, then what a mirror-only guest
+pulls before the product (k3s's own images for the `K3S_VERSION` fresh-install.md
+pins, Argo CD and sealed-secrets at the chart versions the script pins, and the
+harness's git server and its probe). It stops, naming the image, when one comes
+from a registry outside the six. Argo CD's redis, on `ecr-public.aws.com`, is why
+there are six.
 
 **Where the counter lives: `TOCKMOX_UPSTREAM_DENY`.** `node` (the default) is the
 three-part arrangement above, and the attempt never leaves the guest. When the
@@ -310,7 +320,7 @@ test, and a run that cannot retrieve a kubeconfig produces no evidence at all.
 | `TOCKMOX_VM_NETWORK` | `pod` | network attachment for the VM. `pod` is KubeVirt's masquerade binding: the guest NATs out to the substrate API (so the `secret` handoff works from any harness host) and is reached only through the NodePort `create` publishes. A host that can route to the lab segment may override with a Multus NAD, e.g. `export TOCKMOX_VM_NETWORK=NAMESPACE/SEGMENT` ... measured 2026-09-04, a guest there has WAN but no route back to the management network, so the handoff never lands |
 | `TOCKMOX_VM_STORAGECLASS` | `harvester-longhorn-r1` | class for the VM's boot disk |
 | `TOCKMOX_HANDOFF` | `secret` | how the guest's kubeconfig comes back: `secret` (guest writes it outbound, no inbound path needed) or `http` (guest serves it once, no credential in the guest) |
-| `TOCKMOX_REGISTRY_MIRROR` | *(empty)* | `host[:port]`, optionally `/PROJECT`, of a registry that mirrors docker.io, quay.io, ghcr.io, registry.k8s.io and code.forgejo.org. Empty means every image pulls anonymously from upstream |
+| `TOCKMOX_REGISTRY_MIRROR` | *(empty)* | `host[:port]`, optionally `/PROJECT`, of a registry that mirrors docker.io, quay.io, ghcr.io, registry.k8s.io, code.forgejo.org and ecr-public.aws.com. Empty means every image pulls anonymously from upstream |
 | `TOCKMOX_REGISTRY_MODE` | `cache` | `cache`: the mirror is tried first and the upstream is the fallback. `nofallback`: the mirror is the only registry and upstream traffic is denied and counted (see "Registry mirror" below) |
 | `TOCKMOX_UPSTREAM_DENY` | `node` | nofallback only. `node`: the guest rejects and counts attempts to the upstream registries. `edge`: it does not, because the network does (a firewall that blocks and logs), so that firewall sees the attempt. Pass the same value to `mirror-proof` |
 | `TOCKMOX_CAPACITY_CHECK` | `enforce` | `enforce`: `create` refuses a run that does not fit (see "Capacity preflight"). `skip`: run unchecked, with a warning on every run |
