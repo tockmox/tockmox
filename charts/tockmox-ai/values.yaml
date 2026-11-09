@@ -1204,24 +1204,24 @@ open-webui:
   # THE BUNDLED WEBSOCKET REDIS. Upstream deploys it by default with
   # both security contexts empty, so it failed all four restricted fields the
   # console itself now meets. It is the only default pod in this namespace that
-  # did. uid 999 is the `redis` user the alpine image creates and its /data is
-  # owned by it. INFERRED, not measured on a cluster: that redis 7.4-alpine
-  # starts as that uid with every capability dropped and no volume mounted (the
-  # image's entrypoint only needs to drop privileges, which it no longer has to
-  # do). readOnlyRootFilesystem is left unset, as for the console above.
+  # did. uid 999 (gid 1000) is the `valkey` user the alpine image creates, the
+  # same ids the redis image used, and /data is owned by it. Measured on the lab
+  # 2026-11-08: valkey 9.1.3-alpine started as 999:1000 with every capability
+  # dropped and no volume mounted, answered PING and kept a key.
+  # readOnlyRootFilesystem is left unset, as for the console above.
   # ------------------------------------------------------------------------
   websocket:
     redis:
-      # The upstream chart's default tag (7.4.2-alpine3.21, a 2025 build) carries
-      # four fixable Critical CVEs: three Go standard library ones in its gosu
-      # binary and one OpenSSL. Pinned here, not left to the subchart, because
-      # Renovate reads this file and never reads the subchart's own defaults, so
-      # the default would never move. 7.4.11-alpine scanned clean of fixable
-      # Criticals (Trivy, 2026-10-17). It holds no data: Open WebUI uses it only
-      # to fan websocket events out between replicas, so a restart loses nothing.
+      # Valkey, not the chart's default redis image (0.9.0): Redis 7.4 is
+      # RSALv2/SSPLv1, which is not open source; Valkey is BSD-3, the Linux
+      # Foundation fork, and drop-in at this usage (it speaks the same protocol
+      # and reports redis_version 7.2.4 to clients). Pinned here, not left to the
+      # subchart, because Renovate reads this file and never reads the subchart's
+      # own defaults. It holds no data: Open WebUI uses it only to fan websocket
+      # events out between replicas, so a restart loses nothing.
       image:
-        repository: redis
-        tag: 7.4.12-alpine
+        repository: valkey/valkey
+        tag: 9.1.3-alpine
       resources:
         # measured on the prod install 2026-10-05 (accepted for the lab):
         # peak 12.7 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2); average 11.7 MiB.
