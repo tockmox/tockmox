@@ -212,8 +212,18 @@ costs you, with the reasoning in the documentation rather than here.
   branch `forge-dump`, pushed without force. A night that fails leaves a failed
   Job, which `KubeJobFailed` reports for a day. The machine user
   `tockmox-offsite` gains `read:issue` (it still cannot write); re-run
-  `bootstrap-forge` to give an installed forge the new token. The dump is not yet
-  read by `--restore-from`.
+  `bootstrap-forge` to give an installed forge the new token.
+
+- **A rebuild or a forge repair restores the review history from the forge
+  dump.** `--restore-from` and `repair-forge` read the latest dump beside the
+  copy, check its checksum, its counts and that it belongs to this site's
+  repository before touching the cluster, and bring each pull request back as one
+  closed issue labelled `restored-from-dump`, with its reviews and comments in
+  order; a rerun skips what is already there. New options: `--dump FILE` and
+  `--dump-sha256 HEX` for a dump carried in on media, and `--no-review-history`
+  to skip it. A dump that fails a check stops the rebuild with nothing installed;
+  no dump at all is a warning
+  (docs/administration/site-forge-recovery.md, "What a rebuild can lose").
 
 - **The built-in forge's image and chart in the air-gap list, and the
   charts repository served by the forge.** The forge's image,

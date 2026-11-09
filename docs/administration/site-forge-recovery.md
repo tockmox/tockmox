@@ -61,10 +61,14 @@ a failed Job, which the platform's failed-Job alert reports.
 
 **A rebuild can lose the commits made since the last off-site copy (up to the 15
 minutes the copy may fall behind before its alert fires), any change made by hand
-to the forge's own settings, and, in this release, the review comments: the
-nightly dump keeps every one of them, but a rebuild does not yet load them back
-into the new forge.** The dump stays readable in the destination, as the JSON the
-forge returned. Running workloads and their data volumes are the business of
+to the forge's own settings, and the review history written since the last forge
+dump (up to a day of it).** The review history in the dump comes back in a
+different shape: each pull request returns as one closed issue labelled
+`restored-from-dump`, holding its description, its reviews and its comments in
+order, with who wrote each and when. They are a record to read, not pull requests
+to reopen, and a rerun skips an issue already there. The dump itself stays
+readable in the destination, as the JSON the forge returned. Running workloads and
+their data volumes are the business of
 [backup and restore](../operations/backup-restore.md), as before.
 
 ## Set these once
@@ -129,8 +133,8 @@ up to and including ArgoCD).
 The same command as the check above, with `--context` and without `--dry-run`. It
 opens the kit, restores your sealing key **before** the sealed-secrets controller
 starts (so every sealed file in the copy still opens), installs the forge and seeds
-it from the copy, creates the branch rule, teams and sign-in again, and applies the
-root Application. Every Application already names the forge's in-cluster address,
+it from the copy, creates the branch rule, teams and sign-in again, restores the
+review history from the latest forge dump, and applies the root Application. Every Application already names the forge's in-cluster address,
 which is the same on every cluster, so no URL is rewritten.
 
 **WORKSTATION**
@@ -161,7 +165,16 @@ install ([install § connect the built-in forge's sign-in](../deployment/install
 **A copy carried in on media** (a disconnected site, or a bucket you cannot reach):
 `--restore-from file:PATH` in place of `offsite` and the destination flags. The
 file is checked against `PATH.sha256` beside it, or the `--sha256 HEX` you give,
-and refused if it does not match.
+and refused if it does not match. Bring the forge dump on the same media and name
+it with `--dump FILE`; it is checked the same way, against `FILE.sha256` or
+`--dump-sha256 HEX`.
+
+**The forge dump is checked before anything touches the cluster**, beside the copy:
+its checksum, its own counts, and that it is the dump of this site's repository.
+A dump that fails a check stops the rebuild with nothing installed. With no dump
+at the destination, the rebuild warns and goes on without the review history.
+`--no-review-history` skips the dump on purpose. The repair below restores the
+review history the same way.
 
 ## Repair only the forge
 
