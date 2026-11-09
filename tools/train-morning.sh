@@ -44,6 +44,10 @@
 # and its signature. A release line without that file (release-0.8) builds them
 # here as before; the workflow cannot run for it, because a release event runs
 # the workflow as it is at the tagged commit.
+# IMAGES.TXT. Every Release attaches images.txt from the SHA: the air-gap mirror list
+# RELEASING.md promises, which release-assets.yaml does not build. verify refuses a
+# candidate without one; publish writes it to DIST_DIR just before the Release is
+# created, or before a Release that lacks it gets it uploaded.
 # RESUMABLE. Rerun with the same SPEC after a stop. A step whose end state already
 # holds (branch at the SHA, tag on the SHA and verified, .sig that verifies,
 # SHA256SUMS that checks, Release with every asset) is skipped with a message.
@@ -218,6 +222,8 @@ verify() {
       || stop "origin/$REL_BRANCH ($REL_SHA) is not an ancestor of $SHA: not fast-forwardable. Something landed on $REL_BRANCH after the train started; rebuild the candidate."
     say "  origin/$REL_BRANCH $REL_SHA is an ancestor: fast-forward of $(g rev-list --count "$REL_SHA..$SHA") commit(s)"
   fi
+  g cat-file -e "$SHA:images.txt" 2>/dev/null \
+    || stop "$SHA has no images.txt: the Release attaches it as the air-gap mirror list (RELEASING.md). Nothing was changed."
 
   hits=""; stamped=""
   while IFS= read -r f; do
@@ -365,6 +371,7 @@ tag_and_push() {
 
 # ---------------------------------------------------------------- 5. sign the report, checksums
 ci_builds_assets() { g cat-file -e "$SHA:.github/workflows/release-assets.yaml" 2>/dev/null; }
+write_images() { act "mkdir -p $(q "$DIST_DIR") && git -C $(q "$REPO") show $SHA:images.txt > $(q "$DIST_DIR/images.txt")"; }
 
 sign_and_sum() {
   say "5/7 sign the gate report, archive and SHA256SUMS"
@@ -401,8 +408,8 @@ sign_and_sum() {
 # ---------------------------------------------------------------- 6. the Release
 publish() {
   say "6/7 GitHub Release $TAG (--verify-tag; attachments per RELEASING.md)"
-  if ci_builds_assets; then ASSETS=("$GATE_REPORT" "$GATE_REPORT.sig")
-  else ASSETS=("$ARCHIVE" "$DIST_DIR/SHA256SUMS" "$GATE_REPORT" "$GATE_REPORT.sig"); fi
+  if ci_builds_assets; then ASSETS=("$GATE_REPORT" "$GATE_REPORT.sig" "$DIST_DIR/images.txt")
+  else ASSETS=("$ARCHIVE" "$DIST_DIR/SHA256SUMS" "$GATE_REPORT" "$GATE_REPORT.sig" "$DIST_DIR/images.txt"); fi
   if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
     names=$(gh release view "$TAG" --repo "$GH_REPO" --json assets \
       | python3 -I -c 'import json,sys; print("\n".join(a["name"] for a in json.load(sys.stdin)["assets"]))')
@@ -410,11 +417,13 @@ publish() {
     for a in "${ASSETS[@]}"; do printf '%s\n' "$names" | grep -x "$(basename "$a")" >/dev/null || missing="$missing $(q "$a")"; done
     if [ -z "$missing" ]; then say "  Release exists with every asset; skipping"; return 0; fi
     say "  Release exists; uploading what it lacks:$missing"
+    case "$missing" in *images.txt*) write_images ;; esac
     act "gh release upload $TAG --repo $GH_REPO$missing"
     return 0
   fi
   extra=""; [ -z "$ANNOUNCE" ] || extra=" --discussion-category $(q "$ANNOUNCE")"
   files=""; for a in "${ASSETS[@]}"; do files="$files $(q "$a")"; done
+  write_images
   act "gh release create $TAG --repo $GH_REPO --title $(q "Tockmox $VER") --notes-file $(q "$RELEASE_NOTES") --verify-tag$extra$files"
   if [ "$GO" = 1 ]; then
     gh release view "$TAG" --repo "$GH_REPO" >/dev/null || stop "gh release view $TAG fails after create"
@@ -512,6 +521,7 @@ st_fixture() { # NAME VARIANT -> builds $PT/NAME with origin.git, repo, template
   echo "security" > "$seed/SECURITY.md"
   printf 'verify\n\n<!-- tockmox:footer:begin -->\n<sub>Tockmox v0.8.1</sub>\n<!-- tockmox:footer:end -->\n' > "$seed/docs/deployment/verify.md"
   echo "# changelog" > "$seed/CHANGELOG.md"
+  [ "$v" = noimages ] || printf 'docker.io/library/alpine:3.24\nghcr.io/example/app:1.0\n' > "$seed/images.txt"
   if [ "$v" = ciassets ]; then mkdir -p "$seed/.github/workflows"; echo "name: release-assets" > "$seed/.github/workflows/release-assets.yaml"; fi
   # a stand-in for tools/site-pin-at-tag.sh with the same interface (TAG --dir DIR)
   cat > "$seed/tools/site-pin-at-tag.sh" <<'EOS'
@@ -607,14 +617,15 @@ selftest_main() {
   st_fixture wrongkey good; ssh-keygen -q -t ed25519 -N '' -f "$PT/otherkey"
   sed -i.bak "s|SIGNING_KEY=.*|SIGNING_KEY=\"$PT/otherkey\"|" "$PT/wrongkey/spec"; st_run wrongkey
   st_probe "signing key is not the .gitsigners key" wrongkey 1 "not the key .gitsigners vouches for"
-  for n in witness nonff forbidden tagexists wrongkey; do
+  st_fixture noimages noimages; st_run noimages;    st_probe "the candidate has no images.txt" noimages 1 "has no images.txt"
+  for n in witness nonff forbidden tagexists wrongkey noimages; do
     st_assert "$n: nothing merged, pushed or signed" bash -c "[ ! -f $PT/$n/gh-calls ] && [ \"\$(cat $PT/$n/pr-state)\" = OPEN ] && [ ! -f $PT/$n/GATE-REPORT-v0.8.2.md.sig ]"
   done
 
   echo "selftest: report-only prints without acting"
   st_fixture good good; A=$(git -C "$PT/good/origin.git" rev-parse refs/heads/release-0.8); B=$(git -C "$PT/good/origin.git" rev-parse refs/heads/train/0.8.2)
   st_run good
-  st_probe "report-only exits 0" good 0 "REPORT DONE: 8 actions would run"
+  st_probe "report-only exits 0" good 0 "REPORT DONE: 9 actions would run"
   st_probe "it prints the fast-forward push" good 0 "would run: \$ git -C .*push origin $B:refs/heads/release-0.8"
   st_probe "it prints the signed tag" good 0 "would run: .*tag -s v0.8.2"
   st_probe "it prints the release with --verify-tag" good 0 "would run: \$ gh release create v0.8.2 .*--verify-tag"
@@ -625,16 +636,17 @@ selftest_main() {
 
   echo "selftest: --go against the throwaway origin (gh stubbed), then a second --go that skips everything"
   st_run good --go
-  st_probe "--go exits 0" good 0 "DONE. v0.8.2 is cut: 8 actions"
+  st_probe "--go exits 0" good 0 "DONE. v0.8.2 is cut: 9 actions"
   st_assert "origin/release-0.8 fast-forwarded to the candidate" test "$(git -C "$PT/good/origin.git" rev-parse refs/heads/release-0.8)" = "$B"
   st_assert "tag v0.8.2 on origin at the candidate" test "$(git -C "$PT/good/origin.git" rev-parse 'refs/tags/v0.8.2^{commit}')" = "$B"
   st_assert "tag verifies against .gitsigners" bash -c "git -C $PT/good/repo -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=$PT/good/repo/.gitsigners verify-tag v0.8.2 >/dev/null 2>&1"
   st_assert "template PR merged and template main pins v0.8.2" bash -c "[ \"\$(cat $PT/good/pr-state)\" = MERGED ] && git -C $PT/good/template.git show main:README.md | grep -q 'Pinned to \*\*v0.8.2\*\*'"
   st_assert "gate report signature verifies (namespace file)" bash -c "ssh-keygen -Y verify -f $PT/good/repo/.gitsigners -I maintainer@example.com -n file -s $PT/good/GATE-REPORT-v0.8.2.md.sig < $PT/good/GATE-REPORT-v0.8.2.md >/dev/null 2>&1"
   st_assert "SHA256SUMS verifies the archive" bash -c "cd $PT/good/dist && $(sha256_tool) -c SHA256SUMS >/dev/null 2>&1 && tar tzf tockmox-0.8.2.tar.gz | grep -q '^tockmox-0.8.2/CHANGELOG.md'"
-  st_assert "release created with --verify-tag and the four attachments" bash -c "grep -q -- '--verify-tag' $PT/good/gh-calls && python3 -I -c 'import json,sys; a=sorted(x[\"name\"] for x in json.load(open(sys.argv[1]))[\"assets\"]); sys.exit(0 if a==[\"GATE-REPORT-v0.8.2.md\",\"GATE-REPORT-v0.8.2.md.sig\",\"SHA256SUMS\",\"tockmox-0.8.2.tar.gz\"] else 1)' $PT/good/release.json"
+  st_assert "release created with --verify-tag and the five attachments" bash -c "grep -q -- '--verify-tag' $PT/good/gh-calls && python3 -I -c 'import json,sys; a=sorted(x[\"name\"] for x in json.load(open(sys.argv[1]))[\"assets\"]); sys.exit(0 if a==[\"GATE-REPORT-v0.8.2.md\",\"GATE-REPORT-v0.8.2.md.sig\",\"SHA256SUMS\",\"images.txt\",\"tockmox-0.8.2.tar.gz\"] else 1)' $PT/good/release.json"
+  st_assert "the attached images.txt is the tag's own" bash -c "git -C $PT/good/repo show v0.8.2:images.txt | cmp -s - $PT/good/dist/images.txt"
   st_assert "order: merge first, release last" bash -c "[ \"\$(sed -n 1p $PT/good/gh-calls)\" = merge ] && [ \"\$(tail -1 $PT/good/gh-calls | cut -c1-14)\" = 'release create' ]"
-  st_assert "one log line with minutes and the action count" bash -c "[ \$(wc -l < $PT/good/train-log.txt) -eq 1 ] && grep -q ' go [0-9]*min 8actions' $PT/good/train-log.txt"
+  st_assert "one log line with minutes and the action count" bash -c "[ \$(wc -l < $PT/good/train-log.txt) -eq 1 ] && grep -q ' go [0-9]*min 9actions' $PT/good/train-log.txt"
   st_run good --go
   st_probe "second --go skips every step" good 0 "DONE. v0.8.2 is cut: 0 actions"
   st_assert "second run appended its own log line" test "$(wc -l < "$PT/good/train-log.txt")" -eq 2
@@ -642,13 +654,13 @@ selftest_main() {
   echo "selftest: a line whose tree has release-assets.yaml leaves the archive and SHA256SUMS to CI"
   st_fixture ciassets ciassets
   st_run ciassets
-  st_probe "report-only: two fewer actions (no archive, no SHA256SUMS)" ciassets 0 "REPORT DONE: 6 actions would run"
+  st_probe "report-only: two fewer actions (no archive, no SHA256SUMS)" ciassets 0 "REPORT DONE: 7 actions would run"
   st_probe "it says CI builds them" ciassets 0 "built from the tag by release-assets.yaml"
   st_run ciassets --go
-  st_probe "--go exits 0 with six actions" ciassets 0 "DONE. v0.8.2 is cut: 6 actions"
+  st_probe "--go exits 0 with seven actions" ciassets 0 "DONE. v0.8.2 is cut: 7 actions"
   st_probe "it names the next check" ciassets 0 "NEXT: release-assets.yaml attaches tockmox-0.8.2.tar.gz"
-  st_assert "no archive built locally" bash -c "[ ! -e $PT/ciassets/dist ]"
-  st_assert "release created with the gate report and its signature only" bash -c "python3 -I -c 'import json,sys; a=sorted(x[\"name\"] for x in json.load(open(sys.argv[1]))[\"assets\"]); sys.exit(0 if a==[\"GATE-REPORT-v0.8.2.md\",\"GATE-REPORT-v0.8.2.md.sig\"] else 1)' $PT/ciassets/release.json"
+  st_assert "no archive or SHA256SUMS built locally" bash -c "[ ! -e $PT/ciassets/dist/tockmox-0.8.2.tar.gz ] && [ ! -e $PT/ciassets/dist/SHA256SUMS ]"
+  st_assert "release created with the gate report, its signature and images.txt" bash -c "python3 -I -c 'import json,sys; a=sorted(x[\"name\"] for x in json.load(open(sys.argv[1]))[\"assets\"]); sys.exit(0 if a==[\"GATE-REPORT-v0.8.2.md\",\"GATE-REPORT-v0.8.2.md.sig\",\"images.txt\"] else 1)' $PT/ciassets/release.json"
   st_run ciassets --go
   st_probe "second --go skips every step" ciassets 0 "DONE. v0.8.2 is cut: 0 actions"
 
