@@ -30,6 +30,23 @@ the installer set `siteForge.enabled`:
       passed more than a quarter ago, or when there is none and the site is
       older than a quarter. Its log names which.
 
+  The next two render only with siteForge.approverWatch, which bootstrap-forge sets
+  once it has installed the watcher they read. Without the watcher, CheckDown would
+  fire on every built-in-forge site, so the key is off until then.
+
+  TockmoxForgeApproverOutsideGroup   someone is in the forge's approvers team but no
+      longer an active member of the admin group (ruled 2026-11-04: detect and
+      alert, a person acts). One alert per person, critical, no for: delay, with
+      the team link and the open pull requests their approval still stands on. It
+      reads tockmox_forge_approver_outside_group_info, which the read-only watcher
+      bootstrap-forge installs (install/forge-approver-watch.py) exposes, and only
+      while the watcher's last check was clean (check_ok 1): an identity provider it
+      cannot read judges nobody.
+
+  TockmoxForgeApproversCheckDown   the watcher's check has not been clean for 15
+      minutes, or the watcher is not being scraped while the forge runs. Until it is,
+      a removal would not be seen.
+
 THE SCRAPE GUARD (`count(kube_namespace_status_phase...)`) is the same arm the
 resilience rules use: a dead kube-state-metrics, which alerts on its own, must
 not read as "no off-site copy" or as a copy that stopped.
@@ -43,6 +60,7 @@ not read as "no off-site copy" or as a copy that stopped.
 {{- $mins := int ($sf.copyBehindMinutes | default 15) -}}
 {{- $drill := printf "%s-drill-check" $release -}}
 {{- $dhours := int ($sf.drillCheckHours | default 26) -}}
+{{- $team := printf "https://forge.%s/org/tockmox/teams/approvers" (.Values.global.internalDomain | default "YOUR_INTERNAL_DOMAIN") -}}
 # SPDX-License-Identifier: Apache-2.0
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -137,4 +155,50 @@ spec:
               kubectl -n {{ $ns }} logs -l app.kubernetes.io/name={{ $drill }} --tail=5.
               Run tockmox-install.sh rebuild-drill on a throwaway cluster
               (docs/administration/site-forge-recovery.md, The rebuild drill).
+{{- if $sf.approverWatch }}
+        - alert: TockmoxForgeApproverOutsideGroup
+          # One series per person from the watcher; judged only on a clean check.
+          expr: >-
+            max by (namespace, user, since) (tockmox_forge_approver_outside_group_info{namespace={{ $ns | quote }}})
+            and on (namespace)
+            (max by (namespace) (tockmox_forge_approvers_check_ok{namespace={{ $ns | quote }}}) == 1)
+          labels:
+            severity: critical
+            tockmox_component: site-repository
+          annotations:
+            summary: {{ `"{{ $labels.user }} can still approve site changes but is no longer an active admin"` }}
+            description: >-
+              {{ `{{ $labels.user }}` }} is in the built-in forge's approvers team but is not an
+              active member of the admin group, so their approval still counts toward
+              merging a change to the site. Take them out of the team: {{ $team }}
+              (one click, as the forge's admin). Open pull requests their approval
+              still stands on:{{ `{{ range printf "tockmox_forge_approval_by_outside_approver{namespace=\"%s\",user=\"%s\"}" $labels.namespace $labels.user | query }} #{{ .Labels.pr }}{{ else }} none{{ end }}` }}.
+              Dismiss or decline those in the same sitting. This keeps firing until the
+              team matches the group again (docs/administration/site-forge.md, Who can approve a change).
+        - alert: TockmoxForgeApproversCheckDown
+          expr: >-
+            (
+              max by (namespace) (tockmox_forge_approvers_check_ok{namespace={{ $ns | quote }}}) == 0
+              or
+              (
+                max by (namespace) (kube_deployment_status_replicas_available{namespace={{ $ns | quote }}, deployment={{ $release | quote }}}) > 0
+                unless on (namespace)
+                max by (namespace) (tockmox_forge_approvers_check_ok{namespace={{ $ns | quote }}})
+              )
+            )
+            and on ()
+            (count(kube_namespace_status_phase{namespace={{ $ns | quote }}}) > 0)
+          for: 15m
+          labels:
+            severity: warning
+            tockmox_component: site-repository
+          annotations:
+            summary: "Nobody is watching who can approve site changes"
+            description: >-
+              The approvers watcher in {{ $ns }} has not made a clean check for 15
+              minutes, or is not being scraped. While it is down, someone removed from
+              the admin group who is still a forge approver would not be noticed. Its
+              log names the read that failed:
+              kubectl -n {{ $ns }} logs deploy/{{ $release }}-approver-watch --tail=20
+{{- end }}
 {{- end }}

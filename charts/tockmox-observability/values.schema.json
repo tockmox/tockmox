@@ -45,7 +45,11 @@
         },
         "siteForge": {
           "type": "string",
-          "enum": ["", "built-in", "external"],
+          "enum": [
+            "",
+            "built-in",
+            "external"
+          ],
           "description": "Where the site repository lives, as tockmox-install.sh wrote it (site.forge). built-in turns on what needs the built-in forge by default, such as the console's Platform > Changes. Empty is read as external."
         }
       },
@@ -704,6 +708,10 @@
           "type": "integer",
           "minimum": 25,
           "description": "Hours without a successful daily drill-check (<release>-drill-check) before TockmoxSiteRebuildDrillOverdue fires. At least a day and an hour, since the check runs once a day."
+        },
+        "approverWatch": {
+          "type": "boolean",
+          "description": "Render TockmoxForgeApproverOutsideGroup and TockmoxForgeApproversCheckDown, which read the forge's approvers watcher (install/forge-approver-watch.py). Off until bootstrap-forge installs that watcher; on without it, CheckDown fires because nothing is scraped."
         }
       }
     }

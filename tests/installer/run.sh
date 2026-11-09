@@ -427,6 +427,8 @@ assert_artifact "with the platform rules off there is no S3 rule to miss, and it
 . "$HERE/forge-dump-tests.sh"
 # shellcheck source=forge-history-tests.sh
 . "$HERE/forge-history-tests.sh"
+# shellcheck source=forge-approver-watch-tests.sh
+. "$HERE/forge-approver-watch-tests.sh"
 # shellcheck source=forge-drill-tests.sh
 . "$HERE/forge-drill-tests.sh"
 # shellcheck source=forge-upgrade-tests.sh
