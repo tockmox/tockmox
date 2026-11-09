@@ -13,7 +13,10 @@
 # in the PR that added this file:
 #
 #   1. the mode check refuses an unknown mode, a nofallback run with no mirror,
-#      a mirror that is itself an upstream name, and a URL where a host belongs
+#      a mirror that is itself an upstream name, a URL where a host belongs, and a
+#      prefix that is not a registry path; it accepts host[:port]/PREFIX, and a
+#      prefix rewrites every registry onto it (the block airgap.md tells a site
+#      to write for a mirror under a project)
 #   2. cache mode is byte-for-byte what the harness wrote before the modes existed
 #   3. nofallback names no upstream endpoint, in either lane, and writes the k3s
 #      drop-in and the per-boot deny script in both; cache writes neither
@@ -167,7 +170,12 @@ chk "nofallback with no mirror is refused" 2 "" nofallback "needs TOCKMOX_REGIST
 chk "an unknown mode is refused" 2 "$M" strict "is not cache or nofallback"
 chk "nofallback with a mirror that is an upstream name is refused" 2 "docker.io" nofallback "upstream names"
 chk "nofallback with a URL for a mirror is refused" 2 "https://$M" nofallback "host[:port]"
-chk "nofallback with a path for a mirror is refused" 2 "$M/proxy" nofallback "host[:port]"
+chk "nofallback with a project path on the mirror is usable" 0 "$M/airgap-090" nofallback
+chk "nofallback with a nested project path is usable" 0 "$M:5000/team/airgap" nofallback
+chk "a mirror ending in a slash is refused" 2 "$M/" nofallback "empty path element"
+chk "a mirror with an empty path element is refused" 2 "$M//airgap" nofallback "empty path element"
+chk "a prefix with upper case is refused (registries refuse it too)" 2 "$M/AirGap" nofallback "not a registry path"
+chk "an upstream name with a path is still an upstream" 2 "docker.io/airgap" nofallback "upstream names"
 chk3() {  # label expect-rc mirror mode deny needle
   local o rc
   o="$(mirror_mode_check "$3" "$4" "$5" 2>&1)"; rc=$?
@@ -198,6 +206,10 @@ mirrors:
     endpoint:
       - "https://${M}"
       - "https://registry.k8s.io"
+  code.forgejo.org:
+    endpoint:
+      - "https://${M}"
+      - "https://code.forgejo.org"
 GOLD
 )
 GOLD_NOFB=$(cat <<GOLD
@@ -214,14 +226,53 @@ mirrors:
   registry.k8s.io:
     endpoint:
       - "https://${M}"
+  code.forgejo.org:
+    endpoint:
+      - "https://${M}"
+GOLD
+)
+P=airgap-090
+GOLD_NOFB_PREFIX=$(cat <<GOLD
+mirrors:
+  docker.io:
+    endpoint:
+      - "https://${M}"
+    rewrite:
+      "(.*)": "${P}/\$1"
+  quay.io:
+    endpoint:
+      - "https://${M}"
+    rewrite:
+      "(.*)": "${P}/\$1"
+  ghcr.io:
+    endpoint:
+      - "https://${M}"
+    rewrite:
+      "(.*)": "${P}/\$1"
+  registry.k8s.io:
+    endpoint:
+      - "https://${M}"
+    rewrite:
+      "(.*)": "${P}/\$1"
+  code.forgejo.org:
+    endpoint:
+      - "https://${M}"
+    rewrite:
+      "(.*)": "${P}/\$1"
 GOLD
 )
 if [ "$(mirror_registries_yaml "$M" cache)" = "$GOLD_CACHE" ]; then
   ok "cache mode writes the registries.yaml the harness has always written (mirror first, upstream fallback)"
 else bad "cache mode writes the registries.yaml the harness has always written" "$(mirror_registries_yaml "$M" cache)"; fi
 if [ "$(mirror_registries_yaml "$M" nofallback)" = "$GOLD_NOFB" ]; then
-  ok "nofallback writes the mirror as the only endpoint of all four registries"
-else bad "nofallback writes the mirror as the only endpoint of all four registries" "$(mirror_registries_yaml "$M" nofallback)"; fi
+  ok "nofallback writes the mirror as the only endpoint of all five registries"
+else bad "nofallback writes the mirror as the only endpoint of all five registries" "$(mirror_registries_yaml "$M" nofallback)"; fi
+if [ "$(mirror_registries_yaml "$M/$P" nofallback)" = "$GOLD_NOFB_PREFIX" ]; then
+  ok "a mirror with a project path: the host is the endpoint and every registry rewrites onto the project"
+else bad "a mirror with a project path: the host is the endpoint and every registry rewrites onto the project" "$(mirror_registries_yaml "$M/$P" nofallback)"; fi
+if [ "$(mirror_registries_yaml "$M/$P" cache | grep -c "\"(.*)\": \"${P}/")" -eq 5 ] && [ "$(mirror_registries_yaml "$M/$P" cache | grep -c 'https://docker.io')" -eq 1 ]; then
+  ok "cache mode with a project path rewrites too, and keeps the upstream fallback"
+else bad "cache mode with a project path rewrites too, and keeps the upstream fallback" "$(mirror_registries_yaml "$M/$P" cache | head -8 | tr '\n' ' ')"; fi
 if [ -z "$(mirror_k3s_dropin cache)" ] && [ "$(mirror_k3s_dropin nofallback)" = "disable-default-registry-endpoint: true" ]; then
   ok "the k3s drop-in disables the default registry endpoint in nofallback and is empty in cache"
 else bad "the k3s drop-in disables the default registry endpoint in nofallback and is empty in cache" "cache=[$(mirror_k3s_dropin cache)] nofallback=[$(mirror_k3s_dropin nofallback)]"; fi
@@ -263,6 +314,12 @@ k_line="$(grep -n 'get.k3s.io | ' "$UB_NOFB" | head -1 | cut -d: -f1)"
 if [ -n "$d_line" ] && [ -n "$k_line" ] && [ "$d_line" -lt "$k_line" ]; then
   ok "ubuntu lane, nofallback: the deny script is run before the k3s install"
 else bad "ubuntu lane, nofallback: the deny script is run before the k3s install" "deny at line [${d_line}], k3s install at line [${k_line}]"; fi
+
+S="${TMP}/ub-prefix"; new_state "$S"
+run_tc "$S" create TOCKMOX_REGISTRY_MIRROR="$M/$P" TOCKMOX_REGISTRY_MODE=nofallback TOCKMOX_UPSTREAM_DENY=edge
+if [ "$(vm_applied "$S")" -ge 1 ] && [ "$(ud_file "$S/userdata" /etc/rancher/k3s/registries.yaml)" = "$GOLD_NOFB_PREFIX" ]; then
+  ok "ubuntu lane, a mirror with a project path: the guest's registries.yaml carries the rewrites"
+else bad "ubuntu lane, a mirror with a project path: the guest's registries.yaml carries the rewrites" "rc=${RC}, applied=$(vm_applied "$S"): $(printf '%s' "$OUT" | tail -2)"; fi
 
 # The denial at the edge (TOCKMOX_UPSTREAM_DENY=edge): the mirror is still the only registry,
 # but nothing on the node rewrites or counts the upstream names, so the firewall sees them.
@@ -420,7 +477,7 @@ proof_run() {  # registries-file dropin-content-or-empty counters -> $OUT $RC
   printf '%s\n' "$1" >"$G/etc/k3s/registries.yaml"
   if [ -n "$2" ]; then printf '%s\n' "$2" >"$G/etc/k3s/dropin.yaml"; else rm -f "$G/etc/k3s/dropin.yaml"; fi
   printf '%s\n' "$3" >"$G/counters"
-  mirror_proof_script "$M" "${PROOF_DENY:-node}" \
+  mirror_proof_script "${PROOF_MIRROR:-$M}" "${PROOF_DENY:-node}" \
     | sed -e "s#/etc/rancher/k3s/registries.yaml#$G/etc/k3s/registries.yaml#" -e "s#$MIRROR_K3S_DROPIN#$G/etc/k3s/dropin.yaml#g" >"$G/proof.sh"
   OUT="$(IPT_LOG="$G/ipt2.log" IPT_COUNTERS="$G/counters" IPT_CHAIN_ABSENT="$G/absent" PATH="$G/bin:${PATH}" sh "$G/proof.sh" 2>&1)"
   RC=$?
@@ -466,6 +523,16 @@ if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep 'does not disable the default re
   ok "mirror-proof, denial at the edge: FAIL when the k3s drop-in is missing"
 else bad "mirror-proof, denial at the edge: FAIL when the k3s drop-in is missing" "rc=${RC}: ${OUT}"; fi
 rm -f "$G/absent"
+# A mirror with a project path: the proof also asks for the rewrites, since without them every pull
+# reaches the registry and asks for a repository that is not there.
+PROOF_MIRROR="$M/$P" PROOF_DENY=edge proof_run "$GOLD_NOFB_PREFIX" "disable-default-registry-endpoint: true" "$GOODCOUNT"
+if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep '5 rewrite(s) onto airgap-090/' >/dev/null; then
+  ok "mirror-proof, a mirror with a project path: PASS when every registry rewrites onto the project"
+else bad "mirror-proof, a mirror with a project path: PASS when every registry rewrites onto the project" "rc=${RC}: ${OUT}"; fi
+PROOF_MIRROR="$M/$P" PROOF_DENY=edge proof_run "$GOLD_NOFB" "disable-default-registry-endpoint: true" "$GOODCOUNT"
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep 'not every registry rewrites onto it' >/dev/null; then
+  ok "mirror-proof, a mirror with a project path: FAIL when the rewrites are missing"
+else bad "mirror-proof, a mirror with a project path: FAIL when the rewrites are missing" "rc=${RC}: ${OUT}"; fi
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

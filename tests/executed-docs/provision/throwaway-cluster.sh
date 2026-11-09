@@ -123,6 +123,7 @@ DISK="${TOCKMOX_VM_DISK:-250Gi}"
 # finding indistinguishable from a real product defect is worse than a slow one.
 #
 #   TOCKMOX_REGISTRY_MIRROR=harbor.example.com ./throwaway-cluster.sh create
+#   TOCKMOX_REGISTRY_MIRROR=harbor.example.com/airgap ./throwaway-cluster.sh create   # images under a project
 REGISTRY_MIRROR="${TOCKMOX_REGISTRY_MIRROR:-}"
 # REGISTRY MODE, added 2026-10-27. `cache` (the default, and what every
 # run so far was) keeps the upstream as the mirror's fallback. `nofallback` makes
@@ -857,7 +858,7 @@ create() {
   # Say it on the transcript either way. A run whose image source is unstated is
   # a run whose pull failures have to be diagnosed by inference later.
   if [ -n "$REGISTRY_MIRROR" ]; then
-    echo "  registry mirror: ${REGISTRY_MIRROR} (docker.io, quay.io, ghcr.io, registry.k8s.io)" >&2
+    echo "  registry mirror: ${REGISTRY_MIRROR} (${MIRROR_UPSTREAMS// /, })" >&2
     if [ "$REGISTRY_MODE" = "nofallback" ] && [ "$REGISTRY_DENY" = "edge" ]; then
       echo "  registry mode: nofallback ... the mirror is the ONLY registry (registries.yaml and the k3s" >&2
       echo "                 drop-in). Upstream denial and the counter are the network's (upstream-deny=edge)." >&2

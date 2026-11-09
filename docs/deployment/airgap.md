@@ -327,7 +327,44 @@ and the reason this rather than a values key is the real air-gap answer is
 
 The `rewrite` block in that file is what maps an upstream path onto the prefix
 you mirrored into, so write it against the same `REGISTRY_HOST/mirror` you gave
-`tools/mirror-images.sh` above.
+`tools/mirror-images.sh` above. The example there is for proxy-cache projects,
+one per upstream. For the closed set this page builds, every registry rewrites
+onto the one prefix, and there are **five** registries, not four:
+`images.txt` carries the built-in forge's image from `code.forgejo.org`, and a
+registry with no entry in this file is pulled from directly.
+
+**NODE** ... every one of them. **YOU SUPPLY:** your registry host and prefix
+
+```yaml
+# /etc/rancher/k3s/registries.yaml
+mirrors:
+  docker.io:
+    endpoint: ["https://REGISTRY_HOST"]
+    rewrite:
+      "(.*)": "mirror/$1"
+  quay.io:
+    endpoint: ["https://REGISTRY_HOST"]
+    rewrite:
+      "(.*)": "mirror/$1"
+  ghcr.io:
+    endpoint: ["https://REGISTRY_HOST"]
+    rewrite:
+      "(.*)": "mirror/$1"
+  registry.k8s.io:
+    endpoint: ["https://REGISTRY_HOST"]
+    rewrite:
+      "(.*)": "mirror/$1"
+  code.forgejo.org:
+    endpoint: ["https://REGISTRY_HOST"]
+    rewrite:
+      "(.*)": "mirror/$1"
+```
+
+Docker Hub's official images are the one path difference between the two
+mechanisms: containerd asks for `mirror/library/python` where
+`global.imageRegistry` asks for `mirror/python`. `tools/mirror-images.sh` lands
+those images under both paths and `--verify` checks both, so either mechanism
+finds them.
 
 ### `global.imageRegistry` is the fallback
 

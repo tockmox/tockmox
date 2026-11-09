@@ -81,8 +81,9 @@ STUB
   chmod +x "$T/bin/skopeo"
   printf 'docker.io/grafana/grafana:1.0\nbusybox:1.36\nghcr.io/org/app@sha256:%s\n' \
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" > "$T/images.txt"
-  # Present set: exactly what --verify should ask for, per the dest_path rule.
-  printf 'reg.test/m/grafana/grafana:1.0\nreg.test/m/busybox:1.36\nreg.test/m/org/app:sha256-0123456789ab\n' > "$T/present.txt"
+  # Present set: exactly what --verify should ask for, per the dest_path rule,
+  # plus library/ for the Docker Hub official image (the path containerd asks for).
+  printf 'reg.test/m/grafana/grafana:1.0\nreg.test/m/busybox:1.36\nreg.test/m/library/busybox:1.36\nreg.test/m/org/app:sha256-0123456789ab\n' > "$T/present.txt"
   pass=0; fail=0
   ok()  { pass=$((pass+1)); echo "ok   $1"; }
   bad() { fail=$((fail+1)); echo "FAIL $1"; }
@@ -95,6 +96,17 @@ STUB
   out="$(STUB_PRESENT="$T/present2.txt" PATH="$T/bin:$PATH" bash "$SELF" --registry reg.test/m --images "$T/images.txt" --verify 2>&1)"; rc=$?
   if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'MISSING     busybox:1.36' && printf '%s' "$out" | grep -q '2 present, 1 missing'; then ok "one miss: exit 1, names it, counts 2/1"
   else bad "one miss: expected exit 1 naming busybox:1.36, got rc=$rc: $out"; fi
+
+  grep -v '/library/busybox' "$T/present.txt" > "$T/present4.txt"
+  out="$(STUB_PRESENT="$T/present4.txt" PATH="$T/bin:$PATH" bash "$SELF" --registry reg.test/m --images "$T/images.txt" --verify 2>&1)"; rc=$?
+  if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'at  reg.test/m/library/busybox:1.36' && printf '%s' "$out" | grep -q '2 present, 1 missing'; then ok "an official image missing under library/ (where containerd asks): exit 1, names that path"
+  else bad "library/ miss: expected exit 1 naming reg.test/m/library/busybox:1.36, got rc=$rc: $out"; fi
+
+  printf 'docker.io/traefik:v3\ndocker.io/library/postgres:17\nquay.io/solo:1\n' > "$T/official.txt"
+  out="$(bash "$SELF" --registry reg.test/m --images "$T/official.txt" --dry-run 2>&1)"
+  if printf '%s' "$out" | grep -qx '        ->  reg.test/m/library/traefik:v3' && ! printf '%s' "$out" | grep -q 'library/library' \
+     && ! printf '%s' "$out" | grep -q 'library/solo'; then ok "dry run: docker.io/NAME also lands under library/; library/ is not doubled; other registries are left alone"
+  else bad "dry run library/ handling: $out"; fi
 
   : > "$T/present3.txt"
   out="$(STUB_PRESENT="$T/present3.txt" PATH="$T/bin:$PATH" bash "$SELF" --registry reg.test/m --images "$T/images.txt" --verify 2>&1)"; rc=$?
@@ -141,6 +153,20 @@ dest_path() {
   else
     printf '%s' "$img"                       # org/name on implied docker.io
   fi
+}
+
+# docker_official IMG : true for a Docker Hub official image, the ones containerd
+# names library/NAME: a bare name, or docker.io/NAME with no organization.
+docker_official() {
+  case "$1" in
+    */*) ;;
+    *) return 0 ;;
+  esac
+  case "${1%%/*}" in
+    docker.io|index.docker.io|registry-1.docker.io)
+      case "${1#*/}" in */*) return 1 ;; *) return 0 ;; esac ;;
+  esac
+  return 1
 }
 
 src_digest() {
@@ -196,45 +222,58 @@ while IFS= read -r img; do
     *) dest="${REG}/${path}" ;;
   esac
 
+  # Docker Hub's official images (a bare name, or docker.io/NAME) live under
+  # library/ as far as containerd is concerned: a node whose registries.yaml
+  # rewrites docker.io pulls onto this prefix asks for PREFIX/library/NAME, while
+  # global.imageRegistry asks for PREFIX/NAME. Land both, so either mechanism
+  # finds the image; --verify asks for both.
+  dests="$dest"
+  if docker_official "$img"; then dests="$dest ${REG}/library/${dest#"${REG}"/}"; fi
+
   ENTRIES=$((ENTRIES + 1))
   if [ "$DRY" = 1 ]; then
     echo "would copy  $img"
-    echo "        ->  $dest"
+    for d in $dests; do echo "        ->  $d"; done
     continue
   fi
 
   if [ "$VERIFY" = 1 ]; then
-    m="$(raw_manifest "$dest")"
-    if [ -n "$m" ]; then
-      echo "present     $dest"
-      PRESENT=$((PRESENT + 1))
+    all=1
+    for d in $dests; do
+      m="$(raw_manifest "$d")"
+      if [ -n "$m" ]; then
+        echo "present     $d"
+      else
+        all=0
+        echo "MISSING     $img" >&2
+        echo "        at  $d" >&2
+        MISSING_LIST="${MISSING_LIST}  ${img}  ->  ${d}
+"
+      fi
+    done
+    if [ "$all" = 1 ]; then PRESENT=$((PRESENT + 1)); else MISSING=$((MISSING + 1)); fi
+    continue
+  fi
+
+  for d in $dests; do
+    s=$(src_digest "$img"); t=$(dst_digest "$d")
+    if [ -n "$s" ] && [ "$s" = "$t" ]; then
+      echo "up to date  $d"
+      SKIPPED=$((SKIPPED + 1))
+      continue
+    fi
+
+    echo "copying     $img"
+    echo "        ->  $d"
+    if copy_image "$img" "$d"; then
+      COPIED=$((COPIED + 1))
     else
-      echo "MISSING     $img" >&2
-      echo "        at  $dest" >&2
-      MISSING=$((MISSING + 1))
-      MISSING_LIST="${MISSING_LIST}  ${img}  ->  ${dest}
+      echo "FAILED      $img" >&2
+      FAILED=$((FAILED + 1))
+      FAILED_LIST="${FAILED_LIST}  ${img}  ->  ${d}
 "
     fi
-    continue
-  fi
-
-  s=$(src_digest "$img"); t=$(dst_digest "$dest")
-  if [ -n "$s" ] && [ "$s" = "$t" ]; then
-    echo "up to date  $dest"
-    SKIPPED=$((SKIPPED + 1))
-    continue
-  fi
-
-  echo "copying     $img"
-  echo "        ->  $dest"
-  if copy_image "$img" "$dest"; then
-    COPIED=$((COPIED + 1))
-  else
-    echo "FAILED      $img" >&2
-    FAILED=$((FAILED + 1))
-    FAILED_LIST="${FAILED_LIST}  ${img}
-"
-  fi
+  done
 done < "$IMAGES"
 
 [ "$DRY" = 1 ] && exit 0
