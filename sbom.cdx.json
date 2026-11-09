@@ -45,15 +45,15 @@
     },
     {
       "name": "docker.io/grafana/loki-canary",
-      "purl": "pkg:oci/loki-canary?repository_url=docker.io/grafana/loki-canary&tag=3.7.8",
+      "purl": "pkg:oci/loki-canary?repository_url=docker.io/grafana/loki-canary&tag=3.7.9",
       "type": "container",
-      "version": "3.7.8"
+      "version": "3.7.9"
     },
     {
       "name": "docker.io/grafana/loki",
-      "purl": "pkg:oci/loki?repository_url=docker.io/grafana/loki&tag=3.7.8",
+      "purl": "pkg:oci/loki?repository_url=docker.io/grafana/loki&tag=3.7.9",
       "type": "container",
-      "version": "3.7.8"
+      "version": "3.7.9"
     },
     {
       "name": "docker.io/library/busybox",
@@ -93,9 +93,9 @@
     },
     {
       "name": "docker.io/traefik",
-      "purl": "pkg:oci/traefik?repository_url=docker.io/traefik&tag=v3.7.14",
+      "purl": "pkg:oci/traefik?repository_url=docker.io/traefik&tag=v3.7.17",
       "type": "container",
-      "version": "v3.7.14"
+      "version": "v3.7.17"
     },
     {
       "name": "dxflrs/garage",
@@ -129,9 +129,9 @@
     },
     {
       "name": "ghcr.io/jkroepke/access-log-exporter",
-      "purl": "pkg:oci/access-log-exporter?repository_url=ghcr.io/jkroepke/access-log-exporter&tag=0.5.1",
+      "purl": "pkg:oci/access-log-exporter?repository_url=ghcr.io/jkroepke/access-log-exporter&tag=1.0.1",
       "type": "container",
-      "version": "0.5.1"
+      "version": "1.0.1"
     },
     {
       "name": "ghcr.io/jkroepke/kube-webhook-certgen",
@@ -330,9 +330,9 @@
     {
       "description": "Helm chart dependency of tockmox-observability",
       "name": "loki",
-      "purl": "pkg:generic/helm/loki@18.17.1",
+      "purl": "pkg:generic/helm/loki@21.0.0",
       "type": "application",
-      "version": "18.17.1"
+      "version": "21.0.0"
     },
     {
       "description": "Helm chart dependency of tockmox-observability",
@@ -358,9 +358,9 @@
     {
       "description": "Helm chart dependency of tockmox-platform",
       "name": "traefik",
-      "purl": "pkg:generic/helm/traefik@41.7.1",
+      "purl": "pkg:generic/helm/traefik@42.3.0",
       "type": "application",
-      "version": "41.7.1"
+      "version": "42.3.0"
     },
     {
       "description": "Helm chart dependency of tockmox-platform",
