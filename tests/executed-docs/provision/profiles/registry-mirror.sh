@@ -39,9 +39,18 @@
 #          refuses) reaches the firewall and is seen there. `mirror-proof` then
 #          checks the two files only and says the counter is not on the node.
 
+# A MIRROR WITH A PATH. TOCKMOX_REGISTRY_MIRROR is host[:port], or host[:port]/PREFIX
+# when the images live under a path on the registry (a Harbor project, which is
+# what tools/mirror-images.sh --registry HOST/PREFIX fills). containerd asks the
+# endpoint for the repository path alone, so a prefix needs a `rewrite` on every
+# mirror, the block docs/deployment/airgap.md tells a disconnected site to write:
+# without it the pulls reach the registry and ask for repositories that are not
+# there. With no prefix the file is what it always was.
+
 # WHAT THIS CAN AND CANNOT SHOW. The counter sees attempts to the front-door
 # names (docker.io, registry-1.docker.io, auth.docker.io, the CDN hosts the
-# registries redirect blobs to, quay.io, ghcr.io, registry.k8s.io). A redirect to
+# registries redirect blobs to, quay.io, ghcr.io, registry.k8s.io, and
+# code.forgejo.org, where the built-in forge's image lives). A redirect to
 # a host not on the list, by address or by a name nobody enumerated, is not seen;
 # the mirror's own upstream (a pull-through cache fetching on its side) is the
 # mirror's business and is not seen either; and it is the NODE's pulls that are
@@ -57,9 +66,9 @@
 # And the mirror has to be a closed set: a pull-through cache fetches from upstream
 # on a miss, from its own side, which nothing here can see.
 
-MIRROR_UPSTREAMS="docker.io quay.io ghcr.io registry.k8s.io"
+MIRROR_UPSTREAMS="docker.io quay.io ghcr.io registry.k8s.io code.forgejo.org"
 MIRROR_DENY_ADDR="192.0.2.1"
-MIRROR_DENY_NAMES="docker.io registry-1.docker.io index.docker.io auth.docker.io production.cloudflare.docker.com quay.io cdn.quay.io cdn01.quay.io cdn02.quay.io cdn03.quay.io ghcr.io pkg-containers.githubusercontent.com registry.k8s.io"
+MIRROR_DENY_NAMES="docker.io registry-1.docker.io index.docker.io auth.docker.io production.cloudflare.docker.com quay.io cdn.quay.io cdn01.quay.io cdn02.quay.io cdn03.quay.io ghcr.io pkg-containers.githubusercontent.com registry.k8s.io code.forgejo.org"
 MIRROR_DENY_CHAIN="TOCKMOX_UPSTREAM_DENY"
 # A drop-in, not an edit of config.yaml: the Ubuntu lane writes its own
 # config.yaml and the MicroOS lane runs the documented install, which may write
@@ -69,6 +78,10 @@ MIRROR_K3S_DROPIN="/etc/rancher/k3s/config.yaml.d/10-tockmox-registry-nofallback
 # empties them. cloud-init runs per-boot scripts in name order.
 # shellcheck disable=SC2034  # read by throwaway-cluster.sh, microos.sh and the test
 MIRROR_DENY_PERBOOT="/var/lib/cloud/scripts/per-boot/10-tockmox-upstream-deny.sh"
+
+# mirror_host MIRROR : the host[:port] part. mirror_prefix MIRROR : the path after it, or nothing.
+mirror_host() { printf '%s' "${1%%/*}"; }
+mirror_prefix() { case "$1" in */*) printf '%s' "${1#*/}" ;; esac; }
 
 # mirror_mode_check MIRROR MODE [DENY] : 0 when the combination is usable, else 2 with the reason.
 # DENY is node (default) or edge; it only matters in nofallback mode.
@@ -86,15 +99,21 @@ mirror_mode_check() {
         echo "          have nowhere to go, and a run that cannot pull proves nothing about an air gap." >&2
         return 2
       fi
+      case "$mirror" in
+        *://*|*" "*) echo "REFUSING: TOCKMOX_REGISTRY_MIRROR is a host[:port], optionally /PREFIX, not a URL: ${mirror}" >&2; return 2 ;;
+      esac
+      case "$mirror" in
+        */|*//*) echo "REFUSING: the prefix in TOCKMOX_REGISTRY_MIRROR has an empty path element: ${mirror}" >&2; return 2 ;;
+      esac
+      case "/$(mirror_prefix "$mirror")" in
+        *[!a-z0-9._/-]*) echo "REFUSING: the prefix in TOCKMOX_REGISTRY_MIRROR is not a registry path (lower case, digits, . _ - /): ${mirror}" >&2; return 2 ;;
+      esac
       for n in $MIRROR_DENY_NAMES; do
-        if [ "$mirror" = "$n" ]; then
+        if [ "$(mirror_host "$mirror")" = "$n" ]; then
           echo "REFUSING: the mirror ${mirror} is one of the upstream names nofallback denies. Name a mirror of your own." >&2
           return 2
         fi
       done
-      case "$mirror" in
-        */*|*" "*) echo "REFUSING: TOCKMOX_REGISTRY_MIRROR is a host[:port], not a URL or path: ${mirror}" >&2; return 2 ;;
-      esac
       return 0 ;;
     *)
       echo "REFUSING: TOCKMOX_REGISTRY_MODE=${mode} is not cache or nofallback." >&2
@@ -104,14 +123,19 @@ mirror_mode_check() {
 
 # mirror_registries_yaml MIRROR MODE : the text of /etc/rancher/k3s/registries.yaml.
 mirror_registries_yaml() {
-  local mirror="$1" mode="$2" up
+  local mirror="$1" mode="$2" up host prefix
+  host="$(mirror_host "$mirror")"; prefix="$(mirror_prefix "$mirror")"
   echo "mirrors:"
   for up in $MIRROR_UPSTREAMS; do
     echo "  ${up}:"
     echo "    endpoint:"
-    echo "      - \"https://${mirror}\""
+    echo "      - \"https://${host}\""
     # The upstream is the fallback in cache mode, and absent in nofallback.
     [ "$mode" = "nofallback" ] || echo "      - \"https://${up}\""
+    if [ -n "$prefix" ]; then
+      echo "    rewrite:"
+      echo "      \"(.*)\": \"${prefix}/\$1\""
+    fi
   done
 }
 
@@ -163,7 +187,14 @@ EOF
 # exits 0 only when the configuration is the nofallback one and (deny=node) the
 # counter is 0. With deny=edge it checks the two files and says where the counter is.
 mirror_proof_script() {
-  local mirror="$1" deny="${2:-node}" up ups="" counter
+  local mirror="$1" deny="${2:-node}" up ups="" counter prefix rewrite="" nup=0
+  prefix="$(mirror_prefix "$mirror")"
+  for up in $MIRROR_UPSTREAMS; do nup=$((nup + 1)); done
+  if [ -n "$prefix" ]; then
+    rewrite="rw=\$(grep -cF '\"(.*)\": \"${prefix}/\$1\"' \"\$reg\" || true)
+  echo \"  registries.yaml: \$rw rewrite(s) onto ${prefix}/ (${nup} required, one per registry)\"
+  [ \"\$rw\" -eq ${nup} ] || { echo \"  FAIL the mirror has a prefix and not every registry rewrites onto it\"; rc=1; }"
+  fi
   for up in $MIRROR_UPSTREAMS; do ups="${ups} ${up}"; done
   if [ "$deny" = "edge" ]; then
     counter='note=" (configuration only: the counter is not on this node)"
@@ -186,6 +217,7 @@ if [ -r "\$reg" ]; then
   done
   echo "  registries.yaml: \$n endpoint line(s), \$bad naming an upstream"
   [ "\$bad" -eq 0 ] || rc=1
+${rewrite}
 else
   echo "  FAIL registries.yaml is not readable"; rc=1
 fi
