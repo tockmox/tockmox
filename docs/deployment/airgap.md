@@ -329,9 +329,10 @@ The `rewrite` block in that file is what maps an upstream path onto the prefix
 you mirrored into, so write it against the same `REGISTRY_HOST/mirror` you gave
 `tools/mirror-images.sh` above. The example there is for proxy-cache projects,
 one per upstream. For the closed set this page builds, every registry rewrites
-onto the one prefix, and there are **five** registries, not four:
-`images.txt` carries the built-in forge's image from `code.forgejo.org`, and a
-registry with no entry in this file is pulled from directly.
+onto the one prefix, and there are **six** registries, not four:
+`images.txt` carries the built-in forge's image from `code.forgejo.org`, the
+ArgoCD chart (step 4) pulls its redis from `ecr-public.aws.com`, and a registry
+with no entry in this file is pulled from directly.
 
 **NODE** ... every one of them. **YOU SUPPLY:** your registry host and prefix
 
@@ -355,6 +356,10 @@ mirrors:
     rewrite:
       "(.*)": "mirror/$1"
   code.forgejo.org:
+    endpoint: ["https://REGISTRY_HOST"]
+    rewrite:
+      "(.*)": "mirror/$1"
+  ecr-public.aws.com:
     endpoint: ["https://REGISTRY_HOST"]
     rewrite:
       "(.*)": "mirror/$1"
@@ -461,7 +466,7 @@ in that file is a Tockmox workload.
 
 | Prerequisite | Normally fetched from | What has to cross the boundary |
 |---|---|---|
-| ArgoCD | the `argo/argo-cd` chart | the chart archive plus its images |
+| ArgoCD | the `argo/argo-cd` chart | the chart archive plus its images, which at chart 10.17.1 come from three registries: `quay.io`, `ghcr.io` (dex) and `ecr-public.aws.com` (redis) |
 | sealed-secrets | `oci://registry-1.docker.io/bitnamicharts/sealed-secrets` | the chart archive plus its image |
 | `kubeseal` CLI | GitHub Releases | one binary, onto your workstation |
 

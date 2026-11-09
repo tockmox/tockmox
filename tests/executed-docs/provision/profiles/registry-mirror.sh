@@ -49,8 +49,10 @@
 
 # WHAT THIS CAN AND CANNOT SHOW. The counter sees attempts to the front-door
 # names (docker.io, registry-1.docker.io, auth.docker.io, the CDN hosts the
-# registries redirect blobs to, quay.io, ghcr.io, registry.k8s.io, and
-# code.forgejo.org, where the built-in forge's image lives). A redirect to
+# registries redirect blobs to, quay.io, ghcr.io, registry.k8s.io,
+# code.forgejo.org, where the built-in forge's image lives, and
+# ecr-public.aws.com, where Argo CD's redis lives; its blobs redirect to a
+# CloudFront name that is not listed). A redirect to
 # a host not on the list, by address or by a name nobody enumerated, is not seen;
 # the mirror's own upstream (a pull-through cache fetching on its side) is the
 # mirror's business and is not seen either; and it is the NODE's pulls that are
@@ -66,9 +68,9 @@
 # And the mirror has to be a closed set: a pull-through cache fetches from upstream
 # on a miss, from its own side, which nothing here can see.
 
-MIRROR_UPSTREAMS="docker.io quay.io ghcr.io registry.k8s.io code.forgejo.org"
+MIRROR_UPSTREAMS="docker.io quay.io ghcr.io registry.k8s.io code.forgejo.org ecr-public.aws.com"
 MIRROR_DENY_ADDR="192.0.2.1"
-MIRROR_DENY_NAMES="docker.io registry-1.docker.io index.docker.io auth.docker.io production.cloudflare.docker.com quay.io cdn.quay.io cdn01.quay.io cdn02.quay.io cdn03.quay.io ghcr.io pkg-containers.githubusercontent.com registry.k8s.io code.forgejo.org"
+MIRROR_DENY_NAMES="docker.io registry-1.docker.io index.docker.io auth.docker.io production.cloudflare.docker.com quay.io cdn.quay.io cdn01.quay.io cdn02.quay.io cdn03.quay.io ghcr.io pkg-containers.githubusercontent.com registry.k8s.io code.forgejo.org ecr-public.aws.com"
 MIRROR_DENY_CHAIN="TOCKMOX_UPSTREAM_DENY"
 # A drop-in, not an edit of config.yaml: the Ubuntu lane writes its own
 # config.yaml and the MicroOS lane runs the documented install, which may write
