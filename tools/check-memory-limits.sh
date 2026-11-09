@@ -122,21 +122,27 @@ fi
 render "$tmp/r"; fail=0
 python3 "$tmp/scan.py" "$tmp/r" "$RESIDUE" >/dev/null && echo "selftest ok    the unmutated render is GREEN" \
   || { echo "selftest FAIL  the unmutated render is not green"; fail=1; }
-mutate() {  # mutate <label> <render file|residue> <python expr over text s> <expected message>
+mutate() {  # mutate <label> <render file|residue|all> <python expr over text s> <expected message>
   rm -rf "$tmp/m"; cp -R "$tmp/r" "$tmp/m"; cp "$RESIDUE" "$tmp/res.txt"
   local target="$tmp/m/$2"; [ "$2" = residue ] && target="$tmp/res.txt"
+  [ "$2" = all ] && target="$tmp/m"
   python3 - "$target" "$3" <<'PY'
-import sys, re
+import sys, re, os, glob
 p, expr = sys.argv[1], sys.argv[2]
-s = open(p).read(); n = eval(expr)
-assert n != s, 'mutation did not change the input'
-open(p, 'w').write(n)
+for f in (sorted(glob.glob(os.path.join(p, '*.yaml'))) if os.path.isdir(p) else [p]):
+    s = open(f).read(); n = eval(expr)
+    assert n != s, 'mutation did not change the input'
+    open(f, 'w').write(n)
 PY
   local out; out=$(python3 "$tmp/scan.py" "$tmp/m" "$tmp/res.txt" 2>&1) && { echo "selftest FAIL  $1: scan stayed GREEN"; fail=1; return; }
   if grep -q "$4" <<<"$out"; then echo "selftest ok    $1: RED on '$4'"; else echo "selftest FAIL  $1: red, but not for the expected reason"; echo "$out" | grep error | head -3 || true; fail=1; fi
 }
 # A limited container loses its limit.
-mutate "grafana loses its memory limit" observability.yaml "re.sub(r'(\n +- name: grafana\n(?: {10,}.*\n)*? +limits:\n +memory: )1536Mi', r'\1null', s, 1)" "t-grafana container grafana has no memory limit"
+# `\S` after the indent makes each line's indentation one unambiguous run. With `.*` alone the
+# spaces could be split between ` {10,}` and `.*` in many ways, so on a render that already lacks
+# the limit Python's regex engine tried every split of every line of the Grafana block (about 100
+# lines) and never finished: one process at 100% of a CPU until check-all was killed (2026-10-27).
+mutate "grafana loses its memory limit" observability.yaml "re.sub(r'(\n +- name: grafana\n(?: {10,}\S.*\n)*? +limits:\n +memory: )1536Mi', r'\1null', s, 1)" "t-grafana container grafana has no memory limit"
 # A new subchart container arrives with no limit.
 mutate "a new unlimited container appears" ai.yaml "s + '---\napiVersion: apps/v1\nkind: Deployment\nmetadata: {name: t-new}\nspec:\n  template:\n    spec:\n      containers: [{name: c, image: x}]\n'" "t-new container c has no memory limit"
 # A residue container gains a limit, and the entry stays: the ratchet must ask for its removal.
@@ -147,6 +153,8 @@ mutate "a residue entry names nothing" residue "s + 'platform Deployment t-gone 
 mutate "a residue entry loses its reason" residue "re.sub(r'(longhorn-ui\s+)# no-limit:[^\n]*', r'\1', s, 1)" "no-limit:\` reason"
 # The LiteLLM database's Cluster loses its limit: the pod is not in the render, the CR is.
 mutate "the CNPG Cluster loses its memory limit" ai.yaml "re.sub(r'(kind: Cluster\n(?:.*\n)*?  resources:\n    limits:\n      memory: )320Mi', r'\1null', s, 1)" "Cluster tockmox-litellm-db sets no spec.resources"
-# The scan sees nothing (an empty render must not pass as coverage).
-mutate "the render is empty" platform.yaml "''" "the scan is not looking at the render"
+# The scan sees nothing (an empty render must not pass as coverage). Every layer is emptied: emptying one left
+# the other layers above FLOOR once they rendered 50 containers between them, and the case went red for the
+# wrong reason (the residue entries of the emptied layer) instead of the floor it exists to prove.
+mutate "the render is empty" all "''" "the scan is not looking at the render"
 [ "$fail" -eq 0 ] && echo "selftest ok    every mutation turned the gate red" || exit 1
