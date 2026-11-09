@@ -266,6 +266,13 @@ gates:
   tools/check-garage-block-size.sh:
     - '@render'
     - tools/check-garage-block-size.sh
+  # 6 s and 13 s (2026-11-09, one run each)
+  tools/check-garage-key-rotation.sh:
+    - '@render'
+    - tools/check-garage-key-rotation.sh
+  tools/check-garage-key-rotation.sh --selftest:
+    - '@render'
+    - tools/check-garage-key-rotation.sh
   # 14 s
   tools/check-kured-gate.sh --selftest:
     - '@render'

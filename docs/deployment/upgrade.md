@@ -840,6 +840,35 @@ from the platform layer. Point `restoreDrill.register.endpoint`, `.bucket` and
 (`ACCESS_KEY_ID`, `ACCESS_SECRET_KEY` and `REGION`, the region the store signs
 for) yourself; a drill with no Secret to mount fails its Job.
 
+### The Garage bootstrap deletes keys no Secret holds (0.9.0)
+
+From 0.9.0 the platform layer's bootstrap Job (a PostSync hook, so on every
+platform sync) keeps one Garage key per name: `tockmox-backups` and
+`tockmox-drill-register`. It deletes every key of those names that the Secret in
+the platform namespace does not hold, and it brings each copy of a Secret
+(`tockmox-garage-credentials` and `tockmox-drill-register-credentials` in their
+copy namespaces, and `tockmox-longhorn-backup`) to the key in its source.
+
+On the first sync after the upgrade that means:
+
+- A key left by an earlier rotation, or by a bootstrap run that died between
+  creating the key and writing the Secret, is deleted. Each deletion is a line in
+  the Job's log (`deleted key ... no Secret holds it`). Before 0.9.0 those keys
+  kept read and write on their bucket.
+- A copy that holds a different key from its source (a source Secret that was
+  deleted and re-minted by hand) is updated to the source's key. A drill Job reads
+  its Secret when it starts. Whether a running database backup picks up a changed
+  Secret without a restart is not proven here; take a backup by hand after the
+  sync ([backup and restore § 4](../operations/backup-restore.md#4-prove-a-backup-now-not-at-0300--required)).
+- Anything outside the cluster that holds one of the deleted keys stops working.
+  If you gave a `tockmox-backups` or `tockmox-drill-register` key to a tool
+  outside the cluster, mint that tool a key of its own under another name before
+  you upgrade.
+
+Rotating one of these keys is unchanged: delete the Secret in the platform
+namespace and sync the platform layer
+([backup and restore](../operations/backup-restore.md#rotating-the-shipped-stores-keys)).
+
 ### The LiteLLM migrations Job gets a new name on upgrade to 0.8.0
 
 **Only if you run the model gateway (`apps.litellm`). Nothing to do if your

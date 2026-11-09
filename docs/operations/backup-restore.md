@@ -806,6 +806,29 @@ machine that trusted the old one must trust the new. A CA you supply and seal
 into the site repository rides the secrets plane instead
 ([bring your own CA](../administration/bring-your-own-ca.md)).
 
+### Rotating the shipped store's keys
+
+The platform layer's bootstrap Job mints two Garage keys: `tockmox-backups`
+(read and write on the backup bucket, in `tockmox-garage-credentials`) and, with
+the drill register on, `tockmox-drill-register` (read and write on the register
+bucket, in `tockmox-drill-register-credentials`). To rotate one, delete its Secret
+in the platform namespace and sync the platform layer. The Job, in this order:
+
+1. deletes every Garage key of that name, so the old key stops working before the
+   new one exists;
+2. mints a new key and writes the Secret;
+3. grants the new key read and write on its bucket;
+4. updates each copy of the Secret (in the namespaces listed in
+   `garage.credentialsNamespaces`, the drill namespaces, and Longhorn's
+   `tockmox-longhorn-backup`) to the new key.
+
+Between step 1 and step 4, a backup or drill that starts fails with an access
+error and succeeds on its next run. Every run of the Job also deletes any key of
+those two names that the Secret does not hold, so a run that died between
+minting a key and writing the Secret leaves nothing with access to a bucket.
+Delete only the Secret in the platform namespace: a copy is brought to its source
+on every run, and deleting a copy alone changes nothing.
+
 ### Adopting an existing Garage
 
 If you point the platform layer at a Garage metadata volume that another install wrote, check which metadata
