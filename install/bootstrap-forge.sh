@@ -233,6 +233,8 @@ the encrypted recovery kit.
   --wait-seconds N       how long to wait for the forge (default 300)
 
   --dry-run              show the plan; change nothing
+  --restore-history DIR  (rebuild and repair; forge-restore passes it) a checked forge dump: each
+                         pull request in it comes back as a closed issue labelled restored-from-dump
   -h, --help             this
 USAGE
 }
@@ -244,7 +246,7 @@ FORGE_NS="$FORGE_NS_DEFAULT"; CHART_REF="$CHART_REF_DEFAULT"; CHART_VERSION="$CH
 OS_S3_ENDPOINT=""; OS_S3_BUCKET=""; OS_S3_PREFIX=""; OS_S3_REGION="us-east-1"; OS_S3_CREDS=""; OS_S3_CA=""
 OS_GIT_URL=""; OS_GIT_CREDS=""
 IMAGE_REGISTRY=""; STORAGE_CLASS=""; ARGO_NS="argocd"; AI_NS="tockmox-ai"; WAIT_SECONDS=300; DRY_RUN=false
-CONNECT_ONLY=false; NO_SIGN_IN=false; REPLACE_ARGO_CRED=false; FORGE_HOST=""; CONSOLE_HOST=""; ADMIN_GROUP="tockmox-admins"
+RESTORE_HISTORY=""; CONNECT_ONLY=false; NO_SIGN_IN=false; REPLACE_ARGO_CRED=false; FORGE_HOST=""; CONSOLE_HOST=""; ADMIN_GROUP="tockmox-admins"
 IDENTITY_NS="tockmox-authentik"; PLATFORM_NS="tockmox-platform"; AUTH_HOST=""
 CHARTS_REPO="charts"; CHARTS_DIR=""; CHARTS_TAG=""; CHARTS_COMMIT=""
 
@@ -288,6 +290,7 @@ while [[ $# -gt 0 ]]; do
     --auth-host) AUTH_HOST="${2:?--auth-host needs a host name}"; shift 2 ;;
     --console-host) CONSOLE_HOST="${2:?--console-host needs a host name}"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
+    --restore-history) RESTORE_HISTORY="${2:?--restore-history needs a directory}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) usage; die "unknown argument: $1" ;;
   esac
@@ -477,6 +480,10 @@ need kubectl "talks to the cluster"
 need helm "installs the forge (v3)"
 need git "pushes the site repository"
 need curl "talks to the forge's API through the port-forward"
+if [[ -n "$RESTORE_HISTORY" ]]; then
+  need python3 "restores the review history from the forge dump (--restore-history)"
+  [[ -f "$RESTORE_HISTORY/MANIFEST" ]] || die "--restore-history $RESTORE_HISTORY holds no forge dump (no MANIFEST)"
+fi
 need openssl "generates every password"
 need tar "packs the recovery kit"
 [[ "$ENC" == "age" ]] && need age "was asked for by --age-recipient"
@@ -1136,6 +1143,28 @@ for want in '"enable_push":false' '"required_approvals":1' '"enable_approvals_wh
   printf '%s' "$RULE" | grep "$want" >/dev/null || die "the rule on main does not read back $want: $RULE"
 done
 ok "main: no direct pushes, one approval from team $APPROVERS_TEAM (the forge admin can still override; see the header)"
+
+# ---------------------------------------------------------------- review history
+# A rebuild or a repair hands over the last nightly forge dump, already fetched and checked
+# against its checksum by forge-restore.sh. The forge cannot recreate pull requests (git
+# carries commits, not reviews), so each comes back as a closed issue carrying its
+# description, reviews and comments, labelled restored-from-dump (ruled 2026-11-08).
+# forge-history.py does the posting, the admin credential on its stdin, never in argv. Best
+# effort: a failure is named and never stops the run, and a rerun creates nothing twice.
+if [[ -n "$RESTORE_HISTORY" ]]; then
+  say "Review history"
+  set +e
+  HIST_OUT="$(printf '%s:%s\n' "$ADMIN_USER" "$ADMIN_PASS" \
+    | python3 "$HERE/forge-history.py" restore "$RESTORE_HISTORY" --api "$API" --repo "$ORG/$REPO" 2>"$TMPD/history.err")"
+  HIST_RC=$?
+  set -e
+  if [[ "$HIST_RC" -eq 0 ]]; then
+    ok "review history: $HIST_OUT"
+  else
+    warn "review history, best effort: ${HIST_OUT:-nothing restored}. $(head -c 300 "$TMPD/history.err" | tr '\n' ' ')"
+    info "the dump stays in the off-site copy; rerunning repair-forge restores what is missing without duplicates"
+  fi
+fi
 if $SIGN_IN; then
   info "members of ${ADMIN_GROUP} join $APPROVERS_TEAM when they sign in to ${FORGE_URL} (after --connect-sign-in)"
 else

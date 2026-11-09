@@ -129,11 +129,68 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with open(os.path.join(ROOT, "moves", "%d.json" % n), "w") as fh:
                 _json.dump(rec, fh)
             return self.send(201, dumps(rec).encode())
+        if self.forge_issues(a, d):
+            return
         if self.command == "PATCH" and a == "/repos/tockmox/site":
             with open(os.path.join(ROOT, "archived"), "w") as fh:
                 fh.write("true" if d.get("archived") else "false")
             return self.send(200, dumps(repo()).encode())
         return self.send(404, b'{"message":"not found"}')
+
+    # Labels and issues, kept in ROOT/issues.json so a test can read them back.
+    def issue_state(self):
+        path = os.path.join(ROOT, "issues.json")
+        if os.path.exists(path):
+            return json_load(path)
+        return {"labels": [], "issues": []}
+
+    def issue_save(self, st):
+        with open(os.path.join(ROOT, "issues.json"), "w") as fh:
+            _json.dump(st, fh)
+
+    def forge_issues(self, a, d):
+        base = "/repos/tockmox/site"
+        st = self.issue_state()
+        if self.command == "POST" and a == base + "/labels":
+            lab = {"id": len(st["labels"]) + 1, "name": d.get("name"), "color": d.get("color")}
+            st["labels"].append(lab)
+            self.issue_save(st)
+            self.send(201, dumps(lab).encode())
+            return True
+        if self.command == "POST" and a == base + "/issues":
+            ids = d.get("labels") or []
+            rec = {"number": len(st["issues"]) + 1, "title": d.get("title"), "body": d.get("body"),
+                   "state": "open", "labels": [x for x in st["labels"] if x["id"] in ids]}
+            st["issues"].append(rec)
+            self.issue_save(st)
+            self.send(201, dumps(rec).encode())
+            return True
+        m = re.fullmatch(base + r"/issues/(\d+)", a)
+        if self.command == "PATCH" and m:
+            for rec in st["issues"]:
+                if rec["number"] == int(m.group(1)):
+                    if d.get("state"):
+                        rec["state"] = d["state"]
+                    self.issue_save(st)
+                    self.send(200, dumps(rec).encode())
+                    return True
+            self.send(404, b'{"message":"not found"}')
+            return True
+        return False
+
+    def forge_issues_get(self, a, q):
+        base = "/repos/tockmox/site"
+        if a == base + "/labels":
+            self.send(200, dumps(page(self.issue_state()["labels"], q)).encode())
+            return True
+        if a == base + "/issues":
+            items = self.issue_state()["issues"]
+            want = [x for v in q.get("labels", []) for x in v.split(",") if x]
+            if want:
+                items = [i for i in items if any(l["name"] in want for l in i["labels"])]
+            self.send(200, dumps(page(items, q)).encode())
+            return True
+        return False
 
     def move_pr(self, n):
         path = os.path.join(ROOT, "moves", "%d.json" % n)
@@ -184,6 +241,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.move_pr(int(m.group(1)))
             if p[7:] == "/repos/tockmox/site/pulls" and os.path.exists(os.path.join(ROOT, "moves")):
                 return self.send(200, dumps([json_load(os.path.join(ROOT, "moves", f)) for f in sorted(os.listdir(os.path.join(ROOT, "moves")))]).encode())
+            if self.command == "GET" and self.forge_issues_get(p[7:], q):
+                return
             return self.api(p[7:], q)
         env = dict(os.environ, GIT_PROJECT_ROOT=ROOT, GIT_HTTP_EXPORT_ALL="1", PATH_INFO=p, QUERY_STRING=u.query,
                    REQUEST_METHOD=self.command, CONTENT_TYPE=self.headers.get("Content-Type", ""),

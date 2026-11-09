@@ -37,10 +37,18 @@
 # forge that is gone, so the age is the honest number, and a copy older than
 # --max-age-hours is called out.
 #
-# WHAT IT DOES NOT RESTORE. Review comments and the forge's own settings: there is no
-# forge dump to restore them from yet, and the run says so. Who approved each change
-# is in the merge commits, so that is never lost. Accounts come back at each person's
-# next sign-in. Running workloads and their volumes are the backups' business.
+# THE REVIEW HISTORY comes back from the last nightly forge dump, best effort: the dump is
+# fetched beside the copy (the bucket's latest-dump pointer, the remote's forge-dump
+# branch, or --dump FILE beside a copy on media), checked against its SHA-256 and its own
+# counts here, before the cluster is touched, and each pull request in it returns as a
+# closed issue labelled restored-from-dump (bootstrap-forge --restore-history). What was
+# said after that dump is lost. No dump at the destination is a warning, not a refusal; a
+# dump that does not match its checksum is a refusal, like a copy that does not.
+#
+# WHAT IT DOES NOT RESTORE. The forge's own settings: bootstrap-forge recreates them. Who
+# approved each change is in the merge commits, so that is never lost. Accounts come back
+# at each person's next sign-in. Running workloads and their volumes are the backups'
+# business.
 #
 # A COPY ON MEDIA (file:PATH) is checked against PATH.sha256 (the line the off-site
 # job writes beside every bundle: "<sum>  site.bundle") or --sha256 HEX. Its
@@ -100,6 +108,10 @@ Writes to a CLUSTER, after it has checked everything it can without one.
                             the git remote the forge mirrors to
   The same destination is set up again for the new forge's off-site copy.
   --max-age-hours N         call the copy out as old past this age (default 24)
+  --dump FILE               (file:PATH) the forge dump carried in beside the copy; checked against
+                            FILE.sha256 or --dump-sha256. Offsite, the dump is read from the destination
+  --dump-sha256 HEX         the dump's SHA-256, when there is no FILE.sha256 beside it
+  --no-review-history       do not read the forge dump: the review history is not restored
 
  The recovery kit (rebuild)
   --kit FILE                the kit bootstrap-forge wrote
@@ -136,7 +148,7 @@ USAGE
 }
 
 # ---------------------------------------------------------------- arguments
-FROM=""; SHA256_GIVEN=""; MAX_AGE_H=24
+FROM=""; SHA256_GIVEN=""; MAX_AGE_H=24; DUMP_FILE=""; DUMP_SHA=""; NO_HISTORY=false
 OS_S3_ENDPOINT=""; OS_S3_BUCKET=""; OS_S3_PREFIX=""; OS_S3_REGION="us-east-1"; OS_S3_CREDS=""; OS_S3_CA=""
 OS_GIT_URL=""; OS_GIT_CREDS=""
 KIT=""; PASSFILE=""; AGE_IDENTITY=""; KEY_PASSFILE=""; KEY_AGE_IDENTITY=""
@@ -184,6 +196,9 @@ while [[ $# -gt 0 ]]; do
     --force) FORCE=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     --keep-copy) KEEP_COPY="${2:?--keep-copy needs a file}"; shift 2 ;;
+    --dump) DUMP_FILE="${2:?--dump needs a file}"; shift 2 ;;
+    --dump-sha256) DUMP_SHA="${2:?--dump-sha256 needs a SHA-256}"; shift 2 ;;
+    --no-review-history) NO_HISTORY=true; shift ;;
     --no-offsite-setup) NO_OFFSITE_SETUP=true; shift ;;
     --drill-wait-minutes) DRILL_WAIT_MIN="${2:?--drill-wait-minutes needs a number}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -222,6 +237,10 @@ case "$FROM" in
 esac
 [[ "$MAX_AGE_H" =~ ^[0-9]+$ ]] || die "--max-age-hours must be a number: '$MAX_AGE_H'"
 [[ -z "$SHA256_GIVEN" || "$SHA256_GIVEN" =~ ^[0-9a-f]{64}$ ]] || die "--sha256 must be 64 lowercase hex characters"
+[[ -z "$DUMP_SHA" || "$DUMP_SHA" =~ ^[0-9a-f]{64}$ ]] || die "--dump-sha256 must be 64 lowercase hex characters"
+[[ -z "$DUMP_FILE" || "$SRC" == file ]] || die "--dump FILE goes with --restore-from file:PATH; offsite, the dump is read from the destination"
+[[ -z "$DUMP_FILE" ]] || { [[ -r "$DUMP_FILE" && -s "$DUMP_FILE" ]] || die "cannot read the forge dump $DUMP_FILE, or it is empty"; }
+! $NO_HISTORY || [[ -z "$DUMP_FILE" ]] || die "--dump and --no-review-history do not go together"
 [[ "$FORGE_NS" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || die "--namespace is not a namespace name: '$FORGE_NS'"
 if $CONTEXT_GIVEN && [[ -z "${CONTEXT// }" ]]; then
   die "--context was given empty. Refusing rather than falling back to the current context."
@@ -583,6 +602,100 @@ fi
 [[ -z "${COPY_CREATED:-}" ]] || info "the bucket's pointer says this copy was written at $COPY_CREATED (UTC)"
 info "nothing here can tell how far it is behind the forge that is gone; its age is what it is"
 
+# ---------------------------------------------------------------- the forge dump
+# Read and checked here, beside the copy, before anything touches a cluster. Format and
+# writer: forge-offsite-copy.sh TASK=dump. The counts check is forge-history.py's.
+DUMP_DIR=""
+if $NO_HISTORY; then
+  info "review history: not restored (--no-review-history)"
+else
+  say "The forge dump"
+  DTGZ="$TMPD/dump.tar.gz"; DX="$TMPD/dump"; HAVE_DUMP=false; DUMP_WHERE=""
+  if [[ "$SRC" == file ]]; then
+    if [[ -n "$DUMP_FILE" ]]; then
+      if [[ -z "$DUMP_SHA" ]]; then
+        [[ -r "$DUMP_FILE.sha256" ]] || die "no checksum for the forge dump $DUMP_FILE: put its .sha256 beside it (the off-site job
+       writes one with every dump) or give --dump-sha256 HEX. Nothing was installed."
+        DUMP_SHA="$(awk 'NR==1{print $1}' "$DUMP_FILE.sha256")"
+        [[ "$DUMP_SHA" =~ ^[0-9a-f]{64}$ ]] || die "$DUMP_FILE.sha256 does not start with a SHA-256"
+      fi
+      cp "$DUMP_FILE" "$DTGZ"
+      GOT="$(sha_of "$DTGZ")"
+      [[ "$GOT" == "$DUMP_SHA" ]] || die "the forge dump's SHA-256 is $GOT, not $DUMP_SHA: the file is corrupt or was changed. Nothing was installed."
+      HAVE_DUMP=true; DUMP_WHERE="$DUMP_FILE"
+    else
+      DUMP_WHERE="the media (no --dump given)"
+    fi
+  elif [[ "$OFFSITE" == bucket ]]; then
+    DUMP_WHERE="$OS_S3_BUCKET/$(key_of latest-dump)"
+    st="$(s3_get "$(key_of latest-dump)" "$TMPD/latest-dump")"
+    if [[ "$st" == 200 ]]; then
+      [[ "$(head -1 "$TMPD/latest-dump")" == "format tockmox-forge-dump v1" ]] \
+        || die "the forge dump's pointer is not 'format tockmox-forge-dump v1': $(head -c 80 "$TMPD/latest-dump")"
+      DKEY="$(awk '$1=="dump"{print $2; exit}' "$TMPD/latest-dump")"
+      DSUM="$(awk '$1=="sha256"{print $2; exit}' "$TMPD/latest-dump")"
+      [[ -n "$DKEY" && "$DSUM" =~ ^[0-9a-f]{64}$ ]] || die "the forge dump's pointer is incomplete (dump and sha256 are required)"
+      case "$DKEY" in *..*|/*) die "the forge dump's pointer names an unsafe key: $DKEY" ;; esac
+      st="$(s3_get "$DKEY" "$DTGZ")"
+      [[ "$st" == 200 ]] || die "reading the forge dump $DKEY failed: HTTP $st. Nothing was installed.
+       (--no-review-history rebuilds without it.)"
+      GOT="$(sha_of "$DTGZ")"
+      [[ "$GOT" == "$DSUM" ]] || die "the forge dump's SHA-256 is $GOT, but latest-dump says $DSUM: the dump is corrupt or was
+       replaced. Nothing was installed. (--no-review-history rebuilds without it.)"
+      HAVE_DUMP=true; DUMP_WHERE="$DKEY"
+    elif [[ "$st" != 404 ]]; then
+      die "reading the forge dump's pointer $(key_of latest-dump) failed: HTTP $st. Nothing was installed.
+       (--no-review-history rebuilds without it.)"
+    fi
+  else
+    DUMP_WHERE="$OS_GIT_URL forge-dump"
+    set +e
+    GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraHeader GIT_CONFIG_VALUE_0="$GH" GIT_TERMINAL_PROMPT=0 \
+      git ls-remote --exit-code "$OS_GIT_URL" refs/heads/forge-dump >/dev/null 2>&1
+    rc=$?
+    set -e
+    if [[ "$rc" -eq 0 ]]; then
+      GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraHeader GIT_CONFIG_VALUE_0="$GH" GIT_TERMINAL_PROMPT=0 \
+        git -C "$TMPD/remote.git" fetch -q "$OS_GIT_URL" "+refs/heads/forge-dump:refs/heads/forge-dump" 2>/dev/null \
+        || die "fetching forge-dump from $OS_GIT_URL failed. Nothing was installed. (--no-review-history rebuilds without it.)"
+      mkdir -p "$TMPD/dumpx"
+      git -C "$TMPD/remote.git" archive refs/heads/forge-dump dump | tar -x -C "$TMPD/dumpx" \
+        || die "the remote's forge-dump branch holds no dump/ directory. Nothing was installed."
+      DX="$TMPD/dumpx/dump"; HAVE_DUMP=true
+    elif [[ "$rc" -ne 2 ]]; then
+      die "asking $OS_GIT_URL for its forge-dump branch failed. Nothing was installed. (--no-review-history rebuilds without it.)"
+    fi
+  fi
+  if $HAVE_DUMP; then
+    need python3 "reads the forge dump"
+    if [[ -f "$DTGZ" && ! -d "$TMPD/dumpx" ]]; then
+      mkdir -p "$DX"
+      tar -xzf "$DTGZ" -C "$DX" 2>/dev/null || die "the forge dump does not unpack. Nothing was installed."
+    fi
+    set +e
+    DOUT="$(python3 "$HERE/forge-history.py" check "$DX" 2>&1)"
+    rc=$?
+    set -e
+    [[ "$rc" -eq 0 ]] || die "the forge dump does not read whole: ${DOUT#forge-history: }. Nothing was installed.
+       (--no-review-history rebuilds without it.)"
+    DREPO="$(awk '$1=="repository"{print $2; exit}' "$DX/MANIFEST")"
+    [[ "$DREPO" == "$ORG/$REPO" ]] || die "the forge dump is of $DREPO, not $ORG/$REPO: it belongs to another site. Nothing was installed."
+    DCREATED="$(awk '$1=="created"{print $2; exit}' "$DX/MANIFEST")"
+    DAGE="$(python3 -c 'import sys, calendar, time
+try:
+    s = int(time.time()) - calendar.timegm(time.strptime(sys.argv[1], "%Y%m%dT%H%M%SZ"))
+except ValueError:
+    print("of unknown age"); sys.exit(0)
+s = max(s, 0)
+print("%d min old" % (s // 60) if s < 3600 else ("%d h old" % (s // 3600) if s < 172800 else "%d days old" % (s // 86400)))' "$DCREATED")"
+    ok "forge dump: ${DOUT#dump } ($DAGE)"
+    info "each pull request in it returns as a closed issue labelled restored-from-dump"
+    DUMP_DIR="$DX"
+  else
+    warn "no forge dump at $DUMP_WHERE: the review history is not restored (review comments since the last dump are lost either way)"
+  fi
+fi
+
 # ---------------------------------------------------------------- the kit (rebuild)
 if [[ "$ACTION" == rebuild ]]; then
   say "The recovery kit"
@@ -621,8 +734,8 @@ if [[ "$ACTION" == rebuild ]]; then
        (--key-passphrase-file or --key-age-identity, which default to the kit's own). Nothing was installed."
   ok "sealing key backup opens"
   SEAL_BACKUP="$SEAL_FILE"
-  info "review comments and the forge's own settings: this kit and copy hold no forge dump, so they are not"
-  info "restored. Who approved each change is in the merge commits. People's accounts return at their next sign-in."
+  info "the forge's own settings are recreated by bootstrap-forge. Who approved each change is in the merge"
+  info "commits. People's accounts return at their next sign-in."
 fi
 
 if $DRY_RUN; then
@@ -630,9 +743,11 @@ if $DRY_RUN; then
   if [[ "$ACTION" == rebuild ]]; then
     info "restore the sealing key and install the controller (bootstrap-secrets --mode recover)"
     info "install the forge and seed it from the copy (${MAIN:0:12}); write the new kit to $KIT_OUT"
+    [[ -z "$DUMP_DIR" ]] || info "restore the review history from the forge dump as closed issues"
     info "apply $SITE_ABS/bootstrap/root.yaml"
   else
     info "reinstall the forge in $FORGE_NS and seed it from the copy (${MAIN:0:12}); nothing else is touched"
+    [[ -z "$DUMP_DIR" ]] || info "restore the review history from the forge dump as closed issues"
     info "write the new kit to $KIT_OUT"
   fi
   exit 0
@@ -679,6 +794,7 @@ case "$OFFSITE_FOR_FORGE" in
   git) FORGE_FLAGS+=(--offsite-git "$OS_GIT_URL" --offsite-git-credentials "$OS_GIT_CREDS") ;;
 esac
 FORGE_FLAGS+=(--namespace "$FORGE_NS")
+[[ -z "$DUMP_DIR" ]] || FORGE_FLAGS+=(--restore-history "$DUMP_DIR")
 FORGE_FLAGS+=(${PASS_FORGE[@]+"${PASS_FORGE[@]}"})
 
 # Applications and their state, so a repair can show it touched nothing else.

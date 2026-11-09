@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Sourced by run.sh. Groups R1-R12: install/forge-restore.sh, reached as
+# Sourced by run.sh. Groups R1-R19: install/forge-restore.sh, reached as
 # `tockmox-install.sh --restore-from ...` and `tockmox-install.sh repair-forge`.
 #
 # HERMETIC. Every case is a refusal, or a dry run, and each one comes before any
@@ -117,7 +117,7 @@ assert_artifact "R8 a dry run checks the copy and the kit and plans the rebuild"
   "echo $RS_STATUS; grep -c 'file copy matches its SHA-256' '$D/out/stdout'; grep -c 'kit opened' '$D/out/stdout'; grep -c 'Plan (dry run, nothing changed)' '$D/out/stdout'" \
   "$(printf '0\n1\n1\n1')"
 assert_artifact "R8 ... names the copy's age and says what is not restored" \
-  "grep -c \"the copy's main: .* min old\" '$D/out/stdout'; grep -c 'review comments and the forge' '$D/out/stdout'" "$(printf '1\n1')"
+  "grep -c \"the copy's main: .* min old\" '$D/out/stdout'; grep -c 'the review history is not restored' '$D/out/stdout'" "$(printf '1\n1')"
 assert_artifact "R8 ... with no kubectl or helm call and no new kit" \
   "rs_cluster_calls; [ -e '$D/kits/new.kit' ] && echo kit || echo no-kit" "$(printf '0\nno-kit')"
 
@@ -169,3 +169,63 @@ rs_case r13b
 rs_run --restore-from file:media/site.bundle --kit kits/old.kit --passphrase-file inputs/pass --kit-out kits/old.kit --dry-run
 assert_artifact "R13 --kit-out naming the kit being restored from is refused" \
   "echo $RS_STATUS; rs_err | grep -c -E 'already exists|names the kit this run is restoring from'" "$(printf '1\n1')"
+
+
+# R14-R19: the forge dump that brings the review history back. A small, real v1
+# dump (one pull request with a review, a review comment and a comment), packed and summed
+# the way the off-site job writes it, carried in beside the copy with --dump.
+# rs_dump [REPOSITORY] [PULL-REQUESTS-COUNT] -> $D/media/dump.tar.gz and its .sha256
+rs_dump() {
+  local x="$D/dumpsrc"; rm -rf "$x"; mkdir -p "$x"
+  printf 'format tockmox-forge-dump v1\nrepository %s\ncreated 20261108T020000Z\nforge-main 0000000\npull-requests %s\nreviews 1\nreview-comments 1\nissue-comments 1\n' \
+    "${1:-tockmox/site}" "${2:-1}" > "$x/MANIFEST"
+  printf '[{"number":1,"title":"change 1","body":"why","state":"closed","merged":true,"merged_at":"2026-11-07T00:00:00Z","created_at":"2026-11-06T00:00:00Z","user":{"login":"dev"}}]' > "$x/pulls-1.json"
+  printf '[{"id":10,"user":{"login":"approver"},"state":"APPROVED","body":"ok","submitted_at":"2026-11-06T01:00:00Z"}]' > "$x/reviews-1-1.json"
+  printf '[{"id":20,"path":"a.yaml","line":1,"user":{"login":"approver"},"body":"nit","created_at":"2026-11-06T01:00:00Z"}]' > "$x/review-comments-1-10.json"
+  printf '[{"id":30,"issue_url":"http://forge/api/v1/repos/tockmox/site/issues/1","user":{"login":"dev"},"body":"thanks","created_at":"2026-11-06T02:00:00Z"}]' > "$x/issue-comments-1.json"
+  tar -C "$x" -czf "$D/media/dump.tar.gz" .
+  printf '%s  dump.tar.gz\n' "$(rs_sha "$D/media/dump.tar.gz")" > "$D/media/dump.tar.gz.sha256"
+}
+
+# R14. A good dump: the dry run checks it, names what it holds and its age, plans the restore.
+rs_case r14; rs_dump
+rs_run --restore-from file:media/site.bundle --dump media/dump.tar.gz "${RS_KIT[@]}" --site-out ./restored --dry-run
+assert_artifact "R14 a good dump is checked, named and planned" \
+  "echo $RS_STATUS; grep -c 'forge dump: 20261108T020000Z of tockmox/site: 1 pull requests, 1 reviews, 1 review comments, 1 issue comments (.* old)' '$D/out/stdout'; grep -c 'restore the review history from the forge dump as closed issues' '$D/out/stdout'" \
+  "$(printf '0\n1\n1')"
+assert_artifact "R14 ... with no kubectl or helm call" "rs_cluster_calls" "0"
+
+# R15. A dump that does not match its checksum is refused, like a copy that does not.
+rs_case r15; rs_dump; printf 'x' >> "$D/media/dump.tar.gz"
+rs_run --restore-from file:media/site.bundle --dump media/dump.tar.gz "${RS_KIT[@]}" --site-out ./restored --dry-run
+assert_artifact "R15 a changed dump is refused before any cluster contact" \
+  "echo $RS_STATUS; rs_err | grep -c \"the forge dump's SHA-256 is .*Nothing was installed\"; rs_cluster_calls" "$(printf '1\n1\n0')"
+
+# R16. No dump given: a warning, not a refusal, and the dry run still plans the rebuild.
+rs_case r16
+rs_run --restore-from file:media/site.bundle "${RS_KIT[@]}" --site-out ./restored --dry-run
+assert_artifact "R16 no dump warns that the review history is not restored, and the dry run passes" \
+  "echo $RS_STATUS; grep -c 'no forge dump at the media (no --dump given): the review history is not restored' '$D/out/stdout'; grep -c 'restore the review history' '$D/out/stdout'" \
+  "$(printf '0\n1\n0')"
+
+# R17. A dump of another site's repository is refused.
+rs_case r17; rs_dump other/site
+rs_run --restore-from file:media/site.bundle --dump media/dump.tar.gz "${RS_KIT[@]}" --site-out ./restored --dry-run
+assert_artifact "R17 a dump of another repository is refused" \
+  "echo $RS_STATUS; rs_err | grep -c 'the forge dump is of other/site, not tockmox/site'" "$(printf '1\n1')"
+
+# R18. --no-review-history reads no dump and says so; it cannot be given with --dump.
+rs_case r18
+rs_run --restore-from file:media/site.bundle --no-review-history "${RS_KIT[@]}" --site-out ./restored --dry-run
+assert_artifact "R18 --no-review-history says the review history is not restored" \
+  "echo $RS_STATUS; grep -c 'review history: not restored (--no-review-history)' '$D/out/stdout'" "$(printf '0\n1')"
+rs_case r18b; rs_dump
+rs_run --restore-from file:media/site.bundle --dump media/dump.tar.gz --no-review-history "${RS_KIT[@]}" --dry-run
+assert_artifact "R18 --dump with --no-review-history is refused" \
+  "echo $RS_STATUS; rs_err | grep -c 'do not go together'" "$(printf '1\n1')"
+
+# R19. A dump whose MANIFEST counts do not match what it holds is refused (cut short or changed).
+rs_case r19; rs_dump tockmox/site 2
+rs_run --restore-from file:media/site.bundle --dump media/dump.tar.gz "${RS_KIT[@]}" --site-out ./restored --dry-run
+assert_artifact "R19 a dump that does not read whole is refused" \
+  "echo $RS_STATUS; rs_err | grep -c 'the forge dump does not read whole: MANIFEST says pull-requests 2, but 1 were read'" "$(printf '1\n1')"
