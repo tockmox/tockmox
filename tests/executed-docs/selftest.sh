@@ -1130,6 +1130,23 @@ if [ "$HS_CASES" -eq 0 ] || { [ "$HS_RC" -ne 0 ] && ! printf '%s\n' "$HS_OUT" | 
   bad "handoff-secret-test.sh ran its cases" "rc=${HS_RC}, ${HS_CASES} case(s): $(printf '%s' "$HS_OUT" | tail -3)"
 fi
 
+# k3s from inside the boundary (TOCKMOX_K3S_ARTIFACTS_URL). Its cases drive the provisioner against the same stubs
+# and run the guest script it writes; folded in the same way, so the per-commit gate holds "unset is what it was"
+# and "set, nothing names get.k3s.io".
+KA_OUT="$(bash "${HERE}/k3s-artifacts-test.sh" 2>&1)"; KA_RC=$?
+KA_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) KA_CASES=$((KA_CASES+1)); ok "k3s artifacts: ${line#ok   }" ;;
+    "FAIL "*) KA_CASES=$((KA_CASES+1)); bad "k3s artifacts: ${line#FAIL }" "run tests/executed-docs/k3s-artifacts-test.sh for detail" ;;
+  esac
+done <<EOF_KA
+$KA_OUT
+EOF_KA
+if [ "$KA_CASES" -eq 0 ] || { [ "$KA_RC" -ne 0 ] && ! printf '%s\n' "$KA_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "k3s-artifacts-test.sh ran its cases" "rc=${KA_RC}, ${KA_CASES} case(s): $(printf '%s' "$KA_OUT" | tail -3)"
+fi
+
 # ---------------------------------------------------------------------------
 # The registry-mirror modes.
 #

@@ -141,6 +141,38 @@ REGISTRY_MODE="${TOCKMOX_REGISTRY_MODE:-cache}"
 # upstream: under `node` the guest refuses it before it leaves. Only read in
 # nofallback mode; profiles/registry-mirror.sh explains both.
 REGISTRY_DENY="${TOCKMOX_UPSTREAM_DENY:-node}"
+# K3S FROM INSIDE THE BOUNDARY, added 2026-11-09. Unset (the default), the guest
+# installs k3s the way fresh-install.md does: get.k3s.io, which downloads the
+# binary from GitHub. Set, it is the base URL of a server the guest can reach that
+# holds VERSION/install.sh and VERSION/k3s for the version this run installs. The
+# guest fetches both from there, refuses a binary that is not that version, and
+# runs the script with INSTALL_K3S_SKIP_DOWNLOAD=true, so the k3s install reaches
+# nothing outside (the OS's own timers, and the http handoff's apt, are not this
+# variable's business). k3s's own images still come from the registry mirror
+# (the air-gap closed set lists them). The beacon then skips its WAN probe, which on a
+# segment with no route out can only fail, and probes this URL instead. Ubuntu
+# lane only: the MicroOS lane runs the page's own install line.
+#
+#   TOCKMOX_K3S_ARTIFACTS_URL=https://artifacts.example.com/k3s ./throwaway-cluster.sh create
+K3S_ARTIFACTS_URL="${TOCKMOX_K3S_ARTIFACTS_URL:-}"
+K3S_ARTIFACTS_URL="${K3S_ARTIFACTS_URL%/}"
+
+# k3s_artifacts_check : 0 when TOCKMOX_K3S_ARTIFACTS_URL is unset or usable, else 2 with the reason.
+# The URL is written into a shell script the guest runs, so it is held to the characters a URL needs.
+k3s_artifacts_check() {
+  [ -n "$K3S_ARTIFACTS_URL" ] || return 0
+  case "$K3S_ARTIFACTS_URL" in
+    http://?*|https://?*) ;;
+    *) echo "REFUSING: TOCKMOX_K3S_ARTIFACTS_URL is an http(s) URL, not '${K3S_ARTIFACTS_URL}'" >&2; return 2 ;;
+  esac
+  case "$K3S_ARTIFACTS_URL" in
+    *[!A-Za-z0-9._~:/%@-]*)
+      echo "REFUSING: TOCKMOX_K3S_ARTIFACTS_URL may hold only letters, digits and . _ ~ : / % @ -" >&2
+      echo "          (it is written into a script the guest runs): ${K3S_ARTIFACTS_URL}" >&2
+      return 2 ;;
+  esac
+  return 0
+}
 # shellcheck source=/dev/null
 . "$(dirname "${BASH_SOURCE[0]}")/profiles/registry-mirror.sh"
 # The capacity preflight: refuse a run that does not fit, before anything is
@@ -633,6 +665,7 @@ create() {
   # The same rule for the registry mode: a nofallback run with no mirror, or an
   # unknown mode, is refused before it reaches the hypervisor.
   mirror_mode_check "$REGISTRY_MIRROR" "$REGISTRY_MODE" "$REGISTRY_DENY" || exit 2
+  k3s_artifacts_check || exit 2
   preflight
   # Before the first thing this run creates or deletes: a run that does not fit
   # on the substrate refuses here (exit 4 BLOCKED, exit 5 INFRA_ERROR).
@@ -694,6 +727,13 @@ create() {
     echo "k3s ${ver} (the version docs/deployment/fresh-install.md pins)" >&2
   fi
   local k3s_env="INSTALL_K3S_VERSION=${ver} "
+  if [ -n "$K3S_ARTIFACTS_URL" ]; then
+    echo "k3s from ${K3S_ARTIFACTS_URL}/${ver} (TOCKMOX_K3S_ARTIFACTS_URL), not get.k3s.io" >&2
+    if [ "$HANDOFF" = "http" ]; then
+      echo "NOTE: TOCKMOX_HANDOFF=http still installs netcat with apt in the guest, which reaches" >&2
+      echo "      outside. The secret handoff needs no package." >&2
+    fi
+  fi
   # Per-run cluster token. Never a stored secret ... it dies with the VM.
   token="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   local handoff_path
@@ -829,6 +869,13 @@ create() {
     if [ -n "$K3S_VERSION" ]; then
       echo "NOTE: TOCKMOX_K3S_VERSION is ignored on MicroOS. The guest runs section 4's" >&2
       echo "      exports block, which pins the version the page tells a reader to use." >&2
+    fi
+    # Not a note: a run that asked for k3s from inside the boundary and got the
+    # page's get.k3s.io line instead would reach outside with nothing to say so.
+    if [ -n "$K3S_ARTIFACTS_URL" ]; then
+      echo "REFUSING: TOCKMOX_K3S_ARTIFACTS_URL is for the Ubuntu lane. The MicroOS lane runs" >&2
+      echo "          fresh-install.md's own install line, which fetches from get.k3s.io." >&2
+      exit 2
     fi
     # shellcheck source=profiles/microos.sh
     . "$(dirname "${BASH_SOURCE[0]}")/profiles/microos.sh"
@@ -1035,8 +1082,16 @@ create() {
       echo "      # the public internet are separate reachability questions and"
       echo "      # a run that only tests one cannot tell an isolated guest from"
       echo "      # one that simply cannot reach the harness."
-      echo "      WAN=\$(curl -s -m 20 -o /dev/null -w '%{http_code}' https://get.k3s.io 2>&1)"
-      echo "      echo \"TOCKMOX-BEACON: wan get.k3s.io http_code=\$WAN\""
+      if [ -n "$K3S_ARTIFACTS_URL" ]; then
+        # A WAN probe that must fail is noise on an edge counter. The question
+        # this run has instead is whether the guest reaches its k3s source.
+        echo "      echo \"TOCKMOX-BEACON: wan probe skipped: k3s comes from TOCKMOX_K3S_ARTIFACTS_URL, and this run expects no route out\""
+        echo "      ART=\$(curl -s -m 20 -o /dev/null -w '%{http_code}' '${K3S_ARTIFACTS_URL}/${ver}/install.sh' 2>&1)"
+        echo "      echo \"TOCKMOX-BEACON: k3s artifacts ${K3S_ARTIFACTS_URL}/${ver}/install.sh http_code=\$ART\""
+      else
+        echo "      WAN=\$(curl -s -m 20 -o /dev/null -w '%{http_code}' https://get.k3s.io 2>&1)"
+        echo "      echo \"TOCKMOX-BEACON: wan get.k3s.io http_code=\$WAN\""
+      fi
       echo "      GW=\$(ip route | awk '/^default/{print \$3}')"
       echo "      ping -c1 -W3 \"\$GW\" >/dev/null 2>&1 && echo \"TOCKMOX-BEACON: gateway \$GW reachable\" || echo \"TOCKMOX-BEACON: gateway \$GW UNREACHABLE\""
       echo "      head -c 300 /tmp/beacon.out | sed 's/^/TOCKMOX-BEACON body: /'"
@@ -1090,6 +1145,28 @@ create() {
     if [ "$HANDOFF" = "secret" ]; then
       echo "      [ \"\$ok\" = 1 ] || { echo \"TOCKMOX-HANDOFF: FAILED, kubeconfig not delivered (last http_code=\$code)\"; exit 1; }"
     fi
+    if [ -n "$K3S_ARTIFACTS_URL" ]; then
+      # A block scalar, like the beacon, for the same reason. The server
+      # arguments (the token among them) arrive on the command line from runcmd,
+      # so the token is in this file no more than it was before.
+      echo "  - path: /usr/local/bin/k3s-from-inside.sh"
+      echo "    permissions: \"0700\""
+      echo "    content: |"
+      echo "      #!/bin/sh"
+      echo "      # k3s ${ver} from TOCKMOX_K3S_ARTIFACTS_URL: this install reaches nothing outside."
+      echo "      set -eu"
+      echo "      base='${K3S_ARTIFACTS_URL}/${ver}'"
+      echo "      curl -fsSL -o /usr/local/bin/k3s \"\$base/k3s\" || { echo \"TOCKMOX-K3S: FAILED to fetch \$base/k3s\"; exit 1; }"
+      echo "      chmod 0755 /usr/local/bin/k3s"
+      echo "      got=\$(/usr/local/bin/k3s --version 2>&1 | head -1)"
+      echo "      case \"\$got\" in"
+      echo "        *' ${ver} '*) ;;"
+      echo "        *) rm -f /usr/local/bin/k3s; echo \"TOCKMOX-K3S: FAILED, \$base/k3s is not ${ver}: \$got\"; exit 1 ;;"
+      echo "      esac"
+      echo "      curl -fsSL -o /run/k3s-install.sh \"\$base/install.sh\" || { echo \"TOCKMOX-K3S: FAILED to fetch \$base/install.sh\"; exit 1; }"
+      echo "      echo \"TOCKMOX-K3S: \$got, with install.sh, from \$base\""
+      echo "      INSTALL_K3S_SKIP_DOWNLOAD=true INSTALL_K3S_VERSION='${ver}' sh /run/k3s-install.sh \"\$@\""
+    fi
     echo "runcmd:"
     # Before anything can pull: the deny rules are in place when k3s first starts.
     if [ "$REGISTRY_MODE" = "nofallback" ] && [ "$REGISTRY_DENY" = "node" ] && [ -n "$REGISTRY_MIRROR" ]; then
@@ -1124,7 +1201,11 @@ create() {
     #
     # Keep these in step with fresh-install.md step 4a. If that page changes
     # its flags, this line is the second edit.
-    echo "  - [ sh, -c, \"curl -sfL https://get.k3s.io | ${k3s_env}sh -s - server --disable traefik --disable servicelb --write-kubeconfig-mode 644 --token ${token}\" ]"
+    if [ -n "$K3S_ARTIFACTS_URL" ]; then
+      echo "  - [ sh, -c, \"/usr/local/bin/k3s-from-inside.sh server --disable traefik --disable servicelb --write-kubeconfig-mode 644 --token ${token}\" ]"
+    else
+      echo "  - [ sh, -c, \"curl -sfL https://get.k3s.io | ${k3s_env}sh -s - server --disable traefik --disable servicelb --write-kubeconfig-mode 644 --token ${token}\" ]"
+    fi
     echo "  - [ sh, -c, \"until /usr/local/bin/kubectl --kubeconfig /etc/rancher/k3s/k3s.yaml get nodes 2>/dev/null | grep -q ' Ready'; do sleep 5; done\" ]"
     echo "  - [ sh, -c, \"/usr/local/bin/handoff.sh\" ]"
     echo "  - [ sh, -c, \"touch /run/tockmox-harness-ready\" ]"
