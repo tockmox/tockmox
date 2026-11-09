@@ -198,7 +198,7 @@ runner that is not there.
 
 ## Registry mirror
 
-A by-the-book install pulls its images anonymously from four public registries,
+A by-the-book install pulls its images anonymously from five public registries,
 and an upstream rate limit then looks like a component that never became ready.
 `TOCKMOX_REGISTRY_MIRROR` points the node at a mirror you run. What that proves
 depends on the mode.
@@ -221,6 +221,14 @@ export TOCKMOX_REGISTRY_MODE=nofallback
 ./provision/throwaway-cluster.sh create
 ./provision/throwaway-cluster.sh mirror-proof
 ```
+
+**A mirror under a path** (a Harbor project, which is what
+`tools/mirror-images.sh --registry HOST/PROJECT` fills) is written
+`TOCKMOX_REGISTRY_MIRROR=HOST/PROJECT`. The node's `registries.yaml` then names
+`https://HOST` as the endpoint and carries a `rewrite` onto `PROJECT/` for every
+registry, the block [air-gapped](../../docs/deployment/airgap.md) tells a site to
+write; without it every pull reaches the registry and asks for a repository that
+is not there. `mirror-proof` checks the rewrites too.
 
 `mirror-proof` runs on the node and prints `mirror-proof: PASS` only when the
 configuration is the nofallback one and the counter reads zero. Read its limits
@@ -302,7 +310,7 @@ test, and a run that cannot retrieve a kubeconfig produces no evidence at all.
 | `TOCKMOX_VM_NETWORK` | `pod` | network attachment for the VM. `pod` is KubeVirt's masquerade binding: the guest NATs out to the substrate API (so the `secret` handoff works from any harness host) and is reached only through the NodePort `create` publishes. A host that can route to the lab segment may override with a Multus NAD, e.g. `export TOCKMOX_VM_NETWORK=NAMESPACE/SEGMENT` ... measured 2026-09-04, a guest there has WAN but no route back to the management network, so the handoff never lands |
 | `TOCKMOX_VM_STORAGECLASS` | `harvester-longhorn-r1` | class for the VM's boot disk |
 | `TOCKMOX_HANDOFF` | `secret` | how the guest's kubeconfig comes back: `secret` (guest writes it outbound, no inbound path needed) or `http` (guest serves it once, no credential in the guest) |
-| `TOCKMOX_REGISTRY_MIRROR` | *(empty)* | `host[:port]` of a registry that mirrors docker.io, quay.io, ghcr.io and registry.k8s.io. Empty means every image pulls anonymously from upstream |
+| `TOCKMOX_REGISTRY_MIRROR` | *(empty)* | `host[:port]`, optionally `/PROJECT`, of a registry that mirrors docker.io, quay.io, ghcr.io, registry.k8s.io and code.forgejo.org. Empty means every image pulls anonymously from upstream |
 | `TOCKMOX_REGISTRY_MODE` | `cache` | `cache`: the mirror is tried first and the upstream is the fallback. `nofallback`: the mirror is the only registry and upstream traffic is denied and counted (see "Registry mirror" below) |
 | `TOCKMOX_UPSTREAM_DENY` | `node` | nofallback only. `node`: the guest rejects and counts attempts to the upstream registries. `edge`: it does not, because the network does (a firewall that blocks and logs), so that firewall sees the attempt. Pass the same value to `mirror-proof` |
 | `TOCKMOX_CAPACITY_CHECK` | `enforce` | `enforce`: `create` refuses a run that does not fit (see "Capacity preflight"). `skip`: run unchecked, with a warning on every run |
