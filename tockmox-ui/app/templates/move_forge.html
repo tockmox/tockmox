@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Move to my own forge · Status{% endblock %}
+{% block main %}
+{#- Status > Site repository > Move to my own forge. First a check of the target (nothing moves), then the
+    move (steps 1 to 4, ending in a change an approver other than you merges), then Finish the move. -#}
+<p class="crumb"><a href="/status/site-repository">Site repository</a></p>
+<section class="panel" aria-labelledby="mv-h">
+  <h1 id="mv-h">Move the site to my own forge</h1>
+  <p>The site's whole history (every branch and tag) moves to an <strong>empty</strong> repository you own elsewhere, and one change repoints Argo CD at it. That change waits for an approver other than you, like every change. Once it is merged, <strong>Finish the move</strong> archives the built-in repository: read-only, nothing deleted.</p>
+  <form method="get" action="/actions/confirm" class="stack">
+    <input type="hidden" name="kind" value="move-forge">
+    <input type="hidden" name="mode" value="check">
+    <label for="to">Empty repository URL <span class="muted small">(https, with no user or token in it)</span></label>
+    <input id="to" name="to" type="url" inputmode="url" required maxlength="400" pattern="https://[^@\s?#]+" placeholder="https://git.example.org/acme/site.git" autocomplete="off">
+    <p class="confirm-acts"><button class="btn" type="submit">Check the target</button> <a class="btn-ghost" href="/status/site-repository">Cancel</a></p>
+  </form>
+  <p class="muted small">The check runs the move's first step only: nothing is pushed. A target on a private CA the site does not trust is refused; use <code>tockmox-install.sh move-forge</code> from a laptop for that.</p>
+</section>
+{% if err %}<p class="banner warn" role="status">The moves started here could not be listed: {{ err }}.</p>{% endif %}
+{% if started %}
+<section class="panel" aria-labelledby="mv-started-h">
+  <h2 id="mv-started-h">Moves started here</h2>
+  <ul class="rows">
+  {% for m in started %}
+    <li><code>{{ m.to }}</code>, started by {{ m.who }}.
+      {% if m.finished %}<span class="muted">Finished.</span>
+      {% else %}Once its change is merged on <a href="/platform/changes">Platform › Changes</a>:
+        <a class="pill primary" href="/actions/confirm?kind=move-forge&amp;mode=finish&amp;to={{ m.to | urlencode }}">Finish the move</a>{% endif %}</li>
+  {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endblock %}

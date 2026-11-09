@@ -50,6 +50,14 @@ forge_image_ref() {
   fi
   # The chart's rootless variant: the chart appends the suffix itself unless told not to.
   echo "        image: ${repo}:${tag}-rootless"
+  # The console's move Job (install/forge-move-template.sh), from the same file.
+  local move
+  move=$(sed -n 's/^MOVE_IMAGE_DEFAULT="\([^"]*\)"$/\1/p' install/bootstrap-forge.sh)
+  if [ -z "$move" ]; then
+    echo "ERROR: install/bootstrap-forge.sh has no MOVE_IMAGE_DEFAULT pin" >&2
+    exit 1
+  fi
+  echo "        image: ${move}"
 }
 OUT="$(mktemp "${TMPDIR:-/tmp}/tockmox-images.XXXXXX")"
 trap 'rm -f "$OUT"' EXIT

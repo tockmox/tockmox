@@ -62,6 +62,15 @@ Alertmanager-reading observability capability for the Alertmanager kinds.
 {{- /* changes: the UI reads only the switch; the forge's addresses, the bot's token and the OAuth2 client are
        the service's alone (templates/tockmox-actions.yaml), and the UI asks the service for the sign-in URL. */ -}}
 {{- $_ := set $out "changes" (dict "enabled" $chOn) -}}
+{{- /* moveForge: Status > Site repository > Move to my own forge. It starts bootstrap-forge's suspended
+       <release>-move Job, and its change is approved in Platform > Changes, so it is on only with the change kinds;
+       an explicit false turns it off. image is the one the admission policy admits, so it must equal what
+       bootstrap-forge installs (MOVE_IMAGE_DEFAULT; global.imageRegistry prefixes both). */ -}}
+{{- $mf := $a.moveForge | default dict -}}
+{{- $mfOn := $chOn -}}
+{{- if and (hasKey $mf "enabled") (not (kindIs "invalid" $mf.enabled)) -}}{{- $mfOn = and $chOn $mf.enabled -}}{{- end -}}
+{{- $mfImage := include "tockmox.image" (dict "ctx" . "repo" (($a.moveForge | default dict).image | default "alpine/k8s:1.37.2")) -}}
+{{- $_ := set $out "moveForge" (dict "enabled" $mfOn "image" $mfImage) -}}
 {{- end -}}
 {{- $out | toYaml -}}
 {{- end -}}

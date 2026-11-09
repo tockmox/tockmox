@@ -130,6 +130,11 @@ CHART_VERSION_DEFAULT="17.3.2"
 # shellcheck disable=SC2034 # read by tools/gen-images.sh, which greps this line; the chart takes the repository from its own default
 FORGE_IMAGE_REPO_DEFAULT="code.forgejo.org/forgejo/forgejo"
 FORGE_IMAGE_TAG_DEFAULT="15.0.11"
+# The console's "Move to my own forge" Job (install/forge-move-template.sh): bash, git, curl,
+# python3 and kubectl in one image the AI layer already pins, so the air-gap set gains nothing.
+# Read by tools/gen-images.sh; Renovate moves it with the charts' alpine/k8s pins, and the
+# tockmox-actions admission policy pins the same string (tockmoxUi.actions.moveForge.image).
+MOVE_IMAGE_DEFAULT="alpine/k8s:1.37.2"
 FORGE_NS_DEFAULT="tockmox-forge"
 RELEASE="tockmox-forge"
 ORG="tockmox"
@@ -1445,6 +1450,20 @@ CRON
        a night that fails leaves a failed Job, which the console's KubeJobFailed alert reports.
        Look at: kubectl --context $CTX -n $FORGE_NS logs -l app.kubernetes.io/name=${RELEASE}-dump --tail=20"
 fi
+
+# ---------------------------------------------------------------- the console's move template
+# The suspended CronJob <release>-move that the console's "Move to my own forge" starts:
+# install/forge-move.sh itself, in a ConfigMap, run --in-cluster by a ServiceAccount that can read
+# the forge's admin Secret, write Argo CD's one repository Secret and patch the one root Application.
+# Nothing runs until an admin starts it from the console; forge-move-template.sh says why that is safe.
+say "The console's move template"
+MOVE_IMAGE="${IMAGE_REGISTRY:+${IMAGE_REGISTRY%/}/}${MOVE_IMAGE_DEFAULT}"
+kubectl "${K[@]}" -n "$FORGE_NS" create configmap "${RELEASE}-move-script" \
+  --from-file=forge-move.sh="$HERE/forge-move.sh" --dry-run=client -o yaml \
+  | kubectl "${K[@]}" apply -f - >/dev/null || die "could not apply the ConfigMap ${RELEASE}-move-script"
+bash "$HERE/forge-move-template.sh" --release "$RELEASE" --namespace "$FORGE_NS" --argocd-namespace "$ARGO_NS" \
+  --image "$MOVE_IMAGE" | kubectl "${K[@]}" apply -f - >/dev/null || die "could not apply the move template ${FORGE_NS}/${RELEASE}-move"
+ok "CronJob ${FORGE_NS}/${RELEASE}-move: suspended, started only from the console (Status > Site repository > Move to my own forge)"
 
 # ---------------------------------------------------------------- recovery kit
 say "The recovery kit"

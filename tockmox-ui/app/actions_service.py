@@ -24,6 +24,11 @@ API (reachable from the UI pod only, by NetworkPolicy):
                      and the drill check's CronJobs as the forge namespace holds them (read by name, no Secret)
                      (/v1/changes also carries "sign_in": the forge's authorize URL and the console's public client
                      id, for the UI's redirect; the client secret stays here)
+  POST /v1/forge/move/credentials   Move to my own forge: the push (and optional read) credential, kept in this
+                     process under a one-use handle for ten minutes; the intent then names only the handle (beside the
+                     intent, never in it), and the credential goes nowhere but the move Job's own Secret
+  GET  /v1/forge/move/<job>   one move run: its state, its STEP lines, the check's CHECK line, the change it opened,
+                     and the refusal in the script's words; the run's request Secret is deleted once the Job has finished
   GET  /v1/activity  the last actions, newest first
   GET  /v1/identity/users   the people Authentik knows, for the Identity page (identity kinds on only)
   GET  /healthz
@@ -41,10 +46,12 @@ never written to the record, the log line or a replay's answer.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import ssl
 import sys
@@ -74,6 +81,12 @@ def _username(claims) -> str:
     return str(c.get("preferred_username") or c.get("nickname") or "")[:100]
 
 log = logging.getLogger("tockmox.actions")
+
+# A move Job's log (install/forge-move.sh --in-cluster): one STEP line per step, the check's CHECK line, and the
+# script's refusal (its err() line, "  ✗ ..."), which the page shows in the script's own words.
+MOVE_STEP = re.compile(r"^STEP ([1-5]) (run|ok|fail|wait) (.*)$")
+MOVE_CHECK = re.compile(r"^CHECK branches=(\d{1,6}) tags=(\d{1,6}) main=([0-9a-f]{40}) files=(\d{1,6})$")
+MOVE_REFUSAL = re.compile(r"^\s*✗ (.+)$")
 
 # Changes a page stages to open (stage_draft): kept in this process for as long as a confirm can take.
 DRAFT_TTL_S = 30 * 60
@@ -132,6 +145,24 @@ class Kube:
             with open(self.token_file, encoding="utf-8") as fh:
                 h["Authorization"] = "Bearer " + fh.read().strip()
         return httpx.Client(base_url=self.url, timeout=self.timeout, verify=verify, headers=h, transport=self.transport)
+
+    def text(self, path) -> str:
+        """A text answer (a pod's log), or "" when there is none yet."""
+        with self._c() as c:
+            r = c.get(path)
+        return r.text if r.status_code == 200 else ""
+
+    def quiet(self, method, path, body=None, allow_404=False):
+        """call() for the move's request Secret: the same answer, but nothing about the request is logged (its path
+        names the Secret that carries a credential; CodeQL py/clear-text-logging-sensitive-data)."""
+        with self._c() as c:
+            r = c.request(method, path, content=None if body is None else json.dumps(body),
+                          headers={"Content-Type": "application/json"} if body is not None else {})
+        if r.status_code == 404 and allow_404:
+            return None
+        if r.status_code >= 400:
+            raise act.Refused(f"the Kubernetes API answered {r.status_code}")
+        return r.json()
 
     def call(self, method, path, body=None, ctype="application/json", allow_404=False):
         """The answer's JSON; None for a 404 only when the caller asked (a GET for something that may not exist)."""
@@ -374,6 +405,8 @@ class Service:
         self.seen: dict = {}            # key -> (nonce, row, at): this process's memory, for a record that lost a row
         self.drafts: dict = {}          # digest -> draft: changes a page staged to open (stage_draft)
         self.drafts_lock = threading.Lock()
+        self.move_creds: dict = {}      # handle -> (push, read, at): Move to my own forge, one use, ten minutes
+        self.move_lock = threading.Lock()
 
     # ------------------------------------------------------------ who is asking
 
@@ -820,6 +853,138 @@ class Service:
     def do_assign_job(self, it, who, claims=None):
         return self._open(it, who, claims)
 
+    # ------------------------------------------------------------ Move to my own forge
+
+    def stage_move(self, body) -> str:
+        """Keep a push credential (and a read one, or the push one again) for ten minutes under a one-use handle."""
+        def cred(x, what):
+            x = x if isinstance(x, dict) else {}
+            user, tok = str(x.get("user", "")), str(x.get("token", ""))
+            if not (act.MOVE_USER.fullmatch(user) and act.MOVE_TOKEN.fullmatch(tok)):
+                raise act.Refused(f"the {what} credential is a user name and a token (no spaces, quotes or backslashes)")
+            return user, tok
+        b = body if isinstance(body, dict) else {}
+        push = cred(b.get("push"), "push")
+        read = cred(b["read"], "read") if b.get("read") else push
+        handle = secrets.token_urlsafe(24)
+        now = self.now()
+        with self.move_lock:
+            self.move_creds = {k: v for k, v in self.move_creds.items() if now - v[2] < DRAFT_TTL_S / 3}
+            if len(self.move_creds) >= DRAFTS_MAX:
+                raise act.Refused("too many moves are being confirmed at once; try again in a few minutes")
+            self.move_creds[handle] = (push, read, now)
+        return handle
+
+    def _move_paths(self):
+        ns = self.cfg.forge_namespace
+        return ns, f"/apis/batch/v1/namespaces/{ns}/jobs", f"/api/v1/namespaces/{ns}/secrets"
+
+    def move_run(self, job: str) -> dict:
+        """One move run as the page shows it. Reads the Job and its pod's log; never the request Secret's data."""
+        if not (act.MOVE_JOB.fullmatch(job) and job.startswith(self.cfg.move_cronjob + "-")):
+            raise act.Refused("that is not a move run")
+        ns, jobs, secs = self._move_paths()
+        j = self.kube.call("GET", f"{jobs}/{job}", allow_404=True)
+        if j is None:
+            return {"job": job, "state": "gone"}
+        st = j.get("status") or {}
+        conds = {c.get("type"): c.get("status") for c in st.get("conditions") or []}
+        state = "done" if conds.get("Complete") == "True" else "failed" if conds.get("Failed") == "True" else "running"
+        out = {"job": job, "mode": job.split("-move-")[1].split("-")[0], "state": state,
+               "to": ((j.get("metadata") or {}).get("annotations") or {}).get("tockmox.com/move-to", ""),
+               "requested_by": ((j.get("metadata") or {}).get("annotations") or {}).get("tockmox.com/requested-by", ""),
+               "steps": {}, "check": None, "change": None, "refusal": ""}
+        pods = self.kube.call("GET", f"/api/v1/namespaces/{ns}/pods?labelSelector=job-name%3D{job}") or {}
+        names = sorted(((p.get("metadata") or {}).get("name", "") for p in pods.get("items") or []))
+        logtext = self.kube.text(f"/api/v1/namespaces/{ns}/pods/{names[-1]}/log?tailLines=400") if names else ""
+        for line in logtext.splitlines()[-400:]:
+            m = MOVE_STEP.match(line)
+            if m:
+                out["steps"][m.group(1)] = {"state": m.group(2), "words": m.group(3)[:400]}
+                pr = re.search(r"change #(\d{1,9})", m.group(3))
+                if pr and m.group(1) in ("4", "5"):
+                    out["change"] = int(pr.group(1))
+                continue
+            m = MOVE_CHECK.match(line)
+            if m:
+                out["check"] = {"branches": int(m.group(1)), "tags": int(m.group(2)), "main": m.group(3),
+                                "files": int(m.group(4))}
+                continue
+            m = MOVE_REFUSAL.match(line)
+            if m:
+                out["refusal"] = m.group(1)[:600]
+        if state != "running":          # the credential's Secret goes with the run: now, not ten minutes from now
+            sec = self.kube.quiet("GET", f"{secs}/{self.cfg.move_request_secret}", allow_404=True)
+            owners = [o.get("name") for o in ((sec or {}).get("metadata") or {}).get("ownerReferences") or []]
+            if sec is not None and owners == [job]:
+                try:
+                    self.kube.quiet("DELETE", f"{secs}/{self.cfg.move_request_secret}", allow_404=True)
+                except act.Refused:
+                    log.warning("move %s: its request Secret could not be deleted now; it goes with the Job", job)
+        return out
+
+    def do_move_forge(self, it, who, claims=None, move=None):
+        t = it["target"]
+        mode, to, after = t["mode"], t["to"], t.get("after", "")
+        if not (self.cfg.move_cronjob and self.cfg.move_request_secret):
+            raise act.Refused("the move template is not configured here (actions.moveForge)")
+        requested = _username(claims)
+        if not act.MOVE_USER.fullmatch(requested) or len(requested) > 64:
+            raise act.Refused("your username cannot be recorded on the change, so nothing was started")
+        if mode == "move":                        # the check it follows, read now: the same repository, and clean
+            prev = self.move_run(after)
+            if prev["state"] == "gone":
+                raise act.Refused("the check is kept for ten minutes after it ends, and this one has gone; check the "
+                                  "target again")
+            if prev.get("to") != to or not (prev["state"] == "done" and prev.get("check")):
+                raise act.Refused("the check this follows did not pass for this repository; check the target again")
+        # finish follows nothing the service must keep: the script finds the move's change on the forge itself and
+        # does step 5 only once it is merged (otherwise it says the change still waits, and changes nothing)
+        h = str((move or {}).get("handle", "")) if isinstance(move, dict) else ""
+        with self.move_lock:
+            cred = self.move_creds.pop(h, None) if h else None
+        if cred is None or self.now() - cred[2] > DRAFT_TTL_S / 3:
+            raise act.Refused("the credential was not kept (it is held ten minutes, once); type it again")
+        (pu, pt), (ru, rt) = cred[0], cred[1]
+        ns, jobs, secs = self._move_paths()
+        old = self.kube.quiet("GET", f"{secs}/{self.cfg.move_request_secret}", allow_404=True)
+        if old is not None:                       # one run at a time; a finished run's leftover Secret goes now
+            owner = next((o.get("name") for o in (old.get("metadata") or {}).get("ownerReferences") or []), "")
+            if owner and act.MOVE_JOB.fullmatch(owner) and self.move_run(owner)["state"] == "running":
+                raise act.Refused(f"another move run ({owner}) is still running; follow it, or wait for it to end")
+            self.kube.quiet("DELETE", f"{secs}/{self.cfg.move_request_secret}", allow_404=True)
+        cj = self.kube.call("GET", f"{jobs.replace('/jobs', '/cronjobs')}/{self.cfg.move_cronjob}", allow_404=True)
+        if cj is None:
+            raise act.Refused(f"there is no move template {ns}/{self.cfg.move_cronjob}; run tockmox-install.sh "
+                              "bootstrap-forge again to install it")
+        jt = (cj.get("spec") or {}).get("jobTemplate") or {}
+        jname = f"{self.cfg.move_cronjob}-{mode}-{secrets.token_hex(3)}"
+        meta = jt.get("metadata") or {}
+        labels = dict(meta.get("labels") or {}, **{"tockmox.com/move-forge": "true"})
+        ann = dict(meta.get("annotations") or {}, **{"cronjob.kubernetes.io/instantiate": "manual",
+                                                      "tockmox.com/requested-by": requested, "tockmox.com/move-to": to,
+                                                      "tockmox.com/action": it["key"]})
+        job = {"apiVersion": "batch/v1", "kind": "Job",
+               "metadata": {"name": jname, "namespace": ns, "labels": labels, "annotations": ann,
+                            "ownerReferences": [{"apiVersion": "batch/v1", "kind": "CronJob", "name": self.cfg.move_cronjob,
+                                                 "uid": cj["metadata"]["uid"], "controller": True}]},
+               "spec": jt.get("spec") or {}}
+        made = self.kube.call("POST", jobs, job)
+        req = f"to={to}\nmode={mode}\nrequested-by={requested}\n"
+        b64 = lambda x: base64.b64encode(x.encode()).decode()          # noqa: E731
+        secret = {"apiVersion": "v1", "kind": "Secret", "type": "Opaque",
+                  "metadata": {"name": self.cfg.move_request_secret, "namespace": ns,
+                               "labels": {"tockmox.com/move-forge": "true"},
+                               "ownerReferences": [{"apiVersion": "batch/v1", "kind": "Job", "name": jname,
+                                                    "uid": made["metadata"]["uid"]}]},
+                  "data": {"request": b64(req), "push": b64(f"{pu}\n{pt}\n"), "read": b64(f"{ru}\n{rt}\n")}}
+        try:
+            self.kube.quiet("POST", secs, secret)
+        except act.Refused as e:
+            raise act.Refused(f"the run's credential could not be handed to its Job ({e.reason}); the Job {jname} "
+                              "waits for it and ends by itself within half an hour") from e
+        return {"ref": [jname], "detail": f"{mode} started as Job {jname}", "job": jname}
+
     # ------------------------------------------------------------ one intent
 
     def handle(self, body) -> tuple[int, dict]:
@@ -837,7 +1002,7 @@ class Service:
                     raise act.Refused("this action is already running; its result will be in Activity")
                 self.inflight.add(it["key"])
             try:
-                return self._once(it, sub, who, claims=claims, forge=body.get("forge"))
+                return self._once(it, sub, who, claims=claims, forge=body.get("forge"), move=body.get("move"))
             finally:
                 with self.inflight_lock:
                     self.inflight.discard(it["key"])
@@ -849,7 +1014,7 @@ class Service:
             self.audit(it if isinstance(it, dict) else {}, sub, who, "failed", [], type(e).__name__)
             return 502, {"result": "failed", "reason": f"the action did not complete ({type(e).__name__})"}
 
-    def _once(self, it, sub, who, claims=None, forge=None) -> tuple[int, dict]:
+    def _once(self, it, sub, who, claims=None, forge=None, move=None) -> tuple[int, dict]:
         """Carry out a verified intent once. The key is RESERVED in the record before anything is done (no record,
         no action), and a key is bound to the intent it was first used for: the same key with another intent is
         refused, a replay of the same intent returns its first result."""
@@ -877,6 +1042,8 @@ class Service:
             fn = getattr(self, "do_" + it["kind"].replace("-", "_"))
             if it["kind"] in act.CHANGE_KINDS:
                 res = fn(it, who, claims=claims, forge=forge)
+            elif it["kind"] == "move-forge":
+                res = fn(it, who, claims=claims, move=move)
             elif it["kind"] in OPENS:
                 res = fn(it, who, claims=claims)      # the change records who asked (Tockmox-Requested-By)
             else:
@@ -890,6 +1057,8 @@ class Service:
         self._finish(row)
         if res.get("secret"):                    # to the person who asked, once: never the record, the log or a replay
             return 200, dict(row, secret=res["secret"])
+        if res.get("job"):                       # a move run: the page that follows it
+            return 200, dict(row, job=res["job"])
         return 200, row
 
     def _finish(self, row):
@@ -933,6 +1102,27 @@ def create_service(doc: dict | None = None, transports: dict | None = None, now=
         except Exception as e:  # noqa: BLE001
             return JSONResponse({"error": f"the activity record could not be read ({type(e).__name__})"}, status_code=503)
         return {"rows": rows[:max(1, min(limit, ACTIVITY_MAX))]}
+
+    @app.post("/v1/forge/move/credentials")
+    async def move_credentials(request: Request):
+        """Move to my own forge: the credential, kept here under a one-use handle (the UI is the only caller)."""
+        if not svc.cfg.on("move-forge"):
+            return JSONResponse({"error": "moving the site is not turned on here"}, status_code=404)
+        try:
+            return {"handle": svc.stage_move(await request.json())}
+        except act.Refused as e:
+            return JSONResponse({"error": e.reason}, status_code=400)
+        except ValueError:
+            return JSONResponse({"error": "not JSON"}, status_code=400)
+
+    @app.get("/v1/forge/move/{job}")
+    def move_run(job: str):
+        if not svc.cfg.on("move-forge"):
+            return JSONResponse({"error": "moving the site is not turned on here"}, status_code=404)
+        try:
+            return svc.move_run(job)
+        except act.Refused as e:
+            return JSONResponse({"error": e.reason}, status_code=404 if "not a move run" in e.reason else 502)
 
     @app.get("/v1/identity/users")
     def identity_users():

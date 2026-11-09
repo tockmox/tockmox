@@ -230,6 +230,15 @@
       datasourceTemplate: "docker",
     },
     {
+      // The console's move Job: its pin lives beside the forge's in install/bootstrap-forge.sh.
+      customType: "regex",
+      description: "alpine/k8s move-forge Job image in install/bootstrap-forge.sh",
+      managerFilePatterns: ["/^install/bootstrap-forge\\.sh$/"],
+      matchStrings: ["\\nMOVE_IMAGE_DEFAULT=\"alpine/k8s:(?<currentValue>[0-9][^\"]*)\""],
+      depNameTemplate: "alpine/k8s",
+      datasourceTemplate: "docker",
+    },
+    {
       customType: "regex",
       description: "alpine/k8s wait-for-db init container in tockmox-ai (registry threaded through tpl)",
       managerFilePatterns: ["/^charts/tockmox-ai/values\\.yaml$/"],

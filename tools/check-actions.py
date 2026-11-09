@@ -40,6 +40,13 @@ WHAT IT ASSERTS:
      on port 3000 and nothing else of it.
   9. THE CHANGE KINDS' DEFAULT FOLLOWS THE SITE'S FORGE: on with global.siteForge built-in and nothing set, off with
      it external or empty, and an explicit tockmoxUi.actions.changes.enabled wins either way.
+ 10. MOVE TO MY OWN FORGE (moveForge, on with the change kinds) starts a Job that runs as a ServiceAccount able to
+     patch Argo CD's root, so its grant and its policies are checked whole: the Role tockmox-actions-move in the
+     forge's namespace is exactly get on the one move CronJob, create/get/list on Jobs, list on pods, get on their
+     logs, create on Secrets and get/delete on the one request Secret; tockmox-actions-move-job (Deny, fails closed,
+     this identity only) pins the owner, the ServiceAccount, one container, the image the chart pins, the command,
+     the arguments and the volumes; tockmox-actions-move-secret admits only the request Secret, owned by a Job; the
+     run-now policy steps aside for a move Job and for nothing else. Off (moveForge.enabled false): none of it renders.
 Exit 2 (skipped) when helm or PyYAML is absent.
 """
 import copy
@@ -117,6 +124,8 @@ def check_on(docs) -> list:
         if kind == "ClusterRole" or bkind == "ClusterRoleBinding":
             errs.append(f"2: tockmox-actions is bound cluster-wide ({bkind} -> {kind} {name})")
             continue
+        if name == "tockmox-actions-move":
+            continue                                   # checked whole by check_move (10)
         for rule in (role(docs, kind, name, ns) or {}).get("rules") or []:
             res, verbs, names = set(rule.get("resources") or []), set(rule.get("verbs") or []), rule.get("resourceNames")
             for v in verbs:
@@ -226,6 +235,60 @@ def check_changes(docs) -> list:
                 if ((t.get("namespaceSelector") or {}).get("matchLabels") or {}).get("kubernetes.io/metadata.name") == "tockmox-forge"]
     if not to_forge or any(r.get("ports") != [{"port": 3000, "protocol": "TCP"}] for r in to_forge):
         errs.append("8: tockmox-actions cannot reach the forge on port 3000, or may reach more of it")
+    return errs
+
+
+MOVE_RULES = [
+    {"apiGroups": ["batch"], "resources": ["cronjobs"], "resourceNames": ["tockmox-forge-move"], "verbs": ["get"]},
+    {"apiGroups": ["batch"], "resources": ["jobs"], "verbs": ["create", "get", "list"]},
+    {"apiGroups": [""], "resources": ["pods"], "verbs": ["list"]},
+    {"apiGroups": [""], "resources": ["pods/log"], "verbs": ["get"]},
+    {"apiGroups": [""], "resources": ["secrets"], "verbs": ["create"]},
+    {"apiGroups": [""], "resources": ["secrets"], "resourceNames": ["tockmox-forge-move-request"], "verbs": ["get", "delete"]},
+]
+MOVE_PINS = ("serviceAccountName == 'tockmox-forge-move'", "image == 'alpine/k8s:", "command == ['bash', '/opt/move/forge-move.sh']",
+             "'--request', '/run/move/request'", "v.configMap.name == 'tockmox-forge-move-script'",
+             "v.secret.secretName == 'tockmox-forge-move-request'", "ownerReferences[0].name == 'tockmox-forge-move'",
+             "e.name in ['HOME', 'NO_COLOR']", "!has(variables.pod.initContainers)")
+
+
+def check_move(docs, want_on=True) -> list:
+    errs = []
+    r = role(docs, "Role", "tockmox-actions-move", "tockmox-forge")
+    vaps = {d["metadata"]["name"]: d for d in docs if d["kind"] == "ValidatingAdmissionPolicy"}
+    binds = {d["spec"]["policyName"]: d for d in docs if d["kind"] == "ValidatingAdmissionPolicyBinding"}
+    if not want_on:
+        left = [n for n in ("tockmox-actions-move-job", "tockmox-actions-move-secret") if n in vaps] + (["the Role"] if r else [])
+        return [f"10: moveForge is off but {left} rendered"] if left else []
+    if r is None:
+        return ["10: moveForge is on but the Role tockmox-actions-move is missing in the forge's namespace"]
+    if r.get("rules") != MOVE_RULES:
+        errs.append(f"10: the Role tockmox-actions-move is not exactly the move's grant: {r.get('rules')}")
+    for pol in ("tockmox-actions-move-job", "tockmox-actions-move-secret"):
+        v = vaps.get(pol)
+        if v is None or binds.get(pol, {}).get("spec", {}).get("validationActions") != ["Deny"] or v["spec"].get("failurePolicy") != "Fail":
+            errs.append(f"10: {pol} is missing, not bound with Deny, or fails open")
+            continue
+        conds = " ".join(c["expression"] for c in v["spec"].get("matchConditions") or [])
+        if "system:serviceaccount:tockmox-ai:tockmox-actions" not in conds:
+            errs.append(f"10: {pol} does not match the tockmox-actions identity")
+    job = " ".join(x["expression"] for x in ((vaps.get("tockmox-actions-move-job") or {}).get("spec") or {}).get("validations") or [])
+    for pin in MOVE_PINS:
+        if pin not in job:
+            errs.append(f"10: tockmox-actions-move-job does not pin {pin!r}")
+    sec = " ".join(x["expression"] for x in ((vaps.get("tockmox-actions-move-secret") or {}).get("spec") or {}).get("validations") or [])
+    for pin in ("request.operation == 'CREATE'", "object.metadata.name == 'tockmox-forge-move-request'", "ownerReferences[0].kind == 'Job'"):
+        if pin not in sec:
+            errs.append(f"10: tockmox-actions-move-secret does not pin {pin!r}")
+    rn = vaps.get("tockmox-actions-jobs")
+    if rn is not None:
+        conds = [c["expression"] for c in rn["spec"].get("matchConditions") or []]
+        if conds[1:] != ["!(has(object.metadata.labels) && 'tockmox.com/move-forge' in object.metadata.labels)"]:
+            errs.append(f"10: the run-now policy steps aside for more than a move Job: {conds[1:]}")
+    svc = next((d for d in docs if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "tockmox-actions"), None)
+    mv = (((yaml.safe_load((svc or {}).get("data", {}).get("config.yaml", "")) or {}).get("actions") or {}).get("moveForge")) or {}
+    if (mv.get("cronJob"), mv.get("requestSecret")) != ("tockmox-forge-move", "tockmox-forge-move-request"):
+        errs.append(f"10: the service's config does not name the move CronJob and its request Secret: {mv}")
     return errs
 
 
@@ -442,6 +505,26 @@ def selftest(docs) -> int:
     planted("the UI mounts the console's OAuth2 client", ui_oauth, check_changes, "8:")
     planted("the UI's config carries the client secret file", ui_config_secret, check_changes, "8:")
     planted("tockmox-actions may reach every port of the forge", forge_wide, check_changes, "8:")
+
+    def move_role_wide(d):
+        next(y for y in d if y["kind"] == "Role" and y["metadata"]["name"] == "tockmox-actions-move")["rules"].append(
+            {"apiGroups": [""], "resources": ["secrets"], "verbs": ["get"]})
+
+    def move_image_free(d):
+        v = next(y for y in d if y["kind"] == "ValidatingAdmissionPolicy" and y["metadata"]["name"] == "tockmox-actions-move-job")
+        v["spec"]["validations"] = [x for x in v["spec"]["validations"] if "image ==" not in x["expression"]]
+
+    def move_secret_unbound(d):
+        d[:] = [y for y in d if not (y["kind"] == "ValidatingAdmissionPolicyBinding" and y["spec"]["policyName"] == "tockmox-actions-move-secret")]
+
+    def run_now_steps_aside(d):
+        v = next(y for y in d if y["kind"] == "ValidatingAdmissionPolicy" and y["metadata"]["name"] == "tockmox-actions-jobs")
+        v["spec"]["matchConditions"].append({"name": "x", "expression": "request.namespace != 'tockmox-ai'"})
+    planted("the move Role may read every Secret in the forge's namespace", move_role_wide, check_move, "10:")
+    planted("the move Job policy admits any image", move_image_free, check_move, "10:")
+    planted("the request Secret's policy is not bound", move_secret_unbound, check_move, "10:")
+    if any(y["kind"] == "ValidatingAdmissionPolicy" and y["metadata"]["name"] == "tockmox-actions-jobs" for y in docs):
+        planted("the run-now policy steps aside for more than a move", run_now_steps_aside, check_move, "10:")
     docs[:] = layer
     planted("the console role granted change_user", wide_role, check_identity_layer, "7:")
     planted("the console may change the admin group", admin_group, check_identity_layer, "7:")
@@ -511,7 +594,9 @@ def main():
     rc, ident = render(ON, IDENTITY_ON)
     errs += [f"render with identity on failed: {ident}"] if rc else check_on(ident) + check_identity_mount(ident)
     rc, ch = render(ON, CHANGES_ON)
-    errs += [f"render with changes on failed: {ch}"] if rc else check_on(ch) + check_changes(ch)
+    errs += [f"render with changes on failed: {ch}"] if rc else check_on(ch) + check_changes(ch) + check_move(ch)
+    rc, nomv = render(ON, CHANGES_ON, {"tockmoxUi": {"actions": {"moveForge": {"enabled": False}}}})
+    errs += [f"render with moveForge off failed: {nomv}"] if rc else check_move(nomv, want_on=False)
     for label, overlays, want in (
             ("built-in, nothing set", (CHANGES_ON,), True),
             ("built-in, set off", (CHANGES_ON, {"tockmoxUi": {"actions": {"changes": {"enabled": False}}}}), False),

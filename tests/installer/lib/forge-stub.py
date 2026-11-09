@@ -125,7 +125,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.command == "POST" and a == "/repos/tockmox/site/pulls":
             os.makedirs(os.path.join(ROOT, "moves"), exist_ok=True)
             n = 100 + len(os.listdir(os.path.join(ROOT, "moves"))) + 1
-            rec = {"number": n, "state": "open", "merged": False, "title": d.get("title"), "head": {"ref": d.get("head")}}
+            rec = {"number": n, "state": "open", "merged": False, "title": d.get("title"), "body": d.get("body", ""),
+                   "head": {"ref": d.get("head")}}
             with open(os.path.join(ROOT, "moves", "%d.json" % n), "w") as fh:
                 _json.dump(rec, fh)
             return self.send(201, dumps(rec).encode())

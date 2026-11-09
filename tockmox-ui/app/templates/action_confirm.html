@@ -35,6 +35,25 @@
       <legend>Good for</legend>
       {% for h, label in recovery_choices %}<label class="choice"><input type="radio" name="hours" value="{{ h }}" required{% if h == 24 %} checked{% endif %}> {{ label }}</label>{% endfor %}
     </fieldset>
+    {% elif kind == "move-forge" %}
+    {#- The credential goes to tockmox-actions when you confirm, before the sign-in, and from there only into the move
+        Job's own Secret; it is never shown again, logged or recorded in Activity. -#}
+    <fieldset>
+      <legend>Push credential <span class="muted small">(write access to {{ target.to }})</span></legend>
+      <label for="push_user">User</label>
+      <input id="push_user" name="push_user" required maxlength="100" pattern="[A-Za-z0-9._@-]+" autocomplete="off">
+      <label for="push_token">Token</label>
+      <input id="push_token" name="push_token" type="password" required maxlength="400" autocomplete="new-password">
+    </fieldset>
+    {% if target.mode != "check" %}
+    <fieldset>
+      <legend>Read credential for Argo CD <span class="muted small">(optional; read-only is better. Empty: the push credential)</span></legend>
+      <label for="read_user">User</label>
+      <input id="read_user" name="read_user" maxlength="100" pattern="[A-Za-z0-9._@-]+" autocomplete="off">
+      <label for="read_token">Token</label>
+      <input id="read_token" name="read_token" type="password" maxlength="400" autocomplete="new-password">
+    </fieldset>
+    {% endif %}
     {% elif kind == "decline-change" %}
     <label for="reason">Why <span class="muted small">(optional; the forge keeps it as a comment on the change)</span></label>
     <textarea id="reason" name="reason" rows="2" maxlength="300"></textarea>

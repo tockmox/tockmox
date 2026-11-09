@@ -69,6 +69,11 @@ Off means absent: with no kind on, none of this renders, and the UI shows no but
       "oauth" (dict "authorizeUrl" (printf "%s/login/oauth/authorize" $web) "tokenUrl" (printf "%s/login/oauth/access_token" $in)
                     "clientIdFile" "/etc/tockmox-actions/forge-oauth/client_id" "clientSecretFile" "/etc/tockmox-actions/forge-oauth/client_secret")) -}}
 {{- end -}}
+{{- $mvName := printf "%s-move" $fRel -}}
+{{- if $act.moveForge.enabled -}}
+{{- $_ := set $svcActions "moveForge" (dict "enabled" true "forgeNamespace" $fNs "forgeRelease" $fRel "cronJob" $mvName
+      "requestSecret" (printf "%s-request" $mvName) "argocdNamespace" $argoNs) -}}
+{{- end -}}
 {{- $svcCfg := dict
       "oidc" (dict "issuer" $cfg.oidc.issuer "clientId" ($cfg.oidc.clientId | default "tockmox-ui"))
       "roles" (dict "adminGroup" ((($cfg.roles | default dict).adminGroup) | default "tockmox-admins"))
@@ -176,6 +181,130 @@ roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: tockmox-action
 subjects:
   - { kind: ServiceAccount, name: tockmox-actions, namespace: {{ $aiNs }} }
 {{- end }}
+{{- if $act.moveForge.enabled }}
+---
+# moveForge: start the suspended <release>-move Job, hand it the run's request and credentials in ONE
+# Secret owned by that Job, and follow it by its pod's log. The tockmox-actions-move-* policies below pin the Job's
+# pod spec and the Secret's name and owner, because the Job runs as a ServiceAccount that can patch tockmox-root.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tockmox-actions-move
+  namespace: {{ $fNs }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+rules:
+  - { apiGroups: [batch], resources: [cronjobs], resourceNames: [{{ $mvName }}], verbs: [get] }
+  - { apiGroups: [batch], resources: [jobs], verbs: [create, get, list] }
+  - { apiGroups: [""], resources: [pods], verbs: [list] }
+  - { apiGroups: [""], resources: [pods/log], verbs: [get] }
+  - { apiGroups: [""], resources: [secrets], verbs: [create] }
+  - { apiGroups: [""], resources: [secrets], resourceNames: [{{ $mvName }}-request], verbs: [get, delete] }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tockmox-actions-move
+  namespace: {{ $fNs }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: tockmox-actions-move }
+subjects:
+  - { kind: ServiceAccount, name: tockmox-actions, namespace: {{ $aiNs }} }
+---
+# A move Job from this identity is the template's own, exactly: the move ServiceAccount, the script from its
+# ConfigMap, the fixed arguments, the request Secret, the pinned image. Anything else is refused, so the right to
+# start it is not a right to run a pod of one's choosing as a ServiceAccount that can repoint Argo CD.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: tockmox-actions-move-job
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - { apiGroups: [batch], apiVersions: [v1], operations: [CREATE, UPDATE], resources: [jobs] }
+  matchConditions:
+    - name: from-tockmox-actions
+      expression: "request.userInfo.username == '{{ $sa }}'"
+    - name: a-move
+      expression: "has(object.metadata.labels) && 'tockmox.com/move-forge' in object.metadata.labels"
+  variables:
+    - name: pod
+      expression: "object.spec.template.spec"
+  validations:
+    - expression: "request.operation == 'CREATE' && request.namespace == '{{ $fNs }}'"
+      message: "tockmox-actions may create a move Job in {{ $fNs }}, never change one"
+    - expression: >-
+        object.metadata.labels['tockmox.com/move-forge'] == 'true' &&
+        has(object.metadata.ownerReferences) && size(object.metadata.ownerReferences) == 1 &&
+        object.metadata.ownerReferences[0].kind == 'CronJob' && object.metadata.ownerReferences[0].name == '{{ $mvName }}'
+      message: "a move Job is owned by the CronJob {{ $mvName }}"
+    - expression: >-
+        has(variables.pod.serviceAccountName) && variables.pod.serviceAccountName == '{{ $mvName }}' &&
+        size(variables.pod.containers) == 1 && !has(variables.pod.initContainers) && !has(variables.pod.ephemeralContainers) &&
+        (!has(variables.pod.hostNetwork) || !variables.pod.hostNetwork) && (!has(variables.pod.hostPID) || !variables.pod.hostPID)
+      message: "a move Job runs one container as {{ $mvName }}, nothing else"
+    - expression: >-
+        variables.pod.containers[0].image == '{{ $act.moveForge.image }}' &&
+        variables.pod.containers[0].command == ['bash', '/opt/move/forge-move.sh'] &&
+        variables.pod.containers[0].args == ['--in-cluster', '--namespace', '{{ $fNs }}', '--argocd-namespace', '{{ $argoNs }}',
+          '--request', '/run/move/request', '--credentials', '/run/move/push', '--read-credentials', '/run/move/read',
+          '--approval-wait-minutes', '0']
+      message: "a move Job runs install/forge-move.sh from its ConfigMap in the pinned image (tockmoxUi.actions.moveForge.image), with the template's arguments"
+    - expression: >-
+        !has(variables.pod.containers[0].envFrom) &&
+        (!has(variables.pod.containers[0].env) || variables.pod.containers[0].env.all(e, e.name in ['HOME', 'NO_COLOR'] && !has(e.valueFrom))) &&
+        has(variables.pod.volumes) && variables.pod.volumes.all(v,
+          (has(v.configMap) && v.configMap.name == '{{ $mvName }}-script') ||
+          (has(v.secret) && v.secret.secretName == '{{ $mvName }}-request') || has(v.emptyDir))
+      message: "a move Job reads only its script, its request Secret and a scratch directory"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: tockmox-actions-move-job
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  policyName: tockmox-actions-move-job
+  validationActions: [Deny]
+---
+# The one Secret this identity writes: the move's request, named, owned by a move Job, so it goes when the Job does.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: tockmox-actions-move-secret
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - { apiGroups: [""], apiVersions: [v1], operations: [CREATE, UPDATE], resources: [secrets] }
+  matchConditions:
+    - name: from-tockmox-actions
+      expression: "request.userInfo.username == '{{ $sa }}'"
+  validations:
+    - expression: "request.operation == 'CREATE' && request.namespace == '{{ $fNs }}' && object.metadata.name == '{{ $mvName }}-request'"
+      message: "tockmox-actions may create only the Secret {{ $fNs }}/{{ $mvName }}-request, never change one"
+    - expression: >-
+        has(object.metadata.ownerReferences) && size(object.metadata.ownerReferences) == 1 &&
+        object.metadata.ownerReferences[0].kind == 'Job' && object.metadata.ownerReferences[0].name.startsWith('{{ $mvName }}-')
+      message: "the move's request Secret is owned by its move Job"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: tockmox-actions-move-secret
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  policyName: tockmox-actions-move-secret
+  validationActions: [Deny]
+{{- end }}
 {{- if $jobNs }}
 {{- $allowed := list }}{{- range $n, $names := $jobNs }}{{- range $names }}{{- $allowed = append $allowed (printf "%s/%s" $n .) }}{{- end }}{{- end }}
 ---
@@ -194,6 +323,11 @@ spec:
   matchConditions:
     - name: from-tockmox-actions
       expression: "request.userInfo.username == '{{ $sa }}'"
+    {{- if $act.moveForge.enabled }}
+    # A move Job answers to tockmox-actions-move-job instead, which pins far more than this.
+    - name: not-a-move
+      expression: "!(has(object.metadata.labels) && 'tockmox.com/move-forge' in object.metadata.labels)"
+    {{- end }}
   validations:
     - expression: "request.operation == 'CREATE'"
       message: "tockmox-actions may create a Job, never change one"
