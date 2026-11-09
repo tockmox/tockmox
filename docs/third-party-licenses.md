@@ -57,7 +57,7 @@ the caveats worth knowing before you depend on something.
 | PostgreSQL (official image) | identity | PostgreSQL License | |
 | LiteLLM | ai | **MIT core + separately licensed enterprise directory** | see the open-core note below |
 | Open WebUI | ai | **Open WebUI License** (BSD-3-Clause plus a branding clause; not OSI-approved) | see the Open WebUI note below |
-| Redis 7.4 | ai (console websocket state) | **RSALv2 / SSPLv1 (dual; not open source)** | see the Redis note below |
+| Valkey | ai (console websocket state) | BSD-3-Clause | replaced Redis 7.4 in 0.9.0; see the Valkey note below |
 | Python (official image) | ai (jobs) | PSF-2.0 | |
 | Argo Workflows | devops | Apache-2.0 | |
 | prometheus-operator CRDs | crds | Apache-2.0 | |
@@ -84,14 +84,13 @@ read the [Open WebUI license](https://docs.openwebui.com/license/) before
 relying on it; the obligation is yours, not Tockmox's, and Tockmox cannot
 waive it.
 
-**Redis 7.4 is not open source software either.** The console's websocket
-state store is the `redis:7.4` image, dual-licensed RSALv2 / SSPLv1 ...
-source-available, OSI-rejected. It arrives as the Open WebUI chart's default
-and is used as a plain cache with no Redis-specific modules. Two clean exits
-exist if the license matters to you: [Valkey](https://valkey.io/) (BSD-3, the
-Linux Foundation fork, drop-in at this usage level) via the chart's image
-override, or Redis 8.x, which added AGPL-3.0 as an option. Replacing the
-default is on the roadmap; today this row is the honest state.
+**The console's websocket state store is Valkey, not Redis.** The Open WebUI
+chart's default is the `redis:7.4` image, dual-licensed RSALv2 / SSPLv1 ...
+source-available, OSI-rejected. From 0.9.0 Tockmox overrides it with
+[Valkey](https://valkey.io/) (BSD-3, the Linux Foundation fork), which is
+drop-in at this usage: a plain cache that fans websocket events out between
+console replicas, with no Redis-specific modules and no data kept. A site that
+pins the old image in its own values keeps Redis and its license terms.
 
 **The open-core pair: Authentik and LiteLLM.** Both are MIT at the core with
 an `enterprise/` directory under a separate commercial license, shipped

@@ -88,9 +88,9 @@ quay.io/metallb/controller
 quay.io/metallb/speaker
 quay.io/prometheus-operator/prometheus-config-reloader
 quay.io/prometheus/snmp-exporter
-redis
 registry.example/tockmox/tockmox-ui
 registry.k8s.io/sig-storage/snapshot-controller
+valkey/valkey
 "
 
 fail=0
