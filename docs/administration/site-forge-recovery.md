@@ -93,7 +93,8 @@ ls "$TOCKMOX/install/tockmox-install.sh" "$KIT" "$S3_CREDENTIALS" "$AGE_IDENTITY
 **Success condition:** `ls` lists all four files. `S3_CREDENTIALS` holds two
 lines, the access key id and then the secret key. **On a git-remote copy**, in
 every block below replace the three `--offsite-s3-*` flags with
-`--offsite-git URL --offsite-git-credentials FILE`. **For a passphrase kit**,
+`--offsite-git URL --offsite-git-credentials FILE`, plus `--offsite-git-ca FILE`
+if the remote's certificate is from your own CA. **For a passphrase kit**,
 replace `--age-identity "$AGE_IDENTITY"` with `--passphrase-file FILE`.
 
 ## Check the copy and the kit, without a cluster
