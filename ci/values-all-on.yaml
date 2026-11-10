@@ -146,3 +146,5 @@ alertPack:
 # runs against the rendered rules.
 siteForge:
   enabled: true
+  # and the approvers watcher's two alerts (tests/rules/site-repository.yaml cases 7-10)
+  approverWatch: true

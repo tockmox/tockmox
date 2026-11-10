@@ -18,6 +18,12 @@
 #   6  RebuildDrillOverdue: a drill-check that succeeds each morning never
 #      fires; one that stops fires 26 hours after its last success (plus for: 1m),
 #      not before; one that never succeeded fires once it is 26 hours old.
+#   7  ApproverOutsideGroup: a person in the watcher's info series fires at once,
+#      critical, naming the open PR their approval stands on and not another person's.
+#   8  The fail-safe: with the watcher's last check not clean, nobody is judged.
+#   9  ApproversCheckDown: a check that stays not-clean fires after 15 minutes, not before.
+#   10 A running forge with no watcher series fires CheckDown after 15 minutes; with no
+#      kube-state-metrics series for the namespace, nothing fires.
 
 evaluation_interval: 1m
 
@@ -180,3 +186,101 @@ tests:
             exp_annotations:
               summary: "The site's rebuild drill failed or is overdue"
               description: "The drill-check job tockmox-forge/tockmox-forge-drill-check has not succeeded for more than 26 hours: the last rebuild drill failed, or passed more than a quarter ago, or none has been run. Until one passes, nobody knows the off-site copy and the recovery kit can rebuild this site. Its log names which: kubectl -n tockmox-forge logs -l app.kubernetes.io/name=tockmox-forge-drill-check --tail=5. Run tockmox-install.sh rebuild-drill on a throwaway cluster (docs/administration/site-forge-recovery.md, The rebuild drill)."
+
+  # 7  TockmoxForgeApproverOutsideGroup: the watcher's info series for a person,
+  #    judged only while its check is clean. No for: delay.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_forge_approvers_check_ok{namespace="tockmox-forge",pod="w"}'
+        values: '1x10'
+      - series: 'tockmox_forge_approver_outside_group_info{namespace="tockmox-forge",pod="w",user="bob",since="1762700000"}'
+        values: '_x2 1x8'
+      - series: 'tockmox_forge_approval_by_outside_approver{namespace="tockmox-forge",pod="w",user="bob",pr="4"}'
+        values: '_x2 1x8'
+      - series: 'tockmox_forge_approval_by_outside_approver{namespace="tockmox-forge",pod="w",user="carol",pr="9"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: TockmoxForgeApproverOutsideGroup
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: TockmoxForgeApproverOutsideGroup
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              tockmox_component: site-repository
+              namespace: tockmox-forge
+              user: bob
+              since: "1762700000"
+            exp_annotations:
+              summary: "bob can still approve site changes but is no longer an active admin"
+              description: "bob is in the built-in forge's approvers team but is not an active member of the admin group, so their approval still counts toward merging a change to the site. Take them out of the team: https://forge.int.example.com/org/tockmox/teams/approvers (one click, as the forge's admin). Open pull requests their approval still stands on: #4. Dismiss or decline those in the same sitting. This keeps firing until the team matches the group again (docs/administration/site-forge.md, Who can approve a change)."
+
+  # 8  The fail-safe: the same person, but the watcher's last check was not clean. Nobody is judged.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_forge_approvers_check_ok{namespace="tockmox-forge",pod="w"}'
+        values: '0x10'
+      - series: 'tockmox_forge_approver_outside_group_info{namespace="tockmox-forge",pod="w",user="bob",since="1762700000"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TockmoxForgeApproverOutsideGroup
+        exp_alerts: []
+
+  # 9  TockmoxForgeApproversCheckDown: a check that stays not-clean fires after 15 minutes,
+  #    not before; a clean one never does.
+  - interval: 1m
+    input_series:
+      - series: 'tockmox_forge_approvers_check_ok{namespace="tockmox-forge",pod="w"}'
+        values: '1x5 0x30'
+      - series: 'kube_namespace_status_phase{namespace="tockmox-forge",phase="Active"}'
+        values: '1x35'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TockmoxForgeApproversCheckDown
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: TockmoxForgeApproversCheckDown
+        exp_alerts: []
+      - eval_time: 22m
+        alertname: TockmoxForgeApproversCheckDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tockmox_component: site-repository
+              namespace: tockmox-forge
+            exp_annotations:
+              summary: "Nobody is watching who can approve site changes"
+              description: "The approvers watcher in tockmox-forge has not made a clean check for 15 minutes, or is not being scraped. While it is down, someone removed from the admin group who is still a forge approver would not be noticed. Its log names the read that failed: kubectl -n tockmox-forge logs deploy/tockmox-forge-approver-watch --tail=20"
+
+  # 10 A forge that runs with no watcher series at all (the watcher not scraped) fires CheckDown
+  #    after 15 minutes; with no kube-state-metrics series for the namespace, nothing fires.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="tockmox-forge",deployment="tockmox-forge"}'
+        values: '1x30'
+      - series: 'kube_namespace_status_phase{namespace="tockmox-forge",phase="Active"}'
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: TockmoxForgeApproversCheckDown
+        exp_alerts: []
+      - eval_time: 17m
+        alertname: TockmoxForgeApproversCheckDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              tockmox_component: site-repository
+              namespace: tockmox-forge
+            exp_annotations:
+              summary: "Nobody is watching who can approve site changes"
+              description: "The approvers watcher in tockmox-forge has not made a clean check for 15 minutes, or is not being scraped. While it is down, someone removed from the admin group who is still a forge approver would not be noticed. Its log names the read that failed: kubectl -n tockmox-forge logs deploy/tockmox-forge-approver-watch --tail=20"
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="tockmox-forge",deployment="tockmox-forge"}'
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: TockmoxForgeApproversCheckDown
+        exp_alerts: []
