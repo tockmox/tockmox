@@ -137,7 +137,7 @@ elif method == "POST" and re.fullmatch(r"/api/v1/orgs/[^/]+/repos", path):
 elif method == "DELETE" and path.startswith("/api/v1/repos/"):
     code = os.environ.get("CURL_DELETE_CODE", "204")
 if code == "000":
-    sys.stderr.write("curl: (6) Could not resolve host: %s\n" % re.sub(r"^https://([^/:]+).*", r"\1", url)); sys.exit(6)
+    sys.stderr.write("curl: (6) Could not resolve host: %s\n" % re.sub(r"^https://([^/:]+).*", r"\1", url)); sys.exit(int(os.environ.get("CURL_EXIT", "6")))
 if opt("-o"):
     open(opt("-o"), "w").write(body)
 sys.stdout.write(code)
@@ -232,10 +232,18 @@ has_secret ed-run-offsite && ok "the marker stays after a failed create, so dest
 reset_store; CURL_USER_CODE=401 run_tc offsite-repo "$TMP/off"
 [ "$RC" = 1 ] && ! grep '^POST' "$TMP/curl.log" >/dev/null && ! has_secret ed-run-offsite && grep -F 'did not accept key token' "$TMP/err" >/dev/null \
   && ok "a token the forge does not accept fails before anything is created" || bad "a token the forge does not accept fails before anything is created" "rc=$RC $(both | tail -3)"
+reset_store; CURL_USER_CODE=403 run_tc offsite-repo "$TMP/off"
+[ "$RC" = 0 ] && grep '^POST' "$TMP/curl.log" >/dev/null && [ "$(cat "$TMP/off/git-credentials" 2>/dev/null)" = "git
+$TOKEN" ] && ok "a token without read:user still creates the repository, and the credentials file names a user the forge ignores" \
+  || bad "a token without read:user still creates the repository, and the credentials file names a user the forge ignores" "rc=$RC $(both | tail -3)"
 reset_store; CURL_USER_CODE=000 run_tc offsite-repo "$TMP/off"
-[ "$RC" = 1 ] && quiet && grep -F '000 means it was not reached' "$TMP/err" >/dev/null \
-  && ok "a forge that is not reached fails without curl's own words, which name the host" \
-  || bad "a forge that is not reached fails without curl's own words, which name the host" "rc=$RC $(both | tail -3)"
+[ "$RC" = 1 ] && quiet && grep -F 'answered 000, curl exit 6: the host in key url did not resolve' "$TMP/err" >/dev/null \
+  && ok "a forge that is not reached fails with curl's exit code and its meaning, not curl's own words, which name the host" \
+  || bad "a forge that is not reached fails with curl's exit code and its meaning, not curl's own words, which name the host" "rc=$RC $(both | tail -3)"
+reset_store; CURL_USER_CODE=000 CURL_EXIT=60 run_tc offsite-repo "$TMP/off"
+[ "$RC" = 1 ] && quiet && grep -F 'curl exit 60: its certificate was not trusted' "$TMP/err" >/dev/null \
+  && ok "an untrusted certificate is told apart from an unreachable forge" \
+  || bad "an untrusted certificate is told apart from an unreachable forge" "rc=$RC $(both | tail -3)"
 reset_store; KT_FAIL=create-secret run_tc offsite-repo "$TMP/off"
 [ "$RC" = 1 ] && ! grep '^POST' "$TMP/curl.log" >/dev/null && ok "no repository is created when the marker cannot be written" \
   || bad "no repository is created when the marker cannot be written" "rc=$RC $(cat "$TMP/curl.log") $(both | tail -3)"
@@ -329,6 +337,7 @@ cat > "$L/run.sh" <<'STUB'
 printf 'run.sh %s url=%s creds=%s ca=%s scrub=%s\n' "$*" "${TOCKMOX_P09_OFFSITE_GIT_URL-unset}" "${TOCKMOX_P09_OFFSITE_GIT_CREDENTIALS-unset}" \
   "${TOCKMOX_P09_OFFSITE_GIT_CA-unset}" "${TOCKMOX_P09_OFFSITE_SCRUB-unset}" >> "$LANE_LOG"
 [ "$1" != P09 ] || [ ! -f "${TOCKMOX_P09_OFFSITE_GIT_CREDENTIALS:-/nonexistent}" ] || echo "P09 read the credentials file" >> "$LANE_LOG"
+[ "$1" != P09 ] || exit "${STUB_P09_RC:-0}"
 exit 0
 STUB
 for t in helm kubeseal openssl zsh curl age age-keygen; do printf '#!/bin/sh\nexit 0\n' > "$TMP/lbin/$t"; done
@@ -404,6 +413,20 @@ run_lane TOCKMOX_P09_OFFSITE=git STUB_REACH_RC=1
 [ "$RC" = 1 ] && ! grep -F 'run.sh' "$LH/log" >/dev/null && [ ! -e "$(OD)" ] \
   && ok "a guest that does not reach the forge stops the lane before the install, and the token is not left" \
   || bad "a guest that does not reach the forge stops the lane before the install, and the token is not left" "rc=$RC $(cat "$LH/log")"
+run_lane TOCKMOX_P09_OFFSITE=git STUB_REACH_RC=3
+[ "$RC" = 0 ] && grep -F 'run.sh P09 url=https://' "$LH/log" >/dev/null && grep -F 'was not checked' "$TMP/lout" >/dev/null \
+  && ok "a reach check that could not run on the guest is said so, and the install goes on to show it" \
+  || bad "a reach check that could not run on the guest is said so, and the install goes on to show it" "rc=$RC $(tail -3 "$TMP/lout")"
+run_lane TOCKMOX_P09_OFFSITE=git TOCKMOX_KEEP_CLUSTER=1 STUB_REPO_RC=1
+[ "$RC" = 1 ] && grep '^destroy' "$LH/log" >/dev/null && grep -F 'no install to keep' "$TMP/lout" >/dev/null \
+  && ok "a kept run that stops before P09 began is destroyed: there is no install to keep" \
+  || bad "a kept run that stops before P09 began is destroyed: there is no install to keep" "rc=$RC $(cat "$LH/log")"
+run_lane TOCKMOX_P09_OFFSITE=git TOCKMOX_KEEP_CLUSTER=1 STUB_REPO_RC=1 TOCKMOX_KEEP_ON_PREP_FAILURE=1
+[ "$RC" = 1 ] && ! grep '^destroy' "$LH/log" >/dev/null \
+  && ok "TOCKMOX_KEEP_ON_PREP_FAILURE=1 keeps it anyway" || bad "TOCKMOX_KEEP_ON_PREP_FAILURE=1 keeps it anyway" "rc=$RC $(cat "$LH/log")"
+run_lane TOCKMOX_P09_OFFSITE=git TOCKMOX_KEEP_CLUSTER=1 STUB_P09_RC=1
+[ "$RC" = 1 ] && ! grep '^destroy' "$LH/log" >/dev/null \
+  && ok "a kept run whose P09 failed stays up: that install is what keep is for" || bad "a kept run whose P09 failed stays up: that install is what keep is for" "rc=$RC $(cat "$LH/log")"
 run_lane TOCKMOX_P09_OFFSITE=git STUB_PATCH_RC=1
 [ "$RC" = 1 ] && ! grep -F 'run.sh P09' "$LH/log" >/dev/null && ok "a CA that cannot be added to ArgoCD's trust stops the lane before P09" \
   || bad "a CA that cannot be added to ArgoCD's trust stops the lane before P09" "rc=$RC $(cat "$LH/log")"
