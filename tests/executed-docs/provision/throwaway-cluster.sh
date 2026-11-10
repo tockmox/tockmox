@@ -15,6 +15,9 @@
 #   throwaway-cluster.sh await    ... resume create's wait for a guest already provisioning
 #   throwaway-cluster.sh mirror-proof ... under TOCKMOX_REGISTRY_MODE=nofallback, report on the
 #                                     guest whether any upstream registry was contacted
+#   throwaway-cluster.sh kit-store KIT IDENTITY ... keep a P09 recovery kit and the age identity
+#                                     that opens it as the Secret ${VM_NAME}-kit
+#   throwaway-cluster.sh kit DIR  ... write that Secret's two files into DIR
 #
 # MicroOS images only (provision/profiles/microos.sh):
 #
@@ -580,6 +583,127 @@ store_ssh_key_secret() {
     tockmox.com/harness=executed-docs --overwrite >/dev/null \
     || { echo "REFUSING: stored ${NS}/${name} but could not label it for destroy's sweep" >&2; exit 2; }
   echo "  per-run key stored as ${NS}/${name} (TOCKMOX_KEY_SECRET=1; destroy removes it)" >&2
+}
+
+# ---- the recovery kit of a kept throwaway -----------------------------------
+# P09's built-in route ends with a recovery kit (tockmox-recovery-kit.tar.age)
+# and makes the age identity that opens it, and both exist only on the machine
+# that ran P09: the kit in its home, the identity in the job's scratch. When the
+# job ends they are gone, and with them any way to rebuild that throwaway from
+# its off-site copy, restore it, or run the drill against it. A workflow
+# artifact is the wrong place for either: this repository is public, and anyone
+# signed in can download a public repository's artifacts.
+#
+#   kit-store KIT IDENTITY   keep both as the Secret ${VM_NAME}-kit (keys `kit`
+#                            and `identity`) in the test namespace, labelled like
+#                            the harness's other Secrets
+#   kit DIR                  write them into DIR as tockmox-recovery-kit.tar.age
+#                            and p09-age-identity.txt, with the environment
+#                            `await` takes
+#
+# destroy deletes the Secret with the VM's other objects, and sweep destroys by
+# name, so it lives exactly as long as the VM. What it holds is one throwaway's
+# forge admin password and sealing-key backup, readable by anyone who can read
+# Secrets in the test namespace. It opens nothing beyond that throwaway.
+# Neither verb prints either file. Both check that the identity opens the kit
+# when `age` is on PATH, and say so when it is not.
+KIT_FILE="tockmox-recovery-kit.tar.age"
+KIT_ID_FILE="p09-age-identity.txt"
+
+# kit_state KIT IDENTITY: whole, broken, or unchecked (no age on PATH). The
+# opened kit goes through a pipe and is never written anywhere.
+kit_state() {
+  command -v age >/dev/null 2>&1 || { printf 'unchecked'; return 0; }
+  local s
+  s="$(age -d -i "$2" "$1" 2>/dev/null \
+        | awk 'NR==1 && /^# tockmox-recovery-kit / {h=1} /^=== end$/ {e=1} END {print (h && e) ? "whole" : "broken"}')" || s=broken
+  printf '%s' "${s:-broken}"
+}
+
+kit_store() {
+  local kit="${1:-}" id="${2:-}" name="${VM_NAME}-kit" out state bytes
+  if [ -z "$kit" ] || [ -z "$id" ]; then
+    echo "REFUSING: kit-store needs two files: $0 kit-store KIT IDENTITY" >&2; exit 2
+  fi
+  [ -s "$kit" ] || { echo "REFUSING: there is no recovery kit at ${kit}" >&2; exit 2; }
+  [ -s "$id" ] || { echo "REFUSING: there is no age identity at ${id}" >&2; exit 2; }
+  bytes=$(( $(wc -c < "$kit") + $(wc -c < "$id") ))
+  if [ "$bytes" -gt 786432 ]; then
+    echo "REFUSING: the kit and its identity are ${bytes} bytes together. A Secret holds 1 MiB and this stops at 768 KiB;" >&2
+    echo "          a recovery kit is a few kilobytes, so this is not one." >&2
+    exit 2
+  fi
+  state="$(kit_state "$kit" "$id")"
+  if [ "$state" = broken ]; then
+    echo "REFUSING: ${id} does not open ${kit}, or the kit was cut short." >&2
+    echo "          A kit that cannot be opened is not kept: in the Secret it would read as one that can." >&2
+    exit 2
+  fi
+  # A kit with no VM is an orphan: sweep finds its work by listing VMs.
+  if ! kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" get vm "$VM_NAME" >/dev/null 2>&1; then
+    echo "REFUSING: ${NS}/${VM_NAME} does not exist, so nothing would ever delete its kit." >&2; exit 2
+  fi
+  # An earlier kit under this name would open nothing this VM has; replace it.
+  if ! out="$(kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" delete secret "$name" --ignore-not-found 2>&1)"; then
+    echo "kit-store: FAILED to clear an earlier ${NS}/${name}:" >&2; printf '  %s\n' "$out" >&2; exit 1
+  fi
+  if ! out="$(kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" create secret generic "$name" \
+                --from-file=kit="$kit" --from-file=identity="$id" 2>&1)"; then
+    echo "kit-store: FAILED to create ${NS}/${name}:" >&2; printf '  %s\n' "$out" >&2; exit 1
+  fi
+  if ! out="$(kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" label secret "$name" \
+                tockmox.com/harness=executed-docs --overwrite 2>&1)"; then
+    echo "kit-store: FAILED to label ${NS}/${name}, so it is removed again instead of left half-made:" >&2
+    printf '  %s\n' "$out" >&2
+    kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" delete secret "$name" --ignore-not-found >/dev/null 2>&1 || true
+    exit 1
+  fi
+  if [ "$state" = whole ]; then
+    echo "  recovery kit kept as ${NS}/${name}; its identity opens it" >&2
+  else
+    echo "  recovery kit kept as ${NS}/${name}; NOT checked that its identity opens it (no age on PATH)" >&2
+  fi
+  echo "  fetch it with: throwaway-cluster.sh kit DIR  (destroy removes it with the VM)" >&2
+}
+
+kit_fetch() {
+  local dir="${1:-}" name="${VM_NAME}-kit" out pair key file state made=0
+  [ -n "$dir" ] || { echo "REFUSING: kit needs a directory to write into: $0 kit DIR" >&2; exit 2; }
+  for file in "$KIT_FILE" "$KIT_ID_FILE"; do
+    if [ -e "${dir}/${file}" ]; then
+      echo "REFUSING: ${dir}/${file} already exists, and a kit is never written over." >&2
+      echo "          Move it, or name another directory." >&2
+      exit 2
+    fi
+  done
+  if ! out="$(kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" get secret "$name" -o name 2>&1)"; then
+    echo "REFUSING: could not read ${NS}/${name}:" >&2; printf '  %s\n' "$out" >&2
+    echo "          A kept p09 lane run on the built-in route writes it after P09, and destroy" >&2
+    echo "          removes it with the VM." >&2
+    exit 2
+  fi
+  # A directory this verb makes is the caller's alone; one that exists keeps its mode.
+  if [ ! -d "$dir" ]; then mkdir -p "$dir"; chmod 700 "$dir"; made=1; fi
+  umask 077
+  for pair in "kit:${KIT_FILE}" "identity:${KIT_ID_FILE}"; do
+    key="${pair%%:*}"; file="${pair#*:}"
+    if ! kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" get secret "$name" -o "jsonpath={.data.${key}}" 2>/dev/null \
+           | base64 -d > "${dir}/${file}.tmp" 2>/dev/null || [ ! -s "${dir}/${file}.tmp" ]; then
+      rm -f "${dir}/${file}.tmp" "${dir}/${KIT_FILE}"
+      [ "$made" = 0 ] || rmdir "$dir" 2>/dev/null || true
+      echo "kit: FAILED to read key '${key}' of ${NS}/${name}; nothing is left in ${dir}" >&2
+      exit 1
+    fi
+    mv "${dir}/${file}.tmp" "${dir}/${file}"
+  done
+  state="$(kit_state "${dir}/${KIT_FILE}" "${dir}/${KIT_ID_FILE}")"
+  case "$state" in
+    whole) echo "  ${VM_NAME}'s recovery kit and identity are in ${dir}; the identity opens the kit" >&2 ;;
+    unchecked) echo "  ${VM_NAME}'s recovery kit and identity are in ${dir}; NOT checked that the identity opens the kit (no age on PATH)" >&2 ;;
+    *) echo "kit: FAILED: the identity in ${dir} does not open the kit beside it, or the kit was cut short" >&2
+       exit 1 ;;
+  esac
+  printf '%s\n%s\n' "${dir}/${KIT_FILE}" "${dir}/${KIT_ID_FILE}"
 }
 
 # ---- a stale handoff Secret is refused, never waited on ------------
@@ -1746,8 +1870,9 @@ reboot() {
 # ---- WHAT A TEARDOWN MAY TOUCH (2026-10-06) ----------------------
 # Everything this script creates on the substrate is named `${VM_NAME}` or
 # `${VM_NAME}-<something>`: the VM, its DataVolume, the cloud-init, boot and
-# kubeconfig Secrets (the last two written by the guest), the API Service,
-# snapshots, restores and the uninstall ConfigMap. So ownership is the NAME,
+# kubeconfig Secrets (the last two written by the guest), the kit Secret a kept
+# p09 run leaves (kit-store), the API Service, snapshots, restores and the
+# uninstall ConfigMap. So ownership is the NAME,
 # and `destroy` deletes only names it owns.
 #
 # It used to be `delete vm --all` (and every harness-labelled Secret, Service
@@ -1782,9 +1907,10 @@ owned_names() {
   done
 }
 
-# destroy's Secret sweep: this VM's three Secrets by name, plus any other
+# destroy's Secret sweep: this VM's four Secrets by name, plus any other
 # harness-labelled Secret whose name this VM owns. Every failure is counted and
-# printed: a refused delete must not read as a clean teardown.
+# printed: a refused delete must not read as a clean teardown. The kit goes by
+# name as well as by label, so one whose label never landed still dies here.
 delete_harness_secrets() {
   local out names
   if ! names="$(owned_names secret -l tockmox.com/harness=executed-docs)"; then
@@ -1794,7 +1920,7 @@ delete_harness_secrets() {
   fi
   # shellcheck disable=SC2086
   if ! out="$(kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" delete secret \
-                "${VM_NAME}-cloudinit" "${VM_NAME}-kubeconfig" "${VM_NAME}-boot" $names \
+                "${VM_NAME}-cloudinit" "${VM_NAME}-kubeconfig" "${VM_NAME}-boot" "${VM_NAME}-kit" $names \
                 --ignore-not-found 2>&1)"; then
     SECRET_DELETE_ERRORS=$((SECRET_DELETE_ERRORS + 1))
     echo "  secret delete FAILED:" >&2
@@ -2185,8 +2311,10 @@ case "${1:-}" in
   kubeconfig) printf '%s\n' "$KUBECONFIG_OUT" ;;
   keep-until) keep_until_value; echo ;;
   await)   await_guest ;;
+  kit-store) shift; kit_store "${1:-}" "${2:-}" ;;
+  kit)     shift; kit_fetch "${1:-}" ;;
   mirror-proof) mirror_proof ;;
   uninstall-proof) uninstall_proof ;;
   evidence) evidence ;;
-  *) echo "usage: $0 {create|await|exec CMD|reboot|destroy|reset --every-vm-in-NS|sweep PREFIX MINUTES|snapshot RUNG|restore RUNG|snapshots|ip|kubeconfig|uninstall-proof|evidence|mirror-proof}" >&2; exit 2 ;;
+  *) echo "usage: $0 {create|await|exec CMD|reboot|destroy|reset --every-vm-in-NS|sweep PREFIX MINUTES|snapshot RUNG|restore RUNG|snapshots|ip|kubeconfig|kit-store KIT IDENTITY|kit DIR|uninstall-proof|evidence|mirror-proof}" >&2; exit 2 ;;
 esac
