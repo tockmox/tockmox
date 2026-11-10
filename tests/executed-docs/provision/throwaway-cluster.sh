@@ -657,6 +657,8 @@ except Exception:
 }
 
 create() {
+  # A bad TOCKMOX_KEEP_HOURS refuses here, before anything is built.
+  keep_until_value >/dev/null || exit 2
   # First, before preflight touches anything: nothing may be created or deleted
   # on behalf of a run whose token must not reach a guest.
   check_handoff_token
@@ -1282,6 +1284,7 @@ PY
   shred -u "$udfile" 2>/dev/null || rm -f "$udfile"
   echo "  cloud-init in secret ${NS}/${secret_name}" >&2
 
+  local keep_until; keep_until="$(keep_until_value)" || exit 2
   manifest="$(cat <<YAML
 apiVersion: kubevirt.io/v1
 kind: VirtualMachine
@@ -1292,6 +1295,7 @@ metadata:
     tockmox.com/role: k3s-test-server
     tockmox.com/blast-radius: disposable
     tockmox.com/harness: executed-docs
+$( [ -n "$keep_until" ] && printf '    tockmox.com/keep-until: "%s"\n' "$keep_until" )
 spec:
   running: true
   template:
@@ -1941,17 +1945,40 @@ reset_namespace() {
 # scheduled caller that names its VMs with a prefix only it uses (the nightly
 # workflow uses `ed-`), so it can clear what an earlier, killed run of ITSELF
 # left behind without touching anyone else's VM.
+# KEEP MEANS KEEP. A kept VM (TOCKMOX_KEEP_CLUSTER=1) carries tockmox.com/keep-until, epoch
+# seconds, set at create to now plus TOCKMOX_KEEP_HOURS (default 6, 1 to 24). sweep leaves a VM
+# alone until then; after it, or with no label, the age rule applies as before, so a forgotten
+# VM still goes. Before this, every run's `sweep ed- 120` destroyed kept VMs at two hours
+# (the forge lab's VM on 2026-11-09). Prints nothing when the VM is not kept.
+keep_until_value() {
+  [ "${TOCKMOX_KEEP_CLUSTER:-0}" = 1 ] || return 0
+  local h="${TOCKMOX_KEEP_HOURS:-6}"
+  case "$h" in ''|*[!0-9]*) echo "REFUSING: TOCKMOX_KEEP_HOURS must be a whole number of hours, 1 to 24, got '${h}'" >&2; exit 2 ;; esac
+  if [ "$h" -lt 1 ] || [ "$h" -gt 24 ]; then
+    echo "REFUSING: TOCKMOX_KEEP_HOURS must be 1 to 24, got ${h}: a kept VM still has to go eventually" >&2; exit 2
+  fi
+  printf '%s' "$(( $(date -u +%s) + h * 3600 ))"
+}
+
 sweep_prefix() {
   local prefix="${1:-}" mins="${2:-}"
   case "$prefix" in
     ""|?|??) echo "REFUSING: sweep needs a prefix of 3 or more characters, got '${prefix}'" >&2; exit 2 ;;
   esac
   case "$mins" in ''|*[!0-9]*) echo "REFUSING: sweep needs an age in minutes, got '${mins}'" >&2; exit 2 ;; esac
-  local now n ts age rc=0
+  local now n ts keep age rc=0
   now="$(date -u +%s)"
-  while IFS=' ' read -r n ts; do
+  while IFS=' ' read -r n ts keep; do
     [ -n "$n" ] || continue
     case "$n" in "$prefix"*) ;; *) continue ;; esac
+    case "${keep:-}" in
+      ''|'<none>') ;;
+      *[!0-9]*) echo "  sweep: ${n} has keep-until '${keep}', not epoch seconds; the age rule decides" >&2 ;;
+      *) if [ "$keep" -gt "$now" ]; then
+           echo "  sweep: ${n} is kept for $(( (keep - now + 59) / 60 )) more min (tockmox.com/keep-until); left alone" >&2
+           continue
+         fi ;;
+    esac
     age=$(( (now - $(python3 -c 'import sys,datetime;print(int(datetime.datetime.strptime(sys.argv[1],"%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp()))' "$ts")) / 60 ))
     if [ "$age" -lt "$mins" ]; then
       echo "  sweep: ${n} is ${age} min old, younger than ${mins}; left alone" >&2
@@ -1960,7 +1987,7 @@ sweep_prefix() {
     echo "  sweep: ${n} is ${age} min old; destroying it by name" >&2
     ( VM_NAME="$n"; API_SVC="${n}-api"; KUBECONFIG_OUT="${WORKDIR}/${n}.kubeconfig"; SSH_KEY="${WORKDIR}/${n}.id_ed25519"; destroy ) || rc=1
   done < <(kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" get vm \
-             -o custom-columns=:metadata.name,:metadata.creationTimestamp --no-headers 2>/dev/null)
+             -o 'custom-columns=:metadata.name,:metadata.creationTimestamp,:metadata.labels.tockmox\.com/keep-until' --no-headers 2>/dev/null)
   return $rc
 }
 
@@ -2140,7 +2167,7 @@ snapshots() {
 # refuse before any verb that reaches the hypervisor. `kubeconfig` only
 # prints a path and calls nothing.
 case "${1:-}" in
-  kubeconfig) ;;
+  kubeconfig|keep-until) ;;
   *) : "${TOCKMOX_SUBSTRATE_CONTEXT:?TOCKMOX_SUBSTRATE_CONTEXT is empty: export the kubectl context of the hypervisor cluster that hosts the throwaway VM}" ;;
 esac
 
@@ -2156,6 +2183,7 @@ case "${1:-}" in
   snapshots) snapshots ;;
   ip)      vm_ip; echo ;;
   kubeconfig) printf '%s\n' "$KUBECONFIG_OUT" ;;
+  keep-until) keep_until_value; echo ;;
   await)   await_guest ;;
   mirror-proof) mirror_proof ;;
   uninstall-proof) uninstall_proof ;;

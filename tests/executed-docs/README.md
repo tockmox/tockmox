@@ -329,6 +329,7 @@ test, and a run that cannot retrieve a kubeconfig produces no evidence at all.
 | `TOCKMOX_CAPACITY_REPLICAS` | `1` | replicas the VM's storage class keeps; that many distinct disks must each fit the VM disk. Set it to match `TOCKMOX_VM_STORAGECLASS` |
 | `TOCKMOX_CAPACITY_ALLOW_OTHER_VMS` | `0` | `1` lets another harness VM stand in the namespace |
 | `TOCKMOX_KEEP_CLUSTER` | `0` | `1` leaves the cluster standing for inspection |
+| `TOCKMOX_KEEP_HOURS` | `6` | with `TOCKMOX_KEEP_CLUSTER=1`: the VM carries `tockmox.com/keep-until`, now plus these hours (1 to 24), and `sweep` leaves it alone until then |
 | `TOCKMOX_EXPECTED_DEFAULT_COUNT` | `0` | expected count of default StorageClasses after P03 un-defaults `local-path` (1 once a platform layer is installed) |
 | `TOCKMOX_P08_EXPECTED_DEFAULT_COUNT` | `1` | what P08 expects `existing-cluster.md` Check 3 to find: `local-path` on a stock k3s throwaway. Set `0` when P03 has run first |
 
