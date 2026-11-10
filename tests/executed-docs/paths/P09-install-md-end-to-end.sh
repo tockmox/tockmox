@@ -402,7 +402,10 @@ if ! done_step "$S"; then budget_left || yield "S01+"
   want="$(kubectl --context="$KUBE_CONTEXT" config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
   got="$(out_of "$S" | grep -m1 '^https://' || true)"
   record "$S" "Set these once: the server address printed is the cluster under test (read, not recognised)" "$want" "$got"
-  record "$S" "Set these once: both script paths exist (ls printed both)" "2" "$(out_of "$S" | grep -c -E 'tockmox-install[.]sh|mint-secrets[.]sh' | tr -d ' ')"
+  # Count the paths ls printed, not the lines: ls writing to a terminal puts both on ONE line when they fit the width
+  # (a short clone path does). And never count ls's own complaint, which names the missing path too: before this, a
+  # missing script still read 2.
+  record "$S" "Set these once: both script paths exist (ls printed both)" "2" "$(out_of "$S" | grep -v -e 'No such file' -e 'cannot access' | grep -o -E 'tockmox-install[.]sh|mint-secrets[.]sh' | wc -l | tr -d ' ')"
   mark_done "$S"
 fi
 
