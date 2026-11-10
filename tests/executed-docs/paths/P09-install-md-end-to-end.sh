@@ -78,6 +78,8 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "${HERE}/../lib/assert.sh"
+# shellcheck source=/dev/null  # the file is read at run time, from beside this one
+. "${HERE}/../lib/p09-offsite.sh"
 # every kubectl and helm call below names its cluster with --context or
 # --kube-context from this variable, and an empty value is refused rather than
 # falling back to the current context (docs/deployment/fresh-install.md, "Name
@@ -213,7 +215,8 @@ run_ws() {
     ( bash -c "$(cat "$bf")"$'\n''__rc=$?; export -p > "'"$envout"$'"; exit $__rc' ) > "${STATE}/${name}.out" 2>&1 </dev/null; rc=$?
   fi
   printf '%s' "$rc" > "${STATE}/${name}.rc"
-  sed 's/^/    | /' "${STATE}/${name}.out" | while IFS= read -r l; do _emit "$l"; done
+  # offsite_scrub: with an off-site copy the installer names the remote, which is the lab's and stays out of the report
+  offsite_scrub < "${STATE}/${name}.out" | sed 's/^/    | /' | while IFS= read -r l; do _emit "$l"; done
   _emit "    (exit ${rc}; the exit code is evidence, not the assertion)"
   if [ -f "$envout" ]; then
     apply_exports "$envout"
@@ -666,6 +669,17 @@ if ! done_step "$S"; then budget_left || yield "S14f+"
   run_ws "${S}-reuse" "$(block 'bootstrap-secrets --mode reuse')" "${STATE}/${S}-reuse.answers"; execute_end $?
   record "$S" "the key backup the kit carries exists and is bootstrap-secrets' encrypted export (age armour or binary, never YAML)" "yes" "$( [ -s "$HOME/tockmox-backup/sealed-secrets-key.enc" ] && ! grep -q 'tls.key' "$HOME/tockmox-backup/sealed-secrets-key.enc" && echo yes || echo no )"
   B="$(block 'tockmox-recovery-kit.tar.age" --age-recipient')"
+  # The p09 lane's off-site copy (TOCKMOX_P09_OFFSITE=git): the page's own edit, "Add one of these to
+  # the command", made before the dry run as a reader would. The remote, its credentials file and its
+  # CA are exported for the pasted shell and referenced by name, so the report shows no value.
+  OFFSITE_ON=0
+  if [ -n "${TOCKMOX_P09_OFFSITE_GIT_URL:-}" ]; then
+    OFFSITE_ON=1
+    export OFFSITE_GIT_URL="$TOCKMOX_P09_OFFSITE_GIT_URL" OFFSITE_GIT_CREDENTIALS="${TOCKMOX_P09_OFFSITE_GIT_CREDENTIALS:?the lane sets it with the URL}"
+    export OFFSITE_GIT_CA="${TOCKMOX_P09_OFFSITE_GIT_CA:-}"
+    B="$(printf '%s\n' "$B" | offsite_block "${OFFSITE_GIT_CA:+ca}")" || block_gone "$S"
+    _emit "EDIT AS THE PAGE SAYS: a git remote added as the off-site copy (--offsite-git, --offsite-git-credentials${OFFSITE_GIT_CA:+, --offsite-git-ca}); GLUE: the remote is the lab's, exported and not printed"
+  fi
   execute_begin "install.md publish to the built-in forge: bootstrap-forge --dry-run"
   run_ws "${S}-dry" "$B"; execute_end $?
   record "$S" "the dry run changes nothing: no tockmox-forge namespace yet" "absent" "$(kubectl --context="$KUBE_CONTEXT" get ns tockmox-forge >/dev/null 2>&1 && echo present || echo absent)"
@@ -674,6 +688,10 @@ if ! done_step "$S"; then budget_left || yield "S14f+"
   execute_begin "install.md publish to the built-in forge: bootstrap-forge"
   ZSH_PASTE_TIMEOUT=900 run_ws "$S" "$B" "${STATE}/${S}.answers"; execute_end $?
   record "$S" "Done opens with the forge holding tockmox/site at the in-cluster address" "1" "$(out_of "$S" | grep -c 'the built-in forge holds tockmox/site; ArgoCD reads it at http://tockmox-forge-http.tockmox-forge.svc.cluster.local:3000/tockmox/site.git' | tr -d ' ')"
+  if [ "$OFFSITE_ON" = 1 ]; then
+    record "$S" "the run wrote the first off-site copy and read it back before it reported done" "1" "$(out_of "$S" | grep -c 'first off-site copy: ' | tr -d ' ')"
+    record "$S" "Done names the off-site copy: a git remote, checked every minute" "1" "$(out_of "$S" | grep -c 'off-site copy: git to .*, checked every minute' | tr -d ' ')"
+  fi
   # shellcheck disable=SC2016  # the needle is the page's own text; $HOME is matched, never expanded
   run_ws "${S}-success" "$(block 'ls -l "$HOME/tockmox-backup/tockmox-recovery-kit.tar.age"')"
   record "$S" "success: ArgoCD's repository Secret carries the repository label" "1" "$(out_of "${S}-success" | grep -c 'argocd.argoproj.io/secret-type.*repository' | tr -d ' ')"

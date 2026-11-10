@@ -160,6 +160,9 @@ closed-set-test.sh     hermetic proof of that list (also run by selftest.sh)
 p09-lane.sh            install.md end to end on one throwaway: create, P04 and P05, this tree served
                        from inside, P09, and on a kept run the recovery kit kept beside the VM
 kit-keep-test.sh       hermetic proof of that kit's Secret and the lane step that writes it (also run by selftest.sh)
+lib/p09-offsite.sh     what P09 needs for the lane's off-site copy: the edit of install.md's bootstrap-forge
+                       block, and the scrub that keeps the off-site forge's name out of the report
+offsite-copy-test.sh   hermetic proof of the off-site copy: settings, repository, teardown, P09's edit, the lane (also run by selftest.sh)
 selftest.sh            hermetic proof of the machinery above
 pages-no-cluster.sh    the six no-cluster pages (values-contract, customising, capabilities,
                        configuration, platform-management, verify): every bash block extracted
@@ -305,6 +308,22 @@ backup, readable by anyone who can read Secrets in the test namespace, which is
 why it is a Secret there and not a workflow artifact: this repository is
 public.
 
+**A p09 throwaway can have an off-site copy** (`TOCKMOX_P09_OFFSITE=git`,
+built-in route). Without one the install warns that there is no off-site copy
+and the throwaway cannot be rebuilt. With it the lane creates a repository named
+after the VM on a forge the site provides, P09 adds `--offsite-git`,
+`--offsite-git-credentials` and `--offsite-git-ca` to install.md's
+`bootstrap-forge` command the way the page says to, and `destroy` and `sweep`
+delete the repository with the VM. Where the forge is and the token that creates
+repositories there are the site's own, so they live beside the VMs and nowhere
+else: a Secret `p09-offsite` in the test namespace with the keys `url`
+(`https://HOST[:PORT]`), `org`, `token` (a user who owns that organisation) and,
+for a private CA, `ca.crt`. The lane reads it before it creates anything, so a
+credential that cannot `get` that Secret stops the run with the Secret and the
+verb named. The forge's name and the token are never printed: the provisioner
+names the Secret and its keys, and P09 replaces the host in every transcript it
+writes, because this repository's job logs and reports are public.
+
 A KubeVirt cluster usually also hosts machines that are not disposable. The
 namespace rule is the boundary that keeps this harness away from them, because a
 rule scoped to a class survives someone adding a new machine and a deny list of
@@ -353,6 +372,7 @@ test, and a run that cannot retrieve a kubeconfig produces no evidence at all.
 | `TOCKMOX_CAPACITY_ALLOW_OTHER_VMS` | `0` | `1` lets another harness VM stand in the namespace |
 | `TOCKMOX_KEEP_CLUSTER` | `0` | `1` leaves the cluster standing for inspection |
 | `TOCKMOX_KEEP_HOURS` | `6` | with `TOCKMOX_KEEP_CLUSTER=1`: the VM carries `tockmox.com/keep-until`, now plus these hours (1 to 24), and `sweep` leaves it alone until then |
+| `TOCKMOX_P09_OFFSITE` | `none` | the p09 lane only: `git` gives the install an off-site copy, a repository named after the VM on the forge the Secret `p09-offsite` names (`TOCKMOX_P09_OFFSITE_SECRET` to name another) |
 | `TOCKMOX_EXPECTED_DEFAULT_COUNT` | `0` | expected count of default StorageClasses after P03 un-defaults `local-path` (1 once a platform layer is installed) |
 | `TOCKMOX_P08_EXPECTED_DEFAULT_COUNT` | `1` | what P08 expects `existing-cluster.md` Check 3 to find: `local-path` on a stock k3s throwaway. Set `0` when P03 has run first |
 

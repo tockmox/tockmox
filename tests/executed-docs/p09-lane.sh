@@ -15,11 +15,28 @@
 #      with this job; `throwaway-cluster.sh kit DIR` fetches them, and destroy removes them with the VM
 #   6. destroy it, unless TOCKMOX_KEEP_CLUSTER=1
 #
+# AN OFF-SITE COPY, with TOCKMOX_P09_OFFSITE=git (default none; built-in route only). Without it the
+# install warns "no off-site copy" and there is nothing to rebuild the throwaway from. With it:
+#   - before step 1, the settings are read from the Secret p09-offsite beside the VMs
+#     (throwaway-cluster.sh offsite-check; the keys are listed there), so a credential that cannot read
+#     it stops the run before a VM exists. A forge on a private CA (key ca.crt) needs this tree's
+#     bootstrap-forge to take --offsite-git-ca, and the run is refused when it does not;
+#   - after step 1, a repository named after the VM is created on that forge (offsite-repo) and the
+#     guest is shown to reach it (offsite-reach);
+#   - after step 2, the forge's CA goes into ArgoCD's argocd-tls-certs-cm on the throwaway, under the
+#     forge's host name, so its ArgoCD can read that forge too;
+#   - step 4 runs P09 with the destination: P09 adds --offsite-git, --offsite-git-credentials and
+#     --offsite-git-ca to install.md's bootstrap-forge command, as the page says to;
+#   - destroy and sweep delete the repository with the VM.
+# The forge's name and the token never reach this job's log or its report: the provisioner's lines name
+# the Secret and its keys, and P09 replaces the host in what it prints (lib/p09-offsite.sh).
+#
 # It is what the executed-docs workflow runs on a dispatch with lane=p09, and it runs the same from a
 # workstation whose credential the harness accepts (a tockmox-test ServiceAccount token, on a network the
 # guest can call back from). Inputs: TOCKMOX_DOCS_REF, TOCKMOX_SUBSTRATE_CONTEXT, TOCKMOX_TEST_NAMESPACE,
 # TOCKMOX_TEST_VM, TOCKMOX_P09_ROUTE (default built-in); optional TOCKMOX_KEEP_CLUSTER, TOCKMOX_P09_BUDGET,
-# TOCKMOX_P09_LAN_CIDR and TOCKMOX_P09_POOL (default: the node's /24 and .240-.250 in it).
+# TOCKMOX_P09_OFFSITE (none or git), TOCKMOX_P09_LAN_CIDR and TOCKMOX_P09_POOL (default: the node's /24 and
+# .240-.250 in it).
 # Exit: P09's own exit status; 2 for a refused precondition; 1 when a preparation step fails, or when P09
 # passed on a kept run and its kit could not be kept (the report says which).
 set -euo pipefail
@@ -45,6 +62,8 @@ fail() { STOPPED="lane: $1"; echo "$STOPPED" >&2; exit 1; }
 # shellcheck disable=SC2329  # invoked by the EXIT trap below
 finish() {
   local rc=$?
+  # The off-site directory holds the token (git-credentials); it does not outlive the job.
+  [ -z "${OFFDIR:-}" ] || rm -rf "$OFFDIR"
   if [ -n "$STOPPED" ]; then
     printf 'p09 lane (%s): exit %s\n%s\n' "${TOCKMOX_DOCS_REF}" "$rc" "$STOPPED" \
       >"${TOCKMOX_WORKDIR}/report-p09-lane-$(date -u +%Y%m%dT%H%M%SZ).txt" || true
@@ -68,6 +87,22 @@ for t in kubectl helm kubeseal openssl git python3 zsh curl tar age age-keygen; 
 done
 [ -z "$missing" ] || refuse "not on PATH:${missing}; P09's ${ROUTE} route runs them"
 
+# The off-site copy's preconditions, before anything is created.
+OFFSITE="${TOCKMOX_P09_OFFSITE:-none}"
+OFFDIR=""
+OFFSITE_CA=no-ca
+case "$OFFSITE" in
+  none) ;;
+  git)
+    [ "$ROUTE" = built-in ] || refuse "TOCKMOX_P09_OFFSITE=git needs TOCKMOX_P09_ROUTE=built-in: the off-site copy is bootstrap-forge's, and only that route runs it"
+    OFFSITE_CA="$(bash "${PROV}/throwaway-cluster.sh" offsite-check)" \
+      || refuse "TOCKMOX_P09_OFFSITE=git, and the off-site settings cannot be read or used (the provisioner's lines above say which)"
+    if [ "$OFFSITE_CA" = ca ] && ! grep -e '--offsite-git-ca)' "${TREE}/install/bootstrap-forge.sh" >/dev/null 2>&1; then
+      refuse "TOCKMOX_P09_OFFSITE=git: the off-site forge is on a private CA (key ca.crt), and this tree's bootstrap-forge has no --offsite-git-ca to trust it with. Run a ref that has it."
+    fi ;;
+  *) refuse "TOCKMOX_P09_OFFSITE must be none or git, not: ${OFFSITE}" ;;
+esac
+
 # 1. the throwaway
 echo "lane 1: creating ${TOCKMOX_TEST_VM} on ${TOCKMOX_SUBSTRATE_CONTEXT}"
 out="$(bash "${PROV}/throwaway-cluster.sh" create)" || fail "create failed"
@@ -81,10 +116,30 @@ export TOCKMOX_EXISTING_KUBECONFIG="$KC" KUBE_CONTEXT
 export TOCKMOX_SUBSTRATE_KUBECONFIG="$SUBSTRATE_KUBECONFIG"
 export KUBECONFIG="$KC"
 echo "lane 1: cluster under test ${KUBE_CONTEXT}"
+if [ "$OFFSITE" = git ]; then
+  OFFDIR="${LANE}/offsite"
+  KUBECONFIG="$SUBSTRATE_KUBECONFIG" bash "${PROV}/throwaway-cluster.sh" offsite-repo "$OFFDIR" >/dev/null \
+    || fail "the off-site repository for ${TOCKMOX_TEST_VM} could not be created"
+  KUBECONFIG="$SUBSTRATE_KUBECONFIG" bash "${PROV}/throwaway-cluster.sh" offsite-reach "$OFFDIR" \
+    || fail "the guest does not reach the off-site forge, so its copy job would not either"
+  echo "lane 1: off-site repository ready, and the guest reaches its forge"
+fi
 
 # 2. what install.md starts from: fresh-install.md 6 and 7
 echo "lane 2: P04 + P05 (ArgoCD, sealed-secrets)"
 bash "${HERE}/run.sh" P04 P05 || fail "P04/P05 failed, so P09 would start from the wrong state"
+
+# ArgoCD exists now. The off-site forge's CA goes into its trust store under the forge's host name: the
+# guest's ArgoCD does not otherwise trust a private CA, and the steps run later against a kept throwaway
+# (the rebuild among them) have it read that forge.
+if [ "$OFFSITE" = git ] && [ -s "${OFFDIR}/ca.crt" ]; then
+  python3 -c 'import json,sys; print(json.dumps({"data": {open(sys.argv[1]).read().strip(): open(sys.argv[2]).read()}}))' \
+    "${OFFDIR}/host" "${OFFDIR}/ca.crt" > "${OFFDIR}/tls-patch.json"
+  kubectl --context="$KUBE_CONTEXT" -n argocd patch configmap argocd-tls-certs-cm --type merge \
+    --patch-file "${OFFDIR}/tls-patch.json" >/dev/null \
+    || fail "could not add the off-site forge's CA to argocd/argocd-tls-certs-cm on the throwaway"
+  echo "lane 2: the off-site forge's CA is in ArgoCD's argocd-tls-certs-cm"
+fi
 
 # 3. this tree, served from inside the throwaway
 TAG="lane-${TOCKMOX_TEST_VM}"
@@ -102,7 +157,13 @@ export TOCKMOX_P09_TOCKMOX_REPO_URL="$TM_URL" TOCKMOX_P09_TOCKMOX_REVISION="$TAG
 export TOCKMOX_P09_STATE="${LANE}/p09-state" TOCKMOX_P09_BUDGET="${TOCKMOX_P09_BUDGET:-3000}"
 export TOCKMOX_P09_LAN_CIDR="${TOCKMOX_P09_LAN_CIDR:-${NODE_IP%.*}.0/24}"
 export TOCKMOX_P09_POOL="${TOCKMOX_P09_POOL:-${NODE_IP%.*}.240-${NODE_IP%.*}.250}"
-echo "lane 4: P09, ${ROUTE} route (LAN ${TOCKMOX_P09_LAN_CIDR}, pool ${TOCKMOX_P09_POOL})"
+if [ "$OFFSITE" = git ]; then
+  TOCKMOX_P09_OFFSITE_GIT_URL="$(cat "${OFFDIR}/git-url")"
+  TOCKMOX_P09_OFFSITE_SCRUB="$(cat "${OFFDIR}/host")"
+  export TOCKMOX_P09_OFFSITE_GIT_URL TOCKMOX_P09_OFFSITE_SCRUB TOCKMOX_P09_OFFSITE_GIT_CREDENTIALS="${OFFDIR}/git-credentials"
+  [ ! -s "${OFFDIR}/ca.crt" ] || export TOCKMOX_P09_OFFSITE_GIT_CA="${OFFDIR}/ca.crt"
+fi
+echo "lane 4: P09, ${ROUTE} route (LAN ${TOCKMOX_P09_LAN_CIDR}, pool ${TOCKMOX_P09_POOL}, off-site copy ${OFFSITE})"
 set +e
 bash "${HERE}/run.sh" P09
 rc=$?

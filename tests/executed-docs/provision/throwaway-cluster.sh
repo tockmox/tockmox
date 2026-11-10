@@ -18,6 +18,10 @@
 #   throwaway-cluster.sh kit-store KIT IDENTITY ... keep a P09 recovery kit and the age identity
 #                                     that opens it as the Secret ${VM_NAME}-kit
 #   throwaway-cluster.sh kit DIR  ... write that Secret's two files into DIR
+#   throwaway-cluster.sh offsite-check ... prove the off-site settings Secret can be read and used
+#   throwaway-cluster.sh offsite-repo DIR ... create this VM's off-site repository; what the
+#                                     installer needs to copy to it goes into DIR
+#   throwaway-cluster.sh offsite-reach DIR ... prove the guest reaches that forge
 #
 # MicroOS images only (provision/profiles/microos.sh):
 #
@@ -704,6 +708,204 @@ kit_fetch() {
        exit 1 ;;
   esac
   printf '%s\n%s\n' "${dir}/${KIT_FILE}" "${dir}/${KIT_ID_FILE}"
+}
+
+# ---- the off-site copy of a p09 throwaway ------------------------------------
+# With TOCKMOX_P09_OFFSITE=git the p09 lane gives its install an off-site copy: a
+# git repository of its own, named after the VM, in a lab-only organisation on a
+# forge the site running the lane provides. Where that forge is and the token
+# that can create a repository there are the site's, so they are not in this
+# tree, not in the workflow and not in its settings: they are the Secret
+# ${TOCKMOX_P09_OFFSITE_SECRET:-p09-offsite} in the test namespace, keys
+#
+#   url     https://HOST[:PORT], the forge (Forgejo or Gitea), nothing after the host
+#   org     the organisation the repositories are created in
+#   token   a token of a user who owns that organisation (write:organization,
+#           write:repository)
+#   ca.crt  optional: the CA that signed the forge's certificate, when it is private
+#
+#   offsite-check      read and check the Secret; print `ca` or `no-ca`. The p09
+#                      lane runs it before `create`, so a credential that cannot
+#                      `get` the Secret stops the run before a VM exists.
+#   offsite-repo DIR   create ORG/${VM_NAME} (private, empty) and write into DIR
+#                      what the installer takes: git-url, git-credentials (the
+#                      user, then the token), host, and ca.crt when there is one
+#   offsite-reach DIR  from the guest, ask that forge for its version
+#
+# destroy deletes the repository, and sweep destroys by name, so the repository
+# lives as long as the VM. What says a VM has one is the Secret
+# ${VM_NAME}-offsite, written before the repository is created; a VM without it
+# never causes a call to the forge or a read of the settings.
+#
+# NOTHING HERE PRINTS THE FORGE'S NAME OR THE TOKEN. This repository is public and
+# so are its workflow logs. Messages name the Secret and its keys; curl's own
+# words are kept back, because they name the host. The token reaches curl in a
+# config file, never on a command line.
+OFFSITE_SECRET="${TOCKMOX_P09_OFFSITE_SECRET:-p09-offsite}"
+
+# offsite_read DIR: the Secret's keys as files in DIR (url without a trailing
+# slash, host, org, token, ca.crt), each checked. Exits 2, naming the key and
+# never its value, when the Secret cannot be read or a key is unusable.
+offsite_read() {
+  local dir="$1" out rc
+  mkdir -p "$dir"; chmod 700 "$dir"
+  if ! out="$(kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" get secret "$OFFSITE_SECRET" -o json 2>&1)"; then
+    echo "REFUSING: this credential cannot 'get' the Secret ${NS}/${OFFSITE_SECRET}, which holds the off-site" >&2
+    echo "          settings (keys url, org, token, ca.crt). Grant get on that one Secret, or run without" >&2
+    echo "          TOCKMOX_P09_OFFSITE. kubectl said:" >&2
+    printf '%s\n' "$out" | head -2 | sed 's/^/            /' >&2
+    exit 2
+  fi
+  rc=0
+  printf '%s' "$out" | (umask 077; python3 -c '
+import base64, json, os, re, sys
+d = sys.argv[1]
+try:
+    data = json.load(sys.stdin).get("data") or {}
+    v = {k: base64.b64decode(data.get(k) or "").decode() for k in ("url", "org", "token", "ca.crt")}
+except Exception:
+    sys.exit("the Secret is not readable as a Secret with text keys")
+url = v["url"].strip().rstrip("/")
+m = re.fullmatch(r"https://([A-Za-z0-9.-]+)(:[0-9]+)?", url)
+if not m:
+    sys.exit("key url must be https://HOST or https://HOST:PORT with nothing after it")
+org = v["org"].strip()
+if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", org):
+    sys.exit("key org must be an organisation name")
+token = v["token"].strip()
+if not token or re.search(r"\s", token) or "\"" in token or "\\" in token:
+    sys.exit("key token must be one token, with no space or quote in it")
+ca = v["ca.crt"]
+if ca.strip() and "-----BEGIN CERTIFICATE-----" not in ca:
+    sys.exit("key ca.crt holds no PEM certificate")
+out = {"url": url, "host": m.group(1), "org": org, "token": token}
+if ca.strip():
+    out["ca.crt"] = ca
+for k, val in out.items():
+    with open(os.path.join(d, k), "w") as f:
+        f.write(val if k == "ca.crt" else val + "\n")
+' "$dir" 2>"${dir}/why") || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "REFUSING: ${NS}/${OFFSITE_SECRET} cannot be used: $(tail -1 "${dir}/why" 2>/dev/null)" >&2
+    rm -rf "$dir"
+    exit 2
+  fi
+  rm -f "${dir}/why"
+}
+
+# offsite_api DIR METHOD PATH [JSON]: one call to the forge's API as the token's
+# user. Prints the HTTP status (000 when curl itself failed); the body goes to
+# DIR/resp. The address and the token are in a config file curl reads.
+offsite_api() {
+  local dir="$1" method="$2" path="$3" data="${4:-}" code
+  ( umask 077
+    { printf 'url = "%s%s"\n' "$(cat "${dir}/url")" "$path"
+      printf 'header = "Authorization: token %s"\n' "$(cat "${dir}/token")"
+      printf 'header = "Content-Type: application/json"\n'
+      printf 'header = "Accept: application/json"\n'
+      [ ! -s "${dir}/ca.crt" ] || printf 'cacert = "%s"\n' "${dir}/ca.crt"
+    } > "${dir}/curl.cfg" )
+  code="$(curl -sS -m 30 -o "${dir}/resp" -w '%{http_code}' -X "$method" ${data:+--data "$data"} \
+            --config "${dir}/curl.cfg" 2>/dev/null)" || code=000
+  rm -f "${dir}/curl.cfg"
+  printf '%s' "${code:-000}"
+}
+
+offsite_check() {
+  need curl; need python3
+  local dir="${WORKDIR}/${VM_NAME}.offsite-check" has=no-ca
+  rm -rf "$dir"
+  offsite_read "$dir"
+  [ ! -s "${dir}/ca.crt" ] || has=ca
+  rm -rf "$dir"
+  echo "  off-site settings read from ${NS}/${OFFSITE_SECRET} (url, org, token$([ "$has" = ca ] && printf ', ca.crt'))" >&2
+  printf '%s\n' "$has"
+}
+
+offsite_repo_create() {
+  need curl; need python3
+  local dir="${1:-}" marker="${VM_NAME}-offsite" org code login out
+  [ -n "$dir" ] || { echo "REFUSING: offsite-repo needs a directory to write into: $0 offsite-repo DIR" >&2; exit 2; }
+  # As with the kit: sweep finds its work by listing VMs, so a repository with no VM is never deleted.
+  if ! kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" get vm "$VM_NAME" >/dev/null 2>&1; then
+    echo "REFUSING: ${NS}/${VM_NAME} does not exist, so nothing would ever delete its off-site repository." >&2; exit 2
+  fi
+  rm -rf "$dir"
+  offsite_read "$dir"
+  org="$(cat "${dir}/org")"
+  code="$(offsite_api "$dir" GET /api/v1/user)"
+  login="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("login", ""))' "${dir}/resp" 2>/dev/null || true)"
+  if [ "$code" != 200 ] || [ -z "$login" ]; then
+    rm -rf "$dir"
+    echo "offsite-repo: FAILED: the forge at key url of ${NS}/${OFFSITE_SECRET} did not accept key token (GET /api/v1/user answered ${code}; 000 means it was not reached)" >&2
+    exit 1
+  fi
+  # The marker first: a repository nothing remembers is the one destroy cannot delete.
+  if ! out="$(kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" delete secret "$marker" --ignore-not-found 2>&1)" \
+     || ! out="$(kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" create secret generic "$marker" \
+                   --from-literal=repo="${org}/${VM_NAME}" 2>&1)" \
+     || ! out="$(kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" label secret "$marker" \
+                   tockmox.com/harness=executed-docs --overwrite 2>&1)"; then
+    rm -rf "$dir"
+    echo "offsite-repo: FAILED to write the marker ${NS}/${marker}, so no repository was created:" >&2
+    printf '  %s\n' "$out" >&2
+    kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" delete secret "$marker" --ignore-not-found >/dev/null 2>&1 || true
+    exit 1
+  fi
+  code="$(offsite_api "$dir" POST "/api/v1/orgs/${org}/repos" "{\"name\": \"${VM_NAME}\", \"private\": true, \"auto_init\": false}")"
+  case "$code" in
+    201) echo "  off-site repository ${org}/${VM_NAME} created on the forge ${NS}/${OFFSITE_SECRET} names" >&2 ;;
+    409) echo "  off-site repository ${org}/${VM_NAME} is already there (an earlier attempt of this run made it)" >&2 ;;
+    *) rm -rf "$dir"
+       echo "offsite-repo: FAILED to create ${org}/${VM_NAME} (POST /api/v1/orgs/${org}/repos answered ${code}; 000 means the forge was not reached)" >&2
+       exit 1 ;;
+  esac
+  ( umask 077
+    printf '%s/%s/%s.git\n' "$(cat "${dir}/url")" "$org" "$VM_NAME" > "${dir}/git-url"
+    printf '%s\n%s\n' "$login" "$(cat "${dir}/token")" > "${dir}/git-credentials" )
+  rm -f "${dir}/resp" "${dir}/token"
+  printf '%s\n' "$dir"
+}
+
+offsite_reach() {
+  local dir="${1:-}" code
+  [ -s "${dir}/url" ] || { echo "REFUSING: offsite-reach needs the directory offsite-repo wrote: $0 offsite-reach DIR" >&2; exit 2; }
+  # -k: this asks only whether the guest resolves and reaches the forge. Whether the copy job
+  # trusts its certificate is the installer's to get right, and its own first copy proves it.
+  code="$(node_exec "curl -sk -m 20 -o /dev/null -w '%{http_code}' '$(cat "${dir}/url")/api/v1/version'" 2>/dev/null)" || true
+  if [ "$code" != 200 ]; then
+    echo "offsite-reach: FAILED: the guest ${VM_NAME} does not resolve or reach the forge at key url of ${NS}/${OFFSITE_SECRET} (it answered '${code:-nothing}'; 000 is no connection)" >&2
+    exit 1
+  fi
+  echo "  the guest reaches the forge ${NS}/${OFFSITE_SECRET} names" >&2
+}
+
+# destroy's half. Quiet, and no call anywhere, for a VM with no marker. A repository that
+# could not be deleted is counted and named, and destroy fails on it at the end.
+offsite_repo_delete() {
+  local marker="${VM_NAME}-offsite" dir="${WORKDIR}/${VM_NAME}.offsite-delete" repo code
+  kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" get secret "$marker" -o name >/dev/null 2>&1 || return 0
+  repo="$(kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" get secret "$marker" -o 'jsonpath={.data.repo}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  case "$repo" in
+    */"$VM_NAME") ;;
+    *) OFFSITE_DELETE_ERRORS=$((OFFSITE_DELETE_ERRORS + 1))
+       echo "  off-site repository NOT deleted: ${NS}/${marker} does not name a repository of ${VM_NAME}" >&2
+       return 0 ;;
+  esac
+  rm -rf "$dir"
+  if ! ( offsite_read "$dir" ); then
+    OFFSITE_DELETE_ERRORS=$((OFFSITE_DELETE_ERRORS + 1))
+    echo "  off-site repository ${repo} NOT deleted: the settings could not be read (above)" >&2
+    rm -rf "$dir"; return 0
+  fi
+  code="$(offsite_api "$dir" DELETE "/api/v1/repos/${repo}")"
+  rm -rf "$dir"
+  case "$code" in
+    204) echo "  off-site repository ${repo} deleted" >&2 ;;
+    404) echo "  off-site repository ${repo} was already gone" >&2 ;;
+    *) OFFSITE_DELETE_ERRORS=$((OFFSITE_DELETE_ERRORS + 1))
+       echo "  off-site repository ${repo} NOT deleted (DELETE /api/v1/repos/${repo} answered ${code}; 000 means the forge was not reached)" >&2 ;;
+  esac
 }
 
 # ---- a stale handoff Secret is refused, never waited on ------------
@@ -1871,8 +2073,11 @@ reboot() {
 # Everything this script creates on the substrate is named `${VM_NAME}` or
 # `${VM_NAME}-<something>`: the VM, its DataVolume, the cloud-init, boot and
 # kubeconfig Secrets (the last two written by the guest), the kit Secret a kept
-# p09 run leaves (kit-store), the API Service, snapshots, restores and the
-# uninstall ConfigMap. So ownership is the NAME,
+# p09 run leaves (kit-store), the off-site marker (offsite-repo), the API
+# Service, snapshots, restores and the uninstall ConfigMap. One thing lives
+# outside the substrate: the off-site repository offsite-repo creates, named
+# after the VM, which destroy deletes while the marker says there is one. So
+# ownership is the NAME,
 # and `destroy` deletes only names it owns.
 #
 # It used to be `delete vm --all` (and every harness-labelled Secret, Service
@@ -1961,6 +2166,9 @@ destroy() {
     exit 2
   fi
   SECRET_DELETE_ERRORS=0
+  OFFSITE_DELETE_ERRORS=0
+  # Before the Secrets go: the marker among them is what says this VM has an off-site repository.
+  offsite_repo_delete
   echo "clearing ${VM_NAME}'s secrets in ${NS}" >&2
   delete_harness_secrets
   # Snapshots BEFORE the VM: a snapshot pins storage holding a full copy of the
@@ -2012,6 +2220,10 @@ destroy() {
   [ -z "$secleft" ] || { echo "RESULT:   FAIL ... teardown left secrets behind: $(printf '%s' "$secleft" | tr '\n' ' ')" >&2; exit 1; }
   if [ "$SECRET_DELETE_ERRORS" -ne 0 ]; then
     echo "RESULT:   FAIL ... ${SECRET_DELETE_ERRORS} secret delete(s) returned an error (printed above)" >&2
+    exit 1
+  fi
+  if [ "$OFFSITE_DELETE_ERRORS" -ne 0 ]; then
+    echo "RESULT:   FAIL ... ${VM_NAME}'s off-site repository was not deleted (printed above); delete it on the forge by hand" >&2
     exit 1
   fi
   # The snapshot query can be REFUSED (the harness credential may not list
@@ -2313,8 +2525,11 @@ case "${1:-}" in
   await)   await_guest ;;
   kit-store) shift; kit_store "${1:-}" "${2:-}" ;;
   kit)     shift; kit_fetch "${1:-}" ;;
+  offsite-check) offsite_check ;;
+  offsite-repo)  shift; offsite_repo_create "${1:-}" ;;
+  offsite-reach) shift; offsite_reach "${1:-}" ;;
   mirror-proof) mirror_proof ;;
   uninstall-proof) uninstall_proof ;;
   evidence) evidence ;;
-  *) echo "usage: $0 {create|await|exec CMD|reboot|destroy|reset --every-vm-in-NS|sweep PREFIX MINUTES|snapshot RUNG|restore RUNG|snapshots|ip|kubeconfig|kit-store KIT IDENTITY|kit DIR|uninstall-proof|evidence|mirror-proof}" >&2; exit 2 ;;
+  *) echo "usage: $0 {create|await|exec CMD|reboot|destroy|reset --every-vm-in-NS|sweep PREFIX MINUTES|snapshot RUNG|restore RUNG|snapshots|ip|kubeconfig|kit-store KIT IDENTITY|kit DIR|offsite-check|offsite-repo DIR|offsite-reach DIR|uninstall-proof|evidence|mirror-proof}" >&2; exit 2 ;;
 esac
