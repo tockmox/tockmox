@@ -199,6 +199,9 @@ the encrypted recovery kit.
   --offsite-git URL           an https git remote that receives main after every merge
                               (protect its main from force pushes)
   --offsite-git-credentials F two lines: the user, then a token that can push
+  --offsite-git-ca FILE       a CA bundle for the remote, if it is private. The forge's
+                              push mirror and the copy job trust it, and the remote's
+                              host is allowed even on a private address (that host only)
 
  Sign-in through Authentik (on when the site has the identity layer)
   --connect-sign-in      add the forge's sign-in source now. Run it once tockmox-identity
@@ -249,7 +252,7 @@ SITE=""; CONTEXT=""; CONTEXT_GIVEN=false; YES_CONTEXT=""; YES_SERVER=""; NO_PROM
 KIT_OUT=""; AGE_RECIPIENT=""; PASSFILE=""; SEAL_BACKUP=""; NO_SEAL_BACKUP=false
 FORGE_NS="$FORGE_NS_DEFAULT"; CHART_REF="$CHART_REF_DEFAULT"; CHART_VERSION="$CHART_VERSION_DEFAULT"
 OS_S3_ENDPOINT=""; OS_S3_BUCKET=""; OS_S3_PREFIX=""; OS_S3_REGION="us-east-1"; OS_S3_CREDS=""; OS_S3_CA=""
-OS_GIT_URL=""; OS_GIT_CREDS=""
+OS_GIT_URL=""; OS_GIT_CREDS=""; OS_GIT_CA=""
 IMAGE_REGISTRY=""; STORAGE_CLASS=""; ARGO_NS="argocd"; AI_NS="tockmox-ai"; WAIT_SECONDS=300; DRY_RUN=false
 RESTORE_HISTORY=""; CONNECT_ONLY=false; NO_SIGN_IN=false; REPLACE_ARGO_CRED=false; FORGE_HOST=""; CONSOLE_HOST=""; ADMIN_GROUP="tockmox-admins"
 IDENTITY_NS="tockmox-authentik"; PLATFORM_NS="tockmox-platform"; AUTH_HOST=""
@@ -282,6 +285,7 @@ while [[ $# -gt 0 ]]; do
     --offsite-s3-ca) OS_S3_CA="${2:?--offsite-s3-ca needs a file}"; shift 2 ;;
     --offsite-git) OS_GIT_URL="${2:?--offsite-git needs a URL}"; shift 2 ;;
     --offsite-git-credentials) OS_GIT_CREDS="${2:?--offsite-git-credentials needs a file}"; shift 2 ;;
+    --offsite-git-ca) OS_GIT_CA="${2:?--offsite-git-ca needs a file}"; shift 2 ;;
     --wait-seconds) WAIT_SECONDS="${2:?--wait-seconds needs a number}"; shift 2 ;;
     --connect-sign-in) CONNECT_ONLY=true; shift ;;
     --replace-argocd-credential) REPLACE_ARGO_CRED=true; shift ;;
@@ -453,7 +457,7 @@ two_lines() {
 }
 OFFSITE=""
 if [[ -n "$OS_S3_ENDPOINT$OS_S3_BUCKET$OS_S3_CREDS$OS_S3_CA$OS_S3_PREFIX" ]]; then OFFSITE="bucket"; fi
-if [[ -n "$OS_GIT_URL$OS_GIT_CREDS" ]]; then
+if [[ -n "$OS_GIT_URL$OS_GIT_CREDS$OS_GIT_CA" ]]; then
   [[ -z "$OFFSITE" ]] || die "give one off-site destination, a bucket OR a git remote, not both"
   OFFSITE="git"
 fi
@@ -472,6 +476,14 @@ case "$OFFSITE" in
     [[ "$OS_GIT_URL" =~ ^https://[^@[:space:]]+$ ]] || die "--offsite-git must be an https URL with no credentials in it: '$OS_GIT_URL'"
     [[ -n "$OS_GIT_CREDS" ]] || die "--offsite-git-credentials FILE is required with a git remote"
     OS_GIT_CREDS="$(two_lines "$OS_GIT_CREDS" --offsite-git-credentials)" || exit 1
+    if [[ -n "$OS_GIT_CA" ]]; then
+      [[ -r "$OS_GIT_CA" && -s "$OS_GIT_CA" ]] || die "cannot read --offsite-git-ca $OS_GIT_CA"
+      grep -q -- '-----BEGIN CERTIFICATE-----' "$OS_GIT_CA" || die "--offsite-git-ca $OS_GIT_CA holds no PEM certificate"
+    fi
+    # The remote's host, without a port: Forgejo's migrations.ALLOWED_DOMAINS takes host names,
+    # and a host it allows is allowed on a private address too (ALLOW_LOCALNETWORKS stays off).
+    OS_GIT_HOST="${OS_GIT_URL#https://}"; OS_GIT_HOST="${OS_GIT_HOST%%/*}"; OS_GIT_HOST="${OS_GIT_HOST%%:*}"
+    [[ "$OS_GIT_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || die "--offsite-git has no host name I can allow: '$OS_GIT_URL'"
     OFFSITE_WHERE="$OS_GIT_URL" ;;
   *) OFFSITE_WHERE="" ;;
 esac
@@ -545,6 +557,7 @@ if $DRY_RUN; then
   fi
   if [[ -n "$OFFSITE" ]]; then info "off-site copy (${OFFSITE}) to ${OFFSITE_WHERE}: a CronJob every minute, a nightly forge dump of pull requests, reviews and comments to the same place, then the first copy and the first dump written and read back"
   else info "no off-site copy (the console will raise No off-site copy until one is set)"; fi
+  [[ -z "$OS_GIT_CA" ]] || info "trust ${OS_GIT_CA} for ${OS_GIT_HOST} in the forge's push mirror and the copy job; the forge allows ${OS_GIT_HOST} alone as a mirror target, even on a private address"
   info "write the recovery kit to ${KIT_OUT}"
   exit 0
 fi
@@ -789,34 +802,51 @@ $( [[ "$SCHEME" == https ]] && printf '  annotations:\n    cert-manager.io/clust
           pathType: Prefix
 $( [[ "$SCHEME" == https ]] && printf '  tls:\n    - secretName: %s-tls\n      hosts: [%s]\n' "$RELEASE" "$FORGE_HOST" )
 VALUES
-  if [[ "$SCHEME" == https ]]; then
-    # Trust: ONLY ca.crt from the certificate's Secret (never its key), as an extra
-    # directory beside the image's own store. Go reads every directory in SSL_CERT_DIR.
-    # Optional, so the forge starts before cert-manager exists; connect_sign_in restarts
-    # it once when the CA arrived after it started.
-    cat <<VALUES
-extraVolumes:
-  - name: tockmox-ca
+else
+  printf 'ingress:\n  enabled: false\n'
+fi
+# Trust: extra CA directories beside the image's own store. Go reads every directory in
+# SSL_CERT_DIR. Two sources, either or both:
+#  - with sign-in on https, ONLY ca.crt from the certificate's Secret (never its key).
+#    Optional, so the forge starts before cert-manager exists; connect_sign_in restarts
+#    it once when the CA arrived after it started.
+#  - with --offsite-git-ca, the remote's CA (the ConfigMap written just before the
+#    chart). The push mirror is a git subprocess, which does not read SSL_CERT_DIR's
+#    unhashed files, so GIT_SSL_CAINFO names that one file for git; it replaces git's
+#    bundle, which is right here: the only https remote the forge's git talks to is the
+#    off-site copy's.
+TRUST_VOLS=""; TRUST_MOUNTS=""; TRUST_DIRS="/etc/ssl/certs"; TRUST_ENV=""
+if $SIGN_IN && [[ "$SCHEME" == https ]]; then
+  TRUST_VOLS+="  - name: tockmox-ca
     secret:
       secretName: ${RELEASE}-tls
       optional: true
       items: [{key: ca.crt, path: tockmox-ca.crt}]
-extraContainerVolumeMounts:
-  - name: tockmox-ca
+"
+  TRUST_MOUNTS+="  - name: tockmox-ca
     mountPath: /etc/tockmox-ca
     readOnly: true
-extraInitVolumeMounts:
-  - name: tockmox-ca
-    mountPath: /etc/tockmox-ca
+"
+  TRUST_DIRS+=":/etc/tockmox-ca"
+fi
+if [[ "$OFFSITE" == git && -n "$OS_GIT_CA" ]]; then
+  TRUST_VOLS+="  - name: offsite-ca
+    configMap:
+      name: ${RELEASE}-offsite-ca
+      items: [{key: ca.crt, path: offsite-ca.crt}]
+"
+  TRUST_MOUNTS+="  - name: offsite-ca
+    mountPath: /etc/tockmox-offsite-ca
     readOnly: true
-deployment:
-  env:
-    - name: SSL_CERT_DIR
-      value: /etc/ssl/certs:/etc/tockmox-ca
-VALUES
-  fi
-else
-  printf 'ingress:\n  enabled: false\n'
+"
+  TRUST_DIRS+=":/etc/tockmox-offsite-ca"
+  TRUST_ENV="    - name: GIT_SSL_CAINFO
+      value: /etc/tockmox-offsite-ca/offsite-ca.crt
+"
+fi
+if [[ -n "$TRUST_VOLS" ]]; then
+  printf 'extraVolumes:\n%sextraContainerVolumeMounts:\n%sextraInitVolumeMounts:\n%sdeployment:\n  env:\n    - name: SSL_CERT_DIR\n      value: %s\n%s' \
+    "$TRUST_VOLS" "$TRUST_MOUNTS" "$TRUST_MOUNTS" "$TRUST_DIRS" "$TRUST_ENV"
 fi
 cat <<VALUES
 gitea:
@@ -880,10 +910,16 @@ gitea:
       ENABLED: false
     mirror:
       ENABLED: true
+$( [[ "$OFFSITE" == git ]] && printf '    migrations:\n      ALLOWED_DOMAINS: %s\n' "$OS_GIT_HOST" )
     api:
       ENABLE_SWAGGER: false
 VALUES
 } > "$TMPD/values.yaml"
+if [[ "$OFFSITE" == git && -n "$OS_GIT_CA" ]]; then
+  kubectl "${K[@]}" -n "$FORGE_NS" create configmap "${RELEASE}-offsite-ca" --from-file=ca.crt="$OS_GIT_CA" \
+    --dry-run=client -o yaml | kubectl "${K[@]}" apply -f - >/dev/null \
+    || die "cannot write ${FORGE_NS}/${RELEASE}-offsite-ca"
+fi
 info "$($ADOPT && echo upgrading || echo installing) chart ${CHART_REF} ${CHART_VERSION} (an install pulls the forge image)"
 helm --kube-context "$CTX" upgrade --install "$RELEASE" "$CHART_REF" --version "$CHART_VERSION" \
   -n "$FORGE_NS" -f "$TMPD/values.yaml" --wait --timeout "${WAIT_SECONDS}s" >/dev/null \
@@ -1331,6 +1367,11 @@ if [[ -n "$OFFSITE" ]]; then
     CA_VOL="            - { name: ca, configMap: { name: ${RELEASE}-offsite-ca } }"
     CA_MOUNT="                - { name: ca, mountPath: /run/offsite-ca, readOnly: true }"
     CA_ENV="                - { name: S3_CA_FILE, value: /run/offsite-ca/ca.crt }"
+  elif [[ "$OFFSITE" == git && -n "$OS_GIT_CA" ]]; then
+    # Written before the chart (the forge mounts it too); the job's git reads it here.
+    CA_VOL="            - { name: ca, configMap: { name: ${RELEASE}-offsite-ca } }"
+    CA_MOUNT="                - { name: ca, mountPath: /run/offsite-ca, readOnly: true }"
+    CA_ENV="                - { name: GIT_SSL_CAINFO, value: /run/offsite-ca/ca.crt }"
   fi
   kubectl "${K[@]}" -n "$FORGE_NS" create configmap "${RELEASE}-offsite-script" \
     --from-file=forge-offsite-copy.sh="$OFFSITE_SCRIPT" --dry-run=client -o yaml \

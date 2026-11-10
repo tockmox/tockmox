@@ -1159,7 +1159,7 @@ one of these to the command:
 | Destination | Flags |
 |---|---|
 | An S3-compatible bucket (MinIO on a NAS, Garage, a cloud bucket) | `--offsite-s3-endpoint URL --offsite-s3-bucket NAME --offsite-s3-credentials FILE` (the file holds the access key id, then the secret key, one per line) |
-| A git remote (protect its `main` from force pushes) | `--offsite-git URL --offsite-git-credentials FILE` (the user, then a token that can push) |
+| A git remote (protect its `main` from force pushes) | `--offsite-git URL --offsite-git-credentials FILE` (the user, then a token that can push). If the remote's certificate is from your own CA, add `--offsite-git-ca FILE`: the forge trusts that CA for the copy, and allows that one host even on a private address |
 
 **Without one the install still finishes**, and the console carries a persistent
 **No off-site copy** warning, which you can snooze or dismiss like any other
