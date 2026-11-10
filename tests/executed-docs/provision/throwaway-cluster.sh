@@ -794,10 +794,25 @@ for k, val in out.items():
 }
 
 # offsite_api DIR METHOD PATH [JSON]: one call to the forge's API as the token's
-# user. Prints the HTTP status (000 when curl itself failed); the body goes to
-# DIR/resp. The address and the token are in a config file curl reads.
+# user. Prints the HTTP status; the body goes to DIR/resp. The address and the
+# token are in a config file curl reads. When curl itself failed it prints 000
+# and why: curl's exit code and what that code means. The code names no host,
+# which curl's own message would, and without it "not reached" cannot be told
+# apart from "reached, and its certificate was not trusted" (the first live run,
+# 2026-11-10, stopped on a bare 000).
+offsite_curl_why() {
+  case "$1" in
+    6) printf 'the host in key url did not resolve' ;;
+    7) printf 'the connection was refused or had no route' ;;
+    28) printf 'no answer within 30 seconds' ;;
+    35) printf 'the TLS handshake failed' ;;
+    60) printf 'its certificate was not trusted: with key ca.crt set, that CA alone is trusted' ;;
+    77) printf 'the CA file from key ca.crt could not be read as certificates' ;;
+    *) printf 'see the curl manual, EXIT CODES' ;;
+  esac
+}
 offsite_api() {
-  local dir="$1" method="$2" path="$3" data="${4:-}" code
+  local dir="$1" method="$2" path="$3" data="${4:-}" code rc=0
   ( umask 077
     { printf 'url = "%s%s"\n' "$(cat "${dir}/url")" "$path"
       printf 'header = "Authorization: token %s"\n' "$(cat "${dir}/token")"
@@ -806,9 +821,13 @@ offsite_api() {
       [ ! -s "${dir}/ca.crt" ] || printf 'cacert = "%s"\n' "${dir}/ca.crt"
     } > "${dir}/curl.cfg" )
   code="$(curl -sS -m 30 -o "${dir}/resp" -w '%{http_code}' -X "$method" ${data:+--data "$data"} \
-            --config "${dir}/curl.cfg" 2>/dev/null)" || code=000
+            --config "${dir}/curl.cfg" 2>/dev/null)" || rc=$?
   rm -f "${dir}/curl.cfg"
-  printf '%s' "${code:-000}"
+  if [ "$rc" -ne 0 ]; then
+    printf '000, curl exit %s: %s' "$rc" "$(offsite_curl_why "$rc")"
+  else
+    printf '%s' "${code:-000}"
+  fi
 }
 
 offsite_check() {
@@ -837,7 +856,7 @@ offsite_repo_create() {
   login="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("login", ""))' "${dir}/resp" 2>/dev/null || true)"
   if [ "$code" != 200 ] || [ -z "$login" ]; then
     rm -rf "$dir"
-    echo "offsite-repo: FAILED: the forge at key url of ${NS}/${OFFSITE_SECRET} did not accept key token (GET /api/v1/user answered ${code}; 000 means it was not reached)" >&2
+    echo "offsite-repo: FAILED: the forge at key url of ${NS}/${OFFSITE_SECRET} did not accept key token (GET /api/v1/user answered ${code})" >&2
     exit 1
   fi
   # The marker first: a repository nothing remembers is the one destroy cannot delete.
@@ -857,7 +876,7 @@ offsite_repo_create() {
     201) echo "  off-site repository ${org}/${VM_NAME} created on the forge ${NS}/${OFFSITE_SECRET} names" >&2 ;;
     409) echo "  off-site repository ${org}/${VM_NAME} is already there (an earlier attempt of this run made it)" >&2 ;;
     *) rm -rf "$dir"
-       echo "offsite-repo: FAILED to create ${org}/${VM_NAME} (POST /api/v1/orgs/${org}/repos answered ${code}; 000 means the forge was not reached)" >&2
+       echo "offsite-repo: FAILED to create ${org}/${VM_NAME} (POST /api/v1/orgs/${org}/repos answered ${code})" >&2
        exit 1 ;;
   esac
   ( umask 077
@@ -904,7 +923,7 @@ offsite_repo_delete() {
     204) echo "  off-site repository ${repo} deleted" >&2 ;;
     404) echo "  off-site repository ${repo} was already gone" >&2 ;;
     *) OFFSITE_DELETE_ERRORS=$((OFFSITE_DELETE_ERRORS + 1))
-       echo "  off-site repository ${repo} NOT deleted (DELETE /api/v1/repos/${repo} answered ${code}; 000 means the forge was not reached)" >&2 ;;
+       echo "  off-site repository ${repo} NOT deleted (DELETE /api/v1/repos/${repo} answered ${code})" >&2 ;;
   esac
 }
 

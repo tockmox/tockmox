@@ -137,7 +137,7 @@ elif method == "POST" and re.fullmatch(r"/api/v1/orgs/[^/]+/repos", path):
 elif method == "DELETE" and path.startswith("/api/v1/repos/"):
     code = os.environ.get("CURL_DELETE_CODE", "204")
 if code == "000":
-    sys.stderr.write("curl: (6) Could not resolve host: %s\n" % re.sub(r"^https://([^/:]+).*", r"\1", url)); sys.exit(6)
+    sys.stderr.write("curl: (6) Could not resolve host: %s\n" % re.sub(r"^https://([^/:]+).*", r"\1", url)); sys.exit(int(os.environ.get("CURL_EXIT", "6")))
 if opt("-o"):
     open(opt("-o"), "w").write(body)
 sys.stdout.write(code)
@@ -233,9 +233,13 @@ reset_store; CURL_USER_CODE=401 run_tc offsite-repo "$TMP/off"
 [ "$RC" = 1 ] && ! grep '^POST' "$TMP/curl.log" >/dev/null && ! has_secret ed-run-offsite && grep -F 'did not accept key token' "$TMP/err" >/dev/null \
   && ok "a token the forge does not accept fails before anything is created" || bad "a token the forge does not accept fails before anything is created" "rc=$RC $(both | tail -3)"
 reset_store; CURL_USER_CODE=000 run_tc offsite-repo "$TMP/off"
-[ "$RC" = 1 ] && quiet && grep -F '000 means it was not reached' "$TMP/err" >/dev/null \
-  && ok "a forge that is not reached fails without curl's own words, which name the host" \
-  || bad "a forge that is not reached fails without curl's own words, which name the host" "rc=$RC $(both | tail -3)"
+[ "$RC" = 1 ] && quiet && grep -F 'answered 000, curl exit 6: the host in key url did not resolve' "$TMP/err" >/dev/null \
+  && ok "a forge that is not reached fails with curl's exit code and its meaning, not curl's own words, which name the host" \
+  || bad "a forge that is not reached fails with curl's exit code and its meaning, not curl's own words, which name the host" "rc=$RC $(both | tail -3)"
+reset_store; CURL_USER_CODE=000 CURL_EXIT=60 run_tc offsite-repo "$TMP/off"
+[ "$RC" = 1 ] && quiet && grep -F 'curl exit 60: its certificate was not trusted' "$TMP/err" >/dev/null \
+  && ok "an untrusted certificate is told apart from an unreachable forge" \
+  || bad "an untrusted certificate is told apart from an unreachable forge" "rc=$RC $(both | tail -3)"
 reset_store; KT_FAIL=create-secret run_tc offsite-repo "$TMP/off"
 [ "$RC" = 1 ] && ! grep '^POST' "$TMP/curl.log" >/dev/null && ok "no repository is created when the marker cannot be written" \
   || bad "no repository is created when the marker cannot be written" "rc=$RC $(cat "$TMP/curl.log") $(both | tail -3)"
