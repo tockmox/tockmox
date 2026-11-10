@@ -1146,6 +1146,22 @@ if [ "$KK_CASES" -eq 0 ] || { [ "$KK_RC" -ne 0 ] && ! printf '%s\n' "$KK_OUT" | 
   bad "kit-keep-test.sh ran its cases" "rc=${KK_RC}, ${KK_CASES} case(s): $(printf '%s' "$KK_OUT" | tail -3)"
 fi
 
+# The off-site copy of a p09 throwaway (TOCKMOX_P09_OFFSITE=git): the settings Secret, the repository
+# and its deletion, P09's block edit and scrub, and the lane's steps. Folded the same way.
+OC_OUT="$(bash "${HERE}/offsite-copy-test.sh" 2>&1)"; OC_RC=$?
+OC_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) OC_CASES=$((OC_CASES+1)); ok "offsite-copy: ${line#ok   }" ;;
+    "FAIL "*) OC_CASES=$((OC_CASES+1)); bad "offsite-copy: ${line#FAIL }" "run tests/executed-docs/offsite-copy-test.sh for detail" ;;
+  esac
+done <<EOF_OC
+$OC_OUT
+EOF_OC
+if [ "$OC_CASES" -eq 0 ] || { [ "$OC_RC" -ne 0 ] && ! printf '%s\n' "$OC_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "offsite-copy-test.sh ran its cases" "rc=${OC_RC}, ${OC_CASES} case(s): $(printf '%s' "$OC_OUT" | tail -3)"
+fi
+
 # k3s from inside the boundary (TOCKMOX_K3S_ARTIFACTS_URL). Its cases drive the provisioner against the same stubs
 # and run the guest script it writes; folded in the same way, so the per-commit gate holds "unset is what it was"
 # and "set, nothing names get.k3s.io".
