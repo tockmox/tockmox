@@ -372,6 +372,7 @@ test, and a run that cannot retrieve a kubeconfig produces no evidence at all.
 | `TOCKMOX_CAPACITY_ALLOW_OTHER_VMS` | `0` | `1` lets another harness VM stand in the namespace |
 | `TOCKMOX_KEEP_CLUSTER` | `0` | `1` leaves the cluster standing for inspection |
 | `TOCKMOX_KEEP_HOURS` | `6` | with `TOCKMOX_KEEP_CLUSTER=1`: the VM carries `tockmox.com/keep-until`, now plus these hours (1 to 24), and `sweep` leaves it alone until then |
+| `TOCKMOX_KEEP_ON_PREP_FAILURE` | `0` | the p09 lane only: a kept run that stops before P09 begins is destroyed, because there is no install to keep and a standing VM holds the rig; `1` keeps it anyway |
 | `TOCKMOX_P09_OFFSITE` | `none` | the p09 lane only: `git` gives the install an off-site copy, a repository named after the VM on the forge the Secret `p09-offsite` names (`TOCKMOX_P09_OFFSITE_SECRET` to name another) |
 | `TOCKMOX_EXPECTED_DEFAULT_COUNT` | `0` | expected count of default StorageClasses after P03 un-defaults `local-path` (1 once a platform layer is installed) |
 | `TOCKMOX_P08_EXPECTED_DEFAULT_COUNT` | `1` | what P08 expects `existing-cluster.md` Check 3 to find: `local-path` on a stock k3s throwaway. Set `0` when P03 has run first |

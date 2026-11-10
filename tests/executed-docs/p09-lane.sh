@@ -13,7 +13,8 @@
 #   5. on a kept built-in run, keep P09's recovery kit and the age identity that opens it as the Secret
 #      ${TOCKMOX_TEST_VM}-kit beside the VM (throwaway-cluster.sh kit-store), because both otherwise end
 #      with this job; `throwaway-cluster.sh kit DIR` fetches them, and destroy removes them with the VM
-#   6. destroy it, unless TOCKMOX_KEEP_CLUSTER=1
+#   6. destroy it, unless TOCKMOX_KEEP_CLUSTER=1. A kept run that stopped before step 4 began is destroyed all the
+#      same (there is no install to keep), unless TOCKMOX_KEEP_ON_PREP_FAILURE=1
 #
 # AN OFF-SITE COPY, with TOCKMOX_P09_OFFSITE=git (default none; built-in route only). Without it the
 # install warns "no off-site copy" and there is nothing to rebuild the throwaway from. With it:
@@ -54,6 +55,7 @@ LANE_T0="$(date -u +%s)"
 SUBSTRATE_KUBECONFIG="${KUBECONFIG:-}"
 KEEP="${TOCKMOX_KEEP_CLUSTER:-0}"
 CREATED=0
+P09_STARTED=0
 # Why the lane itself stopped, before or around run.sh. run.sh writes its own report for P04, P05 and P09; a stop
 # here would leave the workflow's report upload with nothing to send, so finish() writes one line in its place.
 STOPPED=""
@@ -67,6 +69,15 @@ finish() {
   if [ -n "$STOPPED" ]; then
     printf 'p09 lane (%s): exit %s\n%s\n' "${TOCKMOX_DOCS_REF}" "$rc" "$STOPPED" \
       >"${TOCKMOX_WORKDIR}/report-p09-lane-$(date -u +%Y%m%dT%H%M%SZ).txt" || true
+  fi
+  # KEEP keeps an install. A lane that stopped before P09 began has none: there is nothing on the
+  # VM to inspect, rebuild or drill, and left standing it holds the rig against the next create for
+  # as long as its keep-until says (four such VMs on 2026-11-10, each destroyed by hand).
+  # TOCKMOX_KEEP_ON_PREP_FAILURE=1 keeps it anyway, for looking at a preparation step itself.
+  if [ "$CREATED" = 1 ] && [ "$KEEP" = 1 ] && [ "$P09_STARTED" != 1 ] && [ "$rc" != 0 ] \
+     && [ "${TOCKMOX_KEEP_ON_PREP_FAILURE:-0}" != 1 ]; then
+    echo "lane: stopped before P09 began, so there is no install to keep; destroying ${TOCKMOX_TEST_VM} (TOCKMOX_KEEP_ON_PREP_FAILURE=1 keeps it)"
+    KEEP=0
   fi
   if [ "$CREATED" = 1 ] && [ "$KEEP" != 1 ]; then
     echo "lane: destroying ${TOCKMOX_TEST_VM}"
@@ -120,9 +131,13 @@ if [ "$OFFSITE" = git ]; then
   OFFDIR="${LANE}/offsite"
   KUBECONFIG="$SUBSTRATE_KUBECONFIG" bash "${PROV}/throwaway-cluster.sh" offsite-repo "$OFFDIR" >/dev/null \
     || fail "the off-site repository for ${TOCKMOX_TEST_VM} could not be created"
-  KUBECONFIG="$SUBSTRATE_KUBECONFIG" bash "${PROV}/throwaway-cluster.sh" offsite-reach "$OFFDIR" \
-    || fail "the guest does not reach the off-site forge, so its copy job would not either"
-  echo "lane 1: off-site repository ready, and the guest reaches its forge"
+  reach=0
+  KUBECONFIG="$SUBSTRATE_KUBECONFIG" bash "${PROV}/throwaway-cluster.sh" offsite-reach "$OFFDIR" || reach=$?
+  case "$reach" in
+    0) echo "lane 1: off-site repository ready, and the guest reaches its forge" ;;
+    3) echo "lane 1: off-site repository ready; whether the guest reaches its forge was not checked (above), and P09's first off-site copy will show it" ;;
+    *) fail "the guest does not reach the off-site forge, so its copy job would not either" ;;
+  esac
 fi
 
 # 2. what install.md starts from: fresh-install.md 6 and 7
@@ -164,6 +179,7 @@ if [ "$OFFSITE" = git ]; then
   [ ! -s "${OFFDIR}/ca.crt" ] || export TOCKMOX_P09_OFFSITE_GIT_CA="${OFFDIR}/ca.crt"
 fi
 echo "lane 4: P09, ${ROUTE} route (LAN ${TOCKMOX_P09_LAN_CIDR}, pool ${TOCKMOX_P09_POOL}, off-site copy ${OFFSITE})"
+P09_STARTED=1
 set +e
 bash "${HERE}/run.sh" P09
 rc=$?
