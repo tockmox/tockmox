@@ -157,6 +157,9 @@ lib/edge-deny-count.sh the air-gap lane's counter: the edge's deny lines for one
 edge-deny-count-test.sh hermetic proof of that counter (also run by selftest.sh)
 lib/closed-set.sh      the air-gap lane's image list: images.txt plus what the guest pulls before the product
 closed-set-test.sh     hermetic proof of that list (also run by selftest.sh)
+p09-lane.sh            install.md end to end on one throwaway: create, P04 and P05, this tree served
+                       from inside, P09, and on a kept run the recovery kit kept beside the VM
+kit-keep-test.sh       hermetic proof of that kit's Secret and the lane step that writes it (also run by selftest.sh)
 selftest.sh            hermetic proof of the machinery above
 pages-no-cluster.sh    the six no-cluster pages (values-contract, customising, capabilities,
                        configuration, platform-management, verify): every bash block extracted
@@ -281,6 +284,26 @@ until 2026-10-06 a teardown took everyone's. The nightly names its VM
 destroys, one by one, its own earlier VMs older than two hours. The
 namespace-wide reset still exists for the deliberate case, and asks for it by
 name: `throwaway-cluster.sh reset --every-vm-in-tockmox-test`.
+
+**A kept p09 throwaway keeps its recovery kit beside it.** P09's built-in route
+ends with a recovery kit and makes the age identity that opens it, and both
+exist only on the machine that ran the lane. On a kept run
+(`TOCKMOX_KEEP_CLUSTER=1`) `p09-lane.sh` stores the pair as the Secret
+`$TOCKMOX_TEST_VM-kit` in the test namespace, so the rebuild, the restore and
+the drill can be run against that throwaway later. Fetch them with the
+environment `await` takes:
+
+```bash
+bash tests/executed-docs/provision/throwaway-cluster.sh kit "$HOME/keys/ed-kit"
+```
+
+It writes `tockmox-recovery-kit.tar.age` and `p09-age-identity.txt` into that
+directory, never over a file already there, and checks that the identity opens
+the kit when `age` is on PATH. `destroy` and `sweep` delete the Secret with the
+VM. What it holds is that one throwaway's forge admin password and sealing-key
+backup, readable by anyone who can read Secrets in the test namespace, which is
+why it is a Secret there and not a workflow artifact: this repository is
+public.
 
 A KubeVirt cluster usually also hosts machines that are not disposable. The
 namespace rule is the boundary that keeps this harness away from them, because a

@@ -1130,6 +1130,22 @@ if [ "$HS_CASES" -eq 0 ] || { [ "$HS_RC" -ne 0 ] && ! printf '%s\n' "$HS_OUT" | 
   bad "handoff-secret-test.sh ran its cases" "rc=${HS_RC}, ${HS_CASES} case(s): $(printf '%s' "$HS_OUT" | tail -3)"
 fi
 
+# The recovery kit of a kept throwaway: kit-store and kit, destroy and sweep taking the kit Secret
+# with the VM, and the p09 lane's step 5. Folded in like the handoff cases above.
+KK_OUT="$(bash "${HERE}/kit-keep-test.sh" 2>&1)"; KK_RC=$?
+KK_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) KK_CASES=$((KK_CASES+1)); ok "kit-keep: ${line#ok   }" ;;
+    "FAIL "*) KK_CASES=$((KK_CASES+1)); bad "kit-keep: ${line#FAIL }" "run tests/executed-docs/kit-keep-test.sh for detail" ;;
+  esac
+done <<EOF_KK
+$KK_OUT
+EOF_KK
+if [ "$KK_CASES" -eq 0 ] || { [ "$KK_RC" -ne 0 ] && ! printf '%s\n' "$KK_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "kit-keep-test.sh ran its cases" "rc=${KK_RC}, ${KK_CASES} case(s): $(printf '%s' "$KK_OUT" | tail -3)"
+fi
+
 # k3s from inside the boundary (TOCKMOX_K3S_ARTIFACTS_URL). Its cases drive the provisioner against the same stubs
 # and run the guest script it writes; folded in the same way, so the per-commit gate holds "unset is what it was"
 # and "set, nothing names get.k3s.io".

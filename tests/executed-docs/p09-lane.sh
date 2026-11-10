@@ -10,14 +10,18 @@
 #   3. serve this tree from inside it (site-repo-server.sh), so the Applications read THIS tree
 #   4. run.sh P09 against it, the route TOCKMOX_P09_ROUTE names (built-in or external), its blocks read from
 #      this tree's install.md (TOCKMOX_P09_FROM_TREE=1)
-#   5. destroy it, unless TOCKMOX_KEEP_CLUSTER=1
+#   5. on a kept built-in run, keep P09's recovery kit and the age identity that opens it as the Secret
+#      ${TOCKMOX_TEST_VM}-kit beside the VM (throwaway-cluster.sh kit-store), because both otherwise end
+#      with this job; `throwaway-cluster.sh kit DIR` fetches them, and destroy removes them with the VM
+#   6. destroy it, unless TOCKMOX_KEEP_CLUSTER=1
 #
 # It is what the executed-docs workflow runs on a dispatch with lane=p09, and it runs the same from a
 # workstation whose credential the harness accepts (a tockmox-test ServiceAccount token, on a network the
 # guest can call back from). Inputs: TOCKMOX_DOCS_REF, TOCKMOX_SUBSTRATE_CONTEXT, TOCKMOX_TEST_NAMESPACE,
 # TOCKMOX_TEST_VM, TOCKMOX_P09_ROUTE (default built-in); optional TOCKMOX_KEEP_CLUSTER, TOCKMOX_P09_BUDGET,
 # TOCKMOX_P09_LAN_CIDR and TOCKMOX_P09_POOL (default: the node's /24 and .240-.250 in it).
-# Exit: P09's own exit status; 2 for a refused precondition; 1 when a preparation step fails.
+# Exit: P09's own exit status; 2 for a refused precondition; 1 when a preparation step fails, or when P09
+# passed on a kept run and its kit could not be kept (the report says which).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 TREE="$(cd "${HERE}/../.." && pwd)"
@@ -28,6 +32,8 @@ PROV="${HERE}/provision"
 export TOCKMOX_WORKDIR="${TOCKMOX_WORKDIR:-${TMPDIR:-/tmp}/executed-docs}"
 LANE="${TOCKMOX_WORKDIR}/p09-lane"
 mkdir -p "$LANE"
+# Step 5 keeps only a kit written from this second on: a runner that outlives its job can still hold an earlier run's.
+LANE_T0="$(date -u +%s)"
 SUBSTRATE_KUBECONFIG="${KUBECONFIG:-}"
 KEEP="${TOCKMOX_KEEP_CLUSTER:-0}"
 CREATED=0
@@ -102,4 +108,25 @@ bash "${HERE}/run.sh" P09
 rc=$?
 set -e
 echo "lane: P09 exit ${rc}"
+
+# 5. the recovery kit of a kept throwaway. P09's S14f (built-in route only) wrote the kit under this
+# job's HOME and made the identity that opens it under P09's state; neither is anywhere else. A P09 that
+# failed after S14f still leaves a kit worth keeping, so this does not look at rc.
+if [ "$KEEP" = 1 ] && [ "$ROUTE" = built-in ]; then
+  KIT="${HOME}/tockmox-backup/tockmox-recovery-kit.tar.age"
+  KIT_ID="${TOCKMOX_P09_STATE}/p09-age-identity.txt"
+  if [ ! -s "$KIT" ] || [ ! -s "$KIT_ID" ]; then
+    echo "lane 5: P09 did not get as far as a recovery kit (S14f), so there is none to keep"
+  elif [ "$(python3 -c 'import os,sys; print(int(os.path.getmtime(sys.argv[1])))' "$KIT")" -lt "$LANE_T0" ]; then
+    echo "lane 5: ${KIT} is older than this run, so it is an earlier run's kit and is not kept"
+  elif KUBECONFIG="$SUBSTRATE_KUBECONFIG" bash "${PROV}/throwaway-cluster.sh" kit-store "$KIT" "$KIT_ID"; then
+    echo "lane 5: recovery kit kept as ${TOCKMOX_TEST_VM}-kit; fetch it with throwaway-cluster.sh kit DIR"
+  elif [ "$rc" = 0 ]; then
+    STOPPED="lane: P09 passed, but its recovery kit could not be kept as ${TOCKMOX_TEST_VM}-kit (kit-store's own lines are in the job log). The VM stays up; without the kit it cannot be rebuilt or drilled."
+    echo "$STOPPED" >&2
+    rc=1
+  else
+    echo "lane 5: the recovery kit could not be kept as ${TOCKMOX_TEST_VM}-kit; the exit stays P09's" >&2
+  fi
+fi
 exit "$rc"
