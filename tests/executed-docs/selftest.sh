@@ -1147,6 +1147,22 @@ if [ "$KA_CASES" -eq 0 ] || { [ "$KA_RC" -ne 0 ] && ! printf '%s\n' "$KA_OUT" | 
   bad "k3s-artifacts-test.sh ran its cases" "rc=${KA_RC}, ${KA_CASES} case(s): $(printf '%s' "$KA_OUT" | tail -3)"
 fi
 
+# KEEP MEANS KEEP (tockmox.com/keep-until): sweep leaves a kept VM alone until its time, and a
+# kept create carries the label. Folded the same way.
+KU_OUT="$(bash "${HERE}/keep-until-test.sh" 2>&1)"; KU_RC=$?
+KU_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) KU_CASES=$((KU_CASES+1)); ok "keep-until: ${line#ok   }" ;;
+    "FAIL "*) KU_CASES=$((KU_CASES+1)); bad "keep-until: ${line#FAIL }" "run tests/executed-docs/keep-until-test.sh for detail" ;;
+  esac
+done <<EOF_KU
+$KU_OUT
+EOF_KU
+if [ "$KU_CASES" -eq 0 ] || { [ "$KU_RC" -ne 0 ] && ! printf '%s\n' "$KU_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "keep-until-test.sh ran its cases" "rc=${KU_RC}, ${KU_CASES} case(s): $(printf '%s' "$KU_OUT" | tail -3)"
+fi
+
 # ---------------------------------------------------------------------------
 # The registry-mirror modes.
 #
