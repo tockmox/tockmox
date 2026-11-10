@@ -854,7 +854,14 @@ offsite_repo_create() {
   org="$(cat "${dir}/org")"
   code="$(offsite_api "$dir" GET /api/v1/user)"
   login="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("login", ""))' "${dir}/resp" 2>/dev/null || true)"
-  if [ "$code" != 200 ] || [ -z "$login" ]; then
+  # 403 here is a token that works and lacks read:user, which creating and deleting a repository
+  # do not need (the lab's token is write:organization and write:repository; the first live run
+  # that reached the forge stopped on this, 2026-11-10). The forge finds the user from the token
+  # whatever name is sent beside it, so the credentials file's first line can be any name.
+  if [ "$code" = 403 ]; then
+    login="git"
+    echo "  the token cannot read its own user (no read:user scope); the credentials file names 'git', which the forge ignores beside a token" >&2
+  elif [ "$code" != 200 ] || [ -z "$login" ]; then
     rm -rf "$dir"
     echo "offsite-repo: FAILED: the forge at key url of ${NS}/${OFFSITE_SECRET} did not accept key token (GET /api/v1/user answered ${code})" >&2
     exit 1
@@ -892,10 +899,12 @@ offsite_reach() {
   # -k: this asks only whether the guest resolves and reaches the forge. Whether the copy job
   # trusts its certificate is the installer's to get right, and its own first copy proves it.
   code="$(node_exec "curl -sk -m 20 -o /dev/null -w '%{http_code}' '$(cat "${dir}/url")/api/v1/version'" 2>/dev/null)" || true
-  if [ "$code" != 200 ]; then
-    echo "offsite-reach: FAILED: the guest ${VM_NAME} does not resolve or reach the forge at key url of ${NS}/${OFFSITE_SECRET} (it answered '${code:-nothing}'; 000 is no connection)" >&2
-    exit 1
-  fi
+  # Any HTTP status is an answer: a forge that wants a sign-in for its version was still reached.
+  case "$code" in
+    ''|000|*[!0-9]*)
+      echo "offsite-reach: FAILED: the guest ${VM_NAME} does not resolve or reach the forge at key url of ${NS}/${OFFSITE_SECRET} (it answered '${code:-nothing}'; 000 is no connection)" >&2
+      exit 1 ;;
+  esac
   echo "  the guest reaches the forge ${NS}/${OFFSITE_SECRET} names" >&2
 }
 

@@ -232,6 +232,10 @@ has_secret ed-run-offsite && ok "the marker stays after a failed create, so dest
 reset_store; CURL_USER_CODE=401 run_tc offsite-repo "$TMP/off"
 [ "$RC" = 1 ] && ! grep '^POST' "$TMP/curl.log" >/dev/null && ! has_secret ed-run-offsite && grep -F 'did not accept key token' "$TMP/err" >/dev/null \
   && ok "a token the forge does not accept fails before anything is created" || bad "a token the forge does not accept fails before anything is created" "rc=$RC $(both | tail -3)"
+reset_store; CURL_USER_CODE=403 run_tc offsite-repo "$TMP/off"
+[ "$RC" = 0 ] && grep '^POST' "$TMP/curl.log" >/dev/null && [ "$(cat "$TMP/off/git-credentials" 2>/dev/null)" = "git
+$TOKEN" ] && ok "a token without read:user still creates the repository, and the credentials file names a user the forge ignores" \
+  || bad "a token without read:user still creates the repository, and the credentials file names a user the forge ignores" "rc=$RC $(both | tail -3)"
 reset_store; CURL_USER_CODE=000 run_tc offsite-repo "$TMP/off"
 [ "$RC" = 1 ] && quiet && grep -F 'answered 000, curl exit 6: the host in key url did not resolve' "$TMP/err" >/dev/null \
   && ok "a forge that is not reached fails with curl's exit code and its meaning, not curl's own words, which name the host" \
