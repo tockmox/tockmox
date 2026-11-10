@@ -80,11 +80,20 @@ on:
         description: 'leave the throwaway cluster standing for inspection'
         type: boolean
         default: false
+      keep_hours:
+        description: 'with keep_cluster: hours before a sweep may take the VM (1 to 24)'
+        type: string
+        default: '6'
       lane:
         description: 'all = every documented path (run.sh); p09 = install.md end to end on one throwaway (p09-lane.sh)'
         type: choice
         options: [all, p09]
         default: all
+      p09_offsite:
+        description: 'the p09 lane only, built-in route: git = give the install an off-site copy, a repository named after the VM on the forge the Secret p09-offsite names'
+        type: choice
+        options: [none, git]
+        default: none
       p09_route:
         description: 'the p09 lane only: where the site repository lives'
         type: choice
@@ -367,8 +376,15 @@ jobs:
       # context the runner's kubeconfig has current. Not a secret, so a variable.
       TOCKMOX_SUBSTRATE_CONTEXT: ${{ vars.TOCKMOX_SUBSTRATE_CONTEXT }}
       TOCKMOX_KEEP_CLUSTER: ${{ github.event.inputs.keep_cluster == 'true' && '1' || '0' }}
+      # A kept VM carries tockmox.com/keep-until, now plus these hours, and every run's
+      # sweep leaves it alone until then (throwaway-cluster.sh keep_until_value).
+      TOCKMOX_KEEP_HOURS: ${{ github.event.inputs.keep_hours || '6' }}
       TOCKMOX_LANE: ${{ github.event.inputs.lane || 'all' }}
       TOCKMOX_P09_ROUTE: ${{ github.event.inputs.p09_route || 'built-in' }}
+      # Where the off-site forge is and its token are not here and not in this repository's
+      # settings: they are the Secret p09-offsite beside the VMs, which the lane reads
+      # (tests/executed-docs/p09-lane.sh). The destroy and sweep below delete the repository.
+      TOCKMOX_P09_OFFSITE: ${{ github.event.inputs.p09_offsite || 'none' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -516,6 +532,8 @@ jobs:
           # one by one and by name, any `ed-` VM older than two hours: earlier
           # runs of THIS workflow that were killed before any teardown ran. No
           # other VM in the namespace is touched; the prefix is this workflow's.
+          # A VM a run kept (keep_cluster) is left alone until its
+          # tockmox.com/keep-until passes (keep_hours, default 6), then swept.
           #
           # The context guard is repeated HERE on purpose: this step runs
           # `if: always()`, including after a preflight that refused because the

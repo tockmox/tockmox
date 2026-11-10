@@ -104,7 +104,7 @@ Writes to a CLUSTER, after it has checked everything it can without one.
   --offsite-s3-endpoint URL --offsite-s3-bucket NAME [--offsite-s3-prefix P] [--offsite-s3-region R]
   --offsite-s3-credentials F [--offsite-s3-ca FILE]
                             the bucket the off-site job writes to (the same flags bootstrap-forge took)
-  --offsite-git URL --offsite-git-credentials F
+  --offsite-git URL --offsite-git-credentials F [--offsite-git-ca FILE]
                             the git remote the forge mirrors to
   The same destination is set up again for the new forge's off-site copy.
   --max-age-hours N         call the copy out as old past this age (default 24)
@@ -150,7 +150,7 @@ USAGE
 # ---------------------------------------------------------------- arguments
 FROM=""; SHA256_GIVEN=""; MAX_AGE_H=24; DUMP_FILE=""; DUMP_SHA=""; NO_HISTORY=false
 OS_S3_ENDPOINT=""; OS_S3_BUCKET=""; OS_S3_PREFIX=""; OS_S3_REGION="us-east-1"; OS_S3_CREDS=""; OS_S3_CA=""
-OS_GIT_URL=""; OS_GIT_CREDS=""
+OS_GIT_URL=""; OS_GIT_CREDS=""; OS_GIT_CA=""
 KIT=""; PASSFILE=""; AGE_IDENTITY=""; KEY_PASSFILE=""; KEY_AGE_IDENTITY=""
 KIT_OUT=""; AGE_RECIPIENT=""; SITE_OUT=""; SEAL_BACKUP=""; NO_SEAL_BACKUP=false
 CONTEXT=""; CONTEXT_GIVEN=false; YES_CONTEXT=""; YES_SERVER=""; NO_PROMPT=false
@@ -172,6 +172,7 @@ while [[ $# -gt 0 ]]; do
     --offsite-s3-ca) OS_S3_CA="${2:?--offsite-s3-ca needs a file}"; shift 2 ;;
     --offsite-git) OS_GIT_URL="${2:?--offsite-git needs a URL}"; shift 2 ;;
     --offsite-git-credentials) OS_GIT_CREDS="${2:?--offsite-git-credentials needs a file}"; shift 2 ;;
+    --offsite-git-ca) OS_GIT_CA="${2:?--offsite-git-ca needs a file}"; shift 2 ;;
     --kit) KIT="${2:?--kit needs a file}"; shift 2 ;;
     --passphrase-file) PASSFILE="${2:?--passphrase-file needs a file}"; shift 2 ;;
     --age-identity) AGE_IDENTITY="${2:?--age-identity needs a file}"; shift 2 ;;
@@ -255,7 +256,7 @@ REPO_URL="http://${RELEASE}-http.${FORGE_NS}.svc.cluster.local:3000/${ORG}/${REP
 # The off-site destination: required to read from it, and set up again for the new forge.
 OFFSITE=""
 [[ -n "$OS_S3_ENDPOINT$OS_S3_BUCKET$OS_S3_CREDS$OS_S3_CA$OS_S3_PREFIX" ]] && OFFSITE="bucket"
-if [[ -n "$OS_GIT_URL$OS_GIT_CREDS" ]]; then
+if [[ -n "$OS_GIT_URL$OS_GIT_CREDS$OS_GIT_CA" ]]; then
   [[ -z "$OFFSITE" ]] || die "give one off-site destination, a bucket OR a git remote, not both"
   OFFSITE="git"
 fi
@@ -277,7 +278,14 @@ case "$OFFSITE" in
   git)
     [[ "$OS_GIT_URL" =~ ^https://[^@[:space:]]+$ ]] || die "--offsite-git must be an https URL with no credentials in it"
     [[ -n "$OS_GIT_CREDS" ]] || die "--offsite-git-credentials FILE is required with a git remote"
-    two_lines "$OS_GIT_CREDS" --offsite-git-credentials ;;
+    two_lines "$OS_GIT_CREDS" --offsite-git-credentials
+    if [[ -n "$OS_GIT_CA" ]]; then
+      [[ -r "$OS_GIT_CA" && -s "$OS_GIT_CA" ]] || die "cannot read --offsite-git-ca $OS_GIT_CA"
+      grep -q -- '-----BEGIN CERTIFICATE-----' "$OS_GIT_CA" || die "--offsite-git-ca $OS_GIT_CA holds no PEM certificate"
+      # Every git call below that reaches the remote is https; the forge's own is http
+      # through a port-forward, which this does not touch.
+      export GIT_SSL_CAINFO="$OS_GIT_CA"
+    fi ;;
 esac
 [[ "$SRC" != offsite || -n "$OFFSITE" ]] || die "--restore-from offsite needs the destination the off-site job wrote to:
          --offsite-s3-endpoint/--offsite-s3-bucket/--offsite-s3-credentials   (a bucket)
@@ -791,7 +799,8 @@ case "$OFFSITE_FOR_FORGE" in
             --offsite-s3-region "$OS_S3_REGION" --offsite-s3-credentials "$OS_S3_CREDS")
           [[ -z "$OS_S3_PREFIX" ]] || FORGE_FLAGS+=(--offsite-s3-prefix "$OS_S3_PREFIX")
           [[ -z "$OS_S3_CA" ]] || FORGE_FLAGS+=(--offsite-s3-ca "$OS_S3_CA") ;;
-  git) FORGE_FLAGS+=(--offsite-git "$OS_GIT_URL" --offsite-git-credentials "$OS_GIT_CREDS") ;;
+  git) FORGE_FLAGS+=(--offsite-git "$OS_GIT_URL" --offsite-git-credentials "$OS_GIT_CREDS")
+       [[ -z "$OS_GIT_CA" ]] || FORGE_FLAGS+=(--offsite-git-ca "$OS_GIT_CA") ;;
 esac
 FORGE_FLAGS+=(--namespace "$FORGE_NS")
 [[ -z "$DUMP_DIR" ]] || FORGE_FLAGS+=(--restore-history "$DUMP_DIR")

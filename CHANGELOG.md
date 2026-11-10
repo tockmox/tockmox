@@ -82,6 +82,15 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **An off-site git copy on a private CA.** `bootstrap-forge --offsite-git-ca FILE`,
+  beside `--offsite-git`, gives the forge's push mirror and the copy job the CA
+  that signed the remote's certificate; the rebuild and the forge repair take the
+  same flag and pass it on. With any git remote the forge now allows that
+  remote's host, and only that host, as a mirror target
+  (`migrations.ALLOWED_DOMAINS`), so a remote on a private address works without
+  opening the forge to every local network (docs/deployment/install.md,
+  "Publish to the built-in forge").
+
 - **Moving the site to a forge you own, from the console.** On a built-in-forge
   site, **Status › Site repository › "Move to my own forge…"** runs the same move as
   `tockmox-install.sh move-forge`. **Check the target** pushes nothing.

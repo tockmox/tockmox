@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Sourced by run.sh. Groups F1-F30: install/bootstrap-forge.sh.
+# Sourced by run.sh. Groups F1-F35: install/bootstrap-forge.sh.
 #
 # HERMETIC, and deliberately narrow: every case here is a REFUSAL, and the
 # assertion that matters in each is that the refusal came before any write to a
@@ -295,3 +295,35 @@ ch_run --charts-repo "$D/charts-src" --charts-tag v9.9.9 --dry-run
 assert_artifact "F30 a dry run with a good checkout exits clean and names the charts repository and tag" \
   "echo $FS_STATUS; grep -c 'create tockmox/charts (read by' '$D/out/stdout'; grep -c 'push tag v9.9.9 and main' '$D/out/stdout'" "$(printf '0\n1\n1')"
 assert_artifact "F30 ... and writes nothing to the cluster" "fs_writes" "0"
+
+# F31-F35. --offsite-git-ca: a git remote on a private CA (and a private address).
+# Refusals before any write, and the dry run's plan naming the trust and the one host
+# allowed. What the chart then mounts is proven on the lab, not here (see the header).
+printf -- '-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----\n' > "$FS/ca.pem"
+fs_case f31; printf 'bot\ntoken\n' > "$D/inputs/git"
+os_run --offsite-git https://git.example.internal/lab/site.git --offsite-git-credentials "$D/inputs/git" --offsite-git-ca "$D/inputs/no-such-ca.pem"
+assert_artifact "F31 an unreadable --offsite-git-ca is refused" \
+  "echo $FS_STATUS; fs_err | grep -c 'cannot read --offsite-git-ca'" "$(printf '1\n1')"
+assert_artifact "F31 ... before any write to the cluster" "fs_writes" "0"
+
+fs_case f32; printf 'bot\ntoken\n' > "$D/inputs/git"; printf 'not a certificate\n' > "$D/inputs/ca.txt"
+os_run --offsite-git https://git.example.internal/lab/site.git --offsite-git-credentials "$D/inputs/git" --offsite-git-ca "$D/inputs/ca.txt"
+assert_artifact "F32 a CA file with no PEM certificate is refused" \
+  "echo $FS_STATUS; fs_err | grep -c 'holds no PEM certificate'" "$(printf '1\n1')"
+assert_artifact "F32 ... before any write to the cluster" "fs_writes" "0"
+
+fs_case f33
+os_run --offsite-git-ca "$FS/ca.pem"
+assert_artifact "F33 a CA with no git remote is refused (it names the missing URL)" \
+  "echo $FS_STATUS; fs_err | grep -c 'must be an https URL'" "$(printf '1\n1')"
+
+fs_case f34; printf 'GKexample\nsecretexample\n' > "$D/inputs/s3"
+os_run --offsite-s3-endpoint https://s3.example.com --offsite-s3-bucket site-copy --offsite-s3-credentials "$D/inputs/s3" --offsite-git-ca "$FS/ca.pem"
+assert_artifact "F34 --offsite-git-ca beside a bucket is refused as two destinations" \
+  "echo $FS_STATUS; fs_err | grep -c 'not both'" "$(printf '1\n1')"
+
+fs_case f35; printf 'bot\ntoken\n' > "$D/inputs/git"
+os_run --offsite-git https://git.example.internal:8443/lab/site.git --offsite-git-credentials "$D/inputs/git" --offsite-git-ca "$FS/ca.pem" --dry-run
+assert_artifact "F35 a dry run plans the trust and allows the remote's host alone, without its port" \
+  "echo $FS_STATUS; grep -c 'for git.example.internal in the forge.s push mirror and the copy job; the forge allows git.example.internal alone' '$D/out/stdout'" "$(printf '0\n1')"
+assert_artifact "F35 ... and writes nothing to the cluster" "fs_writes" "0"
