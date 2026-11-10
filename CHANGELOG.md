@@ -82,6 +82,18 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **The executed-docs harness can install k3s from inside the boundary.**
+  `TOCKMOX_K3S_ARTIFACTS_URL` names a server holding `VERSION/install.sh` and `VERSION/k3s`; the
+  throwaway guest installs from there with the download skipped, refuses a binary of another
+  version, and its beacon probes that URL instead of the internet. Unset, the guest installs from
+  `get.k3s.io` exactly as before.
+
+- **A kept executed-docs throwaway can be rebuilt.** With `TOCKMOX_KEEP_CLUSTER=1` the p09 lane keeps the
+  VM until its keep-until (`TOCKMOX_KEEP_HOURS`, default 6), stores P09's recovery kit and the age identity
+  that opens it as a Secret beside the VM (`throwaway-cluster.sh kit DIR` fetches them), and with
+  `TOCKMOX_P09_OFFSITE=git` gives the install an off-site copy in a repository of its own that is deleted
+  with the VM.
+
 - **An off-site git copy on a private CA.** `bootstrap-forge --offsite-git-ca FILE`,
   beside `--offsite-git`, gives the forge's push mirror and the copy job the CA
   that signed the remote's certificate; the rebuild and the forge repair take the
@@ -1118,9 +1130,31 @@ costs you, with the reasoning in the documentation rather than here.
   1024 for files processed from now on. Tockmox sets none of the three, so a site that
   relies on the old values sets them in its Open WebUI env. The `LICENSE` at `v0.13.3` is
   byte-identical to `v0.13.0` (sha256 `5f1bd74c48bf13ab0f82e177ad9e637313b92533d20ead2593d49347a47fc232`, checked 2026-11-09), so the licence terms
-  in `docs/frontend-posture.md` stand.
+  in `docs/frontend-posture.md` stand. The chart runs Open WebUI as a single-replica StatefulSet, so two
+  versions never run at once; a site that raised its replica count scales to one before the upgrade.
 
 ### Fixed
+
+- **An air-gapped node finds Docker Hub's official images and the built-in forge's image in a
+  closed mirror.** `tools/mirror-images.sh` put an official image (`python`, `docker.io/traefik`)
+  at `PREFIX/NAME`, where `global.imageRegistry` looks, but containerd's mirror asks for
+  `PREFIX/library/NAME`, so a node configured the way the page says pulled two images that were
+  not there. It now lands those under both paths and `--verify` checks both. The page's
+  node-side `registries.yaml` named four registries; `images.txt` carries a fifth
+  (`code.forgejo.org`, the built-in forge), which a node with no entry for it pulls from
+  directly. docs/deployment/airgap.md now gives the closed-set file with every registry and one
+  prefix. The executed-docs harness takes a mirror under a project
+  (`TOCKMOX_REGISTRY_MIRROR=HOST/PROJECT`) and writes the same rewrites, which `mirror-proof`
+  checks.
+
+- **An air-gapped install of Argo CD per fresh-install.md finds its redis in the mirror.** The
+  Argo CD chart pulls redis from `ecr-public.aws.com`, a registry the node-side `registries.yaml`
+  in docs/deployment/airgap.md did not name, so a node configured the way the page said pulled it
+  directly, which on a real air gap is a failed pull. The page now names six registries and says
+  which three the Argo CD chart pulls from. The executed-docs harness mirrors and denies the sixth
+  too, and `tests/executed-docs/lib/closed-set.sh` writes the full closed set a mirror-only node
+  needs (images.txt, k3s's own images, Argo CD and sealed-secrets at pinned chart versions, the
+  harness's two), stopping on any image from a registry it does not mirror.
 
 - **The executed-docs harness no longer reports a run green when a path went missing part way.**
   A P09 step whose block no longer resolved to exactly one block on the page exited the way a
