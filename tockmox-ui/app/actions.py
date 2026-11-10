@@ -27,6 +27,10 @@ Kinds (`actions.<kind>.enabled`; off means absent, never a disabled button):
               the change bot; those three ask for a fresh sign-in. Open a change a page renders (models, inference
               nodes) and add an administrator (sso.adminUsers, with a fresh sign-in) open one as the change bot, which
               waits for an approval like any other. No forge admin credential is used anywhere
+  moveForge   Move to my own forge (Status > Site repository): check an empty repository elsewhere, move the site's
+              whole history there and open the change that repoints Argo CD, then Finish once it is merged. Each run is
+              bootstrap-forge's suspended <release>-move Job (install/forge-move.sh --in-cluster); the push credential
+              goes to the service beside the intent, never in it, and from there only into the Job's own Secret
 """
 from __future__ import annotations
 
@@ -59,8 +63,9 @@ KINDS = {
     "bump-release": ("changes", "medium", True, "Opened a change upgrading Tockmox"),
     "set-feature": ("changes", "low", False, "Opened a change setting"),
     "assign-job": ("changes", "low", False, "Opened a change giving"),
+    "move-forge": ("moveForge", "high", True, "Moved the site repository"),
 }
-SWITCHES = ("silence", "runJob", "argocd", "restart", "testAlert", "identity", "changes")
+SWITCHES = ("silence", "runJob", "argocd", "restart", "testAlert", "identity", "changes", "moveForge")
 IDENTITY_KINDS = ("recovery-link", "add-member", "remove-member")
 CHANGE_KINDS = ("approve-change", "decline-change", "revert-change")
 # The kinds that act as the person in the forge: the UI takes the browser to the forge's own sign-in after the
@@ -99,6 +104,13 @@ APPLICATIONS_FOLDER = "bootstrap/applications"
 SHA = re.compile(r"[0-9a-f]{40}")
 REPO = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
 RECOVERY_HOURS = (1, 24, 72)
+# move-forge: check, move (steps 1 to 4) or finish (step 5), to an https repository with no credentials in its URL;
+# a run is named for its Job (<release>-move-<mode>-<6 hex>), which the next step names as the one it follows.
+MOVE_MODES = ("check", "move", "finish")
+MOVE_TO = re.compile(r"https://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?/[A-Za-z0-9._~/-]{1,300}")
+MOVE_JOB = re.compile(r"[a-z0-9-]{1,40}-move-(check|move|finish)-[0-9a-f]{6}")
+MOVE_USER = re.compile(r"[A-Za-z0-9._@-]{1,100}")
+MOVE_TOKEN = re.compile(r"[A-Za-z0-9!#$%&'()*+,./:;<=>?@^_`{|}~\[\]-]{1,400}")   # printable; no space, quote, backslash
 # What may never be silenced: the alerts that prove the alert path works. Silencing one hides a dead pipeline.
 NEVER_SILENCE = frozenset({"Watchdog", "TockmoxHeartbeat", "TockmoxSelfCheckStale", "InfoInhibitor"})
 SILENCE_HOURS = (1, 4, 24)
@@ -154,6 +166,9 @@ class Config:
     changes_approvers_team: str = "approvers"      # the forge team whose approval the branch rule wants
     forge_namespace: str = "tockmox-forge"         # service side: where the built-in forge and its copy jobs run
     forge_release: str = "tockmox-forge"           # service side: its release (CronJobs <release>-offsite, -drill-check)
+    move_cronjob: str = ""                         # service side: bootstrap-forge's suspended <release>-move
+    move_request_secret: str = ""                  # service side: the one Secret a move Job reads its request from
+    argocd_namespace: str = "argocd"
     values_files: tuple = tuple(VALUES_FILES.items())  # service side: (which, repo path) for the files a change edits
     activity_configmap: str = "tockmox-actions-activity"
     namespace: str = ""                            # service side: where the activity ConfigMap lives
@@ -186,6 +201,13 @@ def parse(raw) -> Config:
         if v.get("enabled"):
             on.add(sw)
     unknown = set(raw) - set(SWITCHES) - {"url", "activityConfigMap", "namespace", "stepUpMaxAgeSeconds"}
+    mv = raw.get("moveForge") or {}
+    mv_unknown = set(mv) - {"enabled", "image", "forgeNamespace", "forgeRelease", "cronJob", "requestSecret", "argocdNamespace"}
+    if mv_unknown:
+        raise ValueError(f"actions.moveForge: unknown key(s) {sorted(mv_unknown)}")
+    for k in ("forgeNamespace", "forgeRelease", "cronJob", "requestSecret", "argocdNamespace"):
+        if mv.get(k) and not DNS_LABEL.fullmatch(str(mv[k])):
+            raise ValueError(f"actions.moveForge.{k} must be a DNS label")
     ch = raw.get("changes") or {}
     ch_unknown = set(ch) - {"enabled", "apiUrl", "repo", "baseBranch", "botTokenFile", "webUrl", "oauth",
                             "forgeNamespace", "forgeRelease", "valuesFiles", "selfApproval", "approversTeam"}
@@ -266,7 +288,9 @@ def parse(raw) -> Config:
                   changes_self_approval=str(ch.get("selfApproval") or "sole-approver-only"),
                   changes_approvers_team=str(ch.get("approversTeam") or "approvers"),
                   forge_namespace=str(ch.get("forgeNamespace") or "tockmox-forge"),
-                  forge_release=str(ch.get("forgeRelease") or "tockmox-forge"),
+                  forge_release=str(ch.get("forgeRelease") or mv.get("forgeRelease") or "tockmox-forge"),
+                  move_cronjob=str(mv.get("cronJob") or ""), move_request_secret=str(mv.get("requestSecret") or ""),
+                  argocd_namespace=str(mv.get("argocdNamespace") or "argocd"),
                   values_files=tuple(sorted(files.items())),
                   activity_configmap=str(raw.get("activityConfigMap", "tockmox-actions-activity")),
                   namespace=str(raw.get("namespace", "")), step_up_max_age=age)
@@ -423,6 +447,19 @@ def check(cfg: Config, it: dict) -> dict:
                 raise Refused(f"the preflight is not green ({c['label']}); open the Upgrade page again")
         if p:
             raise Refused("an upgrade takes no parameters")
+    elif kind == "move-forge":
+        mode, to, after = t.get("mode"), str(t.get("to", "")), str(t.get("after", ""))
+        if mode not in MOVE_MODES or set(t) - {"mode", "to", "after"}:
+            raise Refused("moving the site names check, move or finish, and the repository")
+        if not MOVE_TO.fullmatch(to) or ".." in to:
+            raise Refused("the repository is an https URL with no credentials, query or fragment in it")
+        if mode == "move":
+            if not (MOVE_JOB.fullmatch(after) and after.split("-move-")[1].startswith("check-")):
+                raise Refused("the move follows a clean check of the same repository")
+        elif after:
+            raise Refused(f"a {mode} follows nothing")
+        if p:
+            raise Refused("moving the site takes no parameters; its credentials travel beside the intent")
     elif kind == "add-admin":
         if not ADMIN_USERNAME.fullmatch(str(t.get("username", ""))) or set(t) - {"username"}:
             raise Refused("adding an administrator names one username, with no spaces")
@@ -589,6 +626,28 @@ def describe(it: dict, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime
                 "undo": "Decline the change. Once applied, follow Roll back in docs/deployment/upgrade.md: swapping the "
                         "revisions puts every manifest back, and a release that migrated a database needs the backup "
                         "from the guide's step 2 first."}
+    if k == "move-forge":
+        to, mode = t.get("to", ""), t.get("mode", "")
+        if mode == "check":
+            return {"title": "Check the target repository?", "summary": f"Checked {to} for a move", "target": to,
+                    "effect": "Runs the move's first step only: the repository must be empty and the credential must "
+                              "read it. It says what would move (branches, tags, main) and how many files the change "
+                              "would rewrite. Nothing is pushed and nothing changes here.",
+                    "undo": "Nothing to undo."}
+        if mode == "move":
+            return {"title": f"Move the site to {to}?", "summary": f"Started moving the site to {to}", "target": to,
+                    "effect": "The whole history (every branch and tag) is pushed to the target, Argo CD gets a read "
+                              "credential for it, and one change repoints the site at it. That change waits on "
+                              "Platform > Changes for an approver other than you, like every change; nothing moves "
+                              "until it merges. Then Finish the move archives the built-in repository (nothing is deleted).",
+                    "undo": "Before the change merges: decline it; the target keeps a copy you can delete. After: the "
+                            "built-in repository is archived, not deleted; revert the change to go back."}
+        return {"title": f"Finish the move to {to}?", "summary": f"Finished moving the site to {to}", "target": to,
+                "effect": "Pushes main to the target again (it now holds the merged change), re-applies the root "
+                          "Application from the target, and archives the built-in repository: read-only, nothing deleted. "
+                          "From then on Argo CD reads only the target.",
+                "undo": "Unarchive the built-in repository in the forge and revert the move's change; Argo CD reads "
+                        "the built-in forge again once the root is re-applied from it."}
     if k == "test-alert":
         return {"title": "Send a test alert to your phone?", "summary": "Sent a test alert",
                 "target": "the alert path: Alertmanager, the alert bridge, your phone",

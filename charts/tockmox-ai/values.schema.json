@@ -1900,6 +1900,22 @@
                 "selfApproval": { "type": "string", "enum": ["", "sole-approver-only", "never"], "description": "Whether the person who asked for a change may approve it. sole-approver-only (the default): no, unless they are the only member of the forge's approvers team, and then the merge says Self-approved: sole approver. never: no, even then. Empty: sole-approver-only." },
                 "identityFile": { "type": "string", "pattern": "^$|^([A-Za-z0-9_-][A-Za-z0-9._-]{0,99}/){0,9}[A-Za-z0-9_-][A-Za-z0-9._-]{0,99}\\.ya?ml$", "description": "The site repository file holding the identity layer's sso.adminUsers, which Make an administrator changes. Empty: site/values/identity.yaml." }
               }
+            },
+            "moveForge": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Status > Site repository > Move to my own forge: move the site off the built-in forge to an empty repository elsewhere, from the console. On with the change kinds (changes); false turns it off. See docs/administration/site-forge.md, \"Move to my own forge\".",
+              "properties": {
+                "enabled": {
+                  "type": ["boolean", "null"],
+                  "description": "Empty: on wherever the change kinds are on. false turns it off; true cannot turn it on without them."
+                },
+                "image": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9._/:@-]+$",
+                  "description": "The move Job's image, without global.imageRegistry, which prefixes it. Must equal what tockmox-install.sh bootstrap-forge installs (its MOVE_IMAGE_DEFAULT); the admission policy admits only this one. Empty: alpine/k8s, the version this chart pins."
+                }
+              }
             }
           }
         }

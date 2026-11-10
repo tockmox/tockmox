@@ -19,6 +19,12 @@ confirmation to one intent, and Platform > Activity. Nothing here writes: the in
                                sends the browser to the confirm panel, which shows the exact diff against main
   GET  /actions/forge/callback for approve and decline only: the forge's own sign-in comes back here BEFORE the
                                identity provider's step-up, so the service can act as that person in the forge
+  GET  /actions/move-forge     Move to my own forge (Status > Site repository): the target to check, and moves started
+                               from here with Finish the move; each step is a move-forge intent (check, move, finish)
+  GET  /platform/move-forge/<job>   one move run followed to done or to a named refusal, from its Job's STEP lines
+                               (a Job is kept ten minutes after it ends). The push credential is typed on the confirm
+                               panel and handed to the service before the sign-in; only a one-use handle travels
+                               through it, and no page, log line or Activity row carries the credential
 """
 from __future__ import annotations
 
@@ -40,6 +46,9 @@ DEV_ACT_COOKIE = "tockmox_ui_act"
 FORGE_COOKIE = "__Host-tockmox_ui_forge"
 DEV_FORGE_COOKIE = "tockmox_ui_forge"
 COOKIE_MAX = 3800
+MOVE_STEPS = ((1, "The target is empty"), (2, "The whole history is pushed"), (3, "Argo CD can read the target"),
+              (4, "The change that repoints Argo CD is opened"),
+              (5, "Finish: main pushed again, the root re-applied, the built-in repository archived"))
 SILENCE_CHOICES = ((1, "1 hour"), (4, "4 hours"), (24, "24 hours"), (168, "7 days"))
 RECOVERY_CHOICES = ((1, "1 hour"), (24, "24 hours"), (72, "3 days"))
 
@@ -81,6 +90,8 @@ def part_actions(cfg: act.Config, pv, cron_known=None) -> list[dict]:
         n = len({(x["alert"], x.get("namespace", "")) for x in live})
         out.append({"kind": "silence", "label": f"Silence {n} alert{'s' if n != 1 else ''}…",
                     "href": f"/actions/confirm?kind=silence&part={pid}"})
+    if cfg.on("move-forge") and pv.part.id == "site-repository":
+        out.append({"kind": "move-forge", "label": "Move to my own forge…", "href": "/actions/move-forge"})
     if cfg.on("restart"):
         for ns, kind, name, part in cfg.workloads:
             if mine(ns, part):
@@ -183,6 +194,19 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
                     "applied": str(q.get("applied", ""))}, _back(q.get("back", ""), "/platform/changes"), ""
         if kind == "add-admin":
             return {"username": str(q.get("username", ""))}, "/platform/identity", ""
+        if kind == "move-forge":
+            mode, to = str(q.get("mode", "")), str(q.get("to", "")).strip()
+            t = {"mode": mode, "to": to}
+            if mode == "move":
+                after = str(q.get("after", ""))
+                if not act.MOVE_JOB.fullmatch(after):
+                    raise act.Refused("the move follows a clean check of the same repository; check the target again")
+                code, run = service_get(f"/v1/forge/move/{after}")
+                if code != 200 or run.get("state") != "done" or not run.get("check") or run.get("to") != to:
+                    raise act.Refused("the move follows a clean check of the same repository from the last ten "
+                                      "minutes; check the target again")
+                t["after"] = after
+            return t, "/actions/move-forge", ""
         if kind == "bump-release":
             return bump_target(str(q.get("to", "")))
         if kind == "set-feature":
@@ -293,7 +317,8 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
 
     @app.post("/actions/go")
     def go(request: Request, csrf: str = Form(""), kind: str = Form(""), target: str = Form(""), key: str = Form(""),
-           back: str = Form(""), hours: str = Form(""), reason: str = Form("")):
+           back: str = Form(""), hours: str = Form(""), reason: str = Form(""), push_user: str = Form(""),
+           push_token: str = Form(""), read_user: str = Form(""), read_token: str = Form("")):
         u, deny = admin(request)
         if deny:
             return deny
@@ -321,11 +346,22 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
             elif kind == "decline-change":
                 params = {"reason": reason.strip()[:300]}
             it = act.check(cfg, act.intent(kind, t, params, u.sub, key=key))
+            move = None
+            if kind == "move-forge":
+                # The credential goes to the service NOW, before the sign-in; the cookie that carries the intent
+                # through the identity provider holds only the one-use handle the service gives back.
+                cred = {"push": {"user": push_user.strip(), "token": push_token}}
+                if read_user.strip() or read_token:
+                    cred["read"] = {"user": read_user.strip(), "token": read_token}
+                code, j = service_post("/v1/forge/move/credentials", cred)
+                if code != 200 or not str(j.get("handle", "")):
+                    raise act.Refused(str(j.get("error") or "the actions service did not take the credential"))
+                move = {"handle": str(j["handle"])}
         except (ValueError, TypeError, act.Refused) as e:
             return nope(request, u, f"Not sent: {e}.", 400)
         if kind in act.FORGE_PERSON_KINDS:
             return to_forge(request, u, it, _back(back))
-        return to_idp(request, u, it, _back(back))
+        return to_idp(request, u, it, _back(back), move=move)
 
     def to_forge(request, u, it, back):
         """The forge's own sign-in first (Authentik behind it), with PKCE; the code comes back to forge_callback,
@@ -371,7 +407,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
         resp.delete_cookie(fcookie, path="/", secure=s.secure_cookies, httponly=True)
         return resp
 
-    def to_idp(request, u, it, back, forge=None):
+    def to_idp(request, u, it, back, forge=None, move=None):
         kind = it["kind"]
         try:
             url, st = oidc.begin(nonce=act.nonce_for(it), max_age=cfg.step_up_max_age if act.step_up(kind) else None)
@@ -381,6 +417,8 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
         st.update(intent=it, back=back)
         if forge:
             st["forge"] = forge
+        if move:
+            st["move"] = move
         val = sessions.l.dumps(st)
         if len(val) > COOKIE_MAX:
             return nope(request, u, "Not sent: this action names too much to carry through sign-in. Silence fewer alerts at a time.", 400)
@@ -423,17 +461,59 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
                 body = {"intent": it, "id_token": claims.get("_id_token", "")}
                 if st.get("forge"):
                     body["forge"] = st["forge"]
+                if st.get("move"):
+                    body["move"] = st["move"]
                 r = c.post("/v1/intents", json=body)
             out = r.json()
         except Exception as e:  # noqa: BLE001
             return done("action_result.html", 502, ok=False, d=d,
                         reason=f"the actions service did not answer ({type(e).__name__}); nothing is known to have been done")
         ok = out.get("result") == "done"
+        if ok and it.get("kind") == "move-forge" and act.MOVE_JOB.fullmatch(str(out.get("job", ""))):
+            r = RedirectResponse(f"/platform/move-forge/{out['job']}", status_code=303)
+            r.delete_cookie(cookie, path="/", secure=s.secure_cookies, httponly=True)
+            return r
         # a recovery link is shown on this page once; every page here is sent no-store (main.py)
         return done("action_result.html", 200 if ok else (r.status_code or 502), ok=ok, d=d, out=out,
                     reason=out.get("reason", ""), secret=out.get("secret", ""))
 
     app.state.action_finish = finish
+
+    @app.get("/actions/move-forge")
+    def move_forge_start(request: Request):
+        """Move to my own forge: the repository to check, and the moves started here, each with Finish the move."""
+        u, deny = admin(request)
+        if deny:
+            return deny
+        if not cfg.on("move-forge"):
+            return nope(request, u, "Moving the site from the console is not turned on here (tockmoxUi.actions.moveForge).")
+        code, j = service_get("/v1/activity", {"limit": 100})
+        rows = [r for r in (j.get("rows") or []) if r.get("kind") == "move-forge"] if code == 200 else []
+        started = []
+        for r in rows:                                 # newest first: the moves whose change may wait or be merged
+            t = r.get("target") or {}
+            if t.get("mode") == "move" and r.get("result") == "done" and t.get("to") not in {x["to"] for x in started}:
+                finished = any((x.get("target") or {}).get("mode") == "finish" and (x.get("target") or {}).get("to") == t.get("to")
+                               and x.get("result") == "done" and x.get("at", 0) > r.get("at", 0) for x in rows)
+                started.append({"to": t.get("to", ""), "who": r.get("who", ""), "at": r.get("at", 0),
+                                "job": (r.get("ref") or [""])[0], "finished": finished})
+        return render(request, "move_forge.html", u, started=started[:5], err="" if code == 200 else
+                      str(j.get("error") or "the actions service did not answer"), now=time.time())
+
+    @app.get("/platform/move-forge/{job}")
+    def move_forge_run(request: Request, job: str):
+        u, deny = admin(request)
+        if deny:
+            return deny
+        if not cfg.on("move-forge") or not act.MOVE_JOB.fullmatch(job):
+            return nope(request, u, "No such move.")
+        code, run = service_get(f"/v1/forge/move/{job}")
+        if code != 200:
+            return nope(request, u, f"This move could not be read: {run.get('error') or code}.", 502)
+        steps = [{"n": n, "label": label, **((run.get("steps") or {}).get(str(n)) or {})}
+                 for n, label in MOVE_STEPS]
+        return render(request, "platform_move_forge.html", u, run=run, steps=steps,
+                      refresh=run.get("state") == "running")
 
     def open_change(request, u, what: str, title: str, summary: str, edits: list):
         """A page that renders a change hands it here instead of as a download: it is staged with the service and the

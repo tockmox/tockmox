@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Moving the site · Status{% endblock %}
+{% block head %}{{ super() }}{% if refresh %}<meta http-equiv="refresh" content="5">{% endif %}{% endblock %}
+{% block main %}
+{#- One move run (a Job from bootstrap-forge's suspended <release>-move), from its STEP lines. The credential is in
+    the Job's own Secret, which this page never reads; the Secret goes when the run ends. -#}
+<p class="crumb"><a href="/actions/move-forge">Move to my own forge</a></p>
+<section class="panel" aria-labelledby="run-h">
+  {% if run.state == "gone" %}
+  <h1 id="run-h">This run has ended</h1>
+  <p>A run is kept for ten minutes after it ends. What it did is in <a href="/platform/activity">Activity</a>, and a move's change is on <a href="/platform/changes">Platform › Changes</a>. Start again from <a href="/actions/move-forge">Move to my own forge</a>.</p>
+  {% else %}
+  <h1 id="run-h">{% if run.mode == "check" %}Checking{% elif run.mode == "finish" %}Finishing the move to{% else %}Moving the site to{% endif %} <code>{{ run.to }}</code></h1>
+  <p class="muted small" role="status">{% if run.state == "running" %}Running: this page refreshes every five seconds.{% elif run.state == "failed" %}Stopped.{% else %}Ended.{% endif %}{% if run.requested_by %} Started by {{ run.requested_by }}.{% endif %}</p>
+  <ol class="steps">
+  {% for st in steps %}{% if run.mode != "check" or st.n == 1 %}{% if run.mode != "finish" or st.n == 5 %}
+    <li class="step step-{{ st.state or 'todo' }}">
+      <span class="step-mark" aria-hidden="true">{% if st.state == "ok" %}✓{% elif st.state == "fail" %}✗{% elif st.state in ("wait", "run") %}⋯{% else %}·{% endif %}</span>
+      <span class="sr-only">{% if st.state == "ok" %}done{% elif st.state == "fail" %}failed{% elif st.state == "wait" %}waiting{% elif st.state == "run" %}running{% else %}not started{% endif %}:</span>
+      <strong>{{ st.n }}</strong> {{ st.label }}{% if st.words %}<br><span class="muted small">{{ st.words }}</span>{% endif %}
+      {% if st.n == 4 and run.change %}<br><a href="/platform/changes">Change #{{ run.change }} on Platform › Changes</a>. You asked for it, so someone else in approvers approves it.{% endif %}
+    </li>
+  {% endif %}{% endif %}{% endfor %}
+  </ol>
+  {% if run.refusal and run.state == "failed" %}<p class="banner warn" role="alert"><strong>Refused:</strong> {{ run.refusal }}</p>{% endif %}
+  {% if run.mode == "check" and run.state == "done" and run.check %}
+  <p>✓ The target is empty and the credential can read it. It will receive {{ run.check.branches }} branch{{ "es" if run.check.branches != 1 }} and {{ run.check.tags }} tag{{ "s" if run.check.tags != 1 }}; main is <code>{{ run.check.main[:7] }}</code>. The change rewrites {{ run.check.files }} file{{ "s" if run.check.files != 1 }} that name the built-in forge.</p>
+  <p class="confirm-acts"><a class="btn" href="/actions/confirm?kind=move-forge&amp;mode=move&amp;to={{ run.to | urlencode }}&amp;after={{ run.job }}">Start the move</a> <span class="muted small">within ten minutes of this check</span></p>
+  {% endif %}
+  {% if run.mode == "move" and (run.steps.get("5") or {}).get("state") == "wait" %}
+  <p>When the change is merged: <a class="pill primary" href="/actions/confirm?kind=move-forge&amp;mode=finish&amp;to={{ run.to | urlencode }}">Finish the move</a></p>
+  {% endif %}
+  {% if run.mode == "finish" and run.state == "done" and (run.steps.get("5") or {}).get("state") == "ok" %}
+  <p><strong>Done.</strong> Argo CD reads only <code>{{ run.to }}</code>; see each layer's sync on <a href="/status">Status</a>. Next, in your <code>tockmox.yaml</code>, set <code>site.forge: external</code> with this repository before you run the installer again.</p>
+  {% endif %}
+  {% endif %}
+</section>
+{% endblock %}

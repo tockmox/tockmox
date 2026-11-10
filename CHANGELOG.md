@@ -82,6 +82,24 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **Moving the site to a forge you own, from the console.** On a built-in-forge
+  site, **Status › Site repository › "Move to my own forge…"** runs the same move as
+  `tockmox-install.sh move-forge`. **Check the target** pushes nothing.
+  **Start the move** follows a clean check and opens the change that repoints
+  Argo CD, which an approver other than the requester merges. **Finish the move**
+  then archives the built-in repository. Each step asks for a fresh sign-in, and
+  its run page follows it to done or to the move's own refusal.
+  `bootstrap-forge` installs the suspended CronJob `tockmox-forge-move`:
+  `install/forge-move.sh --in-cluster`, in the `alpine/k8s` image the AI layer
+  already pins. Its ServiceAccount can only read the forge's admin Secret, write
+  Argo CD's one repository Secret and patch the one root Application.
+  The push credential is never on a page, in a cookie, a log line or Activity.
+  It goes once to the actions service, then into a Secret owned by the run's Job
+  and deleted when the run ends. New admission policies admit only that Job, as
+  its template wrote it, and only that Secret. `tockmoxUi.actions.moveForge`
+  (on with the change kinds; `enabled: false` turns it off).
+  [Site forge](docs/administration/site-forge.md#move-to-my-own-forge).
+
 - **Opening a capability switch and a release upgrade as changes from the
   console.** With `changes` on, **Platform › Capabilities** offers **Turn on**
   and **Turn off** for each capability: one change setting only

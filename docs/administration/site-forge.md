@@ -317,6 +317,44 @@ its https address, and a file with two lines, a user and a token that can push t
 it. Give a second file with a read-only token as `--read-credentials` if you can:
 that one is the token Argo CD keeps.
 
+### From the console
+
+On **Status › Site repository**, an administrator opens the drawer and picks
+**"Move to my own forge…"**. It is there when the built-in forge's change actions
+are on (`tockmoxUi.actions.moveForge`, on with them; `enabled: false` turns it
+off). Each step asks for a fresh sign-in, and runs the same move as the command
+below, in a Job inside the cluster.
+
+1. **Check the target.** Type the empty repository's https address, then a user
+   and a token that can push to it. Nothing is pushed. The page shows the branches,
+   tags and `main` that will move and how many files the change rewrites, or the
+   refusal in the move's own words.
+2. **Start the move**, within ten minutes of a clean check. Give a read-only
+   credential for Argo CD if you have one. The history is pushed, Argo CD gets its
+   read credential, and the change opens on Platform › Changes. You asked for it,
+   so an approver other than you merges it (the sole-approver exception applies).
+3. **Finish the move**, from the same page once the change is merged: `main`
+   pushed again, the root Application re-applied from the target, and the built-in
+   repository archived. Finish needs the push credential again.
+
+**Where the credential goes.** It is never on a page, in a cookie, in a log line or
+in Activity. When you confirm, it goes to the console's actions service, which
+keeps it once, for ten minutes. It is then written into one Secret,
+`tockmox-forge-move-request`, which belongs to the run's Job and is deleted when
+the run ends. Argo CD's read credential ends where the command leaves it,
+`argocd/tockmox-site-repo-own`.
+
+**What the Job may do.** `bootstrap-forge` installs the suspended CronJob
+`tockmox-forge-move` with a ServiceAccount that can:
+
+- read the forge's admin Secret;
+- write Argo CD's one repository Secret;
+- patch the one root Application.
+
+An admission policy admits a move Job from the console only as that template
+wrote it: its image, script, arguments and volumes. A target on a private CA
+the site does not trust is refused; move it with the command instead.
+
 **WORKSTATION**
 
 ```bash
