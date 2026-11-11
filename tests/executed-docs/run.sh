@@ -93,6 +93,9 @@ save_counters() {
   {
     printf 'RAN=%s\nFAILED=%s\nSKIPPED=%s\nUNCONVERTED=%s\n' "$RAN" "$FAILED" "$SKIPPED" "$UNCONVERTED"
     printf 'ABSENT_NAMES=%q\nunconverted_names=%q\n' "$ABSENT_NAMES" "$unconverted_names"
+    printf 'PASSED=%s\nDECLARED_N=%s\nBLOCKED_BAD=%s\nINFRA_BAD=%s\n' "$PASSED" "$DECLARED_N" "$BLOCKED_BAD" "$INFRA_BAD"
+    printf 'declared_names=%q\nblocked_names=%q\ninfra_names=%q\nfailed_names=%q\nEO_USED=%q\n' \
+      "$declared_names" "$blocked_names" "$infra_names" "$failed_names" "$EO_USED"
   } > "${RESUME}/counters"
 }
 yield_run() {
@@ -148,6 +151,104 @@ if [ "${#PATHS[@]}" -eq 0 ]; then
   echo "REFUSING: no paths selected. A run that executes nothing must not report success." >&2
   exit 2
 fi
+
+# ------------------------------------------------------- expected outcomes
+#
+# A run is green only if every path that ran left a PASS receipt, or a non-PASS
+# outcome that tests/executed-docs/expected-outcomes.txt allows for that path,
+# with a reason. The receipt's CONTENT decides, never its presence and never
+# the path's exit status: a path that says `path_outcome BLOCKED ...; exit 0`
+# used to leave the job green with "paths failed: 0".
+#
+# Rows are `path id | outcome | when | reason`. Only BLOCKED and SKIPPED can be
+# declared; PRODUCT_FAIL, INFRA_ERROR and ABORTED are refused at parse time.
+# `when` is `always`, `unset:VAR[,VAR...]` (true when any listed variable is
+# unset or empty in this run) or `nofile:VAR/NAME` (true when VAR is unset or
+# names a directory without NAME). The list applies ONLY to a run with no path
+# selectors, the full run. A caller that names the paths it runs (the p09 lane
+# does) decided to run them, so for it anything but PASS fails.
+EO_FILE="${TOCKMOX_EXPECTED_OUTCOMES:-${HERE}/expected-outcomes.txt}"
+EO_PATH=(); EO_OUT=(); EO_WHEN=(); EO_WHY=()
+FULL_RUN=0
+[ $# -eq 0 ] && FULL_RUN=1
+eo_trim() { # TEXT ... TEXT without leading and trailing blanks
+  local t="$1"
+  t="${t#"${t%%[![:space:]]*}"}"
+  t="${t%"${t##*[![:space:]]}"}"
+  printf '%s' "$t"
+}
+eo_refuse() { echo "REFUSING: ${EO_FILE} line ${1}: ${2}" >&2; exit 2; }
+eo_parse() {
+  [ -f "$EO_FILE" ] || { echo "NOTE: no ${EO_FILE}: no outcome is declared, so every BLOCKED or SKIPPED path fails the run." >&2; return 0; }
+  local n=0 line p o w y rest v f hit
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    line="$(eo_trim "$line")"
+    case "$line" in ""|\#*) continue ;; esac
+    IFS='|' read -r p o w y rest <<EOF_EO
+$line
+EOF_EO
+    p="$(eo_trim "$p")"; o="$(eo_trim "$o")"; w="$(eo_trim "$w")"; y="$(eo_trim "${y:-}")"
+    [ -z "${rest:-}" ] || eo_refuse "$n" "more than four '|' separated fields"
+    [ -n "$y" ] || eo_refuse "$n" "needs four fields (path id | outcome | when | reason) and a non-empty reason"
+    case "$o" in
+      BLOCKED|SKIPPED) : ;;
+      *) eo_refuse "$n" "outcome '${o}' cannot be declared; only BLOCKED or SKIPPED can (PRODUCT_FAIL, INFRA_ERROR and ABORTED never)" ;;
+    esac
+    case "$p" in *[!A-Za-z0-9]*|"") eo_refuse "$n" "path id '${p}' must be letters and digits, such as P03" ;; esac
+    hit=0
+    for f in "${HERE}/paths/${p}-"*.sh "${HERE}/paths/${p}.sh"; do [ -f "$f" ] && hit=1; done
+    [ "$hit" = 1 ] || eo_refuse "$n" "no path ${p} exists in paths/; remove the row"
+    case "$w" in
+      always) : ;;
+      unset:?*)
+        for v in $(printf '%s' "${w#unset:}" | tr ',' ' '); do
+          case "$v" in [A-Za-z_]*) : ;; *) eo_refuse "$n" "'${v}' is not a variable name" ;; esac
+          case "$v" in *[!A-Za-z0-9_]*) eo_refuse "$n" "'${v}' is not a variable name" ;; esac
+        done ;;
+      nofile:?*/?*)
+        v="${w#nofile:}"
+        case "${v%%/*}" in [A-Za-z_]*) : ;; *) eo_refuse "$n" "'${v%%/*}' is not a variable name" ;; esac
+        case "${v%%/*}" in *[!A-Za-z0-9_]*) eo_refuse "$n" "'${v%%/*}' is not a variable name" ;; esac
+        case "${v#*/}" in *[!A-Za-z0-9._-]*) eo_refuse "$n" "'${v#*/}' is not a plain file name" ;; esac ;;
+      *) eo_refuse "$n" "when '${w}' is not always, unset:VAR[,VAR...] or nofile:VAR/NAME" ;;
+    esac
+    EO_PATH+=("$p"); EO_OUT+=("$o"); EO_WHEN+=("$w"); EO_WHY+=("$y")
+  done < "$EO_FILE"
+}
+eo_parse
+# eo_when_ok INDEX ... the row's condition holds in this run
+eo_when_ok() {
+  local w="${EO_WHEN[$1]}" v var f d
+  case "$w" in
+    always) return 0 ;;
+    unset:*)
+      for v in $(printf '%s' "${w#unset:}" | tr ',' ' '); do
+        if [ -z "${!v:-}" ]; then return 0; fi
+      done
+      return 1 ;;
+    nofile:*)
+      v="${w#nofile:}"; var="${v%%/*}"; f="${v#*/}"; d="${!var:-}"
+      if [ -n "$d" ] && [ -f "${d}/${f}" ]; then return 1; fi
+      return 0 ;;
+  esac
+  return 1
+}
+# eo_lookup NAME OUTCOME ... sets EO_HIT to the row that allows it; fails when none does, and always fails outside a full run
+EO_HIT=-1
+eo_lookup() {
+  EO_HIT=-1
+  [ "$FULL_RUN" = 1 ] || return 1
+  local i=0 n=${#EO_PATH[@]}
+  while [ "$i" -lt "$n" ]; do
+    case "$1" in
+      "${EO_PATH[$i]}"|"${EO_PATH[$i]}"-*)
+        if [ "${EO_OUT[$i]}" = "$2" ] && eo_when_ok "$i"; then EO_HIT=$i; return 0; fi ;;
+    esac
+    i=$((i + 1))
+  done
+  return 1
+}
 
 # ---------------------------------------------------------------- route waves
 #
@@ -264,6 +365,7 @@ guest_ready() { # <kubeconfig>
 # namespace on the wrong cluster, found zero, and printed PASS ... a teardown
 # reporting success having deleted nothing, leaving the throwaway running.
 SUBSTRATE_KUBECONFIG="${KUBECONFIG:-}"
+# shellcheck disable=SC2329  # invoked by the EXIT trap below
 cleanup() {
   rc=$?
   if [ "$YIELDING" -eq 1 ]; then
@@ -280,7 +382,7 @@ cleanup() {
     echo "Tear it down with: TOCKMOX_TEST_VM=${TOCKMOX_TEST_VM:-k3s-test-01} tests/executed-docs/provision/throwaway-cluster.sh destroy (that VM only)" | tee -a "$REPORT"
   fi
   echo "report: ${REPORT}"
-  exit $rc
+  exit "$rc"
 }
 trap cleanup EXIT INT TERM
 
@@ -450,8 +552,12 @@ FAILED=0
 SKIPPED=0
 ABSENT_NAMES=""
 RAN=0
+PASSED=0
 UNCONVERTED=0
 unconverted_names=""
+DECLARED_N=0; BLOCKED_BAD=0; INFRA_BAD=0
+declared_names=""; blocked_names=""; infra_names=""; failed_names=""
+EO_USED=""
 if [ -n "$RESUME" ] && [ -s "${RESUME}/counters" ]; then
   # shellcheck disable=SC1090
   . "${RESUME}/counters"
@@ -479,6 +585,59 @@ reprovision() {
   export KUBECONFIG="$kc"
   KUBE_CONTEXT="$(guest_context_of "$kc")"; export KUBE_CONTEXT
   : "${KUBE_CONTEXT:?the rebuilt guest kubeconfig names no context}"
+}
+
+# judge_path NAME RC OUTCOME REASON ... book one path that ran, by what its receipt says.
+#   PASS               a pass when the path also exited 0
+#   BLOCKED / SKIPPED  green only when expected-outcomes.txt allows it for this path under its condition
+#                      (and only in a full run); otherwise class 4
+#   INFRA_ERROR        class 5, and it can never be declared
+#   anything else      (PRODUCT_FAIL, ABORTED) a failure, whatever the exit status was
+#   no receipt         UNCONVERTED, judged after the loop; a nonzero exit is still a failure
+judge_path() {
+  local n="$1" code="$2" o="$3" why="$4"
+  case "$o" in
+    PASS)
+      PASSED=$((PASSED + 1))
+      if [ "$code" -ne 0 ]; then
+        PASSED=$((PASSED - 1)); FAILED=$((FAILED + 1)); failed_names="${failed_names}
+  - ${n}  (receipt PASS, exit status ${code})"
+        echo "FAILED  ${n} (rc=${code}; its receipt says PASS but the exit status disagrees)" | tee -a "$REPORT"
+      fi ;;
+    "")
+      if [ "$code" -ne 0 ]; then
+        FAILED=$((FAILED + 1)); failed_names="${failed_names}
+  - ${n}  (rc=${code}, no receipt)"
+        echo "FAILED  ${n} (rc=${code})" | tee -a "$REPORT"
+      fi ;;
+    BLOCKED|SKIPPED)
+      if eo_lookup "$n" "$o"; then
+        case "${o}:${code}" in
+          BLOCKED:0|BLOCKED:3|SKIPPED:0|SKIPPED:2)
+            DECLARED_N=$((DECLARED_N + 1))
+            case " ${EO_USED} " in *" ${EO_HIT} "*) : ;; *) EO_USED="${EO_USED}${EO_USED:+ }${EO_HIT}" ;; esac
+            declared_names="${declared_names}
+  - ${n}  ${o}: ${EO_WHY[$EO_HIT]}  (the path said: ${why:-no reason})"
+            echo "${o} ${n}, as declared in expected-outcomes.txt: ${EO_WHY[$EO_HIT]}" | tee -a "$REPORT" ;;
+          *)
+            FAILED=$((FAILED + 1)); failed_names="${failed_names}
+  - ${n}  (declared ${o}, but exited ${code})"
+            echo "FAILED  ${n} (declared ${o} but exited ${code})" | tee -a "$REPORT" ;;
+        esac
+      else
+        BLOCKED_BAD=$((BLOCKED_BAD + 1)); blocked_names="${blocked_names}
+  - ${n}  ${o}: ${why:-no reason}"
+        echo "${o} ${n}: ${why:-no reason}. No row of expected-outcomes.txt allows it in this run." | tee -a "$REPORT"
+      fi ;;
+    INFRA_ERROR)
+      INFRA_BAD=$((INFRA_BAD + 1)); infra_names="${infra_names}
+  - ${n}  INFRA_ERROR: ${why:-no reason}"
+      echo "INFRA_ERROR ${n}: ${why:-no reason} (rc=${code}); this outcome can never be declared" | tee -a "$REPORT" ;;
+    *)
+      FAILED=$((FAILED + 1)); failed_names="${failed_names}
+  - ${n}  ${o}: ${why:-no reason}  (rc=${code})"
+      echo "FAILED  ${n} (${o}: ${why:-no reason}; rc=${code})" | tee -a "$REPORT" ;;
+  esac
 }
 
 GROUP_INDEX=0
@@ -512,14 +671,20 @@ for p in "${PATHS[@]}"; do
     yield_run "${name} asked to be called again"
   fi
   resume_mark "path.${name}" "$rc"
-  case "$rc" in
-    0) RAN=$((RAN + 1)) ;;
-    3) SKIPPED=$((SKIPPED + 1))
-       ABSENT_NAMES="${ABSENT_NAMES}${ABSENT_NAMES:+ }${name}"
-       echo "SKIPPED ${name}: not a documented path at ${REF} (recorded as an exception)" | tee -a "$REPORT" ;;
-    *) RAN=$((RAN + 1)); FAILED=$((FAILED + 1))
-       echo "FAILED  ${name} (rc=${rc})" | tee -a "$REPORT" ;;
-  esac
+  # The receipt's CONTENT is the verdict. rc 3 with no receipt is the one case that is not a run: the
+  # section is not documented at this ref. A path that declared an outcome and then exited 3 did run.
+  receipt_outcome=""; receipt_reason=""
+  if [ -s "${OUTCOME_RECEIPT_DIR}/${name}" ]; then
+    read -r receipt_outcome receipt_reason < "${OUTCOME_RECEIPT_DIR}/${name}" || true
+  fi
+  if [ "$rc" -eq 3 ] && [ -z "$receipt_outcome" ]; then
+    SKIPPED=$((SKIPPED + 1))
+    ABSENT_NAMES="${ABSENT_NAMES}${ABSENT_NAMES:+ }${name}"
+    echo "SKIPPED ${name}: not a documented path at ${REF} (recorded as an exception)" | tee -a "$REPORT"
+  else
+    RAN=$((RAN + 1))
+    judge_path "$name" "$rc" "$receipt_outcome" "$receipt_reason"
+  fi
   # A declared exception (rc 3) is a legitimate terminal state and needs no
   # receipt. Everything else must have declared an outcome.
   if [ "$rc" -ne 3 ] && [ ! -f "${OUTCOME_RECEIPT_DIR}/${name}" ]; then
@@ -585,10 +750,27 @@ done
       fi
     done
   fi
+  echo "  paths passed   : ${PASSED}  (a PASS receipt and exit status 0)"
+  echo "  paths blocked, as declared : ${DECLARED_N}  (allowed by expected-outcomes.txt; NOT covered, they proved nothing)"
+  if [ -n "$declared_names" ]; then printf '%s\n' "$declared_names" | sed '1{/^$/d;}'; fi
+  echo "  paths blocked, NOT declared: ${BLOCKED_BAD}  (fails the run, status 4)"
+  echo "  paths with INFRA_ERROR     : ${INFRA_BAD}  (fails the run, status 5; never declarable)"
+  if [ "$FULL_RUN" = 1 ]; then
+    _i=0
+    while [ "$_i" -lt "${#EO_PATH[@]}" ]; do
+      case " ${EO_USED} " in
+        *" ${_i} "*) : ;;
+        *) echo "  WARNING stale row $((_i + 1)) of expected-outcomes.txt: ${EO_PATH[$_i]} ${EO_OUT[$_i]} (${EO_WHEN[$_i]}) matched no path in this run. Remove it if it is no longer true." ;;
+      esac
+      _i=$((_i + 1))
+    done
+  fi
   echo "  UNCONVERTED    : ${UNCONVERTED}  (exited without a canonical outcome)"
   echo "================================================================"
   echo ""
   echo "Coverage is NOT what this summary reports. It reports what ran."
+  echo "A path blocked 'as declared' is allowed to leave the run green and is NOT covered:"
+  echo "it examined nothing. Its row in expected-outcomes.txt says why."
   echo "For what is covered and what is knowingly not, read"
   echo "  tests/executed-docs/INVENTORY.md"
 } | tee -a "$REPORT"
@@ -628,4 +810,36 @@ if [ "$UNDECLARED" -gt 0 ]; then
   exit 1
 fi
 
-[ "$FAILED" -eq 0 ]
+# The receipts decide, by class. A product failure is the existing red (1); an INFRA_ERROR is 5; a BLOCKED
+# or SKIPPED that no row of expected-outcomes.txt allows is 4. When several classes are present the
+# lowest-numbered failure wins: 1, then 5, then 4.
+if [ "$FAILED" -gt 0 ]; then
+  {
+    echo ""
+    echo "THIS RUN CANNOT REPORT SUCCESS."
+    echo ""
+    echo "${FAILED} path(s) failed:${failed_names}"
+  } | tee -a "$REPORT"
+  exit 1
+fi
+if [ "$INFRA_BAD" -gt 0 ]; then
+  {
+    echo ""
+    echo "THIS RUN CANNOT REPORT SUCCESS."
+    echo ""
+    echo "${INFRA_BAD} path(s) ended INFRA_ERROR, which is never an allowed outcome:${infra_names}"
+  } | tee -a "$REPORT"
+  exit 5
+fi
+if [ "$BLOCKED_BAD" -gt 0 ]; then
+  {
+    echo ""
+    echo "THIS RUN CANNOT REPORT SUCCESS."
+    echo ""
+    echo "${BLOCKED_BAD} path(s) ended BLOCKED or SKIPPED, and expected-outcomes.txt allows that for none of them in this run:${blocked_names}"
+    echo ""
+    echo "Fix what blocked it, or add a row with its condition and a reason. A row is a reviewed decision."
+  } | tee -a "$REPORT"
+  exit 4
+fi
+exit 0

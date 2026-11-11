@@ -1416,5 +1416,39 @@ if [ "$FR_CASES" -eq 0 ] || { [ "$FR_RC" -ne 0 ] && ! printf '%s\n' "$FR_OUT" | 
 fi
 # --- P13 block end ---
 
+# The outcome model's own contract (a PASS is refused without a completed execute phase, each non-PASS outcome has its
+# own code, receipts are written). It was run by nothing until it was folded in here. Its lines are indented two spaces.
+OC_OUT="$(bash "${HERE}/outcome-contract-test.sh" 2>&1)"; OC_RC=$?
+OC_CASES=0
+while IFS= read -r line; do
+  line="${line#"${line%%[![:space:]]*}"}"
+  case "$line" in
+    "ok   "*) OC_CASES=$((OC_CASES+1)); ok "outcome contract: ${line#ok   }" ;;
+    "FAIL "*) OC_CASES=$((OC_CASES+1)); bad "outcome contract: ${line#FAIL }" "run tests/executed-docs/outcome-contract-test.sh for detail" ;;
+  esac
+done <<EOF_OC
+$OC_OUT
+EOF_OC
+if [ "$OC_CASES" -eq 0 ] || { [ "$OC_RC" -ne 0 ] && ! printf '%s\n' "$OC_OUT" | grep -E '^ *FAIL' >/dev/null; }; then
+  bad "outcome-contract-test.sh ran its cases" "rc=${OC_RC}, ${OC_CASES} case(s): $(printf '%s' "$OC_OUT" | tail -3)"
+fi
+
+# What makes a run green: run.sh reads each path's receipt CONTENT. PASS passes; a BLOCKED or SKIPPED passes only when
+# expected-outcomes.txt allows it for that path under its condition (a full run only, so never the p09 lane); INFRA_ERROR
+# is 5, an undeclared BLOCKED 4, PRODUCT_FAIL 1 whatever the exit status was. Mutated copies of run.sh must go red.
+EO_OUT_T="$(bash "${HERE}/expected-outcomes-test.sh" 2>&1)"; EO_RC_T=$?
+EO_CASES_T=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) EO_CASES_T=$((EO_CASES_T+1)); ok "expected outcomes: ${line#ok   }" ;;
+    "FAIL "*) EO_CASES_T=$((EO_CASES_T+1)); bad "expected outcomes: ${line#FAIL }" "run tests/executed-docs/expected-outcomes-test.sh for detail" ;;
+  esac
+done <<EOF_EOT
+$EO_OUT_T
+EOF_EOT
+if [ "$EO_CASES_T" -eq 0 ] || { [ "$EO_RC_T" -ne 0 ] && ! printf '%s\n' "$EO_OUT_T" | grep '^FAIL' >/dev/null; }; then
+  bad "expected-outcomes-test.sh ran its cases" "rc=${EO_RC_T}, ${EO_CASES_T} case(s): $(printf '%s' "$EO_OUT_T" | tail -3)"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

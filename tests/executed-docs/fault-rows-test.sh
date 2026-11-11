@@ -747,10 +747,10 @@ echo "apiVersion: v1" > "$GT/kc"
 rm -f "$GT/kcalls"
 RUNOUT="$(env PATH="$GT/bin:$PATH" TOCKMOX_EXISTING_KUBECONFIG="$GT/kc" KUBE_CONTEXT=stub-ctx TOCKMOX_DOCS_REF=HEAD \
           TOCKMOX_WORKDIR="$GT/w1" TOCKMOX_P09_STATE= bash "${HERE}/run.sh" P13 2>&1)"; RUNRC=$?
-if [ "$RUNRC" = 0 ] && printf '%s\n' "$RUNOUT" | grep -F 'OUTCOME:  BLOCKED' >/dev/null \
+if [ "$RUNRC" = 4 ] && printf '%s\n' "$RUNOUT" | grep -F 'OUTCOME:  BLOCKED' >/dev/null \
    && printf '%s\n' "$RUNOUT" | grep -F 'UNCONVERTED    : 0' >/dev/null \
-   && printf '%s\n' "$RUNOUT" | grep -F 'paths failed   : 0' >/dev/null; then
-  ok "run.sh: P13 with no install declares BLOCKED; the run exits 0 with nothing failed and nothing UNCONVERTED"
+   && printf '%s\n' "$RUNOUT" | grep -F 'paths blocked, NOT declared: 1' >/dev/null; then
+  ok "run.sh: P13 named with no install declares BLOCKED; the run exits 4 (expected-outcomes.txt is read only in a run with no arguments), nothing UNCONVERTED"
 else bad "run.sh: P13 with no install" "rc=${RUNRC}; $(printf '%s' "$RUNOUT" | tail -12 | tr '\n' ';' | cut -c1-400)"; fi
 if ! grep -E 'quota|jobs|create|delete|--raw|logs|apply' "$GT/kcalls" >/dev/null 2>&1; then ok "run.sh: P13 made no cluster read or write of its own"
 else bad "run.sh: P13 made a cluster call" "$(grep -E 'quota|jobs|create|delete|--raw|logs|apply' "$GT/kcalls" | head -3)"; fi
@@ -758,9 +758,9 @@ else bad "run.sh: P13 made a cluster call" "$(grep -E 'quota|jobs|create|delete|
 rm -f "$GT/kcalls"
 RUNOUT3="$(env PATH="$GT/bin:$PATH" TOCKMOX_EXISTING_KUBECONFIG="$GT/kc" KUBE_CONTEXT=stub-ctx TOCKMOX_DOCS_REF=HEAD \
           TOCKMOX_WORKDIR="$GT/w2" TOCKMOX_P09_STATE= bash "${HERE}/run.sh" P09 P11 P13 2>&1)"; RUNRC3=$?
-if [ "$RUNRC3" = 0 ] && [ "$(printf '%s\n' "$RUNOUT3" | grep -c 'OUTCOME:  BLOCKED')" -ge 3 ] && printf '%s\n' "$RUNOUT3" | grep -F 'UNCONVERTED    : 0' >/dev/null \
-   && printf '%s\n' "$RUNOUT3" | grep -F 'paths failed   : 0' >/dev/null; then
-  ok "run.sh: P09, P11 and P13 together with no P09 state: all three BLOCKED, exit 0, nothing failed, nothing UNCONVERTED"
+if [ "$RUNRC3" = 4 ] && [ "$(printf '%s\n' "$RUNOUT3" | grep -c 'OUTCOME:  BLOCKED')" -ge 3 ] && printf '%s\n' "$RUNOUT3" | grep -F 'UNCONVERTED    : 0' >/dev/null \
+   && printf '%s\n' "$RUNOUT3" | grep -F 'paths blocked, NOT declared: 3' >/dev/null; then
+  ok "run.sh: P09, P11 and P13 named together with no P09 state: all three BLOCKED, exit 4 (named, so not declared), nothing UNCONVERTED"
 else bad "run.sh: P09 P11 P13 with no install" "rc=${RUNRC3}; blocked=$(printf '%s\n' "$RUNOUT3" | grep -c 'OUTCOME:  BLOCKED'); $(printf '%s' "$RUNOUT3" | tail -8 | tr '\n' ';' | cut -c1-300)"; fi
 if ! grep -E 'quota|jobs|create|delete|--raw|logs|apply' "$GT/kcalls" >/dev/null 2>&1; then ok "run.sh: ... and none of the three made a cluster read or write of its own"
 else bad "run.sh: a path made a cluster call" "$(grep -E 'quota|jobs|create|delete|--raw|logs|apply' "$GT/kcalls" | head -3)"; fi
