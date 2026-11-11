@@ -598,6 +598,12 @@ sso:
       access: admin
       host: ""            # empty derives forge.<internalDomain>
       subMode: ""
+      # The approvers watcher's service account (sso.apps.forge only; the generator does not
+      # turn it on, `bootstrap-forge` does, in the same run that writes its token). It can see
+      # the admin group and change nothing. Needs FORGE_APPROVER_WATCH_TOKEN, from the
+      # `tockmox-forge-approver-watch` Secret in THIS namespace, which bootstrap-forge writes;
+      # without it the blueprint's token entry fails and the watcher reports "not clean".
+      approverWatch: false
   # FORWARD-AUTH CONSOLES: consoles with NO sign-in of their own,
   # put behind Authentik by its embedded outpost instead of each speaking OIDC.
   # Each one turned on here renders, in its own blueprint file entry:
@@ -751,6 +757,10 @@ authentik:
       # holds that repository, so its own sign-in secret cannot come from it.
       - secretRef:
           name: tockmox-sso-forge
+          optional: true
+      # FORGE_APPROVER_WATCH_TOKEN for sso.apps.forge.approverWatch. Written by bootstrap-forge.
+      - secretRef:
+          name: tockmox-forge-approver-watch
           optional: true
   blueprints:
     configMaps:

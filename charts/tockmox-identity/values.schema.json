@@ -367,6 +367,10 @@
                   "type": "string",
                   "description": "The forge's hostname, registered as the redirect URI and the launch URL. Empty derives forge.<internalDomain>. Must equal bootstrap-forge --forge-host."
                 },
+                "approverWatch": {
+                  "type": "boolean",
+                  "description": "Create the service account the forge approvers watcher reads the admin group with (view on that one group), and its token from FORGE_APPROVER_WATCH_TOKEN in the tockmox-forge-approver-watch Secret, which bootstrap-forge writes. Set by bootstrap-forge; off by default."
+                },
                 "subMode": {
                   "type": "string",
                   "enum": [
