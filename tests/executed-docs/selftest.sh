@@ -1378,6 +1378,23 @@ if [ "$LO_CASES" -eq 0 ] || { [ "$LO_RC" -ne 0 ] && ! printf '%s\n' "$LO_OUT" | 
   bad "lane-outcome-test.sh ran its cases" "rc=${LO_RC}, ${LO_CASES} case(s): $(printf '%s' "$LO_OUT" | tail -3)"
 fi
 
+# The external route's one git URL: site-repo-server.sh's writable mode (shown against a real git daemon), throwaway-cluster.sh
+# publish, destroy and sweep taking the published Service with the VM, p09-lane.sh providing the URL and ending with 5 when it
+# cannot, and copies that lose one guard each shown to stop being caught. Folded in like the cases above.
+RM_OUT="$(bash "${HERE}/remote-route-test.sh" 2>&1)"; RM_RC=$?
+RM_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) RM_CASES=$((RM_CASES+1)); ok "remote route: ${line#ok   }" ;;
+    "FAIL "*) RM_CASES=$((RM_CASES+1)); bad "remote route: ${line#FAIL }" "run tests/executed-docs/remote-route-test.sh for detail" ;;
+  esac
+done <<EOF_RM
+$RM_OUT
+EOF_RM
+if [ "$RM_CASES" -eq 0 ] || { [ "$RM_RC" -ne 0 ] && ! printf '%s\n' "$RM_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "remote-route-test.sh ran its cases" "rc=${RM_RC}, ${RM_CASES} case(s): $(printf '%s' "$RM_OUT" | tail -3)"
+fi
+
 # --- P13 block begin (self-contained; goes after the P11 recovery rows block) ---
 # P13's planted-fault rows: a ResourceQuota that refuses a restore drill, a drill that cannot write its register row,
 # the alert that says so, and the revert of each fault. The verdicts are shown red one planted input at a time, the

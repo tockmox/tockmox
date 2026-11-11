@@ -45,9 +45,13 @@ cp "$LANE_SH" "$L/p09-lane.sh"
 cat > "$L/provision/throwaway-cluster.sh" <<'STUB'
 #!/usr/bin/env bash
 echo "$1" >> "$LANE_LOG"
-case "$1" in create) echo apiVersion: v1 > "$LANE_TMP/guest.kubeconfig"; echo "$LANE_TMP/guest.kubeconfig" ;; esac
+case "$1" in
+  create) echo apiVersion: v1 > "$LANE_TMP/guest.kubeconfig"; echo "$LANE_TMP/guest.kubeconfig" ;;
+  publish) echo node.stub.invalid:31234 ;;
+  guard-file) echo "$LANE_TMP/guard" ;;
+esac
 STUB
-printf '#!/usr/bin/env bash\n[ "$1" = url ] && echo http://site-repo.stub/tockmox.git\nexit 0\n' > "$L/provision/site-repo-server.sh"
+printf '#!/usr/bin/env bash\necho "site-repo-server $*" >> "$LANE_LOG"\n[ "$1" = url ] && echo http://site-repo.stub/tockmox.git\n[ "$1" = nodeport ] && echo 30418\nexit 0\n' > "$L/provision/site-repo-server.sh"
 cat > "$L/run.sh" <<'STUB'
 #!/usr/bin/env bash
 # a stub run.sh: logs the call, writes the receipt a real one would ("OUTCOME reason"), exits as told
@@ -63,7 +67,9 @@ d="$TOCKMOX_WORKDIR/receipts-$(printf %05d $((n+1)))"; mkdir -p "$d"
 [ "$out" = NONE ] || printf '%s %s\n' "$out" "${STUB_REASON:-a stub reason}" > "$d/$name"
 exit "$rc"
 STUB
-for t in helm kubeseal openssl zsh curl age age-keygen; do printf '#!/bin/sh\nexit 0\n' > "$TMP/lbin/$t"; done
+# git is a stub here (the external route's reachability probe would otherwise dial a name that does not exist);
+# remote-route-test.sh runs the real git against a real daemon
+for t in helm kubeseal openssl zsh curl age age-keygen git; do printf '#!/bin/sh\nexit 0\n' > "$TMP/lbin/$t"; done
 cat > "$TMP/lbin/kubectl" <<'STUB'
 #!/bin/sh
 case "$*" in *"config current-context"*) echo stub-guest ;; *"get nodes"*) echo node.stub.invalid ;; esac

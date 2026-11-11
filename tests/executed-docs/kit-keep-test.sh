@@ -278,11 +278,14 @@ printf '%s KUBECONFIG=%s\n' "$*" "${KUBECONFIG-unset}" >> "$LANE_LOG"
 case "$1" in
   create) : > "$LANE_TMP/guest.kubeconfig"; echo apiVersion: v1 > "$LANE_TMP/guest.kubeconfig"; echo "$LANE_TMP/guest.kubeconfig" ;;
   kit-store) exit "${STUB_KITSTORE_RC:-0}" ;;
+  publish) echo node.stub.invalid:31234 ;;
+  guard-file) echo "$LANE_TMP/guard" ;;
 esac
 STUB
 cat > "$L/provision/site-repo-server.sh" <<'STUB'
 #!/usr/bin/env bash
 [ "$1" = url ] && echo "http://site-repo.stub/tockmox.git"
+[ "$1" = nodeport ] && echo 30418
 exit 0
 STUB
 cat > "$L/run.sh" <<'STUB'
@@ -305,7 +308,7 @@ fi
 exit "${STUB_P09_RC:-0}"
 STUB
 # The lane checks its tools are on PATH; only kubectl answers anything here.
-for t in helm kubeseal openssl zsh curl age age-keygen; do printf '#!/bin/sh\nexit 0\n' > "$TMP/lbin/$t"; done
+for t in helm kubeseal openssl zsh curl age age-keygen git; do printf '#!/bin/sh\nexit 0\n' > "$TMP/lbin/$t"; done
 cat > "$TMP/lbin/kubectl" <<'STUB'
 #!/bin/sh
 case "$*" in

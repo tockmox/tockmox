@@ -7,7 +7,8 @@
 # product tree from. This script provides both on one throwaway:
 #   1. create the throwaway (throwaway-cluster.sh create; its capacity gate refuses first if it does not fit)
 #   2. run.sh P04 P05 against it (TOCKMOX_EXISTING_KUBECONFIG), the state install.md starts from
-#   3. serve this tree from inside it (site-repo-server.sh), so the Applications read THIS tree
+#   3. serve this tree from inside it (site-repo-server.sh), so the Applications read THIS tree. On the
+#      external route also the site repository's remote (see "THE EXTERNAL ROUTE'S REMOTE" below)
 #   4. run.sh P09 against it, the route TOCKMOX_P09_ROUTE names (built-in or external), its blocks read from
 #      this tree's install.md (TOCKMOX_P09_FROM_TREE=1)
 #   5. on a kept built-in run, keep P09's recovery kit and the age identity that opens it as the Secret
@@ -20,6 +21,23 @@
 #      when P09 passed
 #   7. destroy it, unless TOCKMOX_KEEP_CLUSTER=1. A kept run that stopped before step 4 began is destroyed all the
 #      same (there is no install to keep), unless TOCKMOX_KEEP_ON_PREP_FAILURE=1
+#
+# THE EXTERNAL ROUTE'S REMOTE. P09's external route needs TOCKMOX_P09_SITE_REPO_URL, a git remote the
+# workstation can push to and the cluster can clone at ONE URL, and without it P09 declares BLOCKED. Unless the
+# caller already set that variable (their own forge: it is used as given, and nothing below runs), step 3 builds
+# it, with four things that all have to hold:
+#   a. throwaway-cluster.sh publish git PORT: a NodePort Service ${TOCKMOX_TEST_VM}-git on the hypervisor,
+#      selecting the VM and forwarding to the guest's PORT (site-repo-server.sh nodeport). The runner reaches
+#      the hypervisor's nodes and the guest is masqueraded (NAT out, nothing in), so this is the only way in.
+#      It also leaves the voucher that a disposable namespace passed throwaway-cluster.sh's refusal.
+#   b. site-repo-server.sh up --writable: inside the guest, git daemon with receive-pack, site.git and
+#      tockmox.git pre-created, on that PORT. It refuses without the voucher from a. An unauthenticated writable
+#      daemon on a NodePort is acceptable ONLY because the VM is a throwaway in an isolated lab.
+#   c. the runner pushes to it (a dry run, here) and reads it, at git://host:nodePort/site.git;
+#   d. a pod in the guest reads the same URL (site-repo-server.sh reach): the guest reaching its own published
+#      address, by hairpin. P09 and the Applications use that one URL for the push, the placeholder and the clone.
+# A failure of any of them ends the lane with 5 (INFRA_ERROR) and a line that names it; none is ever a pass.
+# The product tree is served by the same daemon at the in-cluster address, as on the built-in route.
 #
 # AN OFF-SITE COPY, with TOCKMOX_P09_OFFSITE=git (default none; built-in route only). Without it the
 # install warns "no off-site copy" and there is nothing to rebuild the throwaway from. With it:
@@ -43,7 +61,8 @@
 # TOCKMOX_TEST_VM, TOCKMOX_P09_ROUTE (default built-in); optional TOCKMOX_KEEP_CLUSTER, TOCKMOX_P09_BUDGET,
 # TOCKMOX_P09_OFFSITE (none or git), TOCKMOX_P09_LAN_CIDR and TOCKMOX_P09_POOL (default: the node's /24 and
 # .240-.250 in it).
-# Exit: P09's own exit status, or P11's when P09 passed and P11 did not; 2 for a refused precondition; 1 when a preparation step fails, or when P09
+# Exit: P09's own exit status, or P11's when P09 passed and P11 did not; 2 for a refused precondition; 5 when the external route's
+# remote could not be provided (INFRA_ERROR); 1 when another preparation step fails, or when P09
 # passed on a kept run and its kit could not be kept (the report says which).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -66,6 +85,9 @@ P09_STARTED=0
 STOPPED=""
 refuse() { STOPPED="REFUSING: $1"; echo "$STOPPED" >&2; exit 2; }
 fail() { STOPPED="lane: $1"; echo "$STOPPED" >&2; exit 1; }
+# infra REASON ... what the lane could not provide is the environment's fault, not the product's and not a pass: exit 5,
+# the status lane_code gives INFRA_ERROR below.
+infra() { STOPPED="lane: INFRA_ERROR: $1"; echo "$STOPPED" >&2; exit 5; }
 # shellcheck disable=SC2329  # invoked by the EXIT trap below
 finish() {
   local rc=$?
@@ -161,13 +183,62 @@ if [ "$OFFSITE" = git ] && [ -s "${OFFDIR}/ca.crt" ]; then
   echo "lane 2: the off-site forge's CA is in ArgoCD's argocd-tls-certs-cm"
 fi
 
-# 3. this tree, served from inside the throwaway
+# 3. this tree, served from inside the throwaway; on the external route the site repository's remote beside it
 TAG="lane-${TOCKMOX_TEST_VM}"
-bash "${PROV}/site-repo-server.sh" up >/dev/null
+# with_timeout CMD... ... a NodePort that nothing answers on hangs a git call for minutes
+with_timeout() { if command -v timeout >/dev/null 2>&1; then timeout 120 "$@"; else "$@"; fi; }
+# runner_git_check URL ... the workstation side of the one URL: it reads URL, and a push to it is accepted
+# (a dry run: the daemon's receive-pack answers, nothing is stored)
+runner_git_check() {
+  local w rc
+  w="$(mktemp -d "${LANE}/probe.XXXXXX")" || return 1
+  ( cd "$w" && git init -q . \
+      && git -c user.name=lane -c user.email=lane@example.invalid commit -q --allow-empty -m probe \
+      && GIT_TERMINAL_PROMPT=0 with_timeout git ls-remote "$1" >/dev/null \
+      && GIT_TERMINAL_PROMPT=0 with_timeout git push --dry-run "$1" HEAD:refs/heads/lane-probe >/dev/null 2>&1 )
+  rc=$?
+  rm -rf "$w"
+  return "$rc"
+}
+EXT_REMOTE=0
+if [ "$ROUTE" = external ]; then
+  if [ -n "${TOCKMOX_P09_SITE_REPO_URL:-}" ]; then
+    echo "lane 3: TOCKMOX_P09_SITE_REPO_URL is set by the caller, so the site remote is theirs and none is provided here"
+  else
+    EXT_REMOTE=1
+  fi
+fi
+if [ "$EXT_REMOTE" = 1 ]; then
+  GIT_NP="$(bash "${PROV}/site-repo-server.sh" nodeport)" \
+    || infra "site-repo-server.sh nodeport gave no port for the git daemon, so the site remote cannot be published"
+  pub="$(KUBECONFIG="$SUBSTRATE_KUBECONFIG" bash "${PROV}/throwaway-cluster.sh" publish git "$GIT_NP")" \
+    || infra "throwaway-cluster.sh publish git ${GIT_NP} failed, so the workstation has no way to push the site repository"
+  PUB_HP="$(printf '%s\n' "$pub" | tail -1)"
+  case "$PUB_HP" in
+    ?*:[0-9]*) ;;
+    *) infra "throwaway-cluster.sh publish printed no host:port (got '${PUB_HP}')" ;;
+  esac
+  TOCKMOX_WRITABLE_GUARD="$(KUBECONFIG="$SUBSTRATE_KUBECONFIG" bash "${PROV}/throwaway-cluster.sh" guard-file)" \
+    || infra "throwaway-cluster.sh guard-file gave no path"
+  export TOCKMOX_WRITABLE_GUARD
+  bash "${PROV}/site-repo-server.sh" up --writable >/dev/null \
+    || infra "site-repo-server.sh up --writable failed, so there is no daemon the workstation can push the site repository to"
+else
+  bash "${PROV}/site-repo-server.sh" up >/dev/null
+fi
 bash "${PROV}/site-repo-server.sh" push "$TREE" tockmox "$TAG" >/dev/null
 TM_URL="$(bash "${PROV}/site-repo-server.sh" url tockmox)"
 [ -n "$TM_URL" ] || fail "site-repo-server gave no URL"
 echo "lane 3: this tree served at ${TM_URL} @ ${TAG}"
+if [ "$EXT_REMOTE" = 1 ]; then
+  SITE_URL="git://${PUB_HP}/site.git"
+  runner_git_check "$SITE_URL" \
+    || infra "the workstation cannot read and push to ${SITE_URL} (NodePort ${PUB_HP##*:} not reachable from here, or the daemon refuses receive-pack)"
+  bash "${PROV}/site-repo-server.sh" reach "$SITE_URL" >/dev/null \
+    || infra "the guest cannot read its own published address ${SITE_URL}; one URL cannot serve the workstation and the cluster (the hairpin does not hold)"
+  export TOCKMOX_P09_SITE_REPO_URL="$SITE_URL"
+  echo "lane 3: site remote ${SITE_URL}: the workstation pushes to it and the guest reads it, at that one URL"
+fi
 
 # 4. P09
 NODE_IP="$(kubectl --context="$KUBE_CONTEXT" get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')"
