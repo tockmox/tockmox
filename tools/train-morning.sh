@@ -19,7 +19,8 @@
 # SAFETY CONTRACT.
 #   - The candidate SHA comes from THIS machine's git (origin/TRAIN_BRANCH after a
 #     fetch), never from the packet. It must equal head_sha in WITNESS, the lab
-#     executor's own results file, which the train cannot write.
+#     executor's own results file, which the train cannot write. The outcome in
+#     WITNESS must be READY; NOT READY, a missing or an empty outcome stop the run.
 #   - origin/REL_BRANCH must be an ancestor of the SHA: the fast-forward is a plain
 #     push, never --force, and git refuses anything else.
 #   - The diff origin/REL_BRANCH..SHA may touch none of FORBIDDEN (below): the trust
@@ -58,7 +59,7 @@
 #   REL_BRANCH       release-0.8
 #   TRAIN_BRANCH     train/0.8.2
 #   TAG              v0.8.2
-#   WITNESS          the executor's results file (JSON with "head_sha"), e.g. runs/<id>/run.json
+#   WITNESS          the executor's results file (JSON with "head_sha" and "outcome"), e.g. runs/<id>/run.json
 #   TEMPLATE_PIN_PR  number of the re-pin PR in TEMPLATE_REPO (default tockmox/tockmox-site-template)
 #   GATE_REPORT      the drafted GATE-REPORT-vX.Y.Z.md
 #   SIGNING_KEY      private half of the tag key; its public half must be in .gitsigners
@@ -212,6 +213,11 @@ verify() {
   [ "$WITNESS_SHA" = "$SHA" ] \
     || stop "witness mismatch: $WITNESS says head_sha=${WITNESS_SHA:-<none>}, origin/$TRAIN_BRANCH is $SHA. The lab tested something else; nothing here is signed for that."
   say "  witness agrees: $WITNESS head_sha=$WITNESS_SHA"
+  WITNESS_OUTCOME=$(python3 -I -c 'import json,sys; o=json.load(open(sys.argv[1])).get("outcome",""); print(o if isinstance(o,str) else json.dumps(o))' "$WITNESS") \
+    || stop "cannot read $WITNESS as JSON"
+  [ "$WITNESS_OUTCOME" = READY ] \
+    || stop "witness outcome: $WITNESS says outcome=${WITNESS_OUTCOME:-<none>}, and only READY is signed for. The lab did not pass this candidate; nothing here is signed for it."
+  say "  witness outcome: $WITNESS outcome=$WITNESS_OUTCOME"
 
   REL_SHA=$(g rev-parse --verify --quiet "refs/remotes/origin/$REL_BRANCH^{commit}") \
     || stop "origin has no branch $REL_BRANCH"
@@ -557,7 +563,11 @@ EOS
   git -C "$tseed" push -q "$d/template.git" refs/heads/main refs/heads/pin
   echo OPEN > "$d/pr-state"
   wsha="$B"; [ "$v" = witness ] && wsha="0000000000000000000000000000000000000000"
-  printf '{"run_id":"selftest","head_sha":"%s","outcome":"READY"}\n' "$wsha" > "$d/run.json"
+  case "$v" in
+    notready)  printf '{"run_id":"selftest","head_sha":"%s","outcome":"NOT READY"}\n' "$wsha" > "$d/run.json" ;;
+    nooutcome) printf '{"run_id":"selftest","head_sha":"%s"}\n' "$wsha" > "$d/run.json" ;;
+    *)         printf '{"run_id":"selftest","head_sha":"%s","outcome":"READY"}\n' "$wsha" > "$d/run.json" ;;
+  esac
   printf '# Gate report v0.8.2\n\nCommit %s.\n\nWhat was NOT tested: everything, this is a selftest.\n' "$B" > "$d/GATE-REPORT-v0.8.2.md"
   printf 'Release notes for the selftest.\n' > "$d/notes.md"
   cat > "$d/spec" <<EOF
@@ -603,6 +613,7 @@ selftest_main() {
   echo "selftest: train-morning in $PT (gh is a stubbed shell function, no network; git, ssh-keygen, python3 are real)"
   rm -rf "$PT"; mkdir -p "$PT/tmp"
   export TMPDIR="$PT/tmp"   # hermetic: every mktemp of the runs under test lands here
+  export GIT_CONFIG_GLOBAL=/dev/null   # hermetic: a global signing config must not reach the throwaway repos
   ssh-keygen -q -t ed25519 -N '' -C maintainer@example.com -f "$PT/key"
   # shellcheck disable=SC2329  # invoked by the child script through the exported function
   gh() { gh_stub "$@"; }
@@ -610,6 +621,8 @@ selftest_main() {
 
   echo "selftest: refusals"
   st_fixture witness witness;     st_run witness;     st_probe "witness head_sha differs from origin/train" witness 1 "witness mismatch"
+  st_fixture notready notready;   st_run notready;    st_probe "witness outcome is NOT READY" notready 1 "outcome=NOT READY"
+  st_fixture nooutcome nooutcome; st_run nooutcome;   st_probe "witness has no outcome field" nooutcome 1 "outcome=<none>"
   st_fixture nonff nonff;         st_run nonff;       st_probe "release branch moved past the train (not fast-forwardable)" nonff 1 "not fast-forwardable"
   st_fixture forbidden forbidden; st_run forbidden;   st_probe "candidate touches docs/deployment/verify.md" forbidden 1 "may not change"
   st_fixture footer footer;       st_run footer;      st_probe "a footer-stamp-only change to verify.md (the version bump) is allowed" footer 0 "footer stamp only, allowed: docs/deployment/verify.md"
@@ -618,7 +631,7 @@ selftest_main() {
   sed -i.bak "s|SIGNING_KEY=.*|SIGNING_KEY=\"$PT/otherkey\"|" "$PT/wrongkey/spec"; st_run wrongkey
   st_probe "signing key is not the .gitsigners key" wrongkey 1 "not the key .gitsigners vouches for"
   st_fixture noimages noimages; st_run noimages;    st_probe "the candidate has no images.txt" noimages 1 "has no images.txt"
-  for n in witness nonff forbidden tagexists wrongkey noimages; do
+  for n in witness notready nooutcome nonff forbidden tagexists wrongkey noimages; do
     st_assert "$n: nothing merged, pushed or signed" bash -c "[ ! -f $PT/$n/gh-calls ] && [ \"\$(cat $PT/$n/pr-state)\" = OPEN ] && [ ! -f $PT/$n/GATE-REPORT-v0.8.2.md.sig ]"
   done
 
