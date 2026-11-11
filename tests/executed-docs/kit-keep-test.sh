@@ -287,12 +287,21 @@ exit 0
 STUB
 cat > "$L/run.sh" <<'STUB'
 #!/usr/bin/env bash
-[ "$1" = P09 ] || exit 0
+# a real run.sh leaves a PASS receipt for a path that passed; the lane reads it (p09-lane.sh, lane_receipt)
+rcpt() {
+  local n f
+  n="$(ls "$TOCKMOX_WORKDIR" | grep -c '^receipts-')"
+  mkdir -p "$TOCKMOX_WORKDIR/receipts-$(printf %05d $((n+1)))"
+  case "$1" in P09) f=P09-install-md-end-to-end ;; P11) f=P11-fresh-install-recovery ;; *) return 0 ;; esac
+  echo PASS > "$TOCKMOX_WORKDIR/receipts-$(printf %05d $((n+1)))/$f"
+}
+[ "$1" = P09 ] || { rcpt "$1"; exit 0; }
 if [ "${STUB_P09_KIT:-1}" = 1 ]; then
   mkdir -p "$HOME/tockmox-backup" "$TOCKMOX_P09_STATE"
   echo kit > "$HOME/tockmox-backup/tockmox-recovery-kit.tar.age"
   echo identity > "$TOCKMOX_P09_STATE/p09-age-identity.txt"
 fi
+[ "${STUB_P09_RC:-0}" != 0 ] || rcpt P09
 exit "${STUB_P09_RC:-0}"
 STUB
 # The lane checks its tools are on PATH; only kubectl answers anything here.
