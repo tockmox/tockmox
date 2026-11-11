@@ -1378,5 +1378,26 @@ if [ "$LO_CASES" -eq 0 ] || { [ "$LO_RC" -ne 0 ] && ! printf '%s\n' "$LO_OUT" | 
   bad "lane-outcome-test.sh ran its cases" "rc=${LO_RC}, ${LO_CASES} case(s): $(printf '%s' "$LO_OUT" | tail -3)"
 fi
 
+# --- P13 block begin (self-contained; goes after the P11 recovery rows block) ---
+# P13's planted-fault rows: a ResourceQuota that refuses a restore drill, a drill that cannot write its register row,
+# the alert that says so, and the revert of each fault. The verdicts are shown red one planted input at a time, the
+# steps are run against a stub kubectl (a fault is reverted and read back as gone even when the middle step fails),
+# the path is run as a script and against mutated copies that lose a guard, and its gate and the lane's P13 block are
+# run too. Folded in like the cases above.
+FR_OUT="$(bash "${HERE}/fault-rows-test.sh" 2>&1)"; FR_RC=$?
+FR_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) FR_CASES=$((FR_CASES+1)); ok "fault rows: ${line#ok   }" ;;
+    "FAIL "*) FR_CASES=$((FR_CASES+1)); bad "fault rows: ${line#FAIL }" "run tests/executed-docs/fault-rows-test.sh for detail" ;;
+  esac
+done <<EOF_FR
+$FR_OUT
+EOF_FR
+if [ "$FR_CASES" -eq 0 ] || { [ "$FR_RC" -ne 0 ] && ! printf '%s\n' "$FR_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "fault-rows-test.sh ran its cases" "rc=${FR_RC}, ${FR_CASES} case(s): $(printf '%s' "$FR_OUT" | tail -3)"
+fi
+# --- P13 block end ---
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

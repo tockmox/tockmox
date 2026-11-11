@@ -10,6 +10,7 @@
 #   P09 exited 0 but its receipt is BLOCKED / INFRA_ERROR / missing   lane 4 / 5 / 1, p09-passed not written, P11 not run
 #   P11 exited 0 but its receipt is BLOCKED / INFRA_ERROR / other / missing   lane 4 / 5 / 1
 #   P09 and P11 declared PASS                                         lane 0
+#   P13 (planted faults, last, whenever P09's receipt said PASS, whatever P11 did): the same table
 #   an earlier failure's status is never replaced by a later path's
 #
 # p09-lane.sh runs unmodified beside stubs of what it calls; the stub run.sh writes the receipts a real one would.
@@ -54,6 +55,7 @@ echo "run.sh $*" >> "$LANE_LOG"
 case "$1" in
   P09) name=P09-install-md-end-to-end; out="${STUB_P09_OUT:-PASS}"; rc="${STUB_P09_RC:-0}" ;;
   P11) name=P11-fresh-install-recovery; out="${STUB_P11_OUT:-PASS}"; rc="${STUB_P11_RC:-0}" ;;
+  P13) name=P13-planted-faults; out="${STUB_P13_OUT:-PASS}"; rc="${STUB_P13_RC:-0}" ;;
   *) exit 0 ;;
 esac
 n="$(ls "$TOCKMOX_WORKDIR" | grep -c '^receipts-')"
@@ -106,6 +108,29 @@ run_lane STUB_P09_OUT=INFRA_ERROR
 run_lane STUB_P09_OUT=NONE
 [ "$RC" = 1 ] && [ "$(marker)" = no ] && [ "$(ran P11)" = 0 ] && ok "P09 exited 0 and left no receipt: the lane exits 1, no marker, no P11" || bad "P09 no receipt" "rc=$RC"
 
+# P13: runs last, whenever P09's receipt said PASS; anything but a PASS receipt fails the lane by the same table
+run_lane
+[ "$RC" = 0 ] && [ "$(ran P13)" = 1 ] && [ "$(grep "^run.sh" "$LH/log" | tail -1)" = "run.sh P13" ] && ok "P13: all three declared PASS, the lane exits 0 and P13 ran last" || bad "P13 PASS" "rc=$RC $(tr '\n' ';' < "$LH/log")"
+run_lane STUB_P13_OUT=BLOCKED STUB_REASON="P09 did not end PASS on this state directory"
+[ "$RC" = 4 ] && say "lane: P13-planted-faults declared BLOCKED: P09 did not end PASS on this state directory" \
+  && ok "P13 exited 0 but declared BLOCKED after a passed P09 and P11: the lane exits 4 and names the path, the outcome and the reason" || bad "P13 BLOCKED" "rc=$RC $(tail -3 "$TMP/lout")"
+run_lane STUB_P13_OUT=INFRA_ERROR
+[ "$RC" = 5 ] && ok "P13 declared INFRA_ERROR with exit 0: the lane exits 5" || bad "P13 INFRA_ERROR" "rc=$RC"
+run_lane STUB_P13_OUT=PRODUCT_FAIL STUB_P13_RC=1
+[ "$RC" = 1 ] && ok "P13 failed (PRODUCT_FAIL, exit 1): the lane exits 1" || bad "P13 PRODUCT_FAIL" "rc=$RC"
+run_lane STUB_P13_OUT=NONE
+[ "$RC" = 1 ] && say "lane: P13-planted-faults declared MISSING" && ok "P13 left no receipt: the lane exits 1 and says so" || bad "P13 missing receipt" "rc=$RC"
+run_lane STUB_P11_OUT=PRODUCT_FAIL STUB_P11_RC=7 STUB_P13_OUT=BLOCKED
+[ "$RC" = 7 ] && ok "a P11 failure's status (7) survives a later P13 BLOCKED (which would be 4)" || bad "P11 status survives P13" "rc=$RC"
+run_lane STUB_P11_OUT=BLOCKED STUB_P13_OUT=INFRA_ERROR
+[ "$RC" = 4 ] && ok "a P11 BLOCKED (4) survives a later P13 INFRA_ERROR (5): the first failure is kept" || bad "P11 BLOCKED survives P13" "rc=$RC"
+run_lane STUB_P11_OUT=BLOCKED
+[ "$(ran P13)" = 1 ] && [ "$RC" = 4 ] && ok "P13 still runs when P11 did not pass (independent proofs of one install); the lane's exit is P11's" || bad "P13 runs after a failed P11" "rc=$RC ran=$(ran P13)"
+run_lane STUB_P09_OUT=BLOCKED
+[ "$(ran P13)" = 0 ] && [ "$RC" = 4 ] && ok "P13 does not run when P09's receipt says BLOCKED" || bad "P13 after P09 BLOCKED" "rc=$RC ran=$(ran P13)"
+run_lane STUB_P09_RC=3 STUB_P09_OUT=PRODUCT_FAIL
+[ "$(ran P13)" = 0 ] && [ "$RC" = 3 ] && ok "P13 does not run when P09 failed" || bad "P13 after P09 failure" "rc=$RC ran=$(ran P13)"
+
 # mutated copies of the lane: each drops one check and must go green where it must not
 mutlane() { mut "$LANE_SH" "$L/p09-lane.sh" "$1" "$2"; }
 mutlane 'if [ "$P09_RC" = 0 ] && [ "${P09_REC%% *}" = PASS ]; then' 'if [ "$P09_RC" = 0 ]; then'
@@ -123,6 +148,24 @@ run_lane STUB_P11_OUT=BLOCKED STUB_P11_RC=6
 mutlane 'elif [ "$P09_RC" = 0 ]; then' 'elif false; then'
 run_lane STUB_P09_OUT=BLOCKED
 [ "$RC" = 0 ] && ok "mutation: a lane with no branch for a P09 that exited 0 without PASS ends 0" || bad "mutation: P09 branch" "rc=$RC"
+mutlane 'if [ "$p13_code" != 0 ] && [ "$rc" = 0 ]; then' 'if false; then'
+run_lane STUB_P13_OUT=BLOCKED
+[ "$RC" = 0 ] && ok "mutation: a lane that drops the P13 outcome check ends 0 over a BLOCKED P13" || bad "mutation: P13 outcome" "rc=$RC"
+mutlane 'if [ "$p13_code" != 0 ] && [ "$rc" = 0 ]; then' 'if [ "$p13_code" != 0 ]; then'
+run_lane STUB_P11_OUT=PRODUCT_FAIL STUB_P11_RC=7 STUB_P13_OUT=BLOCKED
+[ "$RC" = 4 ] && ok "mutation: a lane that lets P13's outcome replace an earlier failure ends 4, not 7" || bad "mutation: P13 overwrite" "rc=$RC"
+mutlane 'if [ "$P09_RC" = 0 ] && [ "${P09_REC%% *}" = PASS ]; then
+  mkdir -p "$TOCKMOX_P09_STATE"
+  : > "${TOCKMOX_P09_STATE}/p09-passed"
+  export TOCKMOX_P13_BUDGET' 'if [ "$P09_RC" = 0 ]; then
+  mkdir -p "$TOCKMOX_P09_STATE"
+  : > "${TOCKMOX_P09_STATE}/p09-passed"
+  export TOCKMOX_P13_BUDGET'
+run_lane STUB_P09_OUT=BLOCKED
+[ "$(ran P13)" = 1 ] && ok "mutation: a P13 block that trusts P09's exit status runs P13 over a BLOCKED P09" || bad "mutation: P13 gate" "ran=$(ran P13)"
+mutlane 'if [ "$out" = PASS ]; then' 'if [ "$out" = PASS ] || [ "$out" = MISSING ]; then'
+run_lane STUB_P13_OUT=NONE
+[ "$RC" = 0 ] && ok "mutation: a lane that reads a missing receipt as a pass ends 0 over a P13 that left none" || bad "mutation: P13 missing receipt" "rc=$RC"
 
 printf '\n  %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

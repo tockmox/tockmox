@@ -270,4 +270,38 @@ elif [ "$P09_RC" = 0 ]; then
 else
   echo "lane 6: P09 did not pass, so P11 does not run"
 fi
+
+# --- P13 block begin (self-contained apart from P09_REC, lane_receipt and lane_judge above; goes after the P11 block) ---
+# 7. P13, last, on the same throwaway and the same state directory, only when P09 exited 0 AND its receipt says PASS.
+# It plants one fault at a time (a ResourceQuota that refuses a restore drill; a drill that cannot write its register
+# row) and breaks the install on purpose, so it runs after everything that reads the install healthy, and it takes each
+# fault out again and reads that it is gone (paths/P13-planted-faults.sh). It does NOT wait on P11: they are independent
+# proofs of one install, and a P11 that failed (or was BLOCKED) leaves the install exactly as P13 needs it; the lane's
+# exit keeps the FIRST failure. It has its own budget, TOCKMOX_P13_BUDGET (default 3000 seconds), a yield point this
+# lane does not call again, so a P13 that yields is a failed lane. The p09-passed marker is rewritten here only because
+# P09's receipt said PASS, so this block never depends on a marker a failed P09 left.
+# Like P11, anything but a PASS receipt fails the lane (4 BLOCKED, 5 INFRA_ERROR, 1 otherwise or none), with one line
+# naming the path, the outcome and the reason, and never replaces an earlier failure's status.
+if [ "$P09_RC" = 0 ] && [ "${P09_REC%% *}" = PASS ]; then
+  mkdir -p "$TOCKMOX_P09_STATE"
+  : > "${TOCKMOX_P09_STATE}/p09-passed"
+  export TOCKMOX_P13_BUDGET="${TOCKMOX_P13_BUDGET:-3000}"
+  echo "lane 7: P13, planted faults, after a P09 that passed (budget ${TOCKMOX_P13_BUDGET}s)"
+  set +e
+  bash "${HERE}/run.sh" P13
+  p13_rc=$?
+  set -e
+  echo "lane: P13 exit ${p13_rc}"
+  if [ "$p13_rc" != 0 ] && [ "$rc" = 0 ]; then
+    rc="$p13_rc"
+  fi
+  # and so does a P13 that exited 0 without declaring PASS (BLOCKED, say): it proved nothing
+  p13_code="$(lane_judge P13-planted-faults "$(lane_receipt P13-planted-faults)")"
+  if [ "$p13_code" != 0 ] && [ "$rc" = 0 ]; then
+    rc="$p13_code"
+  fi
+else
+  echo "lane 7: P09 did not pass, so P13 does not run"
+fi
+# --- P13 block end ------------------------------------------------------------------------------------------------
 exit "$rc"
