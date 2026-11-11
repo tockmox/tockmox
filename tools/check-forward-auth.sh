@@ -50,8 +50,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-command -v helm >/dev/null 2>&1 || { echo "check-forward-auth: SKIPPED (helm not on PATH)"; exit 2; }
-python3 -c 'import yaml' 2>/dev/null || { echo "check-forward-auth: SKIPPED (python3 has no PyYAML)"; exit 2; }
+command -v helm >/dev/null 2>&1 || { echo "check-forward-auth: SKIPPED (helm not on PATH)"; echo "SKIPPED: helm is not on PATH"; exit 2; }
+python3 -c 'import yaml' 2>/dev/null || { echo "check-forward-auth: SKIPPED (python3 has no PyYAML)"; echo "SKIPPED: python3 has no PyYAML"; exit 2; }
 
 VALUES="ci/values.yaml"
 ID_NS="tockmox-authentik"

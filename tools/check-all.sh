@@ -81,7 +81,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-pass=0; fail=0; skipped=0; unselected=0; othershard=0
+pass=0; fail=0; skipped=0; unselected=0; othershard=0; skipped_names=""
 failed_names=""; unselected_names=""
 gate_ord=0; GATE_SERIAL=0
 
@@ -106,7 +106,7 @@ gate_key() {
 # file, and the report is printed in the SAME ORDER and with the SAME counts as a serial run, with
 # each gate's wall time beside its name and the slowest listed at the end.
 #
-#   CHECK_ALL_JOBS=1   the old behaviour exactly: one gate at a time, output streamed as it runs.
+#   CHECK_ALL_JOBS=1   the old behaviour: one gate at a time, output streamed as it runs (and kept, to read its SKIPPED: line).
 #
 # Gates that read what another gate writes, or build into a shared directory, run alone behind a
 # barrier (`serial_gate`): render-counts writes build/render-counts.tsv that doc-claims reads, and
@@ -126,8 +126,8 @@ case "$JOBS" in ''|*[!0-9]*|0) JOBS=1 ;; esac
 # CHECK_ALL_GATE_TIMEOUT seconds (default 1200; 0 = no limit). A gate past it is stopped with
 # everything it started (its own process group, so a python child spinning under a bash gate goes
 # too) and counted as a failure named "TIMEOUT after N s". Serial mode (CHECK_ALL_JOBS=1) streams
-# each gate's name before it runs, so a hang there is already named, and it is left unwrapped so a
-# gate keeps the terminal. A caller with its own budget for the whole run (a CI job's timeout, a QA
+# each gate's name before it runs, so a hang there is already named, and it is left without the time
+# limit's wrapper so a gate keeps the terminal for its input (its output is also kept, to read its SKIPPED: line). A caller with its own budget for the whole run (a CI job's timeout, a QA
 # harness) should give it more than this limit, so a hang ends here, with a name, first.
 GATE_TIMEOUT="${CHECK_ALL_GATE_TIMEOUT:-1200}"
 case "$GATE_TIMEOUT" in ''|*[!0-9]*) GATE_TIMEOUT=1200 ;; esac
@@ -168,27 +168,52 @@ tree_fingerprint() {
   git diff 2>/dev/null | cksum
 }
 
-# EXIT 2 MEANS SKIPPED, and that convention is the repository's, not this
-# script's: see the long note at the top of check-blueprint-discovery.sh. A gate
-# that cannot run because a substrate is absent is a different report from a gate
-# that ran and found a defect, and collapsing the two teaches people to skim past
-# red in this directory.
-tally() {
-  case "$2" in
-    0) pass=$((pass + 1)) ;;
-    2) skipped=$((skipped + 1)) ;;
+# A GATE IS SKIPPED ONLY WHEN IT SAYS SO. Exit 2 is the repository's "could not run" (see the long note at
+# the top of check-blueprint-discovery.sh): a gate that cannot run because a substrate is absent is a
+# different report from a gate that ran and found a defect, and collapsing the two teaches people to skim
+# past red in this directory. But exit 2 alone is not that statement. A bash syntax error, a grep on a file
+# that is not there and an argparse usage error all exit 2 as well, and a run that booked those as skipped
+# ended "All runnable static gates passed" over a gate that had never run. So:
+#
+#   exit 0                                           pass (a SKIPPED: line in a passing gate's output is ignored)
+#   exit 2 AND a line starting "SKIPPED: <reason>"   skip
+#   exit 2 without that line                         FAIL
+#   anything else                                    FAIL
+#
+# The gate's captured output is what is read, standard error included. The reason is printed in the run's
+# summary beside the gate's name, so a skip is never only a count.
+skip_reason_of() { # LOGFILE ... the first "SKIPPED: reason" line's reason, empty when there is none
+  [ -r "$1" ] || return 0
+  sed -n 's/^SKIPPED: \([^[:space:]].*\)$/\1/p' "$1" | head -n 1
+}
+gate_status() { # RC LOGFILE ... pass, skip, timeout or fail
+  case "$1" in
+    0) echo pass ;;
+    2) if [ -n "$(skip_reason_of "$2")" ]; then echo skip; else echo fail; fi ;;
+    124) [ "$GATE_TIMEOUT" -gt 0 ] && echo timeout || echo fail ;;
+    *) echo fail ;;
+  esac
+}
+tally() { # NAME RC LOGFILE
+  case "$(gate_status "$2" "$3")" in
+    pass) pass=$((pass + 1)) ;;
+    skip) skipped=$((skipped + 1))
+          skipped_names="${skipped_names}
+  - ${1}: $(skip_reason_of "$3")" ;;
     *) fail=$((fail + 1))
-       failed_names="${failed_names}
-  - ${1}" ;;
+       if [ "$2" = 2 ]; then
+         failed_names="${failed_names}
+  - ${1} (exited 2 without a 'SKIPPED: <reason>' line, so it did not skip: it failed)"
+       else
+         failed_names="${failed_names}
+  - ${1}"
+       fi ;;
   esac
 }
 
 # One results row: ordinal, key, status, exit code, seconds, name.
 result_row() {
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" "$6" >> "$SLOTS/results"
-}
-status_of() {
-  case "$1" in 0) echo pass ;; 2) echo skip ;; 124) [ "$GATE_TIMEOUT" -gt 0 ] && echo timeout || echo fail ;; *) echo fail ;; esac
 }
 
 # The plan's decision for this gate: run, unselected or othershard. No plan: run.
@@ -224,9 +249,11 @@ run_gate() {
   if [ "$JOBS" -le 1 ]; then
     printf '\n=== %s ===\n' "$name"
     local t0; t0=$(date +%s)
-    "$@" || rc=$?
-    tally "$name" "$rc"
-    result_row "$gate_ord" "$key" "$(status_of "$rc")" "$rc" "$(( $(date +%s) - t0 ))" "$name"
+    # Streamed as before, and kept, because whether a gate skipped is read from what it printed.
+    "$@" 2>&1 | tee "$SLOTS/serial.log"
+    rc="${PIPESTATUS[0]}"
+    tally "$name" "$rc" "$SLOTS/serial.log"
+    result_row "$gate_ord" "$key" "$(gate_status "$rc" "$SLOTS/serial.log")" "$rc" "$(( $(date +%s) - t0 ))" "$name"
     return 0
   fi
   nslot=$((nslot + 1))
@@ -280,7 +307,9 @@ skip_gate() {
       return 0 ;;
   esac
   if [ "$JOBS" -le 1 ]; then
-    printf '\n=== %s ===\n  SKIPPED: %s\n' "$1" "$2"
+    printf '\n=== %s ===\nSKIPPED: %s\n' "$1" "$2"
+    skipped_names="${skipped_names}
+  - ${1}: ${2}"
     skipped=$((skipped + 1))
     result_row "$gate_ord" "$key" skip 2 0 "$1"
     return 0
@@ -289,7 +318,7 @@ skip_gate() {
   local slot; slot="$SLOTS/$(printf '%04d' "$nslot")"
   printf '%s\n' "$1" > "$slot.name"
   printf '%s\t%s\n' "$gate_ord" "$key" > "$slot.key"
-  printf '  SKIPPED: %s\n' "$2" > "$slot.log"
+  printf 'SKIPPED: %s\n' "$2" > "$slot.log"
   echo 0 > "$slot.secs"
   echo 2 > "$slot.rc"
 }
@@ -568,6 +597,10 @@ run_gate "the gate planner selects, shards and aggregates by its rules, and goes
   python3 tools/gate-plan.py --selftest
 run_gate "every gate-input declaration names a registered gate and a tracked path" \
   python3 tools/gate-plan.py check-inputs
+# A gate is skipped only when it exits 2 AND printed a line starting "SKIPPED: <reason>"; a bare exit 2
+# (a syntax error, a grep on a missing file, a usage error) is a failure. Planted gates show each case,
+# and mutated copies of this script that book every exit 2 as skipped must go red.
+run_gate "check-all books a skip only on a SKIPPED: line, and a bare exit 2 as a failure" bash tools/check-all-selftest.sh
 run_gate "every action is SHA-pinned and every CI download is checksummed" bash tools/check-action-pins.sh
 run_gate "the action-pin gate goes red on a moving tag and an unchecked download" bash tools/check-action-pins.sh --selftest
 run_gate "observability off: refused without the profile, zero monitors with it, bring-your-own renders" bash tools/check-capability-monitors.sh
@@ -647,6 +680,7 @@ run_gate "every documented block is accounted for" bash -c '
   bash tools/check-block-inventory.sh || true
   printf "  NOT A GATE: reported, never enforced. No tree state changes this line.\n"
   printf "  Enforcement is per-page and carded; \`--enforce\` is the real check.\n"
+  printf "SKIPPED: reported, never enforced; enforcement is per-page (check-block-inventory.sh --enforce)\n"
   exit 2'
 
 run_gate "docs links resolve" bash tools/check-docs-links.sh
@@ -718,9 +752,9 @@ if [ "$JOBS" -gt 1 ]; then
     cat "$b.log" 2>/dev/null
     [ -e "$b.rc" ] || echo "  (no exit status recorded: the gate's runner died)"
     [ "$rc" = 124 ] && [ "$GATE_TIMEOUT" -gt 0 ] && n="$n (TIMEOUT after ${GATE_TIMEOUT} s)"
-    tally "$n" "$rc"
+    tally "$n" "$rc" "$b.log"
     IFS=$'\t' read -r k_ord k_key < "$b.key"
-    result_row "$k_ord" "$k_key" "$(status_of "$rc")" "$rc" "$(cat "$b.secs" 2>/dev/null || echo -)" "$(cat "$f")"
+    result_row "$k_ord" "$k_key" "$(gate_status "$rc" "$b.log")" "$rc" "$(cat "$b.secs" 2>/dev/null || echo -)" "$(cat "$f")"
   done
   printf '\nSlowest gates:\n'
   for f in "$SLOTS"/*.secs; do printf '%6ss  %s\n' "$(cat "$f")" "$(cat "${f%.secs}.name")"; done | sort -rn | head -5
@@ -735,6 +769,9 @@ if [ "$TREE_BEFORE" != "$TREE_AFTER" ]; then
 fi
 mkdir -p "$(dirname "$RESULTS")"
 { printf 'ord\tkey\tstatus\trc\tseconds\tname\n'; sort -n "$SLOTS/results" 2>/dev/null; } > "$RESULTS"
+if [ "$skipped" -gt 0 ]; then
+  printf '\nSkipped, which is not passed (each said SKIPPED: and why):%s\n' "$skipped_names"
+fi
 if [ "$unselected" -gt 0 ]; then
   printf '\nNot run, because none of their declared inputs changed since %s (tools/gate-inputs.yaml):%s\n' \
     "$CHANGED_FROM" "$unselected_names"

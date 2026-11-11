@@ -35,11 +35,11 @@ cd "$(dirname "$0")/../.." || exit 1
 LITELLM_BIN="${LITELLM_BIN:-$(command -v litellm || true)}"
 # shellcheck disable=SC2012  # one well-known path pattern, version directories only
 PGBIN="${PGBIN:-$(dirname "$(ls /usr/lib/postgresql/*/bin/initdb 2>/dev/null | head -1)" 2>/dev/null)}"
-command -v helm >/dev/null 2>&1 || { echo "key-policy: helm not on PATH"; exit 2; }
-command -v curl >/dev/null 2>&1 || { echo "key-policy: curl not on PATH"; exit 2; }
-python3 -c 'import yaml' 2>/dev/null || { echo "key-policy: python3 PyYAML missing"; exit 2; }
-[ -n "$LITELLM_BIN" ] && [ -x "$LITELLM_BIN" ] || { echo "key-policy: SKIPPED, no litellm CLI (set LITELLM_BIN)"; exit 2; }
-[ -n "$PGBIN" ] && [ -x "$PGBIN/initdb" ] || { echo "key-policy: SKIPPED, no Postgres binaries (set PGBIN)"; exit 2; }
+command -v helm >/dev/null 2>&1 || { echo "key-policy: helm not on PATH"; echo "SKIPPED: helm is not on PATH"; exit 2; }
+command -v curl >/dev/null 2>&1 || { echo "key-policy: curl not on PATH"; echo "SKIPPED: curl is not on PATH"; exit 2; }
+python3 -c 'import yaml' 2>/dev/null || { echo "key-policy: python3 PyYAML missing"; echo "SKIPPED: python3 has no PyYAML"; exit 2; }
+[ -n "$LITELLM_BIN" ] && [ -x "$LITELLM_BIN" ] || { echo "key-policy: SKIPPED, no litellm CLI (set LITELLM_BIN)"; echo "SKIPPED: no litellm CLI (set LITELLM_BIN)"; exit 2; }
+[ -n "$PGBIN" ] && [ -x "$PGBIN/initdb" ] || { echo "key-policy: SKIPPED, no Postgres binaries (set PGBIN)"; echo "SKIPPED: no Postgres binaries (set PGBIN)"; exit 2; }
 
 PORT_PROXY="${PORT_PROXY:-14100}"; PORT_PG="${PORT_PG:-15432}"; KEY=sk-key-policy-test
 work="$(mktemp -d)"; pids=()

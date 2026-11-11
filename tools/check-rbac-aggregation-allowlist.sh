@@ -47,8 +47,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # A gate that cannot render must REFUSE, never report clean.
-command -v helm >/dev/null 2>&1 || { echo "check-rbac-aggregation-allowlist: REFUSING ... helm is not on PATH; cannot render, will not guess" >&2; exit 2; }
-command -v python3 >/dev/null 2>&1 || { echo "check-rbac-aggregation-allowlist: REFUSING ... python3 is not on PATH" >&2; exit 2; }
+command -v helm >/dev/null 2>&1 || { echo "check-rbac-aggregation-allowlist: REFUSING ... helm is not on PATH; cannot render, will not guess" >&2; echo "SKIPPED: helm is not on PATH" >&2; exit 2; }
+command -v python3 >/dev/null 2>&1 || { echo "check-rbac-aggregation-allowlist: REFUSING ... python3 is not on PATH" >&2; echo "SKIPPED: python3 is not on PATH" >&2; exit 2; }
 
 scan() {
   # $1 = workdir holding <release>.yaml per layer, plus policy.yaml for the

@@ -43,7 +43,7 @@ cd "$(dirname "$0")/.."
 # by the fixtures.
 if [ "${1:-}" = "--selftest" ]; then
   set +e
-  py="$(command -v python3)" || { echo "selftest: python3 not on PATH; refusing"; exit 2; }
+  py="$(command -v python3)" || { echo "selftest: python3 not on PATH; refusing"; echo "SKIPPED: python3 is not on PATH"; exit 2; }
   tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
   for d in broken empty; do mkdir -p "$tmp/$d"; ln -s "$py" "$tmp/$d/python3"; done
   printf '\177ELF not a program for this machine\n' > "$tmp/broken/helm"
@@ -65,7 +65,7 @@ if [ "${1:-}" = "--selftest" ]; then
   echo "selftest FAILED"; exit 1
 fi
 
-command -v python3  >/dev/null 2>&1 || { echo "check-alert-rules: REFUSING ... python3 is not on PATH" >&2; exit 2; }
+command -v python3  >/dev/null 2>&1 || { echo "check-alert-rules: REFUSING ... python3 is not on PATH" >&2; echo "SKIPPED: python3 is not on PATH" >&2; exit 2; }
 
 # EXIT 2 IS SKIPPED, not passed ... the repository's convention. promtool is not
 # a build dependency of the chart, so a workstation without it skips rather than
@@ -159,6 +159,7 @@ PY
     exit 1
   fi
   echo "check-alert-rules: INCOMPLETE ... nothing run failed; exit 2, not a pass"
+  echo "SKIPPED: $nskip check(s) need tools that are missing:$miss"
   exit 2
 }
 

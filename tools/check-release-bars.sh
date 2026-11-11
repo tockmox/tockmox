@@ -47,8 +47,8 @@ while [ $# -gt 0 ]; do
     *) echo "check-release-bars: unknown argument $1" >&2; exit 2 ;;
   esac
 done
-command -v python3 >/dev/null 2>&1 || { echo "check-release-bars: python3 not on PATH" >&2; exit 2; }
-python3 -c 'import yaml' 2>/dev/null || { echo "check-release-bars: python3 PyYAML missing" >&2; exit 2; }
+command -v python3 >/dev/null 2>&1 || { echo "check-release-bars: python3 not on PATH" >&2; echo "SKIPPED: python3 is not on PATH" >&2; exit 2; }
+python3 -c 'import yaml' 2>/dev/null || { echo "check-release-bars: python3 PyYAML missing" >&2; echo "SKIPPED: python3 has no PyYAML" >&2; exit 2; }
 
 run_py() {
   # $1 = mode (check|cases); $2 = RELEASING.md; $3 = bars file; $4 = tree root
@@ -286,7 +286,7 @@ if [ "$MODE" = selftest ]; then
   run_py cases "$RELEASING" "$BARS" "$ROOT" || { echo "check-release-bars selftest: FAILED"; exit 1; }
   # End to end through the real command line: a planted disagreement must exit 1,
   # the untouched copy must exit 0.
-  tmp="$(mktemp -d)" && [ -d "$tmp" ] || { echo "  SKIPPED: cannot create a temporary directory"; exit 2; }
+  tmp="$(mktemp -d)" && [ -d "$tmp" ] || { echo "check-release-bars: cannot create a temporary directory"; exit 2; }
   trap 'rm -rf "$tmp"' EXIT
   cp "$RELEASING" "$tmp/RELEASING.md"
   cp "$BARS" "$tmp/bars.yaml"

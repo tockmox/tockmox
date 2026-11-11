@@ -35,8 +35,8 @@
 # Exit 2 (skipped) when helm or PyYAML is absent.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-command -v helm >/dev/null 2>&1 || { echo "check-sa-tokens: helm missing" >&2; exit 2; }
-python3 -c 'import yaml' 2>/dev/null || { echo "check-sa-tokens: python3 PyYAML missing" >&2; exit 2; }
+command -v helm >/dev/null 2>&1 || { echo "check-sa-tokens: helm missing" >&2; echo "SKIPPED: helm is not on PATH" >&2; exit 2; }
+python3 -c 'import yaml' 2>/dev/null || { echo "check-sa-tokens: python3 PyYAML missing" >&2; echo "SKIPPED: python3 has no PyYAML" >&2; exit 2; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
 # ALLOW LIST: <Kind> <name glob> # why this pod keeps a token. One per line.

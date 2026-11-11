@@ -30,8 +30,8 @@
 # shellcheck disable=SC2329  # the scenarios and helpers are called by name, through the run list and must_hold/must_refuse
 set -uo pipefail
 cd "$(dirname "$0")/../.." || exit 1
-command -v helm >/dev/null 2>&1 || { echo "garage key-rotation: helm not on PATH" >&2; exit 2; }
-python3 -c 'import yaml' 2>/dev/null || { echo "garage key-rotation: python3 PyYAML missing" >&2; exit 2; }
+command -v helm >/dev/null 2>&1 || { echo "garage key-rotation: helm not on PATH" >&2; echo "SKIPPED: helm is not on PATH" >&2; exit 2; }
+python3 -c 'import yaml' 2>/dev/null || { echo "garage key-rotation: python3 PyYAML missing" >&2; echo "SKIPPED: python3 has no PyYAML" >&2; exit 2; }
 
 T="${GARAGE_ROT_TMP:-$(mktemp -d "${TMPDIR:-/tmp}/garage-rot.XXXXXX")}"
 GPID=""

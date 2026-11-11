@@ -63,8 +63,8 @@
 # shellcheck disable=SC2329  # each s_N check is called by name, through must_hold and must_refuse and the run list
 set -euo pipefail
 cd "$(dirname "$0")/.."
-command -v helm >/dev/null 2>&1 || { echo "check-platform-seams: helm missing" >&2; exit 2; }
-python3 -c 'import yaml' 2>/dev/null || { echo "check-platform-seams: python3 PyYAML missing" >&2; exit 2; }
+command -v helm >/dev/null 2>&1 || { echo "check-platform-seams: helm missing" >&2; echo "SKIPPED: helm is not on PATH" >&2; exit 2; }
+python3 -c 'import yaml' 2>/dev/null || { echo "check-platform-seams: python3 PyYAML missing" >&2; echo "SKIPPED: python3 has no PyYAML" >&2; exit 2; }
 
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 r() { local out="$1" chart="$2"; shift 2; helm template t "charts/tockmox-$chart" -f ci/values.yaml "$@" > "$T/$out" 2>"$T/$out.err" || { cat "$T/$out.err" >&2; return 1; }; }

@@ -26,6 +26,7 @@ if ! "$py" -c 'import fastapi, httpx, jwt, itsdangerous, yaml, pytest' >/dev/nul
   echo "check-tockmox-ui-tests: SKIPPED: $py lacks the UI's dependencies or pytest."
   echo "  tools/dev-env.sh   (builds build/gates-venv from tools/requirements-gates.txt), then:"
   echo "  TOCKMOX_UI_PYTHON=build/gates-venv/bin/python ./tools/check-tockmox-ui-tests.sh"
+  echo "SKIPPED: $py lacks the UI's dependencies or pytest"
   exit 2
 fi
 # A relative path (build/gates-venv/bin/python) is made absolute before the cd below; a bare command name

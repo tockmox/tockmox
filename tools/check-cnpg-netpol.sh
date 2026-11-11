@@ -39,8 +39,8 @@ cd "$(dirname "$0")/.."
 # under `|| rc=1`, which switches `set -e` off inside it, so a missing helm
 # would write nine empty files, find zero Clusters, and print "clean"
 # (found by a zero-context review 2026-09-07).
-command -v helm >/dev/null 2>&1 || { echo "check-cnpg-netpol: REFUSING ... helm is not on PATH; cannot render, will not guess" >&2; exit 2; }
-command -v python3 >/dev/null 2>&1 || { echo "check-cnpg-netpol: REFUSING ... python3 is not on PATH" >&2; exit 2; }
+command -v helm >/dev/null 2>&1 || { echo "check-cnpg-netpol: REFUSING ... helm is not on PATH; cannot render, will not guess" >&2; echo "SKIPPED: helm is not on PATH" >&2; exit 2; }
+command -v python3 >/dev/null 2>&1 || { echo "check-cnpg-netpol: REFUSING ... python3 is not on PATH" >&2; echo "SKIPPED: python3 is not on PATH" >&2; exit 2; }
 
 render_ns() {
   case "$1" in

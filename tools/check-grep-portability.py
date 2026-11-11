@@ -137,7 +137,7 @@ def main(argv):
         return run(os.getcwd(), argv[2:])
     files = tracked(root)
     if files is None:
-        print("check-grep-portability: SKIPPED: %s is not a git checkout, and the scan set is what git tracks" % root)
+        print("SKIPPED: %s is not a git checkout, and the scan set is what git tracks" % root)
         return 2
     return run(root, files)
 

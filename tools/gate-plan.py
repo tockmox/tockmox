@@ -325,6 +325,9 @@ def cmd_aggregate(argv):
     for r in sorted(seen.values(), key=lambda r: r["ord"]):
         if r["status"] in ("fail", "timeout"):
             print("FAILED: %s" % r["name"]); bad += 1
+        elif r["status"] == "skip" and r["rc"] != "2":
+            # check-all.sh writes skip only for exit 2 with a "SKIPPED: reason" line; any other pair is a row nothing honest wrote.
+            print("FAILED: %s (a skip row must carry exit status 2, this has %r)" % (r["name"], r["rc"])); bad += 1
     timed = sorted((r for r in seen.values() if r["secs"] not in ("", "-")), key=lambda r: -float(r["secs"]))
     print("Every gate reported once: %d gates; %s" % (len(seen), ", ".join("%d %s" % (c, s) for s, c in sorted(counts.items()))))
     print("Slowest gates:")
@@ -450,6 +453,19 @@ def selftest():
     finally:
         sys.stdout.close(); sys.stdout = old
     expect(missing == 1, "aggregate goes red when a gate is reported by no shard")
+    for rc_text, want, what in (("2", 0, "a skip row with exit status 2 is not a failure"), ("1", 1, "a skip row whose exit status is not 2 is a failure")):
+        r3 = os.path.join(d, "r3.tsv")
+        with open(r3, "w") as f:
+            f.write("ord\tkey\tstatus\trc\tseconds\tname\n")
+            for i, g in enumerate(gates):
+                st, rc = ("skip", rc_text) if i == 0 else ("pass", "0")
+                f.write("%d\t%s\t%s\t%s\t1\t%s\n" % (g["ord"], g["key"], st, rc, g["name"]))
+        old = sys.stdout; sys.stdout = open(os.devnull, "w")
+        try:
+            got = cmd_aggregate(["--list", lst, r3])
+        finally:
+            sys.stdout.close(); sys.stdout = old
+        expect(got == want, "aggregate: " + what)
     expect(twice == 1, "aggregate goes red when a gate is reported by two shards")
     files = os.path.join(d, "files")
     with open(files, "w") as f:

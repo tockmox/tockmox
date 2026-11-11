@@ -49,9 +49,9 @@ cd "$(dirname "$0")/.."
 ADDON=addons/posture-probe
 CHART=$ADDON/chart
 REL_NS=tockmox-posture
-command -v helm >/dev/null 2>&1 || { echo "check-posture-probe: helm missing" >&2; exit 2; }
-command -v python3 >/dev/null 2>&1 || { echo "check-posture-probe: python3 missing" >&2; exit 2; }
-python3 -c 'import yaml' 2>/dev/null || { echo "check-posture-probe: python3 PyYAML missing" >&2; exit 2; }
+command -v helm >/dev/null 2>&1 || { echo "check-posture-probe: helm missing" >&2; echo "SKIPPED: helm is not on PATH" >&2; exit 2; }
+command -v python3 >/dev/null 2>&1 || { echo "check-posture-probe: python3 missing" >&2; echo "SKIPPED: python3 is not on PATH" >&2; exit 2; }
+python3 -c 'import yaml' 2>/dev/null || { echo "check-posture-probe: python3 PyYAML missing" >&2; echo "SKIPPED: python3 has no PyYAML" >&2; exit 2; }
 
 ON=(--set enabled=true --set image=registry.example.com/tockmox/posture-probe:0.1.0
     --set 'networkPolicy.apiServer[0].cidr=192.0.2.10/32')

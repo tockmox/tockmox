@@ -50,8 +50,8 @@ cd "$(dirname "$0")/.."
 # missing helm would otherwise write nine empty files, find zero Clusters, and
 # print "clean" (measured by a zero-context review 2026-09-07). Same trap
 # check-all.sh and check-capabilities.sh are written about.
-command -v helm >/dev/null 2>&1 || { echo "check-cnpg-operator-reach: REFUSING ... helm is not on PATH; cannot render, will not guess" >&2; exit 2; }
-command -v python3 >/dev/null 2>&1 || { echo "check-cnpg-operator-reach: REFUSING ... python3 is not on PATH" >&2; exit 2; }
+command -v helm >/dev/null 2>&1 || { echo "check-cnpg-operator-reach: REFUSING ... helm is not on PATH; cannot render, will not guess" >&2; echo "SKIPPED: helm is not on PATH" >&2; exit 2; }
+command -v python3 >/dev/null 2>&1 || { echo "check-cnpg-operator-reach: REFUSING ... python3 is not on PATH" >&2; echo "SKIPPED: python3 is not on PATH" >&2; exit 2; }
 
 OPERATOR_NS="${TOCKMOX_CNPG_OPERATOR_NS:-$(python3 -c "import yaml;print(yaml.safe_load(open('charts/tockmox-policy/values.yaml'))['namespaces']['cnpg_system'])")}"
 

@@ -80,7 +80,7 @@ if [ "${BASH_SOURCE[0]}" = "$0" ] && [ "${1:-}" = "--selftest" ]; then
   # /usr/bin and /bin must not carry a helm of their own, or the absent case
   # measures the machine instead of the fixture.
   if [ -e /usr/bin/helm ] || [ -e /bin/helm ]; then
-    echo "  selftest: a helm in /usr/bin or /bin makes the fixtures unreadable; refusing"; exit 2
+    echo "  selftest: a helm in /usr/bin or /bin makes the fixtures unreadable; refusing"; echo "SKIPPED: a helm in /usr/bin or /bin would be read as the fixture's"; exit 2
   fi
   probe "no helm anywhere is absent"                         empty  absent
   probe "a helm for another architecture is broken, not ok"  broken broken

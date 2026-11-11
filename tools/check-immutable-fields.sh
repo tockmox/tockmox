@@ -102,8 +102,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 export PATH="$HOME/bin:$PATH"
-command -v helm >/dev/null 2>&1 || { echo "check-immutable-fields: helm not on PATH" >&2; exit 2; }
-python3 -c 'import yaml' 2>/dev/null || { echo "check-immutable-fields: python3 PyYAML missing" >&2; exit 2; }
+command -v helm >/dev/null 2>&1 || { echo "check-immutable-fields: helm not on PATH" >&2; echo "SKIPPED: helm is not on PATH" >&2; exit 2; }
+python3 -c 'import yaml' 2>/dev/null || { echo "check-immutable-fields: python3 PyYAML missing" >&2; echo "SKIPPED: python3 has no PyYAML" >&2; exit 2; }
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 
 # ------------------------------------------------------------------ comparison
@@ -502,6 +502,7 @@ else
     echo "check-immutable-fields: SKIPPED, no baseline ref (${BASE:-none}); fetch tags or set BASELINE_REF. Not a pass: nothing was compared."
     # Exit 2, not 0. It said "not a pass" and exited 0, so check-all.sh counted it in the passed total, on a
     # shallow clone or an unpacked archive alike.
+    echo "SKIPPED: no baseline ref (${BASE:-none}); fetch tags or set BASELINE_REF"
     exit 2
   fi
   bsrc="$BASE"; hsrc="$HEADREF"; label="$BASE vs $HEADREF"

@@ -985,6 +985,7 @@ if [ "$rc" -eq 2 ]; then
   echo "  Everything that could be checked without them is true. The SKIPPED"
   echo "  lines above name what was not checked. Exit 2: not a pass. Install"
   echo "  the tool(s), or run tools/render-counts.sh, and re-run for a full result."
+  echo "SKIPPED: $SKIP_TOTAL claim(s) were not checked; missing: $MISSING"
   exit 2
 fi
 if [ "$SKIP_TOTAL" -gt 0 ]; then

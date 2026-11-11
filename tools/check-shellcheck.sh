@@ -74,10 +74,10 @@ report() {  # findings-file baseline-file -> prints new findings; returns 1 when
 }
 
 if [ "${1:-}" = "--selftest" ]; then
-  have_sc || { echo "  SKIPPED: shellcheck is not on PATH or cannot run"; exit 2; }
+  have_sc || { echo "SKIPPED: shellcheck is not on PATH or cannot run"; exit 2; }
   # A failed mktemp must stop the run: with an empty $tmp the fixtures land in /
   # and every case reads as a pass or fail for reasons that are not the tool's.
-  tmp="$(mktemp -d)" && [ -d "$tmp" ] || { echo "  SKIPPED: cannot create a temporary directory"; exit 2; }
+  tmp="$(mktemp -d)" && [ -d "$tmp" ] || { echo "check-shellcheck: cannot create a temporary directory"; exit 2; }
   trap 'rm -rf "$tmp"' EXIT
   # shellcheck disable=SC2016  # the fixture needs a literal $1
   printf '#!/usr/bin/env bash\nset -eu\nname="${1:-x}"\necho "hello $name"\n' > "$tmp/clean.sh"
@@ -103,15 +103,15 @@ if [ "${1:-}" = "--selftest" ]; then
   echo "selftest FAILED"; exit 1
 fi
 
-have_sc || { echo "  SKIPPED: shellcheck is not on PATH or cannot run"; exit 2; }
+have_sc || { echo "SKIPPED: shellcheck is not on PATH or cannot run"; exit 2; }
 # Outside a git checkout `git ls-files` lists nothing, and zero scripts with zero findings read "nothing new":
 # a pass that checked nothing. The scan set is what git tracks, so refuse instead.
 if [ -z "${SHELLCHECK_FILES:-}" ] && ! git --no-optional-locks rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  echo "  SKIPPED: $(pwd) is not a git checkout, and the scripts checked are the ones git tracks"; exit 2
+  echo "SKIPPED: $(pwd) is not a git checkout, and the scripts checked are the ones git tracks"; exit 2
 fi
 # A failed mktemp must stop the run: an empty path collects no findings and the
 # report would read "nothing new", a pass that checked nothing.
-all="$(mktemp)" && [ -f "$all" ] || { echo "  SKIPPED: cannot create a temporary file"; exit 2; }
+all="$(mktemp)" && [ -f "$all" ] || { echo "check-shellcheck: cannot create a temporary file"; exit 2; }
 trap 'rm -f "$all"' EXIT
 findings > "$all"
 

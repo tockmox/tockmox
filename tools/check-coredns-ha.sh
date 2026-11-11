@@ -43,9 +43,9 @@
 # shellcheck disable=SC2016  # the mutations' search strings are Helm template text, matched literally, not shell variables
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
-command -v helm >/dev/null 2>&1 || { echo "check-coredns-ha: helm not on PATH" >&2; exit 2; }
+command -v helm >/dev/null 2>&1 || { echo "check-coredns-ha: helm not on PATH" >&2; echo "SKIPPED: helm is not on PATH" >&2; exit 2; }
 # Probed the way the checks run (-I, isolated).
-python3 -I -c 'import yaml' 2>/dev/null || { echo "check-coredns-ha: python3 -I (isolated) has no PyYAML" >&2; exit 2; }
+python3 -I -c 'import yaml' 2>/dev/null || { echo "check-coredns-ha: python3 -I (isolated) has no PyYAML" >&2; echo "SKIPPED: python3 has no PyYAML" >&2; exit 2; }
 
 if [ "${1:-}" = "--selftest" ]; then
   # Each mutation of the chart must turn the check red; the unmutated copy must

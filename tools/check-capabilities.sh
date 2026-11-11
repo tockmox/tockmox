@@ -54,6 +54,7 @@ if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
   echo "check-capabilities: needs bash 4.0+ for associative arrays; found ${BASH_VERSION:-unknown}." >&2
   echo "  macOS ships bash 3.2 as /bin/bash. Install a newer one and run it explicitly:" >&2
   echo "    brew install bash && /opt/homebrew/bin/bash tools/check-capabilities.sh" >&2
+  echo "SKIPPED: bash 4.0 or newer is needed (found ${BASH_VERSION:-unknown})" >&2
   exit 2
 fi
 
@@ -377,6 +378,7 @@ if [ "$nskip" -gt 0 ]; then
   echo "manifest half ran): $HELM_WHY"
   if [ "$fail" -eq 0 ]; then
     echo "capability framework INCOMPLETE ... nothing run failed; exit 2, not a pass"
+    echo "SKIPPED: $nskip check(s) need a tool that is missing: $HELM_WHY"
     exit 2
   fi
 fi

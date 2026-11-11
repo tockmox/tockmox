@@ -22,6 +22,7 @@ set -u
 REAL_HELM="$(command -v helm || true)"
 if [ -z "$REAL_HELM" ]; then
   echo "test-helm-deps: SKIPPED, helm is not on PATH"
+  echo "SKIPPED: helm is not on PATH"
   exit 2
 fi
 SRC="$(cd "$(dirname "$0")" && pwd)/helm-deps.sh"

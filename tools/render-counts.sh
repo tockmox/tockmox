@@ -96,7 +96,7 @@ case "${1:-}" in
     # shadowed by the fixture. Each failing case starts with a stale counts
     # file in place and must leave none behind.
     tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-    py="$(command -v python3)" || { echo "selftest: python3 not on PATH; refusing"; exit 2; }
+    py="$(command -v python3)" || { echo "selftest: python3 not on PATH; refusing"; echo "SKIPPED: python3 is not on PATH"; exit 2; }
     fx() { mkdir -p "$tmp/$1"; ln -s "$py" "$tmp/$1/python3"; }
     fx good;   printf '#!/bin/sh\n[ "$1" = version ] && exit 0\nprintf "kind: A\\nkind: B\\n"\n' > "$tmp/good/helm"
     fx fails;  printf '#!/bin/sh\n[ "$1" = version ] && exit 0\necho "Error: boom" >&2; exit 1\n' > "$tmp/fails/helm"
@@ -136,6 +136,7 @@ esac
 # Probe that helm EXECUTES, not merely that a file is there (tools/lib/tool-runs.sh).
 if [ "$(tool_state helm)" != ok ]; then
   echo "render-counts: $(tool_why helm); refusing rather than guessing"
+  echo "SKIPPED: $(tool_why helm)"
   rm -f "$OUT"; exit 2
 fi
 mkdir -p "$(dirname "$OUT")"

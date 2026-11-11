@@ -104,9 +104,9 @@ poison() {
   return $rc
 }
 
-command -v helm >/dev/null 2>&1 || { echo "check-values-typos: helm is not on PATH; refusing rather than guessing"; exit 2; }
+command -v helm >/dev/null 2>&1 || { echo "check-values-typos: helm is not on PATH; refusing rather than guessing"; echo "SKIPPED: helm is not on PATH"; exit 2; }
 command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' 2>/dev/null \
-  || { echo "check-values-typos: needs python3 with PyYAML"; exit 2; }
+  || { echo "check-values-typos: needs python3 with PyYAML"; echo "SKIPPED: python3 or its PyYAML is missing"; exit 2; }
 
 case "${1:-}" in
   --write) gen write; exit 0 ;;

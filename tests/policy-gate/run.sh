@@ -32,10 +32,10 @@ set -uo pipefail
 cd "$(dirname "$0")/../.."
 
 LITELLM_BIN="${LITELLM_BIN:-$(command -v litellm || true)}"
-command -v helm >/dev/null 2>&1 || { echo "policy-gate: helm not on PATH"; exit 2; }
-command -v curl >/dev/null 2>&1 || { echo "policy-gate: curl not on PATH"; exit 2; }
-python3 -c 'import yaml' 2>/dev/null || { echo "policy-gate: python3 PyYAML missing"; exit 2; }
-[ -n "$LITELLM_BIN" ] && [ -x "$LITELLM_BIN" ] || { echo "policy-gate: SKIPPED, no litellm CLI (set LITELLM_BIN)"; exit 2; }
+command -v helm >/dev/null 2>&1 || { echo "policy-gate: helm not on PATH"; echo "SKIPPED: helm is not on PATH"; exit 2; }
+command -v curl >/dev/null 2>&1 || { echo "policy-gate: curl not on PATH"; echo "SKIPPED: curl is not on PATH"; exit 2; }
+python3 -c 'import yaml' 2>/dev/null || { echo "policy-gate: python3 PyYAML missing"; echo "SKIPPED: python3 has no PyYAML"; exit 2; }
+[ -n "$LITELLM_BIN" ] && [ -x "$LITELLM_BIN" ] || { echo "policy-gate: SKIPPED, no litellm CLI (set LITELLM_BIN)"; echo "SKIPPED: no litellm CLI (set LITELLM_BIN)"; exit 2; }
 
 PORT_PROXY="${PORT_PROXY:-14000}"; KEY=sk-policy-gate-test
 work="$(mktemp -d)"; pids=()

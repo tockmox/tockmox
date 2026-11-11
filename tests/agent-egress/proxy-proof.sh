@@ -23,7 +23,7 @@
 set -uo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 bin="${SMOKESCREEN_BIN:-$(command -v smokescreen || true)}"
-[ -x "$bin" ] || { echo "proxy-proof: SKIPPED, no Smokescreen binary (set SMOKESCREEN_BIN)"; exit 2; }
+[ -x "$bin" ] || { echo "proxy-proof: SKIPPED, no Smokescreen binary (set SMOKESCREEN_BIN)"; echo "SKIPPED: no Smokescreen binary (set SMOKESCREEN_BIN)"; exit 2; }
 tmp="$(mktemp -d)"; pids=()
 # shellcheck disable=SC2329  # invoked by the trap
 cleanup() { local p; for p in "${pids[@]:-}"; do kill "$p" 2>/dev/null; done; rm -rf "$tmp"; }
