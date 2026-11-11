@@ -17,6 +17,20 @@ is the reason the row is red.
   p09-recovery.py migrations-complete --job NAME                  < Job list (JSON)
   p09-recovery.py migrations-owner --job NAME                     < Job list (JSON)
 
+The planted-fault rows (paths/P13-planted-faults.sh) add these, under the same
+rules (one artefact on stdin, one verdict line, "unreadable" for input that is
+not what was asked for):
+
+  p09-recovery.py job-not-complete                                < one Job (JSON)
+  p09-recovery.py drill-no-pass    --allow-row yes|no             < a drill Job's log
+  p09-recovery.py drill-refusal    --text STRING                  < a drill Job's log
+  p09-recovery.py drill-unrecorded --db NAME --bucket NAME        < a drill Job's log
+  p09-recovery.py absent           --kind KIND --name NAME        < a list (JSON)
+  p09-recovery.py quota-enforced   --name NAME --key RESOURCE     < one ResourceQuota (JSON)
+  p09-recovery.py alert-rule       --group G --alert A --for SECS < Prometheus /api/v1/rules (JSON)
+  p09-recovery.py alert-state      --group G --alert A            < Prometheus /api/v1/rules (JSON)
+  p09-recovery.py job-with-env     --container C --env NAME --value V --name JOB   < one Job (JSON)
+
 Why a module and not shell: the same predicates run in recovery-rows-test.sh
 against green and red fixtures, so each row is shown able to go red without a
 cluster. Input that cannot be read is a verdict beginning "unreadable", never a
@@ -37,6 +51,12 @@ The strings this module matches are quoted from the charts, not recalled:
                         migrations)
   - the owner label     charts/tockmox-common/templates/_helpers.tpl
                         (tockmox.com/managed-by: tockmox)
+
+  - the failure rows   charts/tockmox-ai/templates/restore-drill.yaml line 264
+                        ("apply: OUTPUT" then DETAIL="apply refused: ..."),
+                        the NOT RECORDED line in _drill-register.tpl, and the
+                        alert's group and name at restore-drill.yaml lines 308
+                        and 375 (identity: tockmox.identity.restore-drill)
 
 Exit 0 with a verdict, 2 for a usage error.
 """
@@ -249,6 +269,166 @@ def migrations_owner(text, name):
     return ["the only migrations Job is the subchart's"]
 
 
+# ------------------------------------------------------------ planted-fault rows
+def job_not_complete(text):
+    """A Job that must END without ever being Complete."""
+    doc = load(text)
+    if not isinstance(doc, dict) or doc.get("kind") != "Job":
+        return ["unreadable: not a Job"]
+    conds = [c for c in (get(doc, "status", "conditions") or []) if isinstance(c, dict)]
+    if any(c.get("type") == "Complete" and c.get("status") == "True" for c in conds):
+        return ["reached Complete"]
+    if any(c.get("type") == "Failed" and c.get("status") == "True" for c in conds):
+        return ["Failed, never Complete"]
+    return ["still running (active=%s)" % (get(doc, "status", "active") or 0)]
+
+
+def recorded_objects(log):
+    """(bucket, db, stamp, verdict) of each 'register: recorded' line."""
+    return re.findall(
+        r"^register: recorded s3://([^/\s]+)/([^/\s]+)/([0-9]{8}T[0-9]{6}Z)-([A-Z]+)\.json sha256=[0-9a-f]{64}$",
+        log, re.M)
+
+
+def drill_no_pass(log, allow_row):
+    """No PASS object was recorded; with allow_row=no, no PASS row was printed either."""
+    if not log.strip():
+        return ["unreadable: empty log"]
+    if [r for r in recorded_objects(log) if r[3] == "PASS"]:
+        return ["a PASS object was recorded"]
+    if allow_row != "yes" and row_lines(log, "PASS"):
+        return ["a PASS row is in the log"]
+    return ["no PASS recorded"]
+
+
+def drill_refusal(log, text):
+    """The drill's own output names the refusal: the 'apply:' line it echoes and the FAIL row it writes."""
+    if not log.strip():
+        return ["unreadable: empty log"]
+    if not text:
+        return ["unreadable: no text to look for"]
+    if not any(l.startswith("apply: ") and text in l for l in log.splitlines()):
+        return ["no apply: line names %r" % text]
+    fails = [rest for _, rest in row_lines(log, "FAIL") if rest.strip().startswith("apply refused:")]
+    if not fails:
+        return ["no FAIL row says 'apply refused:'"]
+    if not any(text in r for r in fails):
+        return ["the FAIL row does not name %r" % text]
+    return ["refusal named in the apply output and the FAIL row"]
+
+
+def drill_unrecorded(log, db, bucket):
+    """The restore PASSED, the register write was refused, nothing was recorded, and the drill says so."""
+    if not log.strip():
+        return ["unreadable: empty log"]
+    if recorded_objects(log):
+        return ["a register object was recorded"]
+    m = re.search(r"^register: NOT RECORDED, so this drill FAILS whatever its verdict \(([A-Z]+)\): (.*)$", log, re.M)
+    if not m:
+        return ["no NOT RECORDED line"]
+    if m.group(1) != "PASS":
+        return ["the restore's own verdict was %s, so the planted fault is not the only failure" % m.group(1)]
+    if not row_lines(log, "PASS"):
+        return ["no PASS row before the NOT RECORDED line"]
+    want = "write of s3://%s/%s/" % (bucket, db)
+    if want not in m.group(2) or "refused" not in m.group(2):
+        return ["the refusal does not read %r ... refused: %s" % (want, m.group(2)[:80])]
+    return ["restore PASS, register write refused, nothing recorded"]
+
+
+def absent(text, kind, name):
+    items = items_of(load(text))
+    if items is None:
+        return ["unreadable: not a list"]
+    for i in items:
+        if isinstance(i, dict) and get(i, "metadata", "name") == name and (not i.get("kind") or i.get("kind") == kind):
+            return ["present"]
+    return ["absent"]
+
+
+def quota_enforced(text, name, key):
+    doc = load(text)
+    if not isinstance(doc, dict) or doc.get("kind") != "ResourceQuota":
+        return ["unreadable: not a ResourceQuota"]
+    if get(doc, "metadata", "name") != name:
+        return ["the quota is %s, not %s" % (get(doc, "metadata", "name"), name)]
+    spec = get(doc, "spec", "hard") or {}
+    if key not in spec:
+        return ["the quota does not limit %s" % key]
+    hard = get(doc, "status", "hard") or {}
+    used = get(doc, "status", "used") or {}
+    if key not in hard or key not in used:
+        return ["not enforced yet: the quota controller has not counted %s" % key]
+    return ["enforced"]
+
+
+def find_rule(text, group, alert):
+    """(rule, problem): the alerting rule in the named group of Prometheus's /api/v1/rules answer."""
+    doc = load(text)
+    groups = get(doc, "data", "groups")
+    if not isinstance(doc, dict) or doc.get("status") != "success" or not isinstance(groups, list):
+        return None, "unreadable: not a Prometheus rules answer"
+    for g in groups:
+        if isinstance(g, dict) and g.get("name") == group:
+            for r in g.get("rules") or []:
+                if isinstance(r, dict) and r.get("name") == alert and r.get("type") == "alerting":
+                    return r, None
+    return None, "rule not loaded: no alert %s in group %s" % (alert, group)
+
+
+def alert_rule(text, group, alert, want_for):
+    r, problem = find_rule(text, group, alert)
+    if problem:
+        return [problem]
+    if r.get("health") != "ok":
+        return ["rule unhealthy: %s" % (r.get("lastError") or r.get("health") or "no health")]
+    try:
+        got = float(r.get("duration"))
+    except (TypeError, ValueError):
+        return ["rule has no for: duration"]
+    if got != float(want_for):
+        return ["for: is %ds, not %ds" % (got, float(want_for))]
+    return ["loaded, healthy, for %ds" % got]
+
+
+def alert_state(text, group, alert):
+    r, problem = find_rule(text, group, alert)
+    if problem:
+        return [problem]
+    st = r.get("state")
+    if st not in ("inactive", "pending", "firing"):
+        return ["unreadable: rule state is %s" % st]
+    return [st]
+
+
+def job_with_env(text, container, env, value, name):
+    """The Job a CronJob would make (kubectl create job --from=... --dry-run=client -o json), with one plain env value
+    replaced and a name of our own. Anything that is not exactly that is 'cannot build', so a chart change that moves
+    the setting is a red row and not a fault that was never planted."""
+    doc = load(text)
+    if not isinstance(doc, dict) or doc.get("kind") != "Job":
+        return ["cannot build: not a Job"]
+    cs = get(doc, "spec", "template", "spec", "containers")
+    if not isinstance(cs, list):
+        return ["cannot build: the Job has no containers"]
+    for c in cs:
+        if isinstance(c, dict) and c.get("name") == container:
+            for e in c.get("env") or []:
+                if isinstance(e, dict) and e.get("name") == env:
+                    if "value" not in e:
+                        return ["cannot build: %s in container %s is not a plain value" % (env, container)]
+                    e["value"] = value
+                    meta = doc.setdefault("metadata", {})
+                    meta["name"] = name
+                    for k in ("creationTimestamp", "resourceVersion", "uid", "selfLink", "managedFields"):
+                        meta.pop(k, None)
+                    doc.pop("status", None)
+                    (doc.get("spec") or {}).pop("selector", None)
+                    return [json.dumps(doc, separators=(",", ":"))]
+            return ["cannot build: container %s has no env %s" % (container, env)]
+    return ["cannot build: no container named %s" % container]
+
+
 def main(argv):
     if len(argv) < 2:
         sys.stderr.write(__doc__)
@@ -279,6 +459,24 @@ def main(argv):
             out = migrations_complete(text, opts["job"])
         elif cmd == "migrations-owner":
             out = migrations_owner(text, opts["job"])
+        elif cmd == "job-not-complete":
+            out = job_not_complete(text)
+        elif cmd == "drill-no-pass":
+            out = drill_no_pass(text, opts.get("allow-row", "no"))
+        elif cmd == "drill-refusal":
+            out = drill_refusal(text, opts["text"])
+        elif cmd == "drill-unrecorded":
+            out = drill_unrecorded(text, opts["db"], opts["bucket"])
+        elif cmd == "absent":
+            out = absent(text, opts["kind"], opts["name"])
+        elif cmd == "quota-enforced":
+            out = quota_enforced(text, opts["name"], opts["key"])
+        elif cmd == "alert-rule":
+            out = alert_rule(text, opts["group"], opts["alert"], int(opts["for"]))
+        elif cmd == "alert-state":
+            out = alert_state(text, opts["group"], opts["alert"])
+        elif cmd == "job-with-env":
+            out = job_with_env(text, opts["container"], opts["env"], opts["value"], opts["name"])
         else:
             sys.stderr.write("p09-recovery: unknown subcommand %s\n" % cmd)
             return 2
