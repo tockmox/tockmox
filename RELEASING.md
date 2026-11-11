@@ -232,8 +232,11 @@ cutoff.
 
 1. **Verify.** Your own git derives the head of `train/X.Y.Z`; the script does
    not take a SHA from the packet. The head is the SHA the lab tested, or
-   differs from it by one text-only commit that `ci` ran green on. It refuses
-   any diff in the train that touches `.gitsigners`, `SECURITY.md`,
+   differs from it by one text-only commit that `ci` ran green on. It reads
+   the lab's results file and refuses unless its outcome is READY: NOT READY,
+   a missing outcome and an empty one all stop the morning before anything is
+   merged, pushed, signed or published. It also refuses any diff in the
+   train that touches `.gitsigners`, `SECURITY.md`,
    `docs/deployment/verify.md`, `.github/**`, `renovate.json5` or the release
    tools.
 2. Merge the `tockmox-site-template` re-pin PR
