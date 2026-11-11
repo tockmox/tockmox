@@ -22,6 +22,9 @@
 #   throwaway-cluster.sh offsite-repo DIR ... create this VM's off-site repository; what the
 #                                     installer needs to copy to it goes into DIR
 #   throwaway-cluster.sh offsite-reach DIR ... prove the guest reaches that forge
+#   throwaway-cluster.sh publish NAME PORT ... publish the guest's PORT on the hypervisor's nodes as
+#                                     the NodePort Service ${VM_NAME}-NAME; prints host:nodePort
+#   throwaway-cluster.sh guard-file ... print where publish leaves its disposable-namespace voucher
 #
 # MicroOS images only (provision/profiles/microos.sh):
 #
@@ -344,6 +347,9 @@ fi
 # because `--context=` with an empty value silently means the current context.
 
 KUBECONFIG_OUT="${WORKDIR}/${VM_NAME}.kubeconfig"
+# What `publish` leaves for site-repo-server.sh up --writable: proof that this script's
+# disposable-namespace refusal (above) passed for this VM. destroy removes it.
+guard_path() { printf '%s' "${WORKDIR}/${VM_NAME}.writable-guard"; }
 SSH_KEY="${WORKDIR}/${VM_NAME}.id_ed25519"
 SSH_USER="${TOCKMOX_VM_USER:-tockmox}"
 
@@ -533,6 +539,91 @@ publish_kubeconfig() {
   KUBECONFIG="$KUBECONFIG_OUT" kubectl config set-cluster "$cluster" \
     --server="https://${host}:${port}" --insecure-skip-tls-verify=true >/dev/null
   # ctx-exempt-end
+}
+
+# ---- publishing a further guest port: publish NAME PORT --------------------
+# The API NodePort above gives the harness a way IN to the guest for the kubeconfig. The p09
+# lane's external route needs a second one: a git daemon inside the guest that the
+# workstation PUSHES to. `publish git 30418` makes the Service ${VM_NAME}-git, a NodePort
+# whose selector is the VM (the same selector as ${API_SVC}) and whose targetPort is the
+# guest's own NodePort, and prints host:nodePort. Both the workstation and the guest then
+# use git://host:nodePort/... as ONE URL: the workstation reaches it through the Service,
+# and the guest reaches its own published address by hairpin (site-repo-server.sh reach
+# asserts that; it is not assumed here).
+#
+# What it touches: one Service named after the VM, labelled like ${API_SVC}, so destroy's
+# `delete_owned svc` and sweep (which calls destroy) remove it with the VM; and one file in
+# WORKDIR. Needs the pod network (masquerade): on a routable segment the guest has its own
+# address and there is nothing to publish.
+publish() {
+  local name="${1:-}" port="${2:-}" svc np host gctx deadline guard
+  case "$name" in
+    ""|*[!a-z0-9-]*|-*|*-) echo "REFUSING: publish needs a NAME of lowercase letters, digits and dashes, got '${name}'" >&2; exit 2 ;;
+  esac
+  if [ "$name" = api ]; then
+    echo "REFUSING: publish: the name 'api' is the guest API's Service (${API_SVC})" >&2; exit 2
+  fi
+  case "$port" in ""|*[!0-9]*) echo "REFUSING: publish needs the guest PORT as a number, got '${port}'" >&2; exit 2 ;; esac
+  if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+    echo "REFUSING: publish: PORT ${port} is not 1 to 65535" >&2; exit 2
+  fi
+  svc="${VM_NAME}-${name}"
+  if [ "${#svc}" -gt 63 ]; then
+    echo "REFUSING: publish: the Service name ${svc} is longer than 63 characters" >&2; exit 2
+  fi
+  if [ "$NETWORK" != pod ]; then
+    echo "REFUSING: publish: TOCKMOX_VM_NETWORK=${NETWORK}; only the pod network masquerades the guest and needs a published port" >&2; exit 2
+  fi
+  gctx="$(guest_context)"
+  if [ -z "$gctx" ]; then
+    echo "REFUSING: publish: no guest kubeconfig at ${KUBECONFIG_OUT}; run create first" >&2; exit 2
+  fi
+  if ! kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" get vm "$VM_NAME" -o name >/dev/null 2>&1; then
+    echo "REFUSING: publish: ${NS}/${VM_NAME} does not exist, so a Service selecting it would be an orphan" >&2; exit 2
+  fi
+  kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" apply -f - >/dev/null <<YAML || { echo "publish: FAILED to apply ${NS}/${svc}" >&2; exit 1; }
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${svc}
+  namespace: ${NS}
+  labels:
+    tockmox.com/harness: executed-docs
+    tockmox.com/blast-radius: disposable
+spec:
+  type: NodePort
+  selector:
+    vm.kubevirt.io/name: ${VM_NAME}
+  ports:
+    - name: ${name}
+      port: ${port}
+      targetPort: ${port}
+      protocol: TCP
+YAML
+  np=""
+  deadline=$(( $(date +%s) + 60 ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    np="$(kubectl --context="$TOCKMOX_SUBSTRATE_CONTEXT" -n "$NS" get svc "$svc" -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || true)"
+    [ -z "$np" ] || break
+    sleep 2
+  done
+  if [ -z "$np" ]; then
+    echo "REFUSING: publish: ${NS}/${svc} was never assigned a nodePort" >&2; exit 1
+  fi
+  host="$(nodeport_host)"
+  if [ -z "$host" ]; then
+    echo "REFUSING: publish: could not derive a NodePort host; set TOCKMOX_NODEPORT_HOST to the address of a node" >&2; exit 1
+  fi
+  case "$host" in
+    *:*) echo "REFUSING: publish: the node address '${host}' holds a colon (IPv6), which a git:// URL needs in brackets; set TOCKMOX_NODEPORT_HOST to an IPv4 address or a name" >&2; exit 1 ;;
+  esac
+  guard="$(guard_path)"
+  ( umask 077
+    printf 'disposable-namespace=%s\nvm=%s\nguest-context=%s\n' "$NS" "$VM_NAME" "$gctx" > "${guard}.tmp" \
+      && mv "${guard}.tmp" "$guard" ) \
+    || { echo "publish: FAILED to write ${guard}" >&2; exit 1; }
+  echo "  guest port ${port} published as ${NS}/${svc}, nodePort ${np}" >&2
+  printf '%s:%s\n' "$host" "$np"
 }
 
 # The context name inside the GUEST kubeconfig this script wrote. That file holds
@@ -2226,7 +2317,7 @@ destroy() {
   # The MicroOS lane's beacons and the uninstall ConfigMap: evidence, not
   # credentials, but this run's, so they die with it.
   delete_owned configmap -l tockmox.com/harness=executed-docs 2>/dev/null || true
-  rm -f "$KUBECONFIG_OUT" "${KUBECONFIG_OUT}.tmp" "$SSH_KEY" "${SSH_KEY}.pub"
+  rm -f "$KUBECONFIG_OUT" "${KUBECONFIG_OUT}.tmp" "$SSH_KEY" "${SSH_KEY}.pub" "$(guard_path)" "$(guard_path).tmp"
   # Assert the teardown actually tore down. "delete returned 0" is not evidence.
   local vmleft svcleft secleft snapleft others snaperrf
   snaperrf="$(mktemp)"
@@ -2542,7 +2633,7 @@ snapshots() {
 # refuse before any verb that reaches the hypervisor. `kubeconfig` only
 # prints a path and calls nothing.
 case "${1:-}" in
-  kubeconfig|keep-until) ;;
+  kubeconfig|keep-until|guard-file) ;;
   *) : "${TOCKMOX_SUBSTRATE_CONTEXT:?TOCKMOX_SUBSTRATE_CONTEXT is empty: export the kubectl context of the hypervisor cluster that hosts the throwaway VM}" ;;
 esac
 
@@ -2558,6 +2649,8 @@ case "${1:-}" in
   snapshots) snapshots ;;
   ip)      vm_ip; echo ;;
   kubeconfig) printf '%s\n' "$KUBECONFIG_OUT" ;;
+  guard-file) guard_path; echo ;;
+  publish) shift; publish "${1:-}" "${2:-}" ;;
   keep-until) keep_until_value; echo ;;
   await)   await_guest ;;
   kit-store) shift; kit_store "${1:-}" "${2:-}" ;;
@@ -2568,5 +2661,5 @@ case "${1:-}" in
   mirror-proof) mirror_proof ;;
   uninstall-proof) uninstall_proof ;;
   evidence) evidence ;;
-  *) echo "usage: $0 {create|await|exec CMD|reboot|destroy|reset --every-vm-in-NS|sweep PREFIX MINUTES|snapshot RUNG|restore RUNG|snapshots|ip|kubeconfig|kit-store KIT IDENTITY|kit DIR|offsite-check|offsite-repo DIR|offsite-reach DIR|uninstall-proof|evidence|mirror-proof}" >&2; exit 2 ;;
+  *) echo "usage: $0 {create|await|exec CMD|reboot|destroy|reset --every-vm-in-NS|sweep PREFIX MINUTES|snapshot RUNG|restore RUNG|snapshots|ip|kubeconfig|publish NAME PORT|guard-file|kit-store KIT IDENTITY|kit DIR|offsite-check|offsite-repo DIR|offsite-reach DIR|uninstall-proof|evidence|mirror-proof}" >&2; exit 2 ;;
 esac
