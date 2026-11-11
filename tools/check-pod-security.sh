@@ -31,8 +31,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-command -v helm >/dev/null 2>&1 || { echo "check-pod-security: helm missing" >&2; exit 2; }
-python3 -c 'import yaml' 2>/dev/null || { echo "check-pod-security: python3 PyYAML missing" >&2; exit 2; }
+command -v helm >/dev/null 2>&1 || { echo "check-pod-security: helm missing" >&2; echo "SKIPPED: helm is not on PATH" >&2; exit 2; }
+python3 -c 'import yaml' 2>/dev/null || { echo "check-pod-security: python3 PyYAML missing" >&2; echo "SKIPPED: python3 has no PyYAML" >&2; exit 2; }
 
 echo "-- rules (selftest)"
 python3 tools/lib/psa_eval.py --selftest | grep -v '^  ok' || true

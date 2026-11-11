@@ -56,8 +56,8 @@ while [ $# -gt 0 ]; do
     *) echo "check-no-published-images: unknown argument $1" >&2; exit 2 ;;
   esac
 done
-command -v python3 >/dev/null 2>&1 || { echo "check-no-published-images: python3 not on PATH" >&2; exit 2; }
-python3 -c 'import yaml' 2>/dev/null || { echo "check-no-published-images: python3 PyYAML missing" >&2; exit 2; }
+command -v python3 >/dev/null 2>&1 || { echo "check-no-published-images: python3 not on PATH" >&2; echo "SKIPPED: python3 is not on PATH" >&2; exit 2; }
+python3 -c 'import yaml' 2>/dev/null || { echo "check-no-published-images: python3 PyYAML missing" >&2; echo "SKIPPED: python3 has no PyYAML" >&2; exit 2; }
 
 scan() {
   # $1 = workflows dir; $2 = composite actions dir (may be absent)

@@ -46,10 +46,10 @@ HELM="${HELM:-helm}"
 PY="${PYTHON:-python3}"
 PARSER="tools/lib/ingress_tls.py"
 
-command -v "$HELM" >/dev/null 2>&1 || { echo "check-ingress-tls: SKIPPED ... no helm on PATH"; exit 2; }
-command -v "$PY"   >/dev/null 2>&1 || { echo "check-ingress-tls: SKIPPED ... no python3 on PATH"; exit 2; }
-"$PY" -c "import yaml" 2>/dev/null || { echo "check-ingress-tls: SKIPPED ... PyYAML not installed"; exit 2; }
-[ -f "$PARSER" ] || { echo "check-ingress-tls: SKIPPED ... $PARSER is missing"; exit 2; }
+command -v "$HELM" >/dev/null 2>&1 || { echo "check-ingress-tls: SKIPPED ... no helm on PATH"; echo "SKIPPED: $HELM is not on PATH"; exit 2; }
+command -v "$PY"   >/dev/null 2>&1 || { echo "check-ingress-tls: SKIPPED ... no python3 on PATH"; echo "SKIPPED: $PY is not on PATH"; exit 2; }
+"$PY" -c "import yaml" 2>/dev/null || { echo "check-ingress-tls: SKIPPED ... PyYAML not installed"; echo "SKIPPED: python3 has no PyYAML"; exit 2; }
+[ -f "$PARSER" ] || { echo "check-ingress-tls: ERROR ... $PARSER is missing from the tree"; exit 2; }
 
 CI_VALUES="ci/values.yaml"
 ALL_ON="ci/values-all-on.yaml"

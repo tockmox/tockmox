@@ -58,8 +58,8 @@
 # shellcheck disable=SC2016  # the stubs' case patterns and the sed mutations match shell text literally, on purpose
 set -euo pipefail
 cd "$(dirname "$0")/.."
-for c in helm python3 jq; do command -v "$c" >/dev/null 2>&1 || { echo "check-notify-and-drill: $c missing" >&2; exit 2; }; done
-python3 -c 'import yaml' 2>/dev/null || { echo "check-notify-and-drill: python3 PyYAML missing" >&2; exit 2; }
+for c in helm python3 jq; do command -v "$c" >/dev/null 2>&1 || { echo "check-notify-and-drill: $c missing" >&2; echo "SKIPPED: $c is not on PATH" >&2; exit 2; }; done
+python3 -c 'import yaml' 2>/dev/null || { echo "check-notify-and-drill: python3 PyYAML missing" >&2; echo "SKIPPED: python3 has no PyYAML" >&2; exit 2; }
 
 T=$(mktemp -d); trap 'kill $(jobs -p) 2>/dev/null || true; rm -rf "$T"' EXIT
 
@@ -182,7 +182,7 @@ mkdir -p "$T/bin"
 # green. On a host without one, the stub directory gets a sha256sum that is shasum -a 256: same digest, same
 # "<digest>  <file>" output, which is all the writer reads (cut -d' ' -f1). The writer itself is not touched.
 if ! command -v sha256sum >/dev/null 2>&1; then
-  command -v shasum >/dev/null 2>&1 || { echo "check-notify-and-drill: neither sha256sum nor shasum on PATH" >&2; exit 2; }
+  command -v shasum >/dev/null 2>&1 || { echo "check-notify-and-drill: neither sha256sum nor shasum on PATH" >&2; echo "SKIPPED: shasum is not on PATH" >&2; exit 2; }
   printf '#!/bin/sh\nexec shasum -a 256 "$@"\n' > "$T/bin/sha256sum"; chmod +x "$T/bin/sha256sum"
 fi
 cat > "$T/bin/kubectl" <<'SH'

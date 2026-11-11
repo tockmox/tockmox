@@ -36,8 +36,8 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 ROOT_DEFAULT="$(pwd)"
 
-command -v python3 >/dev/null 2>&1 || { echo "check-airgap-manifest: python3 missing" >&2; exit 2; }
-python3 -c 'import yaml' 2>/dev/null || { echo "check-airgap-manifest: python3 PyYAML missing" >&2; exit 2; }
+command -v python3 >/dev/null 2>&1 || { echo "check-airgap-manifest: python3 missing" >&2; echo "SKIPPED: python3 is not on PATH" >&2; exit 2; }
+python3 -c 'import yaml' 2>/dev/null || { echo "check-airgap-manifest: python3 PyYAML missing" >&2; echo "SKIPPED: python3 has no PyYAML" >&2; exit 2; }
 
 # run ROOT MODE : MODE is check or write. Findings on stdout; 1 on any.
 run() {

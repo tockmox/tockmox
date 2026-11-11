@@ -188,7 +188,7 @@ def main(argv):
         if paths is None:
             # Exit 2, the repository's SKIPPED. Until this, an unpacked archive got a Python traceback and exit 1,
             # which reads as a defect in the tree. The scan set is what git tracks, so there is nothing to judge.
-            print(f"check-pipe-grep-q: SKIPPED: {root} is not a git checkout, and the scan set is what git tracks "
+            print(f"SKIPPED: {root} is not a git checkout, and the scan set is what git tracks "
                   "(clone the repository, or pass --root DIR to scan a directory)")
             return 2
     found = scan(paths)

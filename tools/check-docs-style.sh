@@ -107,6 +107,7 @@ esac
 command -v python3 >/dev/null 2>&1 || {
   echo "check-docs-style: needs python3 on PATH." >&2
   echo "  macOS: xcode-select --install, or brew install python" >&2
+  echo "SKIPPED: python3 is not on PATH" >&2
   exit 2
 }
 

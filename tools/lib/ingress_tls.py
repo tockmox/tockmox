@@ -31,6 +31,7 @@ try:
     import yaml
 except ImportError:
     sys.stderr.write("ingress_tls: PyYAML is required\n")
+    sys.stderr.write("SKIPPED: python3 has no PyYAML\n")
     sys.exit(2)
 
 

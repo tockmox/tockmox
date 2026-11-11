@@ -46,7 +46,7 @@
 # Exit 0 clean, 1 a known-bad digest or a list that cannot be trusted. Needs python3 only. Bash 3.2 compatible.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-command -v python3 >/dev/null 2>&1 || { echo "check-litellm-compromise: python3 missing" >&2; exit 2; }
+command -v python3 >/dev/null 2>&1 || { echo "check-litellm-compromise: python3 missing" >&2; echo "SKIPPED: python3 is not on PATH" >&2; exit 2; }
 self="$(pwd)/tools/check-litellm-compromise.sh"
 
 scan() { # scan <root>

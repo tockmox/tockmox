@@ -58,7 +58,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PY="${PYTHON:-python3}"
-command -v "$PY" >/dev/null 2>&1 || { echo "check-dashboard-panels: SKIPPED ... no python3 on PATH"; exit 2; }
+command -v "$PY" >/dev/null 2>&1 || { echo "check-dashboard-panels: SKIPPED ... no python3 on PATH"; echo "SKIPPED: $PY is not on PATH"; exit 2; }
 
 # The checker. Prints one line per violation to stdout, a summary line last,
 # and exits 1 on any violation or on zero panels examined.

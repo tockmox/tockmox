@@ -15,8 +15,8 @@
 # tests/policy-gate/run.sh (.github/workflows/policy-gate.yaml).
 set -uo pipefail
 cd "$(dirname "$0")/.."
-command -v helm >/dev/null 2>&1 || { echo "check-policy-gate: helm not on PATH; refusing rather than guessing"; exit 2; }
-python3 -c 'import yaml' 2>/dev/null || { echo "check-policy-gate: python3 PyYAML missing"; exit 2; }
+command -v helm >/dev/null 2>&1 || { echo "check-policy-gate: helm not on PATH; refusing rather than guessing"; echo "SKIPPED: helm is not on PATH"; exit 2; }
+python3 -c 'import yaml' 2>/dev/null || { echo "check-policy-gate: python3 PyYAML missing"; echo "SKIPPED: python3 has no PyYAML"; exit 2; }
 
 CHART=charts/tockmox-ai; BASE=(-f ci/values.yaml); FX=(-f ci/values-policy-gate.yaml)
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT

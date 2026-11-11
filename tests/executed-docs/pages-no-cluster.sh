@@ -590,18 +590,20 @@ preflight() {
   if [ -n "$miss" ]; then
     # shellcheck disable=SC2086  # word splitting of the list is the point
     echo "pages-no-cluster.sh: cannot run, missing:$(printf '%s\n' $miss | sort -u | tr '\n' ' ')" >&2
-    echo "  (exit 2 is 'cannot run', not a pass; tools/check-all.sh reports it as skipped)" >&2
+    echo "  (exit 2 with a SKIPPED: line is 'cannot run', not a pass; tools/check-all.sh reports it as skipped)" >&2
+    # shellcheck disable=SC2086  # word splitting of the list is the point
+    printf 'SKIPPED: tools the pages need are missing:%s\n' "$(printf '%s\n' $miss | sort -u | tr '\n' ' ')" >&2
     return 2
   fi
   case " $SELECTED " in
-    *" platform-management "*) python3 -I -c 'import yaml' 2>/dev/null || { echo "pages-no-cluster.sh: cannot run, PyYAML is not importable (python3 -m pip install pyyaml)" >&2; return 2; } ;;
+    *" platform-management "*) python3 -I -c 'import yaml' 2>/dev/null || { echo "pages-no-cluster.sh: cannot run, PyYAML is not importable (python3 -m pip install pyyaml)" >&2; echo "SKIPPED: python3 has no PyYAML" >&2; return 2; } ;;
   esac
   case " $SELECTED " in
     *" customising "*|*" capabilities "*|*" configuration "*)
       # The renders need every chart's dependencies. Without them helm says
       # "found in Chart.yaml, but missing in charts/", which reads like a page defect.
       ls "${ROOT}"/charts/tockmox-observability/charts/*.tgz >/dev/null 2>&1 \
-        || { echo "pages-no-cluster.sh: cannot run, chart dependencies are not fetched (bash tools/helm-deps.sh)" >&2; return 2; } ;;
+        || { echo "pages-no-cluster.sh: cannot run, chart dependencies are not fetched (bash tools/helm-deps.sh)" >&2; echo "SKIPPED: chart dependencies are not fetched" >&2; return 2; } ;;
   esac
   return 0
 }

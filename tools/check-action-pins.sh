@@ -25,7 +25,7 @@
 #     half is a mutated hash making the CI job fail.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-command -v python3 >/dev/null 2>&1 || { echo "check-action-pins: python3 missing" >&2; exit 2; }
+command -v python3 >/dev/null 2>&1 || { echo "check-action-pins: python3 missing" >&2; echo "SKIPPED: python3 is not on PATH" >&2; exit 2; }
 self="$(pwd)/tools/check-action-pins.sh"
 
 scan() {

@@ -253,12 +253,14 @@ fi
 if ! command -v git >/dev/null 2>&1; then
   echo "check-no-site-specifics: REFUSING ... git is not on PATH, so the scan set"
   echo "  cannot be derived from the tracked tree. Run this in a checkout."
+  echo "SKIPPED: git is not on PATH"
   exit 2
 fi
 tracked=$(git --no-optional-locks ls-files 2>/dev/null | awk -F/ '{print $1}' | sort -u)
 if [ -z "$tracked" ]; then
   echo "check-no-site-specifics: REFUSING ... git tracked no files here. A pass"
   echo "  from an empty scan set would be a claim of coverage, not coverage."
+  echo "SKIPPED: git tracks no files here (not a checkout)"
   exit 2
 fi
 

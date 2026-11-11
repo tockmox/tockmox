@@ -42,6 +42,7 @@ try:
     import yaml
 except ImportError:  # the wrapper turns this into exit 2 (skipped)
     print("psa_eval: PyYAML missing", file=sys.stderr)
+    print("SKIPPED: python3 has no PyYAML", file=sys.stderr)
     sys.exit(2)
 
 LEVELS = ["privileged", "baseline", "restricted"]

@@ -60,6 +60,7 @@ try:
     import yaml
 except ImportError:
     print("check-actions: PyYAML missing", file=sys.stderr)
+    print("SKIPPED: python3 has no PyYAML", file=sys.stderr)
     sys.exit(2)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -578,6 +579,7 @@ def selftest(docs) -> int:
 def main():
     if subprocess.run(["helm", "version"], capture_output=True).returncode != 0:
         print("check-actions: helm missing", file=sys.stderr)
+        print("SKIPPED: helm is not on PATH", file=sys.stderr)
         return 2
     rc, on = render(ON)
     if rc:

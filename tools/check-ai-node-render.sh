@@ -41,6 +41,7 @@ if ! ( cd "$root/tockmox-ui" && "$py" -c 'import yaml, jsonschema, app.ai_nodes'
   echo "check-ai-node-render: SKIPPED: $py cannot import the renderer (tockmox-ui/app/ai_nodes.py) and its packages."
   echo "  tools/dev-env.sh   (builds build/gates-venv from tools/requirements-gates.txt), then:"
   echo "  TOCKMOX_UI_PYTHON=build/gates-venv/bin/python ./tools/check-ai-node-render.sh"
+  echo "SKIPPED: $py cannot import the renderer and its packages"
   exit 2
 fi
 FIXTURE="tockmox-ui/tests/fixtures/ai_nodes/site"

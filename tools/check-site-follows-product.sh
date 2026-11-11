@@ -60,7 +60,7 @@ render() { # render <out> [helm args]; the chart under test is \$CH
 }
 
 if [ "${1:-}" != "--selftest" ]; then
-  command -v helm >/dev/null || { echo "check-site-follows-product: helm missing" >&2; exit 2; }
+  command -v helm >/dev/null || { echo "check-site-follows-product: helm missing" >&2; echo "SKIPPED: helm is not on PATH" >&2; exit 2; }
 
   # ---- S1 ----
   render "$tmp/s1.yaml" --set sso.enabled=false --set global.certIssuer=private-ca-issuer \

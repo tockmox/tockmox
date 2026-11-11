@@ -62,6 +62,7 @@ if [ "${BASH_VERSINFO[0]:-0}" -lt 4 ]; then
   echo "check-trust-wiring: needs bash 4.0+ for associative arrays; found ${BASH_VERSION:-unknown}." >&2
   echo "  macOS ships bash 3.2 as /bin/bash. Install a newer one and run it explicitly:" >&2
   echo "    brew install bash && /opt/homebrew/bin/bash tools/check-trust-wiring.sh" >&2
+  echo "SKIPPED: bash 4.0 or newer is needed (found ${BASH_VERSION:-unknown})" >&2
   exit 2
 fi
 

@@ -130,7 +130,7 @@ if [ "${1:-}" = "--selftest" ]; then selftest; exit $?; fi
 if [ "${1:-}" = "--e2e" ]; then
   echo "simulation"
   bash "$AI/tests/e2e/run.sh"; rc=$?
-  if [ "$rc" = 2 ]; then echo "check-ai-node: the simulation needs root, Linux and unshare -m" >&2; exit 2; fi
+  if [ "$rc" = 2 ]; then echo "check-ai-node: the simulation needs root, Linux and unshare -m" >&2; echo "SKIPPED: the simulation needs root, Linux and unshare -m" >&2; exit 2; fi
   [ "$rc" = 0 ] && echo "check-ai-node: the playbook converges, twice, against the macOS shims" || echo "check-ai-node: the simulation FAILED" >&2
   exit "$rc"
 fi
@@ -140,8 +140,8 @@ missing=""
 for c in python3 shellcheck ansible-playbook ansible-lint yamllint git ssh-keygen shasum; do
   command -v "$c" >/dev/null 2>&1 || missing="$missing $c"
 done
-if [ -n "$missing" ]; then echo "check-ai-node: missing tools:$missing" >&2; exit 2; fi
-python3 -c 'import yaml, jinja2' 2>/dev/null || { echo "check-ai-node: python3 needs PyYAML and Jinja2 (they come with ansible)" >&2; exit 2; }
+if [ -n "$missing" ]; then echo "check-ai-node: missing tools:$missing" >&2; echo "SKIPPED: missing tools:$missing" >&2; exit 2; fi
+python3 -c 'import yaml, jinja2' 2>/dev/null || { echo "check-ai-node: python3 needs PyYAML and Jinja2 (they come with ansible)" >&2; echo "SKIPPED: python3 has no PyYAML or Jinja2" >&2; exit 2; }
 
 
 # --------------------------------------------------------------------- shellcheck and portability

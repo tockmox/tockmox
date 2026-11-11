@@ -46,8 +46,8 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 
-command -v python3 >/dev/null 2>&1 || { echo "check-addon-manifest: python3 missing" >&2; exit 2; }
-python3 -c 'import yaml' 2>/dev/null || { echo "check-addon-manifest: python3 PyYAML missing" >&2; exit 2; }
+command -v python3 >/dev/null 2>&1 || { echo "check-addon-manifest: python3 missing" >&2; echo "SKIPPED: python3 is not on PATH" >&2; exit 2; }
+python3 -c 'import yaml' 2>/dev/null || { echo "check-addon-manifest: python3 PyYAML missing" >&2; echo "SKIPPED: python3 has no PyYAML" >&2; exit 2; }
 HAVE_HELM=0
 command -v helm >/dev/null 2>&1 && HAVE_HELM=1
 
@@ -345,6 +345,7 @@ for n in names:
         print(f"  ok   {n}: manifest, chart agreement, settings schema, no code in the admin origin, operations contract against the render")
 if skipped:
     print("check-addon-manifest: INCOMPLETE ... the render checks need helm; exit 2, not a pass")
+    print("SKIPPED: helm is not on PATH, so the render checks did not run")
     sys.exit(2)
 print(f"check-addon-manifest: ok ({len(names)} add-on(s))")
 PY
@@ -356,7 +357,7 @@ if [ "${1:-}" != "--selftest" ]; then
 fi
 
 # --- selftest: every mutation must turn the gate red for its own reason; the untouched copy green ---
-[ "$HAVE_HELM" -eq 1 ] || { echo "check-addon-manifest --selftest: helm missing" >&2; exit 2; }
+[ "$HAVE_HELM" -eq 1 ] || { echo "check-addon-manifest --selftest: helm missing" >&2; echo "SKIPPED: helm is not on PATH" >&2; exit 2; }
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 fail=0
 fresh() { # fresh NAME : a copy of the real add-on tree to mutate

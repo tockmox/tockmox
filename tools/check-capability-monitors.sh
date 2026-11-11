@@ -45,9 +45,9 @@ cd "$(dirname "$0")/.."
 LAYERS="crds platform policy identity observability exporters ai devops selfcheck"
 KINDS='ServiceMonitor|PodMonitor|PrometheusRule|ScrapeConfig|Probe'
 PROFILE_DEFAULT=profiles/observability-off.yaml
-command -v helm >/dev/null 2>&1 || { echo "check-capability-monitors: helm not on PATH" >&2; exit 2; }
-command -v python3 >/dev/null 2>&1 || { echo "check-capability-monitors: python3 not on PATH" >&2; exit 2; }
-python3 -c 'import yaml' 2>/dev/null || { echo "check-capability-monitors: python3 PyYAML missing" >&2; exit 2; }
+command -v helm >/dev/null 2>&1 || { echo "check-capability-monitors: helm not on PATH" >&2; echo "SKIPPED: helm is not on PATH" >&2; exit 2; }
+command -v python3 >/dev/null 2>&1 || { echo "check-capability-monitors: python3 not on PATH" >&2; echo "SKIPPED: python3 is not on PATH" >&2; exit 2; }
+python3 -c 'import yaml' 2>/dev/null || { echo "check-capability-monitors: python3 PyYAML missing" >&2; echo "SKIPPED: python3 has no PyYAML" >&2; exit 2; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
 # monitors <render-file>  ->  "<origin> <kind> <name>" per object. origin is `own`

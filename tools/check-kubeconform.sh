@@ -38,7 +38,7 @@ KC_FLAGS="-strict -summary -ignore-missing-schemas"
 # the vacuous-green refusal still fails a run that validated nothing.
 # Without it, every fetch fails offline and is an error, not a skip.
 if [ -n "${KUBECONFORM_SCHEMA_DIR:-}" ]; then
-  [ -d "$KUBECONFORM_SCHEMA_DIR" ] || { echo "  SKIPPED: KUBECONFORM_SCHEMA_DIR=$KUBECONFORM_SCHEMA_DIR is not a directory, so nothing can be validated"; exit 2; }
+  [ -d "$KUBECONFORM_SCHEMA_DIR" ] || { echo "SKIPPED: KUBECONFORM_SCHEMA_DIR=$KUBECONFORM_SCHEMA_DIR is not a directory, so nothing can be validated"; exit 2; }
   KC_FLAGS="$KC_FLAGS -schema-location $KUBECONFORM_SCHEMA_DIR/{{.NormalizedKubernetesVersion}}-standalone{{.StrictSuffix}}/{{.ResourceKind}}{{.KindSuffix}}.json"
 fi
 
@@ -68,7 +68,7 @@ need() {
   local t
   for t in "$@"; do
     if [ "$(tool_state "$t")" != ok ]; then
-      echo "  SKIPPED: $(tool_why "$t")"
+      echo "SKIPPED: $(tool_why "$t")"
       exit 2
     fi
   done

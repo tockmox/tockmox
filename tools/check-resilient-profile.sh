@@ -42,9 +42,9 @@ ROOT="$PWD"
 # shellcheck source=tools/lib/tool-runs.sh
 . tools/lib/tool-runs.sh
 for t in helm python3; do
-  if [ "$(tool_state "$t")" != ok ]; then echo "check-resilient-profile: SKIPPED ... $(tool_why "$t")" >&2; exit 2; fi
+  if [ "$(tool_state "$t")" != ok ]; then echo "check-resilient-profile: SKIPPED ... $(tool_why "$t")" >&2; echo "SKIPPED: $(tool_why "$t")" >&2; exit 2; fi
 done
-python3 -I -c 'import yaml' 2>/dev/null || { echo "check-resilient-profile: SKIPPED ... python3 -I has no PyYAML" >&2; exit 2; }
+python3 -I -c 'import yaml' 2>/dev/null || { echo "check-resilient-profile: SKIPPED ... python3 -I has no PyYAML" >&2; echo "SKIPPED: python3 has no PyYAML" >&2; exit 2; }
 
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 FAILS=0; NCHK=0

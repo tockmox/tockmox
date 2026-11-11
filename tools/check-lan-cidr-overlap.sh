@@ -32,7 +32,7 @@
 # strings.
 set -uo pipefail
 cd "$(dirname "$0")/.."
-command -v helm >/dev/null 2>&1 || { echo "check-lan-cidr-overlap: helm not on PATH" >&2; exit 2; }
+command -v helm >/dev/null 2>&1 || { echo "check-lan-cidr-overlap: helm not on PATH" >&2; echo "SKIPPED: helm is not on PATH" >&2; exit 2; }
 
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/lan-cidr.XXXXXX")"; trap 'rm -rf "$tmp"' EXIT
 fail=0
