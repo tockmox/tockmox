@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Fake helm for the full-run cases: `status` is true once `upgrade --install` has run for the release.
+S="${FAKE_STATE:?FAKE_STATE not set}"
+printf 'helm %s\n' "$*" >> "$S/calls.log"
+mkdir -p "$S/objs"
+case " $* " in
+  *" status "*)  [ -e "$S/helm-release" ] ; exit $? ;;
+  *" upgrade "*) : > "$S/helm-release"; exit 0 ;;
+esac
+echo "fake helm: unhandled: $*" >&2; exit 1

@@ -243,6 +243,68 @@ data:
           - permission: authentik_core.remove_user_from_group
             role: !KeyOf console-role
 {{- end }}
+{{- if eq ((.Values.sso.apps.forge | default dict).approverWatch) true }}
+  # The built-in forge's approvers watcher (install/forge-approver-watch.py), through one service
+  # account that can do exactly one thing here: see the admin group and its members. It is read by
+  # the watcher, which compares them with the forge's `approvers` team and tells a person (ruled
+  # 2026-11-04: detect and alert, nothing in the cluster can change the team).
+  #   globally   nothing: the role carries no global permission
+  #   on the admin group, that one object only: view_group
+  # Not add_user_to_group or remove_user_from_group, and nothing on any other group, user, flow,
+  # token or role, so a leaked token reads one group and changes nothing.
+  # THE TOKEN is minted by `tockmox-install.sh bootstrap-forge` into the Secret
+  # tockmox-forge-approver-watch in this namespace (FORGE_APPROVER_WATCH_TOKEN), before Argo CD
+  # installs this layer, and read here with `!Env [NAME, ""]`: an empty default, so a missing
+  # Secret fails THIS blueprint's token entry and never the discovery of the others (a bare
+  # `!Env` with nothing behind it stops every blueprint, see sso.apps.forge). Authentik reads the
+  # variable when its worker starts and does not re-apply a blueprint whose file is unchanged:
+  # on a site whose worker is already running, restart it once after the Secret first appears.
+  tockmox-forge-approver-watch.yaml: |
+    version: 1
+    metadata:
+      name: tockmox-forge-approver-watch
+      labels:
+        blueprints.goauthentik.io/description: "The built-in forge's approvers watcher: one service account that can see the admin group"
+    entries:
+      - model: authentik_rbac.role
+        id: watch-role
+        state: present
+        identifiers:
+          name: tockmox-forge-approver-watch
+      - model: authentik_core.user
+        id: watch-account
+        state: present
+        identifiers:
+          username: tockmox-forge-approver-watch
+        attrs:
+          name: Tockmox forge approvers watcher
+          type: service_account
+          path: goauthentik.io/service-accounts
+          is_active: true
+          roles:
+            - !KeyOf watch-role
+          attributes:
+            notes: "Reads the admin group's members for the forge approvers watcher. Managed by the tockmox-forge-approver-watch blueprint; changes made here are reverted."
+      - model: authentik_core.group
+        state: present
+        identifiers:
+          name: {{ .Values.sso.adminGroup }}
+        attrs:
+          is_superuser: false
+        permissions:
+          - permission: authentik_core.view_group
+            role: !KeyOf watch-role
+      - model: authentik_core.token
+        state: present
+        identifiers:
+          identifier: tockmox-forge-approver-watch
+        attrs:
+          user: !KeyOf watch-account
+          intent: api
+          expiring: false
+          description: "The forge approvers watcher; minted by bootstrap-forge"
+          key: !Env [FORGE_APPROVER_WATCH_TOKEN, ""]
+{{- end }}
 {{- if .Values.brand.enabled }}
   tockmox-branding.yaml: |
     version: 1

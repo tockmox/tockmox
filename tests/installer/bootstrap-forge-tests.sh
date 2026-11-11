@@ -327,3 +327,178 @@ os_run --offsite-git https://git.example.internal:8443/lab/site.git --offsite-gi
 assert_artifact "F35 a dry run plans the trust and allows the remote's host alone, without its port" \
   "echo $FS_STATUS; grep -c 'for git.example.internal in the forge.s push mirror and the copy job; the forge allows git.example.internal alone' '$D/out/stdout'" "$(printf '0\n1')"
 assert_artifact "F35 ... and writes nothing to the cluster" "fs_writes" "0"
+
+# F36-F47. The approvers watcher, run for real. Everything above is a refusal; these cases run the whole
+# installer against a stand-in cluster (lib/shims-run/kubectl and helm, lib/fake-kubectl.py) and a stand-in
+# forge (lib/forge-stub.py with ADMIN=1), and read back WHAT WAS MADE: the forge user and its one token with
+# its scopes, the two Secrets, the ConfigMap, the Deployment, the two NetworkPolicies and the site values.
+# The stand-in forge enforces a token the way the forge does (scope for the route, and the user must be able
+# to see the thing), so "the token can read the team and nothing else" is exercised, not asserted.
+#
+# WHAT THIS DOES NOT PROVE: that a real Forgejo 15 answers a read:organization token the way the stand-in
+# does, that Authentik lets the service account list its group, that the NetworkPolicies are enforced by a
+# real CNI, or that the PodMonitor is scraped. Those are lab items (docs/administration/site-forge.md).
+RUN_SHIMS="$HERE/lib/shims-run"
+FKUBE="$HERE/lib/fake-kubectl.py"
+WATCHER="tockmox-approver-watch"
+WNAME="tockmox-forge-approver-watch"     # the Deployment, and the Secrets' name in both namespaces
+fk_case() {  # name [with-identity]  ->  $D, a built-in-forge site whose values turn the forge on, an empty cluster
+  fs_case "$1"
+  [ "${2:-with-identity}" = with-identity ] && printf 'sso:\n  apps:\n    forge:\n      enabled: true\n' >> "$D/site/site/values/identity.yaml"
+  printf '\nsiteForge:\n  enabled: true\n' >> "$D/site/site/values/observability.yaml"
+  mkdir -p "$D/state/objs/_ns"; : > "$D/state/objs/_ns/argocd"
+}
+fk_run() {
+  set +e
+  ( cd "$D" && env PATH="$RUN_SHIMS:$REAL_PATH" FAKE_STATE="$D/state" TMPDIR="$D/tmp" NO_COLOR=1 \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null bash "$INSTALLER" bootstrap-forge \
+      --site "$D/site" --kit-out "$D/kits/k$FK_N" --passphrase-file "$D/inputs/pass" --sealing-key-backup "$D/inputs/seal.enc" \
+      "${FS_OK[@]}" "$@" ) >"$D/out/stdout" 2>"$D/out/stderr"
+  FS_STATUS=$?
+  set -e
+  FK_N=$((FK_N + 1))
+}
+FK_N=1
+fk_get()  { FAKE_STATE="$D/state" python3 "$FKUBE" @get "$@"; }                    # NS KIND NAME PATH
+fk_obj()  { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$D/state/objs/$1/$2/$3.json" "$4"; }
+fk_forge() { python3 -c 'import json,sys; st=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$D/state/forge/forge.json" "$1"; }
+fk_git() { PATH="$REAL_PATH" git --git-dir "$D/state/forge/tockmox/site.git" "$@"; }   # the run.sh git stub always fails
+fk_cluster() { { find "$D/state/objs" -type f ! -path '*/_ns/*' 2>/dev/null || true; } | wc -l | tr -d ' '; }
+fk_watch_sum() {  # one checksum over everything the watcher is made of, to compare two runs
+  { for f in "tockmox-forge/Secret/$WNAME" "tockmox-authentik/Secret/$WNAME" "tockmox-forge/ConfigMap/$WNAME-script" \
+             "tockmox-forge/Deployment/$WNAME" "tockmox-forge/NetworkPolicy/$WNAME" "tockmox-authentik/NetworkPolicy/$WNAME" \
+             "tockmox-forge/ServiceAccount/$WNAME"; do
+      cat "$D/state/objs/$f.json"; echo
+    done
+    fk_forge "st['tokens']['$WATCHER']"
+    cat "$D/site/site/values/observability.yaml" "$D/site/site/values/identity.yaml"
+  } | cksum
+}
+FKNS=tockmox-forge; FKID=tockmox-authentik
+
+# F36. A dry run plans the watcher, with its user, its one token's scopes and both Secrets, and touches nothing:
+# no cluster object, no change to the site's values.
+fk_case f36
+fk_run --dry-run
+assert_artifact "F36 a dry run names the watcher's user, token scopes, Secrets and Deployment" \
+  "echo $FS_STATUS; grep -c \"the approvers watcher: forge user $WATCHER (team readers, one token: read:organization, read:repository)\" '$D/out/stdout'; grep -c 'Secret tockmox-forge-approver-watch in tockmox-forge and tockmox-forge-approver-watch in tockmox-authentik, Deployment tockmox-forge-approver-watch' '$D/out/stdout'" "$(printf '0\n1\n1')"
+assert_artifact "F36 ... writes nothing to the cluster, makes no object and leaves the site's values alone" \
+  "fs_writes; fk_cluster; cat '$D/site/site/values/observability.yaml' '$D/site/site/values/identity.yaml' | grep -c approverWatch || true" "$(printf '0\n0\n0')"
+fk_case f36b without-identity
+fk_run --dry-run --no-sign-in
+assert_artifact "F36 with --no-sign-in the plan says there is no watcher, and why" \
+  "echo $FS_STATUS; grep -c 'no approvers watcher (--no-sign-in' '$D/out/stdout'; grep -c 'the approvers watcher:' '$D/out/stdout' || true" "$(printf '0\n1\n0')"
+
+# F37. The run itself.
+fk_case f37
+fk_run
+assert_artifact "F37 the run finishes" "echo $FS_STATUS; grep -c 'Done' '$D/out/stdout'" "$(printf '0\n1')"
+assert_artifact "F37 the watcher's forge user exists and is not a forge admin" \
+  "fk_forge \"'$WATCHER' in st['users'] and not st['users']['$WATCHER']['is_admin']\"" "True"
+assert_artifact "F37 it has exactly ONE token, scoped read:organization and read:repository and nothing else" \
+  "fk_forge \"[sorted(v['scopes']) for v in st['tokens']['$WATCHER'].values()]\"" "[['read:organization', 'read:repository']]"
+assert_artifact "F37 it is in the readers team only: not Owners, not approvers, not the change team" \
+  "fk_forge \"sorted(t['name'] for t in st['teams'].values() if '$WATCHER' in t['members'])\"" "['readers']"
+assert_artifact "F37 the readers team holds read, not write, and Owners holds only the admin" \
+  "fk_forge \"sorted((t['name'], t['permission']) for t in st['teams'].values() if t['name'] in ('readers','Owners'))\"" "[('Owners', 'owner'), ('readers', 'read')]"
+assert_artifact "F37 the forge Secret holds the token the forge issued, and an Authentik token of 48 characters" \
+  "t=\$(fk_get $FKNS Secret $WNAME data/forge-token); a=\$(fk_get $FKNS Secret $WNAME data/authentik-token); [ \"\$t\" = \"\$(fk_forge \"list(st['tokens']['$WATCHER'].values())[0]['sha1']\")\" ] && echo token-matches; echo \${#a}" "$(printf 'token-matches\n48')"
+assert_artifact "F37 the identity Secret holds the SAME Authentik token under the name the blueprint reads" \
+  "[ \"\$(fk_get $FKID Secret $WNAME data/FORGE_APPROVER_WATCH_TOKEN)\" = \"\$(fk_get $FKNS Secret $WNAME data/authentik-token)\" ] && echo same" "same"
+assert_artifact "F37 the ConfigMap carries install/forge-approver-watch.py exactly" \
+  "fk_get $FKNS ConfigMap $WNAME-script data/forge-approver-watch.py | cmp - '$REPO_ROOT/install/forge-approver-watch.py' && echo identical" "identical"
+assert_artifact "F37 the Deployment runs it in the move job's pinned image, non-root, with a read-only root filesystem and limits" \
+  "fk_obj $FKNS Deployment $WNAME \"[d['spec']['template']['spec']['containers'][0]['image'], d['spec']['template']['spec']['securityContext']['runAsNonRoot'], d['spec']['template']['spec']['containers'][0]['securityContext']['readOnlyRootFilesystem'], d['spec']['template']['spec']['containers'][0]['securityContext']['allowPrivilegeEscalation'], sorted(d['spec']['template']['spec']['containers'][0]['resources']['limits']), sorted(d['spec']['template']['spec']['containers'][0]['resources']['requests'])]\"" \
+  "['alpine/k8s:1.37.2', True, True, False, ['cpu', 'memory'], ['cpu', 'memory']]"
+assert_artifact "F37 ... mounts the script and the one Secret, with no Kubernetes token and no credential in its environment" \
+  "fk_obj $FKNS Deployment $WNAME \"[sorted(v['name'] for v in d['spec']['template']['spec']['volumes']), d['spec']['template']['spec']['automountServiceAccountToken']]\"; grep -c \"\$(fk_get $FKNS Secret $WNAME data/forge-token)\" '$D/state/objs/$FKNS/Deployment/$WNAME.json' || true" \
+  "$(printf "[['credentials', 'script', 'tmp'], False]\n0")"
+assert_artifact "F37 the ServiceAccount has no Role or binding" \
+  "find '$D/state/objs' -path '*Role*' -name '$WNAME*' | wc -l | tr -d ' '" "0"
+assert_artifact "F37 its NetworkPolicy is a default-deny pair: Prometheus in, only the forge, Authentik and DNS out" \
+  "fk_obj $FKNS NetworkPolicy $WNAME \"[d['spec']['policyTypes'], [p['port'] for r in d['spec']['ingress'] for p in r['ports']], sorted(p['port'] for r in d['spec']['egress'] for p in r['ports']), [r['from'][0]['namespaceSelector']['matchLabels']['kubernetes.io/metadata.name'] for r in d['spec']['ingress']]]\"" \
+  "[['Ingress', 'Egress'], [9470], [53, 53, 3000, 9000], ['tockmox-monitoring']]"
+assert_artifact "F37 Authentik admits that one pod to its server on 9000, and nobody else new" \
+  "fk_obj $FKID NetworkPolicy $WNAME \"[d['spec']['policyTypes'], d['spec']['ingress'][0]['from'][0]['namespaceSelector']['matchLabels']['kubernetes.io/metadata.name'], d['spec']['ingress'][0]['from'][0]['podSelector']['matchLabels'], len(d['spec']['ingress']), d['spec']['ingress'][0]['ports'][0]['port']]\"" \
+  "[['Ingress'], 'tockmox-forge', {'app.kubernetes.io/name': 'tockmox-forge-approver-watch'}, 1, 9000]"
+assert_artifact "F37 the site's values turn on both switches" \
+  "python3 -c 'import yaml,sys; print(yaml.safe_load(open(sys.argv[1]))[\"siteForge\"][\"approverWatch\"], yaml.safe_load(open(sys.argv[2]))[\"sso\"][\"apps\"][\"forge\"][\"approverWatch\"])' '$D/site/site/values/observability.yaml' '$D/site/site/values/identity.yaml'" "True True"
+assert_artifact "F37 ... and the forge's main, which ArgoCD reads, carries them" \
+  "fk_git show main:site/values/observability.yaml | grep -c 'approverWatch: true'; fk_git show main:site/values/identity.yaml | grep -c 'approverWatch: true'" "$(printf '1\n1')"
+assert_artifact "F37 the Deployment's pod carries the label, and names the metrics port, that the observability chart's PodMonitor selects" \
+  "fk_obj $FKNS Deployment $WNAME \"sorted(d['spec']['template']['metadata']['labels'].items()), d['spec']['template']['spec']['containers'][0]['ports'][0]['name']\"" \
+  "([('app.kubernetes.io/name', 'tockmox-forge-approver-watch')], 'metrics')"
+assert_artifact "F37 ... and the chart's PodMonitor selects exactly that label, on that port, in the forge's namespace" \
+  "helm template t '$REPO_ROOT/charts/tockmox-observability' -f '$REPO_ROOT/ci/values.yaml' -f '$REPO_ROOT/ci/values-all-on.yaml' 2>/dev/null | awk '/^kind: PodMonitor/ {f=1} /^---/ {f=0} f' | grep -E 'tockmox-forge-approver-watch|port: metrics|matchNames' | sed 's/^ *//' | tr '\n' '|'" \
+  "name: tockmox-forge-approver-watch|matchNames: [\"tockmox-forge\"]|app.kubernetes.io/name: \"tockmox-forge-approver-watch\"|- port: metrics|"
+
+# F38. A re-run on the finished install changes nothing the watcher is made of, keeps its token and mints none.
+fk_watch_sum > "$D/sum1"
+fk_run
+fk_watch_sum > "$D/sum2"
+assert_artifact "F38 a re-run succeeds and says the watcher's token still works" \
+  "echo $FS_STATUS; grep -c \"the approvers watcher's forge token still works; kept\" '$D/out/stdout'" "$(printf '0\n1')"
+assert_artifact "F38 ... and changes nothing: the Secrets, ConfigMap, Deployment, policies, token and the site's values are byte-identical" \
+  "cmp '$D/sum1' '$D/sum2' && echo unchanged" "unchanged"
+assert_artifact "F38 ... the watcher still has exactly one token" \
+  "fk_forge \"len(st['tokens']['$WATCHER'])\"" "1"
+
+# F39. A token the forge no longer accepts is replaced, and the old one is gone: still exactly one.
+OLD="$(fk_forge "list(st['tokens']['$WATCHER'].values())[0]['sha1']")"
+python3 - "$D/state/forge/forge.json" "$WATCHER" <<'PY'
+import json, sys
+p, u = sys.argv[1], sys.argv[2]
+st = json.load(open(p))
+for rec in st["tokens"][u].values():
+    rec["sha1"] = "revoked." + rec["sha1"]          # what the Secret holds is now a token the forge does not know
+json.dump(st, open(p, "w"))
+PY
+fk_run
+assert_artifact "F39 a token the forge rejects is replaced by a new one in the Secret, and only one token remains" \
+  "echo $FS_STATUS; [ \"\$(fk_get $FKNS Secret $WNAME data/forge-token)\" = \"\$(fk_forge \"list(st['tokens']['$WATCHER'].values())[0]['sha1']\")\" ] && echo secret-follows; fk_forge \"len(st['tokens']['$WATCHER'])\"; grep -c 'forge token still works' '$D/out/stdout' || true" \
+  "$(printf '0\nsecret-follows\n1\n0')"
+[ -n "$OLD" ]
+
+# F40. The Authentik token is kept from either namespace: lose the forge-side Secret and the run puts the
+# identity layer's value back, so Authentik and the watcher never disagree.
+AK="$(fk_get $FKID Secret $WNAME data/FORGE_APPROVER_WATCH_TOKEN)"
+rm -f "$D/state/objs/$FKNS/Secret/$WNAME.json"
+fk_run
+assert_artifact "F40 with the watcher's own Secret lost, the identity layer's Authentik token is kept and restored" \
+  "echo $FS_STATUS; [ \"\$(fk_get $FKNS Secret $WNAME data/authentik-token)\" = '$AK' ] && echo restored; [ \"\$(fk_get $FKID Secret $WNAME data/FORGE_APPROVER_WATCH_TOKEN)\" = '$AK' ] && echo unchanged" \
+  "$(printf '0\nrestored\nunchanged')"
+
+# F41. Without sign-in there is no admin group to compare with: no user, no token, no Deployment, no policy,
+# and the observability switch stays off, so the alerts that read the watcher do not fire for want of one.
+fk_case f41 without-identity
+fk_run --no-sign-in
+assert_artifact "F41 --no-sign-in installs no watcher" \
+  "echo $FS_STATUS; fk_forge \"'$WATCHER' in st['users'] or '$WATCHER' in st['tokens']\"; ls '$D/state/objs/$FKNS/Deployment' 2>/dev/null | grep -c approver || true; grep -c approverWatch '$D/site/site/values/observability.yaml' || true" \
+  "$(printf '0\nFalse\n0\n0')"
+
+# F42. A value the operator already set is theirs: a false stays false. And with no siteForge block to
+# attach to, the run says what to add by hand and does not invent one.
+fk_case f42
+python3 - "$D/site/site/values/observability.yaml" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read().replace("siteForge:\n  enabled: true\n", "siteForge:\n  enabled: true\n  approverWatch: false\n")
+open(p, "w").write(s)
+PY
+fk_run
+assert_artifact "F42 an approverWatch: false the operator wrote is left false" \
+  "echo $FS_STATUS; grep -c 'approverWatch: false' '$D/site/site/values/observability.yaml'; grep -c 'approverWatch: true' '$D/site/site/values/observability.yaml' || true" "$(printf '0\n1\n0')"
+fk_case f42b
+python3 - "$D/site/site/values/observability.yaml" <<'PY'
+import sys
+p = sys.argv[1]
+open(p, "w").write(open(p).read().replace("\nsiteForge:\n  enabled: true\n", "\n"))
+PY
+fk_run
+assert_artifact "F42 with no siteForge block the run finishes, adds none, and says what to add by hand" \
+  "echo $FS_STATUS; grep -c 'siteForge' '$D/site/site/values/observability.yaml' || true; grep -c 'has no siteForge block with enabled: true' '$D/out/stderr' '$D/out/stdout' | awk -F: '{s+=\$2} END {print s}'" "$(printf '0\n0\n1')"
+
+# F43. The template refuses what would make a wrong Deployment.
+assert_artifact "F43 the watcher template refuses a missing image, a bad namespace and a bad checksum" \
+  "bash '$REPO_ROOT/install/forge-approver-watch-template.sh' --namespace tockmox-forge >/dev/null 2>&1; echo \$?; bash '$REPO_ROOT/install/forge-approver-watch-template.sh' --namespace 'Bad_NS' --image a/b:1 >/dev/null 2>&1; echo \$?; bash '$REPO_ROOT/install/forge-approver-watch-template.sh' --namespace x --image a/b:1 --script-sha 'a;b' >/dev/null 2>&1; echo \$?" \
+  "$(printf '2\n2\n2')"

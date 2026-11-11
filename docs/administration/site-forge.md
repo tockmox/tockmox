@@ -55,7 +55,7 @@ What gets installed:
 | The repository | `tockmox/site`, private, holding your site as `main` |
 | Its address | `http://tockmox-forge-http.tockmox-forge.svc.cluster.local:3000/tockmox/site.git`, which every Application names. It is the same on every site and after every rebuild, and nothing outside the cluster resolves it, so there is no DNS, TLS or CA step for it |
 | The fence | A NetworkPolicy admitting ArgoCD's repo-server, the console's actions service, the model watcher and the forge's own copy jobs, and nothing else. A browser reaches the forge through Traefik at `forge.<your internal domain>`, unless it was installed with `--no-sign-in` |
-| Machine users | `tockmox-argocd` reads; `tockmox-changes` opens changes and cannot approve them; `tockmox-offsite` reads `main` for the off-site copy. Their tokens are minted in the cluster and live only in Secrets |
+| Machine users | `tockmox-argocd` reads; `tockmox-changes` opens changes and cannot approve them; `tockmox-offsite` reads `main` for the off-site copy; `tockmox-approver-watch` reads the approvers team and the open pull requests, for [the approvers watcher](#the-approvers-watcher). Their tokens are minted in the cluster and live only in Secrets |
 
 ## Who can approve a change
 
@@ -75,11 +75,77 @@ own.
   service holds it.
 - **Taking someone out of the admin group** takes them out of `approvers` only at
   their next forge sign-in, which the default access rule then refuses, so remove
-  them from the team by hand as well ([identity](identity.md)).
+  them from the team by hand as well ([identity](identity.md)). If you forget, the
+  [approvers watcher](#the-approvers-watcher) raises an alert.
 - **Approve in the forge's own pages, or in the console.** Changes the console
   and the model watcher open wait in the forge for an approver; with the console's
   Platform › Changes page on, they wait there too ([Approving in the
   console](#approving-in-the-console)). Either way the forge's rule decides.
+
+## The approvers watcher
+
+The forge updates a person's teams only when they sign in, so someone taken out of
+the admin group (or deactivated) can keep approving changes to the site until you
+remove them from `approvers` yourself. The watcher tells you when that has
+happened. It detects and alerts. It cannot change the team, and nothing in the
+cluster holds a credential that can: you remove the person, as the forge's admin.
+
+`bootstrap-forge` installs it on any site with sign-in, as the Deployment
+`tockmox-forge-approver-watch` in the forge's namespace. Every minute it reads
+who is in the `approvers` team and who is an active member of the admin group, and
+publishes the difference as metrics, one series per person. It also lists the open
+pull requests that carry a standing approval from each such person. It uses the
+image the move job already uses, runs as a non-root user with a read-only root
+filesystem, and has no Kubernetes permissions.
+
+It holds two credentials, in a Secret in the forge's namespace, and each can read
+and nothing else:
+
+| Credential | What it can do | What it cannot do |
+|---|---|---|
+| A token for the forge user `tockmox-approver-watch`, scoped `read:organization` and `read:repository` | List the `approvers` team and read the site repository's open pull requests and their reviews | Merge, approve, comment, push, change the branch rule or any team, add anyone to the organisation. The user is in the `readers` team (read access) and never in Owners or `approvers` |
+| A token for the Authentik service account `tockmox-forge-approver-watch` | View the admin group and its members | Change any group or user, or see anything else. The identity layer's blueprint gives its role one permission, view on that one group |
+
+Both tokens are made by `bootstrap-forge`. The forge token exists once, in the
+watcher's Secret. The Authentik token is one value in two Secrets, the watcher's
+and the identity layer's (`tockmox-forge-approver-watch` in the identity
+namespace), because Authentik's blueprint reads it from there. A re-run keeps a
+forge token that still works and an Authentik token that already exists, and
+replaces only what is missing or rejected.
+
+The same run writes two switches into your site's values before it pushes them:
+`siteForge.approverWatch` in `observability.yaml`, which renders the two alerts and
+the scrape, and `sso.apps.forge.approverWatch` in `identity.yaml`, which makes the
+Authentik account. A value you have already set there, true or false, is left
+alone. If a file has no `siteForge` or `sso.apps.forge` block to attach to, the
+run says so and you add the line by hand. **If tockmox-identity is already running,
+restart the Authentik worker once** after the first run: it reads the token when it
+starts and does not re-apply a blueprint whose file has not changed.
+
+The watcher's pod is fenced. It accepts connections only from Prometheus, on its
+metrics port, and opens connections only to the forge, to Authentik's server and
+to DNS. The run adds one NetworkPolicy in Authentik's namespace that admits that
+one pod to the server, because that namespace otherwise admits only Traefik and
+Prometheus.
+
+Two alerts read it:
+
+- **TockmoxForgeApproverOutsideGroup** (critical, one per person). That person is
+  in the forge's `approvers` team but is no longer an active member of the admin
+  group, so their approval still counts toward merging a change to the site. The
+  alert names the open pull requests their approval stands on. Remove them from the
+  team in the forge, as the forge's admin, and dismiss or decline those approvals;
+  it stops once the team matches the group again. A deactivated account counts as
+  removed.
+- **TockmoxForgeApproversCheckDown** (warning, after 15 minutes). The watcher has
+  not made a clean check, or Prometheus is not scraping it. While it is down, a
+  removal would not be noticed. The watcher judges nobody on a read it could not
+  complete: if Authentik errors or answers with an empty group, it reports "not
+  clean" and raises this alert, never the first one. Its log names the read that
+  failed: `kubectl -n tockmox-forge logs deploy/tockmox-forge-approver-watch`.
+
+A site installed with `--no-sign-in` has no admin group to compare with, so it has
+no watcher and neither alert.
 
 ## Changing your site
 
