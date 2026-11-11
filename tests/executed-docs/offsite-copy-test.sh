@@ -339,7 +339,7 @@ rcpt() {
   local n f
   n="$(ls "$TOCKMOX_WORKDIR" | grep -c '^receipts-')"
   mkdir -p "$TOCKMOX_WORKDIR/receipts-$(printf %05d $((n+1)))"
-  case "$1" in P09) f=P09-install-md-end-to-end ;; P11) f=P11-fresh-install-recovery ;; *) return 0 ;; esac
+  case "$1" in P09) f=P09-install-md-end-to-end ;; P11) f=P11-fresh-install-recovery ;; P13) f=P13-planted-faults ;; *) return 0 ;; esac
   echo PASS > "$TOCKMOX_WORKDIR/receipts-$(printf %05d $((n+1)))/$f"
 }
 printf 'run.sh %s url=%s creds=%s ca=%s scrub=%s\n' "$*" "${TOCKMOX_P09_OFFSITE_GIT_URL-unset}" "${TOCKMOX_P09_OFFSITE_GIT_CREDENTIALS-unset}" \
