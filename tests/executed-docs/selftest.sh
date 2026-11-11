@@ -1344,5 +1344,23 @@ if [ "$ER_CASES" -eq 0 ] || { [ "$ER_RC" -ne 0 ] && ! printf '%s\n' "$ER_OUT" | 
   bad "env-rows-test.sh ran its cases" "rc=${ER_RC}, ${ER_CASES} case(s): $(printf '%s' "$ER_OUT" | tail -3)"
 fi
 
+# P10's recovery rows: the migrations Job, a base backup and a restore drill of each CNPG database.
+# The verdicts and the row functions are shown red on one mutation each, the glue that makes the
+# Backups and the drill Jobs is run against a stub kubectl, and the path's own gate (BLOCKED without a
+# P09 install, here and under run.sh) is run against mutated copies. Folded in like the cases above.
+RC_OUT="$(bash "${HERE}/recovery-rows-test.sh" 2>&1)"; RC_RC=$?
+RC_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) RC_CASES=$((RC_CASES+1)); ok "recovery rows: ${line#ok   }" ;;
+    "FAIL "*) RC_CASES=$((RC_CASES+1)); bad "recovery rows: ${line#FAIL }" "run tests/executed-docs/recovery-rows-test.sh for detail" ;;
+  esac
+done <<EOF_RC
+$RC_OUT
+EOF_RC
+if [ "$RC_CASES" -eq 0 ] || { [ "$RC_RC" -ne 0 ] && ! printf '%s\n' "$RC_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "recovery-rows-test.sh ran its cases" "rc=${RC_RC}, ${RC_CASES} case(s): $(printf '%s' "$RC_OUT" | tail -3)"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -13,7 +13,12 @@
 #   5. on a kept built-in run, keep P09's recovery kit and the age identity that opens it as the Secret
 #      ${TOCKMOX_TEST_VM}-kit beside the VM (throwaway-cluster.sh kit-store), because both otherwise end
 #      with this job; `throwaway-cluster.sh kit DIR` fetches them, and destroy removes them with the VM
-#   6. destroy it, unless TOCKMOX_KEEP_CLUSTER=1. A kept run that stopped before step 4 began is destroyed all the
+#   6. when P09 passed, run P10 on the same throwaway and the same state directory (a backup and a restore
+#      drill of each database, and the migrations Job; paths/P10-fresh-install-recovery.sh). P10 has its own
+#      budget, TOCKMOX_P10_BUDGET (default 5400 seconds), a yield point this lane does not call again, so a
+#      P10 that yields is a failed lane. P10 does not run when P09 failed, and its result is the lane's only
+#      when P09 passed
+#   7. destroy it, unless TOCKMOX_KEEP_CLUSTER=1. A kept run that stopped before step 4 began is destroyed all the
 #      same (there is no install to keep), unless TOCKMOX_KEEP_ON_PREP_FAILURE=1
 #
 # AN OFF-SITE COPY, with TOCKMOX_P09_OFFSITE=git (default none; built-in route only). Without it the
@@ -38,7 +43,7 @@
 # TOCKMOX_TEST_VM, TOCKMOX_P09_ROUTE (default built-in); optional TOCKMOX_KEEP_CLUSTER, TOCKMOX_P09_BUDGET,
 # TOCKMOX_P09_OFFSITE (none or git), TOCKMOX_P09_LAN_CIDR and TOCKMOX_P09_POOL (default: the node's /24 and
 # .240-.250 in it).
-# Exit: P09's own exit status; 2 for a refused precondition; 1 when a preparation step fails, or when P09
+# Exit: P09's own exit status, or P10's when P09 passed and P10 did not; 2 for a refused precondition; 1 when a preparation step fails, or when P09
 # passed on a kept run and its kit could not be kept (the report says which).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -185,6 +190,7 @@ bash "${HERE}/run.sh" P09
 rc=$?
 set -e
 echo "lane: P09 exit ${rc}"
+P09_RC="$rc"
 
 # 5. the recovery kit of a kept throwaway. P09's S14f (built-in route only) wrote the kit under this
 # job's HOME and made the identity that opens it under P09's state; neither is anywhere else. A P09 that
@@ -205,5 +211,25 @@ if [ "$KEEP" = 1 ] && [ "$ROUTE" = built-in ]; then
   else
     echo "lane 5: the recovery kit could not be kept as ${TOCKMOX_TEST_VM}-kit; the exit stays P09's" >&2
   fi
+fi
+# 6. P10, on the same throwaway and the same state directory, only when P09 passed. p09-passed is the marker P10
+# requires: without it P10 declares BLOCKED, so a stale or foreign state directory is never read as an install.
+# The kit above is kept first, so a P10 that outlives the job's time limit does not lose it.
+if [ "$P09_RC" = 0 ]; then
+  mkdir -p "$TOCKMOX_P09_STATE"
+  : > "${TOCKMOX_P09_STATE}/p09-passed"
+  export TOCKMOX_P10_BUDGET="${TOCKMOX_P10_BUDGET:-5400}"
+  echo "lane 6: P10, after a P09 that passed (budget ${TOCKMOX_P10_BUDGET}s)"
+  set +e
+  bash "${HERE}/run.sh" P10
+  p10_rc=$?
+  set -e
+  echo "lane: P10 exit ${p10_rc}"
+  # a P10 failure becomes the lane's exit when nothing earlier (P09, the kit) already failed it
+  if [ "$p10_rc" != 0 ] && [ "$rc" = 0 ]; then
+    rc="$p10_rc"
+  fi
+else
+  echo "lane 6: P09 did not pass, so P10 does not run"
 fi
 exit "$rc"
