@@ -453,7 +453,8 @@ DRY="$(env TOCKMOX_DRY_RUN=1 TOCKMOX_DOCS_REF=HEAD TOCKMOX_WORKDIR="$GT/w0" bash
 if printf '%s\n' "$DRY" | grep -E "group 'argocd-helm': .*P09-install-md-end-to-end P11-fresh-install-recovery" >/dev/null; then
   ok "run.sh: a run with no arguments discovers P11, in P09's route group, after P09 (no extra cluster)"
 else bad "run.sh: discovery" "$(printf '%s' "$DRY" | grep group | tr '\n' ';' | cut -c1-300)"; fi
-# ... and P11 run by run.sh with no P09 state declares BLOCKED: the run is not red, and P11 is not UNCONVERTED.
+# ... and P11 run BY NAME by run.sh with no P09 state declares BLOCKED: it was asked for, so the run is red (status 4,
+# expected-outcomes.txt is read only in a run with no arguments), and P11 is not UNCONVERTED.
 cat > "$GT/bin/kubectl" <<STUB
 #!/bin/sh
 echo "\$@" >> "$GT/kcalls"
@@ -464,10 +465,10 @@ echo "apiVersion: v1" > "$GT/kc"
 rm -f "$GT/kcalls"
 RUNOUT="$(env PATH="$GT/bin:$PATH" TOCKMOX_EXISTING_KUBECONFIG="$GT/kc" KUBE_CONTEXT=stub-ctx TOCKMOX_DOCS_REF=HEAD \
           TOCKMOX_WORKDIR="$GT/w1" TOCKMOX_P09_STATE= bash "${HERE}/run.sh" P11 2>&1)"; RUNRC=$?
-if [ "$RUNRC" = 0 ] && printf '%s\n' "$RUNOUT" | grep -F 'OUTCOME:  BLOCKED' >/dev/null \
+if [ "$RUNRC" = 4 ] && printf '%s\n' "$RUNOUT" | grep -F 'OUTCOME:  BLOCKED' >/dev/null \
    && printf '%s\n' "$RUNOUT" | grep -F 'UNCONVERTED    : 0' >/dev/null \
-   && printf '%s\n' "$RUNOUT" | grep -F 'paths failed   : 0' >/dev/null; then
-  ok "run.sh: P11 with no install declares BLOCKED; the run exits 0 with nothing failed and nothing UNCONVERTED"
+   && printf '%s\n' "$RUNOUT" | grep -F 'paths blocked, NOT declared: 1' >/dev/null; then
+  ok "run.sh: P11 named with no install declares BLOCKED; the run exits 4 (not declared for a named run), nothing UNCONVERTED"
 else bad "run.sh: P11 with no install" "rc=${RUNRC}; $(printf '%s' "$RUNOUT" | tail -12 | tr '\n' ';' | cut -c1-400)"; fi
 # the only kubectl calls were run.sh's own readiness reads: P11 made none of its own
 if ! grep -E 'jobs|backups|create job|exec' "$GT/kcalls" >/dev/null 2>&1; then ok "run.sh: P11 made no cluster read or write of its own"

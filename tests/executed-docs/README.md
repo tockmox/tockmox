@@ -142,6 +142,17 @@ file. `run.sh` reports any path that exits without one, other than a declared
 absence (exit 3), as `UNCONVERTED` and refuses success for the run, so a path
 that never adopted the model cannot count as green.
 
+`run.sh` also reads what each receipt says, never only that one exists, and never
+the path's exit status. A run is green only if every path that ran left a `PASS`
+receipt, or a `BLOCKED` or `SKIPPED` one that `expected-outcomes.txt` allows for
+that path under a stated condition, with a reason. An allowed one is listed in
+the summary as "blocked, as declared": it proved nothing and is not coverage. Any
+other non-`PASS` fails the run: `BLOCKED` not allowed exits 4, `INFRA_ERROR`
+(which can never be allowed) exits 5, `PRODUCT_FAIL` and `ABORTED` exit 1. The
+list is read only by a run with no path selectors; a run that names its paths, as
+the p09 lane does, decided to run them, so anything but `PASS` fails it. A row
+that no path used in a full run is reported as stale.
+
 ## Layout
 
 ```
@@ -163,6 +174,8 @@ kit-keep-test.sh       hermetic proof of that kit's Secret and the lane step tha
 lib/p09-offsite.sh     what P09 needs for the lane's off-site copy: the edit of install.md's bootstrap-forge
                        block, and the scrub that keeps the off-site forge's name out of the report
 offsite-copy-test.sh   hermetic proof of the off-site copy: settings, repository, teardown, P09's edit, the lane (also run by selftest.sh)
+expected-outcomes.txt  the reviewed list of BLOCKED or SKIPPED outcomes a full run may end in, each with a condition and a reason
+expected-outcomes-test.sh hermetic proof of how run.sh judges receipts and reads that list (also run by selftest.sh)
 selftest.sh            hermetic proof of the machinery above
 pages-no-cluster.sh    the six no-cluster pages (values-contract, customising, capabilities,
                        configuration, platform-management, verify): every bash block extracted

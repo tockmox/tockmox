@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The outcomes a FULL run of run.sh (no path selectors) may end in without failing, other than PASS.
+#
+# run.sh reads each path's outcome receipt. PASS passes. A BLOCKED or SKIPPED outcome keeps the run green only
+# when a row below allows it for that path under that condition, and then it is reported as "blocked, as
+# declared", with the reason below: it proved nothing, and it is not coverage (INVENTORY.md is the list of
+# what is covered). Any other BLOCKED or SKIPPED fails the run with status 4. INFRA_ERROR fails it with
+# status 5, PRODUCT_FAIL and ABORTED with status 1, and none of those three can be declared: a row naming
+# one is refused when run.sh starts.
+#
+# A run that names its paths (./run.sh P09, which is what the p09 lane does) decided to run them, so this
+# list is not read at all and anything but PASS fails it.
+#
+# Fields, separated by '|': path id | outcome | when | reason (one sentence).
+#   path id  P03, P09 ... the number before the dash in paths/
+#   outcome  BLOCKED or SKIPPED
+#   when     always
+#            unset:VAR[,VAR...]   true when any listed variable is unset or empty in this run
+#            nofile:VAR/NAME      true when VAR is unset, or names a directory that has no file NAME
+#   reason   why the path cannot run here, in words a reader of the summary can act on
+#
+# A row that no path used in a full run is reported as stale (a warning, not a failure): delete it.
+#
+P03 | BLOCKED | always | Its first documented step is node-local ("on every k3s server node"), and a disposable guest on the nightly's substrate has no stable address to reach it from, so the in-guest transport is unavailable; the page's procedure is neither confirmed nor refuted.
+P09 | BLOCKED | unset:TOCKMOX_P09_SITE_REPO_URL,TOCKMOX_P09_TOCKMOX_REPO_URL,TOCKMOX_P09_TOCKMOX_REVISION,TOCKMOX_P09_TOCKMOX_CLONE,TOCKMOX_P09_LAN_CIDR,TOCKMOX_P09_POOL | The nightly does not stand up the writable git remote and the served product tree that install.md end to end needs, so those P09 inputs are absent; the p09 lane provides them and is where this path runs.
+P11 | BLOCKED | nofile:TOCKMOX_P09_STATE/p09-passed | It runs after P09 on the same cluster and reads P09's state directory, and in a full run without P09 inputs there is no P09 install, so it has nothing to restore from; the p09 lane runs it after a P09 that passed.
+P13 | BLOCKED | nofile:TOCKMOX_P09_STATE/p09-passed | It runs last in the lane, after P09 and P11, plants faults on the install P09 made and reads P09's state directory, and in a full run without P09 inputs there is no P09 install to plant faults on, so it examined nothing; the p09 lane runs it after a P09 that passed.
