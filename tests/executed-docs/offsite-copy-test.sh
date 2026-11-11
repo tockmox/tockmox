@@ -334,9 +334,18 @@ STUB
 printf '#!/usr/bin/env bash\n[ "$1" = url ] && echo "http://site-repo.stub/tockmox.git"\nexit 0\n' > "$L/provision/site-repo-server.sh"
 cat > "$L/run.sh" <<'STUB'
 #!/usr/bin/env bash
+# a real run.sh leaves a PASS receipt for a path that passed; the lane reads it (p09-lane.sh, lane_receipt)
+rcpt() {
+  local n f
+  n="$(ls "$TOCKMOX_WORKDIR" | grep -c '^receipts-')"
+  mkdir -p "$TOCKMOX_WORKDIR/receipts-$(printf %05d $((n+1)))"
+  case "$1" in P09) f=P09-install-md-end-to-end ;; P11) f=P11-fresh-install-recovery ;; *) return 0 ;; esac
+  echo PASS > "$TOCKMOX_WORKDIR/receipts-$(printf %05d $((n+1)))/$f"
+}
 printf 'run.sh %s url=%s creds=%s ca=%s scrub=%s\n' "$*" "${TOCKMOX_P09_OFFSITE_GIT_URL-unset}" "${TOCKMOX_P09_OFFSITE_GIT_CREDENTIALS-unset}" \
   "${TOCKMOX_P09_OFFSITE_GIT_CA-unset}" "${TOCKMOX_P09_OFFSITE_SCRUB-unset}" >> "$LANE_LOG"
 [ "$1" != P09 ] || [ ! -f "${TOCKMOX_P09_OFFSITE_GIT_CREDENTIALS:-/nonexistent}" ] || echo "P09 read the credentials file" >> "$LANE_LOG"
+if [ "$1" != P09 ] || [ "${STUB_P09_RC:-0}" = 0 ]; then rcpt "$1"; fi
 [ "$1" != P09 ] || exit "${STUB_P09_RC:-0}"
 exit 0
 STUB

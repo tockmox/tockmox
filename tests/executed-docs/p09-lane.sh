@@ -13,7 +13,12 @@
 #   5. on a kept built-in run, keep P09's recovery kit and the age identity that opens it as the Secret
 #      ${TOCKMOX_TEST_VM}-kit beside the VM (throwaway-cluster.sh kit-store), because both otherwise end
 #      with this job; `throwaway-cluster.sh kit DIR` fetches them, and destroy removes them with the VM
-#   6. destroy it, unless TOCKMOX_KEEP_CLUSTER=1. A kept run that stopped before step 4 began is destroyed all the
+#   6. when P09 passed, run P11 on the same throwaway and the same state directory (a backup and a restore
+#      drill of each database, and the migrations Job; paths/P11-fresh-install-recovery.sh). P11 has its own
+#      budget, TOCKMOX_P11_BUDGET (default 5400 seconds), a yield point this lane does not call again, so a
+#      P11 that yields is a failed lane. P11 does not run when P09 failed, and its result is the lane's only
+#      when P09 passed
+#   7. destroy it, unless TOCKMOX_KEEP_CLUSTER=1. A kept run that stopped before step 4 began is destroyed all the
 #      same (there is no install to keep), unless TOCKMOX_KEEP_ON_PREP_FAILURE=1
 #
 # AN OFF-SITE COPY, with TOCKMOX_P09_OFFSITE=git (default none; built-in route only). Without it the
@@ -38,7 +43,7 @@
 # TOCKMOX_TEST_VM, TOCKMOX_P09_ROUTE (default built-in); optional TOCKMOX_KEEP_CLUSTER, TOCKMOX_P09_BUDGET,
 # TOCKMOX_P09_OFFSITE (none or git), TOCKMOX_P09_LAN_CIDR and TOCKMOX_P09_POOL (default: the node's /24 and
 # .240-.250 in it).
-# Exit: P09's own exit status; 2 for a refused precondition; 1 when a preparation step fails, or when P09
+# Exit: P09's own exit status, or P11's when P09 passed and P11 did not; 2 for a refused precondition; 1 when a preparation step fails, or when P09
 # passed on a kept run and its kit could not be kept (the report says which).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -185,6 +190,7 @@ bash "${HERE}/run.sh" P09
 rc=$?
 set -e
 echo "lane: P09 exit ${rc}"
+P09_RC="$rc"
 
 # 5. the recovery kit of a kept throwaway. P09's S14f (built-in route only) wrote the kit under this
 # job's HOME and made the identity that opens it under P09's state; neither is anywhere else. A P09 that
@@ -205,5 +211,63 @@ if [ "$KEEP" = 1 ] && [ "$ROUTE" = built-in ]; then
   else
     echo "lane 5: the recovery kit could not be kept as ${TOCKMOX_TEST_VM}-kit; the exit stays P09's" >&2
   fi
+fi
+# 6. P11, on the same throwaway and the same state directory, only when P09 passed. p09-passed is the marker P11
+# requires: without it P11 declares BLOCKED, so a stale or foreign state directory is never read as an install.
+# The kit above is kept first, so a P11 that outlives the job's time limit does not lose it.
+#
+# THE OUTCOME A PATH DECLARED, NOT ITS EXIT STATUS. run.sh exits 0 for a path that declared BLOCKED (right in a full
+# run, where a missing precondition is a declared constraint). Here the lane itself decided to run the path, so
+# anything but PASS fails the lane. The receipt is the file lib/assert.sh's path_outcome writes, named for the path,
+# in the receipts-STAMP directory run.sh makes under TOCKMOX_WORKDIR; the newest such directory is the run that just
+# ended, and a path's receipt only ever exists in its own run's directory, so a run that left none reads as missing.
+# lane_receipt NAME prints "OUTCOME reason" ("MISSING ..." when there is no receipt).
+lane_receipt() {
+  local d f g outcome reason
+  d=""
+  for g in "${TOCKMOX_WORKDIR}"/receipts-*; do [ -d "$g" ] && d="$g"; done   # the glob sorts: the last is the newest
+  f="${d:+${d}/$1}"
+  if [ -n "$f" ] && [ -s "$f" ]; then
+    read -r outcome reason < "$f" || true
+    printf '%s %s' "${outcome:-MISSING}" "${reason:-}"
+  else
+    printf 'MISSING no receipt for %s in the newest run' "$1"
+  fi
+}
+# lane_code OUTCOME ... the lane's status for an outcome that is not PASS: 4 BLOCKED, 5 INFRA_ERROR, 1 anything else
+lane_code() { case "$1" in BLOCKED) echo 4 ;; INFRA_ERROR) echo 5 ;; *) echo 1 ;; esac; }
+# lane_judge NAME RECEIPT ... one line naming the path, its outcome and its reason; the status to fail with, or 0 for PASS
+lane_judge() {
+  local out="${2%% *}" why="${2#* }"
+  if [ "$out" = PASS ]; then echo 0; return 0; fi
+  echo "lane: $1 declared ${out}: ${why}" >&2
+  lane_code "$out"
+}
+P09_REC="$(lane_receipt P09-install-md-end-to-end)"
+if [ "$P09_RC" = 0 ] && [ "${P09_REC%% *}" = PASS ]; then
+  mkdir -p "$TOCKMOX_P09_STATE"
+  : > "${TOCKMOX_P09_STATE}/p09-passed"
+  export TOCKMOX_P11_BUDGET="${TOCKMOX_P11_BUDGET:-5400}"
+  echo "lane 6: P11, after a P09 that passed (budget ${TOCKMOX_P11_BUDGET}s)"
+  set +e
+  bash "${HERE}/run.sh" P11
+  p11_rc=$?
+  set -e
+  echo "lane: P11 exit ${p11_rc}"
+  # a P11 failure becomes the lane's exit when nothing earlier (P09, the kit) already failed it
+  if [ "$p11_rc" != 0 ] && [ "$rc" = 0 ]; then
+    rc="$p11_rc"
+  fi
+  # and so does a P11 that exited 0 without declaring PASS (BLOCKED, say): it proved nothing after P09
+  p11_code="$(lane_judge P11-fresh-install-recovery "$(lane_receipt P11-fresh-install-recovery)")"
+  if [ "$p11_code" != 0 ] && [ "$rc" = 0 ]; then
+    rc="$p11_code"
+  fi
+elif [ "$P09_RC" = 0 ]; then
+  echo "lane 6: P09 exited 0 but its receipt says ${P09_REC%% *} (${P09_REC#* }), so p09-passed is not written and P11 does not run" >&2
+  p09_code="$(lane_code "${P09_REC%% *}")"
+  [ "$rc" != 0 ] || rc="$p09_code"
+else
+  echo "lane 6: P09 did not pass, so P11 does not run"
 fi
 exit "$rc"
