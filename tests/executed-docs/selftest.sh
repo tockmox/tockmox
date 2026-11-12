@@ -1378,6 +1378,23 @@ if [ "$LO_CASES" -eq 0 ] || { [ "$LO_RC" -ne 0 ] && ! printf '%s\n' "$LO_OUT" | 
   bad "lane-outcome-test.sh ran its cases" "rc=${LO_RC}, ${LO_CASES} case(s): $(printf '%s' "$LO_OUT" | tail -3)"
 fi
 
+# P12's bring-your-own-CA path: the page's blocks run against a stub cluster, every assertion shown red on a planted
+# fixture, the gate (BLOCKED without a P09 install, here and under run.sh) shown against mutated copies, and copies that
+# lose a guard shown to stop catching what the fixtures plant. Folded in like the cases above.
+BC_OUT="$(bash "${HERE}/byo-ca-test.sh" 2>&1)"; BC_RC=$?
+BC_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) BC_CASES=$((BC_CASES+1)); ok "bring your own CA: ${line#ok   }" ;;
+    "FAIL "*) BC_CASES=$((BC_CASES+1)); bad "bring your own CA: ${line#FAIL }" "run tests/executed-docs/byo-ca-test.sh for detail" ;;
+  esac
+done <<EOF_BC
+$BC_OUT
+EOF_BC
+if [ "$BC_CASES" -eq 0 ] || { [ "$BC_RC" -ne 0 ] && ! printf '%s\n' "$BC_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "byo-ca-test.sh ran its cases" "rc=${BC_RC}, ${BC_CASES} case(s): $(printf '%s' "$BC_OUT" | tail -3)"
+fi
+
 # The external route's one git URL: site-repo-server.sh's writable mode (shown against a real git daemon), throwaway-cluster.sh
 # publish, destroy and sweep taking the published Service with the VM, p09-lane.sh providing the URL and ending with 5 when it
 # cannot, and copies that lose one guard each shown to stop being caught. Folded in like the cases above.
