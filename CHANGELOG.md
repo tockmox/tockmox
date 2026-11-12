@@ -1155,6 +1155,17 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **Console run-now could run a pod of its choice in the built-in forge's namespace.** With the
+  change kinds on (the default on a built-in-forge site), the forge's two CronJobs are on the
+  run-now list, and the run-now admission policy checked a Job's owner and label and nothing in
+  its pod. A compromised `tockmox-actions` pod could therefore create a Job there that ran as the
+  move identity or mounted the forge's admin Secret; with run-now turned off and the move left
+  on, it needed no owner at all. A new policy, `tockmox-actions-forge-jobs`, now admits a Job
+  from that identity in the forge's namespace only as the move's own Job or in the off-site
+  copy's own shape, and `tools/check-actions.py` fails the render without it. The image is not
+  pinned; what that leaves is in docs/administration/tockmox-ui.md, "What is still trusted".
+  Nothing to do on upgrade. A CronJob of your own that you listed for run-now in the forge's
+  namespace is refused unless it has the copy's shape.
 - **An air-gapped node finds Docker Hub's official images and the built-in forge's image in a
   closed mirror.** `tools/mirror-images.sh` put an official image (`python`, `docker.io/traefik`)
   at `PREFIX/NAME`, where `global.imageRegistry` looks, but containerd's mirror asks for

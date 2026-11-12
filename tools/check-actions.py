@@ -47,6 +47,20 @@ WHAT IT ASSERTS:
      this identity only) pins the owner, the ServiceAccount, one container, the image the chart pins, the command,
      the arguments and the volumes; tockmox-actions-move-secret admits only the request Secret, owned by a Job; the
      run-now policy steps aside for a move Job and for nothing else. Off (moveForge.enabled false): none of it renders.
+ 11. RUN-NOW IN THE FORGE'S NAMESPACE IS THE OFF-SITE COPY'S OWN SHAPE. That namespace holds the forge's admin Secret
+     and the move ServiceAccount, and tockmox-actions-jobs looks at nothing in the pod. So wherever this identity may
+     create Jobs there (the change kinds add the forge's two CronJobs to run-now; a site can add its own),
+     tockmox-actions-forge-jobs is rendered, bound with Deny, fails closed, and matches this identity in that
+     namespace and steps aside for a move Job only. It pins: no ServiceAccount of its own (either field) and no
+     token, one container and no init container, the copy script as the command, no environment read from a Secret
+     or a ConfigMap, and only the copy's script, Secret, CA and scratch volumes. It does not pin the image. With no
+     Jobs grant in that namespace it does not render. It stands on its own: the owner (exactly the CronJobs run-now
+     lists in that namespace) and the label are checked here too, because the move's Role grants create on Jobs
+     there even with run-now off, where tockmox-actions-jobs does not render; then it admits nothing but a move.
+     Measured on a real API server (k3s v1.36.4, 2026-11-11): the product's own run-now of both CronJobs is admitted;
+     twenty requests with one thing changed in the pod, four with the owner or the label changed, and the request
+     that found the gap are refused; each pod rule dropped admits exactly its own; and with run-now off, a Job with
+     no owner that the unfixed chart admitted is refused.
 Exit 2 (skipped) when helm or PyYAML is absent.
 """
 import copy
@@ -293,6 +307,56 @@ def check_move(docs, want_on=True) -> list:
     return errs
 
 
+FORGE_PINS = ("request.operation == 'CREATE'", "object.metadata.ownerReferences[0].kind == 'CronJob'",
+              "object.metadata.labels['tockmox.com/run-now'] == 'true'",
+              "variables.pod.serviceAccountName in ['', 'default']", "variables.pod.serviceAccount in ['', 'default']",
+              "!variables.pod.automountServiceAccountToken", "size(variables.pod.containers) == 1",
+              "!has(variables.pod.initContainers)", "!has(variables.pod.ephemeralContainers)",
+              "command == ['/bin/sh', '/opt/offsite/forge-offsite-copy.sh']", "!has(variables.pod.containers[0].args)",
+              "!has(variables.pod.containers[0].envFrom)", "!has(e.valueFrom)",
+              "v.configMap.name in ['tockmox-forge-offsite-script', 'tockmox-forge-offsite-ca']",
+              "v.secret.secretName == 'tockmox-forge-offsite'")
+NOT_A_MOVE = "!(has(object.metadata.labels) && 'tockmox.com/move-forge' in object.metadata.labels)"
+
+
+def check_forge_jobs(docs, forge_ns="tockmox-forge") -> list:
+    name = "tockmox-actions-forge-jobs"
+    vaps = {d["metadata"]["name"]: d for d in docs if d["kind"] == "ValidatingAdmissionPolicy"}
+    binds = {d["spec"]["policyName"]: d for d in docs if d["kind"] == "ValidatingAdmissionPolicyBinding"}
+    mine = {(n, ns) for kind, n, ns, _ in bound_to(docs, "tockmox-actions") if kind == "Role"}
+    grant = any(d["kind"] == "Role" and d["metadata"].get("namespace") == forge_ns and (d["metadata"]["name"], forge_ns) in mine
+                and any("jobs" in (r.get("resources") or []) and "create" in (r.get("verbs") or []) for r in d.get("rules") or [])
+                for d in docs)
+    v = vaps.get(name)
+    if not grant:
+        return [f"11: {name} rendered with no Jobs grant in {forge_ns}"] if v is not None or name in binds else []
+    if v is None:
+        return [f"11: tockmox-actions may create Jobs in {forge_ns} but {name} is missing"]
+    errs = []
+    if binds.get(name, {}).get("spec", {}).get("validationActions") != ["Deny"] or v["spec"].get("failurePolicy") != "Fail":
+        errs.append(f"11: {name} is not bound with Deny, or fails open")
+    rules = (v["spec"].get("matchConstraints") or {}).get("resourceRules") or []
+    if not any("jobs" in r.get("resources", []) and {"CREATE", "UPDATE"} <= set(r.get("operations", [])) for r in rules):
+        errs.append(f"11: {name} does not match the creation and update of Jobs")
+    conds = [c["expression"] for c in v["spec"].get("matchConditions") or []]
+    want = ["request.userInfo.username == 'system:serviceaccount:tockmox-ai:tockmox-actions'", f"request.namespace == '{forge_ns}'"]
+    if "tockmox-actions-move-job" in vaps:
+        want.append(NOT_A_MOVE)
+    if conds != want:
+        errs.append(f"11: {name} matches something other than every Job from this identity in {forge_ns} that is not a move: {conds}")
+    body = " ".join(x["expression"] for x in v["spec"].get("validations") or [])
+    for pin in FORGE_PINS:
+        if pin not in body:
+            errs.append(f"11: {name} does not pin {pin!r}")
+    # The owners it admits are exactly the CronJobs run-now may read in this namespace: none with run-now off.
+    listed = sorted(n for d in docs if d["kind"] == "Role" and (d["metadata"]["name"], d["metadata"].get("namespace")) == ("tockmox-actions-run-now", forge_ns)
+                    for r in d.get("rules") or [] if "cronjobs" in (r.get("resources") or []) for n in r.get("resourceNames") or [])
+    m = re.search(r"ownerReferences\[0\]\.name in (\[[^\]]*\])", body)
+    if not m or sorted(yaml.safe_load(m.group(1))) != listed:
+        errs.append(f"11: {name} admits owners {m.group(1) if m else None}, not the CronJobs run-now lists in {forge_ns}: {listed}")
+    return errs
+
+
 class _Tag(str):
     """A YAML tag in an Authentik blueprint (!KeyOf, !Env), kept as '!Name value' for the assertions."""
 
@@ -526,6 +590,46 @@ def selftest(docs) -> int:
     planted("the request Secret's policy is not bound", move_secret_unbound, check_move, "10:")
     if any(y["kind"] == "ValidatingAdmissionPolicy" and y["metadata"]["name"] == "tockmox-actions-jobs" for y in docs):
         planted("the run-now policy steps aside for more than a move", run_now_steps_aside, check_move, "10:")
+
+    def _pin(d):
+        return next(y for y in d if y["kind"] == "ValidatingAdmissionPolicy" and y["metadata"]["name"] == "tockmox-actions-forge-jobs")
+
+    def pin_gone(d):
+        d[:] = [y for y in d if not (y["kind"].startswith("ValidatingAdmissionPolicy") and "tockmox-actions-forge-jobs" in (y["metadata"]["name"], y["spec"].get("policyName")))]
+
+    def pin_unbound(d):
+        d[:] = [y for y in d if not (y["kind"] == "ValidatingAdmissionPolicyBinding" and y["spec"]["policyName"] == "tockmox-actions-forge-jobs")]
+
+    def pin_fails_open(d):
+        _pin(d)["spec"]["failurePolicy"] = "Ignore"
+
+    def pin_any_account(d):
+        _pin(d)["spec"]["validations"] = [x for x in _pin(d)["spec"]["validations"] if "serviceAccountName" not in x["expression"]]
+
+    def pin_any_volume(d):
+        _pin(d)["spec"]["validations"] = [x for x in _pin(d)["spec"]["validations"] if "v.secret" not in x["expression"]]
+
+    def pin_any_command(d):
+        _pin(d)["spec"]["validations"] = [x for x in _pin(d)["spec"]["validations"] if "command ==" not in x["expression"]]
+
+    def pin_steps_aside(d):
+        _pin(d)["spec"]["matchConditions"].append({"name": "x", "expression": "!has(object.metadata.labels) || !('skip' in object.metadata.labels)"})
+
+    def pin_other_namespace(d):
+        _pin(d)["spec"]["matchConditions"][1]["expression"] = "request.namespace == 'elsewhere'"
+    planted("run-now reaches the forge's namespace with no pin on the pod", pin_gone, check_forge_jobs, "11:")
+    planted("the forge run-now pin is not bound", pin_unbound, check_forge_jobs, "11:")
+    planted("the forge run-now pin fails open", pin_fails_open, check_forge_jobs, "11:")
+    planted("the forge run-now pin admits any ServiceAccount", pin_any_account, check_forge_jobs, "11:")
+    planted("the forge run-now pin admits any volume", pin_any_volume, check_forge_jobs, "11:")
+    planted("the forge run-now pin admits any command", pin_any_command, check_forge_jobs, "11:")
+    planted("the forge run-now pin steps aside for a label of the caller's choosing", pin_steps_aside, check_forge_jobs, "11:")
+    planted("the forge run-now pin watches another namespace", pin_other_namespace, check_forge_jobs, "11:")
+
+    def pin_any_owner(d):
+        for x in _pin(d)["spec"]["validations"]:
+            x["expression"] = re.sub(r"name in \[[^\]]*\]", "name in ['tockmox-forge-offsite', 'tockmox-forge-drill-check', 'tockmox-forge-move']", x["expression"])
+    planted("the forge run-now pin admits an owner run-now does not list", pin_any_owner, check_forge_jobs, "11:")
     docs[:] = layer
     planted("the console role granted change_user", wide_role, check_identity_layer, "7:")
     planted("the console may change the admin group", admin_group, check_identity_layer, "7:")
@@ -571,7 +675,8 @@ def selftest(docs) -> int:
                 e["secretRef"].pop("optional", None)
     planted("the Authentik server is given the token by key", server_gets_token, check_identity_layer, "7:")
     planted("the grants CronJob requires the token's Secret", token_required, check_identity_layer, "7:")
-    clean = check_on(iddocs) + check_identity_mount(iddocs) + check_identity_layer(layer) + check_changes(chdocs)
+    clean = (check_on(iddocs) + check_identity_mount(iddocs) + check_identity_layer(layer) + check_changes(chdocs)
+             + check_forge_jobs(chdocs))
     print(("  ok    " if not clean else "  FAIL  ") + "the real renders are green" + ("" if not clean else f": {clean}"))
     return 1 if fails or clean else 0
 
@@ -587,7 +692,7 @@ def main():
         return 1
     if "--selftest" in sys.argv:
         return selftest(on)
-    errs = check_on(on)
+    errs = check_on(on) + check_forge_jobs(on)
     rc, off = render(ON, OFF)
     errs += [f"render with every kind off failed: {off}"] if rc else check_off(off)
     rc, out = render(ON, ARGO_NO_ACCOUNT)
@@ -596,9 +701,21 @@ def main():
     rc, ident = render(ON, IDENTITY_ON)
     errs += [f"render with identity on failed: {ident}"] if rc else check_on(ident) + check_identity_mount(ident)
     rc, ch = render(ON, CHANGES_ON)
-    errs += [f"render with changes on failed: {ch}"] if rc else check_on(ch) + check_changes(ch) + check_move(ch)
+    errs += [f"render with changes on failed: {ch}"] if rc else check_on(ch) + check_changes(ch) + check_move(ch) + check_forge_jobs(ch)
     rc, nomv = render(ON, CHANGES_ON, {"tockmoxUi": {"actions": {"moveForge": {"enabled": False}}}})
-    errs += [f"render with moveForge off failed: {nomv}"] if rc else check_move(nomv, want_on=False)
+    errs += [f"render with moveForge off failed: {nomv}"] if rc else check_move(nomv, want_on=False) + check_forge_jobs(nomv)
+    # Run-now off, the move on: the move's Role still grants create on Jobs there, and nothing but a move is admitted.
+    rc, norun = render(ON, CHANGES_ON, {"tockmoxUi": {"actions": {"runJob": {"enabled": False}}}})
+    errs += [f"render with run-now off and the move on failed: {norun}"] if rc else check_forge_jobs(norun) + check_move(norun)
+    if not rc and "ownerReferences[0].name in []" not in " ".join(
+            x["expression"] for d in norun if d["kind"] == "ValidatingAdmissionPolicy" and d["metadata"]["name"] == "tockmox-actions-forge-jobs"
+            for x in d["spec"]["validations"]):
+        errs.append("11: with run-now off and the move on, tockmox-actions-forge-jobs is missing or admits an owner")
+    # A site that lists a CronJob of its own in the forge's namespace, with the change kinds off, gets the pin too.
+    rc, own = render(ON, {"tockmoxUi": {"actions": {"runJob": {"allow": [{"namespace": "tockmox-forge", "name": "my-job", "part": "site-repository"}]}}}})
+    errs += [f"render with a run-now CronJob of the site's own in the forge's namespace failed: {own}"] if rc else check_forge_jobs(own)
+    if not rc and not any(d["kind"] == "ValidatingAdmissionPolicy" and d["metadata"]["name"] == "tockmox-actions-forge-jobs" for d in own):
+        errs.append("11: a run-now CronJob of the site's own in the forge's namespace rendered without tockmox-actions-forge-jobs")
     for label, overlays, want in (
             ("built-in, nothing set", (CHANGES_ON,), True),
             ("built-in, set off", (CHANGES_ON, {"tockmoxUi": {"actions": {"changes": {"enabled": False}}}}), False),
