@@ -248,6 +248,44 @@ clearpaths; mkpath P13 "$PASSBODY"
 runit "$P13ROW"
 expect "a PASS P13 beside the P13 row: green, and the row is reported stale (a warning only)" 0 "WARNING stale row 1"
 
+# ---- the real P12 row, read from the real expected-outcomes.txt, against a fixture P12 that declares BLOCKED
+# P12 declares BLOCKED when it has no P09 install to work on (paths/P12-bring-your-own-ca.sh: no state directory, no
+# p09-passed marker, no site repository, no sealed-secrets certificate in it, or no remote named origin). The row allows
+# exactly the first two, and nothing else.
+P12ROW="$(grep -E '^P12 \| BLOCKED \|' "$REAL_LIST" | head -1)"
+[ -n "$P12ROW" ] && ok "the real list holds a BLOCKED row for P12" || bad "the real list holds a BLOCKED row for P12" "no such row in ${REAL_LIST}"
+case "$P12ROW" in *"nofile:TOCKMOX_P09_STATE/p09-passed"*) ok "... and its condition is the marker P12's own gate reads" ;; *) bad "P12 row condition" "$P12ROW" ;; esac
+grep -F '[ -f "${P09_STATE}/p09-passed" ]' "${HERE}/paths/P12-bring-your-own-ca.sh" >/dev/null \
+  && ok "... which is the marker paths/P12-bring-your-own-ca.sh blocks on" || bad "P12's gate reads p09-passed" "the path no longer tests that marker"
+clearpaths; mkpath P12 'path_outcome BLOCKED "TOCKMOX_P09_STATE is not set, so there is no P09 install on this cluster to read"; exit 0'
+runit "$P12ROW"
+expect "P12 BLOCKED with no P09 state, the real row: green, named, with the list's reason" 0 "BLOCKED P12-fixture, as declared in expected-outcomes.txt: It runs bring-your-own-ca.md"
+say "WARNING stale" && bad "the used P12 row is not stale" "stale warning printed" || ok "... and the used P12 row is not reported stale"
+runit "$P12ROW" P12
+expect "the same BLOCKED P12 in a run that NAMES it (the lane): red, status 4" 4 "paths blocked, NOT declared: 1"
+mkdir -p "${TMP}/p12st"
+p12env() { # STATEDIR ... a full run with TOCKMOX_P09_STATE set; status in $RC, output in $OUT
+  N=$((N+1)); printf '%s\n' "$P12ROW" > "${TMP}/list.txt"
+  OUT="$( cd "$FXREPO" && PATH="${TMP}/bin:${PATH}" TOCKMOX_DOCS_REF=HEAD TOCKMOX_EXISTING_KUBECONFIG="${TMP}/kubeconfig" KUBE_CONTEXT=fixture \
+      TOCKMOX_WORKDIR="${TMP}/work-${MUI}-${N}" TOCKMOX_EXPECTED_OUTCOMES="${TMP}/list.txt" TOCKMOX_P09_STATE="$1" bash "${ED}/run.sh" 2>&1 )"; RC=$?
+}
+p12env "${TMP}/p12st"
+expect "P12 BLOCKED with a state directory but no p09-passed marker: green (P09 did not end PASS, so there is no install)" 0 "as declared"
+: > "${TMP}/p12st/p09-passed"
+p12env "${TMP}/p12st"
+expect "P12 BLOCKED although P09 ended PASS on this state directory: red, status 4 (the install exists, so the block is a defect)" 4 "paths blocked, NOT declared: 1"
+P12ALWAYS="$(printf '%s' "$P12ROW" | sed 's/nofile:TOCKMOX_P09_STATE\/p09-passed/always/')"
+if [ "$P12ALWAYS" != "$P12ROW" ]; then
+  N=$((N+1)); printf '%s\n' "$P12ALWAYS" > "${TMP}/list.txt"
+  OUT="$( cd "$FXREPO" && PATH="${TMP}/bin:${PATH}" TOCKMOX_DOCS_REF=HEAD TOCKMOX_EXISTING_KUBECONFIG="${TMP}/kubeconfig" KUBE_CONTEXT=fixture \
+      TOCKMOX_WORKDIR="${TMP}/work-${MUI}-${N}" TOCKMOX_EXPECTED_OUTCOMES="${TMP}/list.txt" TOCKMOX_P09_STATE="${TMP}/p12st" bash "${ED}/run.sh" 2>&1 )"; RC=$?
+  [ "$RC" = 0 ] && ok "mutation: the P12 row made 'always' lets a BLOCKED P12 beside a passed P09 go green, so the case above would catch it" \
+    || bad "mutation: the P12 row made 'always'" "rc=${RC}; still red, so the case above proves nothing about the condition"
+else bad "mutation: the P12 row made 'always'" "the edit changed nothing"; fi
+clearpaths; mkpath P12 "$PASSBODY"
+runit "$P12ROW"
+expect "a PASS P12 beside the P12 row: green, and the row is reported stale (a warning only)" 0 "WARNING stale row 1"
+
 # ---- mutated copies of run.sh: each must go green (or refuse differently) where the real one is red
 runmut() { # NAME OLD NEW CASE-FUNCTION-ARGS... ; installs the mutant over the fixture's run.sh
   mut "$RUN_SH" "${ED}/run.sh" "$2" "$3" || { bad "$1: the mutation applies" "edit failed"; return 1; }

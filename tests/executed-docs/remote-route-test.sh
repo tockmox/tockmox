@@ -364,7 +364,7 @@ run_lane() { # VAR=value... -> output in $TMP/lout, status in $LRC, calls in $LH
   LN=$((LN+1)); LH="$TMP/lane-$LN"; mkdir -p "$LH/home" "$LH/work"; : > "$LH/log"
   local gp="$TMP/gitstub:" a
   for a in "$@"; do [ "$a" = LANE_REAL_GIT=1 ] && gp=""; done
-  env -u TOCKMOX_KEEP_CLUSTER -u TOCKMOX_P09_ROUTE -u TOCKMOX_P09_SITE_REPO_URL "$@" HOME="$LH/home" TOCKMOX_WORKDIR="$LH/work" \
+  env -u TOCKMOX_KEEP_CLUSTER -u TOCKMOX_P09_ROUTE -u TOCKMOX_P09_SITE_REPO_URL -u TOCKMOX_P09_BYO_CA "$@" HOME="$LH/home" TOCKMOX_WORKDIR="$LH/work" \
     LANE_LOG="$LH/log" LANE_TMP="$LH" PATH="${gp}$TMP/lbin:$PATH" KUBECONFIG="$LH/substrate.kubeconfig" TOCKMOX_DOCS_REF=stub \
     TOCKMOX_SUBSTRATE_CONTEXT=stub-substrate TOCKMOX_TEST_VM=ed-lane \
     bash "${LANE_USE:-$L/p09-lane.sh}" > "$TMP/lout" 2>&1
@@ -374,7 +374,7 @@ logs() { grep -c -- "$1" "$LH/log"; }
 say() { grep -F -- "$1" "$TMP/lout" >/dev/null; }
 report() { cat "$LH"/work/report-p09-lane-*.txt 2>/dev/null; }
 
-run_lane TOCKMOX_P09_ROUTE=external
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_BYO_CA=0
 [ "$LRC" = 0 ] && ok "external route, every step provided: the lane exits 0" || bad "external ok" "rc=$LRC $(tail -4 "$TMP/lout")"
 ordered() { # PATTERN... each must appear in the lane's log, later than the one before
   local last=0 n pat
@@ -410,7 +410,7 @@ grep -v '^TOCKMOX_P09_SITE_REPO_URL=' "$LH/p09.env" > "$TMP/p09.env.without"; ru
   && ok "... and the same environment without that one variable is exactly what P09 declares BLOCKED (the check is real)" || bad "P09 without the URL" "rc=$P9RC $(tail -4 "$TMP/p09out-without")"
 
 # the built-in route is untouched
-run_lane TOCKMOX_P09_ROUTE=built-in
+run_lane TOCKMOX_P09_ROUTE=built-in TOCKMOX_P09_BYO_CA=0
 [ "$LRC" = 0 ] && ! grep -E 'publish|guard-file|nodeport|reach|--writable' "$LH/log" >/dev/null && grep -F 'site-repo-server up GUARD=' "$LH/log" >/dev/null \
   && ! grep '^TOCKMOX_P09_SITE_REPO_URL=' "$LH/p09.env" >/dev/null && ! grep -E '^git ' "$LH/log" >/dev/null \
   && ok "built-in route: plain up, no publish, no voucher, no reach, no git probe, and no site URL exported" || bad "built-in unchanged" "rc=$LRC $(cat "$LH/log")"
@@ -418,7 +418,7 @@ run_lane
 [ "$LRC" = 0 ] && ! grep -E 'publish|--writable' "$LH/log" >/dev/null && ok "with no TOCKMOX_P09_ROUTE the lane's default (built-in) provisions no site remote" || bad "default route" "$(cat "$LH/log")"
 
 # the caller's own forge
-run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_SITE_REPO_URL=git://192.0.2.77/own.git
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_BYO_CA=0 TOCKMOX_P09_SITE_REPO_URL=git://192.0.2.77/own.git
 [ "$LRC" = 0 ] && ! grep -E 'publish|--writable|reach' "$LH/log" >/dev/null && grep -F 'TOCKMOX_P09_SITE_REPO_URL=git://192.0.2.77/own.git' "$LH/p09.env" >/dev/null && say 'is set by the caller' \
   && ok "a TOCKMOX_P09_SITE_REPO_URL the caller set is used as given and nothing is provisioned" || bad "caller URL" "rc=$LRC $(cat "$LH/log")"
 
@@ -430,7 +430,7 @@ for c in "publish:STUB_PUBLISH=fail:throwaway-cluster.sh publish git 30418 faile
          "runner-push:STUB_GIT=push:the workstation cannot read and push to git://node.stub.invalid:31234/site.git" \
          "reach:STUB_REACH=fail:the guest cannot read its own published address"; do
   nm="${c%%:*}"; rest="${c#*:}"; var="${rest%%:*}"; why="${rest#*:}"
-  run_lane TOCKMOX_P09_ROUTE=external "$var"
+  run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_BYO_CA=0 "$var"
   [ "$LRC" = 5 ] && say "lane: INFRA_ERROR: ${why}" && [ "$(logs '^run.sh P09')" = 0 ] && [ "$(logs '^throwaway destroy')" = 1 ] \
     && report | grep -F "lane: INFRA_ERROR: ${why}" >/dev/null \
     && ok "failure at ${nm}: the lane exits 5 naming it, writes it to the report, never runs P09 and destroys the VM" || bad "failure at ${nm}" "rc=$LRC $(tail -3 "$TMP/lout")"
@@ -438,21 +438,21 @@ done
 
 # the runner check against a REAL daemon and the real git: writable passes, read-only is INFRA_ERROR
 start_daemon "$SRS" --writable none; WP="$DPORT"
-run_lane TOCKMOX_P09_ROUTE=external STUB_PUBLISH_HP="127.0.0.1:${WP}" LANE_REAL_GIT=1
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_BYO_CA=0 STUB_PUBLISH_HP="127.0.0.1:${WP}" LANE_REAL_GIT=1
 [ "$LRC" = 0 ] && grep -F "TOCKMOX_P09_SITE_REPO_URL=git://127.0.0.1:${WP}/site.git" "$LH/p09.env" >/dev/null \
   && ok "real git against a real writable daemon: the lane's runner check passes and the URL is exported" || bad "real daemon, lane" "rc=$LRC $(tail -4 "$TMP/lout")"
 start_daemon "$SRS" "" preseed; RP="$DPORT"
-run_lane TOCKMOX_P09_ROUTE=external STUB_PUBLISH_HP="127.0.0.1:${RP}" LANE_REAL_GIT=1
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_BYO_CA=0 STUB_PUBLISH_HP="127.0.0.1:${RP}" LANE_REAL_GIT=1
 [ "$LRC" = 5 ] && say "or the daemon refuses receive-pack" && [ "$(logs '^run.sh P09')" = 0 ] \
   && ok "real git against a read-only daemon: the lane exits 5 (the daemon refuses receive-pack) and P09 never runs" || bad "real daemon read-only, lane" "rc=$LRC $(tail -4 "$TMP/lout")"
-run_lane TOCKMOX_P09_ROUTE=external STUB_PUBLISH_HP="127.0.0.1:$(free_port)" LANE_REAL_GIT=1
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_BYO_CA=0 STUB_PUBLISH_HP="127.0.0.1:$(free_port)" LANE_REAL_GIT=1
 [ "$LRC" = 5 ] && ok "real git against a port nothing listens on: the lane exits 5" || bad "nothing listening" "rc=$LRC"
 
 # ============================================================ 5. copies that lose one guard each
 mutlane() { mut "$LANE_SH" "$L/p09-lane-m.sh" "$1" "$2"; LANE_USE="$L/p09-lane-m.sh"; }
 # a: the URL is never exported
 mutlane '  export TOCKMOX_P09_SITE_REPO_URL="$SITE_URL"' '  : "$SITE_URL"'
-run_lane TOCKMOX_P09_ROUTE=external
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_BYO_CA=0
 if ! grep '^TOCKMOX_P09_SITE_REPO_URL=' "$LH/p09.env" >/dev/null; then
   run_p09 mutA < "$LH/p09.env"
   [ "$P9RC" = 0 ] && grep -F 'Unset: TOCKMOX_P09_SITE_REPO_URL' "$TMP/p09out-mutA" >/dev/null \
@@ -460,39 +460,39 @@ if ! grep '^TOCKMOX_P09_SITE_REPO_URL=' "$LH/p09.env" >/dev/null; then
 else bad "mutation a" "the URL was still exported"; fi
 # b: a failed publish is ignored
 mutlane '    || infra "throwaway-cluster.sh publish git ${GIT_NP} failed' '    || : "throwaway-cluster.sh publish git ${GIT_NP} failed'
-run_lane TOCKMOX_P09_ROUTE=external STUB_PUBLISH=failprint
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_BYO_CA=0 STUB_PUBLISH=failprint
 [ "$LRC" != 5 ] && ok "mutation: a lane that ignores a failed publish no longer exits 5 (the publish case above is the guard)" || bad "mutation b" "rc=$LRC"
 # c: a failed up --writable is ignored
 mutlane '    || infra "site-repo-server.sh up --writable failed' '    || : "site-repo-server.sh up --writable failed'
-run_lane TOCKMOX_P09_ROUTE=external STUB_UP=fail
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_BYO_CA=0 STUB_UP=fail
 [ "$LRC" != 5 ] && ok "mutation: a lane that ignores a failed up --writable no longer exits 5" || bad "mutation c" "rc=$LRC"
 # d: INFRA_ERROR is 1
 mutlane 'STOPPED="lane: INFRA_ERROR: $1"; echo "$STOPPED" >&2; exit 5; }' 'STOPPED="lane: INFRA_ERROR: $1"; echo "$STOPPED" >&2; exit 1; }'
-run_lane TOCKMOX_P09_ROUTE=external STUB_PUBLISH=fail
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_BYO_CA=0 STUB_PUBLISH=fail
 [ "$LRC" = 1 ] && ok "mutation: infra() exiting 1 is caught by the exit-5 cases" || bad "mutation d" "rc=$LRC"
 # e: the built-in route provisions the remote too
 mutlane 'if [ "$ROUTE" = external ]; then
   if [ -n "${TOCKMOX_P09_SITE_REPO_URL:-}" ]; then' 'if true; then
   if [ -n "${TOCKMOX_P09_SITE_REPO_URL:-}" ]; then'
-run_lane TOCKMOX_P09_ROUTE=built-in
+run_lane TOCKMOX_P09_ROUTE=built-in TOCKMOX_P09_BYO_CA=0
 grep -E 'publish|--writable' "$LH/log" >/dev/null && ok "mutation: a lane that provisions the remote on the built-in route is caught by the built-in case" || bad "mutation e" "$(cat "$LH/log")"
 # f: the guest check is dropped
 mutlane '    || infra "the guest cannot read its own published address' '    || : "the guest cannot read its own published address'
-run_lane TOCKMOX_P09_ROUTE=external STUB_REACH=fail
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_BYO_CA=0 STUB_REACH=fail
 [ "$LRC" != 5 ] && ok "mutation: a lane that ignores the guest check (the hairpin) no longer exits 5" || bad "mutation f" "rc=$LRC"
 # g: the runner check is dropped
 mutlane '    || infra "the workstation cannot read and push to' '    || : "the workstation cannot read and push to'
-run_lane TOCKMOX_P09_ROUTE=external STUB_GIT=push
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_BYO_CA=0 STUB_GIT=push
 [ "$LRC" != 5 ] && ok "mutation: a lane that ignores the runner check no longer exits 5" || bad "mutation g" "rc=$LRC"
 # h: a caller's URL is overwritten
 mutlane '  if [ -n "${TOCKMOX_P09_SITE_REPO_URL:-}" ]; then' '  if false; then'
-run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_SITE_REPO_URL=git://192.0.2.77/own.git
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_BYO_CA=0 TOCKMOX_P09_SITE_REPO_URL=git://192.0.2.77/own.git
 grep -F 'publish' "$LH/log" >/dev/null && ok "mutation: a lane that overrides the caller's own URL is caught" || bad "mutation h" "$(cat "$LH/log")"
 LANE_USE=""
 # the dry run is dropped from the runner check: a read-only daemon is then accepted
 mut "$LANE_SH" "$L/p09-lane-m.sh" 'git push --dry-run "$1" HEAD:refs/heads/lane-probe >/dev/null 2>&1 )' 'true )'
 LANE_USE="$L/p09-lane-m.sh"
-run_lane TOCKMOX_P09_ROUTE=external STUB_PUBLISH_HP="127.0.0.1:${RP}" LANE_REAL_GIT=1
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_BYO_CA=0 STUB_PUBLISH_HP="127.0.0.1:${RP}" LANE_REAL_GIT=1
 [ "$LRC" != 5 ] && ok "mutation: a runner check that never tries a push passes a read-only daemon (the real-daemon case above is the guard)" || bad "mutation dry run" "rc=$LRC"
 LANE_USE=""
 
