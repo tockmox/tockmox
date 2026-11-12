@@ -531,6 +531,17 @@ if ! done_step "$S"; then budget_left || yield "S08+"
   execute_begin "install.md 1c success condition"; run_ws "$S" "$(block 'ls "$SITE_REPO/site/values/"')"; execute_end $?
   record "$S" "1c success: root.yaml listed" "1" "$(out_of "$S" | grep -c 'bootstrap/root.yaml' | tr -d ' ')"
   record "$S" "1c success: site/values/ holds global.yaml" "1" "$(out_of "$S" | grep -cw 'global.yaml' | tr -d ' ')"
+  # Lab only, the way identity.md "Naming the first admins" says: name an admin in sso.adminUsers before the
+  # site is published. A reader names themselves; a throwaway has only Authentik's bootstrap user. It gives the
+  # admin group a member, so S21c can prove the approvers watcher sees one (without it the group is empty).
+  if [ "$ROUTE" = built-in ] && [ -f "${SITE_REPO:-/nonexistent}/site/values/identity.yaml" ]; then
+    idv="$SITE_REPO/site/values/identity.yaml"
+    if ! grep -q '^  adminUsers:' "$idv"; then
+      awk '{ print } /^sso:$/ && !d { print "  adminUsers: [akadmin]"; d = 1 }' "$idv" > "$idv.p09" && mv "$idv.p09" "$idv"
+    fi
+    note "S08: lab only: sso.adminUsers names akadmin in site/values/identity.yaml (identity.md, Naming the first admins)"
+    record "$S" "lab: the site names akadmin in sso.adminUsers before it is published" "1" "$(grep -c '^  adminUsers: \[akadmin\]$' "$idv" | tr -d ' ')"
+  fi
   mark_done "$S"
 fi
 
@@ -881,6 +892,50 @@ if ! done_step "$S"; then budget_left || yield "S21c+"
     printf 'Type the context name\t%s\nType the API server\t%s\n' "$KUBE_CONTEXT" "$(kubectl --context="$KUBE_CONTEXT" config view --minify -o jsonpath='{.clusters[0].cluster.server}')" > "${STATE}/${S}.answers"
     execute_begin "install.md connect the built-in forge's sign-in"; run_ws "$S" "$(block '--connect-sign-in')" "${STATE}/${S}.answers"; execute_end $?
     record_sign_in_row "$S"
+    # The approvers watcher (site-forge.md), which bootstrap-forge installs on a site with sign-in: its pod
+    # is ready, and one check run in that pod with its own two read-only credentials reads clean. It reads
+    # Authentik through the cluster's own Service, so it needs no LAN resolver. Each wait is bounded (two
+    # and four minutes): the identity layer applies the watcher's blueprint on its own schedule.
+    wready=""
+    for _ in $(seq 1 8); do
+      wready="$(kubectl --context="$KUBE_CONTEXT" -n tockmox-forge get deployment tockmox-forge-approver-watch -o jsonpath='{.status.readyReplicas}' 2>/dev/null)"
+      [ "$wready" = 1 ] && break
+      sleep 15
+    done
+    record "$S" "the approvers watcher's pod is ready" "1" "${wready:-0}"
+    wok=0; wlast=""
+    for _ in $(seq 1 16); do
+      wlast="$(kubectl --context="$KUBE_CONTEXT" -n tockmox-forge exec deploy/tockmox-forge-approver-watch -- python3 /opt/watch/forge-approver-watch.py --once 2>&1 | tail -n 20)"
+      case "$wlast" in *"tockmox_forge_approvers_check_ok 1"*) wok=1; break ;; esac
+      sleep 15
+    done
+    [ "$wok" = 1 ] || note "S21c: the approvers watcher's last check: $(printf '%s' "$wlast" | tr '\n' ' ' | cut -c1-300)"
+    record "$S" "the approvers watcher's check reads clean (both read-only credentials work)" "1" "$wok"
+    # A clean check alone does not show the watcher can SEE a member: an empty group beside an empty team is
+    # clean too. S08 named akadmin, so the watcher's own read of the group, in its pod, with its own token, must
+    # count one active member (the admin-users hook runs after the identity sync, so this waits too).
+    wseen=""
+    for _ in $(seq 1 16); do
+      wseen="$(kubectl --context="$KUBE_CONTEXT" -n tockmox-forge exec deploy/tockmox-forge-approver-watch -- python3 -c 'import importlib.util as u, os; s = u.spec_from_file_location("w", "/opt/watch/forge-approver-watch.py"); w = u.module_from_spec(s); s.loader.exec_module(w); print(len(w.active_admins(os.environ["AUTHENTIK_URL"], w.token(os.environ["AUTHENTIK_TOKEN_FILE"]), os.environ.get("ADMIN_GROUP", "tockmox-admins"))))' 2>&1 | tail -n 1)"
+      [ "$wseen" = 1 ] && break
+      sleep 15
+    done
+    record "$S" "the approvers watcher sees the admin group's member (akadmin, named in S08) with its own token" "1" "$wseen"
+    # The forge half's credential (ruled 2026-11-11): the watcher's account is in Owners so it may see who is
+    # in approvers, and its one token, read-only, is what keeps it from changing anything. So the same token,
+    # in the watcher's pod, asks the forge to add the watcher itself to approvers: the forge must refuse (403).
+    wwrite="$(kubectl --context="$KUBE_CONTEXT" -n tockmox-forge exec deploy/tockmox-forge-approver-watch -- python3 -c '
+import importlib.util as u, os, urllib.error as e, urllib.request as r
+s = u.spec_from_file_location("w", "/opt/watch/forge-approver-watch.py"); w = u.module_from_spec(s); s.loader.exec_module(w)
+b = os.environ["FORGE_URL"].rstrip("/") + "/api/v1"; h = {"Authorization": "token " + w.token(os.environ["FORGE_TOKEN_FILE"])}
+ids = [t["id"] for t in w.paged(b, "/orgs/" + os.environ.get("FORGE_ORG", "tockmox") + "/teams", h) if t.get("name") == os.environ.get("FORGE_TEAM", "approvers")]
+try:
+    r.urlopen(r.Request(b + "/teams/%d/members/tockmox-approver-watch" % ids[0], method="PUT", headers=h), timeout=20)
+    print("accepted")
+except e.HTTPError as x:
+    print(x.code)
+' 2>&1 | tail -n 1)"
+    record "$S" "the approvers watcher's token is refused on a team write (it asks to join approvers)" "403" "$wwrite"
   else
     record "$S" "the page's gate for the sign-in step is met (tockmox-identity Synced/Healthy)" "Synced/Healthy" "${idh:-absent}"
   fi

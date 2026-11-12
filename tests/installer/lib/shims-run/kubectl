@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# Fake kubectl for the full-run cases of tests/installer/bootstrap-forge-tests.sh (F36 on).
+# The cluster is a directory of objects ($FAKE_STATE/objs); the API the forge's port-forward reaches is
+# tests/installer/lib/forge-stub.py with ADMIN=1. Everything else is fake-kubectl.py.
+S="${FAKE_STATE:?FAKE_STATE not set}"
+LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+case " $* " in
+  *" port-forward "*)
+    printf 'kubectl %s\n' "$*" >> "$S/calls.log"
+    mkdir -p "$S/forge"; rm -f "$S/forge.port"
+    ADMIN=1 python3 "$LIB/forge-stub.py" "$S/forge" "$S/forge.port" &
+    SP=$!
+    trap 'kill "$SP" 2>/dev/null; exit 0' TERM INT
+    for _ in $(seq 1 50); do [ -s "$S/forge.port" ] && break; sleep 0.1; done
+    printf 'Forwarding from 127.0.0.1:%s -> 3000\n' "$(cat "$S/forge.port")"
+    wait "$SP"
+    exit 0 ;;
+esac
+exec python3 "$LIB/fake-kubectl.py" "$@"

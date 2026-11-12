@@ -45,6 +45,7 @@ tockmox-observability ServiceMonitor t-kube-prometheus-stack-kubelet        # ku
 tockmox-observability ServiceMonitor tockmox-argocd-application-controller  # Argo CD metrics Services, from the Argo CD install, not a layer
 tockmox-observability ServiceMonitor tockmox-argocd-server                  # same
 tockmox-observability ServiceMonitor tockmox-argocd-repo-server             # same
+tockmox-observability PodMonitor tockmox-forge-approver-watch         # the watcher bootstrap-forge applies beside the forge (install/forge-approver-watch-template.sh), not a layer
 '
 
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT

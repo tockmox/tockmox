@@ -45,6 +45,18 @@
 #      mirror (a git remote), and the first copy written and read back before this
 #      run reports done. Without one, the observability layer raises the persistent
 #      "No off-site copy" alert, which the console can snooze or silence like any other
+#   6c. with sign-in (so with an admin group to compare against): the APPROVERS WATCHER
+#      (install/forge-approver-watch.py, ruled 2026-11-04: detect, alert, and a person acts; no
+#      credential that can change the team is stored). A forge user `tockmox-approver-watch` in
+#      the organisation's Owners team and no other (ruled 2026-11-11: the forge shows a team's
+#      members only to that team and the owners) with ONE token scoped read:organization and
+#      read:repository, so the credential can read and change nothing; an Authentik
+#      service-account token (view on the admin group only, made by the identity layer's
+#      blueprint) minted into BOTH namespaces like the OIDC secret; a Deployment <release>-approver-watch
+#      in the forge namespace (the move job's image, non-root, read-only root filesystem) fenced by
+#      a NetworkPolicy; and `siteForge.approverWatch` and `sso.apps.forge.approverWatch` written
+#      into the site's values before they are pushed, so the two alerts render and the
+#      blueprint runs. A re-run keeps a token that still works and rotates nothing it need not.
 #   7. write the RECOVERY KIT: the forge's own secrets (app.ini, which carries
 #      SECRET_KEY, INTERNAL_TOKEN and the JWT secrets a restore needs) plus your
 #      sealing-key backup, as ONE encrypted file, kept off the cluster. Its format,
@@ -143,6 +155,7 @@ BOT_READ="tockmox-argocd"
 BOT_CHANGE="tockmox-changes"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BOT_OFFSITE="tockmox-offsite"   # reads main for the off-site copy; nothing else
+BOT_WATCH="tockmox-approver-watch"   # reads the approvers team and the open pull requests; nothing else
 APPROVERS_TEAM="approvers"
 SSO_SOURCE="authentik"         # the sign-in source's name; the identity layer's redirect URI names it
 SSO_CLIENT_ID="tockmox-forge"  # sso.apps.forge.clientId in the identity layer
@@ -213,6 +226,10 @@ the encrypted recovery kit.
                          the identity layer's sso.adminGroup)
   --identity-namespace NS  where Authentik runs (default tockmox-authentik)
   --platform-namespace NS  where Traefik runs, admitted through the fence (default tockmox-platform)
+  --monitoring-namespace NS  where Prometheus runs, admitted to the approvers watcher's metrics port
+                         (default tockmox-monitoring)
+  --identity-service NAME  Authentik's server Service in the identity namespace, which the approvers
+                         watcher reads (default tockmox-identity-authentik-server)
   --auth-host HOST       Authentik's address (default auth.<internalDomain>; set it if the
                          identity layer's ingress.apps.authentik.host is overridden)
   --console-host HOST    the Tockmox console's address (default tockmox.<internalDomain>; set it
@@ -256,6 +273,7 @@ OS_GIT_URL=""; OS_GIT_CREDS=""; OS_GIT_CA=""
 IMAGE_REGISTRY=""; STORAGE_CLASS=""; ARGO_NS="argocd"; AI_NS="tockmox-ai"; WAIT_SECONDS=300; DRY_RUN=false
 RESTORE_HISTORY=""; CONNECT_ONLY=false; NO_SIGN_IN=false; REPLACE_ARGO_CRED=false; FORGE_HOST=""; CONSOLE_HOST=""; ADMIN_GROUP="tockmox-admins"
 IDENTITY_NS="tockmox-authentik"; PLATFORM_NS="tockmox-platform"; AUTH_HOST=""
+MONITORING_NS="tockmox-monitoring"; IDENTITY_SVC="tockmox-identity-authentik-server"; WATCH=false
 CHARTS_REPO="charts"; CHARTS_DIR=""; CHARTS_TAG=""; CHARTS_COMMIT=""
 
 while [[ $# -gt 0 ]]; do
@@ -296,6 +314,8 @@ while [[ $# -gt 0 ]]; do
     --admin-group) ADMIN_GROUP="${2:?--admin-group needs a group name}"; shift 2 ;;
     --identity-namespace) IDENTITY_NS="${2:?--identity-namespace needs a name}"; shift 2 ;;
     --platform-namespace) PLATFORM_NS="${2:?--platform-namespace needs a name}"; shift 2 ;;
+    --monitoring-namespace) MONITORING_NS="${2:?--monitoring-namespace needs a name}"; shift 2 ;;
+    --identity-service) IDENTITY_SVC="${2:?--identity-service needs a name}"; shift 2 ;;
     --auth-host) AUTH_HOST="${2:?--auth-host needs a host name}"; shift 2 ;;
     --console-host) CONSOLE_HOST="${2:?--console-host needs a host name}"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
@@ -389,6 +409,10 @@ if $SIGN_IN; then
   [[ "$ADMIN_GROUP" =~ ^[A-Za-z0-9._-]+$ ]] || die "--admin-group must be letters, digits, '.', '_' or '-': '$ADMIN_GROUP'"
   [[ "$IDENTITY_NS" =~ $NS_RE ]] || die "--identity-namespace is not a namespace name: '$IDENTITY_NS'"
   [[ "$PLATFORM_NS" =~ $NS_RE ]] || die "--platform-namespace is not a namespace name: '$PLATFORM_NS'"
+  [[ "$MONITORING_NS" =~ $NS_RE ]] || die "--monitoring-namespace is not a namespace name: '$MONITORING_NS'"
+  [[ "$IDENTITY_SVC" =~ $NS_RE ]] || die "--identity-service is not a Service name: '$IDENTITY_SVC'"
+  # The watcher compares the forge's approvers with the admin group, so it needs sign-in.
+  WATCH=true
   # global.certIssuer set means the platform's CA signs the forge's certificate, and the
   # forge must trust that CA to reach Authentik; empty means plain http on both.
   SCHEME=http; [[ -n "$CERT_ISSUER" ]] && SCHEME=https
@@ -488,6 +512,9 @@ case "$OFFSITE" in
   *) OFFSITE_WHERE="" ;;
 esac
 OFFSITE_SCRIPT="$HERE/forge-offsite-copy.sh"
+for f in forge-approver-watch.py forge-approver-watch-template.sh; do
+  ! $WATCH || [[ -r "$HERE/$f" ]] || die "missing $HERE/$f, which the approvers watcher is made from"
+done
 [[ -z "$OFFSITE" || -r "$OFFSITE_SCRIPT" ]] || die "missing $OFFSITE_SCRIPT, which the off-site CronJob runs"
 fi  # not --connect-sign-in
 
@@ -555,6 +582,11 @@ if $DRY_RUN; then
     info "the console's OAuth2 application (back to ${CONSOLE_HOST}): Secret ${RELEASE}-console-oauth in ${AI_NS}"
     info "Traefik (${PLATFORM_NS}) admitted through the fence; the sign-in source once Authentik answers"
   fi
+  if $WATCH; then
+    info "the approvers watcher: forge user ${BOT_WATCH} (team Owners only, one token: read:organization, read:repository), an Authentik token for the admin group's view,"
+    info "  Secret ${RELEASE}-approver-watch in ${FORGE_NS} and tockmox-forge-approver-watch in ${IDENTITY_NS}, Deployment ${RELEASE}-approver-watch fenced by a NetworkPolicy,"
+    info "  and siteForge.approverWatch and sso.apps.forge.approverWatch written into the site's values before they are pushed"
+  else info "no approvers watcher (${SIGN_IN_WHY}: there is no admin group sign-in to compare the approvers team with)"; fi
   if [[ -n "$OFFSITE" ]]; then info "off-site copy (${OFFSITE}) to ${OFFSITE_WHERE}: a CronJob every minute, a nightly forge dump of pull requests, reviews and comments to the same place, then the first copy and the first dump written and read back"
   else info "no off-site copy (the console will raise No off-site copy until one is set)"; fi
   [[ -z "$OS_GIT_CA" ]] || info "trust ${OS_GIT_CA} for ${OS_GIT_HOST} in the forge's push mirror and the copy job; the forge allows ${OS_GIT_HOST} alone as a mirror target, even on a private address"
@@ -729,6 +761,20 @@ if $SIGN_IN; then
        forge's sign-in is refused (invalid_client)."
   fi
   ok "OIDC client ${SSO_CLIENT_ID}: one secret in ${FORGE_NS}/${RELEASE}-oidc and ${IDENTITY_NS}/tockmox-sso-forge"
+fi
+# The approvers watcher's Authentik token, one value in two Secrets the same way: the watcher's
+# own (forge namespace) and the one the identity layer's blueprint reads (FORGE_APPROVER_WATCH_TOKEN
+# becomes the service account's API token). An existing value is kept, from either side.
+WATCH_FT=""; WATCH_AK=""
+if $WATCH; then
+  WATCH_AK="$(kubectl "${K[@]}" -n "$FORGE_NS" get secret "${RELEASE}-approver-watch" -o jsonpath='{.data.authentik-token}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  WATCH_FT="$(kubectl "${K[@]}" -n "$FORGE_NS" get secret "${RELEASE}-approver-watch" -o jsonpath='{.data.forge-token}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  WATCH_ID="$(kubectl "${K[@]}" -n "$IDENTITY_NS" get secret tockmox-forge-approver-watch -o jsonpath='{.data.FORGE_APPROVER_WATCH_TOKEN}' 2>/dev/null | base64 -d 2>/dev/null || true)"
+  WATCH_AK="${WATCH_AK:-${WATCH_ID:-$(gen 48)}}"
+  secret_apply "$IDENTITY_NS" tockmox-forge-approver-watch "" FORGE_APPROVER_WATCH_TOKEN="$WATCH_AK"
+  if [[ -z "$WATCH_ID" ]]; then
+    info "Authentik reads that token when its worker starts: if tockmox-identity is already running, restart the worker once so the watcher's service account gets it"
+  fi
 fi
 
 # The release's values are this script's: an adopted release is upgraded to the values
@@ -1064,6 +1110,8 @@ mkuser() {  # name
 mkuser "$BOT_READ"
 mkuser "$BOT_CHANGE"
 mkuser "$BOT_OFFSITE"
+WATCH_MEMBER=""
+if $WATCH; then mkuser "$BOT_WATCH"; WATCH_MEMBER="$BOT_WATCH"; fi
 
 # Teams carry the permissions, so a token is never broader than its team.
 mkteam() {  # name permission user...
@@ -1082,6 +1130,17 @@ mkteam() {  # name permission user...
 mkteam readers read "$BOT_READ" "$BOT_OFFSITE"
 mkteam changes write "$BOT_CHANGE"
 mkteam "$APPROVERS_TEAM" write
+# The approvers watcher is in Owners and no other team (ruled 2026-11-11). The forge shows a team's
+# members only to that team and the organisation's owners, and the watcher must never be an approver.
+# What keeps it from changing anything is its one token, scoped read:organization and read:repository:
+# the forge refuses that token every write. Nobody holds the account's password (made here, never
+# stored) and the forge has no password sign-in.
+if [[ -n "$WATCH_MEMBER" ]]; then
+  OWNERS_ID="$(api GET "/orgs/$ORG/teams/search?q=Owners" | sed -n 's/.*"id":\([0-9]*\),"name":"Owners".*/\1/p' | head -1)"
+  [[ -n "$OWNERS_ID" ]] || die "cannot find the organisation's Owners team"
+  api PUT "/teams/$OWNERS_ID/members/$WATCH_MEMBER" >/dev/null; expect "adding $WATCH_MEMBER to team Owners" 204
+  ok "team Owners: $WATCH_MEMBER (its one token is read-only)"
+fi
 
 # Tokens, minted as the user they belong to, through the admin's sudo. A fresh name
 # per run, so a re-run never fails on a name collision and never reuses a token.
@@ -1117,6 +1176,26 @@ TOKEN_WATCH="$(TOKEN_NAME="bootstrap-watch-$STAMP" mktoken "$BOT_CHANGE" write:r
 # It cannot approve: approving is done as the person, through the console's OAuth2 application (below).
 TOKEN_ACTIONS="$(TOKEN_NAME="bootstrap-actions-$STAMP" mktoken "$BOT_CHANGE" write:repository write:issue)"
 [[ -n "$TOKEN_READ" && -n "$TOKEN_CHANGE" && -n "$TOKEN_WATCH" && -n "$TOKEN_ACTIONS" ]] || die "a token came back empty"
+# The approvers watcher's one token. Unlike the others a working one is KEPT: the watcher re-reads its
+# Secret on every check, so nothing needs the new value, and a re-run changes nothing it need not.
+# A token counts as working when the forge answers it with the team search it exists for.
+token_ok() {  # token -> 0 when the forge accepts it for the team search (the credential goes in on stdin)
+  local c
+  c="$(printf 'header = "Authorization: token %s"\n' "$1" \
+       | curl -sS -o /dev/null -w '%{http_code}' -K - "$API/orgs/$ORG/teams/search?q=$APPROVERS_TEAM" 2>/dev/null)" || c=000
+  [[ "$c" == 200 ]]
+}
+TOKEN_WATCHER=""; WATCHER_TOKEN_KEPT=false
+if $WATCH; then
+  if [[ -n "$WATCH_FT" ]] && token_ok "$WATCH_FT"; then
+    TOKEN_WATCHER="$WATCH_FT"; WATCHER_TOKEN_KEPT=true
+    ok "the approvers watcher's forge token still works; kept"
+  else
+    TOKEN_WATCHER="$(TOKEN_NAME="bootstrap-approver-$STAMP" mktoken "$BOT_WATCH" read:organization read:repository)"
+    [[ -n "$TOKEN_WATCHER" ]] || die "minting a token for $BOT_WATCH returned none"
+    ok "token minted for $BOT_WATCH (read:organization, read:repository)"
+  fi
+fi
 ok "tokens minted for $BOT_READ (read:repository) and $BOT_CHANGE (write:repository, write:issue; one for the console, one for the model watcher)"
 # The older tokens are revoked only once the new ones are in their Secrets (below).
 # Revoking here, as this script first did, left a re-run that stopped in between (a
@@ -1132,6 +1211,35 @@ AUTH_HDR="Authorization: Basic $(printf '%s:%s' "$ADMIN_USER" "$ADMIN_PASS" | ba
 PUSH_URL="http://127.0.0.1:${PORT}/${ORG}/${REPO}.git"
 if [[ ! -d "$SITE/.git" ]]; then
   git -C "$SITE" init -q -b main
+fi
+# The two switches the watcher needs in the site's own values, written here because this run is
+# what installs the watcher (the generator cannot know it): the observability layer renders the
+# watcher's two alerts and its PodMonitor, and the identity layer's blueprint makes the Authentik
+# service account. Added once, under the block that already turns the layer's forge part on; a
+# value already there, true or false, is the operator's and is left alone.
+site_flag() {  # FILE PARENT-REGEX END-REGEX INDENT KEY -> 0 present or added, 1 nowhere to put it
+  local f="$1" parent="$2" endre="$3" ind="$4" key="$5"
+  [[ -f "$f" ]] || return 1
+  if grep -Eq "^${ind}${key}:" "$f"; then return 0; fi
+  awk -v parent="$parent" -v endre="$endre" -v ind="$ind" -v key="$key" '
+    $0 ~ parent { inb = 1; print; next }
+    inb && $0 ~ ("^" ind "enabled: *true") { print; print ind key ": true"; inb = 0; done = 1; next }
+    inb && $0 ~ endre { inb = 0 }
+    { print }
+    END { exit done ? 0 : 3 }' "$f" > "$f.tmp" || { rm -f "$f.tmp"; return 1; }
+  mv "$f.tmp" "$f"
+}
+if $WATCH; then
+  if site_flag "$SITE/site/values/observability.yaml" '^siteForge:' '^[^ #]' '  ' approverWatch; then
+    ok "site/values/observability.yaml: siteForge.approverWatch is set (the two approver alerts render)"
+  else
+    warn "site/values/observability.yaml has no siteForge block with enabled: true. Add 'approverWatch: true' under it by hand, or the approver alerts do not render."
+  fi
+  if site_flag "$SITE/site/values/identity.yaml" '^    forge:' '^([^ #]|  [^ ]|    [^ ])' '      ' approverWatch; then
+    ok "site/values/identity.yaml: sso.apps.forge.approverWatch is set (Authentik makes the watcher's service account)"
+  else
+    warn "site/values/identity.yaml has no sso.apps.forge block with enabled: true. Add 'approverWatch: true' under it by hand, or Authentik has no account for the watcher and it reports 'not clean'."
+  fi
 fi
 git -C "$SITE" add -A
 if ! git -C "$SITE" diff --cached --quiet 2>/dev/null || ! git -C "$SITE" rev-parse -q --verify HEAD >/dev/null; then
@@ -1288,6 +1396,11 @@ secret_apply "$AI_NS" "${RELEASE}-actions-bot" "" \
   username="$BOT_CHANGE" token="$TOKEN_ACTIONS" \
   url="http://${RELEASE}-http.${FORGE_NS}.svc.cluster.local:3000" repository="$ORG/$REPO"
 ok "the console's change identity ${AI_NS}/${RELEASE}-actions-bot (the same bot, its own token)"
+if $WATCH; then
+  secret_apply "$FORGE_NS" "${RELEASE}-approver-watch" "" forge-token="$TOKEN_WATCHER" authentik-token="$WATCH_AK"
+  ok "the approvers watcher's credentials ${FORGE_NS}/${RELEASE}-approver-watch (a forge token for the team and the pull requests; an Authentik token for the admin group)"
+  $WATCHER_TOKEN_KEPT || revoke_old "$BOT_WATCH" "bootstrap-approver-$STAMP"
+fi
 revoke_old "$BOT_READ" "bootstrap-$STAMP"
 revoke_old "$BOT_CHANGE" "bootstrap-$STAMP" "bootstrap-watch-$STAMP" "bootstrap-actions-$STAMP"
 
@@ -1505,6 +1618,27 @@ kubectl "${K[@]}" -n "$FORGE_NS" create configmap "${RELEASE}-move-script" \
 bash "$HERE/forge-move-template.sh" --release "$RELEASE" --namespace "$FORGE_NS" --argocd-namespace "$ARGO_NS" \
   --image "$MOVE_IMAGE" | kubectl "${K[@]}" apply -f - >/dev/null || die "could not apply the move template ${FORGE_NS}/${RELEASE}-move"
 ok "CronJob ${FORGE_NS}/${RELEASE}-move: suspended, started only from the console (Status > Site repository > Move to my own forge)"
+
+# ---------------------------------------------------------------- the approvers watcher
+# install/forge-approver-watch.py in a ConfigMap, run by a Deployment in the forge's namespace in the
+# move job's image (python3 and curl are in it; the air-gap set gains nothing). forge-approver-watch-template.sh
+# says what is granted: no Kubernetes permission at all, a default-deny pair on its pod, and the two read-only
+# tokens written above. The script's checksum is an annotation, so a changed script restarts the pod.
+if $WATCH; then
+  say "The approvers watcher"
+  WATCH_SHA="$(openssl dgst -sha256 "$HERE/forge-approver-watch.py" | awk '{print $NF}')"
+  kubectl "${K[@]}" -n "$FORGE_NS" create configmap "${RELEASE}-approver-watch-script" \
+    --from-file=forge-approver-watch.py="$HERE/forge-approver-watch.py" --dry-run=client -o yaml \
+    | kubectl "${K[@]}" apply -f - >/dev/null || die "could not apply the ConfigMap ${RELEASE}-approver-watch-script"
+  bash "$HERE/forge-approver-watch-template.sh" --release "$RELEASE" --namespace "$FORGE_NS" \
+    --image "${IMAGE_REGISTRY:+${IMAGE_REGISTRY%/}/}${MOVE_IMAGE_DEFAULT}" --identity-namespace "$IDENTITY_NS" \
+    --identity-service "$IDENTITY_SVC" --monitoring-namespace "$MONITORING_NS" --admin-group "$ADMIN_GROUP" \
+    --script-sha "$WATCH_SHA" | kubectl "${K[@]}" apply -f - >/dev/null \
+    || die "could not apply the approvers watcher ${FORGE_NS}/${RELEASE}-approver-watch"
+  ok "Deployment ${FORGE_NS}/${RELEASE}-approver-watch: reads who is in team ${APPROVERS_TEAM} and who is in ${ADMIN_GROUP}, changes nothing"
+  kubectl "${K[@]}" -n "$FORGE_NS" rollout status deploy/"${RELEASE}-approver-watch" --timeout="${WAIT_SECONDS}s" >/dev/null 2>&1 \
+    || warn "the approvers watcher is not ready yet (${WAIT_SECONDS}s). Its log says why: kubectl -n ${FORGE_NS} logs deploy/${RELEASE}-approver-watch"
+fi
 
 # ---------------------------------------------------------------- recovery kit
 say "The recovery kit"
