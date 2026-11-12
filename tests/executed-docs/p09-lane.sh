@@ -39,6 +39,21 @@
 # A failure of any of them ends the lane with 5 (INFRA_ERROR) and a line that names it; none is ever a pass.
 # The product tree is served by the same daemon at the in-cluster address, as on the built-in route.
 #
+# A SUPPLIED CA, P12 (paths/P12-bring-your-own-ca.sh). After P11, and only when P09 passed, run the blocks of
+# docs/administration/bring-your-own-ca.md on the same throwaway and state directory. It replaces the install's CA
+# and makes the consoles re-issue their certificates. TOCKMOX_P09_BYO_CA picks whether it runs:
+#   auto (the default, also unset or empty)  run it when the route is external AND the run is not kept
+#        (TOCKMOX_KEEP_CLUSTER is 0 or unset); otherwise skip it with one logged line that says why
+#   1    run it. Refused up front on the built-in route, before anything is created
+#   0    never run it
+#   anything else is refused.
+# The reasoning: a throwaway that is destroyed at the end can be mutated freely, a kept one cannot (a kept
+# install is left as the reader expects it, on the chart's CA). The external route is needed because the page's
+# commit is pushed to the site repository's remote, and on the built-in forge main takes pull requests only, which
+# a harness cannot approve. P12 has its own budget, TOCKMOX_P12_BUDGET (default 5400 seconds), a yield point this
+# lane does not call again. A P12 failure becomes the lane's exit only when nothing earlier (P09, the kit, P11)
+# already failed it.
+#
 # AN OFF-SITE COPY, with TOCKMOX_P09_OFFSITE=git (default none; built-in route only). Without it the
 # install warns "no off-site copy" and there is nothing to rebuild the throwaway from. With it:
 #   - before step 1, the settings are read from the Secret p09-offsite beside the VMs
@@ -139,6 +154,25 @@ case "$OFFSITE" in
       refuse "TOCKMOX_P09_OFFSITE=git: the off-site forge is on a private CA (key ca.crt), and this tree's bootstrap-forge has no --offsite-git-ca to trust it with. Run a ref that has it."
     fi ;;
   *) refuse "TOCKMOX_P09_OFFSITE must be none or git, not: ${OFFSITE}" ;;
+esac
+
+# A supplied CA (P12): decided here, before anything is created, so a refusal costs nothing.
+BYO_CA="${TOCKMOX_P09_BYO_CA:-auto}"
+BYO_RUN=0
+BYO_WHY=""
+case "$BYO_CA" in
+  0) BYO_WHY="TOCKMOX_P09_BYO_CA=0" ;;
+  1) [ "$ROUTE" = external ] || refuse "TOCKMOX_P09_BYO_CA=1 needs TOCKMOX_P09_ROUTE=external: P12 pushes the page's commit to the site repository's remote, and the built-in forge takes pull requests only"
+     BYO_RUN=1 ;;
+  auto)
+    if [ "$ROUTE" != external ]; then
+      BYO_WHY="built-in route: the page's commit cannot be delivered, because the forge's main takes pull requests only"
+    elif [ "$KEEP" = 1 ]; then
+      BYO_WHY="kept run: P12 replaces the install's CA and a kept install is left as the reader expects it"
+    else
+      BYO_RUN=1
+    fi ;;
+  *) refuse "TOCKMOX_P09_BYO_CA must be auto, 1 or 0, not: ${BYO_CA}" ;;
 esac
 
 # 1. the throwaway
@@ -342,8 +376,33 @@ else
   echo "lane 6: P09 did not pass, so P11 does not run"
 fi
 
+# 7. P12, a supplied CA, when BYO_RUN says so and only when P09 passed. It runs after P11 whatever P11 did, and needs
+# only p09-passed, which was written above. A P12 that cannot start declares BLOCKED and costs nothing.
+if [ "$BYO_RUN" = 1 ] && [ "$P09_RC" = 0 ] && [ "${P09_REC%% *}" = PASS ]; then
+  export TOCKMOX_P12_BUDGET="${TOCKMOX_P12_BUDGET:-5400}"
+  echo "lane 7: P12, a supplied CA, after a P09 that passed (budget ${TOCKMOX_P12_BUDGET}s)"
+  set +e
+  bash "${HERE}/run.sh" P12
+  p12_rc=$?
+  set -e
+  echo "lane: P12 exit ${p12_rc}"
+  # a P12 failure becomes the lane's exit when nothing earlier already failed it
+  if [ "$p12_rc" != 0 ] && [ "$rc" = 0 ]; then
+    rc="$p12_rc"
+  fi
+  # a P12 that exited 0 without declaring PASS fails the lane too: the lane decided to run it
+  p12_code="$(lane_judge P12-bring-your-own-ca "$(lane_receipt P12-bring-your-own-ca)")"
+  if [ "$p12_code" != 0 ] && [ "$rc" = 0 ]; then
+    rc="$p12_code"
+  fi
+elif [ "$BYO_RUN" = 1 ]; then
+  echo "lane 7: P09 did not pass, so P12 does not run"
+else
+  echo "lane 7: P12 (a supplied CA) skipped: ${BYO_WHY}"
+fi
+
 # --- P13 block begin (self-contained apart from P09_REC, lane_receipt and lane_judge above; goes after the P11 block) ---
-# 7. P13, last, on the same throwaway and the same state directory, only when P09 exited 0 AND its receipt says PASS.
+# 8. P13, last, on the same throwaway and the same state directory, only when P09 exited 0 AND its receipt says PASS.
 # It plants one fault at a time (a ResourceQuota that refuses a restore drill; a drill that cannot write its register
 # row) and breaks the install on purpose, so it runs after everything that reads the install healthy, and it takes each
 # fault out again and reads that it is gone (paths/P13-planted-faults.sh). It does NOT wait on P11: they are independent
@@ -357,7 +416,7 @@ if [ "$P09_RC" = 0 ] && [ "${P09_REC%% *}" = PASS ]; then
   mkdir -p "$TOCKMOX_P09_STATE"
   : > "${TOCKMOX_P09_STATE}/p09-passed"
   export TOCKMOX_P13_BUDGET="${TOCKMOX_P13_BUDGET:-3000}"
-  echo "lane 7: P13, planted faults, after a P09 that passed (budget ${TOCKMOX_P13_BUDGET}s)"
+  echo "lane 8: P13, planted faults, after a P09 that passed (budget ${TOCKMOX_P13_BUDGET}s)"
   set +e
   bash "${HERE}/run.sh" P13
   p13_rc=$?
@@ -372,7 +431,7 @@ if [ "$P09_RC" = 0 ] && [ "${P09_REC%% *}" = PASS ]; then
     rc="$p13_code"
   fi
 else
-  echo "lane 7: P09 did not pass, so P13 does not run"
+  echo "lane 8: P09 did not pass, so P13 does not run"
 fi
 # --- P13 block end ------------------------------------------------------------------------------------------------
 exit "$rc"

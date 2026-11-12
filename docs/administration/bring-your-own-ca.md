@@ -340,12 +340,16 @@ chain to the CA you meant.
 kubectl --context "$KUBE_CONTEXT" get clusterissuer site-ca \
   -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}{"\n"}'
 kubectl --context "$KUBE_CONTEXT" get certificate -A \
-  -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name,READY:.status.conditions[0].status,ISSUER:.spec.issuerRef.name
+  -o 'custom-columns=NS:.metadata.namespace,NAME:.metadata.name,READY:.status.conditions[0].status,ISSUER:.spec.issuerRef.name'
 ```
 
 The first prints `True`. Every row of the second reads `True` and names
-`site-ca`. A certificate still on `tockmox-ca` was not re-issued: it is either
-still pending or its Ingress annotation did not change.
+`site-ca`, with one exception: `barman-cloud-client` and `barman-cloud-server`,
+which are there when the backup plugin is installed, name an issuer of their
+own. The plugin signs those two for its internal connection, and
+`global.certIssuer` does not move them. A certificate still on `tockmox-ca` was
+not re-issued: it is either still pending or its Ingress annotation did not
+change.
 
 Now compare one issued certificate to the CA. Take a TLS Secret name and its
 namespace from the Ingress listing in
