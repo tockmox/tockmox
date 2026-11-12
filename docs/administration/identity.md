@@ -257,6 +257,13 @@ What it gives you:
 - **A name that matches an existing forge account is refused, not linked.** An
   Authentik user called `tockmox-changes` does not sign in as the change bot.
 
+**If you forget the second step, an alert tells you.** The approvers watcher
+(`bootstrap-forge` installs it with sign-in; [site forge](site-forge.md#the-approvers-watcher))
+raises `TockmoxForgeApproverOutsideGroup` for each person who is still in `approvers`
+but no longer an active member of the admin group. It uses a view-only Authentik
+service account for the admin group, made by the blueprint behind
+`sso.apps.forge.approverWatch`, and cannot remove anyone itself.
+
 **Removing an approver takes two steps for now.** The forge updates a person's
 teams only when they sign in, and with `access: admin` (the default) someone you
 take out of the admin group can no longer sign in, so the forge never hears of

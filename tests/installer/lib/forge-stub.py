@@ -15,6 +15,12 @@ One loopback server, three roles, told apart by path:
                 repository at /tockmox/site.git and an off-site remote at /remote/site.git
 
 Usage: forge-stub.py ROOT PORTFILE.  The chosen port is written to PORTFILE once it listens.
+With ADMIN=1 it also plays the forge's administration API that bootstrap-forge.sh drives (organisations,
+users, teams, tokens with their scopes, branch protection, OAuth2 applications, and a bare repository it
+`git init`s so the installer can push), keeping its state in ROOT/forge.json so a second run finds what the
+first made. A token is enforced the way the forge does it: it needs the scope for the route AND the user must
+be able to see the thing (admin_token says which rules: the team search shows only the caller's own teams, a
+team's members are for that team and the owners, and a team write needs write:organization and an owner).
 Knobs, read from the environment at start: PRS (how many pull requests, default 3),
 FAIL=pulls (that endpoint answers 500), BADREV=1 (reviews come in a field order the dump
 cannot read, as if the forge changed its format), CORRUPT=1 (a stored dump reads back with
@@ -215,6 +221,219 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 _json.dump(rec, fh)
         return self.send(200, dumps(rec).encode())
 
+    # ---- ADMIN=1: the administration API bootstrap-forge.sh drives. State in ROOT/forge.json.
+    def fstate(self):
+        path = os.path.join(ROOT, "forge.json")
+        if os.path.exists(path):
+            return json_load(path)
+        return {"orgs": {}, "repos": {}, "users": {}, "teams": {}, "tokens": {}, "protections": {}, "oauth": [], "next": 1}
+
+    def fsave(self, st):
+        with open(os.path.join(ROOT, "forge.json"), "w") as fh:
+            _json.dump(st, fh)
+
+    def who(self, st):
+        h = self.headers.get("Authorization", "")
+        if h.startswith("token "):
+            for u, toks in st["tokens"].items():
+                for rec in toks.values():
+                    if rec["sha1"] == h[6:]:
+                        return ("token", u, rec["scopes"])
+            return None
+        if h.startswith("Basic "):
+            return ("admin", "tockmox-admin", None)
+        return None
+
+    def admin(self, a, q):
+        n = int(self.headers.get("Content-Length", 0) or 0)
+        d = _json.loads(self.rfile.read(n) or b"{}") if n else {}
+        st = self.fstate()
+        me = self.who(st)
+        m = self.command
+        if me is None:
+            return self.send(401, b'{"message":"Only signed in user is allowed to call APIs."}')
+        if me[0] == "token":
+            return self.admin_token(st, me, a, q, m)
+        nxt = st["next"]
+        if m == "GET" and a == "/version":
+            return self.send(200, b'{"version":"15.0.11+gitea-1.22.0"}')
+        r = re.fullmatch(r"/orgs/([^/]+)", a)
+        if r and m == "GET":
+            return self.send(200 if r.group(1) in st["orgs"] else 404, dumps({"username": r.group(1)}).encode())
+        if a == "/orgs" and m == "POST":
+            st["orgs"][d["username"]] = {}
+            owners = nxt
+            st["teams"][str(owners)] = {"id": owners, "name": "Owners", "org": d["username"], "permission": "owner", "members": ["tockmox-admin"], "repos": []}
+            st["next"] = nxt + 1
+            self.fsave(st)
+            return self.send(201, dumps({"username": d["username"]}).encode())
+        r = re.fullmatch(r"/repos/([^/]+)/([^/]+)", a)
+        if r and m == "GET":
+            return self.send(200 if "%s/%s" % r.groups() in st["repos"] else 404, dumps({"name": r.group(2)}).encode())
+        r = re.fullmatch(r"/orgs/([^/]+)/repos", a)
+        if r and m == "POST":
+            # Names reach a path below ROOT, so they are checked first (as the forge refuses them too).
+            org, name = r.group(1), str(d.get("name", ""))
+            if not all(re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9._-]*", x) for x in (org, name)):
+                return self.send(422, b'{"message":"invalid repository name"}')
+            full = "%s/%s" % (org, name)
+            root = os.path.realpath(ROOT)
+            bare = os.path.realpath(os.path.join(root, full + ".git"))
+            if not bare.startswith(root + os.sep):
+                return self.send(422, b'{"message":"invalid repository name"}')
+            st["repos"][full] = {}
+            os.makedirs(os.path.dirname(bare), exist_ok=True)
+            subprocess.run(["git", "init", "-q", "--bare", "-b", "main", bare], check=True)
+            subprocess.run(["git", "--git-dir", bare, "config", "http.receivepack", "true"], check=True)
+            self.fsave(st)
+            return self.send(201, dumps({"name": d["name"]}).encode())
+        r = re.fullmatch(r"/users/([^/]+)", a)
+        if r and m == "GET":
+            return self.send(200 if r.group(1) in st["users"] else 404, dumps({"login": r.group(1)}).encode())
+        if a == "/admin/users" and m == "POST":
+            st["users"][d["username"]] = {"is_admin": False}
+            self.fsave(st)
+            return self.send(201, dumps({"login": d["username"]}).encode())
+        r = re.fullmatch(r"/orgs/([^/]+)/teams/search", a)
+        if r and m == "GET":
+            want = q.get("q", [""])[0]
+            hit = [t for t in st["teams"].values() if t["org"] == r.group(1) and want.lower() in t["name"].lower()]
+            return self.send(200, dumps({"ok": True, "data": [{"id": t["id"], "name": t["name"], "permission": t["permission"]} for t in hit]}).encode())
+        r = re.fullmatch(r"/orgs/([^/]+)/teams", a)
+        if r and m == "GET":
+            every = sorted((t for t in st["teams"].values() if t["org"] == r.group(1)), key=lambda t: t["id"])
+            return self.send(200, dumps([{"id": t["id"], "name": t["name"]} for t in page(every, q)]).encode())
+        if r and m == "POST":
+            st["teams"][str(nxt)] = {"id": nxt, "name": d["name"], "org": r.group(1), "permission": d.get("permission"), "members": [], "repos": []}
+            st["next"] = nxt + 1
+            self.fsave(st)
+            return self.send(201, dumps({"id": nxt, "name": d["name"]}).encode())
+        r = re.fullmatch(r"/teams/(\d+)/repos/([^/]+)/([^/]+)", a)
+        if r and m == "PUT":
+            t = st["teams"][r.group(1)]
+            full = "%s/%s" % (r.group(2), r.group(3))
+            if full not in t["repos"]:
+                t["repos"].append(full)
+            self.fsave(st)
+            return self.send(204)
+        r = re.fullmatch(r"/teams/(\d+)/members/([^/]+)", a)
+        if r and m == "PUT":
+            if r.group(2) not in st["users"] and r.group(2) != "tockmox-admin":
+                return self.send(404, b'{"message":"user does not exist"}')
+            t = st["teams"][r.group(1)]
+            if r.group(2) not in t["members"]:
+                t["members"].append(r.group(2))
+            self.fsave(st)
+            return self.send(204)
+        r = re.fullmatch(r"/teams/(\d+)/members", a)
+        if r and m == "GET":
+            return self.send(200, dumps([{"login": u} for u in st["teams"][r.group(1)]["members"]]).encode())
+        r = re.fullmatch(r"/users/([^/]+)/tokens", a)
+        if r and m == "POST":
+            u = r.group(1)
+            toks = st["tokens"].setdefault(u, {})
+            if d["name"] in toks:
+                return self.send(400, b'{"message":"access token name has been used already"}')
+            toks[d["name"]] = {"id": nxt, "sha1": "tok.%s.%d" % (u, nxt), "scopes": d.get("scopes", [])}
+            st["next"] = nxt + 1
+            self.fsave(st)
+            return self.send(201, dumps({"id": nxt, "name": d["name"], "sha1": toks[d["name"]]["sha1"], "scopes": d.get("scopes", [])}).encode())
+        if r and m == "GET":
+            toks = st["tokens"].get(r.group(1), {})
+            return self.send(200, dumps([{"id": v["id"], "name": k, "scopes": v["scopes"]} for k, v in toks.items()]).encode())
+        r = re.fullmatch(r"/users/([^/]+)/tokens/([^/]+)", a)
+        if r and m == "DELETE":
+            ok = st["tokens"].get(r.group(1), {}).pop(r.group(2), None)
+            self.fsave(st)
+            return self.send(204 if ok else 404)
+        r = re.fullmatch(r"/repos/([^/]+)/([^/]+)/branch_protections(/main)?", a)
+        if r:
+            key = "%s/%s" % (r.group(1), r.group(2))
+            if m == "DELETE":
+                gone = st["protections"].pop(key, None)
+                self.fsave(st)
+                return self.send(204 if gone else 404)
+            if m == "POST":
+                st["protections"][key] = d
+                self.fsave(st)
+                return self.send(201, dumps(d).encode())
+            if m == "GET":
+                rule = st["protections"].get(key)
+                return self.send(200 if rule else 404, dumps(rule or {}).encode())
+        if a == "/user/applications/oauth2":
+            if m == "GET":
+                return self.send(200, dumps(st["oauth"]).encode())
+            if m == "POST":
+                rec = {"id": nxt, "name": d["name"], "client_id": "cid.%d" % nxt, "client_secret": "cs.%d" % nxt,
+                       "redirect_uris": d["redirect_uris"], "confidential_client": True}
+                st["oauth"].append(rec)
+                st["next"] = nxt + 1
+                self.fsave(st)
+                return self.send(201, dumps(rec).encode())
+        r = re.fullmatch(r"/user/applications/oauth2/(\d+)", a)
+        if r and m == "DELETE":
+            st["oauth"] = [x for x in st["oauth"] if x["id"] != int(r.group(1))]
+            self.fsave(st)
+            return self.send(204)
+        if a == "/repos/tockmox/site/push_mirrors":
+            return self.send(200, b"[]")
+        return self.send(404, dumps({"message": "stub: no route for %s %s" % (m, a)}).encode())
+
+    def admin_token(self, st, me, a, q, m):
+        """A token's request, enforced the way Forgejo 15 does for a user who is not a site admin.
+
+        The scope first: a GET needs read: or write: for the route's category, anything else needs write:.
+        Then the visibility. The team search shows only the caller's own teams. The organisation's team
+        list shows every team to any member. A team's member list is for that team's members and the
+        organisation's owners (403 to another member, 404 to an outsider). Changing a team's members needs
+        an owner. A repository is visible to a team that holds it, and to the owners."""
+        _, user, scopes = me
+        in_teams = [t for t in st["teams"].values() if user in t["members"]]
+        orgs_in = {t["org"] for t in in_teams}
+        owner_of = {t["org"] for t in in_teams if t["name"] == "Owners"}
+        r_search = re.fullmatch(r"/orgs/([^/]+)/teams/search", a)
+        r_list = re.fullmatch(r"/orgs/([^/]+)/teams", a)
+        r_mem = re.fullmatch(r"/teams/(\d+)/members", a)
+        r_one = re.fullmatch(r"/teams/(\d+)/members/([^/]+)", a)
+        r_repo = re.fullmatch(r"/repos/([^/]+)/([^/]+)(/.*)?", a)
+        if not (r_search or r_list or r_mem or r_one or r_repo):
+            return self.send(404, dumps({"message": "stub: no token route for %s %s" % (m, a)}).encode())
+        need = "repository" if r_repo else "organization"
+        ok = ("read:" + need, "write:" + need) if m == "GET" else ("write:" + need,)
+        if not any(sc in ok for sc in scopes):
+            return self.send(403, dumps({"message": "token does not have at least one of required scope(s): [%s]" % ok[-1]}).encode())
+        if r_search or r_list:
+            org = (r_search or r_list).group(1)
+            if m != "GET":
+                return self.send(403, b'{"message":"Must be an organization owner"}')
+            if org not in orgs_in:
+                return self.send(403, b'{"message":"Must be an organization member"}')
+            if r_search:
+                want = q.get("q", [""])[0]
+                hit = [t for t in in_teams if t["org"] == org and want.lower() in t["name"].lower()]
+                return self.send(200, dumps({"ok": True, "data": [{"id": t["id"], "name": t["name"]} for t in hit]}).encode())
+            every = sorted((t for t in st["teams"].values() if t["org"] == org), key=lambda t: t["id"])
+            return self.send(200, dumps([{"id": t["id"], "name": t["name"]} for t in page(every, q)]).encode())
+        if r_mem or r_one:
+            t = st["teams"].get((r_mem or r_one).group(1))
+            if not t or t["org"] not in orgs_in:
+                return self.send(404, b'{"message":"team not found"}')
+            if r_one and m != "GET":
+                if t["org"] not in owner_of:
+                    return self.send(403, b'{"message":"Must be an organization owner"}')
+                return self.send(500, b'{"message":"stub: a token never changes a team here"}')
+            if user not in t["members"] and t["org"] not in owner_of:
+                return self.send(403, b'{"message":"Must be a team member"}')
+            if r_one:
+                return self.send(200 if r_one.group(2) in t["members"] else 404, dumps({"login": r_one.group(2)}).encode())
+            return self.send(200, dumps([{"login": u} for u in page(t["members"], q)]).encode())
+        if m != "GET":
+            return self.send(403, b'{"message":"stub: a token never writes a repository here"}')
+        full = "%s/%s" % (r_repo.group(1), r_repo.group(2))
+        if r_repo.group(1) not in owner_of and not any(full in t["repos"] for t in in_teams):
+            return self.send(404, b'{"message":"repository not found"}')
+        return self.send(200, b"[]")
+
     def route(self):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
@@ -234,6 +453,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     body = body + b"x"
                 return self.send(200, body, "application/octet-stream")
             return self.send(404, b"<Error>NoSuchKey</Error>")
+        if p.startswith("/api/v1") and os.environ.get("ADMIN"):
+            return self.admin(p[7:], q)
         if p.startswith("/api/v1") and self.command in ("POST", "PATCH"):
             return self.write_api(p[7:])
         if p.startswith("/api/v1"):
@@ -279,7 +500,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(out)
 
-    do_GET = do_PUT = do_POST = do_HEAD = do_PATCH = route
+    do_GET = do_PUT = do_POST = do_HEAD = do_PATCH = do_DELETE = route
 
 
 srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)

@@ -24,8 +24,11 @@
 #   tockmox_forge_approvers_last_success_timestamp_seconds
 #
 # THE FAIL-SAFE. Nobody is judged on a bad read. An identity provider that errors, answers
-# anything but 2xx, or returns an empty or missing group makes check_ok 0 and drops every
-# per-person series, so an outage never reads as "everyone was removed". The alert on
+# anything but 2xx, returns a missing group, or returns a group with no active member while
+# the team still has people, makes check_ok 0 and drops every per-person series, so an outage
+# never reads as "everyone was removed". An empty group beside an empty team is a fresh site
+# (nobody named an admin yet, nobody signed in): clean, with nobody to judge (Jeff,
+# 2026-11-10, after the first lab install read check_ok 0 there). The alert on
 # check_ok 0 is a different one (TockmoxForgeApproversCheckDown), not a removal alert.
 # A deactivated user counts as removed (ruled 2026-11-04, R4).
 #
@@ -40,7 +43,9 @@
 #   AUTHENTIK_TOKEN_FILE a file holding a token that may view the one group
 #   ADMIN_GROUP          default tockmox-admins
 #   FORGE_URL            e.g. http://tockmox-forge-http.tockmox-forge.svc:3000
-#   FORGE_TOKEN_FILE     a file holding a token scoped read:organization, read:repository
+#   FORGE_TOKEN_FILE     a file holding a token scoped read:organization, read:repository. Its account
+#                        is in the organisation's Owners team: the forge shows a team's members only to
+#                        that team and the owners. The token's scopes are what keep it from changing anything.
 #   FORGE_ORG, FORGE_TEAM, FORGE_REPO   default tockmox, approvers, site
 #   INTERVAL             seconds between checks, default 60
 #   LISTEN               host:port, default 0.0.0.0:9470
@@ -111,10 +116,8 @@ def active_admins(base, tok, group):
         raise ReadError(f"the group {group!r} came back without its members")
     names = {u.get("username") for u in users if isinstance(u, dict) and u.get("is_active") is True}
     names.discard(None)
-    if not names:
-        # An admin group with no active member cannot be the real state of a running
-        # site (nobody could approve anything); read it as a bad answer, never as "all removed".
-        raise ReadError(f"the group {group!r} has no active member")
+    # An empty set is returned, not refused: check() decides. A fresh site has nobody in the
+    # admin group and nobody in the team, and that is a clean state with nobody to judge.
     return names
 
 
@@ -137,11 +140,11 @@ def forge_state(base, tok, org, team, repo):
     """(team member logins, {pr number: set of logins with a standing approval})."""
     base = f"{base.rstrip('/')}/api/v1"
     hdr = {"Authorization": f"token {tok}"}
-    q = urllib.parse.urlencode({"q": team})
-    found = get(f"{base}/orgs/{org}/teams/search?{q}", hdr)
-    teams = found.get("data") if isinstance(found, dict) else None
-    if not isinstance(teams, list):
-        raise ReadError("the forge's team search has no data list")
+    # The organisation's team list, not the team search: the forge limits a search to the teams the
+    # caller is in (unless a site admin), so a watcher outside the team would find nothing. Listing
+    # the team's members needs the caller to be in that team or an owner of the organisation, which
+    # is why the watcher's account is in Owners and its one token is read-only (ruled 2026-11-11).
+    teams = paged(base, f"/orgs/{org}/teams", hdr)
     ids = [t.get("id") for t in teams if isinstance(t, dict) and t.get("name") == team]
     if len(ids) != 1:
         raise ReadError(f"the team {org}/{team} was found {len(ids)} times, not once")
@@ -185,6 +188,12 @@ class State:
             admins = active_admins(cfg["AUTHENTIK_URL"], token(cfg["AUTHENTIK_TOKEN_FILE"]), cfg["ADMIN_GROUP"])
             members, approvals = forge_state(cfg["FORGE_URL"], token(cfg["FORGE_TOKEN_FILE"]),
                                              cfg["FORGE_ORG"], cfg["FORGE_TEAM"], cfg["FORGE_REPO"])
+            if not admins and members:
+                # An admin group with no active member while the team still has people is
+                # not a state a running site gets into on purpose: read it as a bad answer
+                # (an outage, a permission that hides members), never as "all removed".
+                raise ReadError(f"the group {cfg['ADMIN_GROUP']!r} has no active member while the "
+                                f"{cfg['FORGE_TEAM']!r} team has {len(members)}")
         except ReadError as e:
             print(f"forge-approver-watch: check not ok, nobody judged: {e}", file=sys.stderr, flush=True)
             with self.lock:

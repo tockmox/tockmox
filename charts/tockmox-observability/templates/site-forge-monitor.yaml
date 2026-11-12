@@ -1,0 +1,42 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+THE APPROVERS WATCHER'S SCRAPE (siteForge.approverWatch). `tockmox-install.sh bootstrap-forge`
+runs the read-only watcher (install/forge-approver-watch.py) as the Deployment
+<release>-approver-watch in the forge's namespace, and sets siteForge.approverWatch in the
+site's observability values in the same run. This PodMonitor is how Prometheus reads its two
+metric families, which TockmoxForgeApproverOutsideGroup and TockmoxForgeApproversCheckDown
+(site-forge-rules.yaml) are written against.
+
+It lives here and not in the installer's objects because the PodMonitor kind only exists once
+the CRDs layer has synced, which is after bootstrap-forge has run on a fresh install. Like the
+rules it renders only with the flag, so a site without the watcher has neither the monitor nor
+the alerts. The pod it selects is not rendered by any layer (the installer applies it), so
+tools/check-monitor-targets.sh lists this monitor as external.
+
+It sits in the monitoring namespace and reads the forge's, so this layer needs no resource in a
+namespace it does not own. The pod's NetworkPolicy admits only Prometheus, on the metrics port.
+*/ -}}
+{{- $sf := .Values.siteForge | default dict -}}
+{{- $stack := include "tockmox.appEnabled" (dict "ctx" $ "app" "kubePrometheusStack") -}}
+{{- if and $sf.enabled $sf.approverWatch $stack }}
+{{- $ns := $sf.namespace | default "tockmox-forge" -}}
+{{- $release := $sf.release | default "tockmox-forge" -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: tockmox-forge-approver-watch
+  namespace: {{ .Values.namespaces.monitoring }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ $ns | quote }}]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ printf "%s-approver-watch" $release | quote }}
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+{{- end }}

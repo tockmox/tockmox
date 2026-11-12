@@ -90,6 +90,7 @@ sso:
       enabled: true
     forge:
       enabled: true
+      approverWatch: true
   links:
     argocd:
       enabled: true

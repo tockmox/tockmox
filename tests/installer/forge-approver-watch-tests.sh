@@ -15,9 +15,13 @@
 #   W6  the forge erroring, or the team missing: the same fail-safe
 #   W7  a page of 50 team members is followed to the next page
 #   W8  it only ever sent GET, and the token went in the header, never the URL
+#   W9  a fresh site (an empty admin group AND an empty team): clean, nobody to judge
+#   W10 the team is found in the organisation's team list (by its exact name, on a later page too), never by
+#       the team search, which the forge limits to the caller's own teams
 #
-# What it does not show: that the real identity provider answers include_users=true with users_obj, or that a
-# read:organization token may list the team. Those are lab items.
+# What it does not show: that the real identity provider answers include_users=true with users_obj, or that the
+# real forge lets an owner's read:organization token list the team. Those are lab items (P09 S21c), and
+# bootstrap-forge-tests.sh F44 runs this read against the stand-in forge's enforced visibility.
 
 AW="$REPO_ROOT/install/forge-approver-watch.py"
 AWD="$(mktemp -d "${TMPDIR:-/tmp}/aw-test.XXXXXX")"
@@ -44,7 +48,11 @@ class H(http.server.BaseHTTPRequestHandler):
             if fx.get("forge_status", 200) != 200:
                 code, body = fx["forge_status"], {"message": "no"}
             elif p == "/api/v1/orgs/tockmox/teams/search":
-                code, body = 200, {"ok": True, "data": fx["teams"]}
+                # The real forge limits a search to the caller's own teams: a watcher must never rely on it.
+                code, body = 200, {"ok": True, "data": []}
+            elif p == "/api/v1/orgs/tockmox/teams":
+                page = int(q.get("page", ["1"])[0]); lim = int(q.get("limit", ["50"])[0])
+                code, body = 200, fx["teams"][(page - 1) * lim: page * lim]
             elif p == "/api/v1/teams/7/members":
                 page = int(q.get("page", ["1"])[0]); lim = int(q.get("limit", ["50"])[0])
                 code, body = 200, fx["members"][(page - 1) * lim: page * lim]
@@ -77,7 +85,7 @@ aw_run() {
 }
 # The base case: two admins, both in the team; PR 4 approved by bob.
 AW_BASE='{"groups":[{"name":"tockmox-admins","users_obj":[{"username":"alice","is_active":true},{"username":"bob","is_active":true}]}],
- "teams":[{"id":7,"name":"approvers"}],
+ "teams":[{"id":1,"name":"Owners"},{"id":3,"name":"readers"},{"id":5,"name":"approvers-old"},{"id":7,"name":"approvers"}],
  "members":[{"login":"alice"},{"login":"bob"}],
  "pulls":[{"number":4},{"number":5}],
  "reviews":{"4":[{"id":1,"user":{"login":"bob"},"state":"APPROVED"}],"5":[]}}'
@@ -129,6 +137,22 @@ aw_fixture "$AW_BASE"; aw_run >/dev/null
 assert_artifact "methods sent, and whether a token is in any URL" \
   "python3 -c 'import json,sys; a=[json.loads(l) for l in open(sys.argv[1])]; print(sorted({x[\"method\"] for x in a})); print(any(\"token-line\" in x[\"path\"] for x in a)); print(sorted({x[\"auth\"].split()[0] for x in a}))' '$AWD/asked'" \
   "$(printf "['GET']\nFalse\n['Bearer', 'token']")"
+
+path_begin "W9" "a fresh site: nobody in the admin group and nobody in the team reads clean"
+aw_fixture "$(aw_with 'b["groups"][0]["users_obj"]=[]; b["members"]=[]; b["pulls"]=[]')"
+assert_artifact "ok 1, outside 0, exit 0" "aw_run" \
+  "$(printf 'tockmox_forge_approvers_check_ok 1\ntockmox_forge_approvers_outside_group 0\nrc=0')"
+aw_fixture "$(aw_with 'b["groups"][0]["users_obj"]=[{"username":"alice","is_active":False}]; b["members"]=[]; b["pulls"]=[]')"
+assert_artifact "an inactive-only group beside an empty team is the same: ok 1, outside 0" "aw_run" \
+  "$(printf 'tockmox_forge_approvers_check_ok 1\ntockmox_forge_approvers_outside_group 0\nrc=0')"
+
+path_begin "W10" "the team comes from the organisation's team list, never the team search"
+aw_fixture "$AW_BASE"; aw_run >/dev/null
+assert_artifact "the team list was read and the search was not" \
+  "grep -c '\"path\": \"/api/v1/orgs/tockmox/teams?' '$AWD/asked'; grep -c 'teams/search' '$AWD/asked' || true" \
+  "$(printf '1\n0')"
+aw_fixture "$(aw_with 'b["teams"]=[{"id":100+i,"name":"t%02d" % i} for i in range(55)]+[{"id":7,"name":"approvers"}]; b["groups"][0]["users_obj"].pop(1)')"
+assert_artifact "the team on the list's second page is found, and bob named" "aw_run | grep -c 'outside_group_info{user=\"bob\"'" "1"
 
 # run.sh runs under set -e: a killed server's wait status (143) must not end the tier.
 kill "$AW_PID" 2>/dev/null || true
