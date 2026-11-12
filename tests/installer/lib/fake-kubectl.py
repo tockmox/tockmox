@@ -142,6 +142,26 @@ def main(argv):
         return 0
     if verb == "rollout":
         return 0
+    # The off-site copy's first run (F48): a Job made from a CronJob this state holds is recorded with that
+    # CronJob's template and counts as complete. NOTHING RUNS: these cases read what was made, never a copy.
+    if verb == "create" and rest[1] == "job":
+        src = next((r.split("/", 1)[1] for r in rest if r.startswith("--from=cronjob/")), None)
+        cj = load(ns, "CronJob", src) if src else None
+        if cj is None:
+            sys.stderr.write('error: from must be an existing cronjob: "%s" not found\n' % src)
+            return 1
+        save({"apiVersion": "batch/v1", "kind": "Job", "metadata": {"name": rest[2], "namespace": ns},
+              "spec": cj["spec"]["jobTemplate"]["spec"]}, ns)
+        return 0
+    if verb == "wait":
+        job = next((r.split("/", 1)[1] for r in rest if r.startswith("job/")), None)
+        return 0 if job and load(ns, "Job", job) is not None else 1
+    if verb == "logs":
+        job = next((r.split("/", 1)[1] for r in rest if r.startswith("job/")), None)
+        if job and load(ns, "Job", job) is not None:
+            print("stand-in: the Job %s was made and nothing ran" % job)
+            return 0
+        return 1
     if verb == "exec":
         tail = rest[rest.index("--") + 1:] if "--" in rest else []
         if tail[:1] == ["grep"]:

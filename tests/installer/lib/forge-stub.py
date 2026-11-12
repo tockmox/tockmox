@@ -375,8 +375,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
             st["oauth"] = [x for x in st["oauth"] if x["id"] != int(r.group(1))]
             self.fsave(st)
             return self.send(204)
+        # The push mirror (F48): what was asked for is kept (never the password), listed, removed and "synced".
+        # NOTHING IS PUSHED: whether Forgejo reaches the remote, on which CA, is a lab question.
         if a == "/repos/tockmox/site/push_mirrors":
-            return self.send(200, b"[]")
+            if m == "POST":
+                rec = {k: d.get(k) for k in ("remote_address", "remote_username", "interval", "sync_on_commit", "branch_filter")}
+                rec["remote_name"] = "remote_mirror_%d" % nxt
+                st.setdefault("push_mirrors", []).append(rec)
+                st["next"] = nxt + 1
+                self.fsave(st)
+                return self.send(200, dumps(rec).encode())
+            return self.send(200, dumps(st.get("push_mirrors", [])).encode())
+        r = re.fullmatch(r"/repos/tockmox/site/push_mirrors/([^/]+)", a)
+        if r and m == "DELETE":
+            st["push_mirrors"] = [x for x in st.get("push_mirrors", []) if x["remote_name"] != r.group(1)]
+            self.fsave(st)
+            return self.send(204)
+        if a == "/repos/tockmox/site/push_mirrors-sync" and m == "POST":
+            return self.send(200, b"{}")
         return self.send(404, dumps({"message": "stub: no route for %s %s" % (m, a)}).encode())
 
     def admin_token(self, st, me, a, q, m):
