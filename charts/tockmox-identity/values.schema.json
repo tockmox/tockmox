@@ -45,7 +45,11 @@
         },
         "siteForge": {
           "type": "string",
-          "enum": ["", "built-in", "external"],
+          "enum": [
+            "",
+            "built-in",
+            "external"
+          ],
           "description": "Where the site repository lives, as tockmox-install.sh wrote it (site.forge). built-in turns on what needs the built-in forge by default, such as the console's Platform > Changes. Empty is read as external."
         },
         "resilience": {
@@ -225,6 +229,45 @@
             },
             "reconcileSchedule": {
               "type": "string"
+            }
+          }
+        },
+        "access": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Bind every shipped application to the role group(s) its access names. False renders no bindings: the open shape, a way back for an operator locked out, not a configuration to run."
+            },
+            "everyone": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[-a-zA-Z0-9_]+$"
+              },
+              "uniqueItems": true,
+              "description": "Authentik application slugs meant for every signed-in user. Names an intended open application so the console does not warn about it; binds and opens nothing."
+            },
+            "report": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The CronJob that lists every Authentik application with no group or user binding into the ConfigMap tockmox-identity-open-applications, which the console's Status page reads.",
+              "properties": {
+                "enabled": {
+                  "type": "boolean"
+                },
+                "schedule": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Cron schedule. Keep it more frequent than hourly: the console reads an older list as Unknown."
+                },
+                "consoleNamespace": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+                  "description": "The AI layer's namespace, where the console's ServiceAccount tockmox-ui is bound to read the list."
+                }
+              }
             }
           }
         },

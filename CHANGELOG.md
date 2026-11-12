@@ -82,6 +82,14 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **Status names the Authentik applications open to every signed-in user.** An
+  identity-layer CronJob lists every application with no group or user
+  binding into one ConfigMap; the console's Status page shows each as a warning
+  on the **Open applications** part, identity actions on or off. Name an
+  application meant for everyone in `sso.access.everyone` and it does not warn. The Argo CD and adding-an-application pages now give the
+  binding as blueprint entries to paste (docs/administration/identity.md,
+  "Applications open to every signed-in user").
+
 - **The executed-docs harness can install k3s from inside the boundary.**
   `TOCKMOX_K3S_ARTIFACTS_URL` names a server holding `VERSION/install.sh` and `VERSION/k3s`; the
   throwaway guest installs from there with the download skipped, refuses a binary of another

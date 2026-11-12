@@ -29,7 +29,8 @@ _ORDER = (CRIT, UNKNOWN, WARN, OK)
 RANK = {s: i for i, s in enumerate(_ORDER)}
 
 # Which reading a part's declaration depends on. A part with none of these reads Unknown.
-_SOURCE_KEYS = {"apps": "apps", "nodes": "nodes", "inference_nodes": "inference_nodes", "prometheus": "prometheus"}
+_SOURCE_KEYS = {"apps": "apps", "nodes": "nodes", "inference_nodes": "inference_nodes", "prometheus": "prometheus",
+                "open_applications": "open_applications"}
 LAYER_PATH = re.compile(r"^charts/tockmox-([a-z]+)$")
 # install/tockmox-install.sh ALL_LAYERS
 LAYERS = ("crds", "policy", "platform", "observability", "exporters", "identity", "devops", "ai", "selfcheck")
@@ -49,7 +50,7 @@ class Part:
     alerts: tuple = ()                    # alertname globs
     namespaces: tuple = ()
     jobs: tuple = ()                      # scrape job globs
-    source: str = ""                      # a whole reading: apps | nodes | inference_nodes | prometheus
+    source: str = ""                      # a whole reading: apps | nodes | inference_nodes | prometheus | open_applications
     when: tuple = ()                      # ((layer, kind, name regex), ...): ANY deployed shows the part
     goto: tuple = ()                      # ((kind, value), ...): app | grafana
     runbook: str = ""
@@ -445,6 +446,19 @@ def place(stack: Stack, readings: dict, pipeline=(), stale_apps=(), since=lambda
         put(inode_part, _sig("inference_nodes", st, x.get("name") or x.get("id", "?"),
                              x.get("why", ""), href=f"/nodes/{x.get('id', '')}"))
 
+    # Applications open to every signed-in user (the identity layer's list): one warning per application the site
+    # did not declare open. The declared ones are the reading's, and say nothing.
+    orr = readings.get("open_applications")
+    rep = orr.data if orr is not None and isinstance(orr.data, dict) else {}
+    oapps = list(rep.get("open") or []) if orr is not None and orr.state != UNKNOWN else []
+    oa_part = next((p.id for p in order if p.source == "open_applications"), None)
+    for x in oapps:
+        if x.get("everyone"):
+            continue
+        name, slug = x.get("name") or x.get("slug", "?"), x.get("slug", "?")
+        put(oa_part, _sig("open_applications", WARN, f"{name} is open to every signed-in user",
+                          f"Authentik application {slug}: no group or user binding"))
+
     # Each part's state.
     for v in list(views.values()):
         p = v.part
@@ -489,6 +503,8 @@ def place(stack: Stack, readings: dict, pipeline=(), stale_apps=(), since=lambda
             v.count = f"{sum(1 for x in inodes if x.get('state') == 'ok')}/{len(inodes)}"
         elif p.source == "prometheus" and targets:
             v.count = f"{sum(1 for t in targets if t.get('up'))}/{len(targets)}"
+        elif p.source == "open_applications" and bad:
+            v.count = str(len(bad))
         elif p.source == "apps" and apps:
             v.count = f"{sum(1 for a in apps if a.get('sync') == 'Synced')}/{len(apps)} synced"
         elif len(bad) > 1:

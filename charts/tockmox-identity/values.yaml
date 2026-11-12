@@ -515,6 +515,26 @@ sso:
   # the restart described in docs/administration/identity.md.
   access:
     enabled: true
+    # Authentik application slugs that are meant for every signed-in user. An
+    # application with no group or user binding is open to anyone who can sign
+    # in (its `group` field is only a launcher heading). The report below lists
+    # every such application, and the console's Status page warns about each
+    # one NOT named here. Naming one here binds nothing and opens nothing: it
+    # only says the open shape is intended. Every shipped application is bound,
+    # so none needs to be named. docs/administration/identity.md, "Applications
+    # open to every signed-in user".
+    everyone: []
+    # The report: a CronJob that reads Authentik's database (read only) and
+    # writes the list to the ConfigMap tockmox-identity-open-applications in
+    # this namespace, which the console reads. It does not need
+    # sso.consoleActions. Keep `schedule` more frequent than hourly: the console
+    # reads a list older than an hour as Unknown. `consoleNamespace` is the AI
+    # layer's namespace, where the console's ServiceAccount (tockmox-ui) lives;
+    # this layer cannot read that layer's values.
+    report:
+      enabled: true
+      schedule: "*/10 * * * *"
+      consoleNamespace: tockmox-ai
   # Client IDs are public identifiers, not secrets. Changing a clientId also
   # needs the console restart in docs/administration/identity.md; GitOps will
   # report the layer healthy while the console keeps the old value.

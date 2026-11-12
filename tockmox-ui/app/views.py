@@ -101,6 +101,15 @@ def problems(readings: dict, pipeline: list | None = None) -> list[dict]:
                          "href": f"/nodes/{x.get('id', '')}", "kind": "inference node", "detail": x.get("why", ""),
                          "since": "", "action": "Open", "action_href": f"/nodes/{x.get('id', '')}"})
 
+    r = readings.get("open_applications")
+    if r is not None and r.state != "unknown" and isinstance(r.data, dict):
+        for x in r.data.get("open") or []:
+            if x.get("everyone"):
+                continue
+            rows.append({"state": "warning", "what": x.get("name") or x.get("slug", "?"), "href": "/status/open-applications",
+                         "kind": "open application", "detail": f"Authentik application {x.get('slug', '?')} has no group or user binding",
+                         "since": "", "action": "Status", "action_href": "/status/open-applications"})
+
     for key, r in readings.items():
         if r is None or r.state != "unknown":
             continue
@@ -124,7 +133,8 @@ def verdict_sentence(verdict: str, probs: list[dict], readings: dict) -> str:
         return "Nothing is reporting a problem."
     kinds: dict[str, list[dict]] = {}
     for p in probs:
-        kinds.setdefault(p["kind"] if p["kind"] in ("application", "node", "scrape target", "inference node", "source") else "alert", []).append(p)
+        kinds.setdefault(p["kind"] if p["kind"] in ("application", "node", "scrape target", "inference node", "source",
+                                                    "open application") else "alert", []).append(p)
     parts: list[str] = []
     if "inference node" in kinds:
         parts.append(_n(len(kinds["inference node"]), "inference node is", "inference nodes are") + " failing probes")
@@ -141,6 +151,8 @@ def verdict_sentence(verdict: str, probs: list[dict], readings: dict) -> str:
         if warn:
             bits.append(_n(warn, "warning", "warnings"))
         parts.append(" and ".join(bits) + (" is firing" if len(kinds["alert"]) == 1 else " are firing"))
+    if "open application" in kinds:
+        parts.append(_n(len(kinds["open application"]), "application is", "applications are") + " open to every signed-in user")
     if "scrape target" in kinds:
         parts.append(_n(len(kinds["scrape target"]), "scrape target is", "scrape targets are") + " down")
     if "source" in kinds:

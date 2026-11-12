@@ -715,6 +715,9 @@ run_gate "the policy gate holds with the local backend down" bash tests/policy-g
 # without a Smokescreen binary (SMOKESCREEN_BIN); each script says how to get them.
 run_gate "the key policy's unit tests" bash -c 'python3 -c "import pytest" 2>/dev/null || { echo "SKIPPED: no pytest for python3"; exit 2; }; python3 -m pytest -q tests/key-policy/test_key_policy.py'
 run_gate "the key policy refuses every bad key write, and the red leg reopens without it" bash tests/key-policy/run.sh
+# The identity layer's open-applications job: its listing and its PATCH run on stand-ins, the console's fixtures are
+# what it writes, and its render is scoped to one ConfigMap (each widening planted and caught).
+run_gate "the open-applications job lists every unbound application, writes one ConfigMap and is scoped to it" bash -c 'python3 -c "import pytest, yaml" 2>/dev/null || { echo "SKIPPED: no pytest or PyYAML for python3"; exit 2; }; python3 -m pytest -q -p no:cacheprovider tests/identity-open-applications'
 run_gate "the rendered agent-egress proxy refuses what it must, in a real Smokescreen" bash tests/agent-egress/proxy-proof.sh
 
 # NOT a tools/check-*.sh script, and included anyway. CONTRIBUTING.md points

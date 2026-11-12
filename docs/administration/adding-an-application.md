@@ -264,6 +264,51 @@ authentik:
 Restart the Authentik worker after adding the Secret key (envFrom is read at
 pod start), and check Blueprints in the admin UI shows yours `successful`.
 
+**Bind it, either way.** An Authentik application with no binding is open to
+everyone who can sign in, whatever group they are in; its `group` field is a
+launcher heading and grants nothing. In the blueprint, add the role groups and
+a binding to each, beside the application entry (here `id: app-miniflux`):
+
+```yaml
+- model: authentik_core.group
+  state: present
+  id: group-admin-miniflux
+  identifiers:
+    name: tockmox-admins
+  attrs:
+    is_superuser: false
+- model: authentik_policies.policybinding
+  state: present
+  identifiers:
+    target: !KeyOf app-miniflux
+    group: !KeyOf group-admin-miniflux
+  attrs:
+    order: 0
+    enabled: true
+- model: authentik_core.group
+  state: present
+  id: group-user-miniflux
+  identifiers:
+    name: tockmox-users
+  attrs:
+    is_superuser: false
+- model: authentik_policies.policybinding
+  state: present
+  identifiers:
+    target: !KeyOf app-miniflux
+    group: !KeyOf group-user-miniflux
+  attrs:
+    order: 1
+    enabled: true
+```
+
+For admins only, set the second binding's `state` to `absent` (keep the
+entry, so a binding an earlier version made is removed). In the admin
+interface, the same is the application's **Policy / Group / User Bindings**
+tab. The console's Status page names every application left unbound under
+**Open applications**; one meant for everyone goes in `sso.access.everyone`
+([identity](identity.md#applications-open-to-every-signed-in-user)).
+
 Users need no per-app setup: anyone in `tockmox-admins` or `tockmox-users`
 signs in; `OAUTH2_USER_CREATION=1` provisions their Miniflux account on
 first login.
@@ -326,10 +371,11 @@ an appliance UI, a wiki you have not wired up yet ... any of these can still
 get a launch tile: create an Application **without a provider**. It renders
 as a card with a launch URL and nothing else.
 
-Visibility is controlled per-card by binding a group policy to the
-Application. Bound to `tockmox-admins`, the card appears only for admins;
-unbound, it appears for everyone. Declaratively, that is three blueprint
-entries:
+Visibility is controlled per-card by binding a group to the Application.
+Bound to `tockmox-admins`, the card appears only for admins; unbound, it
+appears for everyone, and the console's Status page lists it under **Open
+applications** unless you name it in `sso.access.everyone`. Declaratively,
+for admins only:
 
 ```yaml
 - model: authentik_core.application
@@ -339,24 +385,32 @@ entries:
     slug: admin-docs
   attrs:
     name: Admin Documentation
-    meta_launch_url: "http://admin-docs.int.example.com/"
+    meta_launch_url: "https://admin-docs.int.example.com/"
+- model: authentik_core.group
+  state: present
+  id: group-admin-admin-docs
+  identifiers:
+    name: tockmox-admins
+  attrs:
+    is_superuser: false
 - model: authentik_policies.policybinding
   state: present
   identifiers:
     target: !KeyOf app-admin-docs
-    order: 0
+    group: !KeyOf group-admin-admin-docs
   attrs:
-    group: !Find [authentik_core.group, [name, tockmox-admins]]
+    order: 0
     enabled: true
 ```
 
-The shipped app blueprints bind the same way, with one difference worth
-copying: they restate the group in the same blueprint (`authentik_core.group`,
-`state: present`, an `id:`) and bind with `!KeyOf` instead of `!Find`. A
-`!Find` resolves against whatever exists when the blueprint applies, and on a
-first boot that can be nothing ... a binding with no group puts the blueprint
-in `error`, and one blueprint in `error` poisons discovery for all of them.
-`tools/check-sso-bindings.sh` holds the shipped set to that rule.
+This is the shipped blueprints' shape. The group is restated in the same
+blueprint and bound with `!KeyOf`, not `!Find`: a `!Find` resolves against
+whatever exists when the blueprint applies, and on a first boot that can be
+nothing ... a binding with no group puts the blueprint in `error`, and one
+blueprint in `error` poisons discovery for all of them. The binding is
+identified by application and group, never by `order`, which would match and
+rewrite whatever else sits at that order. `tools/check-sso-bindings.sh` holds
+the shipped set to these rules.
 
 Two things to know. Group-membership changes take up to the policy-cache
 TTL to show in the library; force it with

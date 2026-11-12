@@ -493,13 +493,114 @@ server:
     tls: true
 ```
 
-**2. Sign-in through Authentik.** Create an OAuth2/OpenID provider and
-application for Argo CD in your site repository (a blueprint beside your other
-site blueprints, or the admin UI), confidential client, redirect URIs
-`https://argocd.<internalDomain>/auth/callback` (strict) and
-`http://localhost:8085/auth/callback` for the `argocd login --sso` CLI, scopes
-`openid`, `email`, `profile`, grant types `authorization_code` and
-`refresh_token`, bound to the admin group. Then in the Argo CD values:
+**2. Sign-in through Authentik.** Argo CD needs an OAuth2/OpenID provider and
+an application in Authentik, and the application needs a binding to the admin
+group. Without the binding, every signed-in user can open it: Authentik
+authorizes an unbound application for anyone, and the console's Status page
+names it under **Open applications**
+([identity](identity.md#applications-open-to-every-signed-in-user)). The
+blueprint below creates all three. Put it in your site repository (under
+`apps/`, which `site-apps` syncs), with your domain in the two URLs:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-sso-blueprint
+  namespace: tockmox-authentik
+data:
+  argocd.yaml: |
+    version: 1
+    metadata:
+      name: site-argocd
+    entries:
+      - model: authentik_providers_oauth2.oauth2provider
+        state: present
+        id: provider-argocd
+        identifiers:
+          name: argocd
+        attrs:
+          client_type: confidential
+          client_id: argocd
+          grant_types:
+            - authorization_code
+            - refresh_token
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-invalidation-flow]]
+          signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
+          property_mappings:
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-email]]
+            - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-profile]]
+          redirect_uris:
+            - matching_mode: strict
+              url: "https://argocd.int.example.com/auth/callback"
+            - matching_mode: strict
+              url: "http://localhost:8085/auth/callback"
+      - model: authentik_core.application
+        state: present
+        id: app-argocd
+        identifiers:
+          slug: argocd
+        attrs:
+          name: Argo CD sign-in
+          provider: !KeyOf provider-argocd
+          meta_launch_url: "blank://blank"
+      - model: authentik_core.group
+        state: present
+        id: group-admin-argocd
+        identifiers:
+          name: tockmox-admins
+        attrs:
+          is_superuser: false
+      - model: authentik_policies.policybinding
+        state: present
+        identifiers:
+          target: !KeyOf app-argocd
+          group: !KeyOf group-admin-argocd
+        attrs:
+          order: 0
+          enabled: true
+      - model: authentik_core.group
+        state: present
+        id: group-user-argocd
+        identifiers:
+          name: tockmox-users
+        attrs:
+          is_superuser: false
+      - model: authentik_policies.policybinding
+        state: absent
+        identifiers:
+          target: !KeyOf app-argocd
+          group: !KeyOf group-user-argocd
+```
+
+It follows the shipped blueprints' rules: the groups are restated so the file
+applies alone, each binding is identified by application and group (never by
+`order`), and the user-group binding is stated `absent` so that one left by an
+earlier edit is removed. `blank://blank` keeps this application off the portal,
+where the tile from step 3 already opens Argo CD. The provider has no
+`client_secret` entry, so Authentik generates one and later applies keep it;
+copy it from the provider's page in Authentik's admin interface into the
+`argocd-oidc` Secret below. A blueprint that read the secret with `!Env` would
+put every blueprint in `error` until the variable existed
+([the greenfield rule](identity.md#the-greenfield-rule-for-blueprints)).
+
+Then add the ConfigMap to the identity layer's blueprint list, restating the
+shipped one (Helm lists replace, they do not merge):
+
+```yaml
+# site/values/identity.yaml
+authentik:
+  blueprints:
+    configMaps:
+      - tockmox-sso-blueprints
+      - argocd-sso-blueprint
+```
+
+If you create the provider and application in the admin interface instead,
+bind the application to `tockmox-admins` on its **Policy / Group / User
+Bindings** tab before anyone else signs in. Then in the Argo CD values:
 
 ```yaml
 configs:
@@ -553,17 +654,19 @@ The tile is a link (no provider of its own); the sign-in behind it is step 2's.
 **Success condition:** on the Authentik portal, the **Argo CD** tile opens a new
 tab at `https://argocd.<internalDomain>` with no certificate warning, and **Log
 in via Authentik** returns to Argo CD signed in, with the applications of every
-layer visible to a member of the admin group.
+layer visible to a member of the admin group. Within ten minutes, the console's
+Status page does not list `argocd` under **Open applications**.
 
 **What is not certified here.** This section was executed once, on a lab
 install of a 0.9.0 development build with the Argo CD chart at 10.9.1
 (2026-10-28): steps 1 to 3 as written here, step 2 through the admin UI route.
 Without the `rootCA` paragraph above, which the first version of this page did
 not have, that run failed at the provider query. The Secret label is Argo CD's
-documented requirement; the run applied it and did not test without it. Not
-executed: the blueprint route for
-step 2, the `argocd login --sso` CLI path, and any Argo CD chart major other
-than 10. The values keys move between chart majors: read your chart version's
+documented requirement; the run applied it and did not test without it. That run
+did not bind the application, and a user in neither group could see it; the
+binding and the blueprint above were added afterwards. Not executed: the
+blueprint route for step 2, the admin-interface binding, the
+`argocd login --sso` CLI path, and any Argo CD chart major other than 10. The values keys move between chart majors: read your chart version's
 `values.yaml` before applying them.
 
 ## Related

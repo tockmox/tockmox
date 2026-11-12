@@ -15,6 +15,7 @@
 #   scrape target        a part's `jobs` glob; then namespaces as for an alert; else the part whose
 #                        `source` is prometheus (Metrics); else "Unplaced".
 #   node, inference node the part whose `source` names that reading.
+#   open application     the part whose `source` is open_applications, one per application not declared open.
 # "Unplaced" shows at the top when it holds anything, so nothing hides.
 #
 # A part with nothing that reports on it reads Unknown, never OK. `when` hides a part whose
@@ -107,6 +108,16 @@ bands:
         name: Identity database
         alerts: ["TockmoxAuthentikBackup*", "TockmoxIdentityDatabaseUnbacked"]
         runbook: operations/backup-restore.md
+      # The identity layer's list of Authentik applications with no group or user binding (sources.openApplications).
+      # Shown only when the console reads it.
+      - id: open-applications
+        name: Open applications
+        about: >-
+          Authentik applications any signed-in user can open, because no group or user binding restricts them (an
+          application's launcher heading grants nothing). Bind each one to a group, or name it in the identity
+          layer's sso.access.everyone if everyone is meant to have it.
+        source: open_applications
+        runbook: administration/identity.md
 
   - id: observability
     name: Observability

@@ -300,6 +300,60 @@ class NodesSource(Source):
         return OK, f"{len(nodes)} ready"
 
 
+class OpenApplicationsSource(Source):
+    """The identity layer's list of Authentik applications open to every signed-in user: the ConfigMap the
+    tockmox-open-applications CronJob writes (charts/tockmox-identity/templates/open-applications.yaml), read with
+    one GET the identity layer's Role allows on that one object.
+
+    An application with no group or user binding warns unless the site declared it open (sso.access.everyone in the
+    identity layer). A list that is missing, unwritten, unreadable or older than `stale_s` is Unknown with the
+    reason, never OK: the Job not running is not the same as nothing being open."""
+    name = "Open applications"
+    KEY = "report.json"
+
+    def __init__(self, kube: KubeClient, namespace: str, configmap: str, stale_s: float = 3600.0,
+                 clock: Callable[[], float] = time.time, ttl=60.0):
+        super().__init__(ttl)
+        self.kube, self.namespace, self.configmap, self.stale_s, self.clock = kube, namespace, configmap, stale_s, clock
+
+    def fetch(self):
+        try:
+            doc = self.kube.get(f"/api/v1/namespaces/{self.namespace}/configmaps/{self.configmap}")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return {"missing": True}
+            raise
+        raw = (doc.get("data") or {}).get(self.KEY)
+        if raw is None:
+            return {"unwritten": True}
+        rep = json.loads(raw)
+        if not isinstance(rep, dict) or not isinstance(rep.get("open"), list):
+            raise ValueError("report.json has no `open` list")
+        return rep
+
+    def evaluate(self, rep):
+        where = f"{self.namespace}/{self.configmap}"
+        if rep.get("missing"):
+            return UNKNOWN, f"no list: the ConfigMap {where} does not exist (the identity layer's sso.access.report is off, or the layer is not installed)"
+        if rep.get("unwritten"):
+            return UNKNOWN, "the list has not been written yet: the tockmox-open-applications CronJob has not run"
+        if rep.get("version") != 1:
+            return UNKNOWN, f"list version {rep.get('version')!r} is not one this console reads"
+        ts = _parse_ts(rep.get("generatedAt"))
+        if ts is None:
+            return UNKNOWN, "the list carries no time it was written"
+        age = self.clock() - ts
+        if age > self.stale_s:
+            return UNKNOWN, f"the list was written {_age_text(age)} ago; the tockmox-open-applications CronJob has not written since"
+        flagged = [a for a in rep["open"] if not a.get("everyone")]
+        if flagged:
+            n = len(flagged)
+            return WARN, f"{n} application{'s are' if n != 1 else ' is'} open to every signed-in user"
+        meant = len(rep["open"])
+        return OK, (f"every application is bound to a group or user, or declared open ({meant})" if meant
+                    else "every application is bound to a group or user")
+
+
 # ---------------------------------------------------------------- Prometheus / Alertmanager
 
 class _HttpSource(Source):

@@ -169,6 +169,53 @@ close the window:
 carry none of the roles a group grants. That form is the break-glass path below,
 not a second way to add people.
 
+## Applications open to every signed-in user
+
+In Authentik an application with no policy binding is authorized for anyone
+who can sign in: it shows on their dashboard and they can authorize to it. Its
+`group` field is a launcher heading and grants nothing. Every application the
+identity layer ships is bound (`tools/check-sso-bindings.sh` holds the shipped
+set to that), but an application made by hand in Authentik's admin interface,
+or by a site's own blueprint, can miss the binding.
+
+So the identity layer lists them. A CronJob (`tockmox-open-applications`,
+every ten minutes) reads Authentik's database and writes every application
+with no enabled group or user binding to the ConfigMap
+`tockmox-identity-open-applications` in the identity namespace. The console
+reads it and shows it on **Status**, as the **Open applications** part of the
+Identity band: one warning per application, named, and the part reads Unknown
+when the list is missing or more than an hour old. It does not depend on the
+console's identity actions (`sso.consoleActions`).
+
+To clear a warning, bind the application to a group: the blueprint entries
+are in [adding an application](adding-an-application.md#5-single-sign-on).
+When an application is meant for everyone, say so, and it stops warning:
+
+```yaml
+# site/values/identity.yaml
+sso:
+  access:
+    everyone:
+      - handbook        # the application's slug in Authentik
+```
+
+Naming a slug there binds nothing and opens nothing; it only records that the
+open shape is intended. A binding to a policy alone (an expression policy, say)
+does not count as a binding here, because a policy can pass everyone: bind such
+an application to a group as well, or name it in `everyone`.
+
+The Job's Kubernetes authority is `patch` on that one ConfigMap; the console's
+is `get` on it. `sso.access.report.consoleNamespace` names the AI layer's
+namespace if you moved it.
+
+What it costs: by default (`sso.access.report.schedule: "*/10 * * * *"`) it
+starts one pod on the Authentik server image every ten minutes, requesting
+100m CPU and 256Mi of memory (limit 512Mi); it starts an Authentik shell,
+reads two tables, writes the list and exits. A slower schedule makes it cheaper,
+but keep it under an hour or the console reads the list as Unknown;
+`sso.access.report.enabled: false` removes the CronJob, its ConfigMap and both
+Roles.
+
 ## SSO values that follow your site
 
 Three values in the identity layer exist for a site whose hostnames or accounts
@@ -986,6 +1033,14 @@ rather than measured here: that a blueprint updating an existing object applies
 only the fields it names (so the embedded outpost keeps its own configuration),
 and that a `forward_single` provider needs the `/outpost.goauthentik.io/`
 callback on the console's own host.
+
+**The open-applications list (added after 0.9.0) is proved on stand-ins, not
+on a cluster.** Its listing and its write are run against stand-ins for
+Authentik's models and the Kubernetes API, its Roles are proved scoped on the
+render, and the console's part is tested against what that run writes. Not yet
+run on a cluster: that an unbound application is named on Status, that binding
+it clears the warning, that an application named in `sso.access.everyone` does
+not warn, and that Argo CD leaves the Job's `data` alone on a sync.
 
 <!-- tockmox:footer:begin -->
 
