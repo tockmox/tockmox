@@ -298,7 +298,8 @@ assert_artifact "F30 ... and writes nothing to the cluster" "fs_writes" "0"
 
 # F31-F35. --offsite-git-ca: a git remote on a private CA (and a private address).
 # Refusals before any write, and the dry run's plan naming the trust and the one host
-# allowed. What the chart then mounts is proven on the lab, not here (see the header).
+# allowed. What the forge's chart and the copy jobs are then handed is read in F48-F49; that Forgejo and git
+# honour it is proven on the lab, not here (see the header).
 printf -- '-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----\n' > "$FS/ca.pem"
 fs_case f31; printf 'bot\ntoken\n' > "$D/inputs/git"
 os_run --offsite-git https://git.example.internal/lab/site.git --offsite-git-credentials "$D/inputs/git" --offsite-git-ca "$D/inputs/no-such-ca.pem"
@@ -561,3 +562,37 @@ assert_artifact "F42 with no siteForge block the run finishes, adds none, and sa
 assert_artifact "F43 the watcher template refuses a missing image, a bad namespace and a bad checksum" \
   "bash '$REPO_ROOT/install/forge-approver-watch-template.sh' --namespace tockmox-forge >/dev/null 2>&1; echo \$?; bash '$REPO_ROOT/install/forge-approver-watch-template.sh' --namespace 'Bad_NS' --image a/b:1 >/dev/null 2>&1; echo \$?; bash '$REPO_ROOT/install/forge-approver-watch-template.sh' --namespace x --image a/b:1 --script-sha 'a;b' >/dev/null 2>&1; echo \$?" \
   "$(printf '2\n2\n2')"
+
+# F48-F49. The off-site git copy on a private CA, run for real on the stand-ins. F32-F35 are refusals and a
+# dry run; these read WHAT WAS MADE: the values the forge's chart was handed, the ConfigMap, the two CronJobs
+# and the push mirror the forge was asked for. They do NOT show that Forgejo honours the allow-list, that git
+# reads the file, or that a copy arrives: nothing is pushed here. Those are lab items.
+OSG_URL="https://git.example.internal:8443/lab/site.git"
+fk_values() { python3 -c 'import yaml,sys; v=yaml.safe_load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$D/state/helm-values.yaml" "$1"; }
+fk_cj() {  # NAME -> the trust a CronJob's one container carries: its GIT_SSL_CAINFO, the mount there, the ConfigMap behind it
+  fk_obj "$FKNS" CronJob "$1" "(lambda p: ([e['value'] for e in p['containers'][0]['env'] if e['name'] == 'GIT_SSL_CAINFO'], [m['name'] for m in p['containers'][0]['volumeMounts'] if m['mountPath'] == '/run/offsite-ca'], [x['configMap']['name'] for x in p['volumes'] if x['name'] == 'ca']))(d['spec']['jobTemplate']['spec']['template']['spec'])"
+}
+fk_case f48; printf 'bot\ntoken-not-a-real-one\n' > "$D/inputs/git"
+fk_run --offsite-git "$OSG_URL" --offsite-git-credentials "$D/inputs/git" --offsite-git-ca "$FS/ca.pem"
+assert_artifact "F48 the forge is handed the CA: one file for git, mounted in the container and the init containers" \
+  "echo $FS_STATUS; fk_values \"[e['value'] for e in v['deployment']['env'] if e['name'] == 'GIT_SSL_CAINFO'], [x['configMap'] for x in v['extraVolumes'] if x['name'] == 'offsite-ca'], [[m['mountPath'] for m in v[k] if m['name'] == 'offsite-ca'] for k in ('extraContainerVolumeMounts', 'extraInitVolumeMounts')]\"" \
+  "$(printf "0\n(['/etc/tockmox-offsite-ca/offsite-ca.crt'], [{'name': 'tockmox-forge-offsite-ca', 'items': [{'key': 'ca.crt', 'path': 'offsite-ca.crt'}]}], [['/etc/tockmox-offsite-ca'], ['/etc/tockmox-offsite-ca']])")"
+assert_artifact "F48 the forge may mirror to the remote's host alone: no port, no wildcard, private networks not opened" \
+  "fk_values \"v['gitea']['config']['migrations']\"" "{'ALLOWED_DOMAINS': 'git.example.internal'}"
+assert_artifact "F48 the ConfigMap holds the file the operator gave, byte for byte" \
+  "fk_obj '$FKNS' ConfigMap tockmox-forge-offsite-ca \"d['data']['ca.crt'] == open('$FS/ca.pem').read()\"" "True"
+assert_artifact "F48 the copy job and the nightly dump both read that ConfigMap as git's CA" \
+  "fk_cj tockmox-forge-offsite; fk_cj tockmox-forge-dump" \
+  "$(printf "(['/run/offsite-ca/ca.crt'], ['ca'], ['tockmox-forge-offsite-ca'])\n(['/run/offsite-ca/ca.crt'], ['ca'], ['tockmox-forge-offsite-ca'])")"
+assert_artifact "F48 the forge was asked for one push mirror to the remote, on every commit, and the first copy and dump were started" \
+  "fk_forge \"[(m['remote_address'], m['sync_on_commit']) for m in st['push_mirrors']]\"; ls '$D/state/objs/$FKNS/Job' | sed 's/-first-.*//' | sort | tr '\n' ' '" \
+  "$(printf "[('%s', True)]\ntockmox-forge-dump tockmox-forge-offsite " "$OSG_URL")"
+
+# F49. The same run without a CA: nothing above appears on its own, and the allow-list is the same one host.
+fk_case f49; printf 'bot\ntoken-not-a-real-one\n' > "$D/inputs/git"
+fk_run --offsite-git "$OSG_URL" --offsite-git-credentials "$D/inputs/git"
+assert_artifact "F49 without --offsite-git-ca the forge gets no CA file, no mount and no ConfigMap" \
+  "echo $FS_STATUS; fk_values \"[e['name'] for e in v['deployment']['env']], [x['name'] for x in v['extraVolumes']], v['gitea']['config']['migrations']\"; ls '$D/state/objs/$FKNS/ConfigMap' | grep -c offsite-ca || true" \
+  "$(printf "0\n(['SSL_CERT_DIR'], ['tockmox-ca'], {'ALLOWED_DOMAINS': 'git.example.internal'})\n0")"
+assert_artifact "F49 and neither job is pointed at one" \
+  "fk_cj tockmox-forge-offsite; fk_cj tockmox-forge-dump" "$(printf "([], [], [])\n([], [], [])")"

@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
-# Fake helm for the full-run cases: `status` is true once `upgrade --install` has run for the release.
+# Fake helm for the full-run cases: `status` is true once `upgrade --install` has run for the release, and the
+# values file that upgrade was given is kept as $FAKE_STATE/helm-values.yaml.
 S="${FAKE_STATE:?FAKE_STATE not set}"
 printf 'helm %s\n' "$*" >> "$S/calls.log"
 mkdir -p "$S/objs"
 case " $* " in
   *" status "*)  [ -e "$S/helm-release" ] ; exit $? ;;
-  *" upgrade "*) : > "$S/helm-release"; exit 0 ;;
+  *" upgrade "*)
+    # Keep the values the installer handed the chart, so a case can read WHAT THE FORGE WAS TOLD (F48).
+    prev=""; for a in "$@"; do [ "$prev" = "-f" ] && cp "$a" "$S/helm-values.yaml"; prev="$a"; done
+    : > "$S/helm-release"; exit 0 ;;
 esac
 echo "fake helm: unhandled: $*" >&2; exit 1
