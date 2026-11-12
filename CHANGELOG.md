@@ -292,12 +292,32 @@ costs you, with the reasoning in the documentation rather than here.
   approve, an Authentik name that matches a forge account is refused rather
   than linked, and nobody becomes a forge admin through sign-in. Taking someone
   out of the admin group takes them out of `approvers` only at a forge sign-in
-  Authentik still allows, so for now remove them from the team by hand as well.
+  Authentik still allows, so remove them from the team by hand as well; the
+  approvers watcher (below) alerts until you do.
   The model watcher can open its changes as the forge's change bot
   (`tockmox-forge-change-bot` in the AI namespace; Forgejo at an in-cluster
   `*.svc.cluster.local` address over plain http). New key:
   `sso.apps.forge` (identity, off unless the generator turns it on);
   `site.forge: built-in` sites get it on.
+
+- **An alert when someone leaves the admin group but is still a forge
+  approver.** On a site with sign-in, `bootstrap-forge` installs a read-only
+  watcher in the forge's namespace. Every minute it compares the forge's
+  `approvers` team with the active members of `tockmox-admins`, and
+  `TockmoxForgeApproverOutsideGroup` (critical) names each person still in the
+  team, with the open pull requests that carry their approval.
+  `TockmoxForgeApproversCheckDown` fires when it cannot read either side, and a
+  bad read judges nobody. It removes no one: you take them out of the team. It
+  holds two read-only credentials: an Authentik service account that may view
+  only the admin group, and a forge user in the organisation's Owners team
+  (the forge shows a team's members only to that team and its owners) whose one
+  token is scoped `read:organization` and `read:repository`, which the forge
+  refuses on every write. The run turns on `siteForge.approverWatch`
+  (observability) and `sso.apps.forge.approverWatch` (identity) in your site's
+  values, leaving a value you set alone. **If tockmox-identity is already
+  running**, restart the Authentik worker once after the first run so it applies
+  the new blueprint (docs/administration/site-forge.md, "The approvers
+  watcher").
 
 - **Rebuild a built-in-forge site, or repair just its forge, from
   the off-site copy and the recovery kit.**
