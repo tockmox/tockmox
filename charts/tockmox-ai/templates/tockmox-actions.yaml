@@ -32,6 +32,11 @@ compare the Job with its CronJob, so a compromised tockmox-actions pod could run
 allowlisted namespace, as any ServiceAccount there, inside that namespace's Pod Security level. That is why run-now is
 allowlisted by namespace and name, and why the pod takes input only from the UI pod and acts only on a token the
 issuer signed.
+The forge's namespace is the exception, because it holds the forge's admin Secret and the move ServiceAccount: there
+tockmox-actions-forge-jobs admits a Job from this identity only as a move Job or in the off-site copy's own shape
+(no ServiceAccount of its own, no token, the copy script, only the copy's own Secret and ConfigMaps). What is left
+there: the image is not pinned, so a compromised pod could run an image of its choosing with the off-site copy's
+credentials (the remote, and the copy's read of the forge), and nothing else of that namespace.
 
 Off means absent: with no kind on, none of this renders, and the UI shows no buttons.
 */ -}}
@@ -349,6 +354,85 @@ metadata:
     {{- include "tockmox.labels" . | nindent 4 }}
 spec:
   policyName: tockmox-actions-jobs
+  validationActions: [Deny]
+{{- end }}
+{{- if or (hasKey $jobNs $fNs) $act.moveForge.enabled }}
+---
+# In the forge's namespace a Job from this identity is a move Job (tockmox-actions-move-job) or a run-now with the
+# off-site copy's own shape, or it is refused. That namespace holds the forge's admin Secret and the move
+# ServiceAccount, and tockmox-actions-jobs looks at nothing in the pod: without this policy, the right to run the
+# copy now was a right to run a pod there as the move ServiceAccount, or with the admin Secret mounted. It stands on
+# its own (the owner and the label are checked here too), because the move's Role grants create on Jobs there even
+# with run-now off, where tockmox-actions-jobs does not render and the list below is empty: nothing but a move.
+# Pinned: an allowlisted CronJob of this namespace as the owner, no ServiceAccount of its own and no token, one
+# container that runs the copy script, no environment read from a Secret or a ConfigMap, and only the copy's own
+# script, Secret, CA and scratch volumes. NOT pinned: the image, which is the site's own forge image and is not
+# known to this chart.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: tockmox-actions-forge-jobs
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - { apiGroups: [batch], apiVersions: [v1], operations: [CREATE, UPDATE], resources: [jobs] }
+  matchConditions:
+    - name: from-tockmox-actions
+      expression: "request.userInfo.username == '{{ $sa }}'"
+    - name: in-the-forge-namespace
+      expression: "request.namespace == '{{ $fNs }}'"
+    {{- if $act.moveForge.enabled }}
+    # A move Job answers to tockmox-actions-move-job instead, which pins its own, different shape.
+    - name: not-a-move
+      expression: "!(has(object.metadata.labels) && 'tockmox.com/move-forge' in object.metadata.labels)"
+    {{- end }}
+  variables:
+    - name: pod
+      expression: "object.spec.template.spec"
+  validations:
+    - expression: "request.operation == 'CREATE'"
+      message: "tockmox-actions may create a Job, never change one"
+    - expression: >-
+        has(object.metadata.ownerReferences) && size(object.metadata.ownerReferences) == 1 &&
+        object.metadata.ownerReferences[0].kind == 'CronJob' &&
+        object.metadata.ownerReferences[0].name in {{ get $jobNs $fNs | default list | uniq | toJson }} &&
+        has(object.metadata.labels) && 'tockmox.com/run-now' in object.metadata.labels &&
+        object.metadata.labels['tockmox.com/run-now'] == 'true'
+      message: "a Job from tockmox-actions in {{ $fNs }} is a move Job, or a run-now of an allowlisted CronJob there (tockmoxUi.actions.runJob)"
+    - expression: >-
+        (!has(variables.pod.serviceAccountName) || variables.pod.serviceAccountName in ['', 'default']) &&
+        (!has(variables.pod.serviceAccount) || variables.pod.serviceAccount in ['', 'default']) &&
+        has(variables.pod.automountServiceAccountToken) && !variables.pod.automountServiceAccountToken
+      message: "a run-now Job in {{ $fNs }} runs as no ServiceAccount of its own and mounts no token"
+    - expression: >-
+        size(variables.pod.containers) == 1 && !has(variables.pod.initContainers) && !has(variables.pod.ephemeralContainers) &&
+        (!has(variables.pod.hostNetwork) || !variables.pod.hostNetwork) && (!has(variables.pod.hostPID) || !variables.pod.hostPID) &&
+        (!has(variables.pod.hostIPC) || !variables.pod.hostIPC)
+      message: "a run-now Job in {{ $fNs }} runs one container and shares nothing of the node's"
+    - expression: >-
+        has(variables.pod.containers[0].command) &&
+        variables.pod.containers[0].command == ['/bin/sh', '/opt/offsite/forge-offsite-copy.sh'] &&
+        !has(variables.pod.containers[0].args)
+      message: "a run-now Job in {{ $fNs }} runs the off-site copy's script, with no arguments"
+    - expression: >-
+        !has(variables.pod.containers[0].envFrom) &&
+        (!has(variables.pod.containers[0].env) || variables.pod.containers[0].env.all(e, !has(e.valueFrom))) &&
+        has(variables.pod.volumes) && variables.pod.volumes.all(v,
+          (has(v.configMap) && v.configMap.name in ['{{ $fRel }}-offsite-script', '{{ $fRel }}-offsite-ca']) ||
+          (has(v.secret) && v.secret.secretName == '{{ $fRel }}-offsite') || has(v.emptyDir))
+      message: "a run-now Job in {{ $fNs }} reads only the off-site copy's script, Secret, CA and a scratch directory"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: tockmox-actions-forge-jobs
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  policyName: tockmox-actions-forge-jobs
   validationActions: [Deny]
 {{- end }}
 {{- if $wlNs }}

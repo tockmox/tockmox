@@ -620,6 +620,19 @@ template, but the admission policy cannot compare the two, so a compromised
 within that namespace's Pod Security level. Keep the run-now allowlist to
 namespaces you would trust with that.
 
+The built-in forge's namespace is held tighter, because it holds the forge's
+admin Secret and the identity that can repoint Argo CD. There a second policy,
+`tockmox-actions-forge-jobs`, admits a Job from `tockmox-actions` only as the
+move's own Job or in the off-site copy's own shape: no ServiceAccount of its
+own and no token, the copy script as its command, no environment read from a
+Secret, and no volume but the copy's script, Secret, CA and scratch space. With
+run-now off it admits nothing but a move. What is left there: the image is not
+pinned (it is your forge's own image, which this chart does not know), so a
+compromised `tockmox-actions` pod could run an image of its choice with the
+off-site copy's credentials, and with nothing else of that namespace. A CronJob
+of your own that you add to run-now in the forge's namespace must have that
+same shape, or its button is refused; put it in another namespace.
+
 **Adding your own.** Name the namespace (it must exist: a Role is rendered
 there) and, so the button appears on the right part, the part's id:
 
