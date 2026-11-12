@@ -70,9 +70,13 @@ d[0]["body"] = "x" * 70000
 json.dump(d, open(p, "w"))
 PYEOF
 hf_cut() {
-  python3 "$HF" issues "$D/m6" | head -n 1 | python3 -c '
+  # The reader takes the first line and then reads to the end. A reader that leaves after one line (head -n 1)
+  # can close the pipe while forge-history is still writing: the writer dies of a broken pipe, pipefail fails
+  # the assertion, and the answer printed was right. Seen about one run in six.
+  python3 "$HF" issues "$D/m6" | python3 -c '
 import json, sys
 b = json.loads(sys.stdin.readline())["body"]
+sys.stdin.read()
 print("x" * 60000 in b, "x" * 60001 in b, ("x" * 60000 + "\n\n_(cut: the full text is in the forge dump)_\n") in b)'
 }
 assert_artifact "60000 kept, not 60001, and the note follows the cut description" \
