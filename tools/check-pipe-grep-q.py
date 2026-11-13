@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """No `cmd | grep -q` in a script that sets pipefail.
 
-    python3 tools/check-pipe-grep-q.py              scan every tracked shell script
+    python3 tools/check-pipe-grep-q.py              scan every shell script git tracks or would add
     python3 tools/check-pipe-grep-q.py --selftest   prove the scan goes red, and green where it should
     python3 tools/check-pipe-grep-q.py --root DIR   scan DIR (every file in it) instead of the tracked tree
 
@@ -132,9 +132,11 @@ def scan(paths):
 
 
 def tracked(root):
-    """What git tracks under root, or None when root is not a git checkout (the caller reports SKIPPED)."""
+    """What git tracks under root plus what it does not track yet and does not ignore, or None when root is not a
+    git checkout (the caller reports SKIPPED). A file written a minute ago is the likeliest place for a new finding,
+    and a list of tracked files alone passed it unread until its first commit."""
     try:
-        out = subprocess.run(["git", "--no-optional-locks", "-C", root, "ls-files", "-z"],
+        out = subprocess.run(["git", "--no-optional-locks", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
                              capture_output=True, check=True).stdout
     except (OSError, subprocess.CalledProcessError):
         return None
@@ -172,6 +174,20 @@ def selftest():
         got = bool(scan([p]))
         bad += not got
         print(f"selftest {'ok  ' if got else 'FAIL'}  an extensionless script found by its shebang: {'flagged' if got else 'clean'}")
+        # The scan set: a script git does not track yet is read, one git ignores is not.
+        repo = os.path.join(d, "repo")
+        os.makedirs(repo)
+        made = subprocess.run(["git", "init", "-q", repo], capture_output=True).returncode == 0
+        for name in ("untracked.sh", "ignored.sh"):
+            with open(os.path.join(repo, name), "w") as f:
+                f.write("#!/usr/bin/env bash\nset -o pipefail\nx | grep -q y\n")
+        with open(os.path.join(repo, ".gitignore"), "w") as f:
+            f.write("ignored.sh\n")
+        hits = [h.split(":", 1)[0] for h in scan(tracked(repo) or [])] if made else []
+        names = sorted(os.path.basename(h) for h in hits)
+        ok = names == ["untracked.sh"]
+        bad += not ok
+        print(f"selftest {'ok  ' if ok else 'FAIL'}  an untracked script is read and an ignored one is not: flagged {names}")
     print("selftest ok    every case" if not bad else f"selftest FAILED: {bad} case(s)")
     return 1 if bad else 0
 
@@ -187,8 +203,8 @@ def main(argv):
         paths = tracked(root)
         if paths is None:
             # Exit 2, the repository's SKIPPED. Until this, an unpacked archive got a Python traceback and exit 1,
-            # which reads as a defect in the tree. The scan set is what git tracks, so there is nothing to judge.
-            print(f"SKIPPED: {root} is not a git checkout, and the scan set is what git tracks "
+            # which reads as a defect in the tree. The scan set comes from git, so there is nothing to judge.
+            print(f"SKIPPED: {root} is not a git checkout, and the scan set is what git lists "
                   "(clone the repository, or pass --root DIR to scan a directory)")
             return 2
     found = scan(paths)
