@@ -54,6 +54,19 @@
 # lane does not call again. A P12 failure becomes the lane's exit only when nothing earlier (P09, the kit, P11)
 # already failed it.
 #
+# THE OPEN-APPLICATIONS LIST, P14 (paths/P14-open-applications.sh). After P12 and before P13, and only when P09
+# passed, deliver three commits to the site repository's remote on the same throwaway and state directory: an Authentik
+# application with no binding (the list names it), sso.access.everyone (it stops warning), and the binding to
+# tockmox-admins (it leaves the list). TOCKMOX_P09_OPEN_APPS picks whether it runs:
+#   auto (the default, also unset or empty)  run it when the route is external; otherwise skip it with one logged line
+#   1    run it. Refused up front on the built-in route, before anything is created
+#   0    never run it
+#   anything else is refused.
+# The external route is needed for P12's reason: the commits are pushed to the site repository's remote, and on the
+# built-in forge main takes pull requests only. It runs on a kept run too: what it leaves is the blueprint as the page
+# prints it. P14 has its own budget, TOCKMOX_P14_BUDGET (default 5400 seconds), a yield point this lane does not call
+# again. A P14 failure becomes the lane's exit only when nothing earlier already failed it.
+#
 # AN OFF-SITE COPY, with TOCKMOX_P09_OFFSITE=git (default none; built-in route only). Without it the
 # install warns "no off-site copy" and there is nothing to rebuild the throwaway from. With it:
 #   - before step 1, the settings are read from the Secret p09-offsite beside the VMs
@@ -173,6 +186,23 @@ case "$BYO_CA" in
       BYO_RUN=1
     fi ;;
   *) refuse "TOCKMOX_P09_BYO_CA must be auto, 1 or 0, not: ${BYO_CA}" ;;
+esac
+
+# The open-applications list (P14): decided here too, for the same reason.
+OPEN_APPS="${TOCKMOX_P09_OPEN_APPS:-auto}"
+OPEN_RUN=0
+OPEN_WHY=""
+case "$OPEN_APPS" in
+  0) OPEN_WHY="TOCKMOX_P09_OPEN_APPS=0" ;;
+  1) [ "$ROUTE" = external ] || refuse "TOCKMOX_P09_OPEN_APPS=1 needs TOCKMOX_P09_ROUTE=external: P14 pushes its commits to the site repository's remote, and the built-in forge takes pull requests only"
+     OPEN_RUN=1 ;;
+  auto)
+    if [ "$ROUTE" != external ]; then
+      OPEN_WHY="built-in route: the commits cannot be delivered, because the forge's main takes pull requests only"
+    else
+      OPEN_RUN=1
+    fi ;;
+  *) refuse "TOCKMOX_P09_OPEN_APPS must be auto, 1 or 0, not: ${OPEN_APPS}" ;;
 esac
 
 # 1. the throwaway
@@ -400,6 +430,34 @@ elif [ "$BYO_RUN" = 1 ]; then
 else
   echo "lane 7: P12 (a supplied CA) skipped: ${BYO_WHY}"
 fi
+
+# --- P14 block begin (self-contained apart from OPEN_RUN, P09_REC, lane_receipt and lane_judge above; goes after the P12 block) ---
+# 7b. P14, the open-applications list, when OPEN_RUN says so and only when P09 exited 0 AND its receipt says PASS. It
+# does not wait on P11 or P12: it reads one ConfigMap of the identity layer and needs only p09-passed, written above.
+# Anything but a PASS receipt fails the lane (4 BLOCKED, 5 INFRA_ERROR, 1 otherwise or none) and never replaces an
+# earlier failure's status.
+if [ "$OPEN_RUN" = 1 ] && [ "$P09_RC" = 0 ] && [ "${P09_REC%% *}" = PASS ]; then
+  export TOCKMOX_P14_BUDGET="${TOCKMOX_P14_BUDGET:-5400}"
+  echo "lane 7b: P14, the open-applications list, after a P09 that passed (budget ${TOCKMOX_P14_BUDGET}s)"
+  set +e
+  bash "${HERE}/run.sh" P14
+  p14_rc=$?
+  set -e
+  echo "lane: P14 exit ${p14_rc}"
+  if [ "$p14_rc" != 0 ] && [ "$rc" = 0 ]; then
+    rc="$p14_rc"
+  fi
+  # a P14 that exited 0 without declaring PASS fails the lane too: the lane decided to run it
+  p14_code="$(lane_judge P14-open-applications "$(lane_receipt P14-open-applications)")"
+  if [ "$p14_code" != 0 ] && [ "$rc" = 0 ]; then
+    rc="$p14_code"
+  fi
+elif [ "$OPEN_RUN" = 1 ]; then
+  echo "lane 7b: P09 did not pass, so P14 does not run"
+else
+  echo "lane 7b: P14 (the open-applications list) skipped: ${OPEN_WHY}"
+fi
+# --- P14 block end ------------------------------------------------------------------------------------------------
 
 # --- P13 block begin (self-contained apart from P09_REC, lane_receipt and lane_judge above; goes after the P11 block) ---
 # 8. P13, last, on the same throwaway and the same state directory, only when P09 exited 0 AND its receipt says PASS.
