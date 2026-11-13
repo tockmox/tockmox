@@ -269,9 +269,12 @@ the internet at all, and the render check holds that.
 
 **Kubernetes authority:** get and list on nodes, and on Argo CD applications in
 their namespace; with [Platform Management](platform-management.md) on, list on
-Argo CronWorkflows as well. No Secrets and no writes. The Role and RoleBinding live in the
-Argo CD namespace, so the Application that installs the AI layer must be allowed
-to create them there. With actions on, the UI also reaches the `tockmox-actions`
+Argo CronWorkflows as well; and `get` on one ConfigMap in the identity
+namespace, `tockmox-identity-open-applications`, through a Role and RoleBinding
+the identity layer renders ([Open applications](#open-applications)). No
+Secrets and no writes. The Role and RoleBinding for Argo CD applications live in
+the Argo CD namespace, so the Application that installs the AI layer must be
+allowed to create them there. With actions on, the UI also reaches the `tockmox-actions`
 pod on 8081, and nothing about its own authority changes
 ([Taking action](#taking-action)).
 
@@ -513,10 +516,41 @@ The stack is data: `app/stack.yaml` in the UI image. In order:
 3. **A scrape target** goes by its job pattern, then its namespace, else to
    Metrics.
 4. **Nodes** and **inference nodes** go to their parts in Hosts.
+5. **An application open to every signed-in user** goes to **Open
+   applications** in the Identity band.
 
 To place an alert from your own rules, give it the label
 `tockmox_component: <part>`; the part names are the `id` values in
 `app/stack.yaml` (a site app's part is `site-<name>`).
+
+### Open applications
+
+The **Open applications** part, in the Identity band, names each Authentik
+application that any signed-in user can open because no group or user binding
+restricts it. The list comes from the identity layer: its
+`tockmox-open-applications` CronJob reads Authentik's database and writes the
+list to one ConfigMap, `tockmox-identity-open-applications` in the identity
+namespace, which the UI reads with the one `get` its Role allows. Each
+application is a warning, unless the site declared it open on purpose in the
+identity layer's `sso.access.everyone`; a declared one does not warn. The part
+reads **Unknown** with the reason when the ConfigMap is missing, has not been
+written yet, cannot be read, or holds a list older than
+`config.sources.openApplications.staleSeconds` (an hour by default).
+
+The source is on when the identity capability is on. To switch it off, and
+remove the part:
+
+```yaml
+# site/values/ai.yaml
+tockmoxUi:
+  config:
+    sources:
+      openApplications:
+        enabled: false
+```
+
+How to bind an application, and the identity layer's side, are in
+[identity](identity.md#applications-open-to-every-signed-in-user).
 
 ### Extending it for your site
 
@@ -764,7 +798,7 @@ The response, schema `tockmox-status/1`:
 | `generatedAt` | string | when this answer was built, RFC 3339 UTC |
 | `ui.version` | string | the UI's own version |
 | `verdict` | string | `ok`, `warning`, `critical` or `unknown`: critical beats unknown beats warning beats ok, and `ok` needs every source to have answered healthy |
-| `sources` | object | one entry per source the verdict is made of (`apps`, `nodes`, `prometheus`, `alertmanager`, and `inference_nodes` when nodes are configured), each `{name, state, reason, fetchedAt, lastOkAt}`; `fetchedAt` is `null` when the source did not answer this time |
+| `sources` | object | one entry per source the verdict is made of (`apps`, `nodes`, `prometheus`, `alertmanager`, `inference_nodes` when nodes are configured, and `open_applications` when that source is on), each `{name, state, reason, fetchedAt, lastOkAt}`; `fetchedAt` is `null` when the source did not answer this time |
 | `applications` | array or `null` | every Argo CD Application in the Argo CD namespace, each `{name, tockmoxLayer, repo, revision, sync, health, reconciledAt, state, reason}`; `state` applies the staleness rule above, then `Degraded` or `Missing` is `critical`, `OutOfSync`, `Progressing` or `Suspended` is `warning`, `Synced` and `Healthy` is `ok` |
 | `version` | object | the running Tockmox version as the version page derives it: `state` is `single` (with `version`), `mixed` (with `revisions`), `floating` (with `ref`) or `unknown` (with `reason`) |
 | `nodes` | array or `null` | Kubernetes nodes, each `{name, ready, version}` |

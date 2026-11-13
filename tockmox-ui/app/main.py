@@ -60,7 +60,7 @@ from .notes import ReleaseNotes
 from .probe import Prober
 from .sources import (CRIT, OK, UNKNOWN, WARN, AlertmanagerSource, ApplicationsSource,
                       DemandSource, InferenceNodesSource, KubeClient, ModelReportSource, NodesSource, PostureSource, PrometheusSource,
-                      VerdictSource)
+                      OpenApplicationsSource, VerdictSource)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP_VERSION = "0.0.1-proto"
@@ -239,6 +239,10 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
     if s.nodes.inventory.nodes:
         # configured nodes join the verdict (AC-47.7); none configured, nothing to say
         app.state.sources["inference_nodes"] = src_inodes
+    if s.open_apps is not None:
+        # the identity layer's list of applications open to every signed-in user (sources.openApplications)
+        app.state.sources["open_applications"] = OpenApplicationsSource(
+            kube, s.open_apps.namespace, s.open_apps.configmap, s.open_apps.stale_s)
 
     the_stack = stack_mod.load(site=s.stack_site)
     # trend panels from the same Prometheus, one cached range query per panel per minute.

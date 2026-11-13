@@ -798,13 +798,13 @@ states: [0-9]+ exemptions
 page:   docs/usage/what-you-get.md
 claim:  rendered resources
 test:   tools/render-counts.sh --read total
-expect: 618
+expect: 625
 states: [0-9]+ rendered resources
 
 page:   docs/architecture.md
 claim:  resources** render with the CI values
 test:   tools/render-counts.sh --read total
-expect: 618
+expect: 625
 states: [0-9]+ resources\*\* render
 
 page:   docs/usage/what-you-get.md
@@ -838,9 +838,9 @@ expect: 7
 states: [0-9]+ \| blackbox / SNMP
 
 page:   docs/usage/what-you-get.md
-claim:  | identity | 34 | Authentik. Its
+claim:  | identity | 41 | Authentik. Its
 test:   tools/render-counts.sh --read identity
-expect: 34
+expect: 41
 states: [0-9]+ \| Authentik. Its
 
 page:   docs/usage/what-you-get.md

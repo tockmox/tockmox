@@ -90,6 +90,7 @@ class Settings:
     stack_site: dict | None = None         # the site's additions to app/stack.yaml; checked at start
     actions: object = None                 # app/actions.Config: which kinds this console may ask for
     timezone: str = "UTC"                  # the site's zone (global.timezone), for times people read (the lab walk, 2026-11-01)
+    open_apps: "OpenAppsSettings | None" = None   # sources.openApplications: None = not read, no Status part
 
     def app(self, app_id: str) -> App | None:
         for a in self.apps:
@@ -356,7 +357,34 @@ def parse(doc: dict) -> Settings:
         stack_site=_parse_stack(doc.get("stack")),
         timezone=_parse_tz(site.get("timezone", "UTC")),
         actions=_parse_actions(doc.get("actions")),
+        open_apps=_parse_open_apps(src.get("openApplications")),
     )
+
+
+@dataclass(frozen=True)
+class OpenAppsSettings:
+    namespace: str
+    configmap: str
+    stale_s: float
+
+
+_K8S_NAME = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
+
+
+def _parse_open_apps(raw):
+    """sources.openApplications: where the identity layer publishes the applications open to every signed-in user.
+    Off (or absent) reads nothing and shows no part; the AI layer's chart turns it on with the identity capability."""
+    if not raw or not raw.get("enabled", False):
+        return None
+    ns = str(raw.get("namespace", "tockmox-authentik"))
+    cm = str(raw.get("configMap", "tockmox-identity-open-applications"))
+    for k, v in (("namespace", ns), ("configMap", cm)):
+        if not _K8S_NAME.match(v) or len(v) > 253:
+            raise ConfigError(f"sources.openApplications.{k} {v!r} is not a Kubernetes name")
+    stale = float(raw.get("staleSeconds", 3600))
+    if stale <= 0:
+        raise ConfigError("sources.openApplications.staleSeconds must be positive")
+    return OpenAppsSettings(namespace=ns, configmap=cm, stale_s=stale)
 
 
 def _parse_actions(raw):

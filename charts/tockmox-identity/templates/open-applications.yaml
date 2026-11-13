@@ -1,0 +1,184 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+THE APPLICATIONS OPEN TO EVERY SIGNED-IN USER (sso.access.report in values.yaml). In Authentik an application with
+no policy binding is authorized for anyone who can sign in. The shipped blueprints bind every application
+(tools/check-sso-bindings.sh), but one made by hand or by a site's own blueprint can miss it. This CronJob lists
+every application with no group or user binding and publishes the list to ONE ConfigMap, which the console's Status
+page reads (its "Open applications" part, in the Identity band). An application named in sso.access.everyone is
+listed as open on purpose and does not warn.
+
+It runs whether or not the console's identity actions (sso.consoleActions) are on: it needs neither their role nor
+their token. The script is files/open-applications.py; tests/identity-open-applications/ runs it on stand-ins.
+
+AUTHORITY. In Authentik: read only, through `ak shell` with the database credentials the server has (the same
+derivation as templates/console-identity-grants.yaml). In Kubernetes: its own ServiceAccount, whose Role allows
+`patch` on this one ConfigMap and nothing else. The console's ServiceAccount gets `get` on the same one object.
+The chart renders the ConfigMap with no `data`; the Job owns `data`, which Argo CD does not compare because the
+chart never sets it.
+*/ -}}
+{{- $rep := ((.Values.sso.access | default dict).report | default dict) }}
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "authentik")) $rep.enabled }}
+{{- $ak := .Values.authentik }}
+{{- $akGlobal := mergeOverwrite (deepCopy (.Values.global | default dict)) (deepCopy ($ak.global | default dict)) }}
+{{- $fullCtx := dict "Values" (dict "global" $akGlobal "nameOverride" ($ak.nameOverride | default "") "fullnameOverride" ($ak.fullnameOverride | default "")) "Chart" (dict "Name" "authentik") "Release" .Release }}
+{{- $cfgSecret := (($ak.authentik | default dict).existingSecret | default dict).secretName | default (include "authentik.fullname" $fullCtx) }}
+{{- $img := (($ak.server | default dict).image | default dict) }}
+{{- $gimg := (($ak.global | default dict).image | default dict) }}
+{{- $depTag := "" }}
+{{- range .Chart.Dependencies }}{{- if eq .Name "authentik" }}{{- $depTag = .Version }}{{- end }}{{- end }}
+{{- $tag := $img.tag | default $gimg.tag | default $depTag }}
+{{- if not (regexMatch "^[0-9]" $tag) }}
+{{- fail (printf "sso.access.report: cannot derive the authentik image tag (got %q). Pin the authentik dependency in Chart.yaml to an exact version or set authentik.global.image.tag." $tag) }}
+{{- end }}
+{{- $repo := $img.repository | default $gimg.repository | default "ghcr.io/goauthentik/server" }}
+{{- $digest := $img.digest | default $gimg.digest | default "" }}
+{{- $pull := $img.pullPolicy | default $gimg.pullPolicy | default "IfNotPresent" }}
+{{- $srv := $ak.server | default dict }}
+{{- $akg := $ak.global | default dict }}
+{{- /* everything the server gets, less the console's token if a site put it there (as the grants CronJob does) */ -}}
+{{- $envFrom := list }}
+{{- range (concat ($akg.envFrom | default list) ($srv.envFrom | default list)) }}
+{{- if ne (((.secretRef | default dict).name) | default "") "tockmox-console-actions-token" }}{{- $envFrom = append $envFrom . }}{{- end }}
+{{- end }}
+{{- $ns := .Values.namespaces.identity }}
+{{- $cm := "tockmox-identity-open-applications" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $cm }}
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+  annotations:
+    tockmox.com/written-by: "the tockmox-open-applications CronJob (data.report.json)"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tockmox-open-applications
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+# The Job's whole Kubernetes authority: patch this one ConfigMap.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tockmox-open-applications-write
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [{{ $cm }}]
+    verbs: [patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tockmox-open-applications-write
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: tockmox-open-applications-write }
+subjects:
+  - { kind: ServiceAccount, name: tockmox-open-applications, namespace: {{ $ns }} }
+---
+# The console's: read this one ConfigMap. Bound to the Tockmox UI's ServiceAccount in the AI layer's namespace,
+# which this layer cannot read from that layer's values (sso.access.report.consoleNamespace).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tockmox-open-applications-read
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [{{ $cm }}]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tockmox-open-applications-read
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: tockmox-open-applications-read }
+subjects:
+  - { kind: ServiceAccount, name: tockmox-ui, namespace: {{ $rep.consoleNamespace | default "tockmox-ai" }} }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: tockmox-open-applications
+  namespace: {{ $ns }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  schedule: {{ $rep.schedule | default "*/10 * * * *" | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 240
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 240
+      ttlSecondsAfterFinished: 3600
+      template:
+        metadata:
+          labels:
+            {{- include "tockmox.labels" . | nindent 12 }}
+            app.kubernetes.io/name: tockmox-open-applications
+        spec:
+          restartPolicy: Never
+          serviceAccountName: tockmox-open-applications
+          # A token for the one PATCH its Role allows (tools/check-sa-tokens.sh lists why).
+          automountServiceAccountToken: true
+          {{- with ($srv.imagePullSecrets | default $akg.imagePullSecrets) }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: list
+              image: {{ $repo }}:{{ $tag }}{{ if $digest }}@{{ $digest }}{{ end }}
+              imagePullPolicy: {{ $pull }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: { drop: ["ALL"] }
+              resources:
+                requests: { cpu: 100m, memory: 256Mi }
+                limits: { memory: 512Mi }
+              args:
+                - shell
+                - -c
+                - |
+                  {{- .Files.Get "files/open-applications.py" | nindent 18 }}
+              env:
+                {{- with (concat ($akg.env | default list) ($srv.env | default list)) }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+                - name: TOCKMOX_REPORT_NAMESPACE
+                  value: {{ $ns | quote }}
+                - name: TOCKMOX_REPORT_CONFIGMAP
+                  value: {{ $cm | quote }}
+                - name: TOCKMOX_OPEN_TO_EVERYONE
+                  value: {{ (.Values.sso.access.everyone | default list) | toJson | quote }}
+              envFrom:
+                - secretRef:
+                    name: {{ $cfgSecret }}
+                {{- with $envFrom }}
+                {{- toYaml . | nindent 16 }}
+                {{- end }}
+{{- end }}

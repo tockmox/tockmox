@@ -1,0 +1,14 @@
+{
+  "apiVersion": "v1",
+  "data": {
+    "report.json": "{\n \"applications\": 2,\n \"everyoneNotFound\": [],\n \"generatedAt\": \"2026-11-12T09:30:00Z\",\n \"open\": [],\n \"version\": 1\n}"
+  },
+  "kind": "ConfigMap",
+  "metadata": {
+    "labels": {
+      "tockmox.com/managed-by": "tockmox"
+    },
+    "name": "tockmox-identity-open-applications",
+    "namespace": "tockmox-authentik"
+  }
+}

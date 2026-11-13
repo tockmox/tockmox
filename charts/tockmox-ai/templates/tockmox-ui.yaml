@@ -19,7 +19,8 @@ namespace-wide allows skip it, and this policy is the whole of what it may do:
 Everything else is refused, including the inference nodes themselves when probing is off.
 
 Kubernetes authority: get/list on nodes, and on Argo CD applications in their namespace; with Platform Management
-on (config.features.platform.enabled), list on Argo CronWorkflows as well. Nothing else.
+on (config.features.platform.enabled), list on Argo CronWorkflows as well; and get on the identity layer's
+open-applications ConfigMap, a Role that layer renders. Nothing else.
 
 IN-CLUSTER TRUST (lab F7, 2026-10-08). The UI performs the OIDC token exchange itself, from inside the pod, so
 with global.certIssuer (tockmox-ca by default) it must trust the Tockmox CA. Without it every /login answered 503
@@ -122,6 +123,17 @@ site's UI said "No apps are assigned to your account" because it set no tockmoxU
 {{- $_ := set $caps $k (ne (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" $k)) "") -}}
 {{- end -}}
 {{- $_ := set $cfg "capabilities" $caps -}}
+{{- /* THE APPLICATIONS OPEN TO EVERY SIGNED-IN USER: the identity layer publishes them to one ConfigMap (its
+    templates/open-applications.yaml), which binds this ServiceAccount to `get` on that one object. Read, and shown
+    on Status, with the identity capability on, unless the site sets sources.openApplications.enabled itself (set
+    here after the merge, because a merge cannot override with false). */ -}}
+{{- $srcCfg := $cfg.sources | default dict -}}
+{{- $oa := $srcCfg.openApplications | default dict -}}
+{{- if not (hasKey $oa "enabled") -}}
+{{- $_ := set $oa "enabled" (ne (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "identity")) "") -}}
+{{- end -}}
+{{- $_ := set $srcCfg "openApplications" $oa -}}
+{{- $_ := set $cfg "sources" $srcCfg -}}
 {{- $sec := $ui.secrets | default dict -}}
 {{- /*
 PLATFORM MANAGEMENT (DESIGN-2026-10-23-platform-management.md). Off unless the site sets
