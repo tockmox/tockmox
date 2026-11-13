@@ -15,7 +15,8 @@ Written as `grep -E 'a|b'`, the same pattern means the same thing to both. This 
 every tracked shell script and in every bash block of the documentation. It does not read charts/ (their
 scripts run in Linux images) or .github/ (Linux runners).
 
-Exit 0 clean, 1 findings, 2 cannot run (not a git checkout: the scan set is what git tracks).
+Exit 0 clean, 1 findings, 2 cannot run (not a git checkout: the scan set is what git tracks, plus the files it
+does not track yet and does not ignore, so a new script is read before its first commit).
   --selftest   it goes red on each shape above and stays green on the -E forms
   --files F..  scan exactly these files (the selftest uses this)
 """
@@ -68,7 +69,7 @@ def scan_file(path, rel):
 
 def tracked(root):
     try:
-        out = subprocess.run(["git", "--no-optional-locks", "-C", root, "ls-files", "-z"],
+        out = subprocess.run(["git", "--no-optional-locks", "-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
                              capture_output=True, check=True).stdout
     except (OSError, subprocess.CalledProcessError):
         return None
@@ -125,6 +126,22 @@ def selftest():
                 fails = 1
             else:
                 print("  ok    green on %s" % name)
+        # The scan set: a script git does not track yet is read, one git ignores is not.
+        repo = os.path.join(d, "repo")
+        os.makedirs(repo)
+        made = subprocess.run(["git", "init", "-q", repo], capture_output=True).returncode == 0
+        for name in ("untracked.sh", "ignored.sh"):
+            with open(os.path.join(repo, name), "w", encoding="utf-8") as f:
+                f.write(red["gate.sh"])
+        with open(os.path.join(repo, ".gitignore"), "w", encoding="utf-8") as f:
+            f.write("ignored.sh\n")
+        listed = sorted(p for p in (tracked(repo) or []) if p.endswith(".sh")) if made else []
+        hits = [h for rel in listed for h in scan_file(os.path.join(repo, rel), rel)]
+        if listed == ["untracked.sh"] and hits:
+            print("  ok    an untracked script is read and an ignored one is not")
+        else:
+            print("  FAIL  the scan set of a new repository was %s with %d finding(s)" % (listed, len(hits)))
+            fails = 1
     print("check-grep-portability selftest: %s" % ("ok" if not fails else "FAILED"))
     return fails
 
@@ -137,7 +154,7 @@ def main(argv):
         return run(os.getcwd(), argv[2:])
     files = tracked(root)
     if files is None:
-        print("SKIPPED: %s is not a git checkout, and the scan set is what git tracks" % root)
+        print("SKIPPED: %s is not a git checkout, and the scan set is what git lists" % root)
         return 2
     return run(root, files)
 

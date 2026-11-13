@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# EVERY TRACKED SCRIPT THROUGH SHELLCHECK, ADVISORY, AGAINST A COMMITTED BASELINE.
+# EVERY SCRIPT IN THE TREE THROUGH SHELLCHECK, ADVISORY, AGAINST A COMMITTED BASELINE.
 #
 # The repository ships about a hundred bash scripts and none had been linted.
 # The first run found 414 findings at the linter's default severity.
@@ -19,7 +19,12 @@
 #
 #   tools/check-shellcheck.sh             report new findings (exit 1 when there are any)
 #   tools/check-shellcheck.sh --update    rewrite the baseline from the tree (commit it with the fix)
-#   tools/check-shellcheck.sh --selftest  a clean fixture, a planted SC2086, and a baselined one
+#   tools/check-shellcheck.sh --selftest  a clean fixture, a planted SC2086, a baselined one, and a new untracked script
+#
+# The scripts are the *.sh files git tracks plus the ones it does not track yet and does not
+# ignore. A script written a minute ago is the likeliest place for a new finding, and a list of
+# tracked files alone passed it unread until its first commit, which is after the run that
+# was meant to catch it.
 #
 # Exit 0 nothing new, 1 new findings, 2 skipped (shellcheck absent or unable to
 # run). Bash 3.2 compatible.
@@ -30,12 +35,13 @@ BASELINE="${SHELLCHECK_BASELINE:-tools/shellcheck-baseline.txt}"
 
 have_sc() { command -v shellcheck >/dev/null 2>&1 && shellcheck --version >/dev/null 2>&1; }
 
-# The scripts: every tracked *.sh, or the SHELLCHECK_FILES list (the selftest's).
+# The scripts: every *.sh git tracks or would add (untracked and not ignored), or the SHELLCHECK_FILES
+# list (the selftest's).
 list_files() {
   # Word splitting is the point here: SHELLCHECK_FILES is a space-separated list.
   # shellcheck disable=SC2086
   if [ -n "${SHELLCHECK_FILES:-}" ]; then printf '%s\n' $SHELLCHECK_FILES
-  else git ls-files '*.sh'; fi
+  else git --no-optional-locks ls-files --cached --others --exclude-standard '*.sh'; fi
 }
 
 # gcc-format findings: path:line:col: severity: message [SCxxxx]
@@ -99,15 +105,31 @@ if [ "${1:-}" = "--selftest" ]; then
   printf 'echo again $2\n' >> "$tmp/planted.sh"
   if run "$tmp/planted.sh" "$tmp/planted-baseline"; then echo "  SELFTEST FAIL: a second SC2086 in a baselined script was not reported"; fails=1
   else echo "  selftest ok: a second SC2086 in a baselined script is new"; fi
+  # A script git does not track yet is read; one git ignores is not. The run is this script's own copy inside a
+  # throwaway repository, because the list comes from git in the tree the script sits in.
+  repo="$tmp/repo"
+  if ! { mkdir -p "$repo/tools" && cp "$0" "$repo/tools/check-shellcheck.sh" && git init -q "$repo" >/dev/null 2>&1; }; then
+    echo "  SELFTEST FAIL: cannot build the throwaway repository"; fails=1
+  fi
+  # shellcheck disable=SC2016  # the fixtures need a literal $1
+  printf '#!/usr/bin/env bash\nset -eu\necho hello $1\n' | tee "$repo/untracked.sh" > "$repo/ignored.sh"
+  printf 'ignored.sh\n' > "$repo/.gitignore"
+  out="$(SHELLCHECK_FILES='' SHELLCHECK_BASELINE="$tmp/empty-baseline" bash "$repo/tools/check-shellcheck.sh" 2>&1)"; rc=$?
+  if [ "$rc" -eq 1 ] && printf '%s\n' "$out" | grep 'NEW: untracked.sh SC2086' >/dev/null; then
+    echo "  selftest ok: a script git does not track yet is read, and its SC2086 is new"
+  else echo "  SELFTEST FAIL: an untracked script's SC2086 was not reported (exit $rc)"; fails=1; fi
+  if printf '%s\n' "$out" | grep 'ignored.sh' >/dev/null; then
+    echo "  SELFTEST FAIL: a script git ignores was read"; fails=1
+  else echo "  selftest ok: a script git ignores is not read"; fi
   [ "$fails" -eq 0 ] && { echo "selftest PASSED"; exit 0; }
   echo "selftest FAILED"; exit 1
 fi
 
 have_sc || { echo "SKIPPED: shellcheck is not on PATH or cannot run"; exit 2; }
 # Outside a git checkout `git ls-files` lists nothing, and zero scripts with zero findings read "nothing new":
-# a pass that checked nothing. The scan set is what git tracks, so refuse instead.
+# a pass that checked nothing. The scan set comes from git, so refuse instead.
 if [ -z "${SHELLCHECK_FILES:-}" ] && ! git --no-optional-locks rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  echo "SKIPPED: $(pwd) is not a git checkout, and the scripts checked are the ones git tracks"; exit 2
+  echo "SKIPPED: $(pwd) is not a git checkout, and the scripts checked are the ones git lists"; exit 2
 fi
 # A failed mktemp must stop the run: an empty path collects no findings and the
 # report would read "nothing new", a pass that checked nothing.
