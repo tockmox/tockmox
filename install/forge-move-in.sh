@@ -19,9 +19,10 @@
 #   1. Refusals. The site checkout has no uncommitted or untracked change; it is on
 #      main; Argo CD's root Application reads --from (in any spelling of it: https
 #      or ssh, with or without .git); the checkout's main is the revision Argo CD is
-#      synced to; every Application is Synced and Healthy; and if a built-in forge
-#      is already installed, the history it holds is this site's (an earlier run of
-#      this command), never another site's.
+#      synced to; every Application is Synced and Healthy; --from answers to
+#      --from-credentials (its certificate checked against --from-ca, when a private
+#      CA signed it); and if a built-in forge is already installed, the history it
+#      holds is this site's (an earlier run of this command), never another site's.
 #   2. The migration commit, in a scratch copy (your checkout is never changed):
 #      every `repoURL:` that names --from names the built-in forge's in-cluster
 #      address instead, and the built-in values are added (global.siteForge:
@@ -41,6 +42,12 @@
 #      Then the credential copy from step 3 is removed.
 #   7. Only now, unless --no-offsite-copy: bootstrap-forge again, with --from as the
 #      off-site copy (a push mirror of main), which pushes the migration commit there.
+#      --from-ca goes with it as --offsite-git-ca, the option bootstrap-forge already
+#      has for a remote on a private CA: the push mirror and the copy job trust it.
+#
+# Argo CD needs nothing new for a --from on a private CA: it reads --from today, so
+# its own trust for that host (argocd-tls-certs-cm) is in place, and the move never
+# changes it. The credential copy in step 3 is a whole copy of the Secret.
 #
 # If step 6 does not come right within --wait-seconds, nothing is undone for you:
 # it prints what is wrong and the one command that points Argo CD back at --from
@@ -85,6 +92,8 @@ with its whole history, and cut Argo CD over to it. Refuses before it writes any
   --from URL              the site repository Argo CD reads today, as https:// (its ssh spelling in the
                           site's files is matched too)
   --from-credentials FILE two lines, user then token, that can PUSH to --from: it becomes the off-site copy
+  --from-ca FILE          the CA (PEM) that signed --from's certificate, if it is private. This command reads
+                          --from with it, and the forge's push mirror trusts it (bootstrap-forge's --offsite-git-ca)
   --no-offsite-copy       leave --from as it is (give bootstrap-forge another destination after --, or none)
   --namespace NS          the forge's namespace (default tockmox-forge)
   --argocd-namespace NS   default argocd
@@ -97,7 +106,7 @@ with its whole history, and cut Argo CD over to it. Refuses before it writes any
 USAGE
 }
 
-SITE=""; CONTEXT=""; YES_CONTEXT=""; YES_SERVER=""; NO_PROMPT=false; FROM=""; FROM_CREDS=""
+SITE=""; CONTEXT=""; YES_CONTEXT=""; YES_SERVER=""; NO_PROMPT=false; FROM=""; FROM_CREDS=""; FROM_CA=""
 NO_OFFSITE=false; FORGE_NS="tockmox-forge"; ARGO_NS="argocd"; WAIT_S=900; DRY_RUN=false
 PASS=(); ACCEPT=""
 while [[ $# -gt 0 ]]; do
@@ -109,6 +118,7 @@ while [[ $# -gt 0 ]]; do
     --no-prompt) NO_PROMPT=true; shift ;;
     --from) FROM="${2:?--from needs a URL}"; shift 2 ;;
     --from-credentials) FROM_CREDS="${2:?--from-credentials needs a file}"; shift 2 ;;
+    --from-ca) FROM_CA="${2:?--from-ca needs a file}"; shift 2 ;;
     --no-offsite-copy) NO_OFFSITE=true; shift ;;
     --namespace) FORGE_NS="${2:?--namespace needs a name}"; shift 2 ;;
     --argocd-namespace) ARGO_NS="${2:?--argocd-namespace needs a name}"; shift 2 ;;
@@ -135,6 +145,11 @@ else
     || die "--from-credentials FILE is required: two lines, a user and a token that can push to $FROM, which becomes
        the off-site copy. To leave $FROM as it is, pass --no-offsite-copy instead."
 fi
+if [[ -n "$FROM_CA" ]]; then
+  $NO_OFFSITE && die "--from-ca goes with --from-credentials: with --no-offsite-copy this command never connects to $FROM"
+  [[ -r "$FROM_CA" && -s "$FROM_CA" ]] || die "cannot read --from-ca $FROM_CA"
+  grep -q -- '-----BEGIN CERTIFICATE-----' "$FROM_CA" || die "--from-ca $FROM_CA holds no PEM certificate"
+fi
 [[ "$WAIT_S" =~ ^[0-9]+$ ]] || die "--wait-seconds must be a whole number: '$WAIT_S'"
 [[ "$FORGE_NS" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || die "--namespace is not a namespace name: '$FORGE_NS'"
 for a in "${PASS[@]+"${PASS[@]}"}"; do
@@ -143,6 +158,8 @@ for a in "${PASS[@]+"${PASS[@]}"}"; do
       die "$a is this command's to set; do not pass it to bootstrap-forge after --" ;;
     --offsite-git|--offsite-git-credentials)
       $NO_OFFSITE || die "$a after --: --from is the off-site copy unless you pass --no-offsite-copy" ;;
+    --offsite-git-ca)
+      $NO_OFFSITE || die "$a after --: give the CA that signed --from's certificate as --from-ca FILE, before --" ;;
   esac
 done
 for t in kubectl git python3; do command -v "$t" >/dev/null 2>&1 || die "missing: $t"; done
@@ -285,6 +302,35 @@ $(sed -n 's/^BAD /         /p' "$TMPD/before.txt")
        Nothing was touched. Settle them first, or name each one you accept as it is with --accept-unsettled APP."
 fi
 ok "$(sed -n 's/^APPS \([0-9]*\) READ_FROM \([0-9]*\)$/\1 Applications Synced and Healthy, \2 of them read the site repository/p' "$TMPD/before.txt")"
+
+# ---------------------------------------------------------------- the old repository
+# Read now, with the credential and the CA the off-site copy will use, so a certificate this
+# machine cannot verify stops the move here, before anything is written, not after the cutover.
+if ! $NO_OFFSITE; then
+  say "The old repository"
+  FROM_HOST="${FROM#*://}"; FROM_HOST="${FROM_HOST%%/*}"
+  FROM_HDR="Authorization: Basic $(printf '%s:%s' "$(sed -n 1p "$FROM_CREDS")" "$(sed -n 2p "$FROM_CREDS")" | base64 | tr -d '\n')"
+  if ( [[ -z "$FROM_CA" ]] || export GIT_SSL_CAINFO="$FROM_CA"
+       GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraHeader GIT_CONFIG_VALUE_0="$FROM_HDR" GIT_TERMINAL_PROMPT=0 \
+         git ls-remote "$FROM" refs/heads/main ) > "$TMPD/from.refs" 2> "$TMPD/from.err"; then
+    if [[ -n "$FROM_CA" ]]; then ok "$FROM answers to the credential you gave; its certificate verifies against $FROM_CA"
+    else ok "$FROM answers to the credential you gave"; fi
+  else
+    WHY="$(grep -v '^[[:space:]]*$' "$TMPD/from.err" | tail -1)"
+    if grep -qi 'certificate' "$TMPD/from.err"; then
+      [[ -z "$FROM_CA" ]] || die "--from-ca $FROM_CA does not verify the certificate of ${FROM_HOST}:
+         ${WHY}
+       Give the CA that signed it (PEM). Nothing was touched."
+      die "cannot verify the certificate of ${FROM_HOST}:
+         ${WHY}
+       If a private CA signed it, give that CA as --from-ca FILE (PEM): this command reads $FROM with it,
+       and bootstrap-forge's --offsite-git-ca gets it, so the forge's push mirror trusts it too. Nothing was touched."
+    fi
+    die "cannot read $FROM with --from-credentials ${FROM_CREDS}:
+         ${WHY}
+       The token must be able to read and push it. Nothing was touched."
+  fi
+fi
 
 # ---------------------------------------------------------------- an earlier forge
 say "The built-in forge"
@@ -471,7 +517,7 @@ if $DRY_RUN; then
   info "would: keep a copy of Argo CD's credential for $FROM, run bootstrap-forge on the migrated tree"
   info "       (--replace-argocd-credential), apply bootstrap/root.yaml from it, and wait up to ${WAIT_S}s for"
   info "       every Application to read the forge, Synced and Healthy, with nothing pruned"
-  $NO_OFFSITE || info "       then run bootstrap-forge again with --offsite-git $FROM, which pushes main there"
+  $NO_OFFSITE || info "       then run bootstrap-forge again with --offsite-git $FROM${FROM_CA:+ --offsite-git-ca $FROM_CA}, which pushes main there"
   info "the migration commit's diff:"
   git -C "$TREE" diff --stat HEAD~1 | sed 's/^/      /'
   exit 0
@@ -552,10 +598,11 @@ if ! $NO_OFFSITE; then
     if [[ "$prev" == --kit-out ]]; then PASS2+=("$TMPD/second-run-kit"); else PASS2+=("$a"); fi
     prev="$a"
   done
-  if ! bash "$BOOTSTRAP" "${BF[@]}" --offsite-git "$FROM" --offsite-git-credentials "$FROM_CREDS" "${PASS2[@]+"${PASS2[@]}"}"; then
+  OS_CA=(); [[ -z "$FROM_CA" ]] || OS_CA=(--offsite-git-ca "$FROM_CA")
+  if ! bash "$BOOTSTRAP" "${BF[@]}" --offsite-git "$FROM" --offsite-git-credentials "$FROM_CREDS" "${OS_CA[@]+"${OS_CA[@]}"}" "${PASS2[@]+"${PASS2[@]}"}"; then
     err "the move is done and checked, but $FROM is not the off-site copy yet (above). Make it so with:"
     info "  $HERE/tockmox-install.sh bootstrap-forge --site <a clone of the forge's main> --context $CONTEXT \\"
-    info "    --offsite-git $FROM --offsite-git-credentials $FROM_CREDS --kit-out <a NEW file> <your other options>"
+    info "    --offsite-git $FROM --offsite-git-credentials $FROM_CREDS ${FROM_CA:+--offsite-git-ca $FROM_CA }--kit-out <a NEW file> <your other options>"
     exit 2
   fi
 fi

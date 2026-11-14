@@ -40,9 +40,9 @@
 # external repository's https address (git-url), two lines that can push to it (git-credentials), its host name
 # (host), and its CA when its certificate is private (ca.crt). The p09 lane makes it with throwaway-cluster.sh
 # offsite-repo, an empty repository named after the VM that destroy deletes. Any of them missing is BLOCKED with the
-# reason, before any call to a cluster. A ca.crt is BLOCKED too: move-in-forge passes nothing for a private CA to the
-# off-site copy it makes (bootstrap-forge's --offsite-git-ca is refused after `--` without --offsite-git), so on such a
-# forge the page's command cannot finish as printed.
+# reason, before any call to a cluster. A ca.crt is BLOCKED too: the page tells a reader whose forge is on a private
+# CA to add move-in-forge's --from-ca, and this path does not add the page's --from-ca yet, so on such a forge it would
+# not run the command that reader runs.
 #
 # NOTHING IS PUT BACK. The move is the page's end state, so the install is left on the built-in forge, with the
 # external repository as its off-site copy, and the throwaway is destroyed with it. A kept run does not reach this
@@ -81,7 +81,7 @@ FROM_DIR="${TOCKMOX_P16_FROM_DIR:-}"
 [ -n "$FROM_DIR" ] && [ -s "${FROM_DIR}/git-url" ] && [ -s "${FROM_DIR}/git-credentials" ] \
   || blocked "TOCKMOX_P16_FROM_DIR does not name a directory with git-url and git-credentials in it, so there is no external https repository to move the site in from (the p09 lane makes one with throwaway-cluster.sh offsite-repo)"
 [ ! -s "${FROM_DIR}/ca.crt" ] \
-  || blocked "the external forge in TOCKMOX_P16_FROM_DIR is on a private CA (ca.crt), and move-in-forge passes no CA to the off-site copy it makes (bootstrap-forge refuses --offsite-git-ca after -- without --offsite-git), so the page's command cannot finish as printed. Name a forge on a publicly trusted certificate"
+  || blocked "the external forge in TOCKMOX_P16_FROM_DIR is on a private CA (ca.crt), and this path does not add the page's --from-ca yet, so it would not run the command a reader with that forge runs. Name a forge on a publicly trusted certificate"
 SITE_LINE="$(grep -E '^(export|declare -x) SITE_REPO=' "${P09_STATE}/session.env" 2>/dev/null | tail -1 || true)"
 [ -n "$SITE_LINE" ] || blocked "P09's session in ${P09_STATE} holds no SITE_REPO, so there is no site repository to move"
 SITE_REPO="$( eval "${SITE_LINE#declare -x }" 2>/dev/null; printf '%s' "${SITE_REPO:-}" )"

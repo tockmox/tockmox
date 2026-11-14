@@ -744,7 +744,7 @@ run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca TOCKMOX_KEEP_CLUSTER=1
   && ok "lane: P16 is skipped on a kept run, with the reason, and no repository is made" || bad "lane: P16 kept" "rc=$LRC $(grep 'lane 7d' "$TMP/lout")"
 run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=ca
 [ "$LRC" = 0 ] && [ "$(ran16)" = 0 ] && SKIP16 "the external forge the off-site settings name is on a private CA" && ! grep -x offsite-repo "$LH/log" >/dev/null \
-  && ok "lane: P16 is skipped when the forge is on a private CA, with the reason (the command passes no CA to the off-site copy)" || bad "lane: P16 ca" "rc=$LRC $(grep 'lane 7d' "$TMP/lout")"
+  && ok "lane: P16 is skipped when the forge is on a private CA, with the reason (P16 does not add the page's --from-ca yet)" || bad "lane: P16 ca" "rc=$LRC $(grep 'lane 7d' "$TMP/lout")"
 run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=fail
 [ "$LRC" = 0 ] && [ "$(ran16)" = 0 ] && SKIP16 "no external forge to move the site in from" && ok "lane: P16 is skipped when the off-site settings cannot be read" || bad "lane: P16 no settings" "rc=$LRC $(grep 'lane 7d' "$TMP/lout")"
 run_lane TOCKMOX_P09_ROUTE=external
