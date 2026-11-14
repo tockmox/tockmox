@@ -337,7 +337,7 @@ echo "run.sh $*" >> "$LANE_LOG"
 if [ "$1" = P09 ]; then
   env | grep '^TOCKMOX_P09_' > "$LANE_TMP/p09.env"
 fi
-case "$1" in P09) name=P09-install-md-end-to-end ;; P11) name=P11-fresh-install-recovery ;; P13) name=P13-planted-faults ;; *) exit 0 ;; esac
+case "$1" in P09) name=P09-install-md-end-to-end ;; P11) name=P11-fresh-install-recovery ;; P13) name=P13-planted-faults ;; P14) name=P14-open-applications ;; *) exit 0 ;; esac
 n="$(ls "$TOCKMOX_WORKDIR" | grep -c '^receipts-')"
 d="$TOCKMOX_WORKDIR/receipts-$(printf %05d $((n+1)))"; mkdir -p "$d"
 echo "PASS a stub reason" > "$d/$name"

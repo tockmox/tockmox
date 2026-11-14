@@ -1433,6 +1433,27 @@ if [ "$FR_CASES" -eq 0 ] || { [ "$FR_RC" -ne 0 ] && ! printf '%s\n' "$FR_OUT" | 
 fi
 # --- P13 block end ---
 
+# --- P14 block begin (self-contained; goes after the P13 planted-fault rows block) ---
+# P14's open-applications rows: an unbound Authentik application is listed, declaring it open stops the warning, and
+# binding it takes it off the list. The verdicts are shown red one planted input at a time, the page blocks the path
+# extracts are resolved in this tree, the path is run as a script against a stub kubectl and a local remote (green,
+# then one broken product per row, then mutated copies that lose a guard), and its gate is run too. Folded in like
+# the cases above. The lane's P14 block is run by byo-ca-test.sh, beside P12's.
+OA_OUT="$(bash "${HERE}/open-applications-rows-test.sh" 2>&1)"; OA_RC=$?
+OA_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) OA_CASES=$((OA_CASES+1)); ok "open applications: ${line#ok   }" ;;
+    "FAIL "*) OA_CASES=$((OA_CASES+1)); bad "open applications: ${line#FAIL }" "run tests/executed-docs/open-applications-rows-test.sh for detail" ;;
+  esac
+done <<EOF_OA
+$OA_OUT
+EOF_OA
+if [ "$OA_CASES" -eq 0 ] || { [ "$OA_RC" -ne 0 ] && ! printf '%s\n' "$OA_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "open-applications-rows-test.sh ran its cases" "rc=${OA_RC}, ${OA_CASES} case(s): $(printf '%s' "$OA_OUT" | tail -3)"
+fi
+# --- P14 block end ---
+
 # The outcome model's own contract (a PASS is refused without a completed execute phase, each non-PASS outcome has its
 # own code, receipts are written). It was run by nothing until it was folded in here. Its lines are indented two spaces.
 OC_OUT="$(bash "${HERE}/outcome-contract-test.sh" 2>&1)"; OC_RC=$?

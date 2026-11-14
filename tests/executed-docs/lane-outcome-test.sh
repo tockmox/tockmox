@@ -12,6 +12,8 @@
 #   P09 and P11 declared PASS                                         lane 0
 #   P13 (planted faults, last, whenever P09's receipt said PASS, whatever P11 did): the same table
 #   an earlier failure's status is never replaced by a later path's
+#   netpol-adversary.sh (not a path: no receipt, so its exit status is mapped once): 0 PASS lane 0, 1 PRODUCT_FAIL lane 1,
+#   2 (its own "skipped") BLOCKED lane 4, anything else ABORTED lane 1; last, only when P09's receipt said PASS
 #
 # p09-lane.sh runs unmodified beside stubs of what it calls; the stub run.sh writes the receipts a real one would.
 # Then mutated copies of the lane that drop each check must go green where they must not.
@@ -78,7 +80,7 @@ chmod +x "$TMP/lbin"/* "$L/provision"/*.sh "$L/run.sh"
 LN=0
 run_lane() { # VAR=value... -> output in $TMP/lout, status in $RC, the calls in $LH/log
   LN=$((LN+1)); LH="$TMP/lane-$LN"; mkdir -p "$LH/home" "$LH/work"; : > "$LH/log"
-  env -u TOCKMOX_KEEP_CLUSTER -u TOCKMOX_P09_ROUTE "$@" HOME="$LH/home" TOCKMOX_WORKDIR="$LH/work" LANE_LOG="$LH/log" LANE_TMP="$LH" PATH="$TMP/lbin:$PATH" \
+  env -u TOCKMOX_KEEP_CLUSTER -u TOCKMOX_P09_ROUTE -u TOCKMOX_P09_NETPOL "$@" HOME="$LH/home" TOCKMOX_WORKDIR="$LH/work" LANE_LOG="$LH/log" LANE_TMP="$LH" PATH="$TMP/lbin:$PATH" \
     KUBECONFIG="$LH/substrate.kubeconfig" TOCKMOX_DOCS_REF=stub TOCKMOX_SUBSTRATE_CONTEXT=stub-substrate TOCKMOX_TEST_VM=ed-lane \
     bash "$L/p09-lane.sh" > "$TMP/lout" 2>&1
   RC=$?
@@ -172,6 +174,32 @@ run_lane STUB_P09_OUT=BLOCKED
 mutlane 'if [ "$out" = PASS ]; then' 'if [ "$out" = PASS ] || [ "$out" = MISSING ]; then'
 run_lane STUB_P13_OUT=NONE
 [ "$RC" = 0 ] && ok "mutation: a lane that reads a missing receipt as a pass ends 0 over a P13 that left none" || bad "mutation: P13 missing receipt" "rc=$RC"
+
+# --- netpol block begin (the lane's last step; its knob, its switches and its report are byo-ca-test.sh's cases) ---
+# netpol-adversary.sh is not a path and leaves no receipt: the lane maps its exit status to an outcome and judges that
+# like a receipt. Every lane above ran in a tree without the script, where the step is a logged skip.
+cp "$LANE_SH" "$L/p09-lane.sh"
+printf '#!/usr/bin/env bash\necho "netpol-adversary" >> "$LANE_LOG"\nexit "${STUB_NETPOL_RC:-0}"\n' > "$L/netpol-adversary.sh"
+rannp() { grep -c '^netpol-adversary$' "$LH/log"; }
+run_lane
+[ "$RC" = 0 ] && [ "$(rannp)" = 1 ] && ok "netpol-adversary exited 0 after three PASS paths: PASS, the lane exits 0" || bad "netpol exit 0" "rc=$RC ran=$(rannp)"
+run_lane STUB_NETPOL_RC=1
+[ "$RC" = 1 ] && say "lane: netpol-adversary declared PRODUCT_FAIL" && ok "netpol-adversary exited 1: PRODUCT_FAIL, the lane exits 1 and names it" || bad "netpol exit 1" "rc=$RC $(tail -2 "$TMP/lout")"
+run_lane STUB_NETPOL_RC=2
+[ "$RC" = 4 ] && say "lane: netpol-adversary declared BLOCKED" && ok "netpol-adversary exited 2 (its own skip): BLOCKED, never PASS, the lane exits 4 and names it" || bad "netpol exit 2" "rc=$RC $(tail -2 "$TMP/lout")"
+run_lane STUB_NETPOL_RC=9
+[ "$RC" = 1 ] && say "lane: netpol-adversary declared ABORTED" && ok "netpol-adversary exited 9, none of its statuses: ABORTED, the lane exits 1" || bad "netpol exit 9" "rc=$RC $(tail -2 "$TMP/lout")"
+run_lane STUB_P09_OUT=BLOCKED
+[ "$RC" = 4 ] && [ "$(rannp)" = 0 ] && ok "netpol-adversary does not run when P09's receipt says BLOCKED" || bad "netpol after P09 BLOCKED" "rc=$RC ran=$(rannp)"
+run_lane STUB_P13_OUT=BLOCKED STUB_NETPOL_RC=1
+[ "$RC" = 4 ] && [ "$(rannp)" = 1 ] && ok "a P13 BLOCKED (4) survives a later netpol-adversary failure (1): the first failure is kept" || bad "P13 status survives netpol" "rc=$RC"
+mutlane '    2) echo "BLOCKED the script skipped' '    2) echo "PASS the script skipped'
+run_lane STUB_NETPOL_RC=2
+[ "$RC" = 0 ] && ok "mutation: a lane that maps netpol-adversary's exit 2 to PASS ends 0 over a skip" || bad "mutation: netpol exit 2" "rc=$RC"
+mutlane '    1) echo "PRODUCT_FAIL an assertion failed' '    1) echo "PASS an assertion failed'
+run_lane STUB_NETPOL_RC=1
+[ "$RC" = 0 ] && ok "mutation: a lane that maps netpol-adversary's exit 1 to PASS ends 0 over a failure" || bad "mutation: netpol exit 1" "rc=$RC"
+# --- netpol block end ---
 
 printf '\n  %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

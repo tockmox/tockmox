@@ -549,6 +549,7 @@ case "$1" in
   P11) name=P11-fresh-install-recovery; out="${STUB_P11_OUT:-PASS}"; rc="${STUB_P11_RC:-0}" ;;
   P12) name=P12-bring-your-own-ca; out="${STUB_P12_OUT:-PASS}"; rc="${STUB_P12_RC:-0}" ;;
   P13) name=P13-planted-faults; out="${STUB_P13_OUT:-PASS}"; rc="${STUB_P13_RC:-0}" ;;
+  P14) name=P14-open-applications; out="${STUB_P14_OUT:-PASS}"; rc="${STUB_P14_RC:-0}" ;;
   *) exit 0 ;;
 esac
 n="$(ls "$TOCKMOX_WORKDIR" | grep -c '^receipts-')"
@@ -567,7 +568,7 @@ chmod +x "$TMP/lbin"/* "$L/provision"/*.sh "$L/run.sh"
 LN=0
 run_lane() { # VAR=value... -> output in $TMP/lout, status in $LRC, the calls in $LH/log
   LN=$((LN+1)); LH="$TMP/lane-$LN"; mkdir -p "$LH/home" "$LH/work"; : > "$LH/log"
-  env -u TOCKMOX_P09_BYO_CA -u TOCKMOX_KEEP_CLUSTER -u TOCKMOX_P09_ROUTE "$@" HOME="$LH/home" TOCKMOX_WORKDIR="$LH/work" LANE_LOG="$LH/log" LANE_TMP="$LH" PATH="$TMP/lbin:$PATH" \
+  env -u TOCKMOX_P09_BYO_CA -u TOCKMOX_P09_OPEN_APPS -u TOCKMOX_P09_NETPOL -u TOCKMOX_EXPECT_AI_EGRESS_DENY -u TOCKMOX_EXPECT_NODE_SOURCES -u TOCKMOX_UNGUARDED_NS -u TOCKMOX_KEEP_CLUSTER -u TOCKMOX_P09_ROUTE "$@" HOME="$LH/home" TOCKMOX_WORKDIR="$LH/work" LANE_LOG="$LH/log" LANE_TMP="$LH" PATH="$TMP/lbin:$PATH" \
     KUBECONFIG="$LH/substrate.kubeconfig" TOCKMOX_DOCS_REF=stub TOCKMOX_SUBSTRATE_CONTEXT=stub-substrate TOCKMOX_TEST_VM=ed-lane \
     bash "$L/p09-lane.sh" > "$TMP/lout" 2>&1
   LRC=$?
@@ -625,6 +626,142 @@ run_lane TOCKMOX_P09_ROUTE=external STUB_P12_OUT=BLOCKED
 mut "${HERE}/p09-lane.sh" "$L/p09-lane.sh" '[ "$ROUTE" = external ] || refuse "TOCKMOX_P09_BYO_CA=1' ': || refuse "TOCKMOX_P09_BYO_CA=1'
 run_lane TOCKMOX_P09_ROUTE=built-in TOCKMOX_P09_BYO_CA=1
 [ "$LRC" != 2 ] && ok "lane mutation: without the up-front refusal the built-in lane is created ($(grep -cx create "$LH/log") create), so the refusal case above is the guard" || bad "lane mutation: refusal" "rc=$LRC"
+
+# --- P14 block begin (the lane's P14 block, run with the stubs above; P14's own rows are open-applications-rows-test.sh's) ---
+cp "${HERE}/p09-lane.sh" "$L/p09-lane.sh"
+ran14() { grep -c '^run.sh P14' "$LH/log"; }
+SKIP14() { grep -F "lane 7b: P14 (the open-applications list) skipped: $1" "$TMP/lout" >/dev/null; }
+run_lane TOCKMOX_P09_ROUTE=external
+[ "$LRC" = 0 ] && [ "$(ran14)" = 1 ] && ok "lane: P14 runs on the external route by default" || bad "lane: P14 auto+external" "rc=$LRC $(tr '\n' ';' < "$LH/log")"
+awk '/^run.sh P12/{a=NR} /^run.sh P14/{b=NR} /^run.sh P13/{c=NR} END{exit !(a && b && c && a<b && b<c)}' "$LH/log" && ok "lane: P14 runs after P12 and before P13, which stays last" || bad "lane: P14 order" "$(tr '\n' ';' < "$LH/log")"
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_KEEP_CLUSTER=1
+[ "$LRC" = 0 ] && [ "$(ran14)" = 1 ] && ok "lane: P14 runs on a kept external run too (it leaves the blueprint as the page prints it)" || bad "lane: P14 kept" "rc=$LRC"
+run_lane TOCKMOX_P09_ROUTE=built-in
+[ "$LRC" = 0 ] && [ "$(ran14)" = 0 ] && SKIP14 "built-in route: the commits cannot be delivered, because the forge's main takes pull requests only" \
+  && ok "lane: P14 is skipped on the built-in route, with the reason" || bad "lane: P14 auto+built-in" "rc=$LRC $(grep 'lane 7b' "$TMP/lout")"
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_OPEN_APPS=0
+[ "$LRC" = 0 ] && [ "$(ran14)" = 0 ] && SKIP14 "TOCKMOX_P09_OPEN_APPS=0" && ok "lane: TOCKMOX_P09_OPEN_APPS=0 never runs P14" || bad "lane: P14 0" "rc=$LRC $(grep 'lane 7b' "$TMP/lout")"
+run_lane TOCKMOX_P09_ROUTE=built-in TOCKMOX_P09_OPEN_APPS=1
+[ "$LRC" = 2 ] && ! grep -x create "$LH/log" >/dev/null && ! grep '^run.sh' "$LH/log" >/dev/null && ok "lane: TOCKMOX_P09_OPEN_APPS=1 on the built-in route is refused (exit 2) before anything is created" || bad "lane: P14 1+built-in" "rc=$LRC $(tr '\n' ';' < "$LH/log")"
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_OPEN_APPS=yes
+[ "$LRC" = 2 ] && ! grep -x create "$LH/log" >/dev/null && grep -F 'TOCKMOX_P09_OPEN_APPS must be auto, 1 or 0, not: yes' "$TMP/lout" >/dev/null && ok "lane: a garbage TOCKMOX_P09_OPEN_APPS is refused (exit 2) before anything is created" || bad "lane: P14 garbage" "rc=$LRC"
+run_lane TOCKMOX_P09_ROUTE=external STUB_P09_RC=1
+[ "$LRC" = 1 ] && [ "$(ran14)" = 0 ] && ok "lane: a P09 that failed means P14 does not run" || bad "lane: P14 after a failed P09" "rc=$LRC ran $(ran14)"
+run_lane TOCKMOX_P09_ROUTE=external STUB_P09_OUT=BLOCKED
+[ "$LRC" = 4 ] && [ "$(ran14)" = 0 ] && ok "lane: a P09 that declared BLOCKED means P14 does not run" || bad "lane: P14 after a BLOCKED P09" "rc=$LRC ran $(ran14)"
+run_lane TOCKMOX_P09_ROUTE=external STUB_P14_OUT=PRODUCT_FAIL STUB_P14_RC=1
+[ "$LRC" = 1 ] && ok "lane: a P14 failure is the lane's exit when nothing earlier failed" || bad "lane: P14 fails" "rc=$LRC"
+run_lane TOCKMOX_P09_ROUTE=external STUB_P14_OUT=BLOCKED
+[ "$LRC" = 4 ] && grep -F 'lane: P14-open-applications declared BLOCKED: a stub reason' "$TMP/lout" >/dev/null && ok "lane: a P14 that exited 0 but declared BLOCKED fails the lane with 4 and names it" || bad "lane: P14 BLOCKED" "rc=$LRC $(tail -2 "$TMP/lout")"
+run_lane TOCKMOX_P09_ROUTE=external STUB_P14_OUT=NONE
+[ "$LRC" = 1 ] && ok "lane: a P14 that left no receipt fails the lane with 1" || bad "lane: P14 no receipt" "rc=$LRC"
+run_lane TOCKMOX_P09_ROUTE=external STUB_P11_RC=7 STUB_P11_OUT=PRODUCT_FAIL STUB_P14_OUT=BLOCKED
+[ "$LRC" = 7 ] && [ "$(ran14)" = 1 ] && ok "lane: P14 still runs after a failed P11, and the exit stays P11's (7, not 4)" || bad "lane: P11 then P14" "rc=$LRC"
+mut "${HERE}/p09-lane.sh" "$L/p09-lane.sh" 'if [ "$p14_code" != 0 ] && [ "$rc" = 0 ]; then' 'if false; then'
+run_lane TOCKMOX_P09_ROUTE=external STUB_P14_OUT=BLOCKED
+[ "$LRC" = 0 ] && ok "lane mutation: without the P14 outcome check a BLOCKED P14 ends 0, so the P14 outcome case above is the guard" || bad "lane mutation: P14 outcome" "rc=$LRC"
+mut "${HERE}/p09-lane.sh" "$L/p09-lane.sh" 'if [ "$OPEN_RUN" = 1 ] && [ "$P09_RC" = 0 ] && [ "${P09_REC%% *}" = PASS ]; then' 'if [ "$OPEN_RUN" = 1 ] && [ "$P09_RC" = 0 ]; then'
+run_lane TOCKMOX_P09_ROUTE=external STUB_P09_OUT=BLOCKED
+[ "$(ran14)" = 1 ] && ok "lane mutation: a P14 block that trusts P09's exit status runs P14 over a BLOCKED P09, so the case above is the guard" || bad "lane mutation: P14 gate" "ran $(ran14)"
+mut "${HERE}/p09-lane.sh" "$L/p09-lane.sh" '[ "$ROUTE" = external ] || refuse "TOCKMOX_P09_OPEN_APPS=1' ': || refuse "TOCKMOX_P09_OPEN_APPS=1'
+run_lane TOCKMOX_P09_ROUTE=built-in TOCKMOX_P09_OPEN_APPS=1
+[ "$LRC" != 2 ] && ok "lane mutation: without the up-front refusal the built-in lane is created, so the refusal case above is the guard" || bad "lane mutation: P14 refusal" "rc=$LRC"
+# --- P14 block end ---
+
+# --- netpol block begin (the lane's last step: netpol-adversary.sh on the cluster P09 installed; what that script
+# asserts is its own business and needs a cluster, what the lane does with it is shown here) ---
+# Until here the stub tree held no netpol-adversary.sh, so every lane above skipped the step with its one line.
+[ -f "${HERE}/netpol-adversary.sh" ] && grep -F 'NETPOL_SH="${HERE}/netpol-adversary.sh"' "${HERE}/p09-lane.sh" >/dev/null \
+  && ok "netpol: this tree holds netpol-adversary.sh at the place the lane runs it from (a rename would turn the step into a logged skip)" || bad "netpol: the script the lane names exists" "no ${HERE}/netpol-adversary.sh, or the lane names another file"
+cp "${HERE}/p09-lane.sh" "$L/p09-lane.sh"
+ranNP() { grep -c '^netpol-adversary ' "$LH/log"; }
+SKIPNP() { grep -F "lane 9: netpol-adversary.sh skipped: $1" "$TMP/lout" >/dev/null; }
+JUDGED() { grep -F "lane: netpol-adversary declared $1" "$TMP/lout" >/dev/null; }
+run_lane
+[ "$LRC" = 0 ] && [ "$(ranNP)" = 0 ] && SKIPNP "this tree has no tests/executed-docs/netpol-adversary.sh" \
+  && ok "netpol: auto in a tree without the script skips the step with the reason, and the lane's exit is unchanged" || bad "netpol: auto without the script" "rc=$LRC $(grep 'lane 9' "$TMP/lout")"
+run_lane TOCKMOX_P09_NETPOL=1
+[ "$LRC" = 2 ] && ! grep -x create "$LH/log" >/dev/null && grep -F 'TOCKMOX_P09_NETPOL=1, and this tree has no tests/executed-docs/netpol-adversary.sh' "$TMP/lout" >/dev/null \
+  && ok "netpol: 1 in a tree without the script is refused (exit 2) before anything is created" || bad "netpol: 1 without the script" "rc=$LRC $(tr '\n' ';' < "$LH/log")"
+cat > "$L/netpol-adversary.sh" <<'STUB'
+#!/usr/bin/env bash
+# a stub of the adversarial harness: logs what it was run with, writes a line to its report, exits as told
+echo "netpol-adversary kubeconfig=${KUBECONFIG-unset} context=${KUBE_CONTEXT-unset} ai=${TOCKMOX_EXPECT_AI_EGRESS_DENY-unset} node=${TOCKMOX_EXPECT_NODE_SOURCES-unset} unguarded=${TOCKMOX_UNGUARDED_NS-unset} report=${ASSERT_REPORT-unset}" >> "$LANE_LOG"
+[ -z "${ASSERT_REPORT:-}" ] || echo "stub netpol report" >> "$ASSERT_REPORT"
+exit "${STUB_NETPOL_RC:-0}"
+STUB
+run_lane
+[ "$LRC" = 0 ] && [ "$(ranNP)" = 1 ] && ok "netpol: by default the lane runs it once on the built-in route, and a PASS leaves the lane at 0" || bad "netpol: auto, built-in" "rc=$LRC ran $(ranNP) $(grep 'lane 9' "$TMP/lout")"
+# NPLAST ... the script's line comes after every run.sh line, and the last run.sh line is P13's (only the teardown follows)
+NPLAST() { awk '/^run.sh /{a=NR; last=$0} /^netpol-adversary /{b=NR} END{exit !(a && b && a<b && last=="run.sh P13")}' "$LH/log"; }
+NPLAST && ok "netpol: it is the last thing the lane runs, after P13" || bad "netpol: last" "$(tail -3 "$LH/log" | cut -c1-60 | tr '\n' ';')"
+NPL="$(grep '^netpol-adversary ' "$LH/log")"
+case "$NPL" in *" kubeconfig=${LH}/guest.kubeconfig context=stub-guest "*) ok "netpol: it gets the guest kubeconfig and the context the lane gave every path" ;; *) bad "netpol: kubeconfig and context" "$NPL" ;; esac
+case "$NPL" in *" ai=1 node=1 unguarded=unset "*) ok "netpol: it is run with both fixes declared applied and no namespace declared unguarded" ;; *) bad "netpol: switches" "$NPL" ;; esac
+NPR="${NPL##* report=}"
+case "$NPR" in "${LH}/work/report-netpol-adversary-stub-"*.txt) ok "netpol: its report is beside the lane's other reports, named report-netpol-adversary-REF-STAMP.txt" ;; *) bad "netpol: report path" "$NPR" ;; esac
+grep -F "stub netpol report" "$NPR" >/dev/null 2>&1 && grep -F "LANE OUTCOME: PASS" "$NPR" >/dev/null 2>&1 \
+  && ok "netpol: the report holds the script's own lines and the outcome the lane gave it" || bad "netpol: report content" "$(cat "$NPR" 2>&1 | head -3)"
+run_lane TOCKMOX_P09_ROUTE=external
+[ "$LRC" = 0 ] && [ "$(ranNP)" = 1 ] && NPLAST && ok "netpol: it runs on the external route too, last" || bad "netpol: external" "rc=$LRC ran $(ranNP)"
+run_lane TOCKMOX_EXPECT_NODE_SOURCES=0 TOCKMOX_UNGUARDED_NS=tockmox-devops
+case "$(grep '^netpol-adversary ' "$LH/log")" in *" ai=1 node=0 unguarded=tockmox-devops "*) ok "netpol: a switch the caller set is passed through as set" ;; *) bad "netpol: caller's switches" "$(grep '^netpol-adversary ' "$LH/log")" ;; esac
+run_lane STUB_NETPOL_RC=1
+[ "$LRC" = 1 ] && JUDGED "PRODUCT_FAIL: an assertion failed" && ok "netpol: exit 1 is PRODUCT_FAIL, and the lane exits 1 and names it" || bad "netpol: exit 1" "rc=$LRC $(tail -2 "$TMP/lout")"
+run_lane STUB_NETPOL_RC=2
+[ "$LRC" = 4 ] && JUDGED "BLOCKED: the script skipped and judged nothing" && ok "netpol: exit 2 (the script's skip) is BLOCKED, never PASS: the lane exits 4 and names it" || bad "netpol: exit 2" "rc=$LRC $(tail -2 "$TMP/lout")"
+grep -F "LANE OUTCOME: BLOCKED" "${LH}/work/"report-netpol-adversary-*.txt >/dev/null 2>&1 && ok "netpol: ... and the report says BLOCKED too" || bad "netpol: BLOCKED in the report" ""
+run_lane STUB_NETPOL_RC=7
+[ "$LRC" = 1 ] && JUDGED "ABORTED: the script exited 7" && ok "netpol: any other exit status is ABORTED, and the lane exits 1" || bad "netpol: exit 7" "rc=$LRC $(tail -2 "$TMP/lout")"
+run_lane STUB_P09_RC=1 STUB_P09_OUT=PRODUCT_FAIL
+[ "$LRC" = 1 ] && [ "$(ranNP)" = 0 ] && grep -F "lane 9: P09 did not pass, so netpol-adversary.sh does not run" "$TMP/lout" >/dev/null && ok "netpol: a P09 that failed means it does not run" || bad "netpol: after a failed P09" "rc=$LRC ran $(ranNP)"
+run_lane STUB_P09_OUT=BLOCKED
+[ "$LRC" = 4 ] && [ "$(ranNP)" = 0 ] && ok "netpol: a P09 that exited 0 but declared BLOCKED means it does not run" || bad "netpol: after a BLOCKED P09" "rc=$LRC ran $(ranNP)"
+run_lane TOCKMOX_P09_NETPOL=0
+[ "$LRC" = 0 ] && [ "$(ranNP)" = 0 ] && SKIPNP "TOCKMOX_P09_NETPOL=0" && ok "netpol: TOCKMOX_P09_NETPOL=0 never runs it" || bad "netpol: 0" "rc=$LRC ran $(ranNP) $(grep 'lane 9' "$TMP/lout")"
+run_lane TOCKMOX_P09_NETPOL=1 STUB_NETPOL_RC=2
+[ "$LRC" = 4 ] && [ "$(ranNP)" = 1 ] && ok "netpol: 1 runs it, and its outcome counts the same" || bad "netpol: 1" "rc=$LRC ran $(ranNP)"
+run_lane TOCKMOX_P09_NETPOL=yes
+[ "$LRC" = 2 ] && ! grep -x create "$LH/log" >/dev/null && grep -F 'TOCKMOX_P09_NETPOL must be auto, 1 or 0, not: yes' "$TMP/lout" >/dev/null && ok "netpol: a garbage TOCKMOX_P09_NETPOL is refused (exit 2) before anything is created" || bad "netpol: garbage" "rc=$LRC"
+run_lane STUB_P11_RC=7 STUB_P11_OUT=PRODUCT_FAIL STUB_NETPOL_RC=2
+[ "$LRC" = 7 ] && [ "$(ranNP)" = 1 ] && ok "netpol: it still runs after a failed P11, and the exit stays P11's (7, not 4)" || bad "netpol: P11 then netpol" "rc=$LRC ran $(ranNP)"
+run_lane STUB_P13_OUT=BLOCKED STUB_NETPOL_RC=1
+[ "$LRC" = 4 ] && ok "netpol: a P13 that declared BLOCKED keeps its status (4) over a later netpol failure (1)" || bad "netpol: P13 then netpol" "rc=$LRC"
+# mutated lanes lose their guards; each must behave wrongly where a case above says what is right
+mutnp() { mut "${HERE}/p09-lane.sh" "$L/p09-lane.sh" "$1" "$2"; }
+NPIF='if [ "$NETPOL_RUN" = 1 ] && [ "$P09_RC" = 0 ] && [ "${P09_REC%% *}" = PASS ]; then'
+mutnp "$NPIF" 'if false; then'
+run_lane
+[ "$(ranNP)" = 0 ] && [ "$LRC" = 0 ] && ok "netpol mutation: a lane whose block never runs ends 0 without running it, so the 'runs it once' case above is the guard" || bad "netpol mutation: never runs" "rc=$LRC ran $(ranNP)"
+mutnp "$NPIF" 'if [ "$NETPOL_RUN" = 1 ]; then'
+run_lane STUB_P09_RC=1 STUB_P09_OUT=PRODUCT_FAIL
+[ "$(ranNP)" = 1 ] && ok "netpol mutation: a block that does not read P09's result runs it after a failed P09, so the case above is the guard" || bad "netpol mutation: P09 gate" "ran $(ranNP)"
+mutnp "$NPIF" 'if [ "$NETPOL_RUN" = 1 ] && [ "$P09_RC" = 0 ]; then'
+run_lane STUB_P09_OUT=BLOCKED
+[ "$(ranNP)" = 1 ] && ok "netpol mutation: a block that trusts P09's exit status runs it over a BLOCKED P09, so the receipt case above is the guard" || bad "netpol mutation: P09 receipt" "ran $(ranNP)"
+mutnp '    2) echo "BLOCKED the script skipped' '    2) echo "PASS the script skipped'
+run_lane STUB_NETPOL_RC=2
+[ "$LRC" = 0 ] && ok "netpol mutation: a lane that reads exit 2 as PASS ends 0 over a skip, so the exit 2 case above is the guard" || bad "netpol mutation: exit 2 as PASS" "rc=$LRC"
+mutnp '    1) echo "PRODUCT_FAIL an assertion failed' '    1) echo "PASS an assertion failed'
+run_lane STUB_NETPOL_RC=1
+[ "$LRC" = 0 ] && ok "netpol mutation: a lane that reads exit 1 as PASS ends 0 over a failure, so the exit 1 case above is the guard" || bad "netpol mutation: exit 1 as PASS" "rc=$LRC"
+mutnp '  0) NETPOL_WHY="TOCKMOX_P09_NETPOL=0" ;;' '  0) NETPOL_RUN=1 ;;'
+run_lane TOCKMOX_P09_NETPOL=0
+[ "$(ranNP)" = 1 ] && ok "netpol mutation: a lane whose 0 still runs it does, so the 0 case above is the guard" || bad "netpol mutation: 0 still runs" "ran $(ranNP)"
+mutnp 'if [ "$np_code" != 0 ] && [ "$rc" = 0 ]; then' 'if false; then'
+run_lane STUB_NETPOL_RC=1
+[ "$LRC" = 0 ] && ok "netpol mutation: without the outcome check a failed run ends 0, so the exit 1 case above is the guard" || bad "netpol mutation: outcome check" "rc=$LRC"
+mutnp 'if [ "$np_code" != 0 ] && [ "$rc" = 0 ]; then' 'if [ "$np_code" != 0 ]; then'
+run_lane STUB_P11_RC=7 STUB_P11_OUT=PRODUCT_FAIL STUB_NETPOL_RC=2
+[ "$LRC" = 4 ] && ok "netpol mutation: letting its outcome replace an earlier failure changes the exit (4, not 7), so the ordering case above is the guard" || bad "netpol mutation: overwrite" "rc=$LRC"
+mutnp '    *) echo "ABORTED the script exited' '    *) echo "PASS the script exited'
+run_lane STUB_NETPOL_RC=7
+[ "$LRC" = 0 ] && ok "netpol mutation: a lane that reads an unknown exit status as PASS ends 0, so the exit 7 case above is the guard" || bad "netpol mutation: unknown status" "rc=$LRC"
+mutnp '  1) [ -f "$NETPOL_SH" ] || refuse "TOCKMOX_P09_NETPOL=1' '  1) : || refuse "TOCKMOX_P09_NETPOL=1'
+rm -f "$L/netpol-adversary.sh"
+run_lane TOCKMOX_P09_NETPOL=1
+[ "$LRC" != 2 ] && grep -x create "$LH/log" >/dev/null && ok "netpol mutation: without the up-front refusal a tree with no script is created anyway, so the refusal case above is the guard" || bad "netpol mutation: refusal" "rc=$LRC"
+# --- netpol block end ---
 
 printf '\n  %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
