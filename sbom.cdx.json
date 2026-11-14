@@ -201,15 +201,15 @@
     },
     {
       "name": "quay.io/metallb/controller",
-      "purl": "pkg:oci/controller?repository_url=quay.io/metallb/controller&tag=v0.16.1",
+      "purl": "pkg:oci/controller?repository_url=quay.io/metallb/controller&tag=v0.16.2",
       "type": "container",
-      "version": "v0.16.1"
+      "version": "v0.16.2"
     },
     {
       "name": "quay.io/metallb/speaker",
-      "purl": "pkg:oci/speaker?repository_url=quay.io/metallb/speaker&tag=v0.16.1",
+      "purl": "pkg:oci/speaker?repository_url=quay.io/metallb/speaker&tag=v0.16.2",
       "type": "container",
-      "version": "v0.16.1"
+      "version": "v0.16.2"
     },
     {
       "name": "quay.io/prometheus-operator/prometheus-config-reloader",
@@ -289,9 +289,9 @@
     {
       "description": "Helm chart dependency of tockmox-devops",
       "name": "argo-workflows",
-      "purl": "pkg:generic/helm/argo-workflows@2.0.15",
+      "purl": "pkg:generic/helm/argo-workflows@2.0.18",
       "type": "application",
-      "version": "2.0.15"
+      "version": "2.0.18"
     },
     {
       "description": "Helm chart dependency of tockmox-exporters",
@@ -352,9 +352,9 @@
     {
       "description": "Helm chart dependency of tockmox-platform",
       "name": "metallb",
-      "purl": "pkg:generic/helm/metallb@0.16.1",
+      "purl": "pkg:generic/helm/metallb@0.16.2",
       "type": "application",
-      "version": "0.16.1"
+      "version": "0.16.2"
     },
     {
       "description": "Helm chart dependency of tockmox-platform",
