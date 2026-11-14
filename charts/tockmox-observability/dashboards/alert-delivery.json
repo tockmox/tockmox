@@ -142,7 +142,39 @@
    "fieldConfig": {
     "defaults": {
      "decimals": 1,
-     "unit": "m"
+     "unit": "m",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     },
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "-1": {
+         "text": "no bridge metrics",
+         "color": "#808080",
+         "index": 0
+        }
+       }
+      },
+      {
+       "type": "special",
+       "options": {
+        "match": "null",
+        "result": {
+         "text": "no bridge metrics",
+         "color": "#808080",
+         "index": 1
+        }
+       }
+      }
+     ]
     },
     "overrides": []
    },
@@ -170,8 +202,9 @@
      "refId": "A"
     }
    ],
-   "title": "Minutes since last delivered notification",
-   "type": "stat"
+   "title": "Since last delivered notification",
+   "type": "stat",
+   "description": "Time since the bridge last delivered a notification to the sink. Silence is normal when nothing routed to the bridge has fired: this is not a liveness signal. Liveness is the sink, the token and Failed deliveries, and the Overview's verdict, which needs the Watchdog."
   },
   {
    "datasource": {
@@ -179,7 +212,17 @@
     "uid": "${datasource}"
    },
    "fieldConfig": {
-    "defaults": {},
+    "defaults": {
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
+    },
     "overrides": []
    },
    "gridPos": {
@@ -360,7 +403,7 @@
    "options": {
     "legend": {
      "calcs": [
-      "lastNotNull",
+      "last",
       "max"
      ],
      "displayMode": "table",
@@ -386,7 +429,9 @@
  "schemaVersion": 39,
  "tags": [
   "platform",
-  "tockmox"
+  "tockmox",
+  "tier-l2",
+  "incident"
  ],
  "templating": {
   "list": [

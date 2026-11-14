@@ -40,7 +40,16 @@
       },
       "fieldConfig": {
         "defaults": {
-          "unit": "none"
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
         },
         "overrides": []
       },
@@ -235,7 +244,7 @@
           "refId": "A"
         }
       ],
-      "title": "Soonest expiry (days)",
+      "title": "Soonest expiry",
       "type": "stat"
     },
     {
@@ -459,7 +468,9 @@
   "schemaVersion": 39,
   "tags": [
     "platform",
-    "tockmox"
+    "tockmox",
+    "tier-l2",
+    "security"
   ],
   "templating": {
     "list": [

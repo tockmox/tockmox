@@ -51,8 +51,33 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# STRICT MODE AND THE EVIDENCE FILE.
+#
+#   --strict   a skip is not green: a run with no failure that skipped a gate exits 2 (BLOCKED)
+#              instead of 0. A failure still exits 1. This is the release mode (RELEASING.md: "A SKIP
+#              is not green; exit code 2 is BLOCKED"). CHECK_ALL_STRICT=1 does the same.
+#
+# Each run writes one row per gate to build/check-all-results.tsv (CHECK_ALL_RESULTS to move it):
+# ordinal, key, status (pass, fail, skip), exit code, seconds, name. Beside it, the same name with
+# .meta.json for .tsv, it writes what the rows were run on: the commit (head_sha), whether the
+# checkout was clean when the run started, the mode, the counts and the exit status. The release
+# morning (tools/train-morning.sh on main) reads both as the check-all evidence for a candidate on
+# this line, which has no check-all workflow. The same file format main's check-all.sh writes.
+STRICT="${CHECK_ALL_STRICT:-0}"
+case "$STRICT" in 1|true|yes) STRICT=1 ;; *) STRICT=0 ;; esac
+RESULTS="${CHECK_ALL_RESULTS:-build/check-all-results.tsv}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --strict) STRICT=1 ;;
+    -h|--help) sed -n '/^# STRICT MODE AND THE EVIDENCE FILE/,/^STRICT=/p' "$0" | sed '$d'; exit 0 ;;
+    *) echo "check-all.sh: unknown argument: $1 (try --help)" >&2; exit 1 ;;
+  esac
+  shift
+done
+
 pass=0; fail=0; skipped=0
 failed_names=""
+gate_ord=0
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -79,10 +104,31 @@ case "$JOBS" in ''|*[!0-9]*|0) JOBS=1 ;; esac
 SLOTS="$(mktemp -d)"
 trap 'rm -rf "$SLOTS"' EXIT
 nslot=0
-tree_fingerprint() {
-  # Tracked and untracked files outside build/ and the vendored subcharts, contents included.
+tree_status() {
+  # Tracked and untracked files outside build/ and the vendored subcharts that differ from HEAD.
   git status --porcelain --untracked-files=all 2>/dev/null | grep -v -e ' build/' -e '/charts/[^/]*\.tgz$' -e '__pycache__' | sort
+}
+tree_fingerprint() {
+  # The same files, contents included.
+  tree_status
   git diff 2>/dev/null | cksum
+}
+
+# A gate's key in the results file: the script and its arguments, or inline:<name> for a gate
+# written inline here. The same rule as main's check-all.sh.
+gate_key() {
+  local name="$1"; shift
+  case "${1:-}" in bash|python3|sh) shift ;; esac
+  if [ "${1:-}" = "-c" ]; then
+    printf 'inline:%s' "$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-60 | sed 's/-$//')"
+  else
+    printf '%s' "$*"
+  fi
+}
+status_of() { case "$1" in 0) echo pass ;; 2) echo skip ;; *) echo fail ;; esac; }
+# One results row: ordinal, key, status, exit code, seconds, name.
+result_row() {
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" "$6" >> "$SLOTS/results"
 }
 
 # EXIT 2 MEANS SKIPPED, and that convention is the repository's, not this
@@ -102,16 +148,21 @@ tally() {
 
 run_gate() {
   local name="$1"; shift
-  local rc=0
+  local rc=0 key t0
+  gate_ord=$((gate_ord + 1))
+  key="$(gate_key "$name" "$@")"
   if [ "$JOBS" -le 1 ]; then
     printf '\n=== %s ===\n' "$name"
+    t0=$(date +%s)
     "$@" || rc=$?
     tally "$name" "$rc"
+    result_row "$gate_ord" "$key" "$(status_of "$rc")" "$rc" "$(( $(date +%s) - t0 ))" "$name"
     return 0
   fi
   nslot=$((nslot + 1))
   local slot; slot="$SLOTS/$(printf '%04d' "$nslot")"
   printf '%s\n' "$name" > "$slot.name"
+  printf '%s\t%s\n' "$gate_ord" "$key" > "$slot.key"
   while [ "$(jobs -rp | wc -l | tr -d ' ')" -ge "$JOBS" ]; do sleep 0.2; done
   (
     t0=$(date +%s)
@@ -134,14 +185,18 @@ serial_gate() {
 }
 
 skip_gate() {
+  local key; key="skip:$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | cut -c1-60 | sed 's/-$//')"
+  gate_ord=$((gate_ord + 1))
   if [ "$JOBS" -le 1 ]; then
     printf '\n=== %s ===\n  SKIPPED: %s\n' "$1" "$2"
     skipped=$((skipped + 1))
+    result_row "$gate_ord" "$key" skip 2 0 "$1"
     return 0
   fi
   nslot=$((nslot + 1))
   local slot; slot="$SLOTS/$(printf '%04d' "$nslot")"
   printf '%s\n' "$1" > "$slot.name"
+  printf '%s\t%s\n' "$gate_ord" "$key" > "$slot.key"
   printf '  SKIPPED: %s\n' "$2" > "$slot.log"
   echo 0 > "$slot.secs"
   echo 2 > "$slot.rc"
@@ -149,6 +204,7 @@ skip_gate() {
 
 echo "Tockmox static gates, run locally."
 echo "Repository: $(pwd)"
+[ "$STRICT" = 0 ] || echo "Mode: strict. A skipped gate is not green: the run exits 2 (BLOCKED)."
 
 # ---------------------------------------------------------------- dependencies
 missing=""
@@ -190,6 +246,10 @@ if [ -x tools/helm-deps.sh ]; then
 fi
 
 # ---------------------------------------------------------------------- gates
+# What the rows were run on, for the .meta.json beside the results: a results file is evidence for
+# a commit only when it names one, and only when the checkout matched it.
+START_HEAD="$(git --no-optional-locks rev-parse HEAD 2>/dev/null || true)"
+START_DIRTY="$(tree_status | wc -l | tr -d ' ')"
 TREE_BEFORE="$(tree_fingerprint)"
 [ "$JOBS" -le 1 ] || printf '\nRunning the gates %s at a time (CHECK_ALL_JOBS=1 for one at a time).\n' "$JOBS"
 run_gate "every tool is executable" bash -c '
@@ -341,32 +401,18 @@ serial_gate "the docs site-contents gate goes red on every non-static file" bash
 serial_gate "the docs publish script refuses what it must and always removes its pod" bash tools/publish-docs.sh --selftest
 run_gate "documentation style" bash tools/check-docs-style.sh
 run_gate "documented commands paste as-is" bash tools/check-pasteable-blocks.sh
-# NEVER run_gate THIS EITHER. Reporting mode is deliberate and stays: `--enforce`
-# refuses any unclassified block on the three critical-path pages, and today that
-# is all 120 of them, so turning it on here would go red on day one ... which is
-# exactly how a gate earns an exemption list and then stops being believed. The
-# migration flips this to --enforce page by page. Until then the number belongs
-# in every run's output and cannot be lost: staged enforcement is defensible,
-# staged awareness is not.
-#
-# What changed 2026-09-15 is only the ACCOUNTING. Until then this was a
-# `run_gate`, so a line that reports and never tests was counted in the "passed"
-# total alongside gates that can go red ... the identical defect this file already
-# fixed for kubeconform fourteen lines below, for the reason written there. Found
-# by mutation-testing all 24 gates: 22 went red for the right reason, 2 correctly
-# refused to run, and this one could not fail under any tree state because it is
-# not trying to.
-#
-# So: the scan still runs, its number still prints, and it counts as SKIPPED
-# rather than passed. Flipping it back to a gate is the --enforce migration's
-# job, not an accounting change.
-# It goes through run_gate only to keep its place in a parallel run's ordered report, and it
-# EXITS 2 whatever the inventory says: counted as skipped, exactly as before, never as a pass.
-run_gate "every documented block is accounted for" bash -c '
-  bash tools/check-block-inventory.sh || true
-  printf "  NOT A GATE: reported, never enforced. No tree state changes this line.\n"
-  printf "  Enforcement is per-page and carded; \`--enforce\` is the real check.\n"
-  exit 2'
+# NOT A GATE, AND NOT COUNTED AS ONE. Reporting mode is deliberate and stays: `--enforce`
+# refuses any unclassified block on the three critical-path pages, so turning it on here
+# would go red on day one. Until 2026-09-15 this was counted as passed though nothing could
+# turn it red; then it exited 2 whatever the inventory said and was counted as skipped, which
+# under --strict meant no strict run could ever pass. Now it is a report: the scan runs, its
+# output prints under "Reports, not gates" after the gates, and it is in no count and no row.
+{
+  printf '=== every documented block is accounted for ===\n'
+  bash tools/check-block-inventory.sh 2>&1 || true
+  printf '  NOT A GATE: reported, never enforced, never counted. Enforcement is per-page;\n'
+  printf '  `check-block-inventory.sh --enforce` is the real check.\n'
+} > "$SLOTS/report-01-block-inventory.log"
 
 run_gate "docs links resolve" bash tools/check-docs-links.sh
 run_gate "frontmatter contract holds" bash tools/check-frontmatter.sh
@@ -416,9 +462,12 @@ have gitleaks \
 # PATH: the line still read pass.
 #
 # A green that cannot go red is worse than an honest absence, because it is
-# counted. So this is a SKIP in both branches until the render pipeline is
-# actually wired here (carded), and it names where the real check runs.
-skip_gate "kubeconform" "runs in ci.yaml against the full render; NOT executed by this script"
+# counted. It was a SKIP in both branches, which under --strict meant no strict run
+# on this line could pass. This line never runs kubeconform, so it is a report, as the
+# block inventory is: in no count, naming where the real check runs. The release
+# morning requires ci green on the candidate, and ci.yaml is where kubeconform runs.
+printf '=== kubeconform ===\n  NOT RUN HERE: ci.yaml runs it against the full render; the release morning requires ci green on the candidate.\n' \
+  > "$SLOTS/report-02-kubeconform.log"
 
 # --------------------------------------------------------------------- result
 if [ "$JOBS" -gt 1 ]; then
@@ -431,6 +480,8 @@ if [ "$JOBS" -gt 1 ]; then
     cat "$b.log" 2>/dev/null
     [ -e "$b.rc" ] || echo "  (no exit status recorded: the gate's runner died)"
     tally "$n" "$rc"
+    IFS=$'\t' read -r k_ord k_key < "$b.key"
+    result_row "$k_ord" "$k_key" "$(status_of "$rc")" "$rc" "$(cat "$b.secs" 2>/dev/null || echo -)" "$n"
   done
   printf '\nSlowest gates:\n'
   for f in "$SLOTS"/*.secs; do printf '%6ss  %s\n' "$(cat "$f")" "$(cat "${f%.secs}.name")"; done | sort -rn | head -5
@@ -443,11 +494,49 @@ if [ "$TREE_BEFORE" != "$TREE_AFTER" ]; then
   fail=$((fail + 1)); failed_names="${failed_names}
   - the checkout is unchanged by the gates"
 fi
+# Reports: output kept for reading, never a gate, never counted (see the block inventory above).
+for f in "$SLOTS"/report-*.log; do
+  [ -e "$f" ] || continue
+  [ -n "${reports_banner:-}" ] || { printf '\nReports, not gates (never counted as passed, failed or skipped):\n'; reports_banner=1; }
+  printf '\n'; cat "$f"
+done
+mkdir -p "$(dirname "$RESULTS")"
+{ printf 'ord\tkey\tstatus\trc\tseconds\tname\n'; sort -n "$SLOTS/results" 2>/dev/null; } > "$RESULTS"
 printf '\n----------------------------------------------------------------\n'
 printf '%s passed, %s failed, %s skipped\n' "$pass" "$fail" "$skipped"
+printf 'Results: %s\n' "$RESULTS"
+
+# The evidence beside the rows: which commit, from a clean checkout or not, in which mode.
+if [ "$fail" -ne 0 ]; then final_rc=1
+elif [ "$STRICT" = 1 ] && [ "$skipped" -gt 0 ]; then final_rc=2
+else final_rc=0; fi
+RESULTS_META="${RESULTS%.tsv}.meta.json"
+python3 -c '
+import json, sys
+k = ["head_sha", "dirty_paths", "strict", "passed", "failed", "skipped", "exit"]
+v = dict(zip(k, sys.argv[2:]))
+for n in ("dirty_paths", "passed", "failed", "skipped", "exit"):
+    v[n] = int(v[n])
+v["clean"] = v["dirty_paths"] == 0
+v["strict"] = v["strict"] == "1"
+v.update(changed_from="", shard="", unselected=0, othershard=0)
+json.dump(v, open(sys.argv[1], "w"), indent=1, sort_keys=True)
+' "$RESULTS_META" "$START_HEAD" "${START_DIRTY:-0}" "$STRICT" "$pass" "$fail" "$skipped" "$final_rc" \
+  || { echo "check-all.sh: could not write $RESULTS_META"; final_rc=1; }
+printf 'Evidence: %s (commit %s, %s)\n' "$RESULTS_META" "${START_HEAD:-<none>}" \
+  "$([ "${START_DIRTY:-0}" = 0 ] && echo 'clean checkout' || echo "${START_DIRTY} path(s) differed from it when the run started")"
+
 if [ "$fail" -ne 0 ]; then
   printf 'FAILED:%s\n' "$failed_names"
   exit 1
+fi
+if [ "$final_rc" = 2 ]; then
+  printf '\nBLOCKED (strict): %s skipped. In strict mode a gate that did not run is not green;\n' "$skipped"
+  printf 'give each skipped gate what it said it lacked.\n'
+  exit 2
+fi
+if [ "$final_rc" != 0 ]; then
+  exit "$final_rc"
 fi
 echo "All runnable static gates passed."
 echo

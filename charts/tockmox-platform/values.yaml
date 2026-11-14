@@ -436,6 +436,18 @@ metallb:
     namespace: tockmox-monitoring
     serviceAccount: tockmox-observability-kube-prometheus
 traefik:
+  # THE PROXY IMAGE, AHEAD OF THE CHART'S DEFAULT. Chart 41.7.1 defaults to
+  # Traefik v3.7.14. Two High advisories are fixed after it: GHSA-hrpp-p4fc-wwf8
+  # in v3.7.16 (ForwardAuth with NTLM or Negotiate could reuse another user's
+  # authenticated backend connection) and GHSA-xv5x-242w-7hf7 in v3.7.17 (an
+  # unauthenticated client holding a backend connection per client connection
+  # with an NTLM or Negotiate Authorization header, until memory runs out). The
+  # chart release that defaults to v3.7.17 is 42.x, a major with breaking changes,
+  # which a patch line does not take, so the 0.8 line pins the image here.
+  # Registry and repository stay the chart's defaults. Remove this block when the
+  # chart's own default reaches this tag.
+  image:
+    tag: v3.7.17
   resources:
     # measured on the prod install 2026-10-05 (accepted for the lab):
     # peak 180.9 MiB in the tockmox-* namespaces (~3-4 days at v0.7.2), 127.5 MiB in the pre-migration namespace (30 days); average 164.6 MiB.

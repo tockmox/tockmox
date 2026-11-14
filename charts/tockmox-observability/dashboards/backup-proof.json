@@ -62,7 +62,30 @@
        }
       ]
      },
-     "unit": "none"
+     "unit": "none",
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "-1": {
+         "text": "no CNPG metrics",
+         "color": "#808080",
+         "index": 0
+        }
+       }
+      },
+      {
+       "type": "special",
+       "options": {
+        "match": "null",
+        "result": {
+         "text": "no CNPG metrics",
+         "color": "#808080",
+         "index": 1
+        }
+       }
+      }
+     ]
     },
     "overrides": []
    },
@@ -102,7 +125,43 @@
    "fieldConfig": {
     "defaults": {
      "decimals": 1,
-     "unit": "d"
+     "unit": "d",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "#808080",
+        "value": null
+       },
+       {
+        "color": "green",
+        "value": 0
+       }
+      ]
+     },
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "-1": {
+         "text": "no recoverability point reported",
+         "color": "#808080",
+         "index": 0
+        }
+       }
+      },
+      {
+       "type": "special",
+       "options": {
+        "match": "null",
+        "result": {
+         "text": "no recoverability point reported",
+         "color": "#808080",
+         "index": 1
+        }
+       }
+      }
+     ]
     },
     "overrides": []
    },
@@ -126,13 +185,13 @@
       "type": "prometheus",
       "uid": "${datasource}"
      },
-     "expr": "(time() - min(cnpg_collector_first_recoverability_point > 0)) / 86400 OR on() vector(0)",
+     "expr": "(time() - min(cnpg_collector_first_recoverability_point > 0)) / 86400 OR on() vector(-1)",
      "refId": "A"
     }
    ],
-   "title": "Recoverability window (days)",
+   "title": "Recoverability window",
    "type": "stat",
-   "description": "cnpg_collector_first_recoverability_point is deprecated since CNPG 1.26 and stays 0 under the barman-cloud plugin path this platform uses; the > 0 filter drops that zero so the panel shows 0 days (\"no signal\") rather than 20,000. Read the real window from the ObjectStore's retention and the Backup objects."
+   "description": "How far back a point-in-time restore can reach, from the oldest cluster's first recoverability point. Grey: no cluster reports one (CNPG under the Barman Cloud plugin reports 0 here), which is not the same as zero days."
   },
   {
    "datasource": {
@@ -146,8 +205,12 @@
       "mode": "absolute",
       "steps": [
        {
-        "color": "green",
+        "color": "#808080",
         "value": null
+       },
+       {
+        "color": "green",
+        "value": 0
        },
        {
         "color": "yellow",
@@ -159,7 +222,30 @@
        }
       ]
      },
-     "unit": "d"
+     "unit": "d",
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "-1": {
+         "text": "no drill has passed",
+         "color": "#808080",
+         "index": 0
+        }
+       }
+      },
+      {
+       "type": "special",
+       "options": {
+        "match": "null",
+        "result": {
+         "text": "no drill has passed",
+         "color": "#808080",
+         "index": 1
+        }
+       }
+      }
+     ]
     },
     "overrides": []
    },
@@ -183,12 +269,13 @@
       "type": "prometheus",
       "uid": "${datasource}"
      },
-     "expr": "(time() - max(kube_cronjob_status_last_successful_time{cronjob=~\".*-db-drill\"})) / 86400 OR on() vector(-1)",
+     "expr": "(time() - min(kube_cronjob_status_last_successful_time{cronjob=~\".*-drill(-[a-z0-9]+)?\",cronjob!~\".*rehearsal.*\"})) / 86400 OR on() vector(-1)",
      "refId": "A"
     }
    ],
-   "title": "Days since last restore-drill PASS",
-   "type": "stat"
+   "title": "Days since the stalest drill passed",
+   "type": "stat",
+   "description": "Days since the restore drill that passed longest ago. One fresh drill must not hide another that stopped passing. The same definition as the Overview and the Status board."
   },
   {
    "datasource": {
@@ -202,8 +289,12 @@
       "mode": "absolute",
       "steps": [
        {
-        "color": "green",
+        "color": "#808080",
         "value": null
+       },
+       {
+        "color": "green",
+        "value": 0
        },
        {
         "color": "yellow",
@@ -215,7 +306,30 @@
        }
       ]
      },
-     "unit": "h"
+     "unit": "h",
+     "mappings": [
+      {
+       "type": "value",
+       "options": {
+        "-1": {
+         "text": "no identity dump job",
+         "color": "#808080",
+         "index": 0
+        }
+       }
+      },
+      {
+       "type": "special",
+       "options": {
+        "match": "null",
+        "result": {
+         "text": "no identity dump job",
+         "color": "#808080",
+         "index": 1
+        }
+       }
+      }
+     ]
     },
     "overrides": []
    },
@@ -282,7 +396,7 @@
       "type": "prometheus",
       "uid": "${datasource}"
      },
-     "expr": "max(cnpg_collector_last_available_backup_timestamp > 0)",
+     "expr": "1000 * (max(cnpg_collector_last_available_backup_timestamp > 0))",
      "legendFormat": "last good backup (in-core Barman only; absent under the plugin)",
      "refId": "A"
     },
@@ -291,7 +405,7 @@
       "type": "prometheus",
       "uid": "${datasource}"
      },
-     "expr": "max(cnpg_collector_last_failed_backup_timestamp > 0)",
+     "expr": "1000 * (max(cnpg_collector_last_failed_backup_timestamp > 0))",
      "legendFormat": "last FAILED backup (in-core Barman only; absent under the plugin)",
      "refId": "B"
     },
@@ -300,7 +414,7 @@
       "type": "prometheus",
       "uid": "${datasource}"
      },
-     "expr": "max(kube_cronjob_status_last_successful_time{cronjob=~\".*-db-drill|tockmox-authentik-db-backup\"}) by (cronjob)",
+     "expr": "1000 * (max(kube_cronjob_status_last_successful_time{cronjob=~\".*-db-drill|tockmox-authentik-db-backup\"}) by (cronjob))",
      "legendFormat": "{{cronjob}} last success",
      "refId": "C"
     }
@@ -411,7 +525,9 @@
  "schemaVersion": 39,
  "tags": [
   "platform",
-  "tockmox"
+  "tockmox",
+  "tier-l2",
+  "continuity"
  ],
  "templating": {
   "list": [
