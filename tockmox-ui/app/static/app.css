@@ -92,6 +92,7 @@ label.check { font-weight: 400; display: flex; align-items: center; min-height: 
 .quiet p { margin: .25rem 0; }
 .crumb { margin: 0 0 .35rem; font-size: .92rem; }
 .ref, .why { display: block; font-size: .85rem; color: var(--tx-text-muted); font-weight: 400; margin-top: .15rem; }
+.act { display: block; font-size: .9rem; margin-top: .3rem; }
 .agent-name { font-family: var(--ui-font); font-size: 1.02rem; font-weight: 700; }
 table.team tr.lead th, table.team tr.lead td { border-bottom: 2px solid var(--tx-trim); }
 table.team tr.reports th { border-left: 3px solid var(--tx-trim); padding-left: 1rem; }
