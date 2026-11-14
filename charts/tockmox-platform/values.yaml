@@ -580,7 +580,10 @@ traefik:
             scheme: https
             permanent: true
   service:
-    type: LoadBalancer
+    # Under spec, not service.type: the traefik chart rejects service.type
+    # from 42.3.1 on (it had already been ignored, spec.type is the key).
+    spec:
+      type: LoadBalancer
     annotations:
       # THE SYNC-WAVE THAT BREAKS A DEADLOCK. Do not remove this without
       # reading the whole note; the failure it prevents makes a clean install
