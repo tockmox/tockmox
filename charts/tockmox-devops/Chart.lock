@@ -1,9 +1,9 @@
 dependencies:
 - name: tockmox-common
   repository: file://../tockmox-common
-  version: 0.8.4
+  version: 0.8.5
 - name: argo-workflows
   repository: https://argoproj.github.io/argo-helm
   version: 2.0.18
-digest: sha256:cc2ecc4376213bac63de0b63d1c04f4ae6c107df1f9bb35e0010b048a5fd1835
-generated: "2026-11-14T00:17:43.826115861Z"
+digest: sha256:5ea75f366033d1dcd15f23b92ac1dd59ce5a8a9064a04fed6d2a5cd550a9cc2e
+generated: "2026-11-14T13:29:58.488787309-06:00"

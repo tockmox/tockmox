@@ -1,7 +1,7 @@
 dependencies:
 - name: tockmox-common
   repository: file://../tockmox-common
-  version: 0.8.4
+  version: 0.8.5
 - name: kube-prometheus-stack
   repository: https://prometheus-community.github.io/helm-charts
   version: 92.17.0
@@ -11,5 +11,5 @@ dependencies:
 - name: alloy
   repository: https://grafana.github.io/helm-charts
   version: 1.15.0
-digest: sha256:b76dfa7cce540101384d8d11b35fca16235c7bfd3b16e0ae2ccdbaba79166988
-generated: "2026-11-07T20:46:31.061800216-06:00"
+digest: sha256:c6803eab999b594e2074622da9dcf187d24b171cd800f01bb889670c96be4648
+generated: "2026-11-14T13:30:40.895051075-06:00"
