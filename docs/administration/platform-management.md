@@ -145,16 +145,27 @@ With `specialistsUrl` set, Platform Management reads the **Service Desk** on a
 specialist host: the register where the operations agents keep every incident,
 problem, change and known error, with an enforced lifecycle and a timeline.
 
-- `/platform/cases` answers "what waits on me, and what did the agents do":
-  open cases first (anything waiting on you, then failed hand-offs, then what is
-  past its role's time budget), then the cases closed in the last 30 days. Each
-  row says who it waits on (you, an agent, the accountable role, or the open
-  record it links to, followed down the chain), since when, and which agents
-  worked it. `?role=<role id>` narrows it to one role; `team`, `state` (`open`
-  or `closed`), `wait` (who it waits on), `alert` and `ask` (the ask, or the
-  reason when there is none) narrow it further, and the page says how many of
-  how many it shows. `-` matches an empty value. A value the page does not
-  know, such as a state other than `open` or `closed`, matches nothing.
+- `/platform/cases` opens on what waits on you: the open cases that ask you to
+  decide, approve or answer a page, then the ones whose hand-off failed, oldest
+  first within each. This is the same set as the Overview's **Needs you**. Each
+  says the next step in plain words and where to act on it: the pull request it
+  is about, or the conversation (`interfaceUrl`). When the platform has no link
+  for that place, the case says "Act in the conversation" as plain words, never
+  a dead link. Nothing on the page acts: it links to where you act. When an open
+  case does not say what it waits on, the page says so and links to those cases,
+  because any of them may wait on you. Below the list, the count of every other
+  case links to the whole list.
+- `/platform/cases?show=all` answers "what did the agents do": open cases first
+  (anything waiting on you, then failed hand-offs, then what is past its role's
+  time budget), then the cases closed in the last 30 days. Each row says who it
+  waits on (you, an agent, the accountable role, or the open record it links to,
+  followed down the chain), since when, and which agents worked it.
+  `?role=<role id>` narrows it to one role; `team`, `state` (`open` or
+  `closed`), `wait` (who it waits on), `alert` and `ask` (the ask, or the reason
+  when there is none) narrow it further, and the page says how many of how many
+  it shows. Any of these shows the whole list, narrowed. `-` matches an empty
+  value. A value the page does not know, such as a state other than `open` or
+  `closed`, matches nothing.
 - On the **Overview**, the cases waiting on you are grouped by what fired (the
   alert name) and what they ask, with the hosts counted: thirteen cases for one
   alert on six hosts are one row, "13 on 6 hosts", which opens the Cases page

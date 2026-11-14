@@ -308,10 +308,53 @@ def role_cases(agent, rows):
     return out
 
 
+PERSON_ON = ("jeff", "attention")   # the desk's words for a case waiting on a person: you, or a failed hand-off
+
+
 def pending_order(r):
+    """What waits on you first (a decision, an approval, a page), then failed hand-offs, then the rest; oldest first
+    within each, by when it started waiting."""
     w = r.get("waiting") or {}
-    rank = {"attention": 0, "jeff": 1, "unknown": 2, "agent": 3, "role": 4, "record": 5}.get(w.get("on"), 6)
-    return (rank, 0 if r.get("stuck") else 1, r.get("state_since_ts") or r.get("updated_ts") or 0)
+    rank = {"jeff": 0, "attention": 1, "unknown": 2, "agent": 3, "role": 4, "record": 5}.get(w.get("on"), 6)
+    stuck = 0 if (r.get("stuck") and rank > 1) else 1
+    return (rank, stuck, w.get("since_ts") or r.get("state_since_ts") or r.get("updated_ts") or 0)
+
+
+def needs_you(rows):
+    """The open cases waiting on a person, in pending order. The Cases page opens on this set and the Overview's
+    Needs you shows the same one, so the two never disagree."""
+    return sorted([r for r in rows if not r["closed"] and (r.get("waiting") or {}).get("on") in PERSON_ON],
+                  key=pending_order)
+
+
+def _place(url) -> str:
+    """The conversation's address from this platform's own config (features.platform.interfaceUrl): http(s) only."""
+    url = str(url or "")
+    ok = url.startswith(("https://", "http://")) and len(url) <= 500 and not any(c in url for c in '"<> ')
+    return url if ok else ""
+
+
+def where_to_act(r, conversation_url="") -> dict | None:
+    """Where a person acts on a case waiting on them: the pull request it is about, or the conversation that holds it.
+
+    One place per case. A pull request is linked only when the desk gave its https URL; the conversation is linked only
+    when this platform names its address. Without either, the place is still named, as plain words, never a dead link.
+    A case that waits on no person has no place here: nothing on this page acts."""
+    w = r.get("waiting") or {}
+    if r.get("closed") or w.get("on") not in PERSON_ON:
+        return None
+    pr = _https((r.get("facts") or {}).get("pr_url"))
+    if w.get("on") == "jeff" and w.get("reason") == "approval" and pr:
+        return {"kind": "pr", "url": pr, "words": "Review its pull request"}
+    conv = _place(conversation_url)
+    if conv:
+        return {"kind": "conversation", "url": conv, "words": "Act in the conversation"}
+    return {"kind": "plain", "url": "", "words": "Act in the conversation"}
+
+
+def with_act(rows, conversation_url=""):
+    """The rows, each carrying `act` (where_to_act); copies, so the cached list is never changed."""
+    return [dict(r, act=where_to_act(r, conversation_url)) for r in rows]
 
 
 def split(rows):
@@ -416,7 +459,7 @@ def register(app, cat, srcs, guard, render, common):
 
     @app.get("/platform/cases")
     def cases(request: Request, role: str = "", alert: str = "", wait: str = "", ask: str = "", state: str = "",
-              team: str = ""):
+              team: str = "", show: str = ""):
         u, deny = guard(request)
         if deny:
             return deny
@@ -429,11 +472,22 @@ def register(app, cat, srcs, guard, render, common):
         # filters, so a grouped row on the Overview opens exactly its cases
         filters = {k: v for k, v in (("alert", alert), ("wait", wait), ("ask", ask), ("state", state), ("team", team))
                    if v}
-        filtered = filter_cases(shown, cat=cat, **filters)
-        pending, done = split(filtered)
+        ctx = common(u)
+        conv = ctx.get("interface_url", "")
+        # The page opens on what waits on you, the same set as the Overview's Needs you; any filter, a role, or
+        # show=all is a choice to see more.
+        yours_view = not (sel or filters) and show != "all"
+        if yours_view:
+            pending, done = with_act(needs_you(shown), conv), []
+            counts = summarize(shown)
+        else:
+            filtered = filter_cases(shown, cat=cat, **filters)
+            pending, done = split(filtered)
+            pending, counts = with_act(pending, conv), summarize(filtered)
         return render(request, "platform_cases.html", u, desk=r, desk_on=srcs["desk"].configured(), pending=pending,
-                      done=done, sel=sel, counts=summarize(filtered), filters=filters, total=len(shown),
-                      teams=list(cat.teams), roles=[a for a in cat.all() if role_cases(a, rows)], **common(u))
+                      done=done, sel=sel, counts=counts, filters=filters, total=len(shown), yours_view=yours_view,
+                      others=len(shown) - len(pending) if yours_view else 0, yours_n=len(needs_you(shown)),
+                      teams=list(cat.teams), roles=[a for a in cat.all() if role_cases(a, rows)], **ctx)
 
     @app.get("/platform/cases/{rid}")
     def case(request: Request, rid: str):
@@ -466,6 +520,8 @@ def register(app, cat, srcs, guard, render, common):
                 row["waiting"] = {"on": "unknown", "reason": "", "ask": "", "specialist": "", "op": "", "role": "",
                                   "record": "", "rel": "", "since": None, "since_ts": None}
         known |= {rid}
+        if row:
+            row = dict(row, act=where_to_act(row, common(u).get("interface_url", "")))
         steps = [x for x in (clean_entry(e, known) for e in rec.get("timeline") or []) if x]
         family = sorted([x for x in rows if x["trace_id"] == row.get("trace_id") and x["id"] != rid],
                         key=lambda x: x.get("created_ts") or 0)
@@ -501,4 +557,4 @@ def drift(cat, idx):
 
 
 __all__ = ["DeskSource", "IndexSource", "register", "role_cases", "split", "summarize", "drift", "clean_entry",
-           "clean_summary", "ASK_WORDS", "WAIT_WORDS", "REASON_WORDS", "STATE_WORDS", "TYPE_WORDS", "UNKNOWN"]
+           "clean_summary", "needs_you", "where_to_act", "with_act", "PERSON_ON", "ASK_WORDS", "WAIT_WORDS", "REASON_WORDS", "STATE_WORDS", "TYPE_WORDS", "UNKNOWN"]

@@ -75,7 +75,7 @@
 {%- set w = r.waiting -%}
 {%- if not w -%}
 {%- elif w.on == "jeff" and w.reason == "decision" -%}{{ ask_words.get(w.ask, "A decision") }}
-{%- elif w.on == "jeff" and w.reason == "approval" -%}Your approval of its pull request{% if r.facts.pr_url %} (<a href="{{ r.facts.pr_url }}" rel="noopener noreferrer">open it</a>){% endif %}
+{%- elif w.on == "jeff" and w.reason == "approval" -%}Your approval of its pull request
 {%- elif w.on == "jeff" and w.reason == "paged" -%}It paged you: still open past the escalation window
 {%- elif w.on == "attention" -%}The hand-off to {{ spec_name(w.specialist) }} ({{ w.op }}) failed three times; the desk needs a person to look
 {%- elif w.on == "agent" -%}Handed on to {{ spec_name(w.specialist) }} ({{ w.op }})
@@ -83,6 +83,12 @@
   {%- if r.end and r.end.waiting %}{% set ew = r.end.waiting %}{% if r.end.id != w.record %}, then <a href="/platform/cases/{{ r.end.id }}"><code>{{ r.end.id }}</code></a>{% endif %}{% if ew.on == "jeff" %}, which waits on you{% elif ew.on == "attention" %}, whose hand-off failed{% endif %}{% endif %}
 {%- elif w.on == "role" -%}{% set a = by_agent_role.get(w.role) %}{% if a %}The {{ a.name }} is working it{% else %}Its role is working it{% endif %}{% if r.stuck %}, past the budget its role has for {{ r.state | replace("_", " ") }}{% endif %}
 {%- else -%}The desk did not say{%- endif -%}
+{%- endmacro %}
+
+{# Where a person acts on a case waiting on them (platform_cases.where_to_act): one link, to its pull request or to
+   the conversation that holds it, or the same words with no link when this platform knows neither. Never a control. #}
+{% macro act_line(r) -%}
+{%- if r.act -%}<span class="act">{% if r.act.url %}<a href="{{ r.act.url }}" rel="noopener noreferrer">{{ r.act.words }}</a>{% else %}{{ r.act.words }} <span class="muted">(this platform has no link to it)</span>{% endif %}</span>{%- endif -%}
 {%- endmacro %}
 
 {% macro case_table(rows, caption, id, tz, state_words, type_words, ask_words, by_agent_role, show_role=true) -%}
@@ -95,7 +101,7 @@
   <tr><th scope="row"><a href="/platform/cases/{{ r.id }}"><code>{{ r.id }}</code></a> <span class="muted">{{ type_words.get(r.type, "Record") }}</span>
         <span class="ref">{% if r.title %}{{ r.title }}{% else %}<span class="muted">title written by {{ "a model" if r.title_src == "model" else "a client" }}: read it in the conversation</span>{% endif %}{% if r.service %} · {{ r.service }}{% endif %}</span></th>
       <td>{{ state_words.get(r.state, r.state | replace("_", " ")) }}</td>
-      <td>{{ wait_badge(r) }}<span class="why">{{ wait_text(r, ask_words, by_agent_role) }}</span></td>
+      <td>{{ wait_badge(r) }}<span class="why">{{ wait_text(r, ask_words, by_agent_role) }}</span>{{ act_line(r) }}</td>
       <td>{% if r.closed %}{{ when(r.updated_ts, tz) }}{% else %}{{ when((r.waiting.since_ts if r.waiting and r.waiting.since_ts else r.state_since_ts), tz) }}{% endif %}</td>
       {% if show_role %}<td>{% set a = by_agent_role.get(r.role) %}{% if a %}<a href="/platform/agents/{{ a.id }}">{{ a.name }}</a>{% else %}<span class="muted">{{ r.role or "none named" }}</span>{% endif %}</td>{% endif %}
       <td>{% if r.worked_by %}{% for s in r.worked_by %}{{ spec_name(s) }}{{ ", " if not loop.last }}{% endfor %}{% else %}<span class="muted">no agent yet</span>{% endif %}</td></tr>

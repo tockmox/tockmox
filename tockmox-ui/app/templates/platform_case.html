@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "macros.html" import badge, source_line %}
-{% from "platform_macros.html" import wait_badge, wait_text, spec_name, when %}
+{% from "platform_macros.html" import wait_badge, wait_text, act_line, spec_name, when %}
 {% block title %}{{ row.id }} · Cases · Platform Management{% endblock %}
 {% block main %}
 <p class="crumb"><a href="/platform">Platform Management</a> / <a href="/platform/cases">Cases</a> / {{ row.id }}</p>
@@ -9,7 +9,7 @@
 
 <section class="facts-band" aria-label="Status">
   <div><h2 class="kicker">State</h2><p><strong>{{ state_words.get(row.state, row.state | replace("_", " ")) }}</strong></p><p class="why">since {{ when(row.state_since_ts, tz) }}</p></div>
-  <div><h2 class="kicker">Waiting on</h2>{{ wait_badge(row) }}<p class="why">{{ wait_text(row, ask_words, by_agent_role) }}</p></div>
+  <div><h2 class="kicker">Waiting on</h2>{{ wait_badge(row) }}<p class="why">{{ wait_text(row, ask_words, by_agent_role) }}</p>{% if row.act %}<p>{{ act_line(row) }}</p>{% endif %}</div>
   <div><h2 class="kicker">Accountable</h2>{% set a = by_agent_role.get(row.role) %}{% if a %}<p><a href="/platform/agents/{{ a.id }}">{{ a.name }}</a></p>{% else %}<p class="muted">{{ row.role or "none named" }}</p>{% endif %}
     <p class="why">Opened {{ when(row.created_ts, tz) }}</p></div>
 </section>

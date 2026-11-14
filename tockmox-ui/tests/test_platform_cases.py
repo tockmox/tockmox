@@ -109,7 +109,7 @@ def test_the_token_file_is_sent_as_a_bearer(world, tmp_path):
 
 def test_cases_lists_every_record_with_who_it_waits_on(world):
     c, _ = cases_client(world)
-    t = c.get("/platform/cases").text
+    t = c.get("/platform/cases?show=all").text
     for rid in ("INC-0001", "INC-0002", "PRB-0001", "CHG-0001", "INC-0003"):
         assert f"/platform/cases/{rid}" in t, rid
     assert "2 cases wait on you" in t                      # INC-0002's ask, CHG-0001's approval: never counted twice
@@ -371,3 +371,109 @@ def test_a_catalog_specialist_with_a_bad_state_is_the_pages_503(world, tmp_path)
                                                             "{id: incident-responder, state: shipped}"))
     with pytest.raises(pm.CatalogError, match="state"):
         pm.load_catalog(str(bad))
+
+
+# ---------------------------------------------------------------- where to act, and the page opening on what waits on you
+
+def _waiting_fixture():
+    """The fixture plus one case of each person-waiting kind it lacks: one that paged you, one whose hand-off failed."""
+    fix = copy.deepcopy(FIX)
+    base = next(r for r in fix["list"]["records"] if r["id"] == "INC-0002")
+    paged = copy.deepcopy(base)
+    paged.update(id="INC-0004", trace_id="INC-0004", title="Paged case", facts={},
+                 waiting={"on": "jeff", "reason": "paged", "since": "2026-10-26T15:50:00.000Z"})
+    failed = copy.deepcopy(base)
+    failed.update(id="INC-0005", trace_id="INC-0005", title="Hand-off case", facts={},
+                  waiting={"on": "attention", "reason": "hand_off_failed", "specialist": "incident-responder",
+                           "op": "triage", "since": "2026-10-26T15:40:00.000Z"})
+    fix["list"]["records"] += [paged, failed]
+    return fix
+
+
+def _row(t, rid):
+    """The table row whose header cell links to rid, or None."""
+    for tr in t.split("<tr>")[1:]:
+        if f'href="/platform/cases/{rid}"' in tr.split("</th>")[0]:
+            return tr.split("</tr>")[0]
+    return None
+
+
+def _act(row):
+    return row.split('<span class="act">', 1)[1].split("</span></td>", 1)[0] if '<span class="act">' in row else None
+
+
+def test_each_case_waiting_on_a_person_says_where_to_act(world):
+    c, _ = cases_client(world, Host(_waiting_fixture()), interfaceUrl="https://chat.example")
+    t = c.get("/platform/cases?show=all").text
+    want = {"CHG-0001": ("https://git.example/example/site/pulls/41", "Review its pull request"),   # approval
+            "INC-0002": ("https://chat.example", "Act in the conversation"),                    # a decision
+            "INC-0004": ("https://chat.example", "Act in the conversation"),                    # it paged you
+            "INC-0005": ("https://chat.example", "Act in the conversation")}                    # a hand-off failed
+    for rid, (url, words) in want.items():
+        row = _row(t, rid)
+        assert row and row.count('class="act"') == 1, rid
+        assert _act(row) == f'<a href="{url}" rel="noopener noreferrer">{words}</a>', (rid, _act(row))
+    for rid in ("INC-0001", "PRB-0001", "INC-0003"):        # with the agents, or closed: no place for a person here
+        assert 'class="act"' not in _row(t, rid), rid
+    assert _act(_row(c.get("/platform/agents/problem").text, "CHG-0001")) .startswith(
+        '<a href="https://git.example/example/site/pulls/41"'), "the role's page carries the same place"
+    case = c.get("/platform/cases/CHG-0001").text.split('aria-label="Status"')[1].split("</section>")[0]
+    assert 'href="https://git.example/example/site/pulls/41"' in case and "Review its pull request" in case
+
+
+def test_a_case_with_no_known_place_says_act_in_the_conversation_with_no_link(world):
+    fix = _waiting_fixture()
+    next(r for r in fix["list"]["records"] if r["id"] == "CHG-0001")["facts"]["pr_url"] = "javascript:alert(1)"
+    c, _ = cases_client(world, Host(fix))             # no interfaceUrl: this platform cannot link the conversation
+    t = c.get("/platform/cases").text
+    for rid in ("CHG-0001", "INC-0002", "INC-0004", "INC-0005"):
+        act = _act(_row(t, rid))
+        assert act == 'Act in the conversation <span class="muted">(this platform has no link to it)</span>', (rid, act)
+    assert "javascript:" not in t
+    assert pc.where_to_act({"closed": True, "waiting": None}) is None
+    assert pc.where_to_act({"closed": False, "waiting": {"on": "agent"}}, "https://chat.example") is None
+    assert pc.where_to_act({"closed": False, "waiting": {"on": "jeff", "reason": "decision"}}, "javascript:x")["url"] == ""
+
+
+def test_cases_opens_on_what_waits_on_you_decisions_then_failed_hand_offs_oldest_first(world):
+    c, host = cases_client(world, Host(_waiting_fixture()), interfaceUrl="https://chat.example")
+    t = c.get("/platform/cases").text
+    table = t.split('id="pending"')[1].split("</table>")[0]
+    import re as _re
+    order = _re.findall(r'<th scope="row"><a href="/platform/cases/([A-Z]+-\d+)"', table)
+    # INC-0004 paged you (15:50), CHG-0001 waits on your approval (15:58), INC-0002 asks you (16:04); then INC-0005,
+    # whose hand-off failed at 15:40: older, but a failed hand-off comes after what waits on your decision
+    assert order == ["INC-0004", "CHG-0001", "INC-0002", "INC-0005"], order
+    steps = {"INC-0004": "It paged you", "CHG-0001": "Your approval of its pull request",
+             "INC-0002": "Approve a restore no standard change covers", "INC-0005": "The hand-off to Incident Responder"}
+    for rid, words in steps.items():
+        row = _row(table, rid)
+        assert words in row and _act(row), rid
+    assert "Waiting on you (4)" in t and "Every case (7)" in t
+    assert "3 other cases" in t and 'href="/platform/cases?show=all"' in t
+    assert "Worked on in the last 30 days" not in t, "the closed list is one click away, not on the opening view"
+    posts = _re.findall(r'<form[^>]*method="post"[^>]*action="([^"]*)"', t, _re.I)
+    assert posts == ["/logout"], f"no form on the page writes, only the shell's sign-out: {posts}"
+    ops = {r.url.path.rsplit("/", 1)[-1] for r in host.seen if r.method == "POST"}
+    assert ops <= {"list", "get"}, ops
+
+
+def test_the_overviews_needs_you_is_the_same_set_the_cases_page_opens_on(world):
+    import re as _re
+    c, _ = cases_client(world, Host(_waiting_fixture()))
+    table = c.get("/platform/cases").text.split('id="pending"')[1].split("</table>")[0]
+    cases = set(_re.findall(r'<th scope="row"><a href="/platform/cases/([A-Z]+-\d+)"', table))
+    part = c.get("/platform").text.split('id="needs-you-cases"')[1].split('id="needs-you-ledger"')[0]
+    overview = set(_re.findall(r"<code>([A-Z]{2,4}-\d{4,})</code>", part))
+    assert cases == overview == {"INC-0002", "CHG-0001", "INC-0004", "INC-0005"}, (cases, overview)
+
+
+def test_an_incomplete_answer_never_opens_on_no_case_waits_on_you(world):
+    fix = copy.deepcopy(FIX)
+    fix["count_override"] = 99
+    for r in fix["list"]["records"]:
+        if r["id"] in ("INC-0002", "CHG-0001"):
+            r["waiting"] = {"on": "role", "reason": "in_progress", "role": "incident-manager", "since": r["updated"]}
+    c, _ = cases_client(world, Host(fix))
+    t = c.get("/platform/cases").text
+    assert "No case waits on you" not in t and "may not be everything waiting on you" in t

@@ -913,8 +913,7 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
         waiting = [(v, j) for v in views for j in v.waiting]
         rail = day_rail([v for v in views if v.schedules], unowned, time.time(), tz)
         dr, rows = desk()
-        pending, _ = platform_cases.split(rows)
-        yours = [x for x in pending if x["waiting"] and x["waiting"]["on"] in ("jeff", "attention")]
+        yours = platform_cases.needs_you(rows)      # the same set the Cases page opens on
         return render(request, "platform_overview.html", u, readings=r, views=views, teams=teams,
                       org_state=verdict, org_why=why, unowned=unowned, waiting=waiting, rota=rail,
                       ledger_on=srcs["ledger"].configured(), desk=dr, case_counts=platform_cases.summarize(rows),
@@ -964,6 +963,7 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
         dr, rows = desk()
         mine = platform_cases.role_cases(v.agent, rows) if (v.agent.agent_role or v.agent.specialists) else []
         pending, done = platform_cases.split(mine)
+        pending = platform_cases.with_act(pending, interface_url)
         idx = srcs["index"].read()
         served = ((idx.data or {}).get("served") or {}) if idx.fetched_at is not None else None
         return render(request, "platform_agent.html", u, readings=r, v=v, team=team, team_obj=t,
