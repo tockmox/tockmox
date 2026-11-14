@@ -82,12 +82,21 @@ SCAN_EXCLUDE=""
 # CI writes the file from a repository secret when the secret is set; a fork's
 # pull request runs the public rules only, and says so.
 #
+# THE AGENT HAS NO PERSONAL NAME IN THE PRODUCT. A maintainer may call the agent
+# on their own site by a name of their own; the product calls it by a setting
+# (features.platform.agentName, default "Tockmox") and in prose "the
+# orchestrator". That one name did reach this tree once (a demo fixture, two
+# tests), so it is a rule here, written as a character class so that this file
+# does not carry the word itself. It matches the name alone and as a part of an
+# identifier (a namespace or job prefix), not inside a longer word.
+#
 # WHY THE HOSTNAME RULE REQUIRES A SUBDOMAIN. A published contact address
 # (`someone@<domain>`) is not a site specific; `grafana.int.<domain>` is. A label,
 # `int` and a dot separate the two, and the selftest asserts both halves.
 RULES="
 internal git host|git\.int\.
 internal hostname|[A-Za-z0-9_-]+\.int\.[A-Za-z0-9-]+\.[A-Za-z]{2,}
+personal agent name|(^|[^A-Za-z])[Tt][Ii][Ss][Hh]([^A-Za-z]|$)
 internal tracker id|(^|[^A-Za-z0-9])([Tt][Mm]|[Hh][Ll])-?[0-9]{3,4}([^0-9]|$)
 "
 PATTERNS_FILE="${TOCKMOX_SITE_PATTERNS_FILE:-}"
@@ -156,6 +165,10 @@ if [ "${1:-}" = "--selftest" ]; then
   probe "tracker id"     "fixed in the last release (TM-0123)"     "internal tracker id"
   probe "tracker id, lc" "def test_tm0123_a_case():"                "internal tracker id"
 
+  # The name is assembled here so that this file never holds it as a word.
+  agent=$(printf '%s%s' T ish); lc=$(printf '%s%s' t ish)
+  probe "agent name"     "<p>Ask $agent about it.</p>"             "personal agent name"
+  probe "agent name, id" "name: $lc-sched-daily-brief" "personal agent name"
   # A SITE RULE FILE IS LOADED, and a named file that is missing REFUSES. Uses a
   # synthetic pattern, never a real site's: the point is the loading path.
   printf '# synthetic\nselftest node name|acme-node-[0-9]\n' > "$tmp/site-patterns"
@@ -193,6 +206,7 @@ serviceCIDR: 10.43.0.0/16
 report a vulnerability to security@example.org
 Signed-off-by: A Contributor <contributor@example.net>
 PROBE
+  printf 'Bri%s, Scot%s and skit%s are longer words, not the name\n' "$lc" "$lc" "$lc" >> "$tmp/docs/probe.md"
   clean_out=$(cd "$tmp" && scan docs)
   if [ -n "$clean_out" ]; then
     echo "  SELFTEST FAIL: a legitimate example was flagged:"
@@ -291,7 +305,8 @@ if [ -n "$report" ]; then
   echo "CONTRIBUTING.md: no hostnames, no IPs, no node names in the published tree."
   echo "Use example.com / example.org and the RFC 5737 ranges (192.0.2.0/24,"
   echo "198.51.100.0/24, 203.0.113.0/24) instead. Keep the evidence and the date;"
-  echo "it is only the identifier that has to go."
+  echo "it is only the identifier that has to go. The agent has no personal name in"
+  echo "the product: write \"the orchestrator\", or read features.platform.agentName."
   exit 1
 fi
 

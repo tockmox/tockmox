@@ -4,7 +4,7 @@
 {% block title %}Platform Management{% endblock %}
 {% block main %}
 <div class="titled">{% if org_state == "ok" %}{{ mascot("foreman", 56) }}{% endif %}<h1>Platform Management</h1></div>
-<p class="lede">The platform's virtual organization: three teams of agent roles, each owning a part of running the service, the scheduled work for it and the numbers that say how it is going. This page reads and links; decisions happen in the conversation.</p>
+<p class="lede">The platform's virtual organization: three teams of agent roles, each owning a part of running the service, the scheduled work for it and the numbers that say how it is going. This page reads and links; decisions happen in the conversation with {{ agent_name }}.</p>
 
 <section class="verdict st-{{ org_state }}" aria-labelledby="pm-verdict">
   <div class="verdict-ico">{{ state_icon(org_state) }}</div>
@@ -36,7 +36,7 @@
   {% if not ledger_on %}
   <div class="panel quiet">
     <p>No agent ledger is connected, so this page cannot list what the agents are waiting on you for. That is not the same as nothing waiting.</p>
-    <p class="muted">Set <code>features.platform.ledgerUrl</code> to the orchestrator's read API to fill this in.{% if interface_url %} Decisions are made in <a href="{{ interface_url }}">the conversation</a>.{% endif %}</p>
+    <p class="muted">Set <code>features.platform.ledgerUrl</code> to the orchestrator's read API to fill this in.{% if interface_url %} Decisions are made in <a href="{{ interface_url }}">the conversation with {{ agent_name }}</a>.{% endif %}</p>
   </div>
   {% elif readings.ledger.fetched_at is none %}
   <div class="panel quiet">
