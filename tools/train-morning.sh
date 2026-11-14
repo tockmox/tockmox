@@ -28,6 +28,14 @@
 #     config and the release tools. A train that edits those is not a patch.
 #   - The required workflows (REQUIRED) must have a green run on that exact SHA, and
 #     any OPTIONAL one that ran must be green.
+#   - check-all is evidence too. When the SHA's tree holds .github/workflows/check-all.yaml
+#     (0.9 on), check-all joins REQUIRED. A line without it (release-0.8) has no check-all
+#     run to read, so the spec must name CHECK_ALL_RESULTS: the results file of
+#     `tools/check-all.sh --strict` run on the train head. Its .meta.json beside it must
+#     name the SHA, a clean checkout and a full run (no --changed-from, no --shard), and
+#     every row must be a pass: a skip, a timeout, an unselected gate or a failure stops
+#     the run (RELEASING.md: a SKIP is not green). A results file named on a 0.9 line is
+#     read the same way.
 #   - The tag may not already exist on another commit; SIGNING_KEY must be the key
 #     .gitsigners (at the SHA) vouches for, checked BEFORE anything is signed.
 #   - Order (council ruling): verify, merge the template re-pin, fast-forward, tag,
@@ -35,6 +43,12 @@
 #     re-pin merges before the tag because release-tag.yaml goes red otherwise;
 #     the Release is created last and with --verify-tag so GitHub can never create
 #     an unsigned tag on our behalf.
+#   - After the Release is published the morning reads it back before it says DONE: it
+#     waits for every asset (on 0.9, release-assets.yaml's three), downloads them, and
+#     checks that SHA256SUMS verifies the archive, the archive is git archive of the SHA
+#     (its embedded commit id and its files), the gate report's signature verifies, the
+#     attached images.txt is the tag's, and on 0.9 that the provenance bundle verifies with
+#     `gh attestation verify`. Any miss stops the run with the Release named as unverified.
 #   - Report-only is the default. The checks run for real (they only read); every
 #     mutation is printed as "would run: $ ..." and skipped. --go runs them in that
 #     order, stopping at the first failure.
@@ -67,6 +81,10 @@
 #   ANNOUNCE         optional: a Discussions category; adds --discussion-category
 #   DIST_DIR         where the archive and SHA256SUMS go  default <spec dir>/dist-TAG
 #   TRAIN_LOG        the one-line log                      default $HOME/src/_train-log.txt
+#   CHECK_ALL_RESULTS  results file of `tools/check-all.sh --strict` on the train head
+#                    (its .meta.json beside it); required when the SHA has no check-all.yaml
+#   ASSETS_WAIT      seconds to wait for the Release's assets after publish   default 600
+#   ASSETS_POLL      seconds between looks                                     default 15
 #
 # ON THE CI EVIDENCE. ci.yaml runs on pull_request and on pushes to main and
 # release-*; a push to train/** starts nothing. The runs on the SHA therefore come
@@ -75,7 +93,8 @@
 # push to REL_BRANCH in step 3 starts the push-event runs on the SHA itself; the
 # event of each run is printed so the gate report can say which it was.
 #
-# Requires git 2.34+, gh (authenticated), ssh-keygen, python3, sha256sum or shasum.
+# Requires git 2.34+, gh 2.49+ (authenticated; `gh attestation`), ssh-keygen, python3, tar,
+# gzip, sha256sum or shasum.
 # macOS bash 3.2 clean: no associative arrays, no mapfile.
 set -euo pipefail
 
@@ -119,6 +138,7 @@ load_spec() {
   TRAIN_LOG="$HOME/src/_train-log.txt"; ANNOUNCE=""; DIST_DIR=""
   REL_BRANCH=""; TRAIN_BRANCH=""; TAG=""; WITNESS=""; TEMPLATE_PIN_PR=""
   GATE_REPORT=""; SIGNING_KEY=""; RELEASE_NOTES=""
+  CHECK_ALL_RESULTS=""; ASSETS_WAIT=600; ASSETS_POLL=15
   # shellcheck disable=SC1090
   . "$SPEC"
   for v in REL_BRANCH TRAIN_BRANCH TAG WITNESS TEMPLATE_PIN_PR GATE_REPORT SIGNING_KEY RELEASE_NOTES; do
@@ -127,12 +147,15 @@ load_spec() {
   printf '%s\n' "$TAG" | grep -E "$TAG_RE" >/dev/null || stop "TAG '$TAG' is not vX.Y.Z (this script cuts finals; an rc is not a morning)"
   case "$TEMPLATE_PIN_PR" in ''|*[!0-9]*) stop "TEMPLATE_PIN_PR '$TEMPLATE_PIN_PR' is not a PR number" ;; esac
   for f in "$WITNESS" "$GATE_REPORT" "$RELEASE_NOTES"; do [ -s "$f" ] || stop "spec names a file that is missing or empty: $f"; done
+  [ -z "$CHECK_ALL_RESULTS" ] || [ -s "$CHECK_ALL_RESULTS" ] || stop "spec names a file that is missing or empty: $CHECK_ALL_RESULTS"
+  case "$ASSETS_WAIT$ASSETS_POLL" in *[!0-9]*) stop "ASSETS_WAIT and ASSETS_POLL are whole seconds" ;; esac
+  [ "$ASSETS_POLL" -gt 0 ] || stop "ASSETS_POLL must be at least 1"
   [ -r "$SIGNING_KEY" ] || stop "cannot read SIGNING_KEY $SIGNING_KEY"
   [ -d "$REPO/.git" ] || stop "REPO $REPO is not a git clone"
   [ -n "$DIST_DIR" ] || DIST_DIR="$(cd "$(dirname "$SPEC")" && pwd)/dist-$TAG"
   VER="${TAG#v}"
   ARCHIVE="$DIST_DIR/tockmox-${VER}.tar.gz"
-  for t in git gh ssh-keygen python3; do command -v "$t" >/dev/null 2>&1 || stop "$t not on PATH"; done
+  for t in git gh ssh-keygen python3 tar gzip; do command -v "$t" >/dev/null 2>&1 || stop "$t not on PATH"; done
   SHA256="$(sha256_tool)"
   # internal tracker ids never ship (RELEASING.md "Before the tag")
   for f in "$RELEASE_NOTES" "$GATE_REPORT"; do
@@ -201,7 +224,7 @@ footer_only_change() { # OLD-SHA NEW-SHA PATH -> 0 if the two versions differ on
 
 # ---------------------------------------------------------------- 1. verify
 verify() {
-  say "1/7 verify"
+  say "1/8 verify"
   say "  fetch (reads only): git -C $REPO fetch origin --prune --tags"
   g fetch -q origin --prune --tags
   SHA=$(g rev-parse --verify --quiet "refs/remotes/origin/$TRAIN_BRANCH^{commit}") \
@@ -271,7 +294,11 @@ EOF
   # required workflows green on that exact SHA
   RUNS=$(gh run list --repo "$GH_REPO" --commit "$SHA" --limit 100 --json name,status,conclusion,event,url) \
     || stop "gh run list failed for $SHA"
-  for w in $REQUIRED; do
+  REQ="$REQUIRED"
+  if has_check_all_workflow; then
+    case " $REQ " in *" check-all "*) ;; *) REQ="$REQ check-all" ;; esac
+  fi
+  for w in $REQ; do
     line=$(run_of "$w")
     [ -n "$line" ] || stop "no $w run on $SHA (REQUIRED). The train did not open its PR, or the runs are on another commit."
     # shellcheck disable=SC2086
@@ -287,12 +314,62 @@ EOF
     { [ "$1" = completed ] && [ "$2" = success ]; } || stop "$w ran on $SHA and is $1/$2: $4"
     say "  $w: success on $SHA ($3 event) $4"
   done
+  check_all_evidence
   say "  VERIFIED $SHA"
+}
+
+# ---------------------------------------------------------------- check-all evidence
+has_check_all_workflow() { g cat-file -e "$SHA:.github/workflows/check-all.yaml" 2>/dev/null; }
+
+# The rows of `tools/check-all.sh --strict` and the .meta.json it writes beside them. Read when
+# the spec names them; required when the SHA has no check-all workflow to have run.
+check_all_evidence() {
+  if [ -z "$CHECK_ALL_RESULTS" ]; then
+    has_check_all_workflow \
+      || stop "no check-all evidence: $SHA has no .github/workflows/check-all.yaml, so no check-all run exists to read, and the spec names no CHECK_ALL_RESULTS. Run tools/check-all.sh --strict on a clean checkout of the train head and name its build/check-all-results.tsv."
+    say "  check-all: the workflow run above is the evidence (no CHECK_ALL_RESULTS in the spec)"
+    return 0
+  fi
+  meta="${CHECK_ALL_RESULTS%.tsv}.meta.json"
+  [ -s "$meta" ] || stop "check-all evidence: $meta is missing; it is written by tools/check-all.sh beside its results, and says which commit they describe"
+  why=$(python3 -I -c '
+import json, sys
+tsv, meta, sha = sys.argv[1:4]
+m = json.load(open(meta))
+rows = []
+for line in open(tsv):
+    if line.startswith("ord\t") or not line.strip():
+        continue
+    p = line.rstrip("\n").split("\t")
+    if len(p) != 6:
+        print("a results row does not have six columns: %r" % line.strip()); sys.exit(1)
+    rows.append(p)
+bad = []
+if m.get("head_sha") != sha:
+    bad.append("it ran on %s, not %s" % (m.get("head_sha") or "<no commit>", sha))
+if m.get("clean") is not True:
+    bad.append("the checkout was not clean when it started (%s path(s) differed), so the rows describe no commit" % m.get("dirty_paths"))
+if m.get("changed_from") or m.get("shard"):
+    bad.append("it was not a full run (changed_from=%r shard=%r)" % (m.get("changed_from"), m.get("shard")))
+if not rows:
+    bad.append("it has no rows")
+if [int(r[0]) for r in rows] != list(range(1, len(rows) + 1)):
+    bad.append("its rows are not gates 1..%d in order" % len(rows))
+notpass = ["%s %s: %s" % (r[0], r[2], r[5]) for r in rows if r[2] != "pass"]
+if notpass:
+    bad.append("%d gate(s) did not pass, and a skip is not green: %s" % (len(notpass), "; ".join(notpass[:5]) + (" ..." if len(notpass) > 5 else "")))
+if m.get("exit") != 0 or m.get("passed") != len(rows):
+    bad.append("the run exited %r with %r passed of %d rows" % (m.get("exit"), m.get("passed"), len(rows)))
+if bad:
+    print(" AND ".join(bad)); sys.exit(1)
+print("%d gates passed on %s, clean checkout, %s" % (len(rows), sha, "strict" if m.get("strict") else "not strict (no gate skipped)"))
+' "$CHECK_ALL_RESULTS" "$meta" "$SHA" 2>&1) || stop "check-all evidence $CHECK_ALL_RESULTS: $why"
+  say "  check-all: $why ($CHECK_ALL_RESULTS)"
 }
 
 # ---------------------------------------------------------------- 2. template re-pin
 merge_template_pin() {
-  say "2/7 merge the $TEMPLATE_REPO re-pin PR #$TEMPLATE_PIN_PR"
+  say "2/8 merge the $TEMPLATE_REPO re-pin PR #$TEMPLATE_PIN_PR"
   pr=$(gh pr view "$TEMPLATE_PIN_PR" --repo "$TEMPLATE_REPO" --json state,headRefOid,baseRefName,title) \
     || stop "gh pr view $TEMPLATE_PIN_PR --repo $TEMPLATE_REPO failed"
   state=$(printf '%s' "$pr" | jfield state); head=$(printf '%s' "$pr" | jfield headRefOid)
@@ -338,7 +415,7 @@ merge_template_pin() {
 
 # ---------------------------------------------------------------- 3. fast-forward
 fast_forward() {
-  say "3/7 fast-forward $REL_BRANCH to the SHA"
+  say "3/8 fast-forward $REL_BRANCH to the SHA"
   if [ "$REL_SHA" = "$SHA" ]; then say "  already there; skipping"; return 0; fi
   act "git -C $(q "$REPO") push origin $SHA:refs/heads/$REL_BRANCH"
   if [ "$GO" = 1 ]; then
@@ -351,7 +428,7 @@ fast_forward() {
 # ---------------------------------------------------------------- 4. tag
 verify_tag() { g -c gpg.format=ssh -c gpg.ssh.allowedSignersFile="$SIGNERS" verify-tag "$TAG"; }
 tag_and_push() {
-  say "4/7 signed tag $TAG on the SHA"
+  say "4/8 signed tag $TAG on the SHA"
   if [ "$TAG_DONE" = 1 ]; then
     verify_tag >/dev/null 2>&1 || stop "tag $TAG is on origin but does not verify against .gitsigners"
     say "  already on origin and verified; skipping"; return 0
@@ -380,7 +457,7 @@ ci_builds_assets() { g cat-file -e "$SHA:.github/workflows/release-assets.yaml" 
 write_images() { act "mkdir -p $(q "$DIST_DIR") && git -C $(q "$REPO") show $SHA:images.txt > $(q "$DIST_DIR/images.txt")"; }
 
 sign_and_sum() {
-  say "5/7 sign the gate report, archive and SHA256SUMS"
+  say "5/8 sign the gate report, archive and SHA256SUMS"
   grep -q "${SHA:0:12}" "$GATE_REPORT" || stop "$GATE_REPORT does not name $SHA; a report that names another commit must not be signed for this one"
   if [ -f "$GATE_REPORT.sig" ]; then
     ssh-keygen -Y verify -f "$SIGNERS" -I "$PRINCIPAL" -n file -s "$GATE_REPORT.sig" < "$GATE_REPORT" >/dev/null 2>&1 \
@@ -413,7 +490,7 @@ sign_and_sum() {
 
 # ---------------------------------------------------------------- 6. the Release
 publish() {
-  say "6/7 GitHub Release $TAG (--verify-tag; attachments per RELEASING.md)"
+  say "6/8 GitHub Release $TAG (--verify-tag; attachments per RELEASING.md)"
   if ci_builds_assets; then ASSETS=("$GATE_REPORT" "$GATE_REPORT.sig" "$DIST_DIR/images.txt")
   else ASSETS=("$ARCHIVE" "$DIST_DIR/SHA256SUMS" "$GATE_REPORT" "$GATE_REPORT.sig" "$DIST_DIR/images.txt"); fi
   if gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
@@ -436,9 +513,80 @@ publish() {
     say "  published: $(gh release view "$TAG" --repo "$GH_REPO" --json url | jfield url)"
   fi
   if ci_builds_assets; then
-    say "  NEXT: release-assets.yaml attaches tockmox-$VER.tar.gz, SHA256SUMS and the provenance in a minute or two;"
-    say "        confirm all three are on the Release page (a failed run says what to do in its log)"
+    say "  release-assets.yaml attaches tockmox-$VER.tar.gz, SHA256SUMS and the provenance in a minute or two; step 7 waits for them"
   fi
+}
+
+# ---------------------------------------------------------------- 7. read the Release back
+# What was published, not what was meant to be: every asset is downloaded from the Release and
+# checked. Read-only (a scratch directory), so report-only runs it too when the Release exists.
+published_assets() { # the names the Release holds now, one per line
+  gh release view "$TAG" --repo "$GH_REPO" --json assets \
+    | python3 -I -c 'import json,sys; print("\n".join(a["name"] for a in json.load(sys.stdin)["assets"]))'
+}
+unverified() { stop "post-publish: $* The Release $TAG is published and NOT verified; do not announce it. Fix the asset on the Release (RELEASING.md, Checksums) and rerun with the same spec."; }
+
+verify_published() {
+  say "7/8 read the Release back: checksums, archive, signature, images.txt$(ci_builds_assets && echo ', provenance')"
+  if ! gh release view "$TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+    [ "$GO" = 1 ] && unverified "gh release view $TAG fails."
+    say "  would wait up to ${ASSETS_WAIT}s for every asset, download them and verify them"
+    return 0
+  fi
+  WANT="$(basename "$GATE_REPORT") $(basename "$GATE_REPORT").sig images.txt tockmox-$VER.tar.gz SHA256SUMS"
+  ci_builds_assets && WANT="$WANT tockmox-$VER.tar.gz.intoto.jsonl"
+  waited=0
+  while :; do
+    names=$(published_assets) || unverified "cannot list the Release's assets."
+    missing=""
+    for a in $WANT; do printf '%s\n' "$names" | grep -Fx -- "$a" >/dev/null || missing="$missing $a"; done
+    [ -n "$missing" ] || break
+    if [ "$GO" = 0 ]; then say "  the Release lacks:$missing; --go uploads or waits for them, then verifies every asset"; return 0; fi
+    [ "$waited" -lt "$ASSETS_WAIT" ] || unverified "after ${waited}s the Release still lacks:$missing.$(ci_builds_assets && echo ' Read the release-assets run on the Actions tab.')"
+    say "  waiting for:$missing (${waited}s of ${ASSETS_WAIT}s)"
+    sleep "$ASSETS_POLL"; waited=$((waited + ASSETS_POLL))
+  done
+  say "  every asset is on the Release: $WANT"
+  PUB=$(mktemp -d) || stop "mktemp failed"
+  gh release download "$TAG" --repo "$GH_REPO" --dir "$PUB" --pattern '*' >/dev/null 2>&1 || unverified "gh release download failed."
+  for a in $WANT; do [ -s "$PUB/$a" ] || unverified "$a did not download, or is empty."; done
+  ARC="tockmox-$VER.tar.gz"
+
+  # SHA256SUMS: names exactly the archive, and verifies it
+  [ "$(awk '{print $2}' "$PUB/SHA256SUMS" | sed 's/^\*//')" = "$ARC" ] \
+    || unverified "SHA256SUMS on the Release does not list exactly $ARC: $(tr '\n' ' ' < "$PUB/SHA256SUMS")"
+  (cd "$PUB" && $SHA256 -c SHA256SUMS >/dev/null 2>&1) || unverified "SHA256SUMS on the Release does not verify $ARC."
+  say "  SHA256SUMS verifies $ARC: $(awk '{print $1}' "$PUB/SHA256SUMS")"
+  if ! ci_builds_assets && [ -f "$DIST_DIR/SHA256SUMS" ]; then
+    cmp -s "$PUB/SHA256SUMS" "$DIST_DIR/SHA256SUMS" || unverified "SHA256SUMS on the Release differs from the one built here ($DIST_DIR/SHA256SUMS)."
+    say "  ... and it is the SHA256SUMS built here"
+  fi
+
+  # the archive is git archive of the SHA: the commit id git writes into it, then every file
+  arc_commit=$(gzip -dc "$PUB/$ARC" | git get-tar-commit-id 2>/dev/null || true)
+  [ "$arc_commit" = "$SHA" ] || unverified "$ARC says it was archived from ${arc_commit:-<no commit id>}, not $SHA."
+  mkdir -p "$PUB/x-release" "$PUB/x-tag"
+  tar -xzf "$PUB/$ARC" -C "$PUB/x-release" || unverified "$ARC does not extract."
+  g archive --format=tar --prefix="tockmox-$VER/" "$SHA" | tar -xf - -C "$PUB/x-tag" || stop "git archive $SHA failed here"
+  arc_diff=$(diff -rq "$PUB/x-release" "$PUB/x-tag" 2>&1) || unverified "$ARC is not the tree of $SHA:
+$(printf '%s\n' "$arc_diff" | head -5)"
+  say "  $ARC is git archive of $SHA (commit id and every file)"
+
+  # the gate report and its signature as attached, and images.txt as attached
+  ssh-keygen -Y verify -f "$SIGNERS" -I "$PRINCIPAL" -n file -s "$PUB/$(basename "$GATE_REPORT").sig" < "$PUB/$(basename "$GATE_REPORT")" >/dev/null 2>&1 \
+    || unverified "the attached $(basename "$GATE_REPORT").sig does not verify the attached report against .gitsigners."
+  say "  the attached gate report's signature verifies (principal $PRINCIPAL)"
+  g show "$SHA:images.txt" | cmp -s - "$PUB/images.txt" || unverified "the attached images.txt is not the one at $SHA."
+  say "  the attached images.txt is the tag's"
+
+  # the provenance, from the bundle on the Release
+  if ci_builds_assets; then
+    prov=$(gh attestation verify "$PUB/$ARC" --bundle "$PUB/$ARC.intoto.jsonl" --repo "$GH_REPO" 2>&1) \
+      || unverified "gh attestation verify refuses $ARC with the attached bundle: $(printf '%s\n' "$prov" | tail -3 | tr '\n' ' ')"
+    say "  provenance verifies: gh attestation verify $ARC --bundle $ARC.intoto.jsonl --repo $GH_REPO"
+  fi
+  rm -rf "$PUB"
+  say "  PUBLISHED AND VERIFIED $TAG"
 }
 
 # ---------------------------------------------------------------- 7. the log line
@@ -446,7 +594,7 @@ log_line() {
   MINS=$(( ( $(date +%s) - T0 + 59 ) / 60 ))
   mode=report; [ "$GO" = 1 ] && mode=go
   line="$(date '+%Y-%m-%d %H:%M') $TAG $SHA $mode ${MINS}min ${ACTIONS}actions"
-  say "7/7 log: $line"
+  say "8/8 log: $line"
   if [ "$GO" = 1 ]; then printf '%s\n' "$line" >> "$TRAIN_LOG"; say "  appended to $TRAIN_LOG"
   else say "  would append to $TRAIN_LOG"; fi
 }
@@ -472,6 +620,7 @@ run_main() {
   tag_and_push
   sign_and_sum
   publish
+  verify_published
   log_line
   if [ "$GO" = 1 ]; then say "DONE. $TAG is cut: $ACTIONS actions in $MINS min."
   else say "REPORT DONE: $ACTIONS actions would run. Nothing was changed."; fi
@@ -488,7 +637,9 @@ gh_stub() {  # state lives in $PT_STATE (the fixture directory)
   case "$1 $2" in
     "run list")
       printf '[{"name":"ci","status":"completed","conclusion":"success","event":"pull_request","url":"stub://ci"},'
-      printf '{"name":"policy-gate","status":"completed","conclusion":"success","event":"pull_request","url":"stub://policy-gate"}]\n' ;;
+      printf '{"name":"policy-gate","status":"completed","conclusion":"success","event":"pull_request","url":"stub://policy-gate"}'
+      [ ! -f "$PT_STATE/extra-runs" ] || cat "$PT_STATE/extra-runs"
+      printf ']\n' ;;
     "pr view")
       st=$(cat "$PT_STATE/pr-state"); hd=$(git -C "$PT_STATE/template.git" rev-parse refs/heads/pin)
       printf '{"state":"%s","headRefOid":"%s","baseRefName":"main","title":"Pin to Tockmox v0.8.2"}\n' "$st" "$hd" ;;
@@ -502,16 +653,45 @@ gh_stub() {  # state lives in $PT_STATE (the fixture directory)
       git -C "$PT_STATE/template.git" show "$ref:README.md" | python3 -I -c 'import base64,sys; print(base64.b64encode(sys.stdin.read().encode()).decode())' ;;
     "release view")
       [ -f "$PT_STATE/release.json" ] || return 1
+      # release-assets.yaml, played: on the Nth look after the Release exists it attaches its three
+      # files, built as the workflow builds them (ci-badarch: from another commit; ci-badsum: a wrong sum)
+      if [ -f "$PT_STATE/ci-attach" ]; then
+        n=$(($(cat "$PT_STATE/ci-attach") - 1)); echo "$n" > "$PT_STATE/ci-attach"
+        if [ "$n" -le 0 ]; then
+          rm -f "$PT_STATE/ci-attach"; ref=v0.8.2; [ ! -f "$PT_STATE/ci-badarch" ] || ref=main
+          git -C "$PT_STATE/origin.git" archive --format=tar.gz --prefix=tockmox-0.8.2/ -o "$PT_STATE/published/tockmox-0.8.2.tar.gz" "$ref"
+          (cd "$PT_STATE/published" && { if command -v sha256sum >/dev/null 2>&1; then sha256sum tockmox-0.8.2.tar.gz; else shasum -a 256 tockmox-0.8.2.tar.gz; fi; } > SHA256SUMS)
+          [ ! -f "$PT_STATE/ci-badsum" ] || printf '%064d  tockmox-0.8.2.tar.gz\n' 0 > "$PT_STATE/published/SHA256SUMS"
+          echo '{"stub":"bundle"}' > "$PT_STATE/published/tockmox-0.8.2.tar.gz.intoto.jsonl"
+          python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); d["assets"]+=[{"name":n} for n in sys.argv[2:]]; json.dump(d,open(sys.argv[1],"w"))' \
+            "$PT_STATE/release.json" tockmox-0.8.2.tar.gz SHA256SUMS tockmox-0.8.2.tar.gz.intoto.jsonl
+        fi
+      fi
       cat "$PT_STATE/release.json" ;;
     "release create")
       echo "release create $*" >> "$PT_STATE/gh-calls"
-      names=""; prev=""
+      names=""; prev=""; mkdir -p "$PT_STATE/published"
       for a in "$@"; do
         case "$prev" in --repo|--title|--notes-file|--discussion-category) prev="$a"; continue ;; esac
-        case "$a" in /*) names="$names{\"name\":\"$(basename "$a")\"}," ;; esac
+        case "$a" in /*) names="$names{\"name\":\"$(basename "$a")\"},"; cp "$a" "$PT_STATE/published/" ;; esac
         prev="$a"
       done
+      # tamper: what lands on the Release is another commit's archive, with a SHA256SUMS that matches it
+      if [ -f "$PT_STATE/tamper" ]; then
+        git -C "$PT_STATE/origin.git" archive --format=tar.gz --prefix=tockmox-0.8.2/ -o "$PT_STATE/published/tockmox-0.8.2.tar.gz" main
+        (cd "$PT_STATE/published" && { if command -v sha256sum >/dev/null 2>&1; then sha256sum tockmox-0.8.2.tar.gz; else shasum -a 256 tockmox-0.8.2.tar.gz; fi; } > SHA256SUMS)
+      fi
       printf '{"url":"stub://release/%s","assets":[%s]}\n' "$3" "${names%,}" > "$PT_STATE/release.json" ;;
+    "release upload")
+      echo "release upload $*" >> "$PT_STATE/gh-calls"
+      for a in "$@"; do case "$a" in /*) cp "$a" "$PT_STATE/published/"
+        python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); d["assets"].append({"name":sys.argv[2]}); json.dump(d,open(sys.argv[1],"w"))' "$PT_STATE/release.json" "$(basename "$a")" ;; esac; done ;;
+    "release download")
+      dir=""; prev=""
+      for a in "$@"; do [ "$prev" = --dir ] && dir="$a"; prev="$a"; done
+      [ -n "$dir" ] && cp "$PT_STATE"/published/* "$dir/" ;;
+    "attestation verify")
+      [ -s "$3" ] && [ ! -f "$PT_STATE/prov-bad" ] || { echo "stub: verification failed for $3" >&2; return 1; } ;;
     *) echo "gh-stub: unhandled: gh $*" >&2; return 1 ;;
   esac
 }
@@ -528,7 +708,9 @@ st_fixture() { # NAME VARIANT -> builds $PT/NAME with origin.git, repo, template
   printf 'verify\n\n<!-- tockmox:footer:begin -->\n<sub>Tockmox v0.8.1</sub>\n<!-- tockmox:footer:end -->\n' > "$seed/docs/deployment/verify.md"
   echo "# changelog" > "$seed/CHANGELOG.md"
   [ "$v" = noimages ] || printf 'docker.io/library/alpine:3.24\nghcr.io/example/app:1.0\n' > "$seed/images.txt"
-  if [ "$v" = ciassets ]; then mkdir -p "$seed/.github/workflows"; echo "name: release-assets" > "$seed/.github/workflows/release-assets.yaml"; fi
+  ci=0; case "$v" in ciassets|cinever|cibad*) ci=1 ;; esac   # a 0.9 line: CI builds the assets and runs check-all
+  if [ "$ci" = 1 ]; then mkdir -p "$seed/.github/workflows"; echo "name: release-assets" > "$seed/.github/workflows/release-assets.yaml"; fi
+  if [ "$ci" = 1 ] || [ "$v" = cawfnorun ]; then mkdir -p "$seed/.github/workflows"; echo "name: check-all" > "$seed/.github/workflows/check-all.yaml"; fi
   # a stand-in for tools/site-pin-at-tag.sh with the same interface (TAG --dir DIR)
   cat > "$seed/tools/site-pin-at-tag.sh" <<'EOS'
 #!/usr/bin/env bash
@@ -569,6 +751,26 @@ EOS
     *)         printf '{"run_id":"selftest","head_sha":"%s","outcome":"READY"}\n' "$wsha" > "$d/run.json" ;;
   esac
   printf '# Gate report v0.8.2\n\nCommit %s.\n\nWhat was NOT tested: everything, this is a selftest.\n' "$B" > "$d/GATE-REPORT-v0.8.2.md"
+  # check-all evidence: on a 0.9 line a green check-all run on the SHA, on release-0.8 the results
+  # of tools/check-all.sh --strict and the .meta.json beside them (variants spoil one thing each)
+  if [ "$ci" = 1 ]; then
+    printf ',{"name":"check-all","status":"completed","conclusion":"success","event":"pull_request","url":"stub://check-all"}' > "$d/extra-runs"
+  fi
+  ca_sha="$B"; ca_clean=true; ca_skip=0; ca_exit=0; ca_cf=""; st2=pass; st2rc=0
+  case "$v" in
+    casha)   ca_sha="0000000000000000000000000000000000000000" ;;
+    cadirty) ca_clean=false ;;
+    caskip)  ca_skip=1; ca_exit=2; st2=skip; st2rc=2 ;;
+    capart)  ca_cf="origin/release-0.8" ;;
+  esac
+  printf 'ord\tkey\tstatus\trc\tseconds\tname\n1\ttools/a.sh\tpass\t0\t1\tgate a\n2\ttools/b.sh\t%s\t%s\t1\tgate b\n' "$st2" "$st2rc" > "$d/check-all-results.tsv"
+  printf '{"head_sha":"%s","clean":%s,"dirty_paths":%s,"strict":true,"changed_from":"%s","shard":"","passed":%s,"failed":0,"skipped":%s,"unselected":0,"othershard":0,"exit":%s}\n' \
+    "$ca_sha" "$ca_clean" "$([ "$ca_clean" = true ] && echo 0 || echo 1)" "$ca_cf" "$((2 - ca_skip))" "$ca_skip" "$ca_exit" > "$d/check-all-results.meta.json"
+  ca_line="CHECK_ALL_RESULTS=\"$d/check-all-results.tsv\""
+  case "$v" in canone|cawfnorun) ca_line="" ;; esac
+  [ "$ci" = 0 ] || ca_line=""
+  case "$v" in ciassets|cibadsum|cibadarch|cibadprov) echo 5 > "$d/ci-attach" ;; esac
+  case "$v" in cibadsum) touch "$d/ci-badsum" ;; cibadarch) touch "$d/ci-badarch" ;; cibadprov) touch "$d/prov-bad" ;; tamper) touch "$d/tamper" ;; esac
   printf 'Release notes for the selftest.\n' > "$d/notes.md"
   cat > "$d/spec" <<EOF
 REPO="$d/repo"
@@ -584,6 +786,9 @@ SIGNING_KEY="$PT/key"
 RELEASE_NOTES="$d/notes.md"
 DIST_DIR="$d/dist"
 TRAIN_LOG="$d/train-log.txt"
+ASSETS_WAIT=3
+ASSETS_POLL=1
+$ca_line
 EOF
 }
 
@@ -631,7 +836,15 @@ selftest_main() {
   sed -i.bak "s|SIGNING_KEY=.*|SIGNING_KEY=\"$PT/otherkey\"|" "$PT/wrongkey/spec"; st_run wrongkey
   st_probe "signing key is not the .gitsigners key" wrongkey 1 "not the key .gitsigners vouches for"
   st_fixture noimages noimages; st_run noimages;    st_probe "the candidate has no images.txt" noimages 1 "has no images.txt"
-  for n in witness notready nooutcome nonff forbidden tagexists wrongkey noimages; do
+
+  echo "selftest: check-all evidence (a SKIP is not green)"
+  st_fixture canone canone;       st_run canone;      st_probe "release-0.8 line, no CHECK_ALL_RESULTS in the spec" canone 1 "no check-all evidence"
+  st_fixture caskip caskip;       st_run caskip;      st_probe "a check-all results file with a skipped gate" caskip 1 "did not pass, and a skip is not green"
+  st_fixture casha casha;         st_run casha;       st_probe "check-all results from another commit" casha 1 "it ran on 0000000000000000000000000000000000000000"
+  st_fixture cadirty cadirty;     st_run cadirty;     st_probe "check-all results from a dirty checkout" cadirty 1 "checkout was not clean"
+  st_fixture capart capart;       st_run capart;      st_probe "check-all results of a --changed-from run" capart 1 "not a full run"
+  st_fixture cawfnorun cawfnorun; st_run cawfnorun;   st_probe "a tree with check-all.yaml and no check-all run on the SHA" cawfnorun 1 "no check-all run on"
+  for n in witness notready nooutcome nonff forbidden tagexists wrongkey noimages canone caskip casha cadirty capart cawfnorun; do
     st_assert "$n: nothing merged, pushed or signed" bash -c "[ ! -f $PT/$n/gh-calls ] && [ \"\$(cat $PT/$n/pr-state)\" = OPEN ] && [ ! -f $PT/$n/GATE-REPORT-v0.8.2.md.sig ]"
   done
 
@@ -639,6 +852,8 @@ selftest_main() {
   st_fixture good good; A=$(git -C "$PT/good/origin.git" rev-parse refs/heads/release-0.8); B=$(git -C "$PT/good/origin.git" rev-parse refs/heads/train/0.8.2)
   st_run good
   st_probe "report-only exits 0" good 0 "REPORT DONE: 9 actions would run"
+  st_probe "it reads the check-all results as evidence" good 0 "check-all: 2 gates passed on $B, clean checkout"
+  st_probe "it says it would read the Release back" good 0 "would wait up to 3s for every asset"
   st_probe "it prints the fast-forward push" good 0 "would run: \$ git -C .*push origin $B:refs/heads/release-0.8"
   st_probe "it prints the signed tag" good 0 "would run: .*tag -s v0.8.2"
   st_probe "it prints the release with --verify-tag" good 0 "would run: \$ gh release create v0.8.2 .*--verify-tag"
@@ -650,6 +865,10 @@ selftest_main() {
   echo "selftest: --go against the throwaway origin (gh stubbed), then a second --go that skips everything"
   st_run good --go
   st_probe "--go exits 0" good 0 "DONE. v0.8.2 is cut: 9 actions"
+  st_probe "it read the Release back before DONE" good 0 "PUBLISHED AND VERIFIED v0.8.2"
+  st_probe "... SHA256SUMS from the Release is the one built here" good 0 "and it is the SHA256SUMS built here"
+  st_probe "... the archive is git archive of the SHA" good 0 "tockmox-0.8.2.tar.gz is git archive of $B"
+  st_assert "VERIFIED comes before DONE" bash -c "[ \$(grep -n 'PUBLISHED AND VERIFIED' $PT/good/out | cut -d: -f1) -lt \$(grep -n 'DONE. v0.8.2' $PT/good/out | cut -d: -f1) ]"
   st_assert "origin/release-0.8 fast-forwarded to the candidate" test "$(git -C "$PT/good/origin.git" rev-parse refs/heads/release-0.8)" = "$B"
   st_assert "tag v0.8.2 on origin at the candidate" test "$(git -C "$PT/good/origin.git" rev-parse 'refs/tags/v0.8.2^{commit}')" = "$B"
   st_assert "tag verifies against .gitsigners" bash -c "git -C $PT/good/repo -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=$PT/good/repo/.gitsigners verify-tag v0.8.2 >/dev/null 2>&1"
@@ -662,7 +881,16 @@ selftest_main() {
   st_assert "one log line with minutes and the action count" bash -c "[ \$(wc -l < $PT/good/train-log.txt) -eq 1 ] && grep -q ' go [0-9]*min 9actions' $PT/good/train-log.txt"
   st_run good --go
   st_probe "second --go skips every step" good 0 "DONE. v0.8.2 is cut: 0 actions"
+  st_probe "... and still reads the Release back" good 0 "PUBLISHED AND VERIFIED v0.8.2"
   st_assert "second run appended its own log line" test "$(wc -l < "$PT/good/train-log.txt")" -eq 2
+  st_run good
+  st_probe "report-only on a published Release verifies it for real (it only reads)" good 0 "PUBLISHED AND VERIFIED v0.8.2"
+
+  echo "selftest: after publish, an archive that is not what was built stops the run before DONE"
+  st_fixture tamper tamper
+  st_run tamper --go
+  st_probe "release-0.8: another commit's archive with a matching SHA256SUMS on the Release" tamper 1 "differs from the one built here"
+  st_assert "tamper: no DONE and no log line" bash -c "! grep -q 'DONE. v0.8.2' $PT/tamper/out && [ ! -f $PT/tamper/train-log.txt ]"
 
   echo "selftest: a line whose tree has release-assets.yaml leaves the archive and SHA256SUMS to CI"
   st_fixture ciassets ciassets
@@ -670,12 +898,25 @@ selftest_main() {
   st_probe "report-only: two fewer actions (no archive, no SHA256SUMS)" ciassets 0 "REPORT DONE: 7 actions would run"
   st_probe "it says CI builds them" ciassets 0 "built from the tag by release-assets.yaml"
   st_run ciassets --go
+  st_probe "check-all.yaml in the tree makes check-all required, and its run is the evidence" ciassets 0 "check-all: success on"
   st_probe "--go exits 0 with seven actions" ciassets 0 "DONE. v0.8.2 is cut: 7 actions"
-  st_probe "it names the next check" ciassets 0 "NEXT: release-assets.yaml attaches tockmox-0.8.2.tar.gz"
+  st_probe "it waits for the workflow's assets" ciassets 0 "waiting for: tockmox-0.8.2.tar.gz SHA256SUMS tockmox-0.8.2.tar.gz.intoto.jsonl"
+  st_probe "it verifies the provenance from the attached bundle" ciassets 0 "provenance verifies: gh attestation verify tockmox-0.8.2.tar.gz --bundle"
+  st_probe "it verifies the CI-built archive is git archive of the SHA" ciassets 0 "tockmox-0.8.2.tar.gz is git archive of"
+  st_probe "and says so before DONE" ciassets 0 "PUBLISHED AND VERIFIED v0.8.2"
   st_assert "no archive or SHA256SUMS built locally" bash -c "[ ! -e $PT/ciassets/dist/tockmox-0.8.2.tar.gz ] && [ ! -e $PT/ciassets/dist/SHA256SUMS ]"
-  st_assert "release created with the gate report, its signature and images.txt" bash -c "python3 -I -c 'import json,sys; a=sorted(x[\"name\"] for x in json.load(open(sys.argv[1]))[\"assets\"]); sys.exit(0 if a==[\"GATE-REPORT-v0.8.2.md\",\"GATE-REPORT-v0.8.2.md.sig\",\"images.txt\"] else 1)' $PT/ciassets/release.json"
+  st_assert "release created with the gate report, its signature and images.txt only" bash -c "grep '^release create' $PT/ciassets/gh-calls | grep -q 'GATE-REPORT-v0.8.2.md.sig' && ! grep '^release create' $PT/ciassets/gh-calls | grep -q -e 'tar.gz' -e SHA256SUMS"
   st_run ciassets --go
   st_probe "second --go skips every step" ciassets 0 "DONE. v0.8.2 is cut: 0 actions"
+
+  echo "selftest: after publish on a 0.9 line, each way the Release can be wrong stops the run before DONE"
+  st_fixture cinever cinever;     st_run cinever --go;    st_probe "the workflow never attaches its files" cinever 1 "still lacks: tockmox-0.8.2.tar.gz SHA256SUMS tockmox-0.8.2.tar.gz.intoto.jsonl"
+  st_fixture cibadsum cibadsum;   st_run cibadsum --go;   st_probe "SHA256SUMS on the Release does not verify the archive" cibadsum 1 "does not verify tockmox-0.8.2.tar.gz"
+  st_fixture cibadarch cibadarch; st_run cibadarch --go;  st_probe "the archive is another commit's, with a SHA256SUMS that matches it" cibadarch 1 "says it was archived from"
+  st_fixture cibadprov cibadprov; st_run cibadprov --go;  st_probe "the provenance does not verify" cibadprov 1 "gh attestation verify refuses"
+  for n in cinever cibadsum cibadarch cibadprov; do
+    st_assert "$n: NOT verified is said, no DONE, no log line" bash -c "grep -q 'NOT verified; do not announce it' $PT/$n/out && ! grep -q 'DONE. v0.8.2' $PT/$n/out && [ ! -f $PT/$n/train-log.txt ]"
+  done
 
   if [ "$FAILS" = 0 ]; then echo "train-morning --selftest: PASSED"; exit 0; fi
   echo "train-morning --selftest: FAILED"; exit 1

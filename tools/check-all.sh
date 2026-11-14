@@ -60,17 +60,27 @@ cd "$(dirname "$0")/.."
 #   --shard I/N          run only this shard's share, split by measured seconds (tools/gate-weights.tsv);
 #                        N shards' results together are one unsharded run.
 #   --list               print the registered gates (ordinal, key, serial flag, name) and run nothing.
+#   --strict             a skip is not green: a run with no failure that skipped a gate, or left one
+#                        unselected, exits 2 (BLOCKED) instead of 0. A failure still exits 1. This is
+#                        the release mode (RELEASING.md: "A SKIP is not green; exit code 2 is BLOCKED").
+#                        CHECK_ALL_STRICT=1 does the same.
 #
 # Each run writes one row per gate to build/check-all-results.tsv (CHECK_ALL_RESULTS to move it):
 # ordinal, key, status (pass, fail, skip, timeout, unselected, othershard), exit code, seconds, name.
+# Beside it, the same name with .meta.json for .tsv, it writes what the rows were run on: the commit
+# (head_sha), whether the checkout was clean when the run started, the mode (strict, changed_from,
+# shard), the counts and the exit status. tools/train-morning.sh reads both as check-all evidence.
 # tools/gate-plan.py holds the selection and shard rules and their selftest.
 LIST_ONLY=0
+STRICT="${CHECK_ALL_STRICT:-0}"
+case "$STRICT" in 1|true|yes) STRICT=1 ;; *) STRICT=0 ;; esac
 CHANGED_FROM="${CHECK_ALL_CHANGED_FROM:-}"
 SHARD="${CHECK_ALL_SHARD:-}"
 RESULTS="${CHECK_ALL_RESULTS:-build/check-all-results.tsv}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --list) LIST_ONLY=1 ;;
+    --strict) STRICT=1 ;;
     --changed-from) [ $# -ge 2 ] || { echo "check-all.sh: --changed-from needs a git ref" >&2; exit 1; }
                     CHANGED_FROM="$2"; shift ;;
     --shard) [ $# -ge 2 ] || { echo "check-all.sh: --shard needs I/N" >&2; exit 1; }
@@ -162,9 +172,13 @@ sys.exit(128 - rc if rc < 0 else rc)
 SLOTS="$(mktemp -d)"
 trap 'rm -rf "$SLOTS"' EXIT
 nslot=0
-tree_fingerprint() {
-  # Tracked and untracked files outside build/ and the vendored subcharts, contents included.
+tree_status() {
+  # Tracked and untracked files outside build/ and the vendored subcharts that differ from HEAD.
   git status --porcelain --untracked-files=all 2>/dev/null | grep -v -e ' build/' -e '/charts/[^/]*\.tgz$' -e '__pycache__' | sort
+}
+tree_fingerprint() {
+  # The same files, contents included.
+  tree_status
   git diff 2>/dev/null | cksum
 }
 
@@ -323,10 +337,17 @@ skip_gate() {
   echo 2 > "$slot.rc"
 }
 
+# WHAT THE ROWS WERE RUN ON, for the .meta.json beside the results. A results file is evidence for
+# a commit only when it says which one, and only when the checkout matched it: a run over uncommitted
+# edits describes no commit at all.
+START_HEAD="$(git --no-optional-locks rev-parse HEAD 2>/dev/null || true)"
+START_DIRTY="$(tree_status | wc -l | tr -d ' ')"
+
 PLAN=""
 if [ "$LIST_ONLY" = 0 ]; then
 echo "Tockmox static gates, run locally."
 echo "Repository: $(pwd)"
+[ "$STRICT" = 0 ] || echo "Mode: strict. A skipped or unselected gate is not green: the run exits 2 (BLOCKED)."
 
 # A CLONE, NOT AN UNPACKED ARCHIVE. Several gates judge `git ls-files` (what ships), two compare against the
 # previous release tag, and the tree-unchanged assertion at the end reads `git status`. Outside a git checkout
@@ -784,9 +805,39 @@ printf '%s passed, %s failed, %s skipped\n' "$pass" "$fail" "$skipped"
 [ "$unselected" -gt 0 ] && printf '%s not selected (inputs unchanged)\n' "$unselected"
 [ "$othershard" -gt 0 ] && printf '%s on other shards (%s)\n' "$othershard" "$SHARD"
 printf 'Results: %s\n' "$RESULTS"
+
+# The evidence beside the rows: which commit, from a clean checkout or not, in which mode.
+# Written before the verdict is printed, with the exit status the verdict below returns.
+if [ "$fail" -ne 0 ]; then final_rc=1
+elif [ "$STRICT" = 1 ] && { [ "$skipped" -gt 0 ] || [ "$unselected" -gt 0 ]; }; then final_rc=2
+else final_rc=0; fi
+RESULTS_META="${RESULTS%.tsv}.meta.json"
+python3 -c '
+import json, sys
+k = ["head_sha", "dirty_paths", "strict", "changed_from", "shard", "passed", "failed", "skipped", "unselected", "othershard", "exit"]
+v = dict(zip(k, sys.argv[2:]))
+for n in ("dirty_paths", "passed", "failed", "skipped", "unselected", "othershard", "exit"):
+    v[n] = int(v[n])
+v["clean"] = v["dirty_paths"] == 0
+v["strict"] = v["strict"] == "1"
+json.dump(v, open(sys.argv[1], "w"), indent=1, sort_keys=True)
+' "$RESULTS_META" "$START_HEAD" "${START_DIRTY:-0}" "$STRICT" "$CHANGED_FROM" "$SHARD" \
+  "$pass" "$fail" "$skipped" "$unselected" "$othershard" "$final_rc" \
+  || { echo "check-all.sh: could not write $RESULTS_META"; final_rc=1; }
+printf 'Evidence: %s (commit %s, %s)\n' "$RESULTS_META" "${START_HEAD:-<none>}" \
+  "$([ "${START_DIRTY:-0}" = 0 ] && echo 'clean checkout' || echo "${START_DIRTY} path(s) differed from it when the run started")"
+
 if [ "$fail" -ne 0 ]; then
   printf 'FAILED:%s\n' "$failed_names"
   exit 1
+fi
+if [ "$final_rc" = 2 ]; then
+  printf '\nBLOCKED (strict): %s skipped and %s not selected. In strict mode a gate that did not run is\n' "$skipped" "$unselected"
+  printf 'not green; give each skipped gate what it said it lacked, and run every gate (no --changed-from).\n'
+  exit 2
+fi
+if [ "$final_rc" != 0 ]; then
+  exit "$final_rc"
 fi
 if [ "$unselected" -gt 0 ] || [ "$othershard" -gt 0 ]; then
   echo "All selected static gates passed. A run with no arguments runs every gate."
