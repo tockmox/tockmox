@@ -10,7 +10,8 @@
 #   2. The page and the installer. The block P16 runs resolves in this tree to one block, holds the three placeholders
 #      P16 fills once each and one --dry-run, and the page's two success conditions are the words the installer
 #      prints; the names P16 reads (the in-cluster address, the credential copy, the migration commit's author, the
-#      refusal and the prompt) are the installer's; and the reason P16 refuses a private CA still holds.
+#      refusal and the prompt) are the installer's; and the reason P16 refuses a private CA still holds (the
+#      installer takes --from-ca and hands it on as --offsite-git-ca, and P16 does not add it yet).
 #   3. The path as a script, against a stub product: git is real (P09's site repository, the git daemon, the external
 #      forge and the built-in forge are bare repositories reached through insteadOf), kubectl answers from one state
 #      file that the path's own calls change, and a stand-in tockmox-install.sh does what move-in-forge does to that
@@ -170,8 +171,9 @@ grep -qF 'RELEASE="tockmox-forge"; ORG="tockmox"; REPO="site"' "$MI" && grep -qF
   && grep -qF 'FORGE_NS="tockmox-forge"' "$MI" && ok "installer: the in-cluster address P16 expects is the one it writes" || bad "installer: in-cluster address" ""
 grep -qF 'CRED_COPY="tockmox-site-repo-before-move"' "$MI" && grep -qF 'user.name="Tockmox installer"' "$MI" && grep -qF 'ROOT_APP="tockmox-root"' "$MI" \
   && ok "installer: the credential copy, the migration commit's author and the root are the names P16 reads" || bad "installer: names" ""
-grep -qF -- '--offsite-git|--offsite-git-credentials)' "$MI" && ! grep -qF -- '--offsite-git-ca' "$MI" && grep -qF 'if [[ -n "$OS_GIT_URL$OS_GIT_CREDS$OS_GIT_CA" ]]; then' "${TREE}/install/bootstrap-forge.sh" \
-  && ok "installer: P16's reason to refuse a private CA still holds (no CA option of move-in-forge's own, and bootstrap-forge takes --offsite-git-ca only with --offsite-git)" \
+grep -qF -- '--from-ca) FROM_CA=' "$MI" && grep -qF 'OS_CA=(--offsite-git-ca "$FROM_CA")' "$MI" && grep -qF -- '--offsite-git-ca)' "${TREE}/install/bootstrap-forge.sh" \
+  && grep -qF '[ ! -s "${FROM_DIR}/ca.crt" ]' "$P16" \
+  && ok "installer: P16's reason to refuse a private CA still holds (move-in-forge takes --from-ca and gives the off-site run --offsite-git-ca, and P16 does not add it yet)" \
   || bad "installer: the CA reason" "move-in-forge or bootstrap-forge changed: re-read P16's ca.crt gate and its INVENTORY row"
 
 # ------------------------------------------------------------------ 3. the path as a script
@@ -423,7 +425,7 @@ grep -q 'Run the external route' "${TMP}/gout" && ok "gate: the reason names the
 gate "no external forge to move from (no TOCKMOX_P16_FROM_DIR)" "$gd/p09" external ""
 cp -R "$gd/from-dir" "$gd/ca-dir"; printf -- '-----BEGIN CERTIFICATE-----\nstub\n-----END CERTIFICATE-----\n' > "$gd/ca-dir/ca.crt"
 gate "an external forge on a private CA" "$gd/p09" external "$gd/ca-dir"
-grep -q 'passes no CA to the off-site copy' "${TMP}/gout" && ok "gate: the private-CA reason names the gap in the command" || bad "gate: CA reason" "$(tail -2 "${TMP}/gout")"
+grep -q "does not add the page's --from-ca yet" "${TMP}/gout" && ok "gate: the private-CA reason names the gap in the path" || bad "gate: CA reason" "$(tail -2 "${TMP}/gout")"
 mv "$gd/p09/session.env" "$gd/p09/session.off"
 gate "a P09 session that names no site repository" "$gd/p09" external "$gd/from-dir"
 mv "$gd/p09/session.off" "$gd/p09/session.env"

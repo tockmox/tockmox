@@ -24,7 +24,8 @@ team's members are for that team and the owners, and a team write needs write:or
 Knobs, read from the environment at start: PRS (how many pull requests, default 3),
 FAIL=pulls (that endpoint answers 500), BADREV=1 (reviews come in a field order the dump
 cannot read, as if the forge changed its format), CORRUPT=1 (a stored dump reads back with
-a byte added, as if the bucket damaged it).
+a byte added, as if the bucket damaged it), TLS_CERT and TLS_KEY (PEM files: serve https with
+that certificate, for a client that must trust a private CA).
 """
 import http.server
 import json as _json
@@ -520,6 +521,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 
 srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+if os.environ.get("TLS_CERT"):
+    import ssl
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(os.environ["TLS_CERT"], os.environ["TLS_KEY"])
+    srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
 with open(sys.argv[2], "w") as f:
     f.write(str(srv.server_address[1]))
 srv.serve_forever()

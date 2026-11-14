@@ -103,7 +103,11 @@ costs you, with the reasoning in the documentation rather than here.
   (uncommitted changes, Argo CD reading another repository or revision, an
   unsettled Application, a forge holding other history), checks afterwards that
   every Application is Synced and Healthy with nothing pruned, and a re-run is a
-  no-op (docs/administration/site-forge.md, "Move a running site in").
+  no-op (docs/administration/site-forge.md, "Move a running site in"). An old
+  repository on a forge whose certificate a private CA signed takes `--from-ca
+  FILE`: the command reads it with that CA before it writes anything, refuses
+  without it naming the option, and passes it to `bootstrap-forge` as
+  `--offsite-git-ca` so the push mirror trusts it.
 
 - **Status names the Authentik applications open to every signed-in user.** An
   identity-layer CronJob lists every application with no group or user

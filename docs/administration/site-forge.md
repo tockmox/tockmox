@@ -399,6 +399,12 @@ off-site copy. It is the inverse of [Move to my own forge](#move-to-my-own-forge
   that can **push** to it: the forge's push mirror sends `main` there after every
   change, so that token must be allowed to push `main` directly (a branch rule or
   ruleset bypass). Pass `--no-offsite-copy` instead to leave the old repository as it is.
+- if a private CA signed that forge's certificate, the CA as a PEM file, given as
+  `--from-ca FILE` before `--`. The command reads the old repository with it before
+  it changes anything, and hands it to `bootstrap-forge` as `--offsite-git-ca`, so
+  the forge's push mirror and its off-site copy job trust it too. Give it even if
+  your workstation already trusts that CA: the forge does not. Argo CD needs
+  nothing new, because it already reads that repository.
 - what `bootstrap-forge` asks for (the recovery kit and its encryption), after `--`.
 
 **WORKSTATION**
@@ -423,8 +429,10 @@ again without `--dry-run` to move; it asks you to type the context name.
 the checkout; a checkout that is not the revision Argo CD is synced to; a root
 Application that reads another repository (your repository in its ssh spelling,
 `git@host:owner/repo.git`, is the same repository); an Application that is not
-Synced and Healthy (name one you accept as it is with `--accept-unsettled`); and
-a built-in forge that already holds another site's history.
+Synced and Healthy (name one you accept as it is with `--accept-unsettled`); an
+old repository it cannot read with the token you gave, or whose certificate it
+cannot verify (the refusal names `--from-ca`); and a built-in forge that already
+holds another site's history.
 
 **In order, once the checks pass:** a copy of Argo CD's credential for the old
 repository is kept beside it, so Argo CD can read it at every moment of the
