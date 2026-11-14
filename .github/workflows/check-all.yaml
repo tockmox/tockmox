@@ -85,7 +85,7 @@ jobs:
           v="$(sed -n 's/^  KUBECONFORM_SHA256: "\([^"]*\)".*/\1/p' .github/workflows/ci.yaml | head -1)"
           [ -n "$v" ] || { echo "::error::KUBECONFORM_SHA256 not found in ci.yaml's env block"; exit 1; }
           echo "KUBECONFORM_SHA256=$v" | tee -a "$GITHUB_ENV"
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
           version: ${{ env.HELM_VERSION }}
       - name: kubeconform and jq

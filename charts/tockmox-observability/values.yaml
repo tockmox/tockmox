@@ -372,7 +372,7 @@ notifications:
   # while doing it.
   apprise:
     enabled: false
-    image: caronc/apprise:2.0.2     # no "v" from 2.0 on
+    image: caronc/apprise:2.1.0     # no "v" from 2.0 on
     # Secret YOU create, holding one key whose value is a newline-separated
     # list of Apprise URLs. Those URLs contain credentials, which is why this
     # is a Secret and not a value.
@@ -386,7 +386,7 @@ notifications:
     enabled: true
     # Standard library only, so this runs unchanged on a mirrored image in an
     # airgapped cluster. No pip install at container start.
-    image: python:3.14-slim
+    image: python:3.15-slim
     replicas: 2
     # "ntfy" or "apprise". Set to apprise (and enable it) to fan out; put an
     # ntfy:// URL in your Apprise config to keep the phone path as well.
