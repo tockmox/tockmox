@@ -95,8 +95,8 @@
 #   1    run it. Refused up front on the built-in route, or when the settings cannot be read or name a private CA
 #   0    never run it
 #   anything else is refused.
-# A private CA is skipped because move-in-forge passes no CA to the off-site copy it makes, so the page's command
-# cannot finish as printed there. A kept run is skipped because the move changes where the kept install's site lives.
+# A private CA is skipped because P16 does not add the page's --from-ca to move-in-forge yet, so it would not run the
+# command a reader with that forge runs. A kept run is skipped because the move changes where the kept install's site lives.
 # P16 has its own budget, TOCKMOX_P16_BUDGET (default 5400 seconds), read before each step up to the move; once the
 # move has begun it runs to its end. A P16 failure becomes the lane's exit only when nothing earlier already failed it.
 # P13 and netpol-adversary.sh then run on the install as P16 left it, on the built-in forge.
@@ -299,7 +299,7 @@ case "$MOVE_IN" in
       move_ca="$(bash "${PROV}/throwaway-cluster.sh" offsite-check)" || move_ca=""
       case "$move_ca" in
         no-ca) MOVE_RUN=1 ;;
-        ca) MOVE_WHY="the external forge the off-site settings name is on a private CA, and move-in-forge passes no CA to the off-site copy it makes, so the page's command cannot finish as printed" ;;
+        ca) MOVE_WHY="the external forge the off-site settings name is on a private CA, and P16 does not add the page's --from-ca to move-in-forge yet" ;;
         *) MOVE_WHY="no external forge to move the site in from: the off-site settings cannot be read (the provisioner's lines above say why)" ;;
       esac
       [ "$MOVE_RUN" = 1 ] || [ "$MOVE_IN" = auto ] || refuse "TOCKMOX_P09_MOVE_IN=1: ${MOVE_WHY}"

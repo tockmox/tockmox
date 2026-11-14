@@ -2,11 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Sourced by run.sh after forge-move-tests.sh, whose stand-in it uses (dp_start, dp_stop,
-# lib/forge-stub.py). Groups MI1-MI6: install/forge-move-in.sh, reached as
+# lib/forge-stub.py). Groups MI1-MI7: install/forge-move-in.sh, reached as
 # `tockmox-install.sh move-in-forge`.
 #
-# HERMETIC, and git is REAL: the site checkout, the forge's repository (a bare repository
-# the stand-in serves over HTTP) and the migration commit are real commits. A kubectl of
+# HERMETIC, and git is REAL: the site checkout, the forge's repository and the old
+# repository (bare repositories the stand-in serves over HTTP, and in MI7 over HTTPS with a
+# certificate from a CA made for the case) and the migration commit are real commits. A kubectl of
 # this file's own plays Argo CD (its Applications before and after the cutover, switched
 # by the file mi-mode), the repository Secrets, the forge's admin Secret and the applies; a
 # stand-in bootstrap-forge records what it was given and pushes the migrated tree to the
@@ -15,8 +16,10 @@
 # Every assertion reads what the move LEFT: the forge's refs and files, what was applied
 # and deleted, what bootstrap-forge was given, the checkout it must not have changed.
 
-MI_FROM="https://example.invalid/me/site.git"
-MI_FROM_SSH="git@example.invalid:me/site.git"
+# The old repository, which the move reads before it writes anything: mi_start serves it from the
+# stand-in as me/site.git and sets these two spellings of it.
+MI_FROM=""
+MI_FROM_SSH=""
 MI_IN="$RS_URL"   # the built-in forge's in-cluster address, as forge-restore-tests.sh names it
 MI_BIN="$WORK/forge-move-in-bin"; mkdir -p "$MI_BIN"
 cat > "$MI_BIN/kubectl" <<'STUB'
@@ -87,6 +90,7 @@ MI_STATUS=0
 mi_git() { PATH="$DP_PATH" git "$@"; }
 mi_start() {
   dp_start "$1"
+  MI_FROM="http://127.0.0.1:${DP_PORT}/me/site.git"; MI_FROM_SSH="git@127.0.0.1:me/site.git"
   local F="$D/root/tockmox/site.git"
   rm -rf "$F"; mi_git init -q --bare -b main "$F"; mi_git -C "$F" config http.receivepack true
   MI_SITE="$D/mysite"
@@ -103,6 +107,7 @@ mi_start() {
   mi_git -C "$MI_SITE" -c user.name=t -c user.email=t@example.invalid commit -q -m "first"
   echo 'b: 1' >> "$MI_SITE/site/values/observability.yaml"
   mi_git -C "$MI_SITE" -c user.name=t -c user.email=t@example.invalid commit -qam "second"
+  mkdir -p "$D/root/me"; mi_git clone -q --bare "$MI_SITE" "$D/root/me/site.git"
   mkdir -p "$D/state"; : > "$D/state/calls.log"
   cp "$MI_BIN/apps.py" "$D/state/apps.py"
   printf '%s\n' "$2" > "$D/state/mi-mode"
@@ -228,4 +233,51 @@ assert_artifact "no --from-credentials and no --no-offsite-copy is refused" \
 mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --no-offsite-copy -- --kit-out "$D/kit" --age-recipient age1test
 assert_artifact "with --no-offsite-copy, bootstrap-forge is not told to mirror to --from" \
   "echo $MI_STATUS; ls '$D/state' | grep -c '^bf-args-'; grep -c -- '--offsite-git' '$D/state/bf-args-0' || true" "$(printf '0\n1\n0')"
+dp_stop
+
+# mi_tls_start: a CA made for the case, a certificate it signs for 127.0.0.1, another CA that signed
+# nothing here, and a second stand-in serving the same repositories over HTTPS with that certificate.
+# Sets MI_TLS_PORT and MI_TLS_PID.
+mi_tls_start() {
+  local C="$D/ca"; mkdir -p "$C"
+  ( cd "$C" \
+    && openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days 2 -subj "/CN=move-in test CA" \
+    && openssl req -x509 -newkey rsa:2048 -nodes -keyout other.key -out other.crt -days 2 -subj "/CN=another CA" \
+    && openssl req -newkey rsa:2048 -nodes -keyout srv.key -out srv.csr -subj "/CN=127.0.0.1" \
+    && printf 'subjectAltName=IP:127.0.0.1\n' > srv.ext \
+    && openssl x509 -req -in srv.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out srv.crt -days 2 -extfile srv.ext ) >/dev/null 2>&1
+  rm -f "$D/tls-port"
+  env PATH="$DP_PATH" TLS_CERT="$C/srv.crt" TLS_KEY="$C/srv.key" python3 "$DP_STUB" "$D/root" "$D/tls-port" >/dev/null 2>&1 &
+  MI_TLS_PID=$!
+  local i=0
+  while [ ! -s "$D/tls-port" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+  MI_TLS_PORT="$(cat "$D/tls-port" 2>/dev/null || true)"
+}
+
+path_begin "MI7" "an old repository behind a private CA: refused before anything is written unless --from-ca names the CA; with it, read, moved, and made the off-site copy with bootstrap-forge's --offsite-git-ca"
+mi_start i7 settle
+mi_tls_start
+MI_FROM_TLS="https://127.0.0.1:${MI_TLS_PORT}/me/site.git"
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM_TLS" --from-credentials "$D/creds" -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "without --from-ca the certificate is not verified, the refusal names --from-ca, and nothing is written" \
+  "echo $MI_STATUS; grep -c 'cannot verify the certificate of 127.0.0.1:' '$D/out/stderr'; grep -c 'give that CA as --from-ca FILE' '$D/out/stderr'; mi_writes; ls '$D/state' | grep -c '^bf-args-' || true" \
+  "$(printf '1\n1\n1\n0\n0')"
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM_TLS" --from-credentials "$D/creds" --from-ca "$D/ca/other.crt" -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "a --from-ca that did not sign the certificate is refused as such, and nothing is written" \
+  "echo $MI_STATUS; grep -c -- '--from-ca $D/ca/other.crt does not verify the certificate' '$D/out/stderr'; mi_writes; ls '$D/state' | grep -c '^bf-args-' || true" \
+  "$(printf '1\n1\n0\n0')"
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM_TLS" --from-credentials "$D/creds" -- --offsite-git-ca "$D/ca/ca.crt" --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "--offsite-git-ca after -- is refused, pointing at --from-ca" \
+  "echo $MI_STATUS; grep -c -- 'as --from-ca FILE, before --' '$D/out/stderr'; mi_writes" "$(printf '1\n1\n0')"
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM_TLS" --no-offsite-copy --from-ca "$D/ca/ca.crt" -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "--from-ca with --no-offsite-copy is refused: the command never connects to --from then" \
+  "echo $MI_STATUS; grep -c -- '--from-ca goes with --from-credentials' '$D/out/stderr'; mi_writes" "$(printf '1\n1\n0')"
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM_TLS" --from-credentials "$D/creds" --from-ca "$D/ca/ca.crt" -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "with --from-ca the old repository is read through its certificate and the move completes" \
+  "echo $MI_STATUS; grep -c 'its certificate verifies against $D/ca/ca.crt' '$D/out/stdout'; grep -c 'nothing was pruned' '$D/out/stdout'; mi_forge rev-list --count main" \
+  "$(printf '0\n1\n1\n3')"
+assert_artifact "the CA goes to the off-site run alone, as bootstrap-forge's --offsite-git-ca beside --offsite-git --from" \
+  "grep -c -- '--offsite-git-ca' '$D/state/bf-args-0' || true; grep -A1 -- '--offsite-git$' '$D/state/bf-args-1' | tail -1; grep -A1 -- '--offsite-git-ca' '$D/state/bf-args-1' | tail -1" \
+  "$(printf '0\n%s\n%s' "$MI_FROM_TLS" "$D/ca/ca.crt")"
+kill "$MI_TLS_PID" 2>/dev/null || true; wait "$MI_TLS_PID" 2>/dev/null || true
 dp_stop
