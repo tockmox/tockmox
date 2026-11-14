@@ -10,8 +10,8 @@
 #   2. The page and the installer. The block P16 runs resolves in this tree to one block, holds the three placeholders
 #      P16 fills once each and one --dry-run, and the page's two success conditions are the words the installer
 #      prints; the names P16 reads (the in-cluster address, the credential copy, the migration commit's author, the
-#      refusal and the prompt) are the installer's; and the reason P16 refuses a private CA still holds (the
-#      installer takes --from-ca and hands it on as --offsite-git-ca, and P16 does not add it yet).
+#      refusal and the prompt) are the installer's; and the --from-ca P16 adds for a private CA is the installer's
+#      and the page's.
 #   3. The path as a script, against a stub product: git is real (P09's site repository, the git daemon, the external
 #      forge and the built-in forge are bare repositories reached through insteadOf), kubectl answers from one state
 #      file that the path's own calls change, and a stand-in tockmox-install.sh does what move-in-forge does to that
@@ -171,10 +171,10 @@ grep -qF 'RELEASE="tockmox-forge"; ORG="tockmox"; REPO="site"' "$MI" && grep -qF
   && grep -qF 'FORGE_NS="tockmox-forge"' "$MI" && ok "installer: the in-cluster address P16 expects is the one it writes" || bad "installer: in-cluster address" ""
 grep -qF 'CRED_COPY="tockmox-site-repo-before-move"' "$MI" && grep -qF 'user.name="Tockmox installer"' "$MI" && grep -qF 'ROOT_APP="tockmox-root"' "$MI" \
   && ok "installer: the credential copy, the migration commit's author and the root are the names P16 reads" || bad "installer: names" ""
-grep -qF -- '--from-ca) FROM_CA=' "$MI" && grep -qF 'OS_CA=(--offsite-git-ca "$FROM_CA")' "$MI" && grep -qF -- '--offsite-git-ca)' "${TREE}/install/bootstrap-forge.sh" \
-  && grep -qF '[ ! -s "${FROM_DIR}/ca.crt" ]' "$P16" \
-  && ok "installer: P16's reason to refuse a private CA still holds (move-in-forge takes --from-ca and gives the off-site run --offsite-git-ca, and P16 does not add it yet)" \
-  || bad "installer: the CA reason" "move-in-forge or bootstrap-forge changed: re-read P16's ca.crt gate and its INVENTORY row"
+grep -qF -- '--from-ca) FROM_CA=' "$MI" && grep -qF 'OS_CA=(--offsite-git-ca "$FROM_CA")' "$MI" && pagehas '`--from-ca FILE`' \
+  && grep -qF -- '--from-ca \"' "$P16" \
+  && ok "installer: the --from-ca P16 adds for a private CA is an option of move-in-forge's, passed on as --offsite-git-ca, and the page asks for it" \
+  || bad "installer: the CA option" "move-in-forge, the page or P16 changed: re-read P16's ca.crt handling and its INVENTORY row"
 
 # ------------------------------------------------------------------ 3. the path as a script
 BIN="${TMP}/bin"; mkdir -p "$BIN"
@@ -424,16 +424,19 @@ gate "a P09 that passed on the built-in route" "$gd/p09" built-in "$gd/from-dir"
 grep -q 'Run the external route' "${TMP}/gout" && ok "gate: the reason names the route to run instead" || bad "gate: reason" "$(tail -2 "${TMP}/gout")"
 gate "no external forge to move from (no TOCKMOX_P16_FROM_DIR)" "$gd/p09" external ""
 cp -R "$gd/from-dir" "$gd/ca-dir"; printf -- '-----BEGIN CERTIFICATE-----\nstub\n-----END CERTIFICATE-----\n' > "$gd/ca-dir/ca.crt"
-gate "an external forge on a private CA" "$gd/p09" external "$gd/ca-dir"
-grep -q "does not add the page's --from-ca yet" "${TMP}/gout" && ok "gate: the private-CA reason names the gap in the path" || bad "gate: CA reason" "$(tail -2 "${TMP}/gout")"
+is "gate: an external forge on a private CA goes past the gate when the page asks for --from-ca (exit 75)" "75||0" \
+  "$(TOCKMOX_P16_FROM_TREE=1 TOCKMOX_P16_PAGE_FILE="$PAGE" run_gate "$P16" "$gd/p09" external "$gd/ca-dir")"
+grep -vF -- '`--from-ca FILE`' "$PAGE" > "$gd/page-without-from-ca.md"
+is "gate: an external forge on a private CA, on a page that does not ask for --from-ca: BLOCKED, exit 0, and no cluster call" "0|BLOCKED|0" \
+  "$(TOCKMOX_P16_FROM_TREE=1 TOCKMOX_P16_PAGE_FILE="$gd/page-without-from-ca.md" run_gate "$P16" "$gd/p09" external "$gd/ca-dir")"
+grep -q "does not tell that reader to add --from-ca" "${TMP}/gout" && ok "gate: the private-CA reason names the page's missing --from-ca" || bad "gate: CA reason" "$(tail -2 "${TMP}/gout")"
 mv "$gd/p09/session.env" "$gd/p09/session.off"
 gate "a P09 session that names no site repository" "$gd/p09" external "$gd/from-dir"
 mv "$gd/p09/session.off" "$gd/p09/session.env"
 is "gate: with all of them it goes past the gate (a spent budget stops it before any cluster call, exit 75)" "75||0" "$(run_gate "$P16" "$gd/p09" external "$gd/from-dir")"
 gm="$(mktemp "${GT}/paths/g.XXXXXX")"
-# shellcheck disable=SC1003  # the backslash is the line continuation in the path's text, matched literally
-mut "$P16" "$gm" '[ ! -s "${FROM_DIR}/ca.crt" ] \' '[ -n "${FROM_DIR}" ] \'
-case "$(run_gate "$gm" "$gd/p09" external "$gd/ca-dir")" in 0\|BLOCKED\|0) bad "mutation: a gate that does not read ca.crt" "still BLOCKED on a private CA" ;; *) ok "mutation: a gate that does not read ca.crt goes past it on a private CA, so the case above is the guard" ;; esac
+mut "$P16" "$gm" '[ ! -s "${FROM_DIR}/ca.crt" ] || FROM_CA="${FROM_DIR}/ca.crt"' ':'
+case "$(TOCKMOX_P16_FROM_TREE=1 TOCKMOX_P16_PAGE_FILE="$gd/page-without-from-ca.md" run_gate "$gm" "$gd/p09" external "$gd/ca-dir")" in 0\|BLOCKED\|0) bad "mutation: a gate that does not read ca.crt" "still BLOCKED on a private CA" ;; *) ok "mutation: a gate that does not read ca.crt goes past it on a page without --from-ca, so the case above is the guard" ;; esac
 # shellcheck disable=SC1003  # the backslash is the line continuation in the path's text, matched literally
 mut "$P16" "$gm" '[ "${TOCKMOX_P09_ROUTE:-}" = external ] \' '[ -n "${TOCKMOX_P09_ROUTE:-x}" ] \'
 case "$(run_gate "$gm" "$gd/p09" built-in "$gd/from-dir")" in 0\|BLOCKED\|0) bad "mutation: a gate that does not read the route" "still BLOCKED on the built-in route" ;; *) ok "mutation: a gate that does not read the route goes past it on the built-in route, so the case above is the guard" ;; esac
