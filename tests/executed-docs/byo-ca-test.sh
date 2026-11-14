@@ -551,6 +551,7 @@ case "$1" in
   P13) name=P13-planted-faults; out="${STUB_P13_OUT:-PASS}"; rc="${STUB_P13_RC:-0}" ;;
   P14) name=P14-open-applications; out="${STUB_P14_OUT:-PASS}"; rc="${STUB_P14_RC:-0}" ;;
   P15) name=P15-approver-revocation; out="${STUB_P15_OUT:-PASS}"; rc="${STUB_P15_RC:-0}" ;;
+  P16) name=P16-move-in-forge; out="${STUB_P16_OUT:-PASS}"; rc="${STUB_P16_RC:-0}"; echo "P16 from=${TOCKMOX_P16_FROM_DIR:-unset}" >> "$LANE_LOG" ;;
   *) exit 0 ;;
 esac
 n="$(ls "$TOCKMOX_WORKDIR" | grep -c '^receipts-')"
@@ -569,7 +570,7 @@ chmod +x "$TMP/lbin"/* "$L/provision"/*.sh "$L/run.sh"
 LN=0
 run_lane() { # VAR=value... -> output in $TMP/lout, status in $LRC, the calls in $LH/log
   LN=$((LN+1)); LH="$TMP/lane-$LN"; mkdir -p "$LH/home" "$LH/work"; : > "$LH/log"
-  env -u TOCKMOX_P09_BYO_CA -u TOCKMOX_P09_OPEN_APPS -u TOCKMOX_P09_APPROVER_WATCH -u TOCKMOX_P09_NETPOL -u TOCKMOX_EXPECT_AI_EGRESS_DENY -u TOCKMOX_EXPECT_NODE_SOURCES -u TOCKMOX_UNGUARDED_NS -u TOCKMOX_KEEP_CLUSTER -u TOCKMOX_P09_ROUTE "$@" HOME="$LH/home" TOCKMOX_WORKDIR="$LH/work" LANE_LOG="$LH/log" LANE_TMP="$LH" PATH="$TMP/lbin:$PATH" \
+  env -u TOCKMOX_P09_BYO_CA -u TOCKMOX_P09_OPEN_APPS -u TOCKMOX_P09_APPROVER_WATCH -u TOCKMOX_P09_MOVE_IN -u TOCKMOX_P09_NETPOL -u TOCKMOX_EXPECT_AI_EGRESS_DENY -u TOCKMOX_EXPECT_NODE_SOURCES -u TOCKMOX_UNGUARDED_NS -u TOCKMOX_KEEP_CLUSTER -u TOCKMOX_P09_ROUTE "$@" HOME="$LH/home" TOCKMOX_WORKDIR="$LH/work" LANE_LOG="$LH/log" LANE_TMP="$LH" PATH="$TMP/lbin:$PATH" \
     KUBECONFIG="$LH/substrate.kubeconfig" TOCKMOX_DOCS_REF=stub TOCKMOX_SUBSTRATE_CONTEXT=stub-substrate TOCKMOX_TEST_VM=ed-lane \
     bash "$L/p09-lane.sh" > "$TMP/lout" 2>&1
   LRC=$?
@@ -712,6 +713,90 @@ mut "${HERE}/p09-lane.sh" "$L/p09-lane.sh" '  0) WATCH_WHY="TOCKMOX_P09_APPROVER
 run_lane TOCKMOX_P09_ROUTE=built-in TOCKMOX_P09_APPROVER_WATCH=0
 [ "$(ran15)" = 1 ] && ok "lane mutation: a lane whose 0 still runs P15 does, so the 0 case above is the guard" || bad "lane mutation: P15 0 still runs" "ran $(ran15)"
 # --- P15 block end ---
+
+# --- P16 block begin (the lane's P16 block, run with the stubs above and a provisioner that answers the off-site calls as
+# STUB_OFFSITE says; P16's own rows are move-in-rows-test.sh's) ---
+cp "${HERE}/p09-lane.sh" "$L/p09-lane.sh"
+cat > "$L/provision/throwaway-cluster.sh" <<'STUB'
+#!/usr/bin/env bash
+echo "$1" >> "$LANE_LOG"
+case "$1" in
+  create) echo apiVersion: v1 > "$LANE_TMP/guest.kubeconfig"; echo "$LANE_TMP/guest.kubeconfig" ;;
+  publish) echo node.stub.invalid:31234 ;;
+  guard-file) echo "$LANE_TMP/guard" ;;
+  offsite-check) case "${STUB_OFFSITE:-}" in no-ca|ca) echo "$STUB_OFFSITE" ;; fail) echo "REFUSING: stub" >&2; exit 2 ;; esac ;;
+  offsite-repo) [ "${STUB_OFFSITE_REPO_RC:-0}" = 0 ] || exit "$STUB_OFFSITE_REPO_RC"
+                mkdir -p "$2"; echo https://forge.stub.invalid/o/ed-lane.git > "$2/git-url"; printf 'u\nt\n' > "$2/git-credentials"; echo "$2" ;;
+  offsite-reach) exit "${STUB_REACH_RC:-0}" ;;
+esac
+STUB
+chmod +x "$L/provision/throwaway-cluster.sh"
+ran16() { grep -c '^run.sh P16' "$LH/log"; }
+SKIP16() { grep -F "lane 7d: P16 (moving the running site into the built-in forge) skipped: $1" "$TMP/lout" >/dev/null; }
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca
+[ "$LRC" = 0 ] && [ "$(ran16)" = 1 ] && ok "lane: P16 runs on the external route by default when the off-site settings name a forge with a public certificate" || bad "lane: P16 auto+external" "rc=$LRC $(tr '\n' ';' < "$LH/log")"
+awk '/^run.sh P15|^run.sh P14/{a=NR} /^run.sh P16/{b=NR} /^run.sh P13/{c=NR} END{exit !(a && b && c && a<b && b<c)}' "$LH/log" && ok "lane: P16 runs after P14 and before P13, which stays the last path" || bad "lane: P16 order" "$(tr '\n' ';' < "$LH/log")"
+grep -F "P16 from=${LH}/work/p09-lane/move-in-from" "$LH/log" >/dev/null && awk '/^offsite-check$/{a=NR} /^create$/{b=NR} /^offsite-repo$/{c=NR} /^offsite-reach$/{d=NR} END{exit !(a && a<b && b<c && c<d)}' "$LH/log" \
+  && ok "lane: the settings are read before create, the repository is made and reached after it, and P16 is given its directory" || bad "lane: P16's forge" "$(tr '\n' ';' < "$LH/log")"
+[ ! -e "${LH}/work/p09-lane/move-in-from" ] && ok "lane: the directory holding the external forge's token does not outlive the job" || bad "lane: P16's directory left" "$(ls "${LH}/work/p09-lane/move-in-from")"
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca TOCKMOX_KEEP_CLUSTER=1
+[ "$LRC" = 0 ] && [ "$(ran16)" = 0 ] && SKIP16 "kept run: P16 moves the install's site into the built-in forge" && ! grep -x offsite-repo "$LH/log" >/dev/null \
+  && ok "lane: P16 is skipped on a kept run, with the reason, and no repository is made" || bad "lane: P16 kept" "rc=$LRC $(grep 'lane 7d' "$TMP/lout")"
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=ca
+[ "$LRC" = 0 ] && [ "$(ran16)" = 0 ] && SKIP16 "the external forge the off-site settings name is on a private CA" && ! grep -x offsite-repo "$LH/log" >/dev/null \
+  && ok "lane: P16 is skipped when the forge is on a private CA, with the reason (the command passes no CA to the off-site copy)" || bad "lane: P16 ca" "rc=$LRC $(grep 'lane 7d' "$TMP/lout")"
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=fail
+[ "$LRC" = 0 ] && [ "$(ran16)" = 0 ] && SKIP16 "no external forge to move the site in from" && ok "lane: P16 is skipped when the off-site settings cannot be read" || bad "lane: P16 no settings" "rc=$LRC $(grep 'lane 7d' "$TMP/lout")"
+run_lane TOCKMOX_P09_ROUTE=external
+[ "$LRC" = 0 ] && [ "$(ran16)" = 0 ] && SKIP16 "no external forge" && ok "lane: a provisioner that answers nothing about the settings skips P16, never runs it" || bad "lane: P16 silent settings" "rc=$LRC"
+run_lane TOCKMOX_P09_ROUTE=built-in STUB_OFFSITE=no-ca
+[ "$LRC" = 0 ] && [ "$(ran16)" = 0 ] && SKIP16 "built-in route: the site is already in the built-in forge" && ok "lane: P16 is skipped on the built-in route, with the reason" || bad "lane: P16 built-in" "rc=$LRC $(grep 'lane 7d' "$TMP/lout")"
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca TOCKMOX_P09_MOVE_IN=0
+[ "$LRC" = 0 ] && [ "$(ran16)" = 0 ] && SKIP16 "TOCKMOX_P09_MOVE_IN=0" && ! grep -x offsite-check "$LH/log" >/dev/null && ok "lane: TOCKMOX_P09_MOVE_IN=0 never runs P16 and reads no settings" || bad "lane: P16 0" "rc=$LRC"
+for c in "built-in no-ca" "external ca" "external fail"; do
+  read -r c_route c_set <<< "$c"
+  run_lane TOCKMOX_P09_ROUTE="$c_route" STUB_OFFSITE="$c_set" TOCKMOX_P09_MOVE_IN=1
+  [ "$LRC" = 2 ] && ! grep -x create "$LH/log" >/dev/null && ! grep '^run.sh' "$LH/log" >/dev/null && ok "lane: TOCKMOX_P09_MOVE_IN=1 on the ${c_route} route with settings '${c_set}' is refused (exit 2) before anything is created" || bad "lane: P16 1 ${c}" "rc=$LRC"
+done
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca TOCKMOX_P09_MOVE_IN=yes
+[ "$LRC" = 2 ] && grep -F 'TOCKMOX_P09_MOVE_IN must be auto, 1 or 0, not: yes' "$TMP/lout" >/dev/null && ok "lane: a garbage TOCKMOX_P09_MOVE_IN is refused (exit 2) before anything is created" || bad "lane: P16 garbage" "rc=$LRC"
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca STUB_OFFSITE_REPO_RC=1
+[ "$LRC" = 0 ] && [ "$(ran16)" = 0 ] && SKIP16 "the external repository P16 moves the site in from could not be created" && ok "lane: on auto, a repository that cannot be made skips P16 with the reason" || bad "lane: P16 repo fails, auto" "rc=$LRC"
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca STUB_OFFSITE_REPO_RC=1 TOCKMOX_P09_MOVE_IN=1
+[ "$LRC" = 1 ] && ! grep '^run.sh P09' "$LH/log" >/dev/null && ok "lane: on 1, a repository that cannot be made stops the lane before P09" || bad "lane: P16 repo fails, 1" "rc=$LRC"
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca STUB_REACH_RC=1
+[ "$LRC" = 0 ] && [ "$(ran16)" = 0 ] && SKIP16 "the guest does not reach the external forge" && ok "lane: on auto, a guest that cannot reach the forge skips P16" || bad "lane: P16 no reach" "rc=$LRC"
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca STUB_REACH_RC=3
+[ "$(ran16)" = 1 ] && ok "lane: a reach that could not be checked still runs P16 (its settle shows it)" || bad "lane: P16 reach unchecked" "ran $(ran16)"
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca STUB_P09_RC=1
+[ "$LRC" = 1 ] && [ "$(ran16)" = 0 ] && ok "lane: a P09 that failed means P16 does not run" || bad "lane: P16 after a failed P09" "rc=$LRC ran $(ran16)"
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca STUB_P09_OUT=BLOCKED
+[ "$LRC" = 4 ] && [ "$(ran16)" = 0 ] && ok "lane: a P09 that declared BLOCKED means P16 does not run" || bad "lane: P16 after a BLOCKED P09" "rc=$LRC ran $(ran16)"
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca STUB_P16_OUT=PRODUCT_FAIL STUB_P16_RC=1
+[ "$LRC" = 1 ] && ok "lane: a P16 failure is the lane's exit when nothing earlier failed" || bad "lane: P16 fails" "rc=$LRC"
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca STUB_P16_OUT=BLOCKED
+[ "$LRC" = 4 ] && grep -F 'lane: P16-move-in-forge declared BLOCKED: a stub reason' "$TMP/lout" >/dev/null && ok "lane: a P16 that exited 0 but declared BLOCKED fails the lane with 4 and names it" || bad "lane: P16 BLOCKED" "rc=$LRC $(tail -2 "$TMP/lout")"
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca STUB_P16_OUT=NONE
+[ "$LRC" = 1 ] && ok "lane: a P16 that left no receipt fails the lane with 1" || bad "lane: P16 no receipt" "rc=$LRC"
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca STUB_P11_RC=7 STUB_P11_OUT=PRODUCT_FAIL STUB_P16_OUT=BLOCKED
+[ "$LRC" = 7 ] && [ "$(ran16)" = 1 ] && ok "lane: P16 still runs after a failed P11, and the exit stays P11's (7, not 4)" || bad "lane: P11 then P16" "rc=$LRC"
+mut "${HERE}/p09-lane.sh" "$L/p09-lane.sh" 'if [ "$p16_code" != 0 ] && [ "$rc" = 0 ]; then' 'if false; then'
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca STUB_P16_OUT=BLOCKED
+[ "$LRC" = 0 ] && ok "lane mutation: without the P16 outcome check a BLOCKED P16 ends 0, so the P16 outcome case above is the guard" || bad "lane mutation: P16 outcome" "rc=$LRC"
+mut "${HERE}/p09-lane.sh" "$L/p09-lane.sh" 'if [ "$MOVE_RUN" = 1 ] && [ "$P09_RC" = 0 ] && [ "${P09_REC%% *}" = PASS ]; then' 'if [ "$MOVE_RUN" = 1 ] && [ "$P09_RC" = 0 ]; then'
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca STUB_P09_OUT=BLOCKED
+[ "$(ran16)" = 1 ] && ok "lane mutation: a P16 block that trusts P09's exit status runs P16 over a BLOCKED P09, so the case above is the guard" || bad "lane mutation: P16 gate" "ran $(ran16)"
+mut "${HERE}/p09-lane.sh" "$L/p09-lane.sh" '        no-ca) MOVE_RUN=1 ;;' '        no-ca|ca) MOVE_RUN=1 ;;'
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=ca
+[ "$(ran16)" = 1 ] && ok "lane mutation: a lane that does not read ca.crt runs P16 on a private CA, so the CA case above is the guard" || bad "lane mutation: P16 ca" "ran $(ran16)"
+mut "${HERE}/p09-lane.sh" "$L/p09-lane.sh" '    elif [ "$KEEP" = 1 ] && [ "$MOVE_IN" = auto ]; then' '    elif false; then'
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca TOCKMOX_KEEP_CLUSTER=1
+[ "$(ran16)" = 1 ] && ok "lane mutation: a lane that does not read KEEP runs P16 on a kept run, so the kept case above is the guard" || bad "lane mutation: P16 kept" "ran $(ran16)"
+mut "${HERE}/p09-lane.sh" "$L/p09-lane.sh" '  [ -z "${MOVE_DIR:-}" ] || rm -rf "$MOVE_DIR"' ':'
+run_lane TOCKMOX_P09_ROUTE=external STUB_OFFSITE=no-ca
+[ -e "${LH}/work/p09-lane/move-in-from/git-credentials" ] && ok "lane mutation: without the removal at the end the token's directory outlives the job, so the case above is the guard" || bad "lane mutation: P16 directory" "removed anyway"
+cp "${HERE}/p09-lane.sh" "$L/p09-lane.sh"
+# --- P16 block end ---
 
 # --- netpol block begin (the lane's last step: netpol-adversary.sh on the cluster P09 installed; what that script
 # asserts is its own business and needs a cluster, what the lane does with it is shown here) ---

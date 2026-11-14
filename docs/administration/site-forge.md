@@ -405,7 +405,7 @@ off-site copy. It is the inverse of [Move to my own forge](#move-to-my-own-forge
 
 ```bash
 : "${TOCKMOX:?export TOCKMOX first: your Tockmox clone}"
-: "${KUBE_CONTEXT:?export KUBE_CONTEXT first: the site's cluster}"
+: "${KUBE_CONTEXT:?export KUBE_CONTEXT first: the cluster the site runs on}"
 SITE_DIR=YOUR_SITE_CHECKOUT
 SITE_REPO_URL=YOUR_SITE_REPOSITORY_HTTPS_URL
 AGE_RECIPIENT=YOUR_AGE_PUBLIC_KEY
@@ -509,7 +509,7 @@ the site does not trust is refused; move it with the command instead.
 
 ```bash
 : "${TOCKMOX:?export TOCKMOX first: your Tockmox clone}"
-: "${KUBE_CONTEXT:?export KUBE_CONTEXT first: the site's cluster}"
+: "${KUBE_CONTEXT:?export KUBE_CONTEXT first: the cluster the site runs on}"
 OWN_FORGE_URL=YOUR_EMPTY_REPOSITORY_URL
 "$TOCKMOX/install/tockmox-install.sh" move-forge --context "$KUBE_CONTEXT" \
   --to "$OWN_FORGE_URL" --credentials "$HOME/tockmox-backup/own-forge-push"
