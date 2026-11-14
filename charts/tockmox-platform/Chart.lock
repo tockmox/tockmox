@@ -7,7 +7,7 @@ dependencies:
   version: v1.21.3
 - name: metallb
   repository: https://metallb.github.io/metallb
-  version: 0.16.1
+  version: 0.16.2
 - name: traefik
   repository: https://traefik.github.io/charts
   version: 41.7.1
@@ -26,5 +26,5 @@ dependencies:
 - name: snapshot-controller
   repository: https://piraeus.io/helm-charts/
   version: 5.4.0
-digest: sha256:81e994329c4d1f13dec884b017d8d08d3fbae569da84fd1173a6cac46f6f1ca8
-generated: "2026-11-07T20:46:44.286006047-06:00"
+digest: sha256:2fcbae43ecee7503ae83235b3ca9d2ab0dc1a73095721ed7e7fa603042ac4f7c
+generated: "2026-11-14T00:17:50.817555281Z"
