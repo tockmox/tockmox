@@ -40,9 +40,9 @@
 # external repository's https address (git-url), two lines that can push to it (git-credentials), its host name
 # (host), and its CA when its certificate is private (ca.crt). The p09 lane makes it with throwaway-cluster.sh
 # offsite-repo, an empty repository named after the VM that destroy deletes. Any of them missing is BLOCKED with the
-# reason, before any call to a cluster. A ca.crt is BLOCKED too: the page tells a reader whose forge is on a private
-# CA to add move-in-forge's --from-ca, and this path does not add the page's --from-ca yet, so on such a forge it would
-# not run the command that reader runs.
+# reason, before any call to a cluster. A ca.crt is the forge's private CA: the page tells that reader to add
+# move-in-forge's --from-ca, so this path adds it to the block (an edit the page asks for, and logged as one) and reads
+# the forge with it too. A page that does not say so is BLOCKED, because the path would add a word it does not print.
 #
 # NOTHING IS PUT BACK. The move is the page's end state, so the install is left on the built-in forge, with the
 # external repository as its off-site copy, and the throwaway is destroyed with it. A kept run does not reach this
@@ -80,8 +80,8 @@ blocked() { # REASON
 FROM_DIR="${TOCKMOX_P16_FROM_DIR:-}"
 [ -n "$FROM_DIR" ] && [ -s "${FROM_DIR}/git-url" ] && [ -s "${FROM_DIR}/git-credentials" ] \
   || blocked "TOCKMOX_P16_FROM_DIR does not name a directory with git-url and git-credentials in it, so there is no external https repository to move the site in from (the p09 lane makes one with throwaway-cluster.sh offsite-repo)"
-[ ! -s "${FROM_DIR}/ca.crt" ] \
-  || blocked "the external forge in TOCKMOX_P16_FROM_DIR is on a private CA (ca.crt), and this path does not add the page's --from-ca yet, so it would not run the command a reader with that forge runs. Name a forge on a publicly trusted certificate"
+FROM_CA=""
+[ ! -s "${FROM_DIR}/ca.crt" ] || FROM_CA="${FROM_DIR}/ca.crt"
 SITE_LINE="$(grep -E '^(export|declare -x) SITE_REPO=' "${P09_STATE}/session.env" 2>/dev/null | tail -1 || true)"
 [ -n "$SITE_LINE" ] || blocked "P09's session in ${P09_STATE} holds no SITE_REPO, so there is no site repository to move"
 SITE_REPO="$( eval "${SITE_LINE#declare -x }" 2>/dev/null; printf '%s' "${SITE_REPO:-}" )"
@@ -134,6 +134,13 @@ SECTION="## Move a running site in"
 NEEDLE='move-in-forge --context'
 SUCCESS_LINE="every Application reads the built-in forge, Synced and Healthy, and nothing was pruned"
 FROM_TREE="${TOCKMOX_P16_FROM_TREE:-${TOCKMOX_P09_FROM_TREE:-0}}"
+if [ -n "$FROM_CA" ]; then
+  if [ "$FROM_TREE" = "1" ]; then page_text="$(cat "$PAGE_FILE" 2>/dev/null || true)"
+  else page_text="$(git -C "$HERE" show "${REF}:${PAGE}" 2>/dev/null || true)"; fi
+  # shellcheck disable=SC2016  # the backquotes are the page's own markup, matched literally
+  printf '%s' "$page_text" | grep -F -- '`--from-ca FILE`' >/dev/null \
+    || blocked "the external forge in TOCKMOX_P16_FROM_DIR is on a private CA (ca.crt), and ${PAGE} at this ref does not tell that reader to add --from-ca, so the path would add a word the page does not print. Name a forge on a publicly trusted certificate, or a ref whose page has it"
+fi
 EXTRACT="${HERE}/../lib/extract-block.sh"
 PASTE="${HERE}/../lib/zsh-paste.py"
 VERDICT_PY="${HERE}/../lib/p16-move-in-forge.py"
@@ -170,7 +177,10 @@ ASKPASS="${STATE}/askpass.sh"
 # shellcheck disable=SC2016  # the script's own $1 and the file name are for the askpass script, not this shell
 printf '#!/bin/sh\ncase "$1" in Username*) sed -n 1p "%s" ;; *) sed -n 2p "%s" ;; esac\n' "${FROM_DIR}/git-credentials" "${FROM_DIR}/git-credentials" > "$ASKPASS"
 chmod 700 "$ASKPASS"
-xgit() { GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 git -c credential.helper= "$@"; }
+xgit() {
+  if [ -n "$FROM_CA" ]; then GIT_SSL_CAINFO="$FROM_CA" GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 git -c credential.helper= "$@"
+  else GIT_ASKPASS="$ASKPASS" GIT_TERMINAL_PROMPT=0 git -c credential.helper= "$@"; fi
+}
 from_main() { xgit ls-remote "$P16_FROM_URL" refs/heads/main 2>/dev/null | awk 'NR==1{print $1}'; }
 
 # ------------------------------------------------------------- the built-in forge, as its admin (read only)
@@ -240,7 +250,17 @@ pblock() {
 filled() {
   # shellcheck disable=SC2016  # "$P16_FROM_URL" is written into the block for the pasted shell to expand, not this one
   sed -e "s|YOUR_SITE_CHECKOUT|${SITE_DIR}|g" -e 's|YOUR_SITE_REPOSITORY_HTTPS_URL|"$P16_FROM_URL"|g' \
-      -e "s|YOUR_AGE_PUBLIC_KEY|${AGE_PUBLIC_KEY:-NO_AGE_KEY}|g" "$1"
+      -e "s|YOUR_AGE_PUBLIC_KEY|${AGE_PUBLIC_KEY:-NO_AGE_KEY}|g" "$1" | with_ca
+}
+# with_ca ... stdin: the block; stdout: the same, with --from-ca FILE after its --from-credentials argument when the
+# forge is on a private CA (the page's YOU SUPPLY says to add it), and unchanged otherwise
+with_ca() {
+  if [ -z "$FROM_CA" ]; then cat; return; fi
+  FROM_CA="$FROM_CA" python3 -I -c 'import os, re, sys
+t = sys.stdin.read()
+n = len(re.findall(r"--from-credentials \S+", t))
+assert n == 1, "not one --from-credentials"
+sys.stdout.write(re.sub(r"(--from-credentials \S+)", lambda m: m.group(1) + " --from-ca \"" + os.environ["FROM_CA"] + "\"", t, count=1))'
 }
 # undry ... stdin: the block; stdout: the same with its one --dry-run taken out, as the page says to run it again
 undry() { python3 -I -c 'import sys; t=sys.stdin.read(); assert t.count(" --dry-run")==1, "not one --dry-run"; sys.stdout.write(t.replace(" --dry-run","",1))'; }
@@ -403,6 +423,7 @@ if ! done_step "$S"; then budget_left || yield "S04+"
     provenance "$( [ "$FROM_TREE" = "1" ] && echo WORKTREE || echo "$REF" )" "$PAGE" "${SECTION}, the bash block containing '${NEEDLE}'" "-" \
       "$(sha256sum < "${STATE}/block.sh" | cut -d' ' -f1)"
     _emit "SUBSTITUTION: YOUR_SITE_CHECKOUT -> ${SITE_DIR}; YOUR_SITE_REPOSITORY_HTTPS_URL -> \"\$P16_FROM_URL\" (exported, not printed); YOUR_AGE_PUBLIC_KEY -> the path's age identity's public key  (YOU SUPPLY on the page)"
+    [ -z "$FROM_CA" ] || _emit "EDIT AS THE PAGE SAYS: 'if a private CA signed that forge's certificate, the CA as a PEM file, given as --from-ca FILE': --from-ca and the forge's ca.crt are added after --from-credentials"
     execute_begin "site-forge.md: move-in-forge --dry-run"
     run_ws "$S" "$(filled "${STATE}/block.sh")" "${STATE}/answers"; execute_end $?
     record "$S" "the dry run ends as the page says: it changes nothing" "1" "$(out_of "$S" | grep -c 'Dry run: nothing was changed' | tr -d ' ')"
