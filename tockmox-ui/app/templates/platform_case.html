@@ -46,6 +46,7 @@
       <td>{% if s.specialist %}{{ spec_name(s.specialist) }}{% set owners = spec_roles.get(s.specialist) %}{% if owners %}<span class="ref">for the <a href="/platform/agents/{{ owners[0][0] }}">{{ owners[0][1] }}</a></span>{% endif %}
           {%- elif s.actor == "schedule" %}The desk<span class="ref">on its schedule</span>
           {%- elif s.actor.startswith("event/") %}The desk<span class="ref">from {{ s.actor[6:] }}</span>
+          {%- elif s.actor in agent_actors %}{{ agent_name }}<span class="ref">the orchestrator</span>
           {%- else %}<code>{{ s.actor }}</code>{% endif %}</td>
       <td>{{ s.kind_word }}{% if s.kind == "state" and s.from and s.to %}<span class="ref">{{ state_words.get(s.from, s.from) }} → {{ state_words.get(s.to, s.to) }}</span>{% endif %}{% if s.ask %}<span class="ref">{{ ask_words.get(s.ask, "A decision") }}</span>{% endif %}</td>
       <td>{% if s.text %}{{ s.text }}{% elif s.hidden %}<span class="muted">{{ "Worded with a model's help" if s.src == "model" else "Written by a client" if s.src == "client" else "Written before the desk recorded who worded it" }}: read it in the conversation.</span>{% endif %}

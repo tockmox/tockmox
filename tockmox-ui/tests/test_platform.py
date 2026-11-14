@@ -571,6 +571,26 @@ def test_an_unknown_timezone_is_the_pages_503_not_every_requests_500(world):
     assert r.status_code == 503 and "time zone" in r.text
 
 
+def test_the_overview_names_the_agent_tockmox_unless_the_site_names_it(world):
+    c, app, s = client_for(world, doc_with_platform(interfaceUrl="https://chat.example.com"))
+    login_as(c, s, ["tockmox-admins"])
+    t = c.get("/platform").text
+    assert "decisions happen in the conversation with Tockmox." in t
+    assert ">the conversation with Tockmox</a>" in t
+    c, app, s = client_for(world, doc_with_platform(interfaceUrl="https://chat.example.com", agentName="Ada"))
+    login_as(c, s, ["tockmox-admins"])
+    t = c.get("/platform").text
+    assert "decisions happen in the conversation with Ada." in t and "conversation with Tockmox" not in t
+
+
+@pytest.mark.parametrize("opts", [{"agentName": "x" * 41}, {"agentName": "a\nb"}, {"agentActors": "orchestrator"},
+                                  {"agentActors": []}, {"agentActors": ["Not An Id"]}])
+def test_a_bad_agent_name_setting_is_the_pages_503(world, opts):
+    c, app, s = client_for(world, doc_with_platform(**opts))
+    login_as(c, s, ["tockmox-admins"])
+    assert c.get("/").status_code == 200
+    r = c.get("/platform")
+    assert r.status_code == 503 and "features.platform.agent" in r.text
 def test_a_cronjob_without_a_time_zone_uses_the_cluster_zone_not_unknown(world):
     healthy_signals(world)
     add_cronjob(world, "ns", "local-job", schedule="0 3 * * *", tz="local", last_run=NOW - 3600, last_ok=NOW - 3500)

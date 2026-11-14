@@ -60,6 +60,8 @@ Optional keys under `config.features.platform`:
 |---|---|
 | `ledgerUrl` | Your agent orchestrator's read API (`GET <ledgerUrl>/v1/jobs`). Unset, every role's agent reads **Not connected**, which is Unknown and never healthy. Must be an absolute `http(s)` URL; with a token, prefer `https`, because over `http` the token crosses the network in clear. |
 | `interfaceUrl` | Where a person answers an agent's question. The page links there; approving never happens on this page. |
+| `agentName` | What the pages call the orchestrator agent you talk to, default `Tockmox`: "decisions happen in the conversation with Tockmox", and its own steps on a case. Up to 40 printable characters. |
+| `agentActors` | The ids your agent ledger and Service Desk record for that agent's own steps, default `[orchestrator]`. A step by one of them shows `agentName`; any other id shows as written. Set it when your orchestrator records another id, rather than rewriting its history. |
 | `clusterTimezone` | The zone your cluster's controller manager runs in, default UTC. A CronJob that sets no `timeZone` fires in that zone, and kube-state-metrics reports it only as `local`, so the page needs telling. |
 | `specialistsUrl` | A specialist host (its base URL). Turns on the **Cases** pages and the specialists' served state: see "Cases" below. Unset, every Cases view reads **Not connected**, never an empty list. Must be an absolute `http(s)` URL. |
 | `assign` | A map of scheduled-job name to role id: `{nightly-thing: continuity}`. That job belongs to that role ahead of the catalog's patterns; a `tockmox.com/practice` label on the workload still wins. A role id the catalog does not have is ignored. **Give to a role** on the Overview writes one entry here as a change. |

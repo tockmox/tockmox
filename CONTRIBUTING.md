@@ -63,7 +63,9 @@ and the customising ladder grow past one setup.
   any deployment. If a value differs between installations, it is a value.
   `tools/check-no-site-specifics.sh` catches the generic shapes; a maintainer's
   own identifiers live in a private rules file (`TOCKMOX_SITE_PATTERNS_FILE`),
-  never in the tree.
+  never in the tree. The agent a person talks to has no personal name in the
+  product: the pages read `features.platform.agentName` (default `Tockmox`)
+  and prose says "the orchestrator".
 
 ## Practical requirements
 

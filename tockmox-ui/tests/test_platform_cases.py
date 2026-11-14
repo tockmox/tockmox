@@ -477,3 +477,34 @@ def test_an_incomplete_answer_never_opens_on_no_case_waits_on_you(world):
     c, _ = cases_client(world, Host(fix))
     t = c.get("/platform/cases").text
     assert "No case waits on you" not in t and "may not be everything waiting on you" in t
+
+
+# ---------------------------------------------------------------- the orchestrator agent's name is the site's
+
+def _who_cells(t):
+    rows = t.split('id="timeline"')[1].split("</table>")[0].split("<tr")
+    return [r.split("<td>")[2].split("</td>")[0] for r in rows if r.count("<td>") >= 3]
+
+
+def test_the_orchestrators_steps_read_tockmox_when_the_site_names_no_agent(world):
+    fix = copy.deepcopy(FIX)
+    tl = fix["get"]["INC-0002"]["record"]["timeline"]
+    tl.append({"ts": "2026-10-26T16:12:00.000Z", "actor": "orchestrator", "kind": "dispatch", "text": "x", "src": "desk", "refs": []})
+    c, _ = cases_client(world, Host(fix))
+    who = _who_cells(c.get("/platform/cases/INC-0002").text)
+    mine = [w for w in who if "the orchestrator" in w]
+    assert len(mine) == 1 and mine[0].startswith("Tockmox"), who
+    assert not any("<code>orchestrator</code>" in w for w in who), "the actor id is not the agent's name"
+
+
+def test_a_site_names_its_agent_and_the_ids_its_orchestrator_records(world):
+    fix = copy.deepcopy(FIX)
+    tl = fix["get"]["INC-0002"]["record"]["timeline"]
+    tl.append({"ts": "2026-10-26T16:12:00.000Z", "actor": "ops-agent", "kind": "dispatch", "text": "x", "src": "desk", "refs": []})
+    tl.append({"ts": "2026-10-26T16:13:00.000Z", "actor": "orchestrator", "kind": "dispatch", "text": "y", "src": "desk", "refs": []})
+    c, _ = cases_client(world, Host(fix), agentName="Ada", agentActors=["ops-agent"])
+    t = c.get("/platform/cases/INC-0002").text
+    who = _who_cells(t)
+    assert any(w.startswith("Ada<span") for w in who), who
+    assert "<code>orchestrator</code>" in t, "an id the site did not list stays a plain id"
+    assert "Tockmox<span" not in t

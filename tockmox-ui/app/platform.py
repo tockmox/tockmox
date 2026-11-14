@@ -73,6 +73,33 @@ class CatalogError(ValueError):
     pass
 
 
+# The orchestrator agent a person talks to is named by the site, never by the product: the product ships one
+# default, the product's own name, and a site that calls its agent something else sets agentName. agentActors
+# are the ids the agent ledger and the Service Desk record for that agent's own steps (a contract with the
+# site's orchestrator, so the UI maps them rather than asking the site to rewrite its history).
+DEFAULT_AGENT_NAME = "Tockmox"
+DEFAULT_AGENT_ACTORS = ("orchestrator",)
+AGENT_ACTOR_RE = re.compile(r"[a-z][a-z0-9._-]{0,63}")
+
+
+class AgentNameError(ValueError):
+    pass
+
+
+def agent_identity(opt: dict) -> tuple[str, tuple[str, ...]]:
+    """(display name, actor ids) from features.platform.agentName and agentActors, defaults when unset."""
+    raw = opt.get("agentName")
+    name = DEFAULT_AGENT_NAME if raw is None or str(raw).strip() == "" else str(raw).strip()
+    if len(name) > 40 or any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
+        raise AgentNameError(f"features.platform.agentName must be 1 to 40 printable characters, got {raw!r}")
+    actors = opt.get("agentActors")
+    if actors is None:
+        return name, DEFAULT_AGENT_ACTORS
+    if not isinstance(actors, list) or not actors or not all(isinstance(a, str) and AGENT_ACTOR_RE.fullmatch(a)
+                                                             for a in actors):
+        raise AgentNameError("features.platform.agentActors must be a non-empty list of lower-case ids "
+                             f"({AGENT_ACTOR_RE.pattern}), got {actors!r}")
+    return name, tuple(actors)
 # ---------------------------------------------------------------- catalog
 
 @dataclass(frozen=True)
@@ -817,12 +844,14 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
         cat = load_catalog(opt.get("catalogFile") or None)
         for k in ("timezone", "clusterTimezone"):       # an unknown zone would fail every request instead
             ZoneInfo(str(opt.get(k, "UTC")))
+        agent_name, agent_actors = agent_identity(opt)
     except Exception as e:  # noqa: BLE001 - any mistake here is the page's 503, never the whole UI's crash
         # A broken site catalog must not take the rest of the UI down with it: the page stays, admin
         # only, and says what is wrong and where. Nothing on it reads healthy.
         log.error("platform: catalog %s did not load: %s", opt.get("catalogFile") or "(default)", e)
         reason = (f"The Platform Management catalog ({opt.get('catalogFile') or 'the product default'}) did not load: {e}"
-                  if isinstance(e, CatalogError) else f"Platform Management could not start: a time zone in features.platform: {e!r}")
+                  if isinstance(e, CatalogError) else f"Platform Management could not start: {e}"
+                  if isinstance(e, AgentNameError) else f"Platform Management could not start: a time zone in features.platform: {e!r}")
 
         def broken(request: Request, aid: str = "", rid: str = ""):
             u = user_of(request)
@@ -881,7 +910,7 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
 
     def common(u):
         g = grafana if (grafana and grafana.visible_to(set(u.groups))) else None
-        return {"interface_url": interface_url, "grafana": g, "modes": MODES, "sched_words": SCHED_WORDS,
+        return {"interface_url": interface_url, "agent_name": agent_name, "agent_actors": agent_actors, "grafana": g, "modes": MODES, "sched_words": SCHED_WORDS,
                 "tz": tz, "now": time.time(), "spec_words": SPECIALIST_WORDS, "ask_words": platform_cases.ASK_WORDS,
                 "wait_words": platform_cases.WAIT_WORDS, "reason_words": platform_cases.REASON_WORDS,
                 "state_words": platform_cases.STATE_WORDS, "type_words": platform_cases.TYPE_WORDS,
