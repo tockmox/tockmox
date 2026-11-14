@@ -188,7 +188,7 @@ STUB
 chmod +x "${TMP}/lbin"/* "$L/provision"/*.sh
 printf '#!/usr/bin/env bash\n. "$(cd "$(dirname "$0")/.." && pwd)/lib/assert.sh"\n%s\n' "$PASSBODY" > "$L/paths/P04-fixture.sh"
 cp "$L/paths/P04-fixture.sh" "$L/paths/P05-fixture.sh"
-for pp in P09-install-md-end-to-end P11-fresh-install-recovery P13-planted-faults; do
+for pp in P09-install-md-end-to-end P11-fresh-install-recovery P13-planted-faults P15-approver-revocation; do
   printf '#!/usr/bin/env bash\n. "$(cd "$(dirname "$0")/.." && pwd)/lib/assert.sh"\nif [ "${FX_%s:-PASS}" = BLOCKED ]; then path_outcome BLOCKED "fixture: no inputs"; exit 0; fi\n%s\n' "${pp%%-*}" "$PASSBODY" > "$L/paths/${pp}.sh"
 done
 chmod +x "$L"/paths/*.sh

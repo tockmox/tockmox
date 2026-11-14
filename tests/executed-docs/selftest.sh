@@ -1454,6 +1454,27 @@ if [ "$OA_CASES" -eq 0 ] || { [ "$OA_RC" -ne 0 ] && ! printf '%s\n' "$OA_OUT" | 
 fi
 # --- P14 block end ---
 
+# --- P15 block begin (self-contained; goes after the P14 open-applications block) ---
+# P15's approver rows: an approver taken out of the admin group, or deactivated, is alerted on; a failed read judges
+# nobody and raises CheckDown; the page's removal clears it. The verdicts are shown red one planted input at a time, the
+# page block and the chart and installer names the path relies on are read in this tree, the path is run as a script
+# against a stub product (green, then one broken product per row, then mutated copies that lose a step or a guard), and
+# its gate is run too. Folded in like the cases above. The lane's P15 block is run by byo-ca-test.sh, beside P14's.
+AR_OUT="$(bash "${HERE}/approver-revocation-rows-test.sh" 2>&1)"; AR_RC=$?
+AR_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) AR_CASES=$((AR_CASES+1)); ok "approver revocation: ${line#ok   }" ;;
+    "FAIL "*) AR_CASES=$((AR_CASES+1)); bad "approver revocation: ${line#FAIL }" "run tests/executed-docs/approver-revocation-rows-test.sh for detail" ;;
+  esac
+done <<EOF_AR
+$AR_OUT
+EOF_AR
+if [ "$AR_CASES" -eq 0 ] || { [ "$AR_RC" -ne 0 ] && ! printf '%s\n' "$AR_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "approver-revocation-rows-test.sh ran its cases" "rc=${AR_RC}, ${AR_CASES} case(s): $(printf '%s' "$AR_OUT" | tail -3)"
+fi
+# --- P15 block end ---
+
 # The outcome model's own contract (a PASS is refused without a completed execute phase, each non-PASS outcome has its
 # own code, receipts are written). It was run by nothing until it was folded in here. Its lines are indented two spaces.
 OC_OUT="$(bash "${HERE}/outcome-contract-test.sh" 2>&1)"; OC_RC=$?

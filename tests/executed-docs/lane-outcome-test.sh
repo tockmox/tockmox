@@ -62,6 +62,7 @@ case "$1" in
   P09) name=P09-install-md-end-to-end; out="${STUB_P09_OUT:-PASS}"; rc="${STUB_P09_RC:-0}" ;;
   P11) name=P11-fresh-install-recovery; out="${STUB_P11_OUT:-PASS}"; rc="${STUB_P11_RC:-0}" ;;
   P13) name=P13-planted-faults; out="${STUB_P13_OUT:-PASS}"; rc="${STUB_P13_RC:-0}" ;;
+  P15) name=P15-approver-revocation; out="${STUB_P15_OUT:-PASS}"; rc="${STUB_P15_RC:-0}" ;;
   *) exit 0 ;;
 esac
 n="$(ls "$TOCKMOX_WORKDIR" | grep -c '^receipts-')"
@@ -80,7 +81,7 @@ chmod +x "$TMP/lbin"/* "$L/provision"/*.sh "$L/run.sh"
 LN=0
 run_lane() { # VAR=value... -> output in $TMP/lout, status in $RC, the calls in $LH/log
   LN=$((LN+1)); LH="$TMP/lane-$LN"; mkdir -p "$LH/home" "$LH/work"; : > "$LH/log"
-  env -u TOCKMOX_KEEP_CLUSTER -u TOCKMOX_P09_ROUTE -u TOCKMOX_P09_NETPOL "$@" HOME="$LH/home" TOCKMOX_WORKDIR="$LH/work" LANE_LOG="$LH/log" LANE_TMP="$LH" PATH="$TMP/lbin:$PATH" \
+  env -u TOCKMOX_KEEP_CLUSTER -u TOCKMOX_P09_ROUTE -u TOCKMOX_P09_NETPOL -u TOCKMOX_P09_APPROVER_WATCH "$@" HOME="$LH/home" TOCKMOX_WORKDIR="$LH/work" LANE_LOG="$LH/log" LANE_TMP="$LH" PATH="$TMP/lbin:$PATH" \
     KUBECONFIG="$LH/substrate.kubeconfig" TOCKMOX_DOCS_REF=stub TOCKMOX_SUBSTRATE_CONTEXT=stub-substrate TOCKMOX_TEST_VM=ed-lane \
     bash "$L/p09-lane.sh" > "$TMP/lout" 2>&1
   RC=$?

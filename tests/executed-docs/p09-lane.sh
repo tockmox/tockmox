@@ -67,6 +67,21 @@
 # prints it. P14 has its own budget, TOCKMOX_P14_BUDGET (default 5400 seconds), a yield point this lane does not call
 # again. A P14 failure becomes the lane's exit only when nothing earlier already failed it.
 #
+# THE APPROVERS WATCHER'S ALERTS, P15 (paths/P15-approver-revocation.sh). After P14 and before P13, and only when P09
+# passed, plant an approver on the same throwaway and state directory (an Authentik user in tockmox-admins, a forge
+# account of that name in approvers, an open pull request carrying their approval), take them out of the admin group,
+# deactivate them, make the watcher's read fail, and run identity.md's block that removes them from the forge; read
+# the two alerts in Prometheus after each, then take everything out again. TOCKMOX_P09_APPROVER_WATCH picks whether it
+# runs:
+#   auto (the default, also unset or empty)  run it when the route is built-in; otherwise skip it with one logged line
+#   1    run it. Refused up front on the external route, before anything is created
+#   0    never run it
+#   anything else is refused.
+# The built-in route is needed because the watcher is bootstrap-forge's: the external route has no forge and no
+# watcher. It runs on a kept run too: it takes out everything it planted and reads each back as gone. P15 has its own
+# budget, TOCKMOX_P15_BUDGET (default 5400 seconds), read only before it plants anything; once it has planted it runs to
+# its last step. A P15 failure becomes the lane's exit only when nothing earlier already failed it.
+#
 # WHAT THE NETWORK POLICIES ADMIT, netpol-adversary.sh. LAST, after P13, and only when P09 passed, on both routes:
 # the adversarial NetworkPolicy harness plants probe pods in the guarded namespaces of the install P09 made and reads
 # what the shipped policies let through. It is last so that its stand-in pods cannot disturb a path. It is not a path
@@ -227,6 +242,23 @@ case "$OPEN_APPS" in
       OPEN_RUN=1
     fi ;;
   *) refuse "TOCKMOX_P09_OPEN_APPS must be auto, 1 or 0, not: ${OPEN_APPS}" ;;
+esac
+
+# The approvers watcher's alerts (P15): decided here too, for the same reason.
+APPROVER_WATCH="${TOCKMOX_P09_APPROVER_WATCH:-auto}"
+WATCH_RUN=0
+WATCH_WHY=""
+case "$APPROVER_WATCH" in
+  0) WATCH_WHY="TOCKMOX_P09_APPROVER_WATCH=0" ;;
+  1) [ "$ROUTE" = built-in ] || refuse "TOCKMOX_P09_APPROVER_WATCH=1 needs TOCKMOX_P09_ROUTE=built-in: the approvers watcher P15 reads is bootstrap-forge's, and only that route runs it"
+     WATCH_RUN=1 ;;
+  auto)
+    if [ "$ROUTE" != built-in ]; then
+      WATCH_WHY="external route: there is no built-in forge, so there is no approvers watcher to read"
+    else
+      WATCH_RUN=1
+    fi ;;
+  *) refuse "TOCKMOX_P09_APPROVER_WATCH must be auto, 1 or 0, not: ${APPROVER_WATCH}" ;;
 esac
 
 # What the network policies admit (netpol-adversary.sh): decided here too, so a refusal costs nothing.
@@ -500,6 +532,36 @@ else
   echo "lane 7b: P14 (the open-applications list) skipped: ${OPEN_WHY}"
 fi
 # --- P14 block end ------------------------------------------------------------------------------------------------
+
+# --- P15 block begin (self-contained apart from WATCH_RUN, P09_REC, lane_receipt and lane_judge above; goes after the P14 block) ---
+# 7c. P15, the approvers watcher's alerts, when WATCH_RUN says so and only when P09 exited 0 AND its receipt says PASS.
+# It does not wait on P11, P12 or P14: it plants its own approver and takes it out again, and needs only p09-passed and
+# the route, which the lane exported for P09. Anything but a PASS receipt fails the lane (4 BLOCKED, 5 INFRA_ERROR, 1
+# otherwise or none) and never replaces an earlier failure's status.
+if [ "$WATCH_RUN" = 1 ] && [ "$P09_RC" = 0 ] && [ "${P09_REC%% *}" = PASS ]; then
+  mkdir -p "$TOCKMOX_P09_STATE"
+  : > "${TOCKMOX_P09_STATE}/p09-passed"
+  export TOCKMOX_P15_BUDGET="${TOCKMOX_P15_BUDGET:-5400}"
+  echo "lane 7c: P15, the approvers watcher's alerts, after a P09 that passed (budget ${TOCKMOX_P15_BUDGET}s)"
+  set +e
+  bash "${HERE}/run.sh" P15
+  p15_rc=$?
+  set -e
+  echo "lane: P15 exit ${p15_rc}"
+  if [ "$p15_rc" != 0 ] && [ "$rc" = 0 ]; then
+    rc="$p15_rc"
+  fi
+  # a P15 that exited 0 without declaring PASS fails the lane too: the lane decided to run it
+  p15_code="$(lane_judge P15-approver-revocation "$(lane_receipt P15-approver-revocation)")"
+  if [ "$p15_code" != 0 ] && [ "$rc" = 0 ]; then
+    rc="$p15_code"
+  fi
+elif [ "$WATCH_RUN" = 1 ]; then
+  echo "lane 7c: P09 did not pass, so P15 does not run"
+else
+  echo "lane 7c: P15 (the approvers watcher's alerts) skipped: ${WATCH_WHY}"
+fi
+# --- P15 block end ------------------------------------------------------------------------------------------------
 
 # --- P13 block begin (self-contained apart from P09_REC, lane_receipt and lane_judge above; goes after the P11 block) ---
 # 8. P13, the last path (only netpol-adversary.sh follows it), on the same throwaway and the same state directory, only when P09 exited 0 AND its receipt says PASS.
