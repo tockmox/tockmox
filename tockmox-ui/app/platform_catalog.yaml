@@ -23,7 +23,12 @@
 #   tockmox.com/practice=<role id> always belongs to that role; then a name in the site's
 #   features.platform.assign (job name: role id) belongs to the role it names; otherwise the first role (in file
 #   order) whose pattern fully matches the name owns it. Unmatched work is listed as "No owner".
-# schedules.planned: work the design calls for that is not deployed yet. Shown as Planned.
+#   A name in features.platform.plannedTasks (job name: planned task name) is that planned task, deployed
+#   under its own name: it belongs to the task's role, ahead of assign and the patterns, and the task's
+#   Planned row gives way to it. Unowned work in a namespace named in features.platform.siteNamespaces is a
+#   site application's own and is listed under "Site applications", not "No owner".
+# schedules.planned: work the design calls for that is not deployed yet. Shown as Planned. Planned task
+#   names are unique across the catalog, so plannedTasks can name one.
 # schedules.external: work that runs where this page cannot see it (another tool). Never healthy here.
 #
 # signals: one PromQL instant query each. good: below|above, warn/crit thresholds. No answer is
@@ -76,7 +81,7 @@ teams:
         dataClass: internal
         grafana: tockmox-alert-delivery
         schedules:
-          match: ["tockmox-heartbeat", ".*alert-relay.*"]
+          match: ["tockmox-heartbeat", ".*alert-relay.*", ".*health-watch.*"]
           planned:
             - {name: alert-triage, cron: "event", what: "Starts on a critical alert: groups it, investigates read-only, opens or updates the incident record"}
         signals:
@@ -263,7 +268,7 @@ teams:
         dataClass: internal
         grafana: tockmox-argocd
         schedules:
-          match: [".*renovate.*", ".*label-reconciler.*"]
+          match: [".*renovate.*", ".*label-reconciler.*", ".*github-minter.*"]
           planned:
             - {name: change-review, cron: "45 8 * * 1,4", what: "Reviews dependency-update pull requests and lists which are safe, which need a look and which to hold"}
         signals:
@@ -286,6 +291,7 @@ teams:
         never: [tag or publish a release, push to a protected branch]
         dataClass: internal
         schedules:
+          match: [".*gate-freshness.*"]
           planned:
             - {name: release-readiness, cron: "0 8 * * 2", what: "Checks what is ready for the next release and what still blocks it"}
 
@@ -369,6 +375,7 @@ teams:
       never: [change a role's scope itself, retire a role without a person agreeing]
       dataClass: internal
       schedules:
+        match: [".*improvement-fetch.*"]
         planned:
           - {name: quarterly-maturity-review, cron: "0 9 1 1,4,7,10 *", what: "Re-scores maturity against the last snapshot and proposes the cheapest level-ups"}
     members:

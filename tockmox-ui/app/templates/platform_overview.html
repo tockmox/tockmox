@@ -105,6 +105,14 @@
 </section>
 {% endif %}
 
+{% if site_work %}
+<section aria-labelledby="site-apps">
+  <h2 id="site-apps">Scheduled work of site applications</h2>
+  <p class="muted">These run in a namespace named under <code>features.platform.siteNamespaces</code>: your own applications, not part of the platform. No role watches them, and they are not counted in any verdict.</p>
+  <ul class="plain">{% for x in site_work %}<li>{{ sched_badge(x.state, sched_words) }} {% if x.protects %}{{ x.protects }} {% endif %}<code>{{ x.namespace }}/{{ x.name }}</code> <span class="muted">· {{ x.cadence }}</span></li>{% endfor %}</ul>
+</section>
+{% endif %}
+
 <section aria-labelledby="pm-sources">
   <h2 id="pm-sources">Where this page reads from</h2>
   <ul class="srcs">{% for k, r in readings.items() %}{% if k != "ledger" or ledger_on %}<li>{{ source_line(r) }}</li>{% endif %}{% endfor %}

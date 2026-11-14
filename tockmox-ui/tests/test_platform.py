@@ -277,7 +277,8 @@ def test_cronworkflows_without_a_success_metric_read_unknown(world):
     c, app, s = client_for(world, doc_with_platform(), cronworkflows=cw)
     login_as(c, s, ["tockmox-admins"])
     a = c.get("/platform/agents/capacity").text
-    assert "capacity-drift" in a and "outcome is not visible here" in a
+    # this world's Kubernetes API refuses the Workflows read, and the reason says so instead of a bare Unknown
+    assert "capacity-drift" in a and "it ran, but its runs cannot be read here (HTTP 403)" in a
 
 
 def test_cronworkflows_unreadable_makes_owning_practices_unknown(world):
@@ -540,7 +541,7 @@ def test_ledger_odd_statuses_bad_costs_and_stray_profiles(world):
     assert "/jobs/b%2F..%2Fx%3Fy" in r.text                                            # url-encoded
     a = c.get("/platform/agents/incident").text
     assert "Healthy" not in a.split("Agent")[1][:400] if "Agent" in a else True
-    views, _ = pm.build(pm.load_catalog(), {k: v.read() for k, v in app.state.platform["sources"].items()},
+    views, _, _ = pm.build(pm.load_catalog(), {k: v.read() for k, v in app.state.platform["sources"].items()},
                         ledger_configured=True)
     inc = next(v for v in views if v.agent.id == "incident")
     assert inc.agent_state == "unknown" and "cancelled" in inc.agent_reason and inc.cost == 0

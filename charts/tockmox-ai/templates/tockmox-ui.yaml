@@ -201,7 +201,7 @@ metadata:
 rules:
   - { apiGroups: [""], resources: [nodes], verbs: [get, list] }
   {{- if $platOn }}
-  - { apiGroups: [argoproj.io], resources: [cronworkflows], verbs: [list] }
+  - { apiGroups: [argoproj.io], resources: [cronworkflows, workflows], verbs: [list] }
   {{- end }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

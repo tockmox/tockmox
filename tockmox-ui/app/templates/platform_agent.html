@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "macros.html" import badge, source_line %}
-{% from "platform_macros.html" import sched_badge, signal_badge, mode_tag, when, practice_badge, case_table, spec_name %}
+{% from "platform_macros.html" import sched_badge, signal_badge, mode_tag, when, practice_badge, case_table, spec_name, job_name, newest_run %}
 {% block title %}{{ v.agent.name }} · Platform Management{% endblock %}
 {% block main %}
 <p class="crumb"><a href="/platform">Platform Management</a> / {{ team_obj.name }}{% if not v.agent.is_lead %} / reports to <a href="/platform/agents/{{ lead.agent.id }}">the {{ lead.agent.name }}</a>{% else %} / leads the team{% endif %}</p>
@@ -110,8 +110,8 @@
     <thead><tr><th scope="col">Job</th><th scope="col">State</th><th scope="col">Runs</th><th scope="col">Last run</th><th scope="col">Last success</th><th scope="col">Next</th></tr></thead>
     <tbody>
     {% for x in v.schedules %}
-    <tr><th scope="row">{{ x.name }}{% if x.namespace %}<span class="ref">{{ x.kind }} in {{ x.namespace }}</span>{% else %}<span class="ref">{{ x.kind }}</span>{% endif %}</th>
-        <td>{{ sched_badge(x.state, sched_words) }}<span class="why">{{ x.why }}</span></td>
+    <tr><th scope="row">{{ job_name(x) }}</th>
+        <td>{{ sched_badge(x.state, sched_words) }}<span class="why">{{ x.why }}</span>{{ newest_run(x, tz) }}</td>
         <td>{{ x.cadence }}{% if x.schedule and x.schedule != x.cadence and x.schedule != "event" %}<br><code>{{ x.schedule }}</code>{% endif %}</td>
         <td>{{ when(x.last_run, tz) }}</td><td>{{ when(x.last_success, tz) }}</td>
         <td>{% if x.next %}{{ when(x.next, tz) }}{% elif x.planned_next %}<span class="muted">would run {{ x.planned_next | local(tz) }}</span>{% else %}<span class="muted">none</span>{% endif %}</td></tr>

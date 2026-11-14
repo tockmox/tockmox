@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "macros.html" import source_line %}
-{% from "platform_macros.html" import sched_badge, rail, when %}
+{% from "platform_macros.html" import sched_badge, rail, when, job_name, newest_run %}
 {% block title %}Scheduled work · Platform Management{% endblock %}
 {% block main %}
 <p class="crumb"><a href="/platform">Platform Management</a></p>
@@ -13,9 +13,9 @@
   <thead><tr><th scope="col">Job</th><th scope="col">Owner</th><th scope="col">State</th><th scope="col">Runs</th><th scope="col">Last success</th><th scope="col">Next</th></tr></thead>
   <tbody>
   {% for a, x in rows %}
-  <tr><th scope="row">{{ x.name }}<span class="ref">{% if x.namespace %}{{ x.kind }} in {{ x.namespace }}{% else %}{{ x.kind }}{% endif %}</span></th>
-      <td>{% if a %}<a href="/platform/agents/{{ a.id }}">{{ a.name }}</a>{% else %}<span class="muted">No owner</span>{% endif %}</td>
-      <td>{{ sched_badge(x.state, sched_words) }}<span class="why">{{ x.why }}</span></td>
+  <tr><th scope="row">{{ job_name(x) }}</th>
+      <td>{% if a %}<a href="/platform/agents/{{ a.id }}">{{ a.name }}</a>{% elif x.site_app %}<span class="muted">Site application</span>{% else %}<span class="muted">No owner</span>{% endif %}</td>
+      <td>{{ sched_badge(x.state, sched_words) }}<span class="why">{{ x.why }}</span>{{ newest_run(x, tz) }}</td>
       <td>{{ x.cadence }}{% if x.schedule and x.schedule != x.cadence and x.schedule != "event" %}<br><code>{{ x.schedule }}</code>{% endif %}</td>
       <td>{{ when(x.last_success, tz) }}</td>
       <td>{% if x.next %}{{ when(x.next, tz) }}{% else %}<span class="muted">none</span>{% endif %}</td></tr>
