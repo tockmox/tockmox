@@ -345,8 +345,9 @@ jobs:
     # Never on pull_request: a self-hosted runner must not execute fork code.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
     runs-on: [self-hosted, tockmox-devtest]
-    # The p09 lane is one create, P04 and P05, and P09's whole install (20 to 40 minutes measured on the lab).
-    timeout-minutes: ${{ github.event.inputs.lane == 'p09' && 120 || 60 }}
+    # The p09 lane is one create, P04 and P05, and P09's whole install (20 to 40 minutes measured on the lab),
+    # then the paths that run after it on the same install (P11 to P16, P13 and the network-policy harness).
+    timeout-minutes: ${{ github.event.inputs.lane == 'p09' && 180 || 60 }}
     concurrency:
       # One at a time. Since then the teardown only removes this run's own
       # VM (named below), but two runs would still compete for the substrate's
