@@ -23,6 +23,21 @@
 {%- else -%}<span class="muted">none</span>{%- endif -%}
 {%- endmacro %}
 
+{# A job by what it protects, when the site says (features.platform.protects or a CronWorkflow's tockmox.com/protects
+   annotation), with its own name second; a deployed planned task says which. #}
+{% macro job_name(x) -%}
+{%- if x.protects -%}{{ x.protects }}<span class="ref">{{ x.name }}{% if x.namespace %} · {{ x.kind }} in {{ x.namespace }}{% else %} · {{ x.kind }}{% endif %}</span>
+{%- else -%}{{ x.name }}<span class="ref">{% if x.namespace %}{{ x.kind }} in {{ x.namespace }}{% else %}{{ x.kind }}{% endif %}</span>{%- endif -%}
+{%- if x.task %}<span class="ref">the planned task {{ x.task }}</span>{% endif -%}
+{%- endmacro %}
+
+{# How a CronWorkflow's newest run ended, from its own Workflow: the phase in words and its time. #}
+{% macro newest_run(x, tz) -%}
+{%- if x.run_phase -%}<span class="why">Newest run: {{ x.run_phase }},
+{%- if x.run_phase in ("Succeeded", "Failed", "Error") and x.run_finished %} finished {{ when(x.run_finished, tz) }}{% else %} started {{ when(x.run_started, tz) }}{% endif %}</span>
+{%- endif -%}
+{%- endmacro %}
+
 {% macro mode_tag(agent) -%}
 <span class="mode mode-{{ agent.mode }}"><svg class="ico" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
 {%- if agent.mode == "observe" -%}<path d="M2 10s3-5.5 8-5.5S18 10 18 10s-3 5.5-8 5.5S2 10 2 10z" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="10" cy="10" r="2.4" fill="currentColor"/>

@@ -269,7 +269,7 @@ the internet at all, and the render check holds that.
 
 **Kubernetes authority:** get and list on nodes, and on Argo CD applications in
 their namespace; with [Platform Management](platform-management.md) on, list on
-Argo CronWorkflows as well; and `get` on one ConfigMap in the identity
+Argo CronWorkflows and Workflows as well; and `get` on one ConfigMap in the identity
 namespace, `tockmox-identity-open-applications`, through a Role and RoleBinding
 the identity layer renders ([Open applications](#open-applications)). No
 Secrets and no writes. The Role and RoleBinding for Argo CD applications live in

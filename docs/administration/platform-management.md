@@ -65,7 +65,10 @@ Optional keys under `config.features.platform`:
 | `clusterTimezone` | The zone your cluster's controller manager runs in, default UTC. A CronJob that sets no `timeZone` fires in that zone, and kube-state-metrics reports it only as `local`, so the page needs telling. |
 | `specialistsUrl` | A specialist host (its base URL). Turns on the **Cases** pages and the specialists' served state: see "Cases" below. Unset, every Cases view reads **Not connected**, never an empty list. Must be an absolute `http(s)` URL. |
 | `assign` | A map of scheduled-job name to role id: `{nightly-thing: continuity}`. That job belongs to that role ahead of the catalog's patterns; a `tockmox.com/practice` label on the workload still wins. A role id the catalog does not have is ignored. **Give to a role** on the Overview writes one entry here as a change. |
-| `workflowSuccessQuery` | A PromQL query returning each Argo CronWorkflow's last success time, labelled `namespace` and `cronworkflow`. Unset, a CronWorkflow's last run shows but not whether it passed, and it reads Unknown. |
+| `workflowSuccessQuery` | A PromQL query returning each Argo CronWorkflow's last success time, labelled `namespace` and `cronworkflow`. Needed only for a CronWorkflow whose newest run's Workflow Argo has already deleted: while that Workflow exists, its own phase decides (see "How the page decides"). |
+| `plannedTasks` | A map of scheduled-job name to the name of a planned task in the catalog: `{my-standup-job: daily-standup}`. The job is that task, deployed under its own name: it belongs to the task's role, its row says which task it is, and the task's **Planned** row gives way to it. A task name the catalog does not have is ignored. |
+| `protects` | A map of scheduled-job name to what it protects, in a user's words: `{notes-db-drill: Notes database}`. The page names the job by those words, with its own name second. On an Argo CronWorkflow, the annotation `tockmox.com/protects` does the same and wins over this map. At most 80 characters. |
+| `siteNamespaces` | A list of namespaces that hold your own applications, not the platform's: `[notes-app]`. Scheduled work there that no role owns is listed under **Scheduled work of site applications** instead of **No owner**, and is counted in no verdict. A role's pattern or label still wins. |
 
 The ledger is yours, so the chart does not know its address or its token:
 
@@ -84,7 +87,7 @@ tockmoxUi:
 
 | Read | From | What turning it on adds | Control |
 |---|---|---|---|
-| Argo CronWorkflows | the Kubernetes API, `list` on `cronworkflows`, every namespace | **One new permission.** The UI's ServiceAccount can read every CronWorkflow's spec, including inline scripts and parameters. | The rule is rendered only when the switch is on. `list` only: no `get` on Secrets, no `watch`, no writes. The page shows names, schedules, suspend state and last run, never a spec body. Admins only. |
+| Argo CronWorkflows and their runs | the Kubernetes API, `list` on `cronworkflows` and on `workflows`, every namespace | **Two new permissions.** The UI's ServiceAccount can read every CronWorkflow's spec and every Workflow (its spec and status, including inline scripts, parameters and step outputs). It lists only the Workflows a CronWorkflow made (label `workflows.argoproj.io/cron-workflow`), but the permission is on all of them. | The rule is rendered only when the switch is on. `list` only: no `get` on Secrets, no `watch`, no writes. The page shows names, schedules, suspend state, the newest run's phase and its start and finish times, never a spec body or an output. Admins only. If the Workflows read is refused, outcomes fall back to `workflowSuccessQuery` and the source says why. |
 | CronJobs and their Jobs | kube-state-metrics, through Prometheus | Nothing: the UI already reads Prometheus. | |
 | Each role's numbers | PromQL instant queries named in the catalog | A site catalog can query any series Prometheus holds and show the value to admins. | The catalog is a ConfigMap your site commits, so a new query is a reviewed change. Instant, read-only queries. |
 | Cases | the specialist host: `POST /s/service-desk/v1/list` and `/get` as the caller `client/tockmox-ui`, and `GET /v1/index` | Record metadata (ids, titles, states, who worked them, links) and timeline steps leave the host for the UI. | The token is a Secret you name (`secrets.platformSpecialistsToken`), mounted read-only only when the switch is on; the desk admits that caller to `list`, `get` and `timeline` only. Egress is yours to add. Words a model wrote never render. |
@@ -114,7 +117,13 @@ and the release notes folded by section).
   its expected run (a tenth of its interval, at least 10 minutes and at most 2
   hours) and **Missed** after it. Its last *success* decides, not its last run:
   a job whose newest run fails reads **Failed** (a run that failed a pod and then
-  succeeded on a retry is not a failure). A run still going after twice its
+  succeeded on a retry is not a failure).
+- **How an Argo CronWorkflow's run ended.** The page reads the newest Workflow the
+  CronWorkflow made and shows its phase (Succeeded, Failed, Running) with the time
+  it finished or started. `Error` reads as Failed, `Pending` as Running. Only the
+  Workflow for the newest scheduled run counts: when Argo has already deleted it,
+  an older run's outcome is not used, and the job reads **Unknown** ("Argo keeps
+  no record of its newest run") unless `workflowSuccessQuery` answers for it. A run still going after twice its
   interval, or an hour, whichever is longer, reads **Running too long**. One that
   has never run reads **Never run** and a suspended one **Paused**; both are
   Unknown, so a practice that owns one cannot read healthy.
@@ -133,9 +142,11 @@ and the release notes folded by section).
   pattern matches its name. An Argo CronWorkflow labelled
   `tockmox.com/practice: <role id>` belongs to that role whatever its name (CronJobs
   are read through kube-state-metrics, which does not carry their labels, so they
-  match by name only). Between the two, a name listed in `assign` belongs to the
-  role it names. Work no role owns is listed as **No owner**, so nothing
-  scheduled is invisible. With the console's `changes` actions on, each one has
+  match by name only). Between the two, a name listed in `plannedTasks` belongs to
+  the role whose planned task it names, and then a name listed in `assign` to the
+  role it names. Work no role owns in a namespace under `siteNamespaces` is listed
+  as a site application's own; anywhere else it is listed as **No owner**, so
+  nothing scheduled is invisible. With the console's `changes` actions on, each one has
   **Give to a role**, which opens a change adding it to `assign`.
 - **Planned and external.** Work a role will own but that is not deployed shows
   as **Planned**. Work that runs somewhere this page cannot see (another tool)
@@ -259,7 +270,7 @@ approve; **Act** (no role has it) would run named, reversible actions.
 | Role | Mode | ITIL 4 practice | Owns scheduled work matching | Watches |
 |---|---|---|---|---|
 | Platform Manager (lead) | Propose | Service level management; Measurement and reporting; Service desk | none yet; 2 planned | none yet |
-| Incident Manager | Observe | Incident management; Monitoring and event management | `tockmox-heartbeat`, `.*alert-relay.*`; 1 planned | Critical alerts firing, Warnings firing, Alert pipeline heartbeat, Endpoints answering |
+| Incident Manager | Observe | Incident management; Monitoring and event management | `tockmox-heartbeat`, `.*alert-relay.*`, `.*health-watch.*`; 1 planned | Critical alerts firing, Warnings firing, Alert pipeline heartbeat, Endpoints answering |
 | Problem Manager | Observe | Problem management | `.*catches.*`; 1 planned | Different alerts fired this week |
 | Capacity Manager | Observe | Capacity and performance management | `.*capacity.*` | Busiest node, memory used, Busiest node, CPU over the last hour, Fullest volume, AI requests served locally, last 24h |
 | Continuity Manager | Observe | Service continuity management; Availability management | `.*drill.*`, `.*backup.*`, `snapshot-.*`, `.*restore.*`, `.*export.*` | Days since a restore drill passed, Backup jobs whose last run did not succeed |
@@ -272,8 +283,8 @@ approve; **Act** (no role has it) would run named, reversible actions.
 |---|---|---|---|---|
 | Project Manager (lead) | Propose | Project management; Portfolio management | none yet; 1 planned | none yet |
 | Scrum Master | Propose | Project management (iterative delivery); Workforce and talent management | none yet; 3 planned | none yet |
-| Change Manager | Propose | Change enablement | `.*renovate.*`, `.*label-reconciler.*`; 1 planned | Layers not both synced with git and healthy, Layers degraded or missing |
-| Release Manager | Propose | Release management; Deployment management | none yet; 1 planned | none yet |
+| Change Manager | Propose | Change enablement | `.*renovate.*`, `.*label-reconciler.*`, `.*github-minter.*`; 1 planned | Layers not both synced with git and healthy, Layers degraded or missing |
+| Release Manager | Propose | Release management; Deployment management | `.*gate-freshness.*`; 1 planned | none yet |
 | Test Manager | Observe | Service validation and testing | none yet; 1 planned | none yet |
 | Configuration and Asset Manager | Observe | Service configuration management; IT asset management; Infrastructure and platform management | none yet; 1 planned | Cluster nodes not ready, AI nodes running an unverified configuration |
 | Supplier Manager | Observe | Supplier management; Relationship management | none yet; 2 planned | none yet |
@@ -282,7 +293,7 @@ approve; **Act** (no role has it) would run named, reversible actions.
 
 | Role | Mode | ITIL 4 practice | Owns scheduled work matching | Watches |
 |---|---|---|---|---|
-| Improvement Manager (lead) | Propose | Continual improvement; Measurement and reporting; Strategy management | none yet; 1 planned | none yet |
+| Improvement Manager (lead) | Propose | Continual improvement; Measurement and reporting; Strategy management | `.*improvement-fetch.*`; 1 planned | none yet |
 | Knowledge Manager | Propose | Knowledge management | none yet; 1 planned | none yet |
 | Finance Manager | Observe | Service financial management | none yet; 1 planned | Frontier spend, last 24h, Frontier spend, last 30 days, Least budget left on any gateway key |
 | Architect | Propose | Architecture management; Service design | none yet; 1 planned | none yet |

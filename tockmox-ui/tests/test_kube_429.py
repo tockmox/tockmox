@@ -22,6 +22,8 @@ class Kube:
         self.script, self.retry_after, self.seen = list(script), retry_after, 0
 
     def handler(self, req):
+        if req.url.path.endswith("/workflows"):        # the runs list CronWorkflowsSource also reads: not scripted here
+            return httpx.Response(200, json={"items": []})
         code = self.script[min(self.seen, len(self.script) - 1)]
         self.seen += 1
         if code == 429:

@@ -82,6 +82,18 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **Platform › Schedule shows how each Argo CronWorkflow's newest run ended.** The console reads the
+  newest Workflow each CronWorkflow made and shows its phase (Succeeded, Failed, Running) with the
+  time it finished or started, instead of "it ran, but its outcome is not visible here". When Argo has
+  already deleted that run's Workflow, the job reads Unknown and says so, never Failed. The UI's
+  ServiceAccount now also lists Argo Workflows while Platform Management is on. Jobs can be named by
+  what they protect (`features.platform.protects`, or a CronWorkflow's `tockmox.com/protects`
+  annotation), with the job name second; a deployed job can be linked to a planned task in the
+  catalog (`features.platform.plannedTasks`), whose Planned row then gives way to it; work in a
+  namespace under `features.platform.siteNamespaces` is listed as a site application's own, not as
+  No owner; and the default catalog now owns the platform's health watch, gate freshness, GitHub
+  token minters and improvement fetcher (docs/administration/platform-management.md).
+
 - **Move a running site into the built-in forge.** `tockmox-install.sh
   move-in-forge` takes a site whose repository is on GitHub, GitLab or your own
   Forgejo into the built-in forge with its whole history: every `repoURL` that

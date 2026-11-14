@@ -5,7 +5,8 @@ What this module shows, and from where:
 
   the team        the catalog (platform_catalog.yaml, or features.platform.catalogFile): DATA, no code
   scheduled work  CronJobs through kube-state-metrics in Prometheus (no new Kubernetes permission),
-                  Argo CronWorkflows through the Kubernetes API (one new read: cronworkflows, list)
+                  Argo CronWorkflows and the Workflows they made through the Kubernetes API (list cronworkflows,
+                  list workflows)
   practice health each manager's signals: PromQL instant queries with thresholds
   agent runs      the agent ledger (features.platform.ledgerUrl, GET /v1/jobs); unset, every agent
                   reads "Not connected", which is Unknown and never healthy
@@ -43,7 +44,7 @@ from zoneinfo import ZoneInfo
 
 from . import platform_cases
 from .cronexpr import Cron, describe
-from .sources import CRIT, OK, UNKNOWN, WARN, KubeClient, Reading, Source, _parse_ts, worst
+from .sources import CRIT, OK, UNKNOWN, WARN, KubeClient, Reading, Source, _parse_ts, _why, worst
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CATALOG = os.path.join(HERE, "platform_catalog.yaml")
@@ -172,6 +173,10 @@ class Catalog:
             out.extend(t.members)
         return tuple(out)
 
+    def planned_owner(self, name):
+        """The role whose planned task this is, or None."""
+        return next((a.id for a in self.all() if any(p["name"] == name for p in a.planned)), None)
+
     def get(self, aid):
         return next((a for a in self.all() if a.id == aid), None)
 
@@ -281,6 +286,10 @@ def _load_catalog(path: str | None = None) -> Catalog:
         raise CatalogError("role ids must be unique")
     if len({t.id for t in teams}) != len(teams):
         raise CatalogError("team ids must be unique")
+    tasks = [p["name"] for a in cat.all() for p in a.planned]
+    if len(tasks) != len(set(tasks)):
+        dup = sorted({n for n in tasks if tasks.count(n) > 1})
+        raise CatalogError(f"planned task names must be unique (features.platform.plannedTasks names one): {', '.join(dup)}")
     return cat
 
 
@@ -368,18 +377,48 @@ class CronJobsSource(Source):
 
 
 class CronWorkflowsSource(Source):
-    """Argo CronWorkflows through the Kubernetes API (list cronworkflows, cluster-wide). Argo's
-    status says when it last scheduled a run, not how the run ended; the outcome comes from an
-    optional success metric (features.platform.workflowSuccessQuery), else it reads Unknown."""
+    """Argo CronWorkflows through the Kubernetes API (list cronworkflows, cluster-wide), and how each one's
+    newest run ended from the Workflows it made (list workflows labelled workflows.argoproj.io/cron-workflow):
+    the run's phase and finish time. Argo's CronWorkflow status says only when it last scheduled a run.
+    When the run's own record is gone (Argo garbage-collects finished Workflows) or cannot be read, the
+    outcome comes from an optional success metric (features.platform.workflowSuccessQuery), else it reads
+    Unknown with the reason."""
     name = "Scheduled workflows (Argo)"
+    CRON_LABEL = "workflows.argoproj.io/cron-workflow"
+    SCHEDULED_AT = "workflows.argoproj.io/scheduled-time"
+    PROTECTS = "tockmox.com/protects"
 
     def __init__(self, kube: KubeClient, prom_url, timeout, success_query="", transport=None, ttl=30.0):
         super().__init__(ttl)
         self.kube, self.prom_url, self.timeout = kube, prom_url, timeout
         self.success_query, self.transport = success_query, transport
+        self.runs_error = ""
+
+    def _runs(self) -> dict:
+        """(namespace, cronworkflow) -> its newest run: {t, phase, started, finished}. The run's time is the
+        scheduled time Argo stamps on it, else when it started, else when it was made."""
+        doc = self.kube.get("/apis/argoproj.io/v1alpha1/workflows?labelSelector=" + self.CRON_LABEL)
+        newest: dict = {}
+        for w in doc.get("items", []):
+            md, st = w.get("metadata") or {}, w.get("status") or {}
+            cw = (md.get("labels") or {}).get(self.CRON_LABEL)
+            started = _parse_ts(st.get("startedAt"))
+            t = _parse_ts((md.get("annotations") or {}).get(self.SCHEDULED_AT)) or started \
+                or _parse_ts(md.get("creationTimestamp"))
+            if not cw or t is None:
+                continue
+            k = (md.get("namespace"), cw)
+            if k not in newest or t > newest[k]["t"]:
+                newest[k] = {"t": t, "phase": str(st.get("phase") or "Pending"), "started": started or t,
+                             "finished": _parse_ts(st.get("finishedAt"))}
+        return newest
 
     def fetch(self):
         doc = self.kube.get("/apis/argoproj.io/v1alpha1/cronworkflows")
+        try:
+            runs, self.runs_error = self._runs(), ""
+        except Exception as e:  # noqa: BLE001 - outcomes fall back to the metric; the schedule list still shows
+            runs, self.runs_error = None, _why(e)
         ok_by_name = {}
         if self.success_query and self.prom_url:
             try:
@@ -395,16 +434,35 @@ class CronWorkflowsSource(Source):
             md, sp, st = it.get("metadata", {}), it.get("spec", {}), it.get("status", {})
             scheds = sp.get("schedules") or ([sp["schedule"]] if sp.get("schedule") else [])
             k = (md.get("namespace"), md.get("name"))
-            out.append({"kind": "CronWorkflow", "namespace": k[0], "name": k[1],
-                        "schedule": scheds[0] if scheds else "", "schedules": list(scheds),
-                        "timezone": sp.get("timezone") or "UTC",
-                        "suspended": bool(sp.get("suspend")), "active": bool(st.get("active")),
-                        "last_run": _parse_ts(st.get("lastScheduledTime")),
-                        "last_success": ok_by_name.get(k), "next_run": None, "last_failed": None,
-                        "practice": (md.get("labels") or {}).get(PRACTICE_LABEL)})
+            row = {"kind": "CronWorkflow", "namespace": k[0], "name": k[1],
+                   "schedule": scheds[0] if scheds else "", "schedules": list(scheds),
+                   "timezone": sp.get("timezone") or "UTC",
+                   "suspended": bool(sp.get("suspend")), "active": bool(st.get("active")),
+                   "last_run": _parse_ts(st.get("lastScheduledTime")),
+                   "last_success": ok_by_name.get(k), "next_run": None, "last_failed": None,
+                   "practice": (md.get("labels") or {}).get(PRACTICE_LABEL),
+                   "protects": str((md.get("annotations") or {}).get(self.PROTECTS) or "").strip()[:80]}
+            run = (runs or {}).get(k)
+            if run and (row["last_run"] is None or run["t"] >= row["last_run"] - 60):
+                # the newest scheduled run's own record: its phase decides, not the metric
+                row.update(run_phase=run["phase"], run_started=run["started"], run_finished=run["finished"],
+                           last_run=max(row["last_run"] or 0, run["t"]))
+                if run["phase"] == "Succeeded":
+                    row["last_success"] = max(row["last_success"] or 0, run["finished"] or run["t"])
+                    row["last_failed"] = False
+                elif run["phase"] in ("Failed", "Error"):
+                    row["last_failed"] = True
+                else:                       # Pending or Running: a run is going
+                    row["active"] = True
+            elif row["last_success"] is None and row["last_run"] is not None:
+                row["outcome_note"] = (f"it ran, but its runs cannot be read here ({self.runs_error})" if runs is None
+                                       else "it ran, but Argo keeps no record of its newest run")
+            out.append(row)
         return out
 
     def evaluate(self, items):
+        if self.runs_error:
+            return WARN, f"{len(items)} found; how their runs ended cannot be read ({self.runs_error})"
         return OK, f"{len(items)} found"
 
 
@@ -485,12 +543,16 @@ def _usd(v) -> float:
     return 0.0 if math.isnan(f) else f
 
 
-def owner_of(item: dict, cat: Catalog, assign: dict | None = None) -> str | None:
-    """The role a scheduled job belongs to: its tockmox.com/practice label, then features.platform.assign (the
-    console's "Give to a role"), then the first role whose pattern matches its name. A label or an assignment
-    naming no role in the catalog is passed over."""
+def owner_of(item: dict, cat: Catalog, assign: dict | None = None, tasks: dict | None = None) -> str | None:
+    """The role a scheduled job belongs to: its tockmox.com/practice label, then the role whose planned task
+    it is (features.platform.plannedTasks), then features.platform.assign (the console's "Give to a role"),
+    then the first role whose pattern matches its name. A label, a task or an assignment naming nothing in
+    the catalog is passed over."""
     if item.get("practice") and cat.get(item["practice"]):
         return item["practice"]
+    task = (tasks or {}).get(item["name"])
+    if task and cat.planned_owner(task):
+        return cat.planned_owner(task)
     given = (assign or {}).get(item["name"])
     if given and cat.get(given):
         return given
@@ -537,7 +599,7 @@ def schedule_state(item: dict, now: float) -> tuple[str, str, float | None, floa
     if item.get("last_failed"):
         return "failed", "the newest run failed", expected, nxt
     if last_ok is None:
-        return "unknown", "it ran, but its outcome is not visible here", expected, nxt
+        return "unknown", item.get("outcome_note") or "it ran, but its outcome is not visible here", expected, nxt
     if last_run and last_ok + 60 < last_run:
         return "failed", "the newest run did not succeed", expected, nxt
     return "up", "the last scheduled run succeeded", expected, nxt
@@ -619,8 +681,12 @@ class AgentView:
 
 
 def build(cat: Catalog, readings: dict, now: float | None = None, ledger_configured: bool = False, tz: str = "UTC",
-          assign: dict | None = None):
-    """Assemble one AgentView per manager plus the unowned scheduled work."""
+          assign: dict | None = None, tasks: dict | None = None, site_namespaces=(), protects: dict | None = None):
+    """Assemble one AgentView per manager plus the unowned scheduled work, and the site applications' own
+    (work no role owns in a namespace named in features.platform.siteNamespaces). A deployed job linked to a
+    planned task (tasks: job name -> planned task name) is that task: the task's Planned row gives way to it.
+    protects (job name -> what it protects, in a user's words) labels a job; a CronWorkflow's
+    tockmox.com/protects annotation wins over it. Returns (views, unowned, site)."""
     now = now or time.time()
     views = {a.id: AgentView(a) for a in cat.all()}
     sched_readings = [readings["cronjobs"], readings["cronworkflows"]]
@@ -628,16 +694,31 @@ def build(cat: Catalog, readings: dict, now: float | None = None, ledger_configu
     for r in sched_readings:
         if r.fetched_at is not None and r.data:
             items.extend(r.data)
-    unowned = []
+    unowned, site = [], []
+    site_ns = set(site_namespaces or ())
+    deployed_tasks = set()
     for it in items:
         st, why, exp, nxt = schedule_state(it, now)
+        owner = owner_of(it, cat, assign, tasks)
+        task = (tasks or {}).get(it["name"])
+        task = task if task and cat.planned_owner(task) == owner else ""
+        if task:
+            deployed_tasks.add(task)
         row = dict(it, state=st, why=why, expected=exp, next=nxt,
                    cadence="; ".join(describe(e) for e in (it.get("schedules") or [it["schedule"]])),
-                   owner=owner_of(it, cat, assign), source="cluster")
-        (views[row["owner"]].schedules if row["owner"] else unowned).append(row)
+                   owner=owner, source="cluster", task=task,
+                   protects=it.get("protects") or str((protects or {}).get(it["name"]) or "").strip()[:80])
+        if owner:
+            views[owner].schedules.append(row)
+        elif it.get("namespace") in site_ns:
+            site.append(dict(row, site_app=True))
+        else:
+            unowned.append(row)
     for a in cat.all():
         v = views[a.id]
         for p in a.planned:
+            if p["name"] in deployed_tasks:
+                continue        # deployed under its own name: the cluster row above is this task
             nxt = None if p["cron"] == "event" else Cron(p["cron"], tz).next_after(now)
             v.schedules.append({"name": p["name"], "kind": "Agent task", "timezone": tz, "state": "planned", "why": p["what"],
                                 "cadence": "on an event" if p["cron"] == "event" else describe(p["cron"]),
@@ -748,7 +829,7 @@ def build(cat: Catalog, readings: dict, now: float | None = None, ledger_configu
                  if j.get("status") == "input_required" and j.get("profile") not in known]
         if stray:
             views[cat.teams[0].lead.id].waiting.extend(stray)
-    return [views[a.id] for a in cat.all()], unowned
+    return [views[a.id] for a in cat.all()], unowned, site
 
 
 def org_verdict(cat: Catalog, views) -> tuple[str, str]:
@@ -776,7 +857,7 @@ def _ts(v):
     return _parse_ts(v)
 
 
-def day_rail(views, unowned, now: float, tz: str, hours: int = 24):
+def day_rail(views, unowned, now: float, tz: str, hours: int = 24, site=()):
     """The next `hours` of scheduled work, per manager, as positions on a rail (0..1) plus the same
     facts as a list. The rail is a picture of the list; the list is the content (WCAG 1.1.1)."""
     from datetime import datetime
@@ -784,10 +865,12 @@ def day_rail(views, unowned, now: float, tz: str, hours: int = 24):
     z = ZoneInfo(tz)
     end = now + hours * 3600
     lanes, rows = [], []
-    for v in list(views) + ([None] if unowned else []):
-        name = v.agent.name if v else "No owner"
-        aid = v.agent.id if v else ""
-        scheds = v.schedules if v else unowned
+    extra = ([("Site applications", site)] if site else []) + ([("No owner", unowned)] if unowned else [])
+    for v in list(views) + extra:
+        own = isinstance(v, AgentView)
+        name = v.agent.name if own else v[0]
+        aid = v.agent.id if own else ""
+        scheds = v.schedules if own else v[1]
         ticks = []
         for s in scheds:
             expr = s.get("schedule") or ""
@@ -802,7 +885,7 @@ def day_rail(views, unowned, now: float, tz: str, hours: int = 24):
             if gap < 3600:
                 # every few minutes: a band on the rail and one line in the list, not hundreds of ticks
                 ticks.append({"band": True, "planned": planned, "name": s["name"]})
-                rows.append({"t": now, "when": "all day", "name": s["name"], "owner": name, "owner_id": aid,
+                rows.append({"t": now, "when": "all day", "name": s.get("protects") or s["name"], "owner": name, "owner_id": aid,
                              "planned": planned, "kind": s.get("kind", ""), "every": describe(expr), "frequent": True})
                 continue
             t = c.next_after(now - 1)
@@ -811,7 +894,7 @@ def day_rail(views, unowned, now: float, tz: str, hours: int = 24):
                 planned = s.get("source") != "cluster"
                 ticks.append({"x": (t - now) / (end - now), "planned": planned, "name": s["name"], "t": t})
                 rows.append({"t": t, "when": datetime.fromtimestamp(t, z).strftime("%a %H:%M"),
-                             "name": s["name"], "owner": name, "owner_id": aid, "planned": planned,
+                             "name": s.get("protects") or s["name"], "owner": name, "owner_id": aid, "planned": planned,
                              "kind": s.get("kind", "")})
                 t = c.next_after(t)
                 n += 1
@@ -885,11 +968,18 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
     app.state.platform = {"catalog": cat, "sources": srcs}
     raw = opt.get("assign")
     assign = {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+    raw = opt.get("plannedTasks")
+    tasks = {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+    raw = opt.get("protects")
+    protects = {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+    raw = opt.get("siteNamespaces")
+    site_ns = tuple(str(x) for x in raw) if isinstance(raw, list) else ()
     assign_on = bool(s.actions and s.actions.on("assign-job"))
 
     def snapshot():
         r = {k: v.read() for k, v in srcs.items() if k not in ("desk", "index")}
-        views, unowned = build(cat, r, ledger_configured=srcs["ledger"].configured(), tz=tz, assign=assign)
+        views, unowned, site = build(cat, r, ledger_configured=srcs["ledger"].configured(), tz=tz, assign=assign,
+                                     tasks=tasks, site_namespaces=site_ns, protects=protects)
         if not srcs["ledger"].configured() and srcs["index"].configured():
             # No orchestrator ledger, but the specialist host answers: say which of the role's built specialists it
             # serves instead of a bare Not connected. Served is not healthy (their call health is not read here),
@@ -904,7 +994,7 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
                 v.agent_state, v.agent_word = (UNKNOWN, "Served") if n == len(built) else (WARN, f"{n} of {len(built)} served")
                 v.agent_reason = (f"the specialist host serves {n} of its {len(built)} built specialists; "
                                   "how their calls are going is not read on this page yet")
-        return r, views, unowned
+        return r, views, unowned, site
 
     app.state.platform["unowned"] = lambda: [x["name"] for x in snapshot()[2]]
 
@@ -935,16 +1025,16 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
         u, deny = guard(request)
         if deny:
             return deny
-        r, views, unowned = snapshot()
+        r, views, unowned, site = snapshot()
         by = {v.agent.id: v for v in views}
         teams = [{"team": t, "lead": by[t.lead.id], "members": [by[m.id] for m in t.members]} for t in cat.teams]
         verdict, why = org_verdict(cat, views)
         waiting = [(v, j) for v in views for j in v.waiting]
-        rail = day_rail([v for v in views if v.schedules], unowned, time.time(), tz)
+        rail = day_rail([v for v in views if v.schedules], unowned, time.time(), tz, site=site)
         dr, rows = desk()
         yours = platform_cases.needs_you(rows)      # the same set the Cases page opens on
         return render(request, "platform_overview.html", u, readings=r, views=views, teams=teams,
-                      org_state=verdict, org_why=why, unowned=unowned, waiting=waiting, rota=rail,
+                      org_state=verdict, org_why=why, unowned=unowned, site_work=site, waiting=waiting, rota=rail,
                       ledger_on=srcs["ledger"].configured(), desk=dr, case_counts=platform_cases.summarize(rows),
                       yours=yours, groups=platform_cases.group_cases(yours), **common(u))
 
@@ -958,7 +1048,7 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
         if team and t is None:
             return render(request, "error.html", u, status_code=404, title="Not found",
                           message="There is no such team in this platform's organization.")
-        r, views, unowned = snapshot()
+        r, views, unowned, _site = snapshot()
         by = {v.agent.id: v for v in views}
         sel = {"team": t, "lead": by[t.lead.id], "members": [by[m.id] for m in t.members]} if t else None
         return render(request, "platform_organization.html", u, readings=r, sel=sel, teams=cat.teams, **common(u))
@@ -968,12 +1058,12 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
         u, deny = guard(request)
         if deny:
             return deny
-        r, views, unowned = snapshot()
-        rows = [(v.agent, x) for v in views for x in v.schedules] + [(None, x) for x in unowned]
+        r, views, unowned, site = snapshot()
+        rows = [(v.agent, x) for v in views for x in v.schedules] + [(None, x) for x in site + unowned]
         order = {"failed": 0, "missed": 1, "stuck": 2, "late": 2, "unknown": 3, "never": 4, "paused": 5,
                  "running": 6, "up": 7, "external": 8, "planned": 9}
         rows.sort(key=lambda ax: (order.get(ax[1]["state"], 9), ax[1]["name"]))
-        rail = day_rail(views, unowned, time.time(), tz, hours=24 * 7)
+        rail = day_rail(views, unowned, time.time(), tz, hours=24 * 7, site=site)
         return render(request, "platform_schedule.html", u, readings=r, rows=rows, rota=rail, **common(u))
 
     @app.get("/platform/agents/{aid}")
@@ -984,7 +1074,7 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
         if not cat.get(aid):
             return render(request, "error.html", u, status_code=404, title="Not found",
                           message="There is no such role in this platform's organization.")
-        r, views, unowned = snapshot()
+        r, views, unowned, _site = snapshot()
         by = {x.agent.id: x for x in views}
         v = by[aid]
         t = cat.team(v.agent.team)
