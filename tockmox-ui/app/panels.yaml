@@ -186,14 +186,14 @@ panels:
   - id: part-drill-age
     page: part
     title: Days since a passing restore drill
-    expr: (time() - max(kube_job_status_completion_time{job_name=~".*restore-drill.*"} and on (namespace, job_name) kube_job_status_succeeded > 0)) / 86400
+    expr: (time() - min(kube_cronjob_status_last_successful_time{cronjob=~".*-drill(-[a-z0-9]+)?",cronjob!~".*rehearsal.*"})) / 86400
     unit: days
     range: 7d
     step: 2h
     warn: 8
     crit: 15
     board: tockmox-backup-proof
-    describe: Days since the last restore drill that passed, over the last 7 days.
+    describe: Days since the drill that passed longest ago (drill CronJobs are named <db>-drill), over the last 7 days.
 
   # ---------------------------------------------------------------- AI › Inference nodes
   - id: ai-engines-healthy
@@ -267,7 +267,7 @@ panels:
   - id: platform-drill-age
     page: platform
     title: Days since a passing restore drill
-    expr: (time() - max by (namespace) (kube_job_status_completion_time{job_name=~".*restore-drill.*"} and on (namespace, job_name) kube_job_status_succeeded > 0)) / 86400
+    expr: (time() - min by (namespace) (kube_cronjob_status_last_successful_time{cronjob=~".*-drill(-[a-z0-9]+)?",cronjob!~".*rehearsal.*"})) / 86400
     legend: namespace
     unit: days
     range: 7d
@@ -275,7 +275,7 @@ panels:
     warn: 8
     crit: 15
     board: tockmox-backup-proof
-    describe: Days since the last passing restore drill, per namespace, over the last 7 days.
+    describe: Days since each namespace's stalest passing restore drill, over the last 7 days.
 
   - id: platform-alerts
     page: platform

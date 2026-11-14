@@ -40,7 +40,16 @@
    },
    "fieldConfig": {
     "defaults": {
-     "unit": "none"
+     "unit": "none",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
     },
     "overrides": []
    },
@@ -79,7 +88,16 @@
    },
    "fieldConfig": {
     "defaults": {
-     "unit": "reqps"
+     "unit": "reqps",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
     },
     "overrides": []
    },
@@ -173,7 +191,16 @@
    },
    "fieldConfig": {
     "defaults": {
-     "unit": "percentunit"
+     "unit": "percentunit",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
     },
     "overrides": []
    },
@@ -414,7 +441,9 @@
  "schemaVersion": 39,
  "tags": [
   "platform",
-  "tockmox"
+  "tockmox",
+  "tier-l2",
+  "incident"
  ],
  "templating": {
   "list": [

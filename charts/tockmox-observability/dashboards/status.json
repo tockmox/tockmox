@@ -664,6 +664,7 @@
         "w": 8,
         "h": 7
       },
+      "timeFrom": "7d",
       "targets": [
         {
           "datasource": {
@@ -727,6 +728,7 @@
         "w": 8,
         "h": 7
       },
+      "timeFrom": "7d",
       "targets": [
         {
           "datasource": {
@@ -798,6 +800,7 @@
         "w": 8,
         "h": 7
       },
+      "timeFrom": "7d",
       "targets": [
         {
           "datasource": {
@@ -869,6 +872,7 @@
         "w": 8,
         "h": 7
       },
+      "timeFrom": "7d",
       "targets": [
         {
           "datasource": {
@@ -934,7 +938,7 @@
       "id": 13,
       "type": "timeseries",
       "title": "Days since a passing restore drill",
-      "description": "Days since the last passing restore drill, per namespace, over the last 7 days.",
+      "description": "Days since each namespace's stalest passing restore drill, over the last 7 days.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -945,13 +949,14 @@
         "w": 8,
         "h": 7
       },
+      "timeFrom": "7d",
       "targets": [
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "(time() - max by (namespace) (kube_job_status_completion_time{job_name=~\".*restore-drill.*\"} and on (namespace, job_name) kube_job_status_succeeded > 0)) / 86400",
+          "expr": "(time() - min by (namespace) (kube_cronjob_status_last_successful_time{cronjob=~\".*-drill(-[a-z0-9]+)?\",cronjob!~\".*rehearsal.*\"})) / 86400",
           "refId": "A",
           "legendFormat": "{{namespace}}",
           "interval": "2h"
@@ -1016,6 +1021,7 @@
         "w": 8,
         "h": 7
       },
+      "timeFrom": "7d",
       "targets": [
         {
           "datasource": {

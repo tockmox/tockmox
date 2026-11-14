@@ -69,6 +69,8 @@ def main():
             panels.append({
                 "id": ids[p["id"]], "type": "timeseries", "title": p["title"], "description": p["describe"],
                 "datasource": DS, "gridPos": {"x": x, "y": y, "w": 8, "h": 7},
+                # the window the UI draws, so a per-day series is not two points on the board's 24 hours
+                **({"timeFrom": p["range"]} if p.get("range") and p["range"] != "24h" else {}),
                 "targets": [{"datasource": DS, "expr": p["expr"].strip(), "refId": "A", "legendFormat": legend,
                              "interval": p["step"]}],
                 "fieldConfig": {"defaults": {"unit": UNIT[p["unit"]], "thresholds": thresholds(p), "noValue": "no data",

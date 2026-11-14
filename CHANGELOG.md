@@ -875,6 +875,16 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Changed
 
+- **Tockmox / Overview leads with AI.** The first row now answers "can the AI
+  serve right now": a one-tile platform verdict (OK, warnings, critical or
+  Unknown), local engines down, gate and gateway errors, gateway latency,
+  restricted traffic served off-site and AI nodes on an unverified
+  configuration. Share, requests by tier and spend follow, then Capacity, then
+  Is it working?, then active alerts with how long each has fired. The gateway
+  error and latency tiles read a day instead of 15 minutes, so a quiet site no
+  longer reads "no traffic" most of the time. Tiles show their value, not their
+  expression. A bookmark or kiosk URL to the board is unchanged.
+
 - **The console's websocket state store is Valkey, not Redis 7.4.** The Open WebUI
   chart's default `redis:7.4` image is RSALv2/SSPLv1, which is not open source;
   `tockmox-ai` now pins `valkey/valkey` (BSD-3, the Linux Foundation fork), which is
@@ -1162,6 +1172,27 @@ costs you, with the reasoning in the documentation rather than here.
   versions never run at once; a site that raised its replica count scales to one before the upgrade.
 
 ### Fixed
+
+- **Restore-drill age read nothing, or the best case.** The Status board and the
+  Tockmox UI selected Jobs named `*restore-drill*`, which no shipped drill
+  creates (drill CronJobs are `<database>-drill`), so the panel was always
+  empty; the Overview and Backup and Restore Proof showed the newest passing
+  drill, so one fresh drill hid another that had stopped passing. All four now
+  read the drill that passed longest ago, from the drill CronJobs, rehearsals
+  excluded.
+- **Dashboards that showed a missing source as healthy or as something else.**
+  Admission and Argo Workflows opened on the first Prometheus data source by
+  name rather than the default one, so a site with a second Prometheus saw that
+  one's data or none; both now open on the default, with the brand header the
+  other boards carry. Backup and Restore Proof showed "-1 hour" and "0 days" in
+  green when the identity dump or the recoverability point was absent; they are
+  now grey with a word. Its timestamp chart read seconds as milliseconds (1970
+  dates). Authentik's latency panels read a histogram the exporter does not
+  emit; they read its summary quantiles. Count tiles with no thresholds of their
+  own took Grafana's default, which turns any value of 80 or more red (ArgoCD's
+  "Apps total", Authentik's memory); they are now neutral. Alert Delivery's
+  "since last delivered" tile turned red on a quiet day; silence is normal
+  there and the tile now says so.
 
 - **Console run-now could run a pod of its choice in the built-in forge's namespace.** With the
   change kinds on (the default on a built-in-forge site), the forge's two CronJobs are on the

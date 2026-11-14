@@ -1,7 +1,7 @@
 {
   "uid": "tockmox-overview",
   "title": "Tockmox / Overview",
-  "description": "L0: the platform at a glance. Component health, capacity, AI routing and spend. Every tile links down to its L1 board.",
+  "description": "L0: the platform at a glance, AI first: can the AI serve, where it ran and what it cost, then capacity, then whether the platform is working. A tile with a link icon opens its board.",
   "tags": [
     "tockmox",
     "product",
@@ -82,22 +82,22 @@
         "x": 0,
         "y": 2,
         "w": 24,
-        "h": 1
+        "h": 2
       },
       "transparent": true,
       "options": {
         "mode": "markdown",
-        "content": "**The platform at a glance.** Grey means *no data*, which is never healthy: the source did not answer or is not installed. Each tile links to its board."
+        "content": "**The platform at a glance, AI first.** Grey means *no data*, which is never healthy: the source did not answer or is not installed. A tile with a link icon opens the board that explains it."
       }
     },
     {
       "id": 3,
       "type": "row",
-      "title": "Is it working?",
+      "title": "AI: can it serve, where did it run, what did it cost",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 3,
+        "y": 4,
         "w": 24,
         "h": 1
       },
@@ -106,15 +106,15 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "Platform verdict",
-      "description": "OK needs two facts: no critical alert firing AND the always-firing Watchdog present. Without the heartbeat, an empty alert list proves nothing, so the tile reads UNKNOWN.",
+      "title": "Platform",
+      "description": "The platform verdict. OK needs two facts: no critical or warning alert firing AND Alertmanager's always-firing Watchdog present. Without the heartbeat an empty alert list proves nothing, so the tile reads UNKNOWN. The detail is in Is it working? below.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
         "x": 0,
-        "y": 4,
+        "y": 5,
         "w": 4,
         "h": 5
       },
@@ -124,7 +124,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "((count(ALERTS{alertstate=\"firing\",severity=\"critical\"}) or on() vector(0)) and on() (count(ALERTS{alertname=\"Watchdog\",alertstate=\"firing\"}) > 0)) or on() vector(-1)",
+          "expr": "((((count(ALERTS{alertstate=\"firing\",severity=\"critical\"}) > 0) + 1000) or (count(ALERTS{alertstate=\"firing\",severity=\"warning\"}) or on() vector(0))) and on() (count(ALERTS{alertname=\"Watchdog\",alertstate=\"firing\"}) > 0)) or on() vector(-1)",
           "refId": "A",
           "legendFormat": "",
           "instant": true,
@@ -146,8 +146,12 @@
                 "value": 0
               },
               {
-                "color": "red",
+                "color": "orange",
                 "value": 1
+              },
+              {
+                "color": "red",
+                "value": 1000
               }
             ]
           },
@@ -171,11 +175,23 @@
               "type": "range",
               "options": {
                 "from": 1,
+                "to": 999,
+                "result": {
+                  "text": "warnings: ${__value.raw}",
+                  "color": "orange",
+                  "index": 2
+                }
+              }
+            },
+            {
+              "type": "range",
+              "options": {
+                "from": 1000,
                 "to": 1000000000.0,
                 "result": {
-                  "text": "${__value.raw} critical",
+                  "text": "CRITICAL firing",
                   "color": "red",
-                  "index": 2
+                  "index": 3
                 }
               }
             }
@@ -212,16 +228,16 @@
     {
       "id": 5,
       "type": "stat",
-      "title": "Alerts firing",
-      "description": "Excludes Watchdog and InfoInhibitor by severity. Read with the verdict: zero here is only good news while the heartbeat is present.",
+      "title": "Local engines down",
+      "description": "Inference engines on enrolled AI nodes that report unhealthy. Shows local capacity being down before a request fails on it. Grey: no AI node is enrolled.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
         "x": 4,
-        "y": 4,
-        "w": 4,
+        "y": 5,
+        "w": 3,
         "h": 5
       },
       "targets": [
@@ -230,92 +246,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "count(ALERTS{alertstate=\"firing\",severity=\"critical\"}) or on() vector(0)",
-          "refId": "A",
-          "legendFormat": "critical",
-          "instant": true,
-          "range": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "count(ALERTS{alertstate=\"firing\",severity=\"warning\"}) or on() vector(0)",
-          "refId": "B",
-          "legendFormat": "warning",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 1
-              }
-            ]
-          },
-          "mappings": [],
-          "color": {
-            "mode": "thresholds"
-          },
-          "noValue": "no data"
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value_and_name",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "wideLayout": true
-      },
-      "links": [
-        {
-          "title": "Alert delivery",
-          "url": "/d/tockmox-alert-delivery?${__url_time_range}"
-        }
-      ]
-    },
-    {
-      "id": 6,
-      "type": "stat",
-      "title": "GitOps layers not Synced + Healthy",
-      "description": "Argo CD applications that are out of sync or not healthy. Grey: Argo CD metrics are not scraped (apps.argocdMonitoring), which is not the same as all synced.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 8,
-        "y": 4,
-        "w": 3,
-        "h": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "count(argocd_app_info unless argocd_app_info{sync_status=\"Synced\",health_status=\"Healthy\"}) or (count(argocd_app_info) * 0) or on() vector(-1)",
+          "expr": "count(tockmox_ai_node_engine_healthy == 0) or (count(tockmox_ai_node_engine_healthy) * 0)",
           "refId": "A",
           "legendFormat": "",
           "instant": true,
@@ -329,123 +260,8 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "#808080",
-                "value": null
-              },
-              {
                 "color": "green",
-                "value": 0
-              },
-              {
-                "color": "orange",
-                "value": 1
-              }
-            ]
-          },
-          "mappings": [
-            {
-              "type": "special",
-              "options": {
-                "match": "null",
-                "result": {
-                  "text": "no Argo CD metrics",
-                  "color": "#808080",
-                  "index": 0
-                }
-              }
-            },
-            {
-              "type": "special",
-              "options": {
-                "match": "nan",
-                "result": {
-                  "text": "no Argo CD metrics",
-                  "color": "#808080",
-                  "index": 2
-                }
-              }
-            },
-            {
-              "type": "value",
-              "options": {
-                "-1": {
-                  "text": "no Argo CD metrics",
-                  "color": "#808080",
-                  "index": 1
-                }
-              }
-            }
-          ],
-          "color": {
-            "mode": "thresholds"
-          },
-          "noValue": "no data"
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value_and_name",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "wideLayout": true
-      },
-      "links": [
-        {
-          "title": "Argo CD",
-          "url": "/d/tockmox-argocd?${__url_time_range}"
-        }
-      ]
-    },
-    {
-      "id": 7,
-      "type": "stat",
-      "title": "Scrape targets down",
-      "description": "Prometheus targets that stopped answering. A target that was never configured is not counted; this is the 'it was there and went away' signal.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 11,
-        "y": 4,
-        "w": 3,
-        "h": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "count(up == 0) or (count(up) * 0)",
-          "refId": "A",
-          "legendFormat": "",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "#808080",
                 "value": null
-              },
-              {
-                "color": "green",
-                "value": 0
               },
               {
                 "color": "red",
@@ -459,7 +275,7 @@
               "options": {
                 "match": "null",
                 "result": {
-                  "text": "no data",
+                  "text": "no AI nodes enrolled",
                   "color": "#808080",
                   "index": 0
                 }
@@ -470,19 +286,9 @@
               "options": {
                 "match": "nan",
                 "result": {
-                  "text": "no data",
+                  "text": "no AI nodes enrolled",
                   "color": "#808080",
                   "index": 2
-                }
-              }
-            },
-            {
-              "type": "value",
-              "options": {
-                "-1": {
-                  "text": "no data",
-                  "color": "#808080",
-                  "index": 1
                 }
               }
             }
@@ -504,26 +310,26 @@
         },
         "colorMode": "background",
         "graphMode": "none",
-        "textMode": "value_and_name",
+        "textMode": "value",
         "justifyMode": "center",
         "orientation": "auto",
         "wideLayout": true
       }
     },
     {
-      "id": 8,
+      "id": 6,
       "type": "stat",
-      "title": "Endpoints answering",
-      "description": "Blackbox probes of every console: the user's view of 'is it up'. Grey: no probes configured.",
+      "title": "Gate errors (24h)",
+      "description": "Share of requests the policy gate could not serve, local and frontier together. The gate sees failures LiteLLM's own counter does not.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
-        "x": 14,
-        "y": 4,
+        "x": 7,
+        "y": 5,
         "w": 3,
-        "h": 4
+        "h": 5
       },
       "targets": [
         {
@@ -531,7 +337,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(probe_success) / count(probe_success)",
+          "expr": "sum(increase(tockmox_gate_served_total{status=\"error\"}[24h])) / sum(increase(tockmox_gate_served_total[24h]))",
           "refId": "A",
           "legendFormat": "",
           "instant": true,
@@ -545,233 +351,16 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 0.9
-              },
-              {
-                "color": "green",
-                "value": 0.999
-              }
-            ]
-          },
-          "mappings": [
-            {
-              "type": "special",
-              "options": {
-                "match": "null",
-                "result": {
-                  "text": "no probes",
-                  "color": "#808080",
-                  "index": 0
-                }
-              }
-            },
-            {
-              "type": "special",
-              "options": {
-                "match": "nan",
-                "result": {
-                  "text": "no probes",
-                  "color": "#808080",
-                  "index": 2
-                }
-              }
-            },
-            {
-              "type": "value",
-              "options": {
-                "-1": {
-                  "text": "no probes",
-                  "color": "#808080",
-                  "index": 1
-                }
-              }
-            }
-          ],
-          "color": {
-            "mode": "thresholds"
-          },
-          "noValue": "no data",
-          "decimals": 0
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value_and_name",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "wideLayout": true
-      },
-      "links": [
-        {
-          "title": "Traefik",
-          "url": "/d/tockmox-traefik?${__url_time_range}"
-        }
-      ]
-    },
-    {
-      "id": 9,
-      "type": "stat",
-      "title": "Nodes not Ready",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 17,
-        "y": 4,
-        "w": 3,
-        "h": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "count(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 0) or (count(kube_node_info) * 0) or on() vector(-1)",
-          "refId": "A",
-          "legendFormat": "",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "none",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "#808080",
-                "value": null
-              },
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          },
-          "mappings": [
-            {
-              "type": "special",
-              "options": {
-                "match": "null",
-                "result": {
-                  "text": "no node metrics",
-                  "color": "#808080",
-                  "index": 0
-                }
-              }
-            },
-            {
-              "type": "special",
-              "options": {
-                "match": "nan",
-                "result": {
-                  "text": "no node metrics",
-                  "color": "#808080",
-                  "index": 2
-                }
-              }
-            },
-            {
-              "type": "value",
-              "options": {
-                "-1": {
-                  "text": "no node metrics",
-                  "color": "#808080",
-                  "index": 1
-                }
-              }
-            }
-          ],
-          "color": {
-            "mode": "thresholds"
-          },
-          "noValue": "no data"
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value_and_name",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "wideLayout": true
-      }
-    },
-    {
-      "id": 10,
-      "type": "stat",
-      "title": "Days since a restore drill passed",
-      "description": "Backups are only proven by a restore. The newest successful restore-drill CronJob; drills run as Argo CronWorkflows are not seen here until they emit a success metric (see the design doc).",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 20,
-        "y": 4,
-        "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "(time() - max(kube_cronjob_status_last_successful_time{cronjob=~\".*drill.*\"})) / 86400",
-          "refId": "A",
-          "legendFormat": "",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "d",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
                 "color": "green",
                 "value": null
               },
               {
                 "color": "orange",
-                "value": 8
+                "value": 0.02
               },
               {
                 "color": "red",
-                "value": 15
+                "value": 0.1
               }
             ]
           },
@@ -781,7 +370,7 @@
               "options": {
                 "match": "null",
                 "result": {
-                  "text": "no drill has passed",
+                  "text": "no gated traffic",
                   "color": "#808080",
                   "index": 0
                 }
@@ -792,19 +381,9 @@
               "options": {
                 "match": "nan",
                 "result": {
-                  "text": "no drill has passed",
+                  "text": "no gated traffic",
                   "color": "#808080",
                   "index": 2
-                }
-              }
-            },
-            {
-              "type": "value",
-              "options": {
-                "-1": {
-                  "text": "no drill has passed",
-                  "color": "#808080",
-                  "index": 1
                 }
               }
             }
@@ -827,141 +406,26 @@
         },
         "colorMode": "background",
         "graphMode": "none",
-        "textMode": "value_and_name",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "wideLayout": true
-      },
-      "links": [
-        {
-          "title": "Backup and restore proof",
-          "url": "/d/tockmox-backup-proof?${__url_time_range}"
-        }
-      ]
-    },
-    {
-      "id": 11,
-      "type": "row",
-      "title": "Capacity",
-      "collapsed": false,
-      "gridPos": {
-        "x": 0,
-        "y": 9,
-        "w": 24,
-        "h": 1
-      },
-      "panels": []
-    },
-    {
-      "id": 12,
-      "type": "stat",
-      "title": "Busiest node, memory",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 10,
-        "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "max(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)",
-          "refId": "A",
-          "legendFormat": "",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 0.8
-              },
-              {
-                "color": "red",
-                "value": 0.9
-              }
-            ]
-          },
-          "mappings": [
-            {
-              "type": "special",
-              "options": {
-                "match": "null",
-                "result": {
-                  "text": "no data",
-                  "color": "#808080",
-                  "index": 0
-                }
-              }
-            },
-            {
-              "type": "special",
-              "options": {
-                "match": "nan",
-                "result": {
-                  "text": "no data",
-                  "color": "#808080",
-                  "index": 2
-                }
-              }
-            }
-          ],
-          "color": {
-            "mode": "thresholds"
-          },
-          "noValue": "no data",
-          "decimals": 0
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "area",
-        "textMode": "value_and_name",
+        "textMode": "value",
         "justifyMode": "center",
         "orientation": "auto",
         "wideLayout": true
       }
     },
     {
-      "id": 13,
+      "id": 7,
       "type": "stat",
-      "title": "Busiest node, CPU (1h)",
-      "description": "",
+      "title": "Gateway errors (24h)",
+      "description": "Non-2xx share of LiteLLM requests over a day. A day, not 15 minutes: a site with a few requests an hour would otherwise read 'no traffic' most of the time.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
-        "x": 4,
-        "y": 10,
-        "w": 4,
-        "h": 4
+        "x": 10,
+        "y": 5,
+        "w": 3,
+        "h": 5
       },
       "targets": [
         {
@@ -969,7 +433,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "max(1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[1h])))",
+          "expr": "(sum(increase(litellm_proxy_total_requests_metric_total{status_code!~\"2..\"}[24h])) or on() vector(0)) / sum(increase(litellm_proxy_total_requests_metric_total[24h]))",
           "refId": "A",
           "legendFormat": "",
           "instant": true,
@@ -988,11 +452,11 @@
               },
               {
                 "color": "orange",
-                "value": 0.8
+                "value": 0.02
               },
               {
                 "color": "red",
-                "value": 0.95
+                "value": 0.1
               }
             ]
           },
@@ -1002,7 +466,7 @@
               "options": {
                 "match": "null",
                 "result": {
-                  "text": "no data",
+                  "text": "no traffic",
                   "color": "#808080",
                   "index": 0
                 }
@@ -1013,7 +477,7 @@
               "options": {
                 "match": "nan",
                 "result": {
-                  "text": "no data",
+                  "text": "no traffic",
                   "color": "#808080",
                   "index": 2
                 }
@@ -1024,307 +488,7 @@
             "mode": "thresholds"
           },
           "noValue": "no data",
-          "decimals": 0
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "area",
-        "textMode": "value_and_name",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "wideLayout": true
-      }
-    },
-    {
-      "id": 14,
-      "type": "stat",
-      "title": "Fullest volume",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 8,
-        "y": 10,
-        "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "max(1 - kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes)",
-          "refId": "A",
-          "legendFormat": "",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 0.8
-              },
-              {
-                "color": "red",
-                "value": 0.9
-              }
-            ]
-          },
-          "mappings": [
-            {
-              "type": "special",
-              "options": {
-                "match": "null",
-                "result": {
-                  "text": "no data",
-                  "color": "#808080",
-                  "index": 0
-                }
-              }
-            },
-            {
-              "type": "special",
-              "options": {
-                "match": "nan",
-                "result": {
-                  "text": "no data",
-                  "color": "#808080",
-                  "index": 2
-                }
-              }
-            }
-          ],
-          "color": {
-            "mode": "thresholds"
-          },
-          "noValue": "no data",
-          "decimals": 0
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "area",
-        "textMode": "value_and_name",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "wideLayout": true
-      },
-      "links": [
-        {
-          "title": "Storage contract",
-          "url": "/d/tockmox-storage-contract?${__url_time_range}"
-        }
-      ]
-    },
-    {
-      "id": 15,
-      "type": "stat",
-      "title": "Longhorn storage used",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 10,
-        "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(longhorn_node_storage_usage_bytes) / sum(longhorn_node_storage_capacity_bytes)",
-          "refId": "A",
-          "legendFormat": "",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 0.7
-              },
-              {
-                "color": "red",
-                "value": 0.85
-              }
-            ]
-          },
-          "mappings": [
-            {
-              "type": "special",
-              "options": {
-                "match": "null",
-                "result": {
-                  "text": "no data",
-                  "color": "#808080",
-                  "index": 0
-                }
-              }
-            },
-            {
-              "type": "special",
-              "options": {
-                "match": "nan",
-                "result": {
-                  "text": "no data",
-                  "color": "#808080",
-                  "index": 2
-                }
-              }
-            }
-          ],
-          "color": {
-            "mode": "thresholds"
-          },
-          "noValue": "no data",
-          "decimals": 0
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "value",
-        "graphMode": "area",
-        "textMode": "value_and_name",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "wideLayout": true
-      },
-      "links": [
-        {
-          "title": "Storage contract",
-          "url": "/d/tockmox-storage-contract?${__url_time_range}"
-        }
-      ]
-    },
-    {
-      "id": 16,
-      "type": "stat",
-      "title": "Next certificate expiry",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 16,
-        "y": 10,
-        "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "(min(certmanager_certificate_expiration_timestamp_seconds) - time()) / 86400",
-          "refId": "A",
-          "legendFormat": "",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "d",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "red",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 7
-              },
-              {
-                "color": "green",
-                "value": 21
-              }
-            ]
-          },
-          "mappings": [
-            {
-              "type": "special",
-              "options": {
-                "match": "null",
-                "result": {
-                  "text": "no certificates",
-                  "color": "#808080",
-                  "index": 0
-                }
-              }
-            },
-            {
-              "type": "special",
-              "options": {
-                "match": "nan",
-                "result": {
-                  "text": "no certificates",
-                  "color": "#808080",
-                  "index": 2
-                }
-              }
-            }
-          ],
-          "color": {
-            "mode": "thresholds"
-          },
-          "noValue": "no data",
-          "decimals": 0
+          "decimals": 1
         },
         "overrides": []
       },
@@ -1338,32 +502,26 @@
         },
         "colorMode": "background",
         "graphMode": "none",
-        "textMode": "value_and_name",
+        "textMode": "value",
         "justifyMode": "center",
         "orientation": "auto",
         "wideLayout": true
-      },
-      "links": [
-        {
-          "title": "cert-manager",
-          "url": "/d/tockmox-cert-manager?${__url_time_range}"
-        }
-      ]
+      }
     },
     {
-      "id": 17,
+      "id": 8,
       "type": "stat",
-      "title": "Certificates not ready",
-      "description": "cert-manager Certificates whose Ready condition is false: the TLS a console is about to serve wrong or not at all.",
+      "title": "Gateway p95 (24h)",
+      "description": "95th percentile of a whole request through the gateway over a day, long generations included, which is why the bands are minutes, not seconds.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
-        "x": 20,
-        "y": 10,
-        "w": 4,
-        "h": 4
+        "x": 13,
+        "y": 5,
+        "w": 3,
+        "h": 5
       },
       "targets": [
         {
@@ -1371,7 +529,103 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "count(certmanager_certificate_ready_status{condition=\"True\"} == 0) or (count(certmanager_certificate_ready_status) * 0)",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(litellm_request_total_latency_metric_bucket[24h])))",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 120
+              },
+              {
+                "color": "red",
+                "value": 300
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "no traffic",
+                  "color": "#808080",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "no traffic",
+                  "color": "#808080",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "no data",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Restricted served off-site (24h)",
+      "description": "Requests the gate classed restricted that were served by a frontier model. The policy says this is zero; anything else is a control that failed.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 5,
+        "w": 4,
+        "h": 5
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(increase(tockmox_gate_served_total{request_class=\"restricted\",endpoint_tier=\"external\",status=\"ok\"}[24h])) or (count(tockmox_gate_served_total) * 0)",
           "refId": "A",
           "legendFormat": "",
           "instant": true,
@@ -1400,7 +654,7 @@
               "options": {
                 "match": "null",
                 "result": {
-                  "text": "no certificates",
+                  "text": "no gated traffic",
                   "color": "#808080",
                   "index": 0
                 }
@@ -1411,7 +665,7 @@
               "options": {
                 "match": "nan",
                 "result": {
-                  "text": "no certificates",
+                  "text": "no gated traffic",
                   "color": "#808080",
                   "index": 2
                 }
@@ -1435,33 +689,105 @@
         },
         "colorMode": "background",
         "graphMode": "none",
-        "textMode": "value_and_name",
+        "textMode": "value",
         "justifyMode": "center",
         "orientation": "auto",
         "wideLayout": true
-      },
-      "links": [
-        {
-          "title": "cert-manager",
-          "url": "/d/tockmox-cert-manager?${__url_time_range}"
-        }
-      ]
+      }
     },
     {
-      "id": 18,
-      "type": "row",
-      "title": "AI: local versus frontier, and spend",
-      "collapsed": false,
+      "id": 10,
+      "type": "stat",
+      "title": "AI nodes unverified",
+      "description": "Enrolled inference nodes whose last converge ran a commit whose signature did not verify. Grey: no AI node is enrolled.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "gridPos": {
-        "x": 0,
-        "y": 14,
-        "w": 24,
-        "h": 1
+        "x": 20,
+        "y": 5,
+        "w": 4,
+        "h": 5
       },
-      "panels": []
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count(tockmox_ai_node_converge_signature_ok == 0) or (count(tockmox_ai_node_converge_signature_ok) * 0)",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "no AI nodes enrolled",
+                  "color": "#808080",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "no AI nodes enrolled",
+                  "color": "#808080",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      }
     },
     {
-      "id": 19,
+      "id": 11,
       "type": "stat",
       "title": "Served locally, last 24h",
       "description": "Share of AI requests the policy gate served from a local model (tockmox_gate_served_total, endpoint_tier). The gate's tier is the authority: LiteLLM's api_provider says 'openai' for a local OpenAI-compatible server, so it cannot tell local from frontier. No threshold: the right share is a site decision.",
@@ -1471,7 +797,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 15,
+        "y": 10,
         "w": 4,
         "h": 6
       },
@@ -1542,14 +868,14 @@
         },
         "colorMode": "value",
         "graphMode": "none",
-        "textMode": "value_and_name",
+        "textMode": "value",
         "justifyMode": "center",
         "orientation": "auto",
         "wideLayout": true
       }
     },
     {
-      "id": 20,
+      "id": 12,
       "type": "timeseries",
       "title": "AI requests served, by tier",
       "datasource": {
@@ -1558,8 +884,8 @@
       },
       "gridPos": {
         "x": 4,
-        "y": 15,
-        "w": 8,
+        "y": 10,
+        "w": 6,
         "h": 6
       },
       "targets": [
@@ -1638,7 +964,7 @@
       }
     },
     {
-      "id": 21,
+      "id": 13,
       "type": "stat",
       "title": "Frontier spend",
       "description": "LiteLLM's computed cost (USD by its price map; not an invoice). Counts what went through the gateway only: a subscription used directly is not here. Local models cost 0 here unless a notional price is set.",
@@ -1647,8 +973,8 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "x": 12,
-        "y": 15,
+        "x": 10,
+        "y": 10,
         "w": 4,
         "h": 6
       },
@@ -1737,7 +1063,7 @@
       }
     },
     {
-      "id": 22,
+      "id": 14,
       "type": "bargauge",
       "title": "Frontier spend by model, last 7 days",
       "datasource": {
@@ -1745,9 +1071,9 @@
         "uid": "${datasource}"
       },
       "gridPos": {
-        "x": 16,
-        "y": 15,
-        "w": 8,
+        "x": 14,
+        "y": 10,
+        "w": 6,
         "h": 6
       },
       "targets": [
@@ -1787,211 +1113,19 @@
       }
     },
     {
-      "id": 23,
+      "id": 15,
       "type": "stat",
-      "title": "Gateway errors (15m)",
-      "description": "",
+      "title": "Least budget left on a key",
+      "description": "The tightest key's remaining budget. LiteLLM reports a key only while it holds it in memory, so a key that has been idle since a restart is not counted here.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
-        "x": 0,
-        "y": 21,
+        "x": 20,
+        "y": 10,
         "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(rate(litellm_proxy_total_requests_metric_total{status_code!~\"2..\"}[15m])) / sum(rate(litellm_proxy_total_requests_metric_total[15m]))",
-          "refId": "A",
-          "legendFormat": "",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 0.02
-              },
-              {
-                "color": "red",
-                "value": 0.1
-              }
-            ]
-          },
-          "mappings": [
-            {
-              "type": "special",
-              "options": {
-                "match": "null",
-                "result": {
-                  "text": "no traffic",
-                  "color": "#808080",
-                  "index": 0
-                }
-              }
-            },
-            {
-              "type": "special",
-              "options": {
-                "match": "nan",
-                "result": {
-                  "text": "no traffic",
-                  "color": "#808080",
-                  "index": 2
-                }
-              }
-            }
-          ],
-          "color": {
-            "mode": "thresholds"
-          },
-          "noValue": "no data",
-          "decimals": 1
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value_and_name",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "wideLayout": true
-      }
-    },
-    {
-      "id": 24,
-      "type": "stat",
-      "title": "Gateway latency p95 (15m)",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 4,
-        "y": 21,
-        "w": 4,
-        "h": 4
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(litellm_request_total_latency_metric_bucket[15m])))",
-          "refId": "A",
-          "legendFormat": "",
-          "instant": true,
-          "range": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 20
-              },
-              {
-                "color": "red",
-                "value": 60
-              }
-            ]
-          },
-          "mappings": [
-            {
-              "type": "special",
-              "options": {
-                "match": "null",
-                "result": {
-                  "text": "no traffic",
-                  "color": "#808080",
-                  "index": 0
-                }
-              }
-            },
-            {
-              "type": "special",
-              "options": {
-                "match": "nan",
-                "result": {
-                  "text": "no traffic",
-                  "color": "#808080",
-                  "index": 2
-                }
-              }
-            }
-          ],
-          "color": {
-            "mode": "thresholds"
-          },
-          "noValue": "no data",
-          "decimals": 1
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "colorMode": "background",
-        "graphMode": "none",
-        "textMode": "value_and_name",
-        "justifyMode": "center",
-        "orientation": "auto",
-        "wideLayout": true
-      }
-    },
-    {
-      "id": 25,
-      "type": "stat",
-      "title": "Least budget left on a gateway key",
-      "description": "",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 8,
-        "y": 21,
-        "w": 4,
-        "h": 4
+        "h": 6
       },
       "targets": [
         {
@@ -2068,25 +1202,38 @@
         },
         "colorMode": "background",
         "graphMode": "none",
-        "textMode": "value_and_name",
+        "textMode": "value",
         "justifyMode": "center",
         "orientation": "auto",
         "wideLayout": true
       }
     },
     {
-      "id": 26,
+      "id": 16,
+      "type": "row",
+      "title": "Capacity",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 17,
       "type": "stat",
-      "title": "AI nodes on an unverified configuration",
-      "description": "Enrolled inference nodes whose last converge ran a commit whose signature did not verify. Grey: no AI node is enrolled.",
+      "title": "Busiest node, memory",
+      "description": "",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
-        "x": 12,
-        "y": 21,
-        "w": 4,
+        "x": 0,
+        "y": 17,
+        "w": 6,
         "h": 4
       },
       "targets": [
@@ -2095,9 +1242,429 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "count(tockmox_ai_node_converge_signature_ok == 0) or (count(tockmox_ai_node_converge_signature_ok) * 0)",
+          "expr": "max(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)",
           "refId": "A",
           "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.8
+              },
+              {
+                "color": "red",
+                "value": 0.9
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "no data",
+                  "color": "#808080",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "no data",
+                  "color": "#808080",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "no data",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Busiest node, CPU (1h)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 17,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max(1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[1h])))",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.8
+              },
+              {
+                "color": "red",
+                "value": 0.95
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "no data",
+                  "color": "#808080",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "no data",
+                  "color": "#808080",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "no data",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 19,
+      "type": "stat",
+      "title": "Fullest volume",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 17,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "max(1 - kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes)",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.8
+              },
+              {
+                "color": "red",
+                "value": 0.9
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "no data",
+                  "color": "#808080",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "no data",
+                  "color": "#808080",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "no data",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      },
+      "links": [
+        {
+          "title": "Storage contract",
+          "url": "/d/tockmox-storage-contract?${__url_time_range}"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "stat",
+      "title": "Longhorn storage used",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 17,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(longhorn_node_storage_usage_bytes) / sum(longhorn_node_storage_capacity_bytes)",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.7
+              },
+              {
+                "color": "red",
+                "value": 0.85
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "no data",
+                  "color": "#808080",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "no data",
+                  "color": "#808080",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "no data",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      },
+      "links": [
+        {
+          "title": "Storage contract",
+          "url": "/d/tockmox-storage-contract?${__url_time_range}"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "row",
+      "title": "Is it working?",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "Alerts firing",
+      "description": "Critical and warning alerts. Zero is shown only while Alertmanager's Watchdog fires; without it the tile is grey, because an empty list proves nothing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 22,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count(ALERTS{alertstate=\"firing\",severity=\"critical\"}) or (count(ALERTS{alertname=\"Watchdog\",alertstate=\"firing\"}) * 0)",
+          "refId": "A",
+          "legendFormat": "critical",
+          "instant": true,
+          "range": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count(ALERTS{alertstate=\"firing\",severity=\"warning\"}) or (count(ALERTS{alertname=\"Watchdog\",alertstate=\"firing\"}) * 0)",
+          "refId": "B",
+          "legendFormat": "warning",
           "instant": true,
           "range": false
         }
@@ -2113,7 +1680,7 @@
                 "value": null
               },
               {
-                "color": "red",
+                "color": "orange",
                 "value": 1
               }
             ]
@@ -2124,7 +1691,7 @@
               "options": {
                 "match": "null",
                 "result": {
-                  "text": "no AI nodes enrolled",
+                  "text": "alert pipeline silent",
                   "color": "#808080",
                   "index": 0
                 }
@@ -2135,7 +1702,7 @@
               "options": {
                 "match": "nan",
                 "result": {
-                  "text": "no AI nodes enrolled",
+                  "text": "alert pipeline silent",
                   "color": "#808080",
                   "index": 2
                 }
@@ -2160,6 +1727,445 @@
         "colorMode": "background",
         "graphMode": "none",
         "textMode": "value_and_name",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      },
+      "links": [
+        {
+          "title": "Alert delivery",
+          "url": "/d/tockmox-alert-delivery?${__url_time_range}"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "GitOps not synced",
+      "description": "Argo CD applications that are out of sync or not healthy. Grey: Argo CD metrics are not scraped (apps.argocdMonitoring), which is not the same as all synced.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 3,
+        "y": 22,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count(argocd_app_info unless argocd_app_info{sync_status=\"Synced\",health_status=\"Healthy\"}) or (count(argocd_app_info) * 0) or on() vector(-1)",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#808080",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "no Argo CD metrics",
+                  "color": "#808080",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "no Argo CD metrics",
+                  "color": "#808080",
+                  "index": 2
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "-1": {
+                  "text": "no Argo CD metrics",
+                  "color": "#808080",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      },
+      "links": [
+        {
+          "title": "Argo CD",
+          "url": "/d/tockmox-argocd?${__url_time_range}"
+        }
+      ]
+    },
+    {
+      "id": 24,
+      "type": "stat",
+      "title": "Targets down",
+      "description": "Prometheus targets that stopped answering. A target that was never configured is not counted; this is the 'it was there and went away' signal.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 22,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count(up == 0) or (count(up) * 0)",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#808080",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "no data",
+                  "color": "#808080",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "no data",
+                  "color": "#808080",
+                  "index": 2
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "-1": {
+                  "text": "no data",
+                  "color": "#808080",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      }
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "Endpoints up",
+      "description": "Blackbox probes of every console: the user's view of 'is it up'. Grey: no probes configured.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 9,
+        "y": 22,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum(probe_success) / count(probe_success)",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.9
+              },
+              {
+                "color": "green",
+                "value": 0.999
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "no probes",
+                  "color": "#808080",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "no probes",
+                  "color": "#808080",
+                  "index": 2
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "-1": {
+                  "text": "no probes",
+                  "color": "#808080",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "no data",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      },
+      "links": [
+        {
+          "title": "Traefik",
+          "url": "/d/tockmox-traefik?${__url_time_range}"
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "type": "stat",
+      "title": "Nodes not Ready",
+      "description": "Kubernetes nodes whose Ready condition is false.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 22,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count(kube_node_status_condition{condition=\"Ready\",status=\"true\"} == 0) or (count(kube_node_info) * 0) or on() vector(-1)",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "#808080",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "no node metrics",
+                  "color": "#808080",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "no node metrics",
+                  "color": "#808080",
+                  "index": 2
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "-1": {
+                  "text": "no node metrics",
+                  "color": "#808080",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "no data"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
         "justifyMode": "center",
         "orientation": "auto",
         "wideLayout": true
@@ -2168,16 +2174,16 @@
     {
       "id": 27,
       "type": "stat",
-      "title": "Restricted traffic served off-site (24h)",
-      "description": "Requests the gate classed restricted that were served by a frontier model. The policy says this is zero; anything else is a control that failed.",
+      "title": "Stalest restore drill",
+      "description": "Backups are only proven by a restore. Days since the drill that passed LONGEST ago (CronJobs named *-drill). Not seen here: a drill that has never passed, and drills run as Argo CronWorkflows until they emit a success metric.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
-        "x": 16,
-        "y": 21,
-        "w": 8,
+        "x": 15,
+        "y": 22,
+        "w": 3,
         "h": 4
       },
       "targets": [
@@ -2186,7 +2192,221 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(increase(tockmox_gate_served_total{request_class=\"restricted\",endpoint_tier=\"external\",status=\"ok\"}[24h])) or (count(tockmox_gate_served_total) * 0)",
+          "expr": "(time() - min(kube_cronjob_status_last_successful_time{cronjob=~\".*-drill(-[a-z0-9]+)?\",cronjob!~\".*rehearsal.*\"})) / 86400",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "d",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 8
+              },
+              {
+                "color": "red",
+                "value": 15
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "no drill has passed",
+                  "color": "#808080",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "no drill has passed",
+                  "color": "#808080",
+                  "index": 2
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "-1": {
+                  "text": "no drill has passed",
+                  "color": "#808080",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "no data",
+          "decimals": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      },
+      "links": [
+        {
+          "title": "Backup and restore proof",
+          "url": "/d/tockmox-backup-proof?${__url_time_range}"
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "type": "stat",
+      "title": "Next cert expiry",
+      "description": "Days until the soonest cert-manager certificate expires.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 22,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "(min(certmanager_certificate_expiration_timestamp_seconds) - time()) / 86400",
+          "refId": "A",
+          "legendFormat": "",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "d",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 7
+              },
+              {
+                "color": "green",
+                "value": 21
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "no certificates",
+                  "color": "#808080",
+                  "index": 0
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "nan",
+                "result": {
+                  "text": "no certificates",
+                  "color": "#808080",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "noValue": "no data",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true
+      },
+      "links": [
+        {
+          "title": "cert-manager",
+          "url": "/d/tockmox-cert-manager?${__url_time_range}"
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "type": "stat",
+      "title": "Certs not ready",
+      "description": "cert-manager Certificates whose Ready condition is false: the TLS a console is about to serve wrong or not at all.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 21,
+        "y": 22,
+        "w": 3,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "count(certmanager_certificate_ready_status{condition=\"True\"} == 0) or (count(certmanager_certificate_ready_status) * 0)",
           "refId": "A",
           "legendFormat": "",
           "instant": true,
@@ -2215,7 +2435,7 @@
               "options": {
                 "match": "null",
                 "result": {
-                  "text": "no gated traffic",
+                  "text": "no certificates",
                   "color": "#808080",
                   "index": 0
                 }
@@ -2226,7 +2446,7 @@
               "options": {
                 "match": "nan",
                 "result": {
-                  "text": "no gated traffic",
+                  "text": "no certificates",
                   "color": "#808080",
                   "index": 2
                 }
@@ -2250,14 +2470,20 @@
         },
         "colorMode": "background",
         "graphMode": "none",
-        "textMode": "value_and_name",
+        "textMode": "value",
         "justifyMode": "center",
         "orientation": "auto",
         "wideLayout": true
-      }
+      },
+      "links": [
+        {
+          "title": "cert-manager",
+          "url": "/d/tockmox-cert-manager?${__url_time_range}"
+        }
+      ]
     },
     {
-      "id": 28,
+      "id": 30,
       "type": "table",
       "title": "Active alerts",
       "datasource": {
@@ -2266,7 +2492,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 25,
+        "y": 26,
         "w": 24,
         "h": 6
       },
@@ -2276,37 +2502,91 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "ALERTS{alertstate=\"firing\",alertname!~\"Watchdog|InfoInhibitor\"}",
           "refId": "A",
           "instant": true,
-          "format": "table"
+          "format": "table",
+          "expr": "1000 * (ALERTS_FOR_STATE{alertname!~\"Watchdog|InfoInhibitor\",severity=~\"critical|warning\"} and ignoring(alertstate) ALERTS{alertstate=\"firing\"})"
         }
       ],
       "transformations": [
         {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "severity",
+                "alertname",
+                "namespace",
+                "Value"
+              ]
+            }
+          }
+        },
+        {
           "id": "organize",
           "options": {
-            "excludeByName": {
-              "Time": true,
-              "Value": true,
-              "__name__": true,
-              "alertstate": true,
-              "container": true,
-              "endpoint": true,
-              "instance": true,
-              "job": true,
-              "pod": true,
-              "service": true,
-              "prometheus": true
-            },
+            "excludeByName": {},
             "indexByName": {
               "severity": 0,
               "alertname": 1,
-              "namespace": 2
+              "namespace": 2,
+              "Value": 3
+            },
+            "renameByName": {
+              "alertname": "alert",
+              "Value": "firing since"
             }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "firing since",
+                "desc": false
+              }
+            ]
           }
         }
       ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "firing since"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              },
+              {
+                "id": "custom.width",
+                "value": 180
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "severity"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          }
+        ]
+      },
       "options": {
         "showHeader": true,
         "footer": {
