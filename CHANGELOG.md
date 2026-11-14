@@ -1198,6 +1198,12 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **The move commands on the built-in forge page paste into bash.** Three
+  `${KUBE_CONTEXT:?...}` guards, in docs/administration/site-forge.md ("Move a
+  running site in", "Move to my own forge") and site-forge-recovery.md, held an
+  apostrophe, which bash reads as an unclosed quote: the block stopped with a
+  syntax error before it ran (zsh was not affected). Only the words changed.
+  Nothing to do on upgrade.
 - **One 429 from the Kubernetes API no longer leaves the Platform pages reading Unknown.** The API
   server's priority and fairness answers 429, with a Retry-After, when the priority level a request
   lands in is full for a moment. The console read each source once per page view, so a single 429 on

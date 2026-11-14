@@ -82,6 +82,25 @@
 # budget, TOCKMOX_P15_BUDGET (default 5400 seconds), read only before it plants anything; once it has planted it runs to
 # its last step. A P15 failure becomes the lane's exit only when nothing earlier already failed it.
 #
+# MOVING THE RUNNING SITE INTO THE BUILT-IN FORGE, P16 (paths/P16-move-in-forge.sh). After P15 and before P13, and
+# only when P09 passed: the site P09 made on the external route is put on an external https forge, then moved into the
+# built-in forge with site-forge.md's "Move a running site in", and what the move left is read back. The external forge
+# is the one the off-site settings name (the Secret TOCKMOX_P09_OFFSITE_SECRET names, default p09-offsite, read with
+# throwaway-cluster.sh offsite-check before anything is created); after step 1 a repository named after the VM is made
+# there (offsite-repo, which destroy deletes with the VM) and the guest is shown to reach it (offsite-reach). Its
+# address, its push credential and its host go to P16 as the directory TOCKMOX_P16_FROM_DIR, which this job deletes at
+# its end. TOCKMOX_P09_MOVE_IN picks whether it runs:
+#   auto (the default, also unset or empty)  run it when the route is external, the run is not kept, and the settings
+#        name a forge on a publicly trusted certificate (no ca.crt); otherwise skip it with one logged line that says why
+#   1    run it. Refused up front on the built-in route, or when the settings cannot be read or name a private CA
+#   0    never run it
+#   anything else is refused.
+# A private CA is skipped because move-in-forge passes no CA to the off-site copy it makes, so the page's command
+# cannot finish as printed there. A kept run is skipped because the move changes where the kept install's site lives.
+# P16 has its own budget, TOCKMOX_P16_BUDGET (default 5400 seconds), read before each step up to the move; once the
+# move has begun it runs to its end. A P16 failure becomes the lane's exit only when nothing earlier already failed it.
+# P13 and netpol-adversary.sh then run on the install as P16 left it, on the built-in forge.
+#
 # WHAT THE NETWORK POLICIES ADMIT, netpol-adversary.sh. LAST, after P13, and only when P09 passed, on both routes:
 # the adversarial NetworkPolicy harness plants probe pods in the guarded namespaces of the install P09 made and reads
 # what the shipped policies let through. It is last so that its stand-in pods cannot disturb a path. It is not a path
@@ -160,6 +179,7 @@ finish() {
   local rc=$?
   # The off-site directory holds the token (git-credentials); it does not outlive the job.
   [ -z "${OFFDIR:-}" ] || rm -rf "$OFFDIR"
+  [ -z "${MOVE_DIR:-}" ] || rm -rf "$MOVE_DIR"
   if [ -n "$STOPPED" ]; then
     printf 'p09 lane (%s): exit %s\n%s\n' "${TOCKMOX_DOCS_REF}" "$rc" "$STOPPED" \
       >"${TOCKMOX_WORKDIR}/report-p09-lane-$(date -u +%Y%m%dT%H%M%SZ).txt" || true
@@ -261,6 +281,32 @@ case "$APPROVER_WATCH" in
   *) refuse "TOCKMOX_P09_APPROVER_WATCH must be auto, 1 or 0, not: ${APPROVER_WATCH}" ;;
 esac
 
+# Moving the running site into the built-in forge (P16): decided here too. The external forge it moves the site in from
+# is the off-site settings' forge, so its settings are read now, and a refusal costs nothing.
+MOVE_IN="${TOCKMOX_P09_MOVE_IN:-auto}"
+MOVE_RUN=0
+MOVE_WHY=""
+MOVE_DIR=""
+case "$MOVE_IN" in
+  0) MOVE_WHY="TOCKMOX_P09_MOVE_IN=0" ;;
+  1|auto)
+    if [ "$ROUTE" != external ]; then
+      [ "$MOVE_IN" = auto ] || refuse "TOCKMOX_P09_MOVE_IN=1 needs TOCKMOX_P09_ROUTE=external: on the built-in route the site is already in the built-in forge, so there is nothing to move in"
+      MOVE_WHY="built-in route: the site is already in the built-in forge"
+    elif [ "$KEEP" = 1 ] && [ "$MOVE_IN" = auto ]; then
+      MOVE_WHY="kept run: P16 moves the install's site into the built-in forge, and a kept install is left as the reader of the external route expects it"
+    else
+      move_ca="$(bash "${PROV}/throwaway-cluster.sh" offsite-check)" || move_ca=""
+      case "$move_ca" in
+        no-ca) MOVE_RUN=1 ;;
+        ca) MOVE_WHY="the external forge the off-site settings name is on a private CA, and move-in-forge passes no CA to the off-site copy it makes, so the page's command cannot finish as printed" ;;
+        *) MOVE_WHY="no external forge to move the site in from: the off-site settings cannot be read (the provisioner's lines above say why)" ;;
+      esac
+      [ "$MOVE_RUN" = 1 ] || [ "$MOVE_IN" = auto ] || refuse "TOCKMOX_P09_MOVE_IN=1: ${MOVE_WHY}"
+    fi ;;
+  *) refuse "TOCKMOX_P09_MOVE_IN must be auto, 1 or 0, not: ${MOVE_IN}" ;;
+esac
+
 # What the network policies admit (netpol-adversary.sh): decided here too, so a refusal costs nothing.
 NETPOL="${TOCKMOX_P09_NETPOL:-auto}"
 NETPOL_SH="${HERE}/netpol-adversary.sh"
@@ -303,6 +349,24 @@ if [ "$OFFSITE" = git ]; then
     3) echo "lane 1: off-site repository ready; whether the guest reaches its forge was not checked (above), and P09's first off-site copy will show it" ;;
     *) fail "the guest does not reach the off-site forge, so its copy job would not either" ;;
   esac
+fi
+
+# P16's external forge: a repository named after the VM on the off-site settings' forge, which destroy deletes. A
+# failure skips P16 with the reason on auto, and stops the lane on 1.
+if [ "$MOVE_RUN" = 1 ]; then
+  MOVE_DIR="${LANE}/move-in-from"
+  move_skip() { [ "$MOVE_IN" = auto ] || fail "$1"; MOVE_RUN=0; MOVE_WHY="$1"; echo "lane 1: P16 will be skipped: $1"; }
+  if KUBECONFIG="$SUBSTRATE_KUBECONFIG" bash "${PROV}/throwaway-cluster.sh" offsite-repo "$MOVE_DIR" >/dev/null; then
+    reach=0
+    KUBECONFIG="$SUBSTRATE_KUBECONFIG" bash "${PROV}/throwaway-cluster.sh" offsite-reach "$MOVE_DIR" || reach=$?
+    case "$reach" in
+      0) echo "lane 1: P16's external repository ready, and the guest reaches its forge" ;;
+      3) echo "lane 1: P16's external repository ready; whether the guest reaches its forge was not checked (above), and P16's first settle will show it" ;;
+      *) move_skip "the guest does not reach the external forge, so its Argo CD could not read the site there" ;;
+    esac
+  else
+    move_skip "the external repository P16 moves the site in from could not be created for ${TOCKMOX_TEST_VM}"
+  fi
 fi
 
 # 2. what install.md starts from: fresh-install.md 6 and 7
@@ -562,6 +626,36 @@ else
   echo "lane 7c: P15 (the approvers watcher's alerts) skipped: ${WATCH_WHY}"
 fi
 # --- P15 block end ------------------------------------------------------------------------------------------------
+
+# --- P16 block begin (self-contained apart from MOVE_RUN, MOVE_WHY, MOVE_DIR, P09_REC, lane_receipt and lane_judge above; goes after the P15 block) ---
+# 7d. P16, moving the running site into the built-in forge, when MOVE_RUN says so and only when P09 exited 0 AND its
+# receipt says PASS. It runs after P12, P14 and P15, which read the install on the external route, and before P13. It
+# needs p09-passed, the route the lane exported for P09, and the external forge's directory. Anything but a PASS receipt
+# fails the lane (4 BLOCKED, 5 INFRA_ERROR, 1 otherwise or none) and never replaces an earlier failure's status.
+if [ "$MOVE_RUN" = 1 ] && [ "$P09_RC" = 0 ] && [ "${P09_REC%% *}" = PASS ]; then
+  mkdir -p "$TOCKMOX_P09_STATE"
+  : > "${TOCKMOX_P09_STATE}/p09-passed"
+  export TOCKMOX_P16_BUDGET="${TOCKMOX_P16_BUDGET:-5400}" TOCKMOX_P16_FROM_DIR="$MOVE_DIR"
+  echo "lane 7d: P16, moving the running site into the built-in forge, after a P09 that passed (budget ${TOCKMOX_P16_BUDGET}s)"
+  set +e
+  bash "${HERE}/run.sh" P16
+  p16_rc=$?
+  set -e
+  echo "lane: P16 exit ${p16_rc}"
+  if [ "$p16_rc" != 0 ] && [ "$rc" = 0 ]; then
+    rc="$p16_rc"
+  fi
+  # a P16 that exited 0 without declaring PASS fails the lane too: the lane decided to run it
+  p16_code="$(lane_judge P16-move-in-forge "$(lane_receipt P16-move-in-forge)")"
+  if [ "$p16_code" != 0 ] && [ "$rc" = 0 ]; then
+    rc="$p16_code"
+  fi
+elif [ "$MOVE_RUN" = 1 ]; then
+  echo "lane 7d: P09 did not pass, so P16 does not run"
+else
+  echo "lane 7d: P16 (moving the running site into the built-in forge) skipped: ${MOVE_WHY}"
+fi
+# --- P16 block end ------------------------------------------------------------------------------------------------
 
 # --- P13 block begin (self-contained apart from P09_REC, lane_receipt and lane_judge above; goes after the P11 block) ---
 # 8. P13, the last path (only netpol-adversary.sh follows it), on the same throwaway and the same state directory, only when P09 exited 0 AND its receipt says PASS.

@@ -184,6 +184,10 @@ lib/p15-approver-revocation.py  P15's verdicts: the approvers watcher's own chec
                        forge's team and reviews, and the pacing of the page's block
 approver-revocation-rows-test.sh hermetic proof of P15's rows: the verdicts, the page block and the chart and installer names it
                        relies on, the path against a stub product that breaks one row at a time, and its gate (also run by selftest.sh)
+lib/p16-move-in-forge.py  P16's verdicts: where the root reads, whether every Application settled, moved and kept what it
+                       managed, and the GLUE that puts P09's site on an external forge (the repoURL rewrite, Argo CD's credential)
+move-in-rows-test.sh   hermetic proof of P16's rows: the verdicts, the page block and the installer names it relies on, the path
+                       against a stub product and real git that breaks one row at a time, and its gate (also run by selftest.sh)
 selftest.sh            hermetic proof of the machinery above
 pages-no-cluster.sh    the six no-cluster pages (values-contract, customising, capabilities,
                        configuration, platform-management, verify): every bash block extracted
@@ -397,6 +401,7 @@ test, and a run that cannot retrieve a kubeconfig produces no evidence at all.
 | `TOCKMOX_P09_OFFSITE` | `none` | the p09 lane only: `git` gives the install an off-site copy, a repository named after the VM on the forge the Secret `p09-offsite` names (`TOCKMOX_P09_OFFSITE_SECRET` to name another) |
 | `TOCKMOX_P09_NETPOL` | `auto` | the p09 lane only: `auto` and `1` run `netpol-adversary.sh` as the lane's last step on the install P09 made, after a P09 that passed, with its exit 0 judged PASS, 1 PRODUCT_FAIL and 2 (its own skip) BLOCKED, and `0` never runs it |
 | `TOCKMOX_P09_APPROVER_WATCH` | `auto` | the p09 lane only: whether P15 (the approvers watcher's alerts) runs after a P09 that passed. `auto` runs it on the built-in route and skips it on the external one, which has no forge and no watcher; `1` runs it (refused on the external route); `0` never |
+| `TOCKMOX_P09_MOVE_IN` | `auto` | the p09 lane only: whether P16 (moving the running site into the built-in forge) runs after a P09 that passed. `auto` runs it on the external route when the run is not kept and the off-site settings (`TOCKMOX_P09_OFFSITE_SECRET`) name a forge on a publicly trusted certificate, and skips it otherwise with the reason; `1` runs it (refused on the built-in route, or when the settings cannot be read or name a private CA); `0` never |
 | `TOCKMOX_P09_OPEN_APPS` | `auto` | the p09 lane only: whether P14 (the open-applications list) runs after a P09 that passed. `auto` runs it on the external route and skips it on the built-in one, where its commits cannot be delivered; `1` runs it (refused on the built-in route); `0` never |
 | `TOCKMOX_EXPECTED_DEFAULT_COUNT` | `0` | expected count of default StorageClasses after P03 un-defaults `local-path` (1 once a platform layer is installed) |
 | `TOCKMOX_P08_EXPECTED_DEFAULT_COUNT` | `1` | what P08 expects `existing-cluster.md` Check 3 to find: `local-path` on a stock k3s throwaway. Set `0` when P03 has run first |

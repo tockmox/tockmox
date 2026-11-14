@@ -1475,6 +1475,28 @@ if [ "$AR_CASES" -eq 0 ] || { [ "$AR_RC" -ne 0 ] && ! printf '%s\n' "$AR_OUT" | 
 fi
 # --- P15 block end ---
 
+# --- P16 block begin (self-contained; goes after the P15 approver-revocation block) ---
+# P16's move-in rows: move-in-forge moves a running site into the built-in forge, every Application reads it, Synced and
+# Healthy, nothing pruned, one migration commit, the old repository the off-site copy, a dirty checkout refused before
+# any write. The verdicts are shown red one planted input at a time, the page block and the installer names the path
+# relies on are read in this tree, the path is run as a script against a stub product and real git (green, then one
+# broken product per row, then mutated copies that lose a step or a guard), and its gate is run too. Folded in like the
+# cases above. The lane's P16 block is run by byo-ca-test.sh, beside P15's.
+MI_OUT="$(bash "${HERE}/move-in-rows-test.sh" 2>&1)"; MI_RC=$?
+MI_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) MI_CASES=$((MI_CASES+1)); ok "move in: ${line#ok   }" ;;
+    "FAIL "*) MI_CASES=$((MI_CASES+1)); bad "move in: ${line#FAIL }" "run tests/executed-docs/move-in-rows-test.sh for detail" ;;
+  esac
+done <<EOF_MI
+$MI_OUT
+EOF_MI
+if [ "$MI_CASES" -eq 0 ] || { [ "$MI_RC" -ne 0 ] && ! printf '%s\n' "$MI_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "move-in-rows-test.sh ran its cases" "rc=${MI_RC}, ${MI_CASES} case(s): $(printf '%s' "$MI_OUT" | tail -3)"
+fi
+# --- P16 block end ---
+
 # The outcome model's own contract (a PASS is refused without a completed execute phase, each non-PASS outcome has its
 # own code, receipts are written). It was run by nothing until it was folded in here. Its lines are indented two spaces.
 OC_OUT="$(bash "${HERE}/outcome-contract-test.sh" 2>&1)"; OC_RC=$?

@@ -144,7 +144,7 @@ which is the same on every cluster, so no URL is rewritten.
 : "${TOCKMOX:?export TOCKMOX first, see Set these once}"
 : "${S3_ENDPOINT:?export S3_ENDPOINT first, see Set these once}"
 : "${KIT:?export KIT first, see Set these once}"
-: "${KUBE_CONTEXT:?export KUBE_CONTEXT first: the NEW cluster's context}"
+: "${KUBE_CONTEXT:?export KUBE_CONTEXT first: the context of the NEW cluster}"
 "$TOCKMOX/install/tockmox-install.sh" --restore-from offsite \
   --offsite-s3-endpoint "$S3_ENDPOINT" --offsite-s3-bucket "$S3_BUCKET" \
   --offsite-s3-credentials "$S3_CREDENTIALS" \
