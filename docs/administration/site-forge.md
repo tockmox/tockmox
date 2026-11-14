@@ -382,6 +382,79 @@ can also push your internal copy of the Tockmox charts repository into the forge
 so a site with no route to GitHub reads both its charts and its values from inside
 the cluster: [install with no internet access](../deployment/airgap.md).
 
+## Move a running site in
+
+**When your site already runs from a repository on a forge of your own** (GitHub,
+GitLab, your own Forgejo) and you want it in the built-in forge. One command moves
+it: the whole history comes across, every `repoURL` that names your repository
+names the forge's in-cluster address in **one** commit, the built-in forge's
+values are turned on, Argo CD is cut over, and your old repository becomes the
+off-site copy. It is the inverse of [Move to my own forge](#move-to-my-own-forge).
+
+**YOU SUPPLY:**
+
+- a checkout of the site repository at exactly the revision Argo CD is synced to,
+  with nothing uncommitted. The command works on a copy and never changes it.
+- the repository's https address, and a file with two lines, a user and a token
+  that can **push** to it: the forge's push mirror sends `main` there after every
+  change, so that token must be allowed to push `main` directly (a branch rule or
+  ruleset bypass). Pass `--no-offsite-copy` instead to leave the old repository as it is.
+- what `bootstrap-forge` asks for (the recovery kit and its encryption), after `--`.
+
+**WORKSTATION**
+
+```bash
+: "${TOCKMOX:?export TOCKMOX first: your Tockmox clone}"
+: "${KUBE_CONTEXT:?export KUBE_CONTEXT first: the site's cluster}"
+SITE_DIR=YOUR_SITE_CHECKOUT
+SITE_REPO_URL=YOUR_SITE_REPOSITORY_HTTPS_URL
+AGE_RECIPIENT=YOUR_AGE_PUBLIC_KEY
+"$TOCKMOX/install/tockmox-install.sh" move-in-forge --context "$KUBE_CONTEXT" \
+  --site "$SITE_DIR" --from "$SITE_REPO_URL" \
+  --from-credentials "$HOME/tockmox-backup/site-repo-push" --dry-run \
+  -- --kit-out "$HOME/tockmox-backup/recovery-kit.tar.age" --age-recipient "$AGE_RECIPIENT" \
+     --sealing-key-backup "$HOME/tockmox-backup/sealed-secrets.key.enc"
+```
+
+The dry run makes every check and shows the migration commit's files. Run it
+again without `--dry-run` to move; it asks you to type the context name.
+
+**It refuses, before it writes anything:** uncommitted or untracked changes in
+the checkout; a checkout that is not the revision Argo CD is synced to; a root
+Application that reads another repository (your repository in its ssh spelling,
+`git@host:owner/repo.git`, is the same repository); an Application that is not
+Synced and Healthy (name one you accept as it is with `--accept-unsettled`); and
+a built-in forge that already holds another site's history.
+
+**In order, once the checks pass:** a copy of Argo CD's credential for the old
+repository is kept beside it, so Argo CD can read it at every moment of the
+cutover; `bootstrap-forge` installs the forge and pushes the history plus the
+migration commit; the root Application is applied from the forge; then the
+command waits (`--wait-seconds`, default 900) until every Application reads the
+forge, Synced and Healthy, each still managing every resource it managed before.
+Then the credential copy is removed, and only then does `bootstrap-forge` run
+once more to make your old repository the off-site copy, which pushes the
+migration commit there. Until that moment the old repository is exactly what
+Argo CD read before the move.
+
+**Success condition:** it ends with `every Application reads the built-in forge,
+Synced and Healthy, and nothing was pruned`. Run it again: it says `Nothing to
+do`. Set `site.forge: built-in` in your `tockmox.yaml` before you run the
+installer again.
+
+**If the cutover does not settle,** nothing is undone for you. The command
+prints what is wrong and the one command that points Argo CD back at your old
+repository: your checkout's own `bootstrap/root.yaml`, which it never changed.
+Or fix the cause and run the move again: it carries on from what the forge
+holds, with the same migration commit.
+
+**Two things change for you.** The built-in forge runs no CI: workflows on your
+old repository no longer gate a change, and they see each change only when the
+mirror pushes it there, after it is applied. And the forge's push mirror always
+force-pushes, so block force-pushes and direct pushes to the old repository's
+`main` for everyone but the token you gave: a rewrite is then refused and the
+copy-behind alert fires.
+
 ## Move to my own forge
 
 **When you would rather keep the site on a forge of your own** (GitHub, GitLab,

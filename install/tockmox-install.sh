@@ -90,6 +90,10 @@ One subcommand DOES write to a cluster, and only when you name it:
   move-forge         (site.forge: built-in) move the site repository, with its whole
                      history, to an EMPTY repository you own, and repoint ArgoCD
                      at it in one change an approver merges. Run '$ME move-forge --help'.
+  move-in-forge      move a RUNNING site whose repository is on an external forge
+                     (GitHub, your own Forgejo) into the built-in forge, with its
+                     whole history, and cut ArgoCD over to it; the old repository
+                     becomes the off-site copy. Run '$ME move-in-forge --help'.
   upgrade-forge      (site.forge: built-in) take a fresh off-site copy, then move
                      the built-in forge to the Forgejo this release pins and
                      check it answers. Run it before you move the Tockmox pin.
@@ -368,6 +372,10 @@ fi
 if [[ "${1:-}" == "move-forge" ]]; then
   shift
   exec bash "$SELF/forge-move.sh" "$@"
+fi
+if [[ "${1:-}" == "move-in-forge" ]]; then
+  shift
+  exec bash "$SELF/forge-move-in.sh" "$@"
 fi
 if [[ "${1:-}" == "upgrade-forge" ]]; then
   shift
