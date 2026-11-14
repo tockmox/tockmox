@@ -114,12 +114,25 @@ def _why(e: Exception) -> str:
 # ---------------------------------------------------------------- Kubernetes
 
 class KubeClient:
-    """Two GETs and nothing else. No client library, so the surface is visible."""
+    """Two GETs and nothing else. No client library, so the surface is visible.
+
+    A 429 is retried. The API server's priority and fairness answers 429, with a Retry-After, when
+    the priority level a request lands in is full for a moment: an isolated answer, seldom twice
+    running. One page view is one read, so before this a single 429 on the cluster-wide cronworkflows
+    list left every role's scheduled work reading Unknown on that view. A GET is retried twice, waiting
+    what the server asks for, never longer than RETRY_WAIT_MAX_S or the source timeout. A third 429 is
+    the reading: Unknown, with its reason and the age of the last good answer, as for any other
+    failure. Nothing else is retried."""
+
+    RETRY_STATUS = 429
+    RETRIES = 2
+    RETRY_WAIT_MAX_S = 2.0
 
     def __init__(self, url: str, token_file: str, ca_file: str, timeout: float,
-                 transport: httpx.BaseTransport | None = None):
+                 transport: httpx.BaseTransport | None = None,
+                 sleep: Callable[[float], None] = time.sleep):
         self.url, self.token_file, self.ca_file, self.timeout = url, token_file, ca_file, timeout
-        self.transport = transport
+        self.transport, self.sleep = transport, sleep
 
     def _client(self) -> httpx.Client:
         verify: Any = True
@@ -134,9 +147,25 @@ class KubeClient:
 
     def get(self, path: str) -> dict:
         with self._client() as c:
-            r = c.get(path)
+            for attempt in range(self.RETRIES + 1):
+                r = c.get(path)
+                if r.status_code != self.RETRY_STATUS or attempt == self.RETRIES:
+                    break
+                self.sleep(retry_wait(r, min(self.RETRY_WAIT_MAX_S, self.timeout)))
             r.raise_for_status()
             return r.json()
+
+
+def retry_wait(r: httpx.Response, cap: float, default: float = 1.0) -> float:
+    """Seconds to wait before retrying a 429: its Retry-After in seconds, else `default`, never more
+    than `cap` and never negative. An HTTP-date Retry-After reads as `default`."""
+    try:
+        v = float(r.headers.get("retry-after", default))
+    except ValueError:
+        v = default
+    if v != v:  # NaN
+        v = default
+    return max(0.0, min(v, cap))
 
 
 def _parse_ts(v):
