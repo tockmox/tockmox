@@ -1173,6 +1173,14 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **One 429 from the Kubernetes API no longer leaves the Platform pages reading Unknown.** The API
+  server's priority and fairness answers 429, with a Retry-After, when the priority level a request
+  lands in is full for a moment. The console read each source once per page view, so a single 429 on
+  the cluster-wide CronWorkflows list made every role's scheduled work read Unknown, with "last
+  answered" giving the age of the last page view that worked. The console's Kubernetes reads now
+  retry a 429 twice, waiting what Retry-After asks for and never longer than 2 seconds or the source
+  timeout; a third 429 reads as any failure does, Unknown with the last good answer and its age.
+  Nothing else is retried. Nothing to do on upgrade.
 - **Restore-drill age read nothing, or the best case.** The Status board and the
   Tockmox UI selected Jobs named `*restore-drill*`, which no shipped drill
   creates (drill CronJobs are `<database>-drill`), so the panel was always
