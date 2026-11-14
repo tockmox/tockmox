@@ -54,6 +54,43 @@
 # lane does not call again. A P12 failure becomes the lane's exit only when nothing earlier (P09, the kit, P11)
 # already failed it.
 #
+# THE OPEN-APPLICATIONS LIST, P14 (paths/P14-open-applications.sh). After P12 and before P13, and only when P09
+# passed, deliver three commits to the site repository's remote on the same throwaway and state directory: an Authentik
+# application with no binding (the list names it), sso.access.everyone (it stops warning), and the binding to
+# tockmox-admins (it leaves the list). TOCKMOX_P09_OPEN_APPS picks whether it runs:
+#   auto (the default, also unset or empty)  run it when the route is external; otherwise skip it with one logged line
+#   1    run it. Refused up front on the built-in route, before anything is created
+#   0    never run it
+#   anything else is refused.
+# The external route is needed for P12's reason: the commits are pushed to the site repository's remote, and on the
+# built-in forge main takes pull requests only. It runs on a kept run too: what it leaves is the blueprint as the page
+# prints it. P14 has its own budget, TOCKMOX_P14_BUDGET (default 5400 seconds), a yield point this lane does not call
+# again. A P14 failure becomes the lane's exit only when nothing earlier already failed it.
+#
+# WHAT THE NETWORK POLICIES ADMIT, netpol-adversary.sh. LAST, after P13, and only when P09 passed, on both routes:
+# the adversarial NetworkPolicy harness plants probe pods in the guarded namespaces of the install P09 made and reads
+# what the shipped policies let through. It is last so that its stand-in pods cannot disturb a path. It is not a path
+# (run.sh does not run it and it writes no receipt), so the lane reads its exit status and gives it the outcome that
+# status stands for: 0 PASS; 1 PRODUCT_FAIL (an assertion failed, or a known defect started passing); 2, the script's
+# own "skipped" (no reachable cluster, no policy layer, a CNI that does not enforce, a probe that never became Ready),
+# BLOCKED, because nothing was judged and that is never a pass; anything else ABORTED. The outcome then enters the
+# lane's exit the way a path's does (4 BLOCKED, 1 otherwise), and never replaces an earlier failure's status. Its own
+# report is written beside the others, as report-netpol-adversary-REF-STAMP.txt under TOCKMOX_WORKDIR.
+# TOCKMOX_P09_NETPOL picks whether it runs:
+#   auto (the default, also unset or empty)  run it; when this tree has no netpol-adversary.sh, skip it with one logged line
+#   1    run it. Refused up front, before anything is created, when this tree has no netpol-adversary.sh
+#   0    never run it
+#   anything else is refused.
+# THE SWITCHES IT IS RUN WITH are the install's, read from this tree and not from the cluster:
+#   TOCKMOX_EXPECT_AI_EGRESS_DENY=1  the policy chart renders the AI namespace's egress default-deny by default
+#        (charts/tockmox-policy/values.yaml, aiEgress.namespaceDefaultDeny: true), and the site values the installer
+#        writes for the policy layer do not turn it off;
+#   TOCKMOX_EXPECT_NODE_SOURCES=1    P09 runs install.md 1f (its step S09b), which appends
+#        platformNetpol.nodeOriginSources to the site's policy values before the first push;
+#   TOCKMOX_UNGUARDED_NS unset       the policy layer creates and guards all eight namespaces by default, whatever
+#        other layer is on, and tockmox.yaml.example turns every layer on.
+# A caller that installs differently sets them itself: each is passed through when already set.
+#
 # AN OFF-SITE COPY, with TOCKMOX_P09_OFFSITE=git (default none; built-in route only). Without it the
 # install warns "no off-site copy" and there is nothing to rebuild the throwaway from. With it:
 #   - before step 1, the settings are read from the Secret p09-offsite beside the VMs
@@ -173,6 +210,41 @@ case "$BYO_CA" in
       BYO_RUN=1
     fi ;;
   *) refuse "TOCKMOX_P09_BYO_CA must be auto, 1 or 0, not: ${BYO_CA}" ;;
+esac
+
+# The open-applications list (P14): decided here too, for the same reason.
+OPEN_APPS="${TOCKMOX_P09_OPEN_APPS:-auto}"
+OPEN_RUN=0
+OPEN_WHY=""
+case "$OPEN_APPS" in
+  0) OPEN_WHY="TOCKMOX_P09_OPEN_APPS=0" ;;
+  1) [ "$ROUTE" = external ] || refuse "TOCKMOX_P09_OPEN_APPS=1 needs TOCKMOX_P09_ROUTE=external: P14 pushes its commits to the site repository's remote, and the built-in forge takes pull requests only"
+     OPEN_RUN=1 ;;
+  auto)
+    if [ "$ROUTE" != external ]; then
+      OPEN_WHY="built-in route: the commits cannot be delivered, because the forge's main takes pull requests only"
+    else
+      OPEN_RUN=1
+    fi ;;
+  *) refuse "TOCKMOX_P09_OPEN_APPS must be auto, 1 or 0, not: ${OPEN_APPS}" ;;
+esac
+
+# What the network policies admit (netpol-adversary.sh): decided here too, so a refusal costs nothing.
+NETPOL="${TOCKMOX_P09_NETPOL:-auto}"
+NETPOL_SH="${HERE}/netpol-adversary.sh"
+NETPOL_RUN=0
+NETPOL_WHY=""
+case "$NETPOL" in
+  0) NETPOL_WHY="TOCKMOX_P09_NETPOL=0" ;;
+  1) [ -f "$NETPOL_SH" ] || refuse "TOCKMOX_P09_NETPOL=1, and this tree has no tests/executed-docs/netpol-adversary.sh to run"
+     NETPOL_RUN=1 ;;
+  auto)
+    if [ -f "$NETPOL_SH" ]; then
+      NETPOL_RUN=1
+    else
+      NETPOL_WHY="this tree has no tests/executed-docs/netpol-adversary.sh"
+    fi ;;
+  *) refuse "TOCKMOX_P09_NETPOL must be auto, 1 or 0, not: ${NETPOL}" ;;
 esac
 
 # 1. the throwaway
@@ -401,8 +473,36 @@ else
   echo "lane 7: P12 (a supplied CA) skipped: ${BYO_WHY}"
 fi
 
+# --- P14 block begin (self-contained apart from OPEN_RUN, P09_REC, lane_receipt and lane_judge above; goes after the P12 block) ---
+# 7b. P14, the open-applications list, when OPEN_RUN says so and only when P09 exited 0 AND its receipt says PASS. It
+# does not wait on P11 or P12: it reads one ConfigMap of the identity layer and needs only p09-passed, written above.
+# Anything but a PASS receipt fails the lane (4 BLOCKED, 5 INFRA_ERROR, 1 otherwise or none) and never replaces an
+# earlier failure's status.
+if [ "$OPEN_RUN" = 1 ] && [ "$P09_RC" = 0 ] && [ "${P09_REC%% *}" = PASS ]; then
+  export TOCKMOX_P14_BUDGET="${TOCKMOX_P14_BUDGET:-5400}"
+  echo "lane 7b: P14, the open-applications list, after a P09 that passed (budget ${TOCKMOX_P14_BUDGET}s)"
+  set +e
+  bash "${HERE}/run.sh" P14
+  p14_rc=$?
+  set -e
+  echo "lane: P14 exit ${p14_rc}"
+  if [ "$p14_rc" != 0 ] && [ "$rc" = 0 ]; then
+    rc="$p14_rc"
+  fi
+  # a P14 that exited 0 without declaring PASS fails the lane too: the lane decided to run it
+  p14_code="$(lane_judge P14-open-applications "$(lane_receipt P14-open-applications)")"
+  if [ "$p14_code" != 0 ] && [ "$rc" = 0 ]; then
+    rc="$p14_code"
+  fi
+elif [ "$OPEN_RUN" = 1 ]; then
+  echo "lane 7b: P09 did not pass, so P14 does not run"
+else
+  echo "lane 7b: P14 (the open-applications list) skipped: ${OPEN_WHY}"
+fi
+# --- P14 block end ------------------------------------------------------------------------------------------------
+
 # --- P13 block begin (self-contained apart from P09_REC, lane_receipt and lane_judge above; goes after the P11 block) ---
-# 8. P13, last, on the same throwaway and the same state directory, only when P09 exited 0 AND its receipt says PASS.
+# 8. P13, the last path (only netpol-adversary.sh follows it), on the same throwaway and the same state directory, only when P09 exited 0 AND its receipt says PASS.
 # It plants one fault at a time (a ResourceQuota that refuses a restore drill; a drill that cannot write its register
 # row) and breaks the install on purpose, so it runs after everything that reads the install healthy, and it takes each
 # fault out again and reads that it is gone (paths/P13-planted-faults.sh). It does NOT wait on P11: they are independent
@@ -434,4 +534,44 @@ else
   echo "lane 8: P09 did not pass, so P13 does not run"
 fi
 # --- P13 block end ------------------------------------------------------------------------------------------------
+
+# --- netpol block begin (self-contained apart from NETPOL_RUN, NETPOL_SH, KC, P09_REC and lane_judge above; stays LAST) ---
+# 9. netpol-adversary.sh, last, on the same throwaway, only when P09 exited 0 AND its receipt says PASS. It is run
+# with the kubeconfig and the context the lane gave every path (KC and KUBE_CONTEXT, from step 1), and with the
+# switches the header gives the reasons for. It is not a path: it declares no outcome and leaves no receipt, so its
+# exit status is mapped here, once, to the outcome it stands for, and that outcome is judged by lane_judge like a
+# path's receipt. Its exit 2 is the script's "skipped", which judged nothing: BLOCKED, never PASS.
+# netpol_outcome STATUS ... "OUTCOME reason", the shape of a receipt
+netpol_outcome() {
+  case "$1" in
+    0) echo "PASS every must-pass assertion passed" ;;
+    1) echo "PRODUCT_FAIL an assertion failed, or a known defect started passing (its report names the line)" ;;
+    2) echo "BLOCKED the script skipped and judged nothing: no reachable cluster, no policy layer, a CNI that does not enforce egress policies, or a probe that never became Ready (its SKIPPED line says which)" ;;
+    *) echo "ABORTED the script exited ${1}, which is none of its three statuses" ;;
+  esac
+}
+if [ "$NETPOL_RUN" = 1 ] && [ "$P09_RC" = 0 ] && [ "${P09_REC%% *}" = PASS ]; then
+  NETPOL_REPORT="${TOCKMOX_WORKDIR}/report-netpol-adversary-${TOCKMOX_DOCS_REF//\//_}-$(date -u +%Y%m%dT%H%M%SZ).txt"
+  echo "lane 9: netpol-adversary.sh, what the shipped network policies admit, last, after a P09 that passed (report ${NETPOL_REPORT})"
+  set +e
+  KUBECONFIG="$KC" KUBE_CONTEXT="$KUBE_CONTEXT" ASSERT_REPORT="$NETPOL_REPORT" \
+    TOCKMOX_EXPECT_AI_EGRESS_DENY="${TOCKMOX_EXPECT_AI_EGRESS_DENY:-1}" \
+    TOCKMOX_EXPECT_NODE_SOURCES="${TOCKMOX_EXPECT_NODE_SOURCES:-1}" \
+    bash "$NETPOL_SH"
+  np_rc=$?
+  set -e
+  NP_REC="$(netpol_outcome "$np_rc")"
+  echo "lane: netpol-adversary exit ${np_rc}, outcome ${NP_REC%% *}"
+  printf 'LANE OUTCOME: %s (exit status %s)\n' "$NP_REC" "$np_rc" >> "$NETPOL_REPORT" || true
+  # anything but PASS fails the lane, and never replaces an earlier failure's status
+  np_code="$(lane_judge netpol-adversary "$NP_REC")"
+  if [ "$np_code" != 0 ] && [ "$rc" = 0 ]; then
+    rc="$np_code"
+  fi
+elif [ "$NETPOL_RUN" = 1 ]; then
+  echo "lane 9: P09 did not pass, so netpol-adversary.sh does not run"
+else
+  echo "lane 9: netpol-adversary.sh skipped: ${NETPOL_WHY}"
+fi
+# --- netpol block end ---------------------------------------------------------------------------------------------
 exit "$rc"

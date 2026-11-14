@@ -176,6 +176,10 @@ lib/p09-offsite.sh     what P09 needs for the lane's off-site copy: the edit of 
 offsite-copy-test.sh   hermetic proof of the off-site copy: settings, repository, teardown, P09's edit, the lane (also run by selftest.sh)
 expected-outcomes.txt  the reviewed list of BLOCKED or SKIPPED outcomes a full run may end in, each with a condition and a reason
 expected-outcomes-test.sh hermetic proof of how run.sh judges receipts and reads that list (also run by selftest.sh)
+lib/p14-open-applications.py  P14's verdicts: what the open-applications list says about one application, and the one edit
+                       P14 makes to a page's blueprint (its bindings taken out)
+open-applications-rows-test.sh hermetic proof of P14's rows: the verdicts, the page blocks it extracts, the path against a stub
+                       product that breaks one row at a time, and its gate (also run by selftest.sh)
 selftest.sh            hermetic proof of the machinery above
 pages-no-cluster.sh    the six no-cluster pages (values-contract, customising, capabilities,
                        configuration, platform-management, verify): every bash block extracted
@@ -387,6 +391,8 @@ test, and a run that cannot retrieve a kubeconfig produces no evidence at all.
 | `TOCKMOX_KEEP_HOURS` | `6` | with `TOCKMOX_KEEP_CLUSTER=1`: the VM carries `tockmox.com/keep-until`, now plus these hours (1 to 24), and `sweep` leaves it alone until then |
 | `TOCKMOX_KEEP_ON_PREP_FAILURE` | `0` | the p09 lane only: a kept run that stops before P09 begins is destroyed, because there is no install to keep and a standing VM holds the rig; `1` keeps it anyway |
 | `TOCKMOX_P09_OFFSITE` | `none` | the p09 lane only: `git` gives the install an off-site copy, a repository named after the VM on the forge the Secret `p09-offsite` names (`TOCKMOX_P09_OFFSITE_SECRET` to name another) |
+| `TOCKMOX_P09_NETPOL` | `auto` | the p09 lane only: `auto` and `1` run `netpol-adversary.sh` as the lane's last step on the install P09 made, after a P09 that passed, with its exit 0 judged PASS, 1 PRODUCT_FAIL and 2 (its own skip) BLOCKED, and `0` never runs it |
+| `TOCKMOX_P09_OPEN_APPS` | `auto` | the p09 lane only: whether P14 (the open-applications list) runs after a P09 that passed. `auto` runs it on the external route and skips it on the built-in one, where its commits cannot be delivered; `1` runs it (refused on the built-in route); `0` never |
 | `TOCKMOX_EXPECTED_DEFAULT_COUNT` | `0` | expected count of default StorageClasses after P03 un-defaults `local-path` (1 once a platform layer is installed) |
 | `TOCKMOX_P08_EXPECTED_DEFAULT_COUNT` | `1` | what P08 expects `existing-cluster.md` Check 3 to find: `local-path` on a stock k3s throwaway. Set `0` when P03 has run first |
 
