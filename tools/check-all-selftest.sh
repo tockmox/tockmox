@@ -16,6 +16,11 @@
 # parallel. Then mutated copies, one that books every exit 2 as skipped and one that reads the token
 # anywhere in the output, must go red here. No network, no tools beyond bash, git, awk and python3.
 #
+# STRICT MODE. With --strict (or CHECK_ALL_STRICT=1) a skip is not green: skips and passes alone exit 2,
+# a failure still exits 1, passes alone exit 0. Every run writes a .meta.json beside its results naming
+# the commit it ran on and whether the checkout was clean; the release morning reads both. The strict
+# cases below check the exit codes and that file, and mutants that drop either must go red.
+#
 #   bash tools/check-all-selftest.sh
 #   CHECK_ALL_SH=/path/to/check-all.sh bash tools/check-all-selftest.sh     another copy, to show it goes red there
 # shellcheck disable=SC2015  # `test && ok || bad`: ok only prints and counts, so it cannot fail into bad
@@ -81,12 +86,21 @@ commit_planted() {
   git -C "$W" -c user.name=fixture -c user.email=fixture@example.com commit -q --allow-empty -m planted
 }
 
-# run_copy JOBS TAG ... status in $RC, output in $OUT, results in $TSV
+# run_copy JOBS TAG [ARG...] ... status in $RC, output in $OUT, results in $TSV, evidence in $META.
+# STRICT_ENV sets CHECK_ALL_STRICT; NO_COMMIT=1 leaves the planted change uncommitted.
 run_copy() {
-  commit_planted
-  TSV="${T}/results-${2}.tsv"
-  OUT="$( cd "$W" && CHECK_ALL_JOBS="$1" CHECK_ALL_RESULTS="$TSV" CHECK_ALL_GATE_TIMEOUT=60 bash tools/check-all.sh 2>&1 )"
+  local jobs="$1" tag="$2"; shift 2
+  [ "${NO_COMMIT:-0}" = 1 ] || commit_planted
+  TSV="${T}/results-${tag}.tsv"; META="${T}/results-${tag}.meta.json"
+  OUT="$( cd "$W" && CHECK_ALL_STRICT="${STRICT_ENV:-0}" CHECK_ALL_JOBS="$jobs" CHECK_ALL_RESULTS="$TSV" CHECK_ALL_GATE_TIMEOUT=60 bash tools/check-all.sh "$@" 2>&1 )"
   RC=$?
+}
+meta_of() { # FIELD ... one field of $META, as JSON prints it
+  python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))[sys.argv[2]]))' "$META" "$1" 2>/dev/null
+}
+expect_meta() { # FIELD WANT WHY
+  local got; got="$(meta_of "$1")"
+  [ "$got" = "$2" ] && ok "$3" || bad "$3" "$(basename "$META") $1 is '${got}', wanted '$2'"
 }
 row_of() { awk -F'\t' -v n="planted $1" '$6 == n {print $3 " " $4}' "$TSV"; }
 expect_row() { # NAME "STATUS RC" WHY
@@ -139,15 +153,67 @@ suite() { # SOURCE-FILE LABEL
   done
 }
 
+strict_suite() { # SOURCE-FILE LABEL
+  local src="$1" label="$2" jobs head
+  build "$src" "${W}/tools/check-all.sh"
+  for jobs in 1 2; do
+    local p="${label}strict jobs=${jobs}: "
+    reset_planted
+    plant a-skip 'echo "SKIPPED: no widget tool on PATH"; exit 2'
+    plant d-pass 'exit 0'
+    run_copy "$jobs" "${label}s${jobs}a" --strict
+    head="$(git -C "$W" rev-parse HEAD)"
+    [ "$RC" = 2 ] && ok "${p}--strict: a skip among passes exits 2" || bad "${p}--strict: a skip among passes exits 2" "rc=${RC}"
+    printf '%s\n' "$OUT" | grep -F 'BLOCKED (strict): 1 skipped' >/dev/null \
+      && ok "${p}... and says BLOCKED with the count" || bad "${p}BLOCKED line" "$(printf '%s' "$OUT" | tail -6 | tr '\n' ';')"
+    printf '%s\n' "$OUT" | grep -F 'All runnable static gates passed' >/dev/null \
+      && bad "${p}no 'All runnable static gates passed' over a strict skip" "it printed it" || ok "${p}no 'All runnable static gates passed' over a strict skip"
+    expect_meta exit 2 "${p}the evidence records exit 2"
+    expect_meta strict true "${p}the evidence records strict mode"
+    expect_meta head_sha "\"${head}\"" "${p}the evidence names the commit the run was on"
+    expect_meta clean true "${p}the evidence records a clean checkout"
+    expect_meta skipped 1 "${p}the evidence counts the skip"
+
+    STRICT_ENV=1 run_copy "$jobs" "${label}s${jobs}b"
+    [ "$RC" = 2 ] && ok "${p}CHECK_ALL_STRICT=1 does the same" || bad "${p}CHECK_ALL_STRICT=1 does the same" "rc=${RC}"
+
+    run_copy "$jobs" "${label}s${jobs}c"
+    [ "$RC" = 0 ] && ok "${p}without strict the same gates exit 0" || bad "${p}without strict: exit 0" "rc=${RC}"
+    expect_meta strict false "${p}... and the evidence says it was not strict"
+    expect_meta exit 0 "${p}... with exit 0"
+
+    reset_planted
+    plant d-pass 'exit 0'
+    run_copy "$jobs" "${label}s${jobs}d" --strict
+    [ "$RC" = 0 ] && ok "${p}--strict: passes alone exit 0" || bad "${p}--strict: passes alone exit 0" "rc=${RC} $(printf '%s' "$OUT" | tail -5 | tr '\n' ';')"
+
+    plant a-skip 'echo "SKIPPED: no widget tool on PATH"; exit 2'
+    plant f-token-but-fail 'echo "SKIPPED: but it failed"; exit 1'
+    run_copy "$jobs" "${label}s${jobs}e" --strict
+    [ "$RC" = 1 ] && ok "${p}--strict: a failure still exits 1, not 2" || bad "${p}--strict: a failure exits 1" "rc=${RC}"
+    expect_meta exit 1 "${p}... and the evidence records exit 1"
+
+    reset_planted
+    plant d-pass 'exit 0'
+    commit_planted
+    printf 'not committed\n' > "${W}/planted/uncommitted.txt"
+    NO_COMMIT=1 run_copy "$jobs" "${label}s${jobs}f" --strict
+    expect_meta clean false "${p}a run over an uncommitted file records clean: false"
+    rm -f "${W}/planted/uncommitted.txt"
+  done
+}
+
 echo "check-all-selftest: planted gates through the real tally"
 suite "$SRC" ""
+echo "check-all-selftest: strict mode and the evidence file"
+strict_suite "$SRC" ""
 
 # mutated copies of check-all.sh: each must go red in the suite above
 mutant() { # LABEL OLD NEW
   local mf="${T}/mutant.sh" before=$fail
   if ! mut "$SRC" "$mf" "$2" "$3" 2>"${T}/mut.err"; then bad "mutation: $1 applies" "$(tail -1 "${T}/mut.err")"; return; fi
   local sp=$pass sf=$fail
-  suite "$mf" "[mutant] " >"${T}/mutant.out" 2>&1
+  { suite "$mf" "[mutant] "; strict_suite "$mf" "[mutant] "; } >"${T}/mutant.out" 2>&1
   local newfail; newfail=$(grep -c '^  FAIL' "${T}/mutant.out")
   # the mutant's own counters are not the test's: restore, then judge by whether it went red
   pass=$sp; fail=$sf
@@ -164,6 +230,15 @@ mutant "the token alone decides, whatever the exit status" \
   '    0) echo pass ;;
     2) if' '    0) if [ -n "$(skip_reason_of "$2")" ]; then echo skip; else echo pass; fi ;;
     2) if'
+
+mutant "strict mode books a skip as green" \
+  'elif [ "$STRICT" = 1 ] && { [ "$skipped" -gt 0 ] || [ "$unselected" -gt 0 ]; }; then final_rc=2' 'elif false; then final_rc=2'
+mutant "--strict is accepted and ignored" \
+  '    --strict) STRICT=1 ;;' '    --strict) ;;'
+mutant "the evidence does not name the commit" \
+  'START_HEAD="$(git --no-optional-locks rev-parse HEAD 2>/dev/null || true)"' 'START_HEAD=""'
+mutant "the evidence calls every checkout clean" \
+  "START_DIRTY=\"\$(tree_status | wc -l | tr -d ' ')\"" 'START_DIRTY=0'
 
 printf '\n  %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
