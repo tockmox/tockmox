@@ -676,7 +676,7 @@ serial_gate "the docs site-contents gate goes red on every non-static file" bash
 serial_gate "the docs publish script refuses what it must and always removes its pod" bash tools/publish-docs.sh --selftest
 run_gate "documentation style" bash tools/check-docs-style.sh
 run_gate "documented commands paste as-is" bash tools/check-pasteable-blocks.sh
-# NEVER run_gate THIS EITHER. Reporting mode is deliberate and stays: `--enforce`
+# NOT A GATE, AND NOT COUNTED AS ONE. Reporting mode is deliberate and stays: `--enforce`
 # refuses any unclassified block on the three critical-path pages, and today that
 # is all 120 of them, so turning it on here would go red on day one ... which is
 # exactly how a gate earns an exemption list and then stops being believed. The
@@ -684,25 +684,23 @@ run_gate "documented commands paste as-is" bash tools/check-pasteable-blocks.sh
 # in every run's output and cannot be lost: staged enforcement is defensible,
 # staged awareness is not.
 #
-# What changed 2026-09-15 is only the ACCOUNTING. Until then this was a
-# `run_gate`, so a line that reports and never tests was counted in the "passed"
-# total alongside gates that can go red ... the identical defect this file already
-# fixed for kubeconform fourteen lines below, for the reason written there. Found
-# by mutation-testing all 24 gates: 22 went red for the right reason, 2 correctly
-# refused to run, and this one could not fail under any tree state because it is
-# not trying to.
-#
-# So: the scan still runs, its number still prints, and it counts as SKIPPED
-# rather than passed. Flipping it back to a gate is the --enforce migration's
-# job, not an accounting change.
-# It goes through run_gate only to keep its place in a parallel run's ordered report, and it
-# EXITS 2 whatever the inventory says: counted as skipped, exactly as before, never as a pass.
-run_gate "every documented block is accounted for" bash -c '
-  bash tools/check-block-inventory.sh || true
-  printf "  NOT A GATE: reported, never enforced. No tree state changes this line.\n"
-  printf "  Enforcement is per-page and carded; \`--enforce\` is the real check.\n"
-  printf "SKIPPED: reported, never enforced; enforcement is per-page (check-block-inventory.sh --enforce)\n"
-  exit 2'
+# The ACCOUNTING has changed twice. Until 2026-09-15 this was a `run_gate` counted as
+# passed, though no tree state could turn it red (found by mutation-testing all 24 gates:
+# 22 went red for the right reason, 2 correctly refused to run, and this one was not
+# trying to). Then it was a gate that exited 2 whatever the inventory said, counted as
+# skipped ... and once --strict made a skip not green, that meant no strict run could ever
+# pass. So now it is what it always was, a report: the scan runs, its output prints under
+# "Reports, not gates" after the gates, and it is in no count, no results row and no
+# --list. Flipping it back to a gate is the --enforce migration's job. One copy per run:
+# a sharded run prints it on shard 1 only.
+if [ "$LIST_ONLY" = 0 ] && { [ -z "$SHARD" ] || [ "${SHARD%%/*}" = 1 ]; }; then
+  {
+    printf '=== every documented block is accounted for ===\n'
+    bash tools/check-block-inventory.sh 2>&1 || true
+    printf '  NOT A GATE: reported, never enforced, never counted. Enforcement is per-page and\n'
+    printf '  carded; `check-block-inventory.sh --enforce` is the real check.\n'
+  } > "$SLOTS/report-01-block-inventory.log"
+fi
 
 run_gate "docs links resolve" bash tools/check-docs-links.sh
 run_gate "frontmatter contract holds" bash tools/check-frontmatter.sh
@@ -791,6 +789,12 @@ if [ "$TREE_BEFORE" != "$TREE_AFTER" ]; then
   fail=$((fail + 1)); failed_names="${failed_names}
   - the checkout is unchanged by the gates"
 fi
+# Reports: output kept for reading, never a gate, never counted (see the block inventory above).
+for f in "$SLOTS"/report-*.log; do
+  [ -e "$f" ] || continue
+  [ -n "${reports_banner:-}" ] || { printf '\nReports, not gates (never counted as passed, failed or skipped):\n'; reports_banner=1; }
+  printf '\n'; cat "$f"
+done
 mkdir -p "$(dirname "$RESULTS")"
 { printf 'ord\tkey\tstatus\trc\tseconds\tname\n'; sort -n "$SLOTS/results" 2>/dev/null; } > "$RESULTS"
 if [ "$skipped" -gt 0 ]; then

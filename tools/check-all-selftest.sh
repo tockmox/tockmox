@@ -58,6 +58,8 @@ build() { # SRC-FILE OUT ... check-all.sh with the planted gates in place of the
     printf 'PLAN=""\nTREE_BEFORE="$(tree_fingerprint)"\n'
     # shellcheck disable=SC2016  # literal text for the copy
     printf 'for f in planted/*.sh; do run_gate "planted $(basename "$f" .sh)" bash "$f"; done\n'
+    # a report, as the block inventory is one: printed after the gates, in no count
+    printf 'printf "report body: planted\\n" > "$SLOTS/report-01-planted.log"\n'
     awk '/^# -* result$/ {on=1} on {print}' "$1"
   } > "$2"
 }
@@ -186,6 +188,10 @@ strict_suite() { # SOURCE-FILE LABEL
     plant d-pass 'exit 0'
     run_copy "$jobs" "${label}s${jobs}d" --strict
     [ "$RC" = 0 ] && ok "${p}--strict: passes alone exit 0" || bad "${p}--strict: passes alone exit 0" "rc=${RC} $(printf '%s' "$OUT" | tail -5 | tr '\n' ';')"
+    printf '%s\n' "$OUT" | grep -F 'Reports, not gates' >/dev/null && printf '%s\n' "$OUT" | grep -F 'report body: planted' >/dev/null \
+      && ok "${p}a report prints under 'Reports, not gates'" || bad "${p}a report prints" "$(printf '%s' "$OUT" | tail -12 | tr '\n' ';')"
+    printf '%s\n' "$OUT" | grep -F '1 passed, 0 failed, 0 skipped' >/dev/null \
+      && ok "${p}... and is in no count" || bad "${p}the report is in no count" "$(printf '%s' "$OUT" | grep 'passed,')"
 
     plant a-skip 'echo "SKIPPED: no widget tool on PATH"; exit 2'
     plant f-token-but-fail 'echo "SKIPPED: but it failed"; exit 1'
@@ -202,6 +208,20 @@ strict_suite() { # SOURCE-FILE LABEL
     rm -f "${W}/planted/uncommitted.txt"
   done
 }
+
+# A gate that exits 2 whatever happens is a skip no tree state can change, so with one registered
+# no --strict run could ever pass (the block inventory was one until it became a report).
+echo "check-all-selftest: no registered gate exits 2 unconditionally"
+always2="$(python3 - "$SRC" <<'PY'
+import re, sys
+src = open(sys.argv[1], encoding="utf-8").read()
+for m in re.finditer(r"^(?:run_gate|serial_gate) \"([^\"]+)\" bash -c '(.*?)'\s*$", src, re.S | re.M):
+    body = [l.strip() for l in m.group(2).strip().splitlines() if l.strip()]
+    if body and re.fullmatch(r"exit 2;?", body[-1]):
+        print(m.group(1))
+PY
+)"
+[ -z "$always2" ] && ok "no run_gate or serial_gate body ends in a bare exit 2" || bad "a gate always exits 2, so --strict can never pass" "$always2"
 
 echo "check-all-selftest: planted gates through the real tally"
 suite "$SRC" ""
