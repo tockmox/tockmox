@@ -941,7 +941,7 @@ each one:
 
 ```bash
 : "${KUBE_CONTEXT:?export KUBE_CONTEXT first, see Name the cluster}"
-kubectl --context="$KUBE_CONTEXT" get namespace -o name | grep -v 'kube-\|default\|argocd'
+kubectl --context="$KUBE_CONTEXT" get namespace -o name | grep -v -E 'kube-|default|argocd'
 kubectl --context="$KUBE_CONTEXT" get pv -o custom-columns='NAME:.metadata.name,CLAIM:.spec.claimRef.namespace'
 ```
 
