@@ -89,7 +89,17 @@
         "uid": "${datasource}"
       },
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
         "overrides": []
       },
       "gridPos": {
@@ -384,7 +394,9 @@
   "schemaVersion": 39,
   "tags": [
     "platform",
-    "tockmox"
+    "tockmox",
+    "tier-l2",
+    "capacity"
   ],
   "templating": {
     "list": [

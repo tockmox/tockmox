@@ -95,7 +95,16 @@
    },
    "fieldConfig": {
     "defaults": {
-     "unit": "reqps"
+     "unit": "reqps",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
     },
     "overrides": []
    },
@@ -134,7 +143,16 @@
    },
    "fieldConfig": {
     "defaults": {
-     "unit": "s"
+     "unit": "s",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
     },
     "overrides": []
    },
@@ -159,11 +177,11 @@
       "type": "prometheus",
       "uid": "${datasource}"
      },
-     "expr": "histogram_quantile(0.95, sum(rate(authentik_main_request_duration_seconds_bucket[5m])) by (le))",
+     "expr": "max(authentik_main_request_duration_seconds{quantile=\"0.95\"})",
      "refId": "A"
     }
    ],
-   "title": "Request p95 (s)",
+   "title": "Request p95",
    "type": "stat"
   },
   {
@@ -173,7 +191,16 @@
    },
    "fieldConfig": {
     "defaults": {
-     "unit": "bytes"
+     "unit": "bytes",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
     },
     "overrides": []
    },
@@ -299,7 +326,7 @@
       "type": "prometheus",
       "uid": "${datasource}"
      },
-     "expr": "histogram_quantile(0.50, sum(rate(authentik_main_request_duration_seconds_bucket[5m])) by (le))",
+     "expr": "max(authentik_main_request_duration_seconds{quantile=\"0.5\"})",
      "legendFormat": "p50",
      "refId": "A"
     },
@@ -308,7 +335,7 @@
       "type": "prometheus",
       "uid": "${datasource}"
      },
-     "expr": "histogram_quantile(0.95, sum(rate(authentik_main_request_duration_seconds_bucket[5m])) by (le))",
+     "expr": "max(authentik_main_request_duration_seconds{quantile=\"0.95\"})",
      "legendFormat": "p95",
      "refId": "B"
     },
@@ -317,12 +344,12 @@
       "type": "prometheus",
       "uid": "${datasource}"
      },
-     "expr": "histogram_quantile(0.99, sum(rate(authentik_main_request_duration_seconds_bucket[5m])) by (le))",
+     "expr": "max(authentik_main_request_duration_seconds{quantile=\"0.99\"})",
      "legendFormat": "p99",
      "refId": "C"
     }
    ],
-   "title": "Request latency p50/p95/p99 (s)",
+   "title": "Request latency p50/p95/p99",
    "type": "timeseries"
   },
   {
@@ -431,7 +458,9 @@
  "schemaVersion": 39,
  "tags": [
   "platform",
-  "tockmox"
+  "tockmox",
+  "tier-l2",
+  "security"
  ],
  "templating": {
   "list": [

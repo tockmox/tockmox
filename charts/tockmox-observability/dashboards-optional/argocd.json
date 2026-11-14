@@ -41,7 +41,16 @@
    },
    "fieldConfig": {
     "defaults": {
-     "unit": "none"
+     "unit": "none",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "text",
+        "value": null
+       }
+      ]
+     }
     },
     "overrides": []
    },
@@ -643,7 +652,9 @@
   "platform",
   "tockmox",
   "argocd",
-  "gitops"
+  "gitops",
+  "tier-l2",
+  "change"
  ],
  "templating": {
   "list": [
