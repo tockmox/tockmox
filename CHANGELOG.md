@@ -82,6 +82,17 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **Move a running site into the built-in forge.** `tockmox-install.sh
+  move-in-forge` takes a site whose repository is on GitHub, GitLab or your own
+  Forgejo into the built-in forge with its whole history: every `repoURL` that
+  names your repository is rewritten to the forge's in-cluster address in one
+  commit, the built-in forge's values are turned on, Argo CD is cut over, and the
+  old repository becomes the off-site copy. It refuses before it writes anything
+  (uncommitted changes, Argo CD reading another repository or revision, an
+  unsettled Application, a forge holding other history), checks afterwards that
+  every Application is Synced and Healthy with nothing pruned, and a re-run is a
+  no-op (docs/administration/site-forge.md, "Move a running site in").
+
 - **Status names the Authentik applications open to every signed-in user.** An
   identity-layer CronJob lists every application with no group or user
   binding into one ConfigMap; the console's Status page shows each as a warning
