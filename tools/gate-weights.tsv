@@ -3,7 +3,6 @@
 # gates that run did not time. Data, not a gate: a stale number only makes the shards less even,
 # and a gate with no line weighs 10 s. Refresh from full runs' results (the shard artifacts):
 #   tools/gate-plan.py weights check-all-results-*.tsv > tools/gate-weights.tsv
-inline:every-documented-block-is-accounted-for	0
 inline:every-layer-renders-against-ci-values-site-minimal-yaml	4
 inline:every-tool-is-executable	0
 inline:helm-lint-all-layer-charts-both-value-sets	7

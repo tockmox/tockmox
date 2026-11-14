@@ -67,7 +67,8 @@
 # Usage:
 #   tools/release-preflight.sh X.Y.Z            run the five checks
 #   tools/release-preflight.sh X.Y.Z --strict   the same, and a SKIP is not green: a run with no
-#                                               FAIL that skipped a check exits 2 (BLOCKED), not 0
+#                                               FAIL that skipped a check exits 2 (BLOCKED), not 0;
+#                                               check 4 before the tag is N/A (see STRICT)
 #   tools/release-preflight.sh --selftest       prove each check still refuses
 #   tools/release-preflight.sh X.Y.Z --selftest same as --selftest
 #
@@ -77,6 +78,15 @@
 # it: 0 every check passed, 1 a check failed, 2 none failed and at least one
 # was skipped. The release train runs it strict. RELEASE_PREFLIGHT_STRICT=1 is
 # the same as the flag.
+#
+# One step is NOT APPLICABLE under --strict rather than skipped: check 4 with no
+# SHA256SUMS. The file is generated from the tag, after the hour this script is
+# for, and from 0.9 it is built by release-assets.yaml and never exists locally,
+# so a skip there would make every strict run BLOCKED. The release morning
+# (tools/train-morning.sh) reads SHA256SUMS back from the published Release and
+# verifies it, and that is where the checksum is asserted. N/A is printed and
+# counted on its own, never as a pass. A SHA256SUMS that IS present is still
+# checked, and still fails when it does not verify.
 #
 # Environment:
 #   TOCKMOX_SITE_TEMPLATE   path to the site template checkout (check 5)
@@ -650,12 +660,19 @@ selftest() {
     run_whole "--strict with all five checks passing exits 0" 0 "$r" "$ws" "$V" --strict
     r="$tmp/whole-nosums"; mkrepo "$r" "$V"
     run_whole "without --strict, a skipped check 4 still exits 0 (unchanged)" 0 "$r" "$ws" "$V"
-    run_whole "--strict: a skipped check 4 (no SHA256SUMS) exits 2" 2 "$r" "$ws" "$V" --strict
-    case "$rw_out" in *"BLOCKED (strict)"*) echo "  ok  and it says BLOCKED, not PASSED" ;;
-      *) echo "  SELFTEST FAIL: no BLOCKED line under --strict"; printf '%s\n' "$rw_out" | tail -4 | sed 's/^/            /'; fails=1 ;; esac
-    RW_STRICT_ENV=1 run_whole "RELEASE_PREFLIGHT_STRICT=1 is the same as --strict" 2 "$r" "$ws" "$V"
+    case "$rw_out" in *"SKIP  4."*) echo "  ok  and without --strict check 4 still reads SKIP" ;;
+      *) echo "  SELFTEST FAIL: no SKIP line for check 4 without --strict"; printf '%s\n' "$rw_out" | tail -6 | sed 's/^/            /'; fails=1 ;; esac
+    run_whole "--strict: no SHA256SUMS before the tag is not applicable, so the run passes" 0 "$r" "$ws" "$V" --strict
+    case "$rw_out" in *"N/A   4. SHA256SUMS"*"PASSED (strict: 4 passed, 1 not applicable"*) echo "  ok  and it says N/A for check 4 and counts it apart from the passes" ;;
+      *) echo "  SELFTEST FAIL: check 4 is not reported N/A under --strict"; printf '%s\n' "$rw_out" | tail -6 | sed 's/^/            /'; fails=1 ;; esac
+    r="$tmp/whole-badsums"; mkrepo "$r" "$V"; printf 'archive\n' > "$r/tockmox-$V.tar.gz"; (cd "$r" && $(sha_tool) "tockmox-$V.tar.gz" > SHA256SUMS)
+    printf 'changed\n' > "$r/tockmox-$V.tar.gz"
+    run_whole "--strict: a SHA256SUMS that is present and does not verify still fails (exit 1)" 1 "$r" "$ws" "$V" --strict
     r="$tmp/whole-nosite"; mkrepo "$r" "$V"; printf 'archive\n' > "$r/tockmox-$V.tar.gz"; (cd "$r" && $(sha_tool) "tockmox-$V.tar.gz" > SHA256SUMS)
     run_whole "--strict: no site template found (check 5 skipped) exits 2" 2 "$r" "" "$V" --strict
+    case "$rw_out" in *"BLOCKED (strict)"*) echo "  ok  and it says BLOCKED, not PASSED" ;;
+      *) echo "  SELFTEST FAIL: no BLOCKED line under --strict"; printf '%s\n' "$rw_out" | tail -4 | sed 's/^/            /'; fails=1 ;; esac
+    RW_STRICT_ENV=1 run_whole "RELEASE_PREFLIGHT_STRICT=1 is the same as --strict" 2 "$r" "" "$V"
     run_whole "--strict before the version is accepted too" 2 "$r" "" --strict "$V"
     r="$tmp/whole-fail"; mkrepo "$r" "$V"; printf '#!/bin/sh\nVERSION="0.1.0"\n' > "$r/install/tockmox-install.sh"
     run_whole "--strict: a FAIL still exits 1, not 2" 1 "$r" "" "$V" --strict
@@ -703,7 +720,7 @@ echo "release preflight for v$VER"
 [ "$STRICT" = 0 ] || echo "mode: strict (a SKIP is not green: exit 2)"
 echo "repository: $ROOT"
 
-passed=0; skipped=0
+passed=0; skipped=0; notapplicable=0
 run_check() { # run_check NAME FUNCTION ARGS...
   rc_name="$1"; shift
   printf '\n== %s ==\n' "$rc_name"
@@ -720,7 +737,15 @@ run_check() { # run_check NAME FUNCTION ARGS...
 run_check "1. the bump locations agree on $VER" check_versions "$ROOT" "$VER"
 run_check "2. hand-maintained prose names v$VER" check_prose "$ROOT" "$VER"
 run_check "3. CHANGELOG top-most section is [$VER]" check_changelog "$ROOT" "$VER"
-run_check "4. SHA256SUMS names and verifies the archive" check_sums "$ROOT" "$VER"
+if [ "$STRICT" = 1 ] && [ ! -f "$ROOT/SHA256SUMS" ] && [ ! -f "$ROOT/dist/SHA256SUMS" ]; then
+  printf '\n== 4. SHA256SUMS names and verifies the archive ==\n'
+  echo "        no SHA256SUMS at the root or in dist/: it is generated from the tag, after this check's hour"
+  echo "        the release morning verifies it on the published Release (tools/train-morning.sh, step 7)"
+  echo "  N/A   4. SHA256SUMS (strict: not applicable before the tag, not passed)"
+  notapplicable=$((notapplicable + 1))
+else
+  run_check "4. SHA256SUMS names and verifies the archive" check_sums "$ROOT" "$VER"
+fi
 
 nlayers=$(layer_charts "$ROOT" | wc -l | tr -d ' ')
 if site=$(find_site_template); then
@@ -737,9 +762,13 @@ fi
 
 echo
 if [ "$STRICT" = 1 ] && [ "$skipped" -gt 0 ]; then
-  echo "release-preflight v$VER: BLOCKED (strict): $skipped check(s) skipped, $passed passed, $warns warning(s) to read"
+  echo "release-preflight v$VER: BLOCKED (strict): $skipped check(s) skipped, $passed passed, $notapplicable not applicable, $warns warning(s) to read"
   echo "a SKIP is an unasserted step, not a green one; see the lines above"
   exit 2
+fi
+if [ "$STRICT" = 1 ]; then
+  echo "release-preflight v$VER: PASSED (strict: $passed passed, $notapplicable not applicable, $warns warning(s) to read)"
+  exit 0
 fi
 echo "release-preflight v$VER: PASSED ($passed passed, $skipped skipped, $warns warning(s) to read)"
 [ "$skipped" -eq 0 ] || echo "a SKIP is an unasserted step, not a green one; see the lines above"
