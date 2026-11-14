@@ -550,6 +550,7 @@ case "$1" in
   P12) name=P12-bring-your-own-ca; out="${STUB_P12_OUT:-PASS}"; rc="${STUB_P12_RC:-0}" ;;
   P13) name=P13-planted-faults; out="${STUB_P13_OUT:-PASS}"; rc="${STUB_P13_RC:-0}" ;;
   P14) name=P14-open-applications; out="${STUB_P14_OUT:-PASS}"; rc="${STUB_P14_RC:-0}" ;;
+  P15) name=P15-approver-revocation; out="${STUB_P15_OUT:-PASS}"; rc="${STUB_P15_RC:-0}" ;;
   *) exit 0 ;;
 esac
 n="$(ls "$TOCKMOX_WORKDIR" | grep -c '^receipts-')"
@@ -568,7 +569,7 @@ chmod +x "$TMP/lbin"/* "$L/provision"/*.sh "$L/run.sh"
 LN=0
 run_lane() { # VAR=value... -> output in $TMP/lout, status in $LRC, the calls in $LH/log
   LN=$((LN+1)); LH="$TMP/lane-$LN"; mkdir -p "$LH/home" "$LH/work"; : > "$LH/log"
-  env -u TOCKMOX_P09_BYO_CA -u TOCKMOX_P09_OPEN_APPS -u TOCKMOX_P09_NETPOL -u TOCKMOX_EXPECT_AI_EGRESS_DENY -u TOCKMOX_EXPECT_NODE_SOURCES -u TOCKMOX_UNGUARDED_NS -u TOCKMOX_KEEP_CLUSTER -u TOCKMOX_P09_ROUTE "$@" HOME="$LH/home" TOCKMOX_WORKDIR="$LH/work" LANE_LOG="$LH/log" LANE_TMP="$LH" PATH="$TMP/lbin:$PATH" \
+  env -u TOCKMOX_P09_BYO_CA -u TOCKMOX_P09_OPEN_APPS -u TOCKMOX_P09_APPROVER_WATCH -u TOCKMOX_P09_NETPOL -u TOCKMOX_EXPECT_AI_EGRESS_DENY -u TOCKMOX_EXPECT_NODE_SOURCES -u TOCKMOX_UNGUARDED_NS -u TOCKMOX_KEEP_CLUSTER -u TOCKMOX_P09_ROUTE "$@" HOME="$LH/home" TOCKMOX_WORKDIR="$LH/work" LANE_LOG="$LH/log" LANE_TMP="$LH" PATH="$TMP/lbin:$PATH" \
     KUBECONFIG="$LH/substrate.kubeconfig" TOCKMOX_DOCS_REF=stub TOCKMOX_SUBSTRATE_CONTEXT=stub-substrate TOCKMOX_TEST_VM=ed-lane \
     bash "$L/p09-lane.sh" > "$TMP/lout" 2>&1
   LRC=$?
@@ -667,6 +668,50 @@ mut "${HERE}/p09-lane.sh" "$L/p09-lane.sh" '[ "$ROUTE" = external ] || refuse "T
 run_lane TOCKMOX_P09_ROUTE=built-in TOCKMOX_P09_OPEN_APPS=1
 [ "$LRC" != 2 ] && ok "lane mutation: without the up-front refusal the built-in lane is created, so the refusal case above is the guard" || bad "lane mutation: P14 refusal" "rc=$LRC"
 # --- P14 block end ---
+
+# --- P15 block begin (the lane's P15 block, run with the stubs above; P15's own rows are approver-revocation-rows-test.sh's) ---
+cp "${HERE}/p09-lane.sh" "$L/p09-lane.sh"
+ran15() { grep -c '^run.sh P15' "$LH/log"; }
+SKIP15() { grep -F "lane 7c: P15 (the approvers watcher's alerts) skipped: $1" "$TMP/lout" >/dev/null; }
+run_lane TOCKMOX_P09_ROUTE=built-in
+[ "$LRC" = 0 ] && [ "$(ran15)" = 1 ] && ok "lane: P15 runs on the built-in route by default" || bad "lane: P15 auto+built-in" "rc=$LRC $(tr '\n' ';' < "$LH/log")"
+awk '/^run.sh P11/{a=NR} /^run.sh P15/{b=NR} /^run.sh P13/{c=NR} END{exit !(a && b && c && a<b && b<c)}' "$LH/log" && ok "lane: P15 runs after P11 and before P13, which stays the last path" || bad "lane: P15 order" "$(tr '\n' ';' < "$LH/log")"
+run_lane TOCKMOX_P09_ROUTE=built-in TOCKMOX_KEEP_CLUSTER=1
+[ "$LRC" = 0 ] && [ "$(ran15)" = 1 ] && ok "lane: P15 runs on a kept built-in run too (it takes out what it planted)" || bad "lane: P15 kept" "rc=$LRC"
+run_lane TOCKMOX_P09_ROUTE=external
+[ "$LRC" = 0 ] && [ "$(ran15)" = 0 ] && SKIP15 "external route: there is no built-in forge, so there is no approvers watcher to read" \
+  && ok "lane: P15 is skipped on the external route, with the reason" || bad "lane: P15 auto+external" "rc=$LRC $(grep 'lane 7c' "$TMP/lout")"
+run_lane TOCKMOX_P09_ROUTE=built-in TOCKMOX_P09_APPROVER_WATCH=0
+[ "$LRC" = 0 ] && [ "$(ran15)" = 0 ] && SKIP15 "TOCKMOX_P09_APPROVER_WATCH=0" && ok "lane: TOCKMOX_P09_APPROVER_WATCH=0 never runs P15" || bad "lane: P15 0" "rc=$LRC $(grep 'lane 7c' "$TMP/lout")"
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_APPROVER_WATCH=1
+[ "$LRC" = 2 ] && ! grep -x create "$LH/log" >/dev/null && ! grep '^run.sh' "$LH/log" >/dev/null && ok "lane: TOCKMOX_P09_APPROVER_WATCH=1 on the external route is refused (exit 2) before anything is created" || bad "lane: P15 1+external" "rc=$LRC $(tr '\n' ';' < "$LH/log")"
+run_lane TOCKMOX_P09_ROUTE=built-in TOCKMOX_P09_APPROVER_WATCH=yes
+[ "$LRC" = 2 ] && ! grep -x create "$LH/log" >/dev/null && grep -F 'TOCKMOX_P09_APPROVER_WATCH must be auto, 1 or 0, not: yes' "$TMP/lout" >/dev/null && ok "lane: a garbage TOCKMOX_P09_APPROVER_WATCH is refused (exit 2) before anything is created" || bad "lane: P15 garbage" "rc=$LRC"
+run_lane TOCKMOX_P09_ROUTE=built-in STUB_P09_RC=1
+[ "$LRC" = 1 ] && [ "$(ran15)" = 0 ] && ok "lane: a P09 that failed means P15 does not run" || bad "lane: P15 after a failed P09" "rc=$LRC ran $(ran15)"
+run_lane TOCKMOX_P09_ROUTE=built-in STUB_P09_OUT=BLOCKED
+[ "$LRC" = 4 ] && [ "$(ran15)" = 0 ] && ok "lane: a P09 that declared BLOCKED means P15 does not run" || bad "lane: P15 after a BLOCKED P09" "rc=$LRC ran $(ran15)"
+run_lane TOCKMOX_P09_ROUTE=built-in STUB_P15_OUT=PRODUCT_FAIL STUB_P15_RC=1
+[ "$LRC" = 1 ] && ok "lane: a P15 failure is the lane's exit when nothing earlier failed" || bad "lane: P15 fails" "rc=$LRC"
+run_lane TOCKMOX_P09_ROUTE=built-in STUB_P15_OUT=BLOCKED
+[ "$LRC" = 4 ] && grep -F 'lane: P15-approver-revocation declared BLOCKED: a stub reason' "$TMP/lout" >/dev/null && ok "lane: a P15 that exited 0 but declared BLOCKED fails the lane with 4 and names it" || bad "lane: P15 BLOCKED" "rc=$LRC $(tail -2 "$TMP/lout")"
+run_lane TOCKMOX_P09_ROUTE=built-in STUB_P15_OUT=NONE
+[ "$LRC" = 1 ] && ok "lane: a P15 that left no receipt fails the lane with 1" || bad "lane: P15 no receipt" "rc=$LRC"
+run_lane TOCKMOX_P09_ROUTE=built-in STUB_P11_RC=7 STUB_P11_OUT=PRODUCT_FAIL STUB_P15_OUT=BLOCKED
+[ "$LRC" = 7 ] && [ "$(ran15)" = 1 ] && ok "lane: P15 still runs after a failed P11, and the exit stays P11's (7, not 4)" || bad "lane: P11 then P15" "rc=$LRC"
+mut "${HERE}/p09-lane.sh" "$L/p09-lane.sh" 'if [ "$p15_code" != 0 ] && [ "$rc" = 0 ]; then' 'if false; then'
+run_lane TOCKMOX_P09_ROUTE=built-in STUB_P15_OUT=BLOCKED
+[ "$LRC" = 0 ] && ok "lane mutation: without the P15 outcome check a BLOCKED P15 ends 0, so the P15 outcome case above is the guard" || bad "lane mutation: P15 outcome" "rc=$LRC"
+mut "${HERE}/p09-lane.sh" "$L/p09-lane.sh" 'if [ "$WATCH_RUN" = 1 ] && [ "$P09_RC" = 0 ] && [ "${P09_REC%% *}" = PASS ]; then' 'if [ "$WATCH_RUN" = 1 ] && [ "$P09_RC" = 0 ]; then'
+run_lane TOCKMOX_P09_ROUTE=built-in STUB_P09_OUT=BLOCKED
+[ "$(ran15)" = 1 ] && ok "lane mutation: a P15 block that trusts P09's exit status runs P15 over a BLOCKED P09, so the case above is the guard" || bad "lane mutation: P15 gate" "ran $(ran15)"
+mut "${HERE}/p09-lane.sh" "$L/p09-lane.sh" '[ "$ROUTE" = built-in ] || refuse "TOCKMOX_P09_APPROVER_WATCH=1' ': || refuse "TOCKMOX_P09_APPROVER_WATCH=1'
+run_lane TOCKMOX_P09_ROUTE=external TOCKMOX_P09_APPROVER_WATCH=1
+[ "$LRC" != 2 ] && ok "lane mutation: without the up-front refusal the external lane is created, so the refusal case above is the guard" || bad "lane mutation: P15 refusal" "rc=$LRC"
+mut "${HERE}/p09-lane.sh" "$L/p09-lane.sh" '  0) WATCH_WHY="TOCKMOX_P09_APPROVER_WATCH=0" ;;' '  0) WATCH_RUN=1 ;;'
+run_lane TOCKMOX_P09_ROUTE=built-in TOCKMOX_P09_APPROVER_WATCH=0
+[ "$(ran15)" = 1 ] && ok "lane mutation: a lane whose 0 still runs P15 does, so the 0 case above is the guard" || bad "lane mutation: P15 0 still runs" "ran $(ran15)"
+# --- P15 block end ---
 
 # --- netpol block begin (the lane's last step: netpol-adversary.sh on the cluster P09 installed; what that script
 # asserts is its own business and needs a cluster, what the lane does with it is shown here) ---

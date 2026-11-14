@@ -337,7 +337,7 @@ echo "run.sh $*" >> "$LANE_LOG"
 if [ "$1" = P09 ]; then
   env | grep '^TOCKMOX_P09_' > "$LANE_TMP/p09.env"
 fi
-case "$1" in P09) name=P09-install-md-end-to-end ;; P11) name=P11-fresh-install-recovery ;; P13) name=P13-planted-faults ;; P14) name=P14-open-applications ;; *) exit 0 ;; esac
+case "$1" in P09) name=P09-install-md-end-to-end ;; P11) name=P11-fresh-install-recovery ;; P13) name=P13-planted-faults ;; P14) name=P14-open-applications ;; P15) name=P15-approver-revocation ;; *) exit 0 ;; esac
 n="$(ls "$TOCKMOX_WORKDIR" | grep -c '^receipts-')"
 d="$TOCKMOX_WORKDIR/receipts-$(printf %05d $((n+1)))"; mkdir -p "$d"
 echo "PASS a stub reason" > "$d/$name"
@@ -364,7 +364,7 @@ run_lane() { # VAR=value... -> output in $TMP/lout, status in $LRC, calls in $LH
   LN=$((LN+1)); LH="$TMP/lane-$LN"; mkdir -p "$LH/home" "$LH/work"; : > "$LH/log"
   local gp="$TMP/gitstub:" a
   for a in "$@"; do [ "$a" = LANE_REAL_GIT=1 ] && gp=""; done
-  env -u TOCKMOX_KEEP_CLUSTER -u TOCKMOX_P09_ROUTE -u TOCKMOX_P09_SITE_REPO_URL -u TOCKMOX_P09_BYO_CA "$@" HOME="$LH/home" TOCKMOX_WORKDIR="$LH/work" \
+  env -u TOCKMOX_KEEP_CLUSTER -u TOCKMOX_P09_ROUTE -u TOCKMOX_P09_SITE_REPO_URL -u TOCKMOX_P09_BYO_CA -u TOCKMOX_P09_APPROVER_WATCH "$@" HOME="$LH/home" TOCKMOX_WORKDIR="$LH/work" \
     LANE_LOG="$LH/log" LANE_TMP="$LH" PATH="${gp}$TMP/lbin:$PATH" KUBECONFIG="$LH/substrate.kubeconfig" TOCKMOX_DOCS_REF=stub \
     TOCKMOX_SUBSTRATE_CONTEXT=stub-substrate TOCKMOX_TEST_VM=ed-lane \
     bash "${LANE_USE:-$L/p09-lane.sh}" > "$TMP/lout" 2>&1
