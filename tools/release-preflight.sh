@@ -66,8 +66,17 @@
 #
 # Usage:
 #   tools/release-preflight.sh X.Y.Z            run the five checks
+#   tools/release-preflight.sh X.Y.Z --strict   the same, and a SKIP is not green: a run with no
+#                                               FAIL that skipped a check exits 2 (BLOCKED), not 0
 #   tools/release-preflight.sh --selftest       prove each check still refuses
 #   tools/release-preflight.sh X.Y.Z --selftest same as --selftest
+#
+# STRICT. RELEASING.md says a SKIP is not green and exit code 2 is BLOCKED, and
+# without --strict this script still exits 0 over a skipped step, printing the
+# reminder as a line anyone can read past. --strict makes the exit status say
+# it: 0 every check passed, 1 a check failed, 2 none failed and at least one
+# was skipped. The release train runs it strict. RELEASE_PREFLIGHT_STRICT=1 is
+# the same as the flag.
 #
 # Environment:
 #   TOCKMOX_SITE_TEMPLATE   path to the site template checkout (check 5)
@@ -77,6 +86,7 @@
 
 set -uo pipefail
 
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 
@@ -623,6 +633,36 @@ selftest() {
     [ "$warns" -gt "$w0" ] && echo "  ok  the unresolved ref raised a WARN" || { echo "  SELFTEST FAIL: no WARN raised for an unresolved ref"; fails=1; }
   fi
 
+  echo "selftest: strict mode, the whole script on a fixture repository"
+  # A copy of this script in each fixture's tools/, so its ROOT is the fixture. HOME points at an
+  # empty directory and TOCKMOX_SITE_TEMPLATE is set or empty, so no real checkout is ever found.
+  run_whole() { # run_whole LABEL WANT-RC FIXTURE SITE-OR-EMPTY ARG...
+    rw_label="$1"; rw_want="$2"; rw_r="$3"; rw_site="$4"; shift 4
+    mkdir -p "$rw_r/tools" "$tmp/nohome"; cp "$SELF" "$rw_r/tools/release-preflight.sh"
+    rw_out=$(HOME="$tmp/nohome" TOCKMOX_SITE_TEMPLATE="$rw_site" TOCKMOX_PIN_REMOTE="${rtag:-$tmp/no-such-repo}" \
+      RELEASE_PREFLIGHT_STRICT="${RW_STRICT_ENV:-0}" bash "$rw_r/tools/release-preflight.sh" "$@" 2>&1); rw_rc=$?
+    if [ "$rw_rc" -eq "$rw_want" ]; then echo "  ok  $rw_label (exit $rw_rc)"
+    else echo "  SELFTEST FAIL: '$rw_label' wanted exit $rw_want, got $rw_rc:"; printf '%s\n' "$rw_out" | tail -8 | sed 's/^/            /'; fails=1; fi
+  }
+  if [ -n "$(sha_tool)" ]; then
+    ws="$tmp/whole-site"; mksite "$ws" "$V" 2
+    r="$tmp/whole-all"; mkrepo "$r" "$V"; printf 'archive\n' > "$r/tockmox-$V.tar.gz"; (cd "$r" && $(sha_tool) "tockmox-$V.tar.gz" > SHA256SUMS)
+    run_whole "--strict with all five checks passing exits 0" 0 "$r" "$ws" "$V" --strict
+    r="$tmp/whole-nosums"; mkrepo "$r" "$V"
+    run_whole "without --strict, a skipped check 4 still exits 0 (unchanged)" 0 "$r" "$ws" "$V"
+    run_whole "--strict: a skipped check 4 (no SHA256SUMS) exits 2" 2 "$r" "$ws" "$V" --strict
+    case "$rw_out" in *"BLOCKED (strict)"*) echo "  ok  and it says BLOCKED, not PASSED" ;;
+      *) echo "  SELFTEST FAIL: no BLOCKED line under --strict"; printf '%s\n' "$rw_out" | tail -4 | sed 's/^/            /'; fails=1 ;; esac
+    RW_STRICT_ENV=1 run_whole "RELEASE_PREFLIGHT_STRICT=1 is the same as --strict" 2 "$r" "$ws" "$V"
+    r="$tmp/whole-nosite"; mkrepo "$r" "$V"; printf 'archive\n' > "$r/tockmox-$V.tar.gz"; (cd "$r" && $(sha_tool) "tockmox-$V.tar.gz" > SHA256SUMS)
+    run_whole "--strict: no site template found (check 5 skipped) exits 2" 2 "$r" "" "$V" --strict
+    run_whole "--strict before the version is accepted too" 2 "$r" "" --strict "$V"
+    r="$tmp/whole-fail"; mkrepo "$r" "$V"; printf '#!/bin/sh\nVERSION="0.1.0"\n' > "$r/install/tockmox-install.sh"
+    run_whole "--strict: a FAIL still exits 1, not 2" 1 "$r" "" "$V" --strict
+  else
+    echo "  (no sha256sum/shasum on PATH; strict-mode probes not run)"
+  fi
+
   if [ "$fails" -eq 0 ]; then
     echo "release-preflight --selftest: PASSED"; exit 0
   fi
@@ -632,23 +672,35 @@ selftest() {
 # ==========================================================================
 # entry
 # ==========================================================================
-case "${1:-}" in
-  --selftest) selftest ;;
-  ""|-h|--help)
-    echo "usage: tools/release-preflight.sh X.Y.Z [--selftest]"
-    echo "       tools/release-preflight.sh --selftest"
-    exit 1 ;;
-esac
-[ "${2:-}" = "--selftest" ] && selftest
+usage() {
+  echo "usage: tools/release-preflight.sh X.Y.Z [--strict] [--selftest]"
+  echo "       tools/release-preflight.sh --selftest"
+  exit 1
+}
+STRICT="${RELEASE_PREFLIGHT_STRICT:-0}"
+case "$STRICT" in 1|true|yes) STRICT=1 ;; *) STRICT=0 ;; esac
+ARG_VER=""
+for a in "$@"; do
+  case "$a" in
+    --selftest) selftest ;;
+    --strict) STRICT=1 ;;
+    -h|--help) usage ;;
+    -*) echo "release-preflight: unknown option $a"; usage ;;
+    *) [ -z "$ARG_VER" ] || { echo "release-preflight: two versions given ($ARG_VER, $a)"; usage; }
+       ARG_VER="$a" ;;
+  esac
+done
+[ -n "$ARG_VER" ] || usage
 
-VER="${1#v}"
+VER="${ARG_VER#v}"
 printf '%s\n' "$VER" | grep -E "$SEMVER_RE" >/dev/null || {
-  echo "release-preflight: \"$1\" is not a version (want X.Y.Z or X.Y.Z-rcN, with or without a leading v)"
+  echo "release-preflight: \"$ARG_VER\" is not a version (want X.Y.Z or X.Y.Z-rcN, with or without a leading v)"
   exit 1
 }
 command -v python3 >/dev/null 2>&1 || { echo "release-preflight: python3 is required (reads sbom.cdx.json)"; exit 1; }
 
 echo "release preflight for v$VER"
+[ "$STRICT" = 0 ] || echo "mode: strict (a SKIP is not green: exit 2)"
 echo "repository: $ROOT"
 
 passed=0; skipped=0
@@ -684,6 +736,11 @@ else
 fi
 
 echo
+if [ "$STRICT" = 1 ] && [ "$skipped" -gt 0 ]; then
+  echo "release-preflight v$VER: BLOCKED (strict): $skipped check(s) skipped, $passed passed, $warns warning(s) to read"
+  echo "a SKIP is an unasserted step, not a green one; see the lines above"
+  exit 2
+fi
 echo "release-preflight v$VER: PASSED ($passed passed, $skipped skipped, $warns warning(s) to read)"
 [ "$skipped" -eq 0 ] || echo "a SKIP is an unasserted step, not a green one; see the lines above"
 exit 0
