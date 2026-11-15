@@ -10,7 +10,7 @@ generated:
   at: 2026-11-05
 tockmox:
   classification: public
-  audience: [operator, developer]
+  audience: [operator, contributor]
 ---
 
 # Feature pages
