@@ -2,13 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Hermetic contract test for the registry-mirror modes. No cluster, no
-# network, no root: kubectl, curl and sleep are stubs, iptables is a stub that
+# network beyond 127.0.0.1, no root: kubectl, curl and sleep are stubs (clause 7's
+# round trip runs the real curl against a local TLS server), iptables is a stub that
 # records its arguments, and the provisioner and the MicroOS profile run
 # unmodified against them (the same stub shape as handoff-secret-test.sh).
 #
 # WHAT IT HOLDS THE PROVISIONER TO. TOCKMOX_REGISTRY_MODE is `cache` (the
 # default, unchanged: the upstream is the mirror's fallback) or `nofallback` (the
-# mirror is the only registry and upstream traffic is denied and counted). Six
+# mirror is the only registry and upstream traffic is denied and counted). Seven
 # clauses, each proved to go red by tests/executed-docs/selftest.sh's neighbours
 # in the PR that added this file:
 #
@@ -26,10 +27,17 @@
 #      zero, and FAIL for each way either can be false
 #   6. `create` refuses a bad mode before any VM is applied, and `mirror-proof`
 #      refuses to read a cache-mode cluster
+#   7. a mirror behind a private CA (TOCKMOX_REGISTRY_CA): the CA reaches the node and
+#      registries.yaml names it as the mirror's tls.ca_file, in both lanes, and with
+#      no CA neither file changes; a file that is not a certificate, or holds a key,
+#      is refused; the node's TLS round trip passes on the CA that signed a real local
+#      TLS server's certificate and fails, with curl's error, on another CA or none;
+#      and `create` stops on a failed round trip before it hands the kubeconfig back
 #
 # WHAT IT DOES NOT SHOW, and no hermetic test can: that a real guest honours
 # `disable-default-registry-endpoint`, that containerd resolves the denied names
-# through /etc/hosts, or that a provision completes with a counter of zero. Those
+# through /etc/hosts, that containerd verifies the mirror with the tls.ca_file it is
+# given, or that a provision completes with a counter of zero. Those
 # are lab clauses (runsheet: the nofallback provision), read from `mirror-proof`.
 #
 #   ./tests/executed-docs/mirror-mode-test.sh
@@ -126,7 +134,8 @@ STUB
 printf '#!/bin/sh\necho "curl stub: no network in this test" >&2\nexit 7\n' >"${BIN}/curl"
 # The node: `mirror-proof` pipes its script to `ssh ... sudo -n bash -s`; keep it, answer as a node would.
 # shellcheck disable=SC2016  # the stub reads $STUB_STATE when it runs, not when it is written
-printf '#!/bin/sh\ncat >"$STUB_STATE/ssh-script"\necho "ssh stub: script kept"\n' >"${BIN}/ssh"
+# A case that writes ssh-reply (and ssh-rc) gets that answer instead (clause 7's round trip).
+printf '#!/bin/sh\ncat >"$STUB_STATE/ssh-script"\nif [ -f "$STUB_STATE/ssh-reply" ]; then cat "$STUB_STATE/ssh-reply"; exit "$(cat "$STUB_STATE/ssh-rc" 2>/dev/null || echo 0)"; fi\necho "ssh stub: script kept"\n' >"${BIN}/ssh"
 # The provisioner's loops sleep 3 to 15 seconds between polls.
 printf '#!/bin/sh\nexec %s 0.05\n' "$REAL_SLEEP" >"${BIN}/sleep"
 # create validates the cloud-config with PyYAML when python3 has it; where it
@@ -555,6 +564,201 @@ PROOF_MIRROR="$M/$P" PROOF_DENY=edge proof_run "$GOLD_NOFB" "disable-default-reg
 if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep 'not every registry rewrites onto it' >/dev/null; then
   ok "mirror-proof, a mirror with a project path: FAIL when the rewrites are missing"
 else bad "mirror-proof, a mirror with a project path: FAIL when the rewrites are missing" "rc=${RC}: ${OUT}"; fi
+
+# ---- clause 7: a mirror behind a private CA --------------------------------
+# TOCKMOX_REGISTRY_CA: the CA file reaches the node and registries.yaml names it as
+# the mirror's tls.ca_file, in both lanes; without it nothing changes; and the node's
+# TLS round trip passes on the right CA and fails, loudly and with curl's error, on
+# the wrong one or on none. The round trip runs for real, against a local TLS server.
+CAD="${TMP}/ca"; mkdir -p "$CAD"
+( cd "$CAD" \
+  && openssl req -x509 -newkey rsa:2048 -nodes -keyout ca.key -out ca.crt -days 2 -subj "/CN=mirror test CA" \
+  && openssl req -x509 -newkey rsa:2048 -nodes -keyout other.key -out other.crt -days 2 -subj "/CN=another CA" \
+  && openssl req -newkey rsa:2048 -nodes -keyout srv.key -out srv.csr -subj "/CN=127.0.0.1" \
+  && printf 'subjectAltName=IP:127.0.0.1\n' > srv.ext \
+  && openssl x509 -req -in srv.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out srv.crt -days 2 -extfile srv.ext \
+  && cat ca.crt ca.key > ca-with-key.pem \
+  && printf 'not a certificate\n' > junk.txt ) >/dev/null 2>&1 || bad "the test CA and certificates were generated with openssl" "see ${CAD}"
+CA="${CAD}/ca.crt"
+
+ca_chk() {  # label expect-rc mirror cafile needle
+  local o rc
+  o="$(mirror_ca_check "$3" "$4" 2>&1)"; rc=$?
+  if [ "$rc" -eq "$2" ] && { [ -z "${5:-}" ] || printf '%s' "$o" | grep -F -- "$5" >/dev/null; }; then ok "CA check: $1"
+  else bad "CA check: $1" "rc=${rc} (want $2): ${o}"; fi
+}
+ca_chk "no CA is usable (a mirror the node already trusts)" 0 "$M" ""
+ca_chk "a PEM CA certificate with a mirror is usable" 0 "$M/$P" "$CA"
+ca_chk "a CA with no mirror is refused" 2 "" "$CA" "no mirror to trust it for"
+ca_chk "a CA file that does not exist is refused" 2 "$M" "${CAD}/absent.crt" "no readable, non-empty file"
+ca_chk "a file that is not a PEM certificate is refused" 2 "$M" "${CAD}/junk.txt" "not a PEM certificate"
+ca_chk "a file holding a private key is refused (it would be copied into the guest)" 2 "$M" "${CAD}/ca-with-key.pem" "holds a private key"
+
+GOLD_NOFB_PREFIX_CA="${GOLD_NOFB_PREFIX}
+configs:
+  \"${M}\":
+    tls:
+      ca_file: \"${MIRROR_CA_PATH}\""
+if [ "$(mirror_registries_yaml "$M/$P" nofallback "$MIRROR_CA_PATH")" = "$GOLD_NOFB_PREFIX_CA" ]; then
+  ok "with a CA, registries.yaml names it as the mirror host's tls.ca_file, after the mirrors"
+else bad "with a CA, registries.yaml names it as the mirror host's tls.ca_file" "$(mirror_registries_yaml "$M/$P" nofallback "$MIRROR_CA_PATH" | tail -5 | tr '\n' ' ')"; fi
+if [ "$(mirror_registries_yaml "$M:5000" cache "$MIRROR_CA_PATH" | tail -3 | head -1)" = "  \"${M}:5000\":" ]; then
+  ok "with a CA, configs is keyed by the endpoint's host:port, not by a registry it mirrors"
+else bad "with a CA, configs is keyed by the endpoint's host:port" "$(mirror_registries_yaml "$M:5000" cache "$MIRROR_CA_PATH" | tail -4 | tr '\n' ' ')"; fi
+if [ "$(mirror_registries_yaml "$M" nofallback "")" = "$GOLD_NOFB" ] && [ "$(mirror_registries_yaml "$M" cache "")" = "$GOLD_CACHE" ]; then
+  ok "with no CA, registries.yaml is byte for byte what it was (no configs block)"
+else bad "with no CA, registries.yaml is byte for byte what it was" "$(mirror_registries_yaml "$M" nofallback "" | tail -3 | tr '\n' ' ')"; fi
+
+# The Ubuntu lane, through create.
+S="${TMP}/ub-ca"; new_state "$S"
+run_tc "$S" create TOCKMOX_REGISTRY_MIRROR="$M/$P" TOCKMOX_REGISTRY_MODE=nofallback TOCKMOX_REGISTRY_CA="$CA"
+UB_CA="$S/userdata"
+if [ "$(vm_applied "$S")" -ge 1 ] && [ "$(ud_file "$UB_CA" /etc/rancher/k3s/registries.yaml)" = "$GOLD_NOFB_PREFIX_CA" ]; then
+  ok "ubuntu lane, with a CA: the guest's registries.yaml names the CA as the mirror's tls.ca_file"
+else bad "ubuntu lane, with a CA: the guest's registries.yaml names the CA as the mirror's tls.ca_file" "rc=${RC}, applied=$(vm_applied "$S"): $(ud_file "$UB_CA" /etc/rancher/k3s/registries.yaml | tail -4 | tr '\n' ' ')"; fi
+if [ "$(ud_file "$UB_CA" "$MIRROR_CA_PATH")" = "$(cat "$CA")" ] && printf '%s' "$OUT" | grep -F "registry CA: ${CA} -> ${MIRROR_CA_PATH}" >/dev/null; then
+  ok "ubuntu lane, with a CA: the CA is written to the node at the path registries.yaml names; the transcript says so"
+else bad "ubuntu lane, with a CA: the CA is written to the node at the path registries.yaml names" "$(ud_file "$UB_CA" "$MIRROR_CA_PATH" | head -2 | tr '\n' ' ')"; fi
+ca_line="$(grep -nx "  - path: ${MIRROR_CA_PATH}" "$UB_CA" | head -1 | cut -d: -f1)"
+k_line="$(grep -n 'get.k3s.io | ' "$UB_CA" | head -1 | cut -d: -f1)"
+if [ -n "$ca_line" ] && [ -n "$k_line" ] && [ "$ca_line" -lt "$k_line" ]; then
+  ok "ubuntu lane, with a CA: the CA is on the node before k3s is installed (no restart needed)"
+else bad "ubuntu lane, with a CA: the CA is on the node before k3s is installed" "CA at line [${ca_line}], k3s install at line [${k_line}]"; fi
+if ! ud_has "$UB_NOFB" "$MIRROR_CA_PATH" && ! ud_has "$UB_CACHE" "$MIRROR_CA_PATH" && ! grep -q 'ca_file' "$UB_NOFB" "$UB_CACHE"; then
+  ok "ubuntu lane, with no CA: no CA file and no tls.ca_file, in either mode"
+else bad "ubuntu lane, with no CA: no CA file and no tls.ca_file, in either mode" "$(grep -n -E 'ca_file|registry-ca' "$UB_NOFB" "$UB_CACHE" | head -3)"; fi
+S="${TMP}/ub-badca"; new_state "$S"
+run_tc "$S" create TOCKMOX_REGISTRY_MIRROR="$M" TOCKMOX_REGISTRY_MODE=nofallback TOCKMOX_REGISTRY_CA="${CAD}/junk.txt"
+if [ "$RC" -eq 2 ] && [ "$(vm_applied "$S")" -eq 0 ] && printf '%s' "$OUT" | grep 'not a PEM certificate' >/dev/null; then
+  ok "create refuses a CA that is not a certificate before any VM is applied"
+else bad "create refuses a CA that is not a certificate before any VM is applied" "rc=${RC}, applied=$(vm_applied "$S"): $(printf '%s' "$OUT" | tail -2)"; fi
+
+# The MicroOS lane.
+mx_ca_files() {  # cafile-or-empty tag -> decoded write_files in $TMP/mxca-$tag
+  local od="${TMP}/mxca-$2.out"
+  mkdir -p "$od/blocks"; printf '#!/bin/sh\necho block\n' >"$od/blocks/01.sh"; printf 'x\ty\n' >"$od/PROVENANCE.tsv"
+  # shellcheck source=/dev/null
+  ( . "$PROFILE" && MX_OUTDIR="$od" MX_PREFIX=t-01 MX_API=https://api.invalid MX_NS=tockmox-test \
+      MX_TOKEN=x MX_CA_B64="" MX_USER=tockmox MX_PUBKEY="ssh-ed25519 AAAA test" MX_HOSTNAME=t-01 \
+      MX_MIRROR="$M/$P" MX_MIRROR_MODE=nofallback MX_MIRROR_CA="$1" microos_cloud_config "${TMP}/mxca-$2.yaml" ) >/dev/null 2>&1 || return 1
+  "${REAL_PY:-python3}" - "${TMP}/mxca-$2.yaml" "${TMP}/mxca-$2" <<'PY'
+import base64, json, pathlib, sys
+d = json.loads(open(sys.argv[1]).read().split("\n", 1)[1])
+out = pathlib.Path(sys.argv[2]); out.mkdir(parents=True, exist_ok=True)
+for f in d["write_files"]:
+    p = out / f["path"].lstrip("/")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(base64.b64decode(f["content"]))
+    p.chmod(int(f["permissions"], 8))
+PY
+}
+R=etc/rancher/k3s/registries.yaml
+if mx_ca_files "$CA" with && mx_ca_files "" without; then
+  W="${TMP}/mxca-with"; WO="${TMP}/mxca-without"
+  if [ "$(cat "$W/$R")" = "$GOLD_NOFB_PREFIX_CA" ] && [ "$(cat "$W/${MIRROR_CA_PATH#/}")" = "$(cat "$CA")" ]; then
+    ok "microos lane, with a CA: the same registries.yaml as the Ubuntu lane, and the CA at the path it names"
+  else bad "microos lane, with a CA: the same registries.yaml as the Ubuntu lane, and the CA at the path it names" "$(tail -4 "$W/$R" 2>&1 | tr '\n' ' ')"; fi
+  if [ "$(cat "$WO/$R")" = "$GOLD_NOFB_PREFIX" ] && [ ! -e "$WO/${MIRROR_CA_PATH#/}" ]; then
+    ok "microos lane, with no CA: registries.yaml unchanged and no CA file"
+  else bad "microos lane, with no CA: registries.yaml unchanged and no CA file" "$(find "$WO" -type f | tr '\n' ' ')"; fi
+else bad "the MicroOS cloud-config builds with and without a CA" "see ${TMP}/mxca-*.yaml"; fi
+# shellcheck source=/dev/null
+if ! ( . "$PROFILE" && MX_OUTDIR="${TMP}/mxca-with.out" MX_PREFIX=t-01 MX_API=x MX_NS=x MX_TOKEN=x MX_USER=x MX_PUBKEY=x MX_HOSTNAME=x \
+       MX_MIRROR="$M" MX_MIRROR_MODE=nofallback MX_MIRROR_CA="${CAD}/ca-with-key.pem" microos_cloud_config "${TMP}/mxca-key.yaml" ) >/dev/null 2>&1; then
+  ok "microos lane: a CA file holding a private key is refused"
+else bad "microos lane: a CA file holding a private key is refused" "the build succeeded"; fi
+
+# The round trip, for real: a TLS server on 127.0.0.1 whose certificate the test CA signed,
+# answering /v2/ the way a registry that wants a login does (401).
+cat >"${TMP}/tls-v2.py" <<'PY'
+import http.server, ssl, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(401 if self.path == "/v2/" else 404)
+        self.send_header("WWW-Authenticate", 'Bearer realm="https://127.0.0.1/service/token"')
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+    def log_message(self, *a):
+        pass
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+ctx.load_cert_chain(sys.argv[1], sys.argv[2])
+s.socket = ctx.wrap_socket(s.socket, server_side=True)
+open(sys.argv[3], "w").write(str(s.server_address[1]))
+s.serve_forever()
+PY
+"${REAL_PY:-python3}" "${TMP}/tls-v2.py" "${CAD}/srv.crt" "${CAD}/srv.key" "${TMP}/tls-port" >/dev/null 2>&1 &
+TLS_PID=$!
+trap 'kill "$TLS_PID" 2>/dev/null; rm -rf "$TMP"' EXIT
+i=0; while [ ! -s "${TMP}/tls-port" ] && [ "$i" -lt 50 ]; do "$REAL_SLEEP" 0.1; i=$((i + 1)); done
+TLS_M="127.0.0.1:$(cat "${TMP}/tls-port" 2>/dev/null)"
+rt() {  # mirror ca-path-or-empty -> $OUT $RC, the guest script run here with the real curl
+  OUT="$(mirror_tls_check_script "$1" "$2" | sh 2>&1)"; RC=$?
+}
+rt "$TLS_M/$P" "$CA"
+if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -F "mirror-tls: PASS https://${TLS_M}/v2/ answered 401" >/dev/null; then
+  ok "round trip: PASS against the CA that signed the mirror's certificate (401 is a completed handshake)"
+else bad "round trip: PASS against the CA that signed the mirror's certificate" "rc=${RC}: ${OUT}"; fi
+rt "$TLS_M/$P" "${CAD}/other.crt"
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -F "mirror-tls: FAIL no TLS round trip to https://${TLS_M}/v2/" >/dev/null \
+   && printf '%s' "$OUT" | grep -E 'curl: \((35|60)\)' >/dev/null; then
+  ok "round trip: FAIL, with curl's certificate error, against a CA that did not sign it"
+else bad "round trip: FAIL, with curl's certificate error, against a CA that did not sign it" "rc=${RC}: ${OUT}"; fi
+rt "$TLS_M" ""
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -F "verified against the node's own trust store" >/dev/null && printf '%s' "$OUT" | grep -E 'curl: \((35|60)\)' >/dev/null; then
+  ok "round trip: FAIL with no CA given when only a private CA signed the mirror (the defect cache mode hid)"
+else bad "round trip: FAIL with no CA given when only a private CA signed the mirror" "rc=${RC}: ${OUT}"; fi
+rt "127.0.0.1:1" "$CA"
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -F "(HTTP 000)" >/dev/null; then
+  ok "round trip: FAIL when nothing answers"
+else bad "round trip: FAIL when nothing answers" "rc=${RC}: ${OUT}"; fi
+kill "$TLS_PID" 2>/dev/null
+
+# The verb and the gate. The node is the ssh stub: it keeps the script it is sent and
+# answers with ssh-reply / ssh-rc when the case writes them.
+S="${TMP}/ub-ca"
+TLSENV=(TOCKMOX_REGISTRY_MIRROR="$M/$P" TOCKMOX_REGISTRY_MODE=nofallback TOCKMOX_REGISTRY_CA="$CA" TOCKMOX_VM_ADDRESS=192.0.2.77 TOCKMOX_VM_GUEST_ADDRESS=192.0.2.5/24)
+printf 'mirror-tls: PASS https://%s/v2/ answered 401 over TLS verified against %s\n' "$M" "$MIRROR_CA_PATH" >"$S/ssh-reply"; echo 0 >"$S/ssh-rc"
+run_tc "$S" mirror-tls "${TLSENV[@]}"
+if [ "$RC" -eq 0 ] && grep -qF -- "--cacert '${MIRROR_CA_PATH}' 'https://${M}/v2/'" "$S/ssh-script" 2>/dev/null; then
+  ok "mirror-tls: the node is sent the round trip against the CA's path on the node, and its PASS passes"
+else bad "mirror-tls: the node is sent the round trip against the CA's path on the node, and its PASS passes" "rc=${RC}: $(printf '%s' "$OUT" | tail -2); script: $(grep curl "$S/ssh-script" 2>&1)"; fi
+printf 'mirror-tls: FAIL no TLS round trip to https://%s/v2/ (HTTP 000), verified against %s\n  curl: (60) SSL certificate problem: unable to get local issuer certificate\n' "$M" "$MIRROR_CA_PATH" >"$S/ssh-reply"; echo 1 >"$S/ssh-rc"
+run_tc "$S" mirror-tls "${TLSENV[@]}"
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -F "STOP: the node's TLS round trip to the mirror ${M} failed" >/dev/null \
+   && printf '%s' "$OUT" | grep -F 'curl: (60) SSL certificate problem' >/dev/null && printf '%s' "$OUT" | grep -F 'is not the CA that signed' >/dev/null; then
+  ok "mirror-tls: a FAIL from the node stops, carrying curl's error and naming the CA it was given"
+else bad "mirror-tls: a FAIL from the node stops, carrying curl's error and naming the CA it was given" "rc=${RC}: ${OUT}"; fi
+: >"$S/ssh-reply"; echo 0 >"$S/ssh-rc"
+run_tc "$S" mirror-tls "${TLSENV[@]}"
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -F "STOP: the node's TLS round trip" >/dev/null; then
+  ok "mirror-tls: a node that answers nothing has not passed"
+else bad "mirror-tls: a node that answers nothing has not passed" "rc=${RC}: ${OUT}"; fi
+printf 'mirror-tls: FAIL x\n' >"$S/ssh-reply"; echo 1 >"$S/ssh-rc"
+run_tc "$S" mirror-tls TOCKMOX_REGISTRY_MIRROR="$M" TOCKMOX_REGISTRY_MODE=nofallback TOCKMOX_VM_ADDRESS=192.0.2.77 TOCKMOX_VM_GUEST_ADDRESS=192.0.2.5/24
+if [ "$RC" -ne 0 ] && ! grep -q -- '--cacert' "$S/ssh-script" && printf '%s' "$OUT" | grep -F 'set TOCKMOX_REGISTRY_CA' >/dev/null; then
+  ok "mirror-tls with no CA: the node's own trust store, and the stop says to set TOCKMOX_REGISTRY_CA"
+else bad "mirror-tls with no CA: the node's own trust store, and the stop says to set TOCKMOX_REGISTRY_CA" "rc=${RC}: ${OUT}"; fi
+rm -f "$S/ssh-reply" "$S/ssh-rc"
+run_tc "$S" mirror-tls TOCKMOX_VM_ADDRESS=192.0.2.77 TOCKMOX_VM_GUEST_ADDRESS=192.0.2.5/24
+if [ "$RC" -eq 2 ] && printf '%s' "$OUT" | grep 'TOCKMOX_REGISTRY_MIRROR, which is empty' >/dev/null; then
+  ok "mirror-tls refuses with no mirror"
+else bad "mirror-tls refuses with no mirror" "rc=${RC}: $(printf '%s' "$OUT" | tail -2)"; fi
+# When create and await run it: after the kubeconfig is fetched and before they hand it back,
+# on a CA or a nofallback run, and never on a cache run with no CA (no change for public mirrors).
+fn_body() { awk -v f="$1() {" '$0 == f {s=1} s {print} s && /^}$/ {exit}' "$TC"; }
+gate_after_fetch() {
+  fn_body "$1" | awk '/^  fetch_kubeconfig$/ {f=NR} /^  if mirror_tls_wanted; then mirror_tls \|\| \{ echo "\$KUBECONFIG_OUT"; exit 1; \}; fi$/ {g=NR}
+                      /^  echo "\$KUBECONFIG_OUT"$/ {e=NR} END {exit !(f && g && e && f < g && g < e)}'
+}
+if gate_after_fetch create && gate_after_fetch await_guest; then
+  ok "create and await run the round trip after the kubeconfig is fetched and stop before handing it back"
+else bad "create and await run the round trip after the kubeconfig is fetched and stop before handing it back" "$(fn_body create | grep -n -E 'fetch_kubeconfig|mirror_tls|KUBECONFIG_OUT' | tr '\n' ' ')"; fi
+# shellcheck disable=SC2034  # the three are read by the mirror_tls_wanted the eval defines
+wanted() { ( set +eu; REGISTRY_MIRROR="$1" REGISTRY_MODE="$2" REGISTRY_CA="$3"; eval "$(fn_body mirror_tls_wanted)"; mirror_tls_wanted ) && echo y || echo n; }
+if [ "$(wanted "$M" cache "")$(wanted "$M" cache "$CA")$(wanted "$M" nofallback "")$(wanted "" cache "")" = "nyyn" ]; then
+  ok "the round trip runs with a CA or in nofallback, and not on a cache run with no CA"
+else bad "the round trip runs with a CA or in nofallback, and not on a cache run with no CA" "cache/no CA, cache/CA, nofallback/no CA, no mirror: $(wanted "$M" cache "")$(wanted "$M" cache "$CA")$(wanted "$M" nofallback "")$(wanted "" cache "")"; fi
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

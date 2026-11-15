@@ -263,6 +263,17 @@ registry, the block [air-gapped](../../docs/deployment/airgap.md) tells a site t
 write; without it every pull reaches the registry and asks for a repository that
 is not there. `mirror-proof` checks the rewrites too.
 
+**A mirror behind a private CA** needs `TOCKMOX_REGISTRY_CA`, the CA certificate
+that signed the mirror's certificate. The node gets that file and a `configs`
+entry naming it as the mirror host's `tls.ca_file`, the block
+[air-gapped](../../docs/deployment/airgap.md) tells a site to write. Without it a
+nofallback run fails every pull at TLS and waits on pods in `ContainerCreating`;
+a cache run hides the same fault by pulling from upstream. Before `create` hands
+the kubeconfig back it asks the node for one TLS round trip to `https://HOST/v2/`,
+verified against that file (against the node's own trust store on a nofallback run
+with no CA), and stops with curl's error unless the registry answers 200 or 401.
+`./provision/throwaway-cluster.sh mirror-tls` runs the same check on its own.
+
 `mirror-proof` runs on the node and prints `mirror-proof: PASS` only when the
 configuration is the nofallback one and the counter reads zero. Read its limits
 before quoting it: it sees attempts to the registries' front-door and CDN names,
@@ -390,6 +401,7 @@ test, and a run that cannot retrieve a kubeconfig produces no evidence at all.
 | `TOCKMOX_HANDOFF` | `secret` | how the guest's kubeconfig comes back: `secret` (guest writes it outbound, no inbound path needed) or `http` (guest serves it once, no credential in the guest) |
 | `TOCKMOX_REGISTRY_MIRROR` | *(empty)* | `host[:port]`, optionally `/PROJECT`, of a registry that mirrors docker.io, quay.io, ghcr.io, registry.k8s.io, code.forgejo.org and ecr-public.aws.com. Empty means every image pulls anonymously from upstream |
 | `TOCKMOX_REGISTRY_MODE` | `cache` | `cache`: the mirror is tried first and the upstream is the fallback. `nofallback`: the mirror is the only registry and upstream traffic is denied and counted (see "Registry mirror" below) |
+| `TOCKMOX_REGISTRY_CA` | *(empty)* | A PEM file: the CA certificate that signed the mirror's certificate. Written to the node as `/etc/rancher/k3s/registry-ca.crt` and named in `registries.yaml` as the mirror's `tls.ca_file`; `create` then stops unless the node completes a TLS round trip to the mirror (see "Registry mirror" below). Empty changes nothing |
 | `TOCKMOX_UPSTREAM_DENY` | `node` | nofallback only. `node`: the guest rejects and counts attempts to the upstream registries. `edge`: it does not, because the network does (a firewall that blocks and logs), so that firewall sees the attempt. Pass the same value to `mirror-proof` |
 | `TOCKMOX_CAPACITY_CHECK` | `enforce` | `enforce`: `create` refuses a run that does not fit (see "Capacity preflight"). `skip`: run unchecked, with a warning on every run |
 | `TOCKMOX_CAPACITY_STOP_PERCENT` | `85` | the per-disk stop line, as a percentage of a Longhorn disk's `storageMaximum`, 1 to 100 |

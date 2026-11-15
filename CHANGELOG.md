@@ -1202,6 +1202,19 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **The air-gap page shows how a node trusts a registry served from your internal
+  CA.** Its `registries.yaml` block named the mirror but gave no node a way to
+  trust the CA that signed it, so on a disconnected site every pull failed TLS
+  (unknown CA) and the install sat with every pod in `ContainerCreating`; a
+  connected rehearsal hides this, because containerd falls back to the upstream.
+  The block now carries a `configs` entry with the registry host's `tls.ca_file`,
+  and a new section places the CA on every node and checks one TLS round trip
+  from the node before anything installs (docs/deployment/airgap.md, "Make every
+  node trust your registry's CA"; docs/administration/external-integrations.md
+  points at it). The test harness takes the CA as `TOCKMOX_REGISTRY_CA` and runs
+  the same round trip before it installs. Nothing to do on upgrade; a site that
+  already pulls through a registry on its own CA should add the entry before its
+  next air-gapped install.
 - **The move commands on the built-in forge page paste into bash.** Three
   `${KUBE_CONTEXT:?...}` guards, in docs/administration/site-forge.md ("Move a
   running site in", "Move to my own forge") and site-forge-recovery.md, held an

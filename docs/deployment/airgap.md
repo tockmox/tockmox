@@ -167,7 +167,7 @@ connected install and this one.
 | [install § Phase 1 generate](install.md#phase-1--generate-your-site-repository) | Set `tockmox.repoURL` at your internal charts clone | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |
 | [install § Phase 2 publish it](install.md#phase-2--publish-it) | Push to your internal git server, not to GitHub. It must speak the smart protocol | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |
 | [install § Phase 2.5 mint your credentials](install.md#phase-25--mint-your-credentials) | `mint-secrets.sh --cert FILE`, sealing against a fetched certificate rather than a live controller | [4](#4-carry-in-the-three-prerequisites--required) |
-| Every node, before Phase 3 | Point containerd at your mirror in `/etc/rancher/k3s/registries.yaml` and restart k3s. This is the primary mechanism | [2](#2-mirror-the-images--required) |
+| Every node, before Phase 3 | Point containerd at your mirror in `/etc/rancher/k3s/registries.yaml`, put your registry's CA where its `ca_file` points and check one TLS round trip, then restart k3s. This is the primary mechanism | [2](#2-mirror-the-images--required) |
 | Your site values, before Phase 3 | Set `global.certIssuer`. Set `global.imageRegistry` only on the fallback path, where you cannot configure the nodes | [2](#2-mirror-the-images--required), [6](#6-switch-the-certificate-issuer-to-your-internal-ca--required) |
 | [install § Phase 3 apply](install.md#phase-3--apply) | Nothing. This step is unchanged | ... |
 | After the platform layer is Healthy | Publish the product documentation from a directory built on a connected machine: `tools/publish-docs.sh --context CTX --site DIR`. The docs site shows a placeholder until you do | [7](#7-run-the-install--required) |
@@ -334,7 +334,8 @@ onto the one prefix, and there are **six** registries, not four:
 ArgoCD chart (step 4) pulls its redis from `ecr-public.aws.com`, and a registry
 with no entry in this file is pulled from directly.
 
-**NODE** ... every one of them. **YOU SUPPLY:** your registry host and prefix
+**NODE** ... every one of them. **YOU SUPPLY:** your registry host and prefix,
+and the `configs` entry for a registry served from your internal CA (below)
 
 ```yaml
 # /etc/rancher/k3s/registries.yaml
@@ -363,6 +364,10 @@ mirrors:
     endpoint: ["https://REGISTRY_HOST"]
     rewrite:
       "(.*)": "mirror/$1"
+configs:
+  "REGISTRY_HOST":
+    tls:
+      ca_file: /etc/rancher/k3s/registry-ca.crt
 ```
 
 Docker Hub's official images are the one path difference between the two
@@ -370,6 +375,59 @@ mechanisms: containerd asks for `mirror/library/python` where
 `global.imageRegistry` asks for `mirror/python`. `tools/mirror-images.sh` lands
 those images under both paths and `--verify` checks both, so either mechanism
 finds them.
+
+#### Make every node trust your registry's CA
+
+**The `configs` entry is what lets containerd verify your registry, and a
+registry served from your internal CA, as the start of this page recommends,
+needs it.** No node trusts that CA out of the box. Without it every pull fails
+TLS with an unknown-CA error and containerd retries it every few seconds
+without end: every pod sits in `ContainerCreating`, the first install step
+times out, and no message names the certificate. `configs` is keyed by the
+host, with its port if it has one, that your `endpoint` lines name, not by
+`docker.io` or the other registries it mirrors; `tls.ca_file` is the field in
+[k3s's `registries.yaml` schema](https://docs.k3s.io/installation/private-registry).
+A registry whose certificate chains to a public CA the nodes already trust
+needs no `configs` entry.
+
+**A cache hides this failure, so a connected rehearsal will not show it.** With
+an upstream still reachable, containerd falls back to it when the handshake with
+your registry fails, and the install looks healthy while every image comes from
+outside. Inside the boundary there is nothing to fall back to, and the first
+sign is the first air-gapped install. Run the round trip below on every node
+instead.
+[Registry § a cache is not a mirror](registry.md#a-cache-is-not-a-mirror-and-only-one-of-them-survives-a-cut-uplink)
+covers the general case.
+
+Copy the CA's certificate to each node, the PEM certificate alone and never its
+key, then put it where `ca_file` points.
+
+**NODE** ... every one of them, before you restart k3s. **YOU SUPPLY:** the CA
+certificate, copied to the current directory as `registry-ca.crt`
+
+```bash
+sudo install -m 0644 registry-ca.crt /etc/rancher/k3s/registry-ca.crt
+```
+
+**Success condition ... one TLS round trip from the node, before anything is
+installed.** This asks your registry for its API root with that file as the only
+trusted CA, the same verification containerd makes on every pull:
+
+**NODE** ... every one of them. **YOU SUPPLY:** your registry host, the one your
+`endpoint` lines name
+
+```bash
+export MIRROR_REGISTRY=YOUR_MIRROR_REGISTRY_HOST
+curl -sS -o /dev/null -w '%{http_code}\n' --cacert /etc/rancher/k3s/registry-ca.crt "https://$MIRROR_REGISTRY/v2/"
+```
+
+It prints `200` or `401`; a registry that asks for a login has still completed
+the handshake. Anything else stops you here. `curl: (60)` means the file is not
+the CA that signed your registry's certificate, or the chain needs an
+intermediate the file does not hold; `000` with a connection error means the
+node cannot reach the registry at all. Fix it, then restart k3s as
+[external integrations § point containerd at Harbor](../administration/external-integrations.md#3-point-containerd-at-harbor-on-every-node)
+says.
 
 ### `global.imageRegistry` is the fallback
 

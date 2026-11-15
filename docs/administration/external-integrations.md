@@ -425,6 +425,13 @@ projects are private.
 rewrite prepends the proxy-cache project name. Without it, pulls reach Harbor
 and ask for a repository that is not there.
 
+**If Harbor's certificate is signed by your internal CA, the nodes must be told
+to trust it**, with a `tls.ca_file` under the same `configs` entry. Here the
+failure is silent: when the handshake with Harbor fails, containerd falls back
+to the upstream registry and the pull succeeds from outside.
+[Air-gapped § make every node trust your registry's CA](../deployment/airgap.md#make-every-node-trust-your-registrys-ca)
+has the entry, the step that places the CA and a round trip that proves it.
+
 Then restart k3s on every node. On an agent node the unit is named `k3s-agent`
 rather than `k3s`, so substitute that name there:
 
