@@ -15,6 +15,11 @@
 # until then, so read both numbers off the gates rather than off this line.
 # Contract: docs/frontmatter-contract.md
 #
+# THE AUDIENCE VOCABULARY is tools/lib/docs-audiences.txt, the same file the docs
+# build filter (tools/lib/stage-docs.py) reads. A `tockmox.audience` value outside
+# it fails here, on every pull request, rather than in the docs build, which
+# skips without its pinned generator and so first saw such a value on main.
+#
 # WHY NO PyYAML. The contract restricts the permitted shape to scalars, flat
 # lists, and ONE level of nesting, specifically so this gate needs no CI
 # dependency. If you find yourself wanting a real YAML engine here, the block
@@ -33,7 +38,9 @@ if [ "${1:-}" = "--selftest" ]; then
   MODE="selftest"
 fi
 
-FLOOR="$FLOOR" MODE="$MODE" python3 - <<'PY'
+AUDIENCES="$(dirname "$0")/lib/docs-audiences.txt"
+
+FLOOR="$FLOOR" MODE="$MODE" AUDIENCES="$AUDIENCES" python3 - <<'PY'
 import os, pathlib, sys, re
 
 FLOOR = int(os.environ["FLOOR"])
@@ -46,6 +53,36 @@ REQUIRED_GENERATED = ["by", "at"]
 REQUIRED_TOCKMOX = ["classification"]
 ALLOWED_TOCKMOX = {"classification", "audience"}
 STATUSES = {"draft", "stable", "deprecated"}
+
+def load_audiences(path):
+    """The values tools/lib/stage-docs.py sorts in or out; nothing else is known."""
+    known, problems = set(), []
+    with open(path, encoding="utf-8") as fh:
+        for n, line in enumerate(fh, start=1):
+            words = line.split("#", 1)[0].split()
+            if not words:
+                continue
+            if len(words) != 2 or words[0] not in ("in", "out"):
+                problems.append(f"{path}:{n}: expected `in NAME` or `out NAME`")
+            elif words[1] in known:
+                problems.append(f"{path}:{n}: '{words[1]}' is listed twice")
+            else:
+                known.add(words[1])
+    return known, problems
+
+AUDIENCES, AUDIENCE_PROBLEMS = load_audiences(os.environ["AUDIENCES"])
+if AUDIENCE_PROBLEMS or not AUDIENCES:
+    for e in AUDIENCE_PROBLEMS or [f"{os.environ['AUDIENCES']}: lists no audience"]:
+        print(f"  {e}")
+    print("check-frontmatter: FAILED, the audience vocabulary does not parse.")
+    sys.exit(1)
+
+def audience_values(raw):
+    """A nested value arrives as text: `[a, b]` or a bare scalar."""
+    raw = raw.strip()
+    if raw.startswith("[") and raw.endswith("]"):
+        raw = raw[1:-1]
+    return [x.strip().strip('"').strip("'") for x in raw.split(",") if x.strip()]
 
 def parse_block(text, where):
     """Return (mapping, errors). Mapping values are str, list, or dict."""
@@ -131,6 +168,12 @@ def validate(fm, where):
                                 f"key '{k}'; upstream wins")
                 elif k not in ALLOWED_TOCKMOX:
                     errs.append(f"{where}: unknown tockmox key '{k}'")
+            for a in audience_values(tm.get("audience", "")):
+                if a not in AUDIENCES:
+                    errs.append(f"{where}: tockmox.audience '{a}' is not in "
+                                f"tools/lib/docs-audiences.txt; the docs build "
+                                f"fails on it. Use a listed value, or add it "
+                                f"there as in or out")
     else:
         errs.append(f"{where}: missing 'tockmox.classification' (ADR-0032 "
                     f"decides corpus membership on it; absent must not read "
@@ -144,8 +187,25 @@ if MODE == "selftest":
       "tockmox dupes status": '---\nokf_version: "0.2"\ntype: Reference\ntitle: "x"\ndescription: "y"\ntags: [a]\nstatus: stable\ngenerated:\n  by: hand\n  at: 2026-01-01\ntockmox:\n  classification: public\n  status: active\n---\n',
       "missing classification": '---\nokf_version: "0.2"\ntype: Reference\ntitle: "x"\ndescription: "y"\ntags: [a]\nstatus: stable\ngenerated:\n  by: hand\n  at: 2026-01-01\n---\n',
       "bad status value":     '---\nokf_version: "0.2"\ntype: Reference\ntitle: "x"\ndescription: "y"\ntags: [a]\nstatus: whenever\ngenerated:\n  by: hand\n  at: 2026-01-01\ntockmox:\n  classification: public\n---\n',
+      "unknown audience":     '---\nokf_version: "0.2"\ntype: Reference\ntitle: "x"\ndescription: "y"\ntags: [a]\nstatus: stable\ngenerated:\n  by: hand\n  at: 2026-01-01\ntockmox:\n  classification: public\n  audience: [operator, developer]\n---\n',
+      "unknown bare audience": '---\nokf_version: "0.2"\ntype: Reference\ntitle: "x"\ndescription: "y"\ntags: [a]\nstatus: stable\ngenerated:\n  by: hand\n  at: 2026-01-01\ntockmox:\n  classification: public\n  audience: developer\n---\n',
     }
+    # The control: a block using every listed audience is accepted, so the
+    # refusals above are about the planted value and not about the shape.
+    good = ('---\nokf_version: "0.2"\ntype: Reference\ntitle: "x"\ndescription: "y"\n'
+            'tags: [a]\nstatus: stable\ngenerated:\n  by: hand\n  at: 2026-01-01\n'
+            'tockmox:\n  classification: public\n  audience: [' + ", ".join(sorted(AUDIENCES)) +
+            ']\n---\n')
     failed = 0
+    fm, errs = parse_block(good, "selftest")
+    errs += validate(fm, "selftest")
+    if errs:
+        print("  SELFTEST FAIL: the control block was refused:")
+        for e in errs:
+            print(f"    {e}")
+        failed += 1
+    else:
+        print("  accepts: every listed audience")
     for name, text in bad.items():
         fm, errs = parse_block(text, "selftest")
         if fm is not None:

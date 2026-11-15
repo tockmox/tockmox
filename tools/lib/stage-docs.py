@@ -14,13 +14,12 @@
 # docs/third-party-licenses.md are operator pages that live at the top level,
 # and docs/usage/working-with-an-agent.md sits beside material for other readers.
 #
-#   INCLUDED audiences: operator, end-user, admin. (The contract in
-#     docs/frontmatter-contract.md defines operator, contributor, machine; the
-#     other two are accepted so the filter needs no edit the day the vocabulary
-#     grows.) ANY included audience puts the page in, so [operator, contributor]
-#     is in and [machine, operator] is in.
-#   EXCLUDED audiences: contributor, maintainer, internal, machine. A page whose
-#     values are ALL excluded is out.
+#   THE VOCABULARY is tools/lib/docs-audiences.txt, each value marked `in` or
+#     `out`. tools/check-frontmatter.sh reads the same file, so a value this
+#     filter would refuse is refused on the pull request too.
+#   INCLUDED audiences (`in`): ANY of them puts the page in, so
+#     [operator, contributor] is in and [machine, operator] is in.
+#   EXCLUDED audiences (`out`): a page whose values are ALL excluded is out.
 #   ANYTHING ELSE fails the build. An unknown audience value is a decision
 #     somebody has to make, and guessing it either way is silent.
 #   NO FRONTMATTER or NO audience key: the page is OUT, printed by name. Out
@@ -50,8 +49,25 @@ import sys
 
 import yaml
 
-INCLUDE = {"operator", "end-user", "admin"}
-EXCLUDE = {"contributor", "maintainer", "internal", "machine"}
+AUDIENCES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs-audiences.txt")
+
+
+def load_audiences(path):
+    """Return (INCLUDE, EXCLUDE) from the vocabulary file; refuse a malformed one."""
+    sets = {"in": set(), "out": set()}
+    with open(path, encoding="utf-8") as fh:
+        for n, line in enumerate(fh, start=1):
+            words = line.split("#", 1)[0].split()
+            if not words:
+                continue
+            if len(words) != 2 or words[0] not in sets:
+                die("%s:%d: expected `in NAME` or `out NAME`" % (path, n))
+            if words[1] in sets["in"] | sets["out"]:
+                die("%s:%d: '%s' is listed twice" % (path, n, words[1]))
+            sets[words[0]].add(words[1])
+    if not sets["in"]:
+        die("%s: no `in` audience; no page could reach the site" % path)
+    return sets["in"], sets["out"]
 
 # Maintenance data under docs/assets, not site content.
 SKIP_ASSETS = {"assets/capture-manifest.yaml", "assets/social-preview.png"}
@@ -124,6 +140,7 @@ def main():
     ap.add_argument("--list", action="store_true", help="print the in/out table and stop")
     args = ap.parse_args()
 
+    include, exclude = load_audiences(AUDIENCES)
     root = os.path.realpath(args.root)
     docs = os.path.join(root, "docs")
     stage_docs = os.path.join(args.stage, "docs")
@@ -145,11 +162,11 @@ def main():
         if aud is None:
             excluded.append((rel, "no tockmox.audience; out, because absent is not public"))
             continue
-        unknown = [a for a in aud if a not in INCLUDE and a not in EXCLUDE]
+        unknown = [a for a in aud if a not in include and a not in exclude]
         if unknown:
-            die("%s: unknown audience value(s) %s; decide in/out in tools/lib/stage-docs.py"
+            die("%s: unknown audience value(s) %s; decide in/out in tools/lib/docs-audiences.txt"
                 % (rel, unknown))
-        if any(a in INCLUDE for a in aud):
+        if any(a in include for a in aud):
             included[rel] = (fm, text)
         else:
             excluded.append((rel, "audience %s" % aud))

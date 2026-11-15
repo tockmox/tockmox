@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE DOCS AUDIENCE VOCABULARY: every value a page may give in `tockmox.audience`,
+# and whether it puts the page on the operator documentation site.
+#
+# ONE LIST, TWO READERS, so they cannot drift:
+#   - tools/lib/stage-docs.py decides which pages the site build stages. A page is
+#     in when ANY of its values is `in`, out when ALL of them are `out`, and the
+#     build fails on a value that is neither.
+#   - tools/check-frontmatter.sh refuses a value that is neither, naming the page
+#     and the value, so a pull request goes red on it instead of the docs build
+#     on main. The build needs the pinned generator and skips without it; the
+#     frontmatter check needs only python3, so it always runs.
+#
+# A NEW VALUE is a decision somebody has to make: add it here as `in` or `out`.
+# Guessing it either way in a tool is silent.
+#
+# FORMAT, one value per line, a value at most once:
+#
+#   in  NAME    a page for this audience is on the site
+#   out NAME    a page only for this audience is not
+
+in  operator
+in  end-user
+in  admin
+
+out contributor
+out maintainer
+out internal
+out machine
