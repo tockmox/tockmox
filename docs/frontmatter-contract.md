@@ -92,7 +92,7 @@ tockmox:
 | `generated.by` | yes | What produced the page. `hand` for authored pages, the tool name for generated ones |
 | `generated.at` | yes | ISO date. **v0.2 supersedes the v0.1 `timestamp` key** |
 | `tockmox.classification` | yes | ADR-0018 label. Every page in this bundle is `public` |
-| `tockmox.audience` | no | Flat list. `operator`, `contributor`, `machine` |
+| `tockmox.audience` | no | Flat list of values from `tools/lib/docs-audiences.txt`, such as `operator`, `contributor`, `machine` |
 | `sources` | no | v0.2 list, replacing a body `## Sources` heading. Research pages only |
 
 **`classification` is not decoration.** ADR-0032 makes it the key that decides
@@ -161,7 +161,14 @@ block, and reports coverage for those that do not.
 
 It fails on: a malformed block, a missing required key, an unknown top-level
 key, a `tockmox:` key that duplicates an upstream one, nesting deeper than one
-level, and a coverage count below the floor recorded in the script.
+level, a `tockmox.audience` value that `tools/lib/docs-audiences.txt` does not
+list, and a coverage count below the floor recorded in the script.
+
+That file is the one audience vocabulary. It marks each value `in` or `out` of
+the operator documentation site, and `tools/lib/stage-docs.py` reads it to
+choose the pages the site build stages, so the gate and the build cannot
+disagree about which values exist. A new value goes there first, as `in` or
+`out`.
 
 It does not fail on a page that has no frontmatter yet, until the floor is
 raised. **The floor only goes up.** That is the same ratchet
