@@ -126,9 +126,19 @@ cat > "$T/payload.json" <<'JSON'
  {"status":"firing","labels":{"alertname":"Disk Full \"x\"","severity":"critical","namespace":"a"},"annotations":{"summary":"s"},"fingerprint":"abc123"},
  {"status":"resolved","labels":{"alertname":"HighLatency","severity":"warning"},"annotations":{},"fingerprint":"def456"}]}
 JSON
+# A port the kernel says is free right now. A random pick from a fixed range
+# can land in the kernel's ephemeral range (32768-60999 on Linux), where a
+# client socket may already hold it ("Address already in use").
+free_port() {
+  python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()'
+}
 bridge_log() { # bridge.py path, sink code, log out
-  local py="$1" code="$2" out="$3" sp=$((20000 + RANDOM % 20000)) bp=$((40000 + RANDOM % 20000))
+  local py="$1" code="$2" out="$3" sp bp
+  sp=$(free_port); bp=$(free_port)
   python3 "$T/stub.py" "$sp" "$code" & local s=$!
+  # The sink must be listening before the bridge forwards to it, or a slow
+  # start reads as http=0 on the real bridge and the gate goes red at random.
+  for _ in $(seq 50); do curl -fs "http://127.0.0.1:$sp/" >/dev/null 2>&1 && break; sleep 0.1; done
   SINK=ntfy NTFY_URL="http://127.0.0.1:$sp" NTFY_TOKEN="$SECRET" PORT=$bp PROBE_INTERVAL=3600 \
     python3 "$py" > "$out" 2>&1 & local b=$!
   for _ in $(seq 50); do curl -fs "http://127.0.0.1:$bp/healthz" >/dev/null 2>&1 && break; sleep 0.1; done
@@ -265,7 +275,7 @@ class H(http.server.BaseHTTPRequestHandler):
     do_HEAD = do_GET
 http.server.ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()
 PY
-S3DIR="$T/s3"; mkdir -p "$S3DIR"; S3PORT=$((20000 + RANDOM % 20000))
+S3DIR="$T/s3"; mkdir -p "$S3DIR"; S3PORT=$(free_port)
 python3 "$T/s3stub.py" "$S3PORT" "$S3DIR" GKdrilltest SECRETdrilltest garage &
 for _ in $(seq 50); do curl -s -o /dev/null "http://127.0.0.1:$S3PORT/" && break; sleep 0.1; done
 # What the drill pod gets from its env (the chart's Secret and defaults), pointed at the stand-in.
