@@ -15,6 +15,8 @@
 #   throwaway-cluster.sh await    ... resume create's wait for a guest already provisioning
 #   throwaway-cluster.sh mirror-proof ... under TOCKMOX_REGISTRY_MODE=nofallback, report on the
 #                                     guest whether any upstream registry was contacted
+#   throwaway-cluster.sh mirror-tls ... one TLS round trip from the node to the mirror, verified
+#                                     against TOCKMOX_REGISTRY_CA when set (create runs it too)
 #   throwaway-cluster.sh kit-store KIT IDENTITY ... keep a P09 recovery kit and the age identity
 #                                     that opens it as the Secret ${VM_NAME}-kit
 #   throwaway-cluster.sh kit DIR  ... write that Secret's two files into DIR
@@ -151,6 +153,15 @@ REGISTRY_MODE="${TOCKMOX_REGISTRY_MODE:-cache}"
 # upstream: under `node` the guest refuses it before it leaves. Only read in
 # nofallback mode; profiles/registry-mirror.sh explains both.
 REGISTRY_DENY="${TOCKMOX_UPSTREAM_DENY:-node}"
+# A MIRROR BEHIND A PRIVATE CA: the CA certificate (a PEM file on this machine) that
+# signed the mirror's certificate. Written to the node, named in registries.yaml as the
+# mirror's tls.ca_file, and checked with one TLS round trip from the node before
+# create returns. Empty (the default) changes nothing. profiles/registry-mirror.sh
+# says why a nofallback run needs it and a cache run hides its absence.
+#
+#   TOCKMOX_REGISTRY_MIRROR=harbor.example.com/airgap TOCKMOX_REGISTRY_MODE=nofallback \
+#     TOCKMOX_REGISTRY_CA=./site-ca.crt ./throwaway-cluster.sh create
+REGISTRY_CA="${TOCKMOX_REGISTRY_CA:-}"
 # K3S FROM INSIDE THE BOUNDARY, added 2026-11-09. Unset (the default), the guest
 # installs k3s the way fresh-install.md does: get.k3s.io, which downloads the
 # binary from GitHub. Set, it is the base URL of a server the guest can reach that
@@ -1121,6 +1132,7 @@ create() {
   # The same rule for the registry mode: a nofallback run with no mirror, or an
   # unknown mode, is refused before it reaches the hypervisor.
   mirror_mode_check "$REGISTRY_MIRROR" "$REGISTRY_MODE" "$REGISTRY_DENY" || exit 2
+  mirror_ca_check "$REGISTRY_MIRROR" "$REGISTRY_CA" || exit 2
   k3s_artifacts_check || exit 2
   preflight
   # Before the first thing this run creates or deletes: a run that does not fit
@@ -1372,6 +1384,9 @@ create() {
       echo "  registry mode: cache ... the upstream is the mirror's fallback, so this run cannot" >&2
       echo "                 show that the image set is closed. TOCKMOX_REGISTRY_MODE=nofallback can." >&2
     fi
+    if [ -n "$REGISTRY_CA" ]; then
+      echo "  registry CA: ${REGISTRY_CA} -> ${MIRROR_CA_PATH} on the node, the mirror's tls.ca_file in registries.yaml" >&2
+    fi
   else
     echo "  registry mirror: NONE ... every image pulls anonymously from upstream." >&2
     echo "                   An upstream rate limit will look like a component that" >&2
@@ -1450,7 +1465,7 @@ create() {
     [ -n "$mx_ca" ] || echo "  NOTE: guest will not verify the API's certificate (no CA for ${GUEST_API_SERVER})" >&2
     if ! MX_OUTDIR="$mx_dir" MX_PREFIX="$VM_NAME" MX_API="$GUEST_API_SERVER" MX_NS="$NS" \
          MX_TOKEN="$API_TOKEN" MX_CA_B64="$mx_ca" MX_USER="$SSH_USER" MX_PUBKEY="$pubkey" \
-         MX_HOSTNAME="$VM_NAME" MX_MIRROR="$REGISTRY_MIRROR" MX_MIRROR_MODE="$REGISTRY_MODE" MX_UPSTREAM_DENY="$REGISTRY_DENY" \
+         MX_HOSTNAME="$VM_NAME" MX_MIRROR="$REGISTRY_MIRROR" MX_MIRROR_MODE="$REGISTRY_MODE" MX_UPSTREAM_DENY="$REGISTRY_DENY" MX_MIRROR_CA="$REGISTRY_CA" \
          MX_READY_BUDGET="${TOCKMOX_MICROOS_READY_BUDGET:-900}" \
          microos_cloud_config "$udfile"; then
       rm -f "$udfile"
@@ -1482,10 +1497,18 @@ create() {
       # fallback, so a mirror outage degrades to today's behaviour rather than
       # failing the run. In nofallback mode the upstream is not named at all
       # (profiles/registry-mirror.sh says what else closes the gap).
+      # The mirror's CA, before k3s first starts, so containerd reads registries.yaml's
+      # tls.ca_file on its first pull and no restart is needed.
+      if [ -n "$REGISTRY_CA" ]; then
+        echo "  - path: ${MIRROR_CA_PATH}"
+        echo "    permissions: \"0644\""
+        echo "    content: |"
+        tr -d '\r' <"$REGISTRY_CA" | sed 's/^/      /'
+      fi
       echo "  - path: /etc/rancher/k3s/registries.yaml"
       echo "    permissions: \"0600\""
       echo "    content: |"
-      mirror_registries_yaml "$REGISTRY_MIRROR" "$REGISTRY_MODE" | sed 's/^/      /'
+      mirror_registries_yaml "$REGISTRY_MIRROR" "$REGISTRY_MODE" "${REGISTRY_CA:+$MIRROR_CA_PATH}" | sed 's/^/      /'
       if [ "$REGISTRY_MODE" = "nofallback" ]; then
         echo "  - path: ${MIRROR_K3S_DROPIN}"
         echo "    permissions: \"0600\""
@@ -1850,6 +1873,8 @@ YAML
   if [ -n "$mx_dir" ]; then
     microos_report_create || { echo "$KUBECONFIG_OUT"; exit 1; }
   fi
+  # Before anything installs: a node that cannot verify the mirror fails every pull.
+  if mirror_tls_wanted; then mirror_tls || { echo "$KUBECONFIG_OUT"; exit 1; }; fi
   echo "$KUBECONFIG_OUT"
 }
 
@@ -1979,6 +2004,7 @@ await_guest() {
   if [ "$mx" = 1 ]; then
     microos_report_create || { echo "$KUBECONFIG_OUT"; exit 1; }
   fi
+  if mirror_tls_wanted; then mirror_tls || { echo "$KUBECONFIG_OUT"; exit 1; }; fi
   echo "$KUBECONFIG_OUT"
 }
 
@@ -2161,6 +2187,35 @@ node_exec() {
       -o LogLevel=ERROR \
       -o ConnectTimeout=15 \
       "${SSH_USER}@${ip}" "sudo -n bash -s" <<<"$1"
+}
+
+# The mirror's TLS round trip from the node (profiles/registry-mirror.sh, THE ROUND
+# TRIP). create and await run it when mirror_tls_wanted; `mirror-tls` runs it on its
+# own. Only a `mirror-tls: PASS` line from the node passes: a node that answers
+# nothing has not shown it can verify the mirror.
+mirror_tls_wanted() {
+  [ -n "$REGISTRY_MIRROR" ] && { [ -n "$REGISTRY_CA" ] || [ "$REGISTRY_MODE" = "nofallback" ]; }
+}
+mirror_tls() {
+  if [ -z "$REGISTRY_MIRROR" ]; then
+    echo "REFUSING: mirror-tls checks the node's TLS round trip to TOCKMOX_REGISTRY_MIRROR, which is empty." >&2
+    return 2
+  fi
+  mirror_ca_check "$REGISTRY_MIRROR" "$REGISTRY_CA" || return 2
+  local out rc=0
+  out="$(node_exec "$(mirror_tls_check_script "$REGISTRY_MIRROR" "${REGISTRY_CA:+$MIRROR_CA_PATH}")" 2>&1)" || rc=$?
+  printf '%s\n' "$out" | sed 's/^/  /' >&2
+  if [ "$rc" -eq 0 ] && printf '%s\n' "$out" | grep '^mirror-tls: PASS' >/dev/null; then
+    return 0
+  fi
+  echo "STOP: the node's TLS round trip to the mirror $(mirror_host "$REGISTRY_MIRROR") failed (above), so every image" >&2
+  echo "      pull would fail the same way and the install would wait on pods in ContainerCreating. Nothing is installed." >&2
+  if [ -n "$REGISTRY_CA" ]; then
+    echo "      TOCKMOX_REGISTRY_CA (${REGISTRY_CA}) is not the CA that signed the mirror's certificate, or the chain is incomplete." >&2
+  else
+    echo "      If the mirror's certificate is signed by a private CA, set TOCKMOX_REGISTRY_CA to that CA's certificate." >&2
+  fi
+  return 1
 }
 
 mirror_proof() {
@@ -2659,7 +2714,8 @@ case "${1:-}" in
   offsite-repo)  shift; offsite_repo_create "${1:-}" ;;
   offsite-reach) shift; offsite_reach "${1:-}" ;;
   mirror-proof) mirror_proof ;;
+  mirror-tls) mirror_tls ;;
   uninstall-proof) uninstall_proof ;;
   evidence) evidence ;;
-  *) echo "usage: $0 {create|await|exec CMD|reboot|destroy|reset --every-vm-in-NS|sweep PREFIX MINUTES|snapshot RUNG|restore RUNG|snapshots|ip|kubeconfig|publish NAME PORT|guard-file|kit-store KIT IDENTITY|kit DIR|offsite-check|offsite-repo DIR|offsite-reach DIR|uninstall-proof|evidence|mirror-proof}" >&2; exit 2 ;;
+  *) echo "usage: $0 {create|await|exec CMD|reboot|destroy|reset --every-vm-in-NS|sweep PREFIX MINUTES|snapshot RUNG|restore RUNG|snapshots|ip|kubeconfig|publish NAME PORT|guard-file|kit-store KIT IDENTITY|kit DIR|offsite-check|offsite-repo DIR|offsite-reach DIR|uninstall-proof|evidence|mirror-proof|mirror-tls}" >&2; exit 2 ;;
 esac

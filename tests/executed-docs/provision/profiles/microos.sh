@@ -753,13 +753,19 @@ microos_cloud_config() {
     declare -F mirror_registries_yaml >/dev/null \
       || . "$(dirname "${BASH_SOURCE[0]}")/registry-mirror.sh"
     mirror_mode_check "$MX_MIRROR" "$mx_mode" "$mx_deny" || { rm -rf "$d"; return 2; }
-    mirror_registries_yaml "$MX_MIRROR" "$mx_mode" > "$d/registries.yaml"
+    mirror_ca_check "$MX_MIRROR" "${MX_MIRROR_CA:-}" || { rm -rf "$d"; return 2; }
+    if [ -n "${MX_MIRROR_CA:-}" ]; then
+      tr -d '\r' <"$MX_MIRROR_CA" > "$d/registry-ca.crt"
+      mirror_registries_yaml "$MX_MIRROR" "$mx_mode" "$MIRROR_CA_PATH" > "$d/registries.yaml"
+    else
+      mirror_registries_yaml "$MX_MIRROR" "$mx_mode" > "$d/registries.yaml"
+    fi
     if [ "$mx_mode" = "nofallback" ]; then
       mirror_k3s_dropin "$mx_mode" > "$d/k3s-dropin.yaml"
       if [ "$mx_deny" = "node" ]; then mirror_deny_script > "$d/upstream-deny.sh"; fi
     fi
   fi
-  MX_SCRATCH="$d" MX_DROPIN_PATH="${MIRROR_K3S_DROPIN:-}" MX_DENY_PATH="${MIRROR_DENY_PERBOOT:-}" python3 - "$out" <<'PY'
+  MX_SCRATCH="$d" MX_DROPIN_PATH="${MIRROR_K3S_DROPIN:-}" MX_DENY_PATH="${MIRROR_DENY_PERBOOT:-}" MX_CA_PATH="${MIRROR_CA_PATH:-}" python3 - "$out" <<'PY'
 import base64, json, os, pathlib, sys
 
 E = os.environ
@@ -798,6 +804,9 @@ if mirror:
     # mirror's own designed failure mode (cache mode); in nofallback mode the
     # upstream is also denied by the per-boot script, which does not depend on
     # anything the reboot can lose.
+    # The mirror's CA, which registries.yaml names as its tls.ca_file (TOCKMOX_REGISTRY_CA).
+    if (scratch / "registry-ca.crt").exists():
+        files.append(wf(E["MX_CA_PATH"], (scratch / "registry-ca.crt").read_bytes(), "0644"))
     files.append(wf("/etc/rancher/k3s/registries.yaml", (scratch / "registries.yaml").read_bytes(), "0600"))
     if (scratch / "k3s-dropin.yaml").exists():
         files.append(wf(E["MX_DROPIN_PATH"], (scratch / "k3s-dropin.yaml").read_bytes(), "0600"))

@@ -68,6 +68,27 @@
 # And the mirror has to be a closed set: a pull-through cache fetches from upstream
 # on a miss, from its own side, which nothing here can see.
 
+# A MIRROR BEHIND A PRIVATE CA. TOCKMOX_REGISTRY_CA is a file on the machine that runs
+# the harness: the PEM certificate of the CA that signed the mirror's certificate. A
+# mirror inside a boundary is normally served from the site's own CA, which no node
+# trusts out of the box. containerd then fails every pull at TLS (unknown CA) and,
+# with no upstream to fall back to, retries for ever while every pod sits in
+# ContainerCreating: in nofallback mode that surfaced as P04 timing out, with no line
+# anywhere naming the certificate. Cache mode hides it, because the fallback repairs
+# each failed pull from upstream. Given a CA, both lanes write it to MIRROR_CA_PATH on
+# the node before k3s first starts, and registries.yaml gains a `configs` entry for
+# the mirror's host naming that file as its `tls.ca_file` (k3s's registries.yaml
+# schema; the block docs/deployment/airgap.md tells a site to write). Unset, nothing
+# is written and registries.yaml is what it always was: a mirror whose certificate
+# the node already trusts needs nothing.
+#
+# THE ROUND TRIP. Before anything installs, `create` asks the node for one TLS round
+# trip to https://HOST/v2/ (verified against MIRROR_CA_PATH when a CA was given, the
+# node's own trust store otherwise) and stops, with curl's error, unless the
+# registry answers 200 or 401. It runs whenever a CA is given and on every nofallback
+# run; `throwaway-cluster.sh mirror-tls` runs it on its own. It shows the node can
+# verify the mirror; that containerd pulls through it is still the provision's to show.
+
 MIRROR_UPSTREAMS="docker.io quay.io ghcr.io registry.k8s.io code.forgejo.org ecr-public.aws.com"
 MIRROR_DENY_ADDR="192.0.2.1"
 MIRROR_DENY_NAMES="docker.io registry-1.docker.io index.docker.io auth.docker.io production.cloudflare.docker.com quay.io cdn.quay.io cdn01.quay.io cdn02.quay.io cdn03.quay.io ghcr.io pkg-containers.githubusercontent.com registry.k8s.io code.forgejo.org ecr-public.aws.com"
@@ -76,6 +97,10 @@ MIRROR_DENY_CHAIN="TOCKMOX_UPSTREAM_DENY"
 # config.yaml and the MicroOS lane runs the documented install, which may write
 # one too. k3s merges config.yaml.d/*.yaml over it, so the same file serves both.
 MIRROR_K3S_DROPIN="/etc/rancher/k3s/config.yaml.d/10-tockmox-registry-nofallback.yaml"
+# Where the mirror's CA lands on the node, and what registries.yaml's tls.ca_file names.
+# Beside registries.yaml, the path airgap.md uses.
+# shellcheck disable=SC2034  # read by throwaway-cluster.sh, microos.sh and the test
+MIRROR_CA_PATH="/etc/rancher/k3s/registry-ca.crt"
 # Per-boot, because the rules and the counter live in the kernel and a reboot
 # empties them. cloud-init runs per-boot scripts in name order.
 # shellcheck disable=SC2034  # read by throwaway-cluster.sh, microos.sh and the test
@@ -123,9 +148,37 @@ mirror_mode_check() {
   esac
 }
 
-# mirror_registries_yaml MIRROR MODE : the text of /etc/rancher/k3s/registries.yaml.
+# mirror_ca_check MIRROR CAFILE : 0 when CAFILE is empty, or is a readable PEM certificate
+# and there is a mirror to trust it for; else 2 with the reason. The file is copied
+# into the guest's cloud-init, which is readable from the substrate, so a file that
+# holds a private key is refused rather than copied.
+mirror_ca_check() {
+  local mirror="$1" ca="${2:-}"
+  [ -n "$ca" ] || return 0
+  if [ -z "$mirror" ]; then
+    echo "REFUSING: TOCKMOX_REGISTRY_CA is set and TOCKMOX_REGISTRY_MIRROR is not: there is no mirror to trust it for." >&2
+    return 2
+  fi
+  if [ ! -r "$ca" ] || [ ! -s "$ca" ]; then
+    echo "REFUSING: TOCKMOX_REGISTRY_CA names no readable, non-empty file: ${ca}" >&2
+    return 2
+  fi
+  if grep -q -- 'PRIVATE KEY-----' "$ca"; then
+    echo "REFUSING: TOCKMOX_REGISTRY_CA holds a private key: ${ca}. Give the CA's certificate alone; it is copied into the guest." >&2
+    return 2
+  fi
+  if ! grep -q -- '^-----BEGIN CERTIFICATE-----' "$ca"; then
+    echo "REFUSING: TOCKMOX_REGISTRY_CA is not a PEM certificate (no BEGIN CERTIFICATE line): ${ca}" >&2
+    return 2
+  fi
+  return 0
+}
+
+# mirror_registries_yaml MIRROR MODE [CA_PATH] : the text of /etc/rancher/k3s/registries.yaml.
+# CA_PATH is where the mirror's CA is on the NODE (MIRROR_CA_PATH); empty, the file is
+# byte for byte what it was before CAs existed.
 mirror_registries_yaml() {
-  local mirror="$1" mode="$2" up host prefix
+  local mirror="$1" mode="$2" ca="${3:-}" up host prefix
   host="$(mirror_host "$mirror")"; prefix="$(mirror_prefix "$mirror")"
   echo "mirrors:"
   for up in $MIRROR_UPSTREAMS; do
@@ -139,6 +192,40 @@ mirror_registries_yaml() {
       echo "      \"(.*)\": \"${prefix}/\$1\""
     fi
   done
+  # k3s keys `configs` by the endpoint's host[:port], not by the registry it mirrors.
+  if [ -n "$ca" ]; then
+    echo "configs:"
+    echo "  \"${host}\":"
+    echo "    tls:"
+    echo "      ca_file: \"${ca}\""
+  fi
+}
+
+# mirror_tls_check_script MIRROR [CA_PATH] : the guest script for THE ROUND TRIP above.
+# With CA_PATH, curl trusts that file alone (--cacert), so a PASS shows the file placed
+# on the node is the CA that signed the mirror's certificate; without it, the node's
+# own trust store. Exits 0 and prints `mirror-tls: PASS` only on HTTP 200 or 401
+# (a registry that wants a login still completed TLS); anything else is a FAIL that
+# carries curl's own error.
+mirror_tls_check_script() {
+  local host ca="${2:-}" opt="" trust="the node's own trust store"
+  host="$(mirror_host "$1")"
+  if [ -n "$ca" ]; then opt="--cacert '${ca}' "; trust="${ca}"; fi
+  cat <<EOF
+#!/bin/sh
+set -u
+err=\$(mktemp)
+code=\$(curl -sS -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 15 ${opt}'https://${host}/v2/' 2>"\$err")
+case "\$code" in
+  200|401)
+    echo "mirror-tls: PASS https://${host}/v2/ answered \$code over TLS verified against ${trust}"
+    rm -f "\$err"; exit 0 ;;
+esac
+echo "mirror-tls: FAIL no TLS round trip to https://${host}/v2/ (HTTP \${code:-none}), verified against ${trust}"
+sed 's/^/  /' "\$err"
+rm -f "\$err"
+exit 1
+EOF
 }
 
 # mirror_k3s_dropin MODE : the text of $MIRROR_K3S_DROPIN (nothing in cache mode,
