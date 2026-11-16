@@ -185,13 +185,13 @@
       "type": "prometheus",
       "uid": "${datasource}"
      },
-     "expr": "(time() - min(cnpg_collector_first_recoverability_point > 0)) / 86400 OR on() vector(-1)",
+     "expr": "(time() - min(barman_cloud_cloudnative_pg_io_first_recoverability_point > 0 or cnpg_collector_first_recoverability_point > 0)) / 86400 OR on() vector(-1)",
      "refId": "A"
     }
    ],
    "title": "Recoverability window",
    "type": "stat",
-   "description": "How far back a point-in-time restore can reach, from the oldest cluster's first recoverability point. Grey: no cluster reports one (CNPG under the Barman Cloud plugin reports 0 here), which is not the same as zero days."
+   "description": "How far back a point-in-time restore can reach, from the oldest cluster's first recoverability point. Under the Barman Cloud plugin that point is the plugin's own barman_cloud_cloudnative_pg_io_first_recoverability_point; CNPG's cnpg_collector_first_recoverability_point reads 0 there and counts only for a cluster on the in-core path. Grey: no cluster reports one, which is not the same as zero days."
   },
   {
    "datasource": {
@@ -315,6 +315,11 @@
          "text": "no identity dump job",
          "color": "#808080",
          "index": 0
+        },
+        "-2": {
+         "text": "no successful dump yet",
+         "color": "yellow",
+         "index": 2
         }
        }
       },
@@ -353,7 +358,7 @@
       "type": "prometheus",
       "uid": "${datasource}"
      },
-     "expr": "(time() - max(kube_cronjob_status_last_successful_time{cronjob=\"tockmox-authentik-db-backup\"})) / 3600 OR on() vector(-1)",
+     "expr": "(time() - max(kube_cronjob_status_last_successful_time{cronjob=\"tockmox-authentik-db-backup\"})) / 3600 OR on() (0 * max(kube_cronjob_info{cronjob=\"tockmox-authentik-db-backup\"}) - 2) OR on() vector(-1)",
      "refId": "A"
     }
    ],

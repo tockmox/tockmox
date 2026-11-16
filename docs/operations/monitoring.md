@@ -81,13 +81,18 @@ key false to drop the pair.
 The boards that know Tockmox's OWN shapes ship too (2026-08-19), and they
 are the three this page has been promising: **Backup & Restore Proof**
 (WAL segments waiting to archive ... the one CNPG backup metric that still
-reports under the barman-cloud plugin path, since the last-backup and
-recoverability timestamps are deprecated and read 0 there ... days since the
-last drill PASS, the identity dump, and timestamp lines that go flat when
-something stalls), **Storage Contract** (every PVC and the class it
-landed on, Pending binds, and the two Longhorn duty-cycle fault signals as
-graphs), and **Alert Delivery** (the sink, the last delivered notification,
-and the whole Alertmanager-to-phone path as rates). Every panel queries
+reports under the barman-cloud plugin path, since CNPG's own last-backup and
+recoverability timestamps are deprecated and read 0 there ... the
+recoverability window, read from the plugin's own
+`barman_cloud_cloudnative_pg_io_first_recoverability_point`, days since the
+last drill PASS, the identity dump (which reads "no successful dump yet" when
+the job exists and has never succeeded, apart from "no identity dump job"),
+and timestamp lines that go flat when something stalls), **Storage
+Contract** (every PVC and the class it landed on, Pending binds, and the two
+Longhorn duty-cycle fault signals as graphs), and **Alert Delivery** (the
+sink, the last delivered notification, which reads "none since the bridge
+started" until the bridge's first delivery, and the whole
+Alertmanager-to-phone path as rates). Every panel queries
 metric families verified present on a fresh install; the drill and
 identity-dump panels read their CronJobs' own kube-state series, so they go
 yellow-then-red on exactly the schedule the freshness alerts use.

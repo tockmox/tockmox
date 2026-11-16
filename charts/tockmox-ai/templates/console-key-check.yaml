@@ -103,6 +103,18 @@ spec:
   timeZone: "UTC"
   suspend: {{ $check.suspend | default false }}
   concurrencyPolicy: Forbid
+  # SKIP A SLOT THE CONTROLLER MISSED; DO NOT RUN IT AT BOOT. A restore from a
+  # snapshot jumps the clock past a slot (a power cycle can sleep through one),
+  # and with no deadline the CronJob controller fires it as soon as it syncs,
+  # which on a cold node is before the gateway answers. The check then exits 3
+  # (no HTTP answer) and the layer reads Degraded until the next slot succeeds.
+  # A start later than the deadline means the controller was not running at the
+  # slot, which in practice is a boot, so the slot is skipped instead.
+  #
+  # 120 s: the first sync after a restore came about six minutes after it on a
+  # reference install, so 120 s skips it with room to spare; the next slot is at
+  # most 15 minutes away, so a skip costs one interval of coverage.
+  startingDeadlineSeconds: 120
   successfulJobsHistoryLimit: 1
   # The rule reads the rejection off the failed Job that records it, so the
   # Job must outlive the non-rejection failures that can follow it (a gateway
