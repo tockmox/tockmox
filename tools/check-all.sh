@@ -386,6 +386,35 @@ if [ -n "$missing" ]; then
   exit 1
 fi
 
+# VERSION-MANAGER SHIMS, NAMED BEFORE A SELFTEST TRIPS ON ONE. Several selftests rerun a gate on a hermetic
+# PATH (a fixture dir, then /usr/bin:/bin), or put a stub ahead of the real tool and run from a fixture
+# directory outside this checkout. A mise, asdf or pyenv shim picks its tool from the directory it runs in and
+# the PATH it is handed, so there it finds no pin, or finds the stub and runs into it again ("mise ERROR shim
+# fallback recursion detected for helm"), and the selftest fails for the machine, not the tree. Seen on a
+# macOS workstation whose python3 and helm were mise shims: check-alert-rules --selftest and
+# check-immutable-fields --selftest failed for that alone, with nothing up front to say why. A note, not a
+# refusal: the gates themselves run through a shim, and only those selftests cannot. A python3 that imports
+# yaml here but not from outside the checkout is the same trap without a shims directory to name.
+# shellcheck source=tools/lib/tool-runs.sh
+. tools/lib/tool-runs.sh
+shims=""
+for t in helm python3 promtool kubeconform shellcheck jq; do
+  k="$(tool_shim "$t")"; [ -z "$k" ] || shims="${shims} ${t} (${k})"
+done
+yaml_away=0
+if have python3 && ! (cd / && python3 -c 'import yaml') >/dev/null 2>&1; then yaml_away=1; fi
+if [ -n "$shims" ] || [ "$yaml_away" = 1 ]; then
+  echo
+  echo "NOTE, BEFORE ANY GATE RUNS: some tools on PATH depend on the directory they run from."
+  [ -z "$shims" ] || echo "  version-manager shims:${shims}"
+  [ "$yaml_away" = 0 ] || echo "  python3 imports yaml in this checkout but not from outside it"
+  echo "  A selftest that reruns a gate on a hermetic PATH or from a fixture directory can fail for this alone,"
+  echo "  which is a finding about this machine, not the tree. Put the real tools ahead of the shims:"
+  echo "    mise   mise exec -- ./tools/check-all.sh   (the pinned install directories go first on PATH)"
+  echo "    asdf   the bin directory under \"\$(asdf where TOOL)\" first on PATH"
+  echo "    pyenv  the bin directory under \"\$(pyenv prefix)\" first on PATH"
+fi
+
 # THE TOOLCHAIN IS CI'S, OR NOTHING RUNS. A render gate passed in an environment with Helm 3.16 and failed on
 # a Mac and in CI with Helm 4.3.1, and nothing in the green run said it had used another Helm. mise.toml is the
 # one place the versions live; tools/toolchain.sh holds the tools on PATH to it, and a mismatch stops the run
