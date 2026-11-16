@@ -1242,13 +1242,22 @@ encrypted USB key in a drawer. Not the machine you are typing on.
 
 **WORKSTATION**
 
+Run this from a directory **outside** your site repository. The file is the
+controller's private key in plaintext: committed to the site repository, it
+hands every secret in that repository to anyone who can read it. The block
+refuses inside a git repository and writes the file readable by you only.
+
 ```bash
 : "${KUBE_CONTEXT:?export KUBE_CONTEXT first, see Name the cluster}"
-kubectl --context="$KUBE_CONTEXT" -n kube-system get secret \
-  -l sealedsecrets.bitnami.com/sealed-secrets-key \
-  -o yaml > sealed-secrets-key-BACKUP.yaml
-
-grep -c 'tls.key' sealed-secrets-key-BACKUP.yaml
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "This directory is inside a git repository. cd somewhere outside it, then run this again." >&2
+else
+  ( umask 077
+    kubectl --context="$KUBE_CONTEXT" -n kube-system get secret \
+      -l sealedsecrets.bitnami.com/sealed-secrets-key \
+      -o yaml > sealed-secrets-key-BACKUP.yaml )
+  grep -c 'tls.key' sealed-secrets-key-BACKUP.yaml
+fi
 ```
 
 **Success condition:** the count is at least 1, **and** you have moved the file

@@ -846,6 +846,14 @@
       "additionalProperties": false,
       "description": "Tockmox-owned block: platformNetpol. The platform namespace's node-network, scrape and object-store ingress rules, plus the site-peer lists for the devops scrape rule and the monitoring namespace.",
       "properties": {
+        "nodeAddresses": {
+          "type": "array",
+          "description": "The nodes' own addresses, one /32 per node (0.8.6). Set, they replace global.lanCIDR in allow-from-node-network; empty keeps the whole lanCIDR admitted to every platform pod on every port. Print the list with install/tockmox-install.sh --print-netpol-node-sources.",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]{1,3}(\\.[0-9]{1,3}){3}/[0-9]{1,2}$"
+          }
+        },
         "nodeOriginSources": {
           "type": "array",
           "description": "Sources of node-originated traffic (per-node flannel gateway addresses). Empty keeps the whole clusterCIDR admitted to every platform pod, the insecure pre-0.7.0 rule. Print the list with install/tockmox-install.sh --print-netpol-node-sources.",

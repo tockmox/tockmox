@@ -87,3 +87,10 @@ platformNetpol:
     - 10.42.0.0/31
     - 10.42.1.0/31
     - 10.42.2.0/31
+  # 0.8.6: the nodes' own addresses replace the lanCIDR block in the same rule,
+  # one /32 per node (the helper prints them too). Placeholders inside lanCIDR.
+  # values-site-minimal.yaml leaves this empty, so CI renders both forms.
+  nodeAddresses:
+    - 10.0.0.11/32
+    - 10.0.0.12/32
+    - 10.0.0.13/32

@@ -302,6 +302,17 @@ for n in nodes:
     for c in v4:
         net = ipaddress.ip_network(c, strict=False)
         rows.append((name, c, "%s/31" % net.network_address))
+addrs = []
+for n in nodes:
+    name = n["metadata"]["name"]
+    for a in n.get("status", {}).get("addresses", []):
+        if a.get("type") == "InternalIP":
+            try:
+                ip = ipaddress.ip_address(a["address"])
+            except ValueError:
+                continue
+            if ip.version == 4:
+                addrs.append((name, "%s/32" % ip))
 if missing:
     sys.stderr.write("no IPv4 podCIDR on node(s): %s (does this CNI allocate podCIDRs? this helper is for flannel)\n" % ", ".join(missing))
     sys.exit(1)
@@ -311,6 +322,13 @@ print("platformNetpol:")
 print("  nodeOriginSources:")
 for name, c, blk in rows:
     print("    - %s   # %s (podCIDR %s)" % (blk, name, c))
+if addrs:
+    print("  # One /32 per node: its own address. Replaces global.lanCIDR in allow-from-node-network (0.8.6).")
+    print("  nodeAddresses:")
+    for name, a in addrs:
+        print("    - %s   # %s" % (a, name))
+else:
+    sys.stderr.write("no IPv4 InternalIP on any node: nodeAddresses not printed, so allow-from-node-network keeps admitting the whole global.lanCIDR\n")
 '
 }
 
@@ -559,6 +577,15 @@ for cidr in "$G_LAN" "$G_CLUSTER" "$G_SVC"; do
   [[ "$cidr" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$ ]] || die "not a CIDR: '$cidr'"
 done
 [[ "$G_INT" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] || die "not a domain: '$G_INT'"
+# tockmox.repoURL and tockmox.revision reach `git ls-remote` below and are written
+# into every generated Application, so their shape is checked first (0.8.6). A
+# value that begins with `-` would be read by git as an OPTION, and
+# `--upload-pack=<command>` runs a command; the `--` below closes that too, and
+# this refusal also keeps quotes, spaces and newlines out of the generated YAML.
+[[ "$TM_REPO" =~ ^(https?://|ssh://|git@[A-Za-z0-9._-]+:)[A-Za-z0-9._~:/?#@%+=,-]+$ ]] \
+  || die "tockmox.repoURL must be an https://, http://, ssh:// or git@host: URL with no spaces or quotes: '$TM_REPO'"
+[[ "$TM_REV" =~ ^[A-Za-z0-9._/][A-Za-z0-9._/-]*$ ]] \
+  || die "tockmox.revision must be a tag, branch or commit (letters, digits, . _ / -, not starting with -): '$TM_REV'"
 case "$TM_REV" in
   main|master|HEAD) warn "tracking '$TM_REV' means your cluster changes when upstream does. Fine for a lab." ;;
   v*) : ;;
@@ -580,15 +607,15 @@ esac
 # the problem.
 if ! command -v git >/dev/null 2>&1; then
   warn "git not found ... cannot confirm '$TM_REV' exists in $TM_REPO"
-elif ! git ls-remote --exit-code "$TM_REPO" >/dev/null 2>&1; then
+elif ! git ls-remote --exit-code -- "$TM_REPO" >/dev/null 2>&1; then
   warn "cannot reach $TM_REPO ... not confirming '$TM_REV' exists (fine if you are air-gapped or mirroring)"
-elif git ls-remote --exit-code "$TM_REPO" "$TM_REV" >/dev/null 2>&1; then
+elif git ls-remote --exit-code -- "$TM_REPO" "$TM_REV" >/dev/null 2>&1; then
   ok "revision $TM_REV resolves in $TM_REPO"
 else
   err "revision '$TM_REV' does not exist in $TM_REPO"
   info "ArgoCD would accept this file and then fail to resolve it on every layer."
   info "Available branches and tags:"
-  git ls-remote --heads --tags "$TM_REPO" 2>/dev/null \
+  git ls-remote --heads --tags -- "$TM_REPO" 2>/dev/null \
     | sed -E 's|.*refs/(heads\|tags)/|      |' | sort -u | head -20
   die "set tockmox.revision to one of the above"
 fi
@@ -1085,6 +1112,11 @@ secrets/*.plain.yaml
 # mint-secrets.sh stages sealed files here while it runs and removes it on exit.
 # Only a killed process leaves one behind.
 secrets/.mint.*/
+# The sealed-secrets controller's private key, should a backup of it ever be
+# written here. It decrypts every SealedSecret in this repository; it belongs
+# encrypted and off the cluster (docs/operations/sealed-secrets-key-escrow.md).
+*sealed-secrets-key*
+*.backup.yaml
 EOF
 
   wr "$SITE_PATH/README.md" <<EOF

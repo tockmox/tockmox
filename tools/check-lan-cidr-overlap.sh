@@ -97,6 +97,9 @@ global:
   clusterCIDR: "$2"
 platformNetpol:
   nodeOriginSources: $3
+  # ci/values.yaml sets nodeAddresses (0.8.6); these cases are about the
+  # lanCIDR block, which only renders while nodeAddresses is empty.
+  nodeAddresses: []
 YAML
   R="$(helm template t charts/tockmox-policy -f ci/values.yaml -f "$tmp/v.yaml" 2>&1)"
 }
@@ -170,6 +173,41 @@ if printf '%s' "$R" | grep -q 'nodeOriginSources contains 10.42.0.0/16'; then
 else
   bad "the older whole-pod-network entry guard no longer fires" "$(printf '%s' "$R" | head -2 | cut -c1-200)"
 fi
+
+# ---- 3. platformNetpol.nodeAddresses (0.8.6) ---------------------------------
+# SET, the node addresses replace the lanCIDR block in allow-from-node-network:
+# the whole LAN must not be admitted to the platform namespace any more, only
+# the nodes. EMPTY keeps the lanCIDR block (the passes above cover that). An
+# entry that is the LAN, the pod network or wider refuses, naming the value.
+render_na() { # lan cluster nodeAddresses-yaml-list
+  cat > "$tmp/v.yaml" <<YAML
+global:
+  lanCIDR: "$1"
+  clusterCIDR: "$2"
+platformNetpol:
+  nodeOriginSources: $SRC
+  nodeAddresses: $3
+YAML
+  R="$(helm template t charts/tockmox-policy -f ci/values.yaml -f "$tmp/v.yaml" 2>&1)"
+}
+render_na 192.168.1.0/24 10.42.0.0/16 '["192.168.1.11/32", "192.168.1.12/32"]'
+got="$(node_policy_cidrs)"
+if [ "$got" = "192.168.1.11/32 192.168.1.12/32 10.42.1.0/31 " ]; then
+  ok "nodeAddresses set: allow-from-node-network = [the two nodes, 10.42.1.0/31], no lanCIDR block"
+else
+  bad "nodeAddresses set must replace the lanCIDR block with the node addresses" "got: '${got:-<none>}'; $(printf '%s' "$R" | grep -m1 -i error | cut -c1-200)"
+fi
+na_refuses() { # name lan cluster entry
+  render_na "$2" "$3" "[\"$4\"]"
+  if printf '%s' "$R" | grep "platformNetpol.nodeAddresses contains $4," >/dev/null && [ -z "$(node_policy_cidrs)" ]; then
+    ok "$1: refused, naming $4"
+  else
+    bad "$1: expected the nodeAddresses refusal naming $4" "got cidrs: '$(node_policy_cidrs)'; $(printf '%s' "$R" | head -2 | cut -c1-200)"
+  fi
+}
+na_refuses "a nodeAddresses entry equal to the lanCIDR"      192.168.1.0/24 10.42.0.0/16 192.168.1.0/24
+na_refuses "a nodeAddresses entry of everything"             192.168.1.0/24 10.42.0.0/16 0.0.0.0/0
+na_refuses "a nodeAddresses entry containing the pod network" 192.168.1.0/24 10.42.0.0/16 10.0.0.0/8
 
 [ "$fail" -eq 0 ] && echo "PASS: lanCIDR containment refusal holds on the rendered artifact" || echo "FAIL: see above"
 exit "$fail"

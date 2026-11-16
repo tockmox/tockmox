@@ -58,11 +58,34 @@ for d in yaml.safe_load_all(open(f"{t}/obs.yaml")):
         ok = (len(mnt) == 1 and "subPath" not in mnt[0] and len(vol) == 1 and vol[0]["secret"].get("optional") is True
               and len(env) == 1 and env[0]["name"] == vol[0]["secret"]["secretName"])
         open(f"{t}/ntfy.wiring", "w").write(("ok " + mnt[0]["mountPath"]) if ok else "bad")
+import json
 for d in yaml.safe_load_all(open(f"{t}/ai.yaml")):
     if d and d["kind"] == "CronJob" and d["metadata"]["name"].endswith("-drill"):
         open(f"{t}/drill.sh", "w").write(d["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]["args"][0])
+    if d and d["kind"] == "Role" and d["metadata"]["name"] == "tockmox-restore-drill":
+        open(f"{t}/drill.role.json", "w").write(json.dumps(d["rules"]))
 PY
 [ -s "$T/bridge.py" ] && [ -s "$T/drill.sh" ] || { echo "check-notify-and-drill: bridge or drill not rendered" >&2; exit 1; }
+
+# D5 (0.8.6): the drill's Role reaches only its own recovery cluster where RBAC can say so. RBAC cannot scope
+# `create` by name, but it can scope `delete`/`patch` on the Cluster and `create` on pods/exec. Before 0.8.6
+# both were unnamed, so the drill identity could delete the LIVE database's Cluster and exec into any pod in
+# its namespace (the gateway's and the console's, which hold the provider and OIDC secrets).
+d5_roles() { # role rules json
+  python3 - "$1" 2>/dev/null <<'PY'
+import sys, json
+rules = json.load(open(sys.argv[1]))
+for r in rules:
+    res, verbs, names = r.get("resources", []), r.get("verbs", []), r.get("resourceNames") or []
+    if "clusters" in res and set(verbs) & {"delete", "patch", "update", "*"}:
+        assert names and all(n.endswith("-drillcheck") for n in names), r
+    if "pods/exec" in res:
+        assert names and all(n.endswith("-drillcheck-1") for n in names), r
+    assert "*" not in verbs and "*" not in res, r
+assert any("clusters" in r.get("resources", []) and "delete" in r.get("verbs", []) for r in rules), "no delete on its own cluster"
+assert any("pods/exec" in r.get("resources", []) for r in rules), "no exec into its own instance"
+PY
+}
 
 # ---- B1 ---------------------------------------------------------------------
 SECRET=tok-SECRET-9f3a
@@ -190,6 +213,9 @@ if [ "${1:-}" = "--selftest" ]; then
   b1 "$T/bridge.py" || { echo "selftest FAIL: B1 red on the real bridge"; fail=1; }
   b2 || { echo "selftest FAIL: B2 red on the real tree"; fail=1; }
   d1 "$T/drill.sh" || { echo "selftest FAIL: D1 red on the real drill"; fail=1; }
+  d5_roles "$T/drill.role.json" || { echo "selftest FAIL: D5 red on the real Role"; fail=1; }
+  python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); [x.pop("resourceNames",None) for x in r if "configmaps" not in x.get("resources",[])]; json.dump(r,open(sys.argv[2],"w"))' "$T/drill.role.json" "$T/m10.json"
+  if d5_roles "$T/m10.json"; then no "D5 with the drill's delete and exec unnamed (the pre-0.8.6 Role)"; else ok "D5 with the drill's delete and exec unnamed (the pre-0.8.6 Role)"; fi
   n1 "$T/ntfy.live" || { echo "selftest FAIL: N1 red on the real ntfy probe"; fail=1; }
   sed 's/for k in NTFY_AUTH_USERS NTFY_AUTH_ACCESS NTFY_AUTH_TOKENS; do/for k in; do/' "$T/ntfy.live" > "$T/m7.sh"
   if n1 "$T/m7.sh"; then no "N1 with the Secret comparison removed"; else ok "N1 with the Secret comparison removed"; fi
@@ -220,4 +246,5 @@ b1 "$T/bridge.py" && echo "ok: B1 one delivery line per alert, no secrets" || { 
 b2 && echo "ok: B2 ntfy replicas 1, reason and TockmoxNtfyDown written" || { echo "FAIL: B2"; rc=1; }
 d1 "$T/drill.sh" && echo "ok: D1 drill pins and records backup=, on the source's PostgreSQL image" || { echo "FAIL: D1"; rc=1; }
 n1 "$T/ntfy.live" && echo "ok: N1 ntfy restarts onto its auth Secret when it appears or rotates" || { echo "FAIL: N1"; rc=1; }
+d5_roles "$T/drill.role.json" && echo "ok: D5 the drill's Role deletes and execs into only its own recovery cluster" || { echo "FAIL: D5 the drill's Role reaches beyond its own recovery cluster"; rc=1; }
 exit $rc

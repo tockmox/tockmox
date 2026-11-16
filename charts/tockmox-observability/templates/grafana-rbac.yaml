@@ -1,0 +1,56 @@
+{{- $kps := index .Values "kube-prometheus-stack" | default dict }}
+{{- $graf := $kps.grafana | default dict }}
+{{- $gsa := $graf.serviceAccount | default dict }}
+{{- $gname := default "grafana" $graf.nameOverride }}
+{{- $gfull := "" }}
+{{- if $graf.fullnameOverride }}{{ $gfull = $graf.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else if contains $gname .Release.Name }}{{ $gfull = .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- else }}{{ $gfull = printf "%s-%s" .Release.Name $gname | trunc 63 | trimSuffix "-" }}{{ end }}
+{{- if and (include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "kubePrometheusStack")) (ne (toString $graf.enabled) "false") }}
+# SPDX-License-Identifier: Apache-2.0
+#
+# GRAFANA READS CONFIGMAPS, NOT SECRETS (0.8.6).
+#
+# The Grafana chart binds its ServiceAccount to a ClusterRole that grants get,
+# list and watch on configmaps AND secrets in every namespace whenever any
+# sidecar is on, whatever the sidecars are told to watch. Grafana is a web
+# application on the LAN with its API token mounted, so until 0.8.6 a Grafana
+# compromise reached every Secret in the cluster, the sealed-secrets
+# controller's private key among them.
+#
+# Tockmox delivers dashboards and datasources only as ConfigMaps, so the
+# sidecars are set to `resource: configmap` (values.yaml) and the chart's own
+# chart's RBAC is turned off (rbac.create: false) and Grafana's ServiceAccount
+# is bound to the ClusterRole below by a binding of its own. The binding has a
+# NEW name on purpose: a ClusterRoleBinding's roleRef cannot be changed, so
+# re-pointing the chart's existing binding would fail every upgrade.
+# A site that delivers a dashboard as a Secret must deliver it as a ConfigMap
+# instead; the sidecar no longer looks at Secrets.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tockmox-grafana-sidecar
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "watch", "list"]
+---
+# The Grafana chart's grafana.serviceAccountName and grafana.fullname, mirrored:
+# the subchart's helpers are not callable from this chart.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tockmox-grafana-sidecar
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ default $gfull $gsa.name }}
+    namespace: {{ default .Release.Namespace $graf.namespaceOverride }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tockmox-grafana-sidecar
+{{- end }}

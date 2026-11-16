@@ -494,6 +494,28 @@ platformNetpol:
   # do nothing while looking done. IPv4 only; an IPv6 or malformed value is not
   # judged. See tools/check-lan-cidr-overlap.sh.
   nodeOriginSources: []
+  # THE NODES' OWN ADDRESSES, as CIDRs: one /32 per node (0.8.6).
+  #
+  # `allow-from-node-network` exists for callers that originate on a node: the
+  # kube-apiserver's webhook calls, the kubelet, MetalLB's SNAT. Until 0.8.6 it
+  # admitted the whole of global.lanCIDR for them, on every port, to every pod
+  # in the platform namespace. That also admits every other host on the LAN,
+  # and the namespace holds the Longhorn manager API and UI (no
+  # authentication) and the object store's admin port. A LAN host needs only a
+  # static route to the pod network via a node to use them.
+  #
+  # SET, these replace the lanCIDR block in that one rule. EMPTY (the 0.8.x
+  # default) keeps the lanCIDR block, so an upgrade does not cut a webhook path
+  # on a cluster nobody has measured. Set it: print the list for your cluster
+  # with install/tockmox-install.sh --print-netpol-node-sources, which prints
+  # this key next to nodeOriginSources. An entry that is the whole lanCIDR, the
+  # pod network or wider refuses to render.
+  #
+  # THE TRAP is the same as nodeOriginSources: a node you add later is not in
+  # this list until you add it, and traffic that originates on it with its own
+  # address is refused by platform pods. Update this list in the same change
+  # that adds the node.
+  nodeAddresses: []
   # The ports Prometheus may reach on platform pods: the metrics ports the
   # shipped ServiceMonitors scrape (cert-manager 9402, kured and
   # snapshot-controller and the CNPG operator 8080, Longhorn manager 9500,

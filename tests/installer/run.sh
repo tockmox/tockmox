@@ -369,6 +369,54 @@ assert_artifact "and the message names the namespace and the key to add it to" \
 assert_artifact "listed in extraS3ClientNamespaces (flow and block lists, quoted names) it passes" "cat '$WORK/lint-ok/lint-rc'" "0"
 assert_artifact "with the platform rules off there is no S3 rule to miss, and it passes" "cat '$WORK/lint-off/lint-rc'" "0"
 
+# ---------------------------------------------------------------------- I8
+path_begin "I8" "tockmox.repoURL and tockmox.revision cannot become git options or break the generated YAML"
+# 0.8.6. Both values reach `git ls-remote` and every generated Application. A
+# repoURL beginning with `-` is a git OPTION, and --upload-pack runs a command.
+# The proof uses a git stub that RECORDS its arguments and then plays the part
+# of git when it reads an option there: a stub that only failed would make a
+# missing `--` and a present one look the same.
+SITE_G="$WORK/gitinject"; mkdir -p "$SITE_G"
+cat > "$STUB/git" <<EOF
+#!/bin/sh
+printf '%s\\n' "\$*" >> "$WORK/git-args.txt"
+for a in "\$@"; do
+  case "\$a" in --) break ;; --upload-pack=*) touch "$WORK/INJECTED" ;; esac
+done
+exit 1
+EOF
+chmod +x "$STUB/git"
+awk '/^global:/ {print "tockmox:\n  repoURL: \"--upload-pack=touch PWNED\"\n"} {print}' "$PARITY_CFG" > "$SITE_G/tockmox.yaml"
+run_config "$SITE_G" --config tockmox.yaml --no-cluster
+assert_artifact \
+  "a repoURL that is a git option is refused by name" \
+  "grep -c 'tockmox.repoURL must be an https://' '$WORK/cfg-out.txt' || true" \
+  "1"
+assert_artifact \
+  "and git never ran with it, so nothing was executed" \
+  "test -e '$WORK/INJECTED' && echo EXECUTED || echo none" \
+  "none"
+assert_artifact \
+  "and no partial site was written" \
+  "test -e '$SITE_G/tockmox-site' && echo 'PARTIAL SITE WRITTEN' || echo none" \
+  "none"
+SITE_R="$WORK/badrev"; mkdir -p "$SITE_R"
+awk '/^global:/ {print "tockmox:\n  revision: \"-v1.0\"\n"} {print}' "$PARITY_CFG" > "$SITE_R/tockmox.yaml"
+run_config "$SITE_R" --config tockmox.yaml --no-cluster
+assert_artifact \
+  "a revision beginning with - is refused by name" \
+  "grep -c 'tockmox.revision must be a tag, branch or commit' '$WORK/cfg-out.txt' || true" \
+  "1"
+# A good URL still reaches git, and git sees `--` before it.
+SITE_OK="$WORK/goodurl"; mkdir -p "$SITE_OK"; rm -f "$WORK/git-args.txt"
+cp "$PARITY_CFG" "$SITE_OK/tockmox.yaml"
+run_config "$SITE_OK" --config tockmox.yaml --no-cluster
+assert_artifact \
+  "the default upstream URL is accepted and reaches git after --" \
+  "grep -c -- 'ls-remote --exit-code -- https://github.com/tockmox/tockmox.git' '$WORK/git-args.txt' || true" \
+  "1"
+printf '#!/bin/sh\nexit 1\n' > "$STUB/git"; chmod +x "$STUB/git"
+
 # ----------------------------------------------------------------
 # install/bootstrap-secrets.sh. Its own file: it is long, and its shims are not
 # the per-test kubectl stubs above.

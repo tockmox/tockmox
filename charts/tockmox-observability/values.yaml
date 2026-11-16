@@ -887,12 +887,28 @@ kube-prometheus-stack:
           memory: 160Mi
       dashboards:
         enabled: true
+        # ConfigMaps only (0.8.6). The chart default, `both`, also watches
+        # Secrets, and the cluster-wide Secret read that needs is what a
+        # Grafana compromise would inherit. See templates/grafana-rbac.yaml.
+        resource: configmap
         # Discover dashboards from ANY namespace, so a user can drop one in
         # their own. This is the documented extension point.
         searchNamespace: ALL
         label: grafana_dashboard
       datasources:
         enabled: true
+        # ConfigMaps only, as for dashboards (0.8.6). No shipped datasource is
+        # a Secret.
+        resource: configmap
+    # The Grafana chart's own ClusterRole grants Secrets in every namespace
+    # whenever a sidecar is on (0.8.6). Its RBAC is off here, and
+    # templates/grafana-rbac.yaml binds Grafana to a ConfigMap-only
+    # ClusterRole under a NEW binding name. Pointing the chart's binding at
+    # another role instead (rbac.useExistingClusterRole) changes the roleRef
+    # of an existing ClusterRoleBinding, which Kubernetes refuses, so every
+    # upgrade would fail at that object. The old binding and role are pruned.
+    rbac:
+      create: false
     # ------------------------------------------------------------------------
     # IN-CLUSTER TRUST. Grafana performs the OIDC token and userinfo calls from
     # inside its own container, so the CA has to be trusted there.
@@ -1274,6 +1290,39 @@ loki:
     serviceMonitor:
       enabled: true
 alloy:
+  # RBAC WITHOUT SECRETS (0.8.6). The chart's default rules include get, list
+  # and watch on configmaps and secrets in every namespace, for the
+  # remote.kubernetes.* components. The pipeline below uses none of them, so
+  # Alloy, a root DaemonSet with the node's /var/log mounted, does not need to
+  # read every Secret in the cluster. These are the chart's default rules
+  # (alloy 1.15.0) minus that one. A Helm list replaces rather than merges:
+  # re-read the chart's defaults when the chart moves.
+  rbac:
+    rules:
+      - apiGroups: ["", "discovery.k8s.io", "networking.k8s.io"]
+        resources: ["endpoints", "endpointslices", "ingresses", "pods", "services"]
+        verbs: ["get", "list", "watch"]
+      - apiGroups: [""]
+        resources: ["pods", "pods/log", "namespaces"]
+        verbs: ["get", "list", "watch"]
+      - apiGroups: ["monitoring.grafana.com"]
+        resources: ["podlogs"]
+        verbs: ["get", "list", "watch"]
+      - apiGroups: ["monitoring.coreos.com"]
+        resources: ["prometheusrules"]
+        verbs: ["get", "list", "watch"]
+      - apiGroups: ["monitoring.coreos.com"]
+        resources: ["alertmanagerconfigs"]
+        verbs: ["get", "list", "watch"]
+      - apiGroups: ["monitoring.coreos.com"]
+        resources: ["podmonitors", "servicemonitors", "probes", "scrapeconfigs"]
+        verbs: ["get", "list", "watch"]
+      - apiGroups: [""]
+        resources: ["events"]
+        verbs: ["get", "list", "watch"]
+      - apiGroups: ["apps", "extensions"]
+        resources: ["replicasets"]
+        verbs: ["get", "list", "watch"]
   alloy:
     # No usage reporting to stats.grafana.org: enableReporting
     # defaults true and adds nothing we need. Sovereignty: no unrequested
