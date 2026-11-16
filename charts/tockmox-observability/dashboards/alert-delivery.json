@@ -160,6 +160,11 @@
          "text": "no bridge metrics",
          "color": "#808080",
          "index": 0
+        },
+        "-2": {
+         "text": "none since the bridge started",
+         "color": "text",
+         "index": 2
         }
        }
       },
@@ -198,13 +203,13 @@
       "type": "prometheus",
       "uid": "${datasource}"
      },
-     "expr": "(time() - max(tockmox_notify_last_success_timestamp_seconds)) / 60 OR on() vector(-1)",
+     "expr": "(time() - max(tockmox_notify_last_success_timestamp_seconds > 0)) / 60 OR on() (0 * max(tockmox_notify_last_success_timestamp_seconds) - 2) OR on() vector(-1)",
      "refId": "A"
     }
    ],
    "title": "Since last delivered notification",
    "type": "stat",
-   "description": "Time since the bridge last delivered a notification to the sink. Silence is normal when nothing routed to the bridge has fired: this is not a liveness signal. Liveness is the sink, the token and Failed deliveries, and the Overview's verdict, which needs the Watchdog."
+   "description": "Time since the bridge last delivered a notification to the sink. The bridge keeps that time in memory, so before its first delivery after a start this reads none since the bridge started rather than an age counted from 1970. Silence is normal when nothing routed to the bridge has fired: this is not a liveness signal. Liveness is the sink, the token and Failed deliveries, and the Overview's verdict, which needs the Watchdog."
   },
   {
    "datasource": {
