@@ -1202,6 +1202,16 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **A restore or a power cycle no longer fires a missed CronJob slot into a cold
+  cluster.** The console-key check, the model-gateway and Authentik restore
+  drills and the Authentik database dump ran the slot they had missed as soon as
+  the node came back, before the gateway, the CNPG webhook or the database
+  answered; each failed, and its layer read Degraded until the next slot
+  succeeded (up to a week for a drill, which also wrote a FAIL row to its
+  register). Each now carries `startingDeadlineSeconds` (120 for the check, 300
+  for the drills and the dump), so a slot missed by more than that is skipped and
+  the next one runs on schedule. Nothing to do on upgrade; to run a skipped drill
+  sooner, `kubectl create job --from=cronjob/<name>`.
 - **The air-gap page shows how a node trusts a registry served from your internal
   CA.** Its `registries.yaml` block named the mirror but gave no node a way to
   trust the CA that signed it, so on a disconnected site every pull failed TLS

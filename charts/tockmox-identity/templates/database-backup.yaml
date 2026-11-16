@@ -35,6 +35,20 @@ spec:
   timeZone: {{ .Values.global.timezone | quote }}
   suspend: {{ $db.suspend | default false }}
   concurrencyPolicy: Forbid
+  # SKIP A SLOT THE CONTROLLER MISSED; DO NOT RUN IT AT BOOT. A restore from a
+  # snapshot jumps the clock past a slot (a power cycle can sleep through one),
+  # and with no deadline the CronJob controller fires it as soon as it syncs,
+  # which on a cold node is before the database answers. The dump then fails and
+  # the layer reads Degraded until the next night's dump succeeds. A start later
+  # than the deadline means the controller was not running at the slot, which in
+  # practice is a boot, so the slot is skipped instead.
+  #
+  # 300 s: room for ordinary controller lag and for a control-plane restart that
+  # leaves workloads running, and still shorter than the six minutes a reference
+  # install took from a restore to its first sync. A skipped night is what
+  # TockmoxAuthentikBackupStale below is built for: one missed slot stays
+  # silent, two never does.
+  startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 2
   failedJobsHistoryLimit: 3
   jobTemplate:

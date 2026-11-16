@@ -103,6 +103,21 @@ spec:
   timeZone: {{ .Values.global.timezone | quote }}
   suspend: {{ $drill.suspend | default false }}
   concurrencyPolicy: Forbid
+  # SKIP A SLOT THE CONTROLLER MISSED; DO NOT RUN IT AT BOOT. A restore from a
+  # snapshot jumps the clock past a slot (a power cycle can sleep through one),
+  # and with no deadline the CronJob controller fires it as soon as it syncs,
+  # which on a cold node is before the CNPG webhook has endpoints. The drill's
+  # apply then fails, a FAIL row lands in the register, and the layer reads
+  # Degraded until next week's slot succeeds. A start later than the deadline
+  # means the controller was not running at the slot, which in practice is a
+  # boot, so the slot is skipped instead.
+  #
+  # 300 s: room for ordinary controller lag and for a control-plane restart that
+  # leaves workloads running, and still shorter than the six minutes a reference
+  # install took from a restore to its first sync. A skipped drill runs at the
+  # next weekly slot, or by hand with
+  # `kubectl create job --from=cronjob/<name>`.
+  startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 2
   failedJobsHistoryLimit: 3
   jobTemplate:
