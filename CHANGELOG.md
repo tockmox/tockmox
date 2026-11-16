@@ -1225,12 +1225,32 @@ costs you, with the reasoning in the documentation rather than here.
   the same round trip before it installs. Nothing to do on upgrade; a site that
   already pulls through a registry on its own CA should add the entry before its
   next air-gapped install.
+- **Three dashboard tiles say what they know on a quiet or freshly restored
+  install.** Alert Delivery's "Since last delivered notification" read an age
+  counted from 1970 (about 56 years) until the bridge's first delivery; it now
+  reads "none since the bridge started". Backup & Restore Proof's
+  "Recoverability window" never filled under the Barman Cloud plugin, because
+  CNPG's `cnpg_collector_first_recoverability_point` reads 0 there; it now reads
+  the plugin's own `barman_cloud_cloudnative_pg_io_first_recoverability_point`
+  (CNPG's metric still counts for a cluster on the in-core path). "Hours since
+  last identity dump" read "no identity dump job" both when the CronJob is absent
+  and when it has never succeeded; the second now reads "no successful dump yet",
+  in yellow (docs/operations/monitoring.md). Nothing to do on upgrade.
 - **The move commands on the built-in forge page paste into bash.** Three
   `${KUBE_CONTEXT:?...}` guards, in docs/administration/site-forge.md ("Move a
   running site in", "Move to my own forge") and site-forge-recovery.md, held an
   apostrophe, which bash reads as an unclosed quote: the block stopped with a
   syntax error before it ran (zsh was not affected). Only the words changed.
   Nothing to do on upgrade.
+- **`tools/check-all.sh` names a version-manager shim before a selftest fails
+  on it.** A selftest that reruns a gate on a hermetic PATH, or from a fixture
+  directory with a stub ahead of the real tool, fails when helm or python3 on
+  PATH is a mise, asdf or pyenv shim ("shim fallback recursion"), and nothing
+  said so until the selftest's own output. The run now prints a note up front
+  naming each such shim, and a python3 that imports yaml in the checkout but
+  not from outside it, with how to put the real tools first (`mise exec --
+  ./tools/check-all.sh`). A note, not a refusal. `tools/lib/tool-runs.sh` gains
+  `tool_shim`, with selftest cases.
 - **One 429 from the Kubernetes API no longer leaves the Platform pages reading Unknown.** The API
   server's priority and fairness answers 429, with a Retry-After, when the priority level a request
   lands in is full for a moment. The console read each source once per page view, so a single 429 on
