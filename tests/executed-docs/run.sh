@@ -386,6 +386,70 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# WHAT `create` SAID GOES IN THE REPORT, not only in the job log.
+# On 2026-11-14 to 16 every live run failed and the report said only "did not
+# produce a kubeconfig", naming as the path a `kubectl apply` line from the
+# provisioner's stdout. The real cause (a namespace ResourceQuota that refused
+# the VM's pod) was in the job log, which an agent reading the report never
+# sees. So:
+#   - the provisioner's stderr is copied to a file while it still streams to
+#     this script's stderr, so the job log reads as before;
+#   - stdout is a kubeconfig path only when create exits 0 AND its last line is
+#     an absolute path to a non-empty file; a failed create's stdout is never read
+#     as a path;
+#   - a failed create writes its exit code and a bounded, masked tail of its
+#     stderr into the report, under a line that says WHICH kind of failure it is:
+#     the capacity preflight's BLOCKED (4) and INFRA_ERROR (5) are not provisioning
+#     failures and are not reported as one;
+#   - a create that worked leaves its capacity lines in the report, so a green
+#     run also says what the substrate had room for.
+CREATE_TAIL_LINES="${TOCKMOX_CREATE_TAIL_LINES:-40}"
+case "$CREATE_TAIL_LINES" in ''|*[!0-9]*|0) echo "REFUSING: TOCKMOX_CREATE_TAIL_LINES must be a positive whole number" >&2; exit 2 ;; esac
+# run_create ERRFILE CMD...: CMD's stdout on this function's stdout, its stderr
+# both to ERRFILE and to this script's stderr. Returns CMD's exit code (pipefail
+# is set, and tee exits 0).
+run_create() {
+  local errf="$1"; shift
+  { "$@" 2>&1 1>&3 3>&- | tee "$errf" >&2; } 3>&1
+}
+# kubeconfig_of RC STDOUT: the path, only from a create that exited 0 and named
+# a non-empty file on its last line.
+kubeconfig_of() {
+  local last
+  [ "$1" -eq 0 ] || return 1
+  last="$(printf '%s\n' "$2" | tail -1)"
+  case "$last" in /*) [ -s "$last" ] && printf '%s' "$last" && return 0 ;; esac
+  return 1
+}
+# report_create LABEL RC ERRFILE STDOUT: what this create did, in the report.
+report_create() {
+  local label="$1" rc="$2" errf="$3" out="$4"
+  {
+    case "$rc" in
+      0) echo "REFUSING: ${label}: the provisioner exited 0 but its last line is not a kubeconfig file (rc=0)."
+         echo "          That is a provisioner defect, not a product finding." ;;
+      4) echo "BLOCKED: ${label}: the capacity preflight refused this run before anything was created (rc=4)."
+         echo "         The substrate cannot hold this VM now. Not a provisioning failure and not a product finding." ;;
+      5) echo "INFRA_ERROR: ${label}: the capacity preflight could not read the substrate (rc=5). Nothing was created." ;;
+      *) echo "REFUSING: ${label}: provisioning failed (rc=${rc}); no kubeconfig was produced." ;;
+    esac
+    echo "  --- the provisioner's stderr, last ${CREATE_TAIL_LINES} lines (terminal codes stripped, credential-shaped text masked) ---"
+    python3 "${HERE}/lib/stderr-tail.py" --lines "$CREATE_TAIL_LINES" "$errf" 2>&1 | sed 's/^/  | /'
+    if [ "$rc" -eq 0 ]; then
+      echo "  --- its stdout, last 3 lines ---"
+      printf '%s\n' "$out" | tail -3 >"${errf}.out"
+      python3 "${HERE}/lib/stderr-tail.py" --lines 3 "${errf}.out" 2>&1 | sed 's/^/  | /'
+    fi
+    echo "  --- end ---"
+    echo "  Nothing below this line would have measured the documented paths."
+  } | tee -a "$REPORT"
+}
+# capacity_lines ERRFILE: a create that worked keeps its capacity verdict in the report.
+capacity_lines() {
+  grep -E '^  capacity (OK|BLOCKED):' "$1" 2>/dev/null | tee -a "$REPORT" >/dev/null || true
+}
+CREATE_ERR="${RUNDIR}/create-stderr-${STAMP}.txt"
+
 echo "" | tee -a "$REPORT"
 echo "=== provisioning ===" | tee -a "$REPORT"
 
@@ -424,9 +488,16 @@ elif [ -n "$RESUME" ] && [ -s "$(resume_get guest.kubeconfig)" ] \
   echo "resumed: reusing the guest cluster this run created earlier ($(resume_get group.current))" | tee -a "$REPORT"
 else
   if ! budget_ok; then yield_run "budget spent before provisioning"; fi
-  GUEST_KUBECONFIG="$("$CLUSTER" create | tail -1)"
+  CREATE_OUT="$(run_create "$CREATE_ERR" "$CLUSTER" create)"
   CREATE_RC=$?
-  resume_put guest.kubeconfig "$GUEST_KUBECONFIG"
+  GUEST_KUBECONFIG="$(kubeconfig_of "$CREATE_RC" "$CREATE_OUT")" || GUEST_KUBECONFIG=""
+  if [ -n "$GUEST_KUBECONFIG" ]; then
+    capacity_lines "$CREATE_ERR"
+    resume_put guest.kubeconfig "$GUEST_KUBECONFIG"
+  else
+    report_create "provisioning" "$CREATE_RC" "$CREATE_ERR" "$CREATE_OUT"
+    exit 1
+  fi
 fi
 # CREATED is set BELOW, only once provisioning is known to have worked. It used
 # to be set on this line unconditionally, so a `create` that refused ... a wrong
@@ -440,11 +511,11 @@ fi
 # a page of connection-refused noise that read like the CLUSTER was broken. The
 # provisioner had in fact refused cleanly, one line, at the top. Never let a
 # failed setup masquerade as a failed test.
+# A create this run made has already been judged above (report_create). What is
+# left to catch here is a reused or resumed kubeconfig that is not there.
 if [ "$CREATE_RC" -ne 0 ] || [ -z "$GUEST_KUBECONFIG" ] || [ ! -s "$GUEST_KUBECONFIG" ]; then
   {
-    echo "REFUSING: provisioning did not produce a kubeconfig (rc=${CREATE_RC})."
-    echo "          Path returned: '${GUEST_KUBECONFIG:-<empty>}'"
-    echo "          The provisioner's own message above is the real error."
+    echo "REFUSING: no usable kubeconfig for this run (rc=${CREATE_RC}): '${GUEST_KUBECONFIG:-<empty>}'."
     echo "          Nothing below this line would have measured the documented paths."
   } | tee -a "$REPORT"
   exit 1
@@ -577,11 +648,14 @@ reprovision() {
   echo "" | tee -a "$REPORT"
   echo "=== rebuilding the cluster for route group '$1' ===" | tee -a "$REPORT"
   KUBECONFIG="$SUBSTRATE_KUBECONFIG" "$CLUSTER" destroy >/dev/null 2>&1 || true
-  local kc; kc="$(KUBECONFIG="$SUBSTRATE_KUBECONFIG" "$CLUSTER" create | tail -1)"
-  if [ -z "$kc" ] || [ ! -s "$kc" ]; then
+  local kc out rc
+  out="$(KUBECONFIG="$SUBSTRATE_KUBECONFIG" run_create "$CREATE_ERR" "$CLUSTER" create)"; rc=$?
+  if ! kc="$(kubeconfig_of "$rc" "$out")"; then
     echo "REFUSING: could not rebuild for group '$1'. INFRA, not a product finding." | tee -a "$REPORT"
+    report_create "rebuild for group '$1'" "$rc" "$CREATE_ERR" "$out"
     exit 1
   fi
+  capacity_lines "$CREATE_ERR"
   export KUBECONFIG="$kc"
   KUBE_CONTEXT="$(guest_context_of "$kc")"; export KUBE_CONTEXT
   : "${KUBE_CONTEXT:?the rebuilt guest kubeconfig names no context}"

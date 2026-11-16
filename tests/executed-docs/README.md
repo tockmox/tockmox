@@ -429,14 +429,15 @@ clothes: a replica Longhorn will not schedule shows up as a database in
 never finishes. Both read as a product defect, and a false finding is worse
 than none.
 
-The check is sized from the run's own declared need, `TOCKMOX_VM_DISK` and
-`TOCKMOX_VM_MEMORY`, and has three parts (`lib/capacity-check.py` holds the rule):
+The check is sized from the run's own declared need, `TOCKMOX_VM_DISK`,
+`TOCKMOX_VM_MEMORY` and `TOCKMOX_VM_CORES`, and has four parts (`lib/capacity-check.py` holds the rule):
 
 | Check | Passes when |
 |---|---|
 | `storage` | some one schedulable Longhorn disk has `floor(stop% * storageMaximum) - storageScheduled` at least the VM disk. Longhorn puts a replica on one disk, so a node-level sum never decides: two half-full disks do not make one disk that holds the replica. With `TOCKMOX_CAPACITY_REPLICAS=N`, N distinct disks must each fit |
 | `memory` | some one schedulable node has allocatable memory minus the memory requests of its non-terminated pods at least the VM memory. This is the scheduler's own view and needs no metrics API |
 | `harness` | no other harness-labelled VM stands in the run's namespace. A crashed run's leftover still holds its disk and memory |
+| `quota` | every ResourceQuota in the run's namespace has room, key by key (hard minus used), for what the run adds: the VM memory plus the launcher pod's overhead on `requests.memory`, the launcher's cpu on `requests.cpu`, the VM disk on `requests.storage`, one PVC and one VirtualMachine. The node can have room while the namespace does not; then the quota refuses the VM's pod and the run used to fail as "no kubeconfig". A BLOCKED quota line names the pods holding the namespace's memory. A key the rule does not size is listed as not sized. No quota is a pass that says so |
 
 A run that does not fit prints `BLOCKED: <check>: <numbers>` and exits **4**.
 Nothing has been created. A capacity source that cannot be read, or reads as
@@ -444,12 +445,31 @@ nonsense, prints `INFRA_ERROR: capacity-source: ...` and exits **5**; it is neve
 a pass. A bad setting exits 2 like every other refusal. A run that fits is
 unchanged.
 
+**The launcher overhead is an estimate.** KubeVirt's virt-launcher pod requests
+the VM's memory plus its own overhead, which KubeVirt computes and the VM spec
+does not carry. `TOCKMOX_CAPACITY_LAUNCHER_OVERHEAD` (default `512Mi`) is that
+overhead, measured on the rig (KubeVirt 1.7, 2026-11-16): a 1Gi, 1-vCPU VM's
+launcher requests 402Mi beyond its memory, and the 24Gi, 8-vCPU harness VM's
+overhead is at most 589Mi, since it fit a 26Gi quota beside 1.4Gi of other pods.
+`TOCKMOX_CAPACITY_LAUNCHER_CPU` defaults to 100m per vCPU, KubeVirt's default
+ratio. Where the estimate is short, the quota still refuses the pod, and the run
+report carries the provisioner's own error (below).
+
+**What `create` said goes in the report.** When `create` fails, the run report
+carries its exit code and the last 40 lines of its stderr
+(`TOCKMOX_CREATE_TAIL_LINES`), with terminal codes stripped and credential-shaped
+text masked (`lib/stderr-tail.py`), under a line that says which failure it was:
+`BLOCKED` (4) and `INFRA_ERROR` (5) from this preflight are not reported as a
+provisioning failure. A failed `create`'s stdout is never read as the kubeconfig
+path. A `create` that works leaves its capacity lines in the report.
+
 **What the credential must be able to read.** The check reads `nodes.longhorn.io`
-in `longhorn-system`, Nodes, Pods in every namespace and the harness's own
-VirtualMachines. A credential scoped to one namespace, as this harness intends,
-can read only the last. That is `INFRA_ERROR`, on purpose: the choice is between
+in `longhorn-system`, Nodes, Pods in every namespace, and the harness's own
+VirtualMachines and ResourceQuotas. A credential scoped to one namespace, as this
+harness intends, can read only the last two (if its Role lists `resourcequotas`). That is `INFRA_ERROR`, on purpose: the choice is between
 a narrow, read-only grant on the substrate (`get` and `list` on `nodes`, `pods`
-and `nodes.longhorn.io`, bound to the harness identity and no write verb) and an
+and `nodes.longhorn.io`, and `list` on `resourcequotas` in the run's namespace,
+bound to the harness identity and no write verb) and an
 explicit `TOCKMOX_CAPACITY_CHECK=skip`, which prints a warning on every run so an
 unchecked run is never mistaken for a checked one. An empty all-namespace pod
 list is also `INFRA_ERROR`: some API front ends answer a list the credential may

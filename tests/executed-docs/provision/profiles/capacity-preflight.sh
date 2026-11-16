@@ -22,6 +22,10 @@
 #   memory   some one schedulable node must have allocatable memory minus the
 #            memory requests of its non-terminated pods >= the memory
 #   harness  no other harness-labelled VM in the run's namespace
+#   quota    every ResourceQuota in the run's namespace has room, key by key,
+#            for what this run adds: the VM memory plus the launcher's overhead,
+#            the launcher's cpu request, the VM disk, one PVC and one VM. The
+#            node can have room while the namespace does not.
 #
 # VERDICTS, as exit codes of `create` (everything else this script refuses with 2):
 #   4  BLOCKED       "BLOCKED: <check>: <numbers>". The substrate was read and
@@ -31,7 +35,7 @@
 #
 # WHAT THE CREDENTIAL MUST BE ABLE TO READ, and what happens when it cannot. The
 # check reads Longhorn nodes (longhorn-system), Nodes and all-namespace Pods
-# (cluster scope) and the harness's own VirtualMachines. A credential scoped to
+# (cluster scope), and the harness's own VirtualMachines and ResourceQuotas. A credential scoped to
 # one namespace, as this harness intends, cannot read the first three. That is
 # INFRA_ERROR, by design: the fix is a narrow read-only grant on the substrate
 # (get and list on nodes, pods and nodes.longhorn.io; docs in README.md, "Capacity
@@ -43,6 +47,17 @@
 #   TOCKMOX_CAPACITY_REPLICAS           1     replicas the storage class keeps; that
 #                                             many distinct disks must each fit
 #   TOCKMOX_CAPACITY_ALLOW_OTHER_VMS    0     1 lets another harness VM stand
+#   TOCKMOX_CAPACITY_LAUNCHER_OVERHEAD  512Mi what KubeVirt's virt-launcher pod requests
+#                                             beyond the VM's memory. Measured on the rig
+#                                             2026-11-16 (KubeVirt 1.7): a 1Gi, 1-vCPU VM's
+#                                             launcher requests 1Gi + 402Mi, plus a 35M
+#                                             console sidecar; for the 24Gi, 8-vCPU harness
+#                                             VM the overhead was at most 589Mi (it fit a
+#                                             26Gi quota beside 1.4Gi of other pods). An
+#                                             estimate: when it is wrong, the quota still
+#                                             refuses, and the report now says why.
+#   TOCKMOX_CAPACITY_LAUNCHER_CPU       (cores x 100m) the launcher's cpu request; KubeVirt's
+#                                             default ratio requests 100m per vCPU
 #
 # NOT DECIDED HERE: whether the guest's own pods will fit INSIDE the guest. This
 # is the substrate's side only.
@@ -88,18 +103,28 @@ capacity_preflight() {
   capacity_read "$d/nodes.json" "Nodes" get nodes
   capacity_read "$d/pods.json" "Pods in every namespace" get pods -A --field-selector=status.phase!=Succeeded,status.phase!=Failed
   capacity_read "$d/vms.json" "harness VirtualMachines in ${NS}" -n "$NS" get virtualmachines.kubevirt.io -l tockmox.com/harness=executed-docs
+  capacity_read "$d/quotas.json" "ResourceQuotas in ${NS}" -n "$NS" get resourcequotas
 
-  local allow=""
+  local allow="" lcpu="${TOCKMOX_CAPACITY_LAUNCHER_CPU:-}"
   [ "$CAPACITY_ALLOW_OTHER_VMS" = "1" ] && allow="--allow-other-vms"
+  # CPU_CORES is the VM's own vCPU count (TOCKMOX_VM_CORES); read here, at call time,
+  # because throwaway-cluster.sh sets it after it sources this file.
+  if [ -z "$lcpu" ]; then
+    case "${CPU_CORES:-}" in ''|*[!0-9]*) echo "REFUSING: TOCKMOX_VM_CORES must be a whole number, got '${CPU_CORES:-}'" >&2; rm -rf "$d"; exit 2 ;; esac
+    lcpu="$((CPU_CORES * 100))m"
+  fi
   # shellcheck disable=SC2086  # $allow is empty or one fixed flag
   what="$(python3 "$CAPACITY_PY" --disk "$DISK" --memory "$MEMORY" --stop-percent "$CAPACITY_STOP_PERCENT" \
-            --replicas "$CAPACITY_REPLICAS" --vm "$VM_NAME" $allow \
-            --longhorn "$d/longhorn.json" --nodes "$d/nodes.json" --pods "$d/pods.json" --vms "$d/vms.json" 2>&1)" || rc=$?
+            --replicas "$CAPACITY_REPLICAS" --vm "$VM_NAME" $allow --namespace "$NS" \
+            --launcher-memory-overhead "${TOCKMOX_CAPACITY_LAUNCHER_OVERHEAD:-512Mi}" --launcher-cpu "$lcpu" \
+            --longhorn "$d/longhorn.json" --nodes "$d/nodes.json" --pods "$d/pods.json" --vms "$d/vms.json" \
+            --quotas "$d/quotas.json" 2>&1)" || rc=$?
   rm -rf "$d"
   case "$rc" in
     0) printf '%s\n' "$what" | sed 's/^/  capacity /' >&2 ;;
     4) printf '%s\n' "$what" | grep '^BLOCKED:' >&2
-       echo "          Nothing was created. Free the capacity, lower TOCKMOX_VM_DISK / TOCKMOX_VM_MEMORY deliberately, or see" >&2
+       echo "          Nothing was created. Free the capacity (for a quota line, the pods it names), lower TOCKMOX_VM_DISK /" >&2
+       echo "          TOCKMOX_VM_MEMORY deliberately, raise the namespace quota, or see" >&2
        echo "          'Capacity preflight' in tests/executed-docs/README.md for the thresholds." >&2
        exit 4 ;;
     5) printf '%s\n' "$what" >&2; exit 5 ;;

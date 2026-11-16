@@ -21,6 +21,14 @@
 #      list, no disk at all) is INFRA_ERROR (exit 5), never a pass, and creates nothing
 #   6. the thresholds and the opt-outs are environment-overridable, a bad value is
 #      refused (exit 2), and the skip is loud
+#   7. a namespace ResourceQuota with no room for what the run adds is BLOCKED and
+#      names the key, the numbers and the pods holding the namespace's memory,
+#      while the node itself has room; no quota at all is a pass that
+#      says so; an unreadable or uncounted quota is INFRA_ERROR
+#   8. run.sh puts what `create` said into the run REPORT: the provisioner's own
+#      error (masked, bounded) and its exit code under the REFUSING line, a BLOCKED
+#      capacity refusal as BLOCKED rather than as a provisioning failure, and a
+#      create line on stdout is never taken for the kubeconfig path
 #
 # WHAT IT DOES NOT SHOW: that the numbers in a real Longhorn Node or Pod list have
 # the shape the fixtures give them (the live, read-only run in the PR notes does),
@@ -77,6 +85,7 @@ case "$j" in
   "get nodes -o json") capfx nodes ;;
   "get pods -A --field-selector=status.phase!=Succeeded,status.phase!=Failed -o json") capfx pods ;;
   "get virtualmachines.kubevirt.io -l tockmox.com/harness=executed-docs -o json") capfx vms ;;
+  "get resourcequotas -o json") capfx quotas ;;
   "get virtualmachines.kubevirt.io -o name") exit 0 ;;
   "auth can-i"*) echo yes ;;
   *"jsonpath={.clusters[0].cluster.server}") printf 'https://api.invalid:6443' ;;
@@ -146,13 +155,19 @@ chmod +x "${BIN}"/*
 # new_state DIR [key=val ...]: a fixture set. Defaults FIT a 250Gi / 24Gi VM:
 #   disk_a/disk_b  "max:scheduled" in GiB; node_mem allocatable GiB; pod_mem requested GiB;
 #   vms            space-separated labelled VM names
+#   quota          yes|no: one ResourceQuota in the namespace, shaped like the rig's
+#                  harness-ceiling; q_mem "hard:used" GiB (26:1), q_cpu "hard:used"
+#                  millicores (10000:105), q_disk "hard:used" GiB (600:40), q_vms
+#                  "hard:used" (4:1), q_used_missing a key left out of status.used,
+#                  q_extra one more hard key, counted "key=hard:used"
 new_state() {
   local st="$1"; shift
   rm -rf "$st"; mkdir -p "$st/secrets" "$st/fx"; : >"$st/log"; : >"$st/calls"
   "$REAL_PY" - "$st/fx" "$@" <<'PYFX'
 import json, sys
 fx = sys.argv[1]
-o = {"disk_a": "4000:1800", "disk_b": "2000:1200", "node_mem": "94", "pod_mem": "30", "vms": "", "pods": "yes", "disks": "yes"}
+o = {"disk_a": "4000:1800", "disk_b": "2000:1200", "node_mem": "94", "pod_mem": "30", "vms": "", "pods": "yes", "disks": "yes",
+     "quota": "yes", "q_mem": "26:1", "q_cpu": "10000:105", "q_disk": "600:40", "q_vms": "4:1", "q_used_missing": "", "q_extra": ""}
 for kv in sys.argv[2:]:
     k, v = kv.split("=", 1); o[k] = v
 G = 1 << 30
@@ -175,8 +190,29 @@ if o["pods"] == "yes":
         {"metadata": {"name": "p1"}, "spec": {"nodeName": "node-1", "containers": [{"resources": {"requests": {"memory": "%dGi" % int(o["pod_mem"])}}}]}, "status": {"phase": "Running"}},
         {"metadata": {"name": "p2"}, "spec": {"nodeName": "node-1", "containers": [{"resources": {"requests": {"memory": "500Gi"}}}]}, "status": {"phase": "Succeeded"}},
         {"metadata": {"name": "p3"}, "spec": {"containers": [{"resources": {"requests": {"memory": "500Gi"}}}]}, "status": {"phase": "Pending"}}]
+    # Two pods in the run's namespace, as on the rig: what a BLOCKED quota line names.
+    pods["items"] += [
+        {"metadata": {"name": "virt-launcher-other-a", "namespace": "tockmox-test"}, "spec": {"nodeName": "node-1",
+         "containers": [{"resources": {"requests": {"memory": "8Gi"}}}],
+         "initContainers": [{"restartPolicy": "Always", "resources": {"requests": {"memory": "35M"}}}]}, "status": {"phase": "Running"}},
+        {"metadata": {"name": "virt-launcher-other-b", "namespace": "tockmox-test"}, "spec": {"nodeName": "node-1",
+         "containers": [{"resources": {"requests": {"memory": "1Gi"}}}]}, "status": {"phase": "Running"}}]
 vms = {"items": [{"metadata": {"name": n}} for n in o["vms"].split()]}
-for name, doc in (("longhorn", lh), ("nodes", nodes), ("pods", pods), ("vms", vms)):
+def hu(spec):
+    return [x for x in spec.split(":")]
+quotas = {"items": []}
+if o["quota"] == "yes":
+    mh, mu = hu(o["q_mem"]); ch, cu = hu(o["q_cpu"]); dh, du = hu(o["q_disk"]); vh, vu = hu(o["q_vms"])
+    hard = {"requests.memory": "%sGi" % mh, "requests.cpu": "%sm" % ch, "requests.storage": "%sGi" % dh,
+            "count/virtualmachines.kubevirt.io": vh, "persistentvolumeclaims": "20"}
+    used = {"requests.memory": "%sGi" % mu, "requests.cpu": "%sm" % cu, "requests.storage": "%sGi" % du,
+            "count/virtualmachines.kubevirt.io": vu, "persistentvolumeclaims": "2"}
+    if o["q_extra"]:
+        k, v = o["q_extra"].split("=", 1); h, u = v.split(":"); hard[k] = h; used[k] = u
+    if o["q_used_missing"]:
+        used.pop(o["q_used_missing"], None)
+    quotas["items"] = [{"metadata": {"name": "harness-ceiling"}, "spec": {"hard": hard}, "status": {"hard": hard, "used": used}}]
+for name, doc in (("longhorn", lh), ("nodes", nodes), ("pods", pods), ("vms", vms), ("quotas", quotas)):
     json.dump(doc, open("%s/%s.json" % (fx, name), "w"))
 PYFX
 }
@@ -264,7 +300,7 @@ if [ "$RC" -ne 4 ] && [ "$(vm_applied "$S")" -ge 1 ]; then ok "TOCKMOX_CAPACITY_
 else bad "TOCKMOX_CAPACITY_ALLOW_OTHER_VMS=1 lets a stray stand" "rc=${RC}: $(printf '%s' "$OUT" | tail -3)"; fi
 
 # ---- clause 5: an unreadable source refuses ------------------------------------
-for src in longhorn nodes pods vms; do
+for src in longhorn nodes pods vms quotas; do
   S="${TMP}/forbidden-$src"; new_state "$S"; : >"$S/fx/$src.fail"
   run_tc "$S" create
   if [ "$RC" -eq 5 ] && [ "$(vm_applied "$S")" -eq 0 ] && [ "$(mutations "$S")" -eq 0 ] \
@@ -299,7 +335,8 @@ run_tc "$S" create
 if printf '%s' "$OUT" | grep '85% stop line' >/dev/null; then ok "the default stop line is 85 percent"
 else bad "the default stop line is 85 percent" "$(printf '%s' "$OUT" | grep 'capacity' | head -2)"; fi
 for badval in "TOCKMOX_CAPACITY_STOP_PERCENT=0" "TOCKMOX_CAPACITY_STOP_PERCENT=101" "TOCKMOX_CAPACITY_STOP_PERCENT=lots" "TOCKMOX_CAPACITY_REPLICAS=0" \
-              "TOCKMOX_CAPACITY_CHECK=off" "TOCKMOX_CAPACITY_ALLOW_OTHER_VMS=yes" "TOCKMOX_VM_DISK=big"; do
+              "TOCKMOX_CAPACITY_CHECK=off" "TOCKMOX_CAPACITY_ALLOW_OTHER_VMS=yes" "TOCKMOX_VM_DISK=big" \
+              "TOCKMOX_CAPACITY_LAUNCHER_OVERHEAD=lots" "TOCKMOX_CAPACITY_LAUNCHER_CPU=fast" "TOCKMOX_VM_CORES=eight"; do
   S="${TMP}/bad-${badval}"; new_state "$S"
   run_tc "$S" create "$badval"
   if [ "$RC" -eq 2 ] && [ "$(mutations "$S")" -eq 0 ]; then ok "create refuses ${badval} (exit 2) before it changes anything"
@@ -312,11 +349,151 @@ if [ "$RC" -ne 4 ] && [ "$RC" -ne 5 ] && [ "$(vm_applied "$S")" -ge 1 ] && print
   ok "TOCKMOX_CAPACITY_CHECK=skip runs unchecked, says so loudly, and reads nothing"
 else bad "TOCKMOX_CAPACITY_CHECK=skip runs unchecked, says so loudly, and reads nothing" "rc=${RC}: $(printf '%s' "$OUT" | tail -3)"; fi
 
+# ---- clause 7: the namespace ResourceQuota ------------------------------
+# The fixture quota is the rig's: 26Gi requests.memory, 10 cpu, 600Gi storage, 4 VMs.
+S="${TMP}/quota-fit"; new_state "$S"
+run_tc "$S" create
+if [ "$RC" -ne 4 ] && [ "$RC" -ne 5 ] && [ "$(vm_applied "$S")" -ge 1 ] \
+   && printf '%s' "$OUT" | grep -F 'capacity OK: quota: harness-ceiling: ' | grep -F 'requests.memory need 24.5 GiB (24.0 GiB VM + 0.5 GiB launcher overhead), free 25.0 GiB of 26.0 GiB' >/dev/null; then
+  ok "a namespace quota with room passes, and its OK line carries the numbers"
+else bad "a namespace quota with room passes, and its OK line carries the numbers" "rc=${RC}: $(printf '%s' "$OUT" | grep quota | head -2)"; fi
+# 2026-11-14 to 16 on the rig: the node had room, the namespace did not.
+S="${TMP}/quota-mem"; new_state "$S" q_mem=26:9.9
+blocked_case "a namespace quota without room for the VM's memory is BLOCKED while the node has room" "$S" "BLOCKED: quota: harness-ceiling refuses requests.memory need 24.5 GiB"
+if printf '%s' "$OUT" | grep 'BLOCKED: quota:' | grep -F 'memory held in tockmox-test by: virt-launcher-other-a 8.0 GiB, virt-launcher-other-b 1.0 GiB' >/dev/null \
+   && ! printf '%s' "$OUT" | grep -F 'BLOCKED: memory:' >/dev/null; then
+  ok "the BLOCKED quota line names the pods holding the namespace's memory, largest first, and the node check is not blamed"
+else bad "the BLOCKED quota line names the pods holding the namespace's memory, largest first, and the node check is not blamed" "$(printf '%s' "$OUT" | grep BLOCKED)"; fi
+# The run that fit on 2026-11-16: 1.43 GiB of other pods in a 26 GiB quota.
+S="${TMP}/quota-edge"; new_state "$S" q_mem=26:1.43
+run_tc "$S" create
+if [ "$RC" -ne 4 ] && [ "$(vm_applied "$S")" -ge 1 ]; then ok "the shape that fit on the rig on 2026-11-16 still fits"
+else bad "the shape that fit on the rig on 2026-11-16 still fits" "rc=${RC}: $(printf '%s' "$OUT" | grep -E 'quota|BLOCKED' | head -2)"; fi
+S="${TMP}/quota-overhead"; new_state "$S" q_mem=26:1.43
+blocked_case "the launcher overhead is TOCKMOX_CAPACITY_LAUNCHER_OVERHEAD (600Mi blocks where 512Mi fits)" "$S" "requests.memory need 24.6 GiB (24.0 GiB VM + 0.6 GiB launcher overhead)" TOCKMOX_CAPACITY_LAUNCHER_OVERHEAD=600Mi
+S="${TMP}/quota-disk"; new_state "$S" q_disk=600:400
+blocked_case "a quota without room for the VM disk is BLOCKED on requests.storage" "$S" "refuses requests.storage need 250.0 GiB, free 200.0 GiB"
+S="${TMP}/quota-vms"; new_state "$S" q_vms=4:4
+blocked_case "a quota with no VM left is BLOCKED on its VirtualMachine count" "$S" "refuses count/virtualmachines.kubevirt.io need 1, free 0"
+S="${TMP}/quota-cpu"; new_state "$S" q_cpu=10000:9500
+blocked_case "the launcher's cpu is 100m per vCPU of the run's own TOCKMOX_VM_CORES (8 cores, 800m, blocks on 500m free)" "$S" "refuses requests.cpu need 0.8 cpu, free 0.5 cpu"
+S="${TMP}/quota-cpu-4"; new_state "$S" q_cpu=10000:9500
+run_tc "$S" create TOCKMOX_VM_CORES=4
+if [ "$RC" -ne 4 ] && [ "$(vm_applied "$S")" -ge 1 ]; then ok "4 vCPUs (400m) fit where 8 do not"
+else bad "4 vCPUs (400m) fit where 8 do not" "rc=${RC}: $(printf '%s' "$OUT" | grep -E 'BLOCKED|quota' | head -2)"; fi
+S="${TMP}/quota-none"; new_state "$S" quota=no
+run_tc "$S" create
+if [ "$RC" -ne 4 ] && [ "$RC" -ne 5 ] && [ "$(vm_applied "$S")" -ge 1 ] && printf '%s' "$OUT" | grep -F 'capacity OK: quota: no ResourceQuota in tockmox-test' >/dev/null; then
+  ok "no ResourceQuota in the namespace is a pass that says so"
+else bad "no ResourceQuota in the namespace is a pass that says so" "rc=${RC}: $(printf '%s' "$OUT" | grep quota | head -2)"; fi
+S="${TMP}/quota-unsized"; new_state "$S" q_extra=services=10:2
+run_tc "$S" create
+if [ "$RC" -ne 4 ] && printf '%s' "$OUT" | grep 'capacity OK: quota:' | grep -F 'not sized: services' >/dev/null; then
+  ok "a quota key the rule does not size is named as not sized, never silently passed"
+else bad "a quota key the rule does not size is named as not sized, never silently passed" "rc=${RC}: $(printf '%s' "$OUT" | grep quota | head -2)"; fi
+S="${TMP}/quota-uncounted"; new_state "$S" q_used_missing=requests.memory
+run_tc "$S" create
+if [ "$RC" -eq 5 ] && [ "$(mutations "$S")" -eq 0 ] && printf '%s' "$OUT" | grep -F 'quota harness-ceiling: status.used has no requests.memory' >/dev/null; then
+  ok "a quota the controller has not counted is INFRA_ERROR, not a pass"
+else bad "a quota the controller has not counted is INFRA_ERROR, not a pass" "rc=${RC}: $(printf '%s' "$OUT" | tail -3)"; fi
+
+# ---- clause 8: run.sh reports what create said ---------------------------
+# run.sh resolves the ref under test in its own repository root, so the copy lives in a
+# one-commit scratch repository, with a fake provisioner in place of throwaway-cluster.sh.
+FXREPO="${TMP}/repo"; ED="${FXREPO}/tests/executed-docs"; mkdir -p "${ED}/paths" "${ED}/provision" "${TMP}/rbin"
+RUNSH="${RUNSH:-$(dirname "$TC")/../run.sh}"
+cp "$RUNSH" "${ED}/run.sh"; cp -R "$(dirname "$RUNSH")/lib" "${ED}/lib"
+cat >"${ED}/provision/throwaway-cluster.sh" <<'FAKE'
+#!/usr/bin/env bash
+# FAKE_CREATE picks what `create` does; every verb logs itself.
+echo "$1 ${FAKE_CREATE:-}" >>"$FAKE_LOG"
+[ "$1" = create ] || exit 0
+case "$FAKE_CREATE" in
+  quota)  echo "virtualmachine.kubevirt.io/ed-1 created"
+          echo "  capacity OK: memory: need 24.0 GiB on one node" >&2
+          echo "Error creating pod: pods "virt-launcher-ed-1" is forbidden: exceeded quota: harness-ceiling, requested: requests.memory=24.5Gi" >&2
+          echo "debug: token=abc123SECRETVALUE" >&2
+          exit 1 ;;
+  blocked) echo "BLOCKED: quota: harness-ceiling refuses requests.memory need 24.5 GiB" >&2; exit 4 ;;
+  infra)  echo "INFRA_ERROR: capacity-source: cannot read ResourceQuotas in tockmox-test" >&2; exit 5 ;;
+  noise)  echo "virtualmachine.kubevirt.io/ed-1 created"; exit 0 ;;
+  ok)     echo "  capacity OK: quota: harness-ceiling: requests.memory need 24.5 GiB, free 25.0 GiB of 26.0 GiB" >&2
+          echo "virtualmachine.kubevirt.io/ed-1 created"; echo "fixture" >"${FAKE_KC}"; echo "${FAKE_KC}"; exit 0 ;;
+esac
+exit 9
+FAKE
+chmod 755 "${ED}/provision/throwaway-cluster.sh"
+cat >"${ED}/paths/FXa-passes.sh" <<'FXP'
+#!/usr/bin/env bash
+. "$(cd "$(dirname "$0")/.." && pwd)/lib/assert.sh"
+path_begin "FXa-passes" "a fixture path that passes"
+execute_begin "nothing"; execute_end 0
+assert_artifact "one equals one" 'printf 1' 1
+path_finish
+FXP
+chmod 755 "${ED}/paths/FXa-passes.sh"
+cat >"${TMP}/rbin/kubectl" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *"config current-context"*|*"config get-contexts"*) echo fixture ;;
+  *"get nodes"*) printf 'True' ;;
+  *"version -o json"*) echo '{"serverVersion": {"gitVersion": "v0.0.0-fixture"}}' ;;
+esac
+exit 0
+SH
+chmod 755 "${TMP}/rbin/kubectl"
+if ! { git -C "$FXREPO" init -q && git -C "$FXREPO" -c user.name=fixture -c user.email=fixture@example.com \
+    commit -q --allow-empty -m fixture; }; then bad "the scratch repository for run.sh" "git init/commit failed"; fi
+run_rs() {  # mode -> $ROUT, $RRC, $RREP (the report's text)
+  local w="${TMP}/rs-$1"; rm -rf "$w"; mkdir -p "$w"
+  ROUT="$( cd "$FXREPO" && env PATH="${TMP}/rbin:${PATH}" TOCKMOX_DOCS_REF=HEAD TOCKMOX_SUBSTRATE_CONTEXT=stub-substrate \
+           KUBECONFIG="${TMP}/substrate.kubeconfig" TOCKMOX_WORKDIR="$w" FAKE_CREATE="$1" FAKE_LOG="$w/fake.log" \
+           FAKE_KC="$w/guest.kubeconfig" bash "${ED}/run.sh" FXa 2>&1 )"; RRC=$?
+  RREP="$(cat "$w"/report-*.txt 2>/dev/null)"
+}
+run_rs quota
+if [ "$RRC" -ne 0 ] && printf '%s' "$RREP" | grep -F 'REFUSING: provisioning: provisioning failed (rc=1)' >/dev/null \
+   && printf '%s' "$RREP" | grep -F 'exceeded quota: harness-ceiling, requested: requests.memory=24.5Gi' >/dev/null; then
+  ok "run.sh: a failed create puts its exit code and its own error into the REPORT"
+else bad "run.sh: a failed create puts its exit code and its own error into the REPORT" "rc=${RRC}: $(printf '%s' "$RREP" | grep -A6 'provisioning ===' | tr '\n' ' ')"; fi
+if printf '%s' "$RREP" | grep -F 'token=[masked]' >/dev/null && ! printf '%s' "$RREP" | grep -F 'abc123SECRETVALUE' >/dev/null; then
+  ok "run.sh: credential-shaped text in the provisioner's error is masked in the report"
+else bad "run.sh: credential-shaped text in the provisioner's error is masked in the report" "$(printf '%s' "$RREP" | grep -i token)"; fi
+if ! printf '%s' "$RREP" | grep -E "Path returned|virtualmachine.kubevirt.io/ed-1 created'" >/dev/null; then
+  ok "run.sh: a failed create's stdout is never read as the kubeconfig path"
+else bad "run.sh: a failed create's stdout is never read as the kubeconfig path" "$(printf '%s' "$RREP" | grep -E 'Path|created')"; fi
+if printf '%s' "$ROUT" | grep -F 'exceeded quota: harness-ceiling' >/dev/null; then ok "run.sh: the provisioner's stderr still streams to the job log"
+else bad "run.sh: the provisioner's stderr still streams to the job log" "$(printf '%s' "$ROUT" | head -5 | tr '\n' ' ')"; fi
+run_rs blocked
+if [ "$RRC" -ne 0 ] && printf '%s' "$RREP" | grep -F 'BLOCKED: provisioning: the capacity preflight refused this run before anything was created (rc=4)' >/dev/null \
+   && printf '%s' "$RREP" | grep -F '| BLOCKED: quota: harness-ceiling refuses requests.memory' >/dev/null \
+   && ! printf '%s' "$RREP" | grep -E 'provisioning failed|did not produce a kubeconfig' >/dev/null; then
+  ok "run.sh: a capacity BLOCKED is reported as BLOCKED, with its reason, never as a provisioning failure"
+else bad "run.sh: a capacity BLOCKED is reported as BLOCKED, with its reason, never as a provisioning failure" "rc=${RRC}: $(printf '%s' "$RREP" | grep -A4 'provisioning ===' | tr '\n' ' ')"; fi
+run_rs infra
+if [ "$RRC" -ne 0 ] && printf '%s' "$RREP" | grep -F 'INFRA_ERROR: provisioning: the capacity preflight could not read the substrate (rc=5)' >/dev/null \
+   && printf '%s' "$RREP" | grep -F 'cannot read ResourceQuotas in tockmox-test' >/dev/null; then
+  ok "run.sh: a capacity INFRA_ERROR is reported as INFRA_ERROR, with the source it could not read"
+else bad "run.sh: a capacity INFRA_ERROR is reported as INFRA_ERROR, with the source it could not read" "rc=${RRC}: $(printf '%s' "$RREP" | grep -A4 'provisioning ===' | tr '\n' ' ')"; fi
+run_rs noise
+if [ "$RRC" -ne 0 ] && printf '%s' "$RREP" | grep -F 'the provisioner exited 0 but its last line is not a kubeconfig file' >/dev/null \
+   && ! grep -q '^destroy' "${TMP}/rs-noise/fake.log"; then
+  ok "run.sh: a create that exits 0 with no kubeconfig file is refused, and nothing is torn down"
+else bad "run.sh: a create that exits 0 with no kubeconfig file is refused, and nothing is torn down" "rc=${RRC}: $(printf '%s' "$RREP" | grep -A3 'provisioning ===' | tr '\n' ' '); $(cat "${TMP}/rs-noise/fake.log" 2>/dev/null | tr '\n' ' ')"; fi
+run_rs ok
+if [ "$RRC" -eq 0 ] && grep -q '^destroy' "${TMP}/rs-ok/fake.log"; then
+  ok "run.sh: a create that works runs the path and tears down (the control)"
+else bad "run.sh: a create that works runs the path and tears down (the control)" "rc=${RRC}: $(printf '%s' "$ROUT" | tail -4 | tr '\n' ' ')"; fi
+if printf '%s' "$RREP" | grep -F '  capacity OK: quota: harness-ceiling' >/dev/null; then
+  ok "run.sh: a create that works keeps its capacity lines in the report"
+else bad "run.sh: a create that works keeps its capacity lines in the report" "$(printf '%s' "$RREP" | grep -A3 'provisioning ===' | tr '\n' ' ')"; fi
+
 # Every kubectl call the check makes names the substrate context.
 S="${TMP}/ctx"; new_state "$S"
 run_tc "$S" create
-if grep -E 'nodes.longhorn.io|get nodes|get pods -A' "$S/calls" | grep -v -- '--context[= ]stub-substrate' >/dev/null; then
-  bad "every capacity read names the substrate context" "$(grep -E 'nodes.longhorn.io|get nodes|get pods -A' "$S/calls" | grep -v -- '--context[= ]stub-substrate' | head -2)"
+if ! grep -q 'get resourcequotas' "$S/calls"; then bad "every capacity read names the substrate context" "the quota read was not made"
+elif grep -E 'nodes.longhorn.io|get nodes|get pods -A|get resourcequotas' "$S/calls" | grep -v -- '--context[= ]stub-substrate' >/dev/null; then
+  bad "every capacity read names the substrate context" "$(grep -E 'nodes.longhorn.io|get nodes|get pods -A|get resourcequotas' "$S/calls" | grep -v -- '--context[= ]stub-substrate' | head -2)"
 else ok "every capacity read names the substrate context"; fi
 
 if grep -h 'STUB-UNHANDLED' "$TMP"/*/log 2>/dev/null | grep -E 'longhorn|get nodes|get pods -A' >/dev/null; then

@@ -2,12 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Does the throwaway VM this run is about to create FIT on the substrate?
 
-Reads four JSON documents that provision/profiles/capacity-preflight.sh fetched
+Reads five JSON documents that provision/profiles/capacity-preflight.sh fetched
 with kubectl, plus the size of the VM the run declared, and prints one verdict
-line per failed check. Creates nothing and reads nothing itself.
+line per check. Creates nothing and reads nothing itself.
 
     capacity-check.py --disk 250Gi --memory 24Gi --stop-percent 85 --replicas 1 \\
-        --vm NAME --longhorn F --nodes F --pods F --vms F
+        --vm NAME --namespace NS --launcher-memory-overhead 512Mi --launcher-cpu 800m \\
+        --longhorn F --nodes F --pods F --vms F --quotas F
 
 EXIT CODE, and it is the contract with the shell:
 
@@ -34,6 +35,24 @@ THE CHECKS.
             a stray (a crashed run's leftover still holds its disk and memory,
             and two runs compete for the same capacity). The run's own VM name
             is not a stray. --allow-other-vms turns the check off.
+  quota     Every ResourceQuota in the run's namespace must have room for what
+            this run adds to it: hard minus used, key by key. The node can have
+            room while the namespace does not, and then the scheduler is never
+            asked: the quota admission refuses the VM's virt-launcher pod, the
+            VM never starts, and the run fails as "no kubeconfig" (seen
+            2026-11-14 to 16: a 26Gi requests.memory quota, a 24Gi VM, and
+            another tenant's VMs holding 9.9Gi). What the run adds:
+              requests.memory / memory    the VM memory plus the launcher's own
+                                          overhead (--launcher-memory-overhead)
+              requests.cpu / cpu          --launcher-cpu (KubeVirt requests
+                                          100m per vCPU by default)
+              requests.storage            the VM disk (one root PVC)
+              persistentvolumeclaims, count/persistentvolumeclaims    one
+              count/virtualmachines.kubevirt.io                       one
+            Any other key is listed as not sized, never silently passed. A
+            BLOCKED quota line names the pods in the namespace holding its
+            memory, largest first, because the fix is usually one of them.
+            No ResourceQuota in the namespace is a pass, and says so.
 
 WHAT MAKES A READ UNREADABLE (INFRA_ERROR), because each is a way a rule goes
 quietly green:
@@ -45,7 +64,9 @@ quietly green:
     request memory, so zero means the pod list was empty or filtered for this
     identity. Some API front ends answer an all-namespace list a credential may
     not make with an EMPTY list rather than Forbidden, and an empty list would
-    read as "nothing is using any memory".
+    read as "nothing is using any memory";
+  - a quota that sets a key this rule sizes and whose status.used has no
+    figure for it (the quota controller has not counted it yet).
 """
 
 import argparse
@@ -75,6 +96,108 @@ def qty(value):
 
 def gib(b):
     return round(b / GIB, 1)
+
+
+def millicores(value):
+    """A CPU quantity ("10", "105m", "0.5") in millicores. qty() truncates to whole units, which loses 105m."""
+    v = str(value).strip()
+    if v.endswith("m") and re.match(r"^[0-9]+m$", v):
+        return int(v[:-1])
+    if re.match(r"^[0-9]+(?:\.[0-9]+)?$", v):
+        return int(round(float(v) * 1000))
+    raise ValueError("not a cpu quantity: %r" % (value,))
+
+
+def cores(m):
+    return ("%.3f" % (m / 1000.0)).rstrip("0").rstrip(".")
+
+
+# The quota keys this rule sizes: key -> (unit, the amount this run adds is need[unit]).
+QUOTA_KEYS = {
+    "requests.memory": "memory", "memory": "memory",
+    "requests.cpu": "cpu", "cpu": "cpu",
+    "requests.storage": "storage",
+    "persistentvolumeclaims": "pvc", "count/persistentvolumeclaims": "pvc",
+    "count/virtualmachines.kubevirt.io": "vm",
+}
+
+
+def amount(unit, value):
+    if unit in ("memory", "storage"):
+        return qty(value)
+    if unit == "cpu":
+        return millicores(value)
+    return int(str(value).strip())
+
+
+def show(unit, n):
+    if unit in ("memory", "storage"):
+        return "%s GiB" % gib(n)
+    if unit == "cpu":
+        return "%s cpu" % cores(n)
+    return str(n)
+
+
+def holders(pods, ns):
+    """Pods in the namespace with their memory requests (containers plus restartable init containers), largest first."""
+    rows = []
+    for p in pods:
+        meta = p.get("metadata") or {}
+        if meta.get("namespace") != ns or (p.get("status") or {}).get("phase") in ("Succeeded", "Failed"):
+            continue
+        spec = p.get("spec") or {}
+        total = 0
+        conts = list(spec.get("containers") or []) + [c for c in spec.get("initContainers") or []
+                                                     if c.get("restartPolicy") == "Always"]
+        for c in conts:
+            m = ((c.get("resources") or {}).get("requests") or {}).get("memory")
+            if m is not None:
+                try:
+                    total += qty(m)
+                except ValueError:
+                    pass
+        rows.append((total, meta.get("name", "?")))
+    return sorted(rows, reverse=True)
+
+
+def quota_check(quotas, pods, ns, need, need_note):
+    """One row per ResourceQuota: (ok, numbers). need maps unit -> amount this run adds."""
+    if not quotas:
+        return [("quota", True, "no ResourceQuota in %s" % ns)]
+    rows = []
+    for q in quotas:
+        name = (q.get("metadata") or {}).get("name", "?")
+        st = q.get("status") or {}
+        hard = st.get("hard") or (q.get("spec") or {}).get("hard") or {}
+        used = st.get("used") or {}
+        parts, bad, unsized = [], [], []
+        for key in sorted(hard):
+            unit = QUOTA_KEYS.get(key)
+            if unit is None:
+                unsized.append(key)
+                continue
+            if key not in used:
+                raise Infra("quota %s: status.used has no %s (the quota controller has not counted it)" % (name, key))
+            try:
+                h, u = amount(unit, hard[key]), amount(unit, used[key])
+            except ValueError as e:
+                raise Infra("quota %s: %s" % (name, e))
+            free = h - u
+            n = need[unit]
+            text = "%s need %s%s, free %s of %s" % (key, show(unit, n), need_note.get(unit, ""), show(unit, free), show(unit, h))
+            (parts if n <= free else bad).append(text)
+        if unsized:
+            parts.append("not sized: %s" % ", ".join(unsized))
+        if bad:
+            nums = "%s refuses %s" % (name, "; ".join(bad))
+            if any(b.split(" ", 1)[0] in ("requests.memory", "memory") for b in bad):
+                held = holders(pods, ns)
+                nums += "; memory held in %s by: %s" % (ns, ", ".join(
+                    "%s %s GiB" % (pn, gib(m)) for m, pn in held[:5]) if held else "no pod (the quota counts something this list does not show)")
+            rows.append(("quota", False, nums))
+        else:
+            rows.append(("quota", True, "%s: %s" % (name, "; ".join(parts) if parts else "no key this run adds to")))
+    return rows
 
 
 def load(path, what):
@@ -164,11 +287,15 @@ def main():
     ap.add_argument("--replicas", default="1")
     ap.add_argument("--vm", required=True)
     ap.add_argument("--allow-other-vms", action="store_true")
-    for k in ("longhorn", "nodes", "pods", "vms"):
+    ap.add_argument("--namespace", required=True)
+    ap.add_argument("--launcher-memory-overhead", default="512Mi")
+    ap.add_argument("--launcher-cpu", default="800m")
+    for k in ("longhorn", "nodes", "pods", "vms", "quotas"):
         ap.add_argument("--" + k, required=True)
     a = ap.parse_args()
     try:
         need_disk, need_mem = qty(a.disk), qty(a.memory)
+        overhead, need_cpu = qty(a.launcher_memory_overhead), millicores(a.launcher_cpu)
         pct, replicas = int(a.stop_percent), int(a.replicas)
     except ValueError as e:
         print("REFUSING: %s" % e, file=sys.stderr)
@@ -186,8 +313,12 @@ def main():
             raise Infra("nodes: none")
         pods = load(a.pods, "pods")
         vms = load(a.vms, "harness VMs")
+        quotas = load(a.quotas, "ResourceQuotas in %s" % a.namespace)
         s_ok, s_nums = storage_check(disks, need_disk, pct, replicas)
         m_ok, m_nums = memory_check(nodes, pods, need_mem)
+        q_rows = quota_check(quotas, pods, a.namespace,
+                             {"memory": need_mem + overhead, "cpu": need_cpu, "storage": need_disk, "pvc": 1, "vm": 1},
+                             {"memory": " (%s GiB VM + %s GiB launcher overhead)" % (gib(need_mem), gib(overhead))})
     except Infra as e:
         print("INFRA_ERROR: capacity-source: %s" % e)
         return 5
@@ -195,7 +326,7 @@ def main():
                     if (v.get("metadata") or {}).get("name") != a.vm)
     h_ok = a.allow_other_vms or not strays
     rows = [("storage", s_ok, s_nums), ("memory", m_ok, m_nums),
-            ("harness", h_ok, "other harness VM(s) in the namespace: %s" % (", ".join(strays) or "none"))]
+            ("harness", h_ok, "other harness VM(s) in the namespace: %s" % (", ".join(strays) or "none"))] + q_rows
     bad = [r for r in rows if not r[1]]
     for name, ok, nums in rows:
         print(("OK: %s: %s" if ok else "BLOCKED: %s: %s") % (name, nums))
