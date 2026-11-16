@@ -247,5 +247,5 @@ prevent.
 
 ---
 
-<sub>Tockmox v0.8.5 &middot; &copy; 2026 Tockmox LLC &middot; code Apache-2.0, docs CC BY 4.0 &middot; Tockmox is a trademark</sub>
+<sub>Tockmox v0.8.6 &middot; &copy; 2026 Tockmox LLC &middot; code Apache-2.0, docs CC BY 4.0 &middot; Tockmox is a trademark</sub>
 <!-- tockmox:footer:end -->

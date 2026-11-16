@@ -1,6 +1,6 @@
 dependencies:
 - name: tockmox-common
   repository: file://../tockmox-common
-  version: 0.8.5
-digest: sha256:6d4f7a48318e24691aaa6420cfbfb033c62f9fe0226cfbaf29d59c778841465d
-generated: "2026-11-14T13:31:20.16687539-06:00"
+  version: 0.8.6
+digest: sha256:752253a0cbe09ddba3838cd56a5c9e59b6eab6a951f58a9ad5c6bad0288e50a8
+generated: "2026-11-16T14:40:29.085167917-06:00"

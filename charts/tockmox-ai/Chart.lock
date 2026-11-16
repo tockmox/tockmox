@@ -1,12 +1,12 @@
 dependencies:
 - name: tockmox-common
   repository: file://../tockmox-common
-  version: 0.8.5
+  version: 0.8.6
 - name: open-webui
   repository: https://helm.openwebui.com
   version: 17.0.0
 - name: litellm-helm
   repository: oci://ghcr.io/berriai
   version: 1.105.1
-digest: sha256:db1a9eff74b75be954c314a6ff7b7ffbc0e508dd089dadce69bfb56ccb258018
-generated: "2026-11-14T13:29:30.086662345-06:00"
+digest: sha256:e0a9fca3eb9a6384c42efff2b1695d449bc29e7c053a7fe8b39644472caf56d9
+generated: "2026-11-16T14:39:44.55270226-06:00"

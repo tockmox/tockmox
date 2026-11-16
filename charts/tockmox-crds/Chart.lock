@@ -1,9 +1,9 @@
 dependencies:
 - name: tockmox-common
   repository: file://../tockmox-common
-  version: 0.8.5
+  version: 0.8.6
 - name: prometheus-operator-crds
   repository: https://prometheus-community.github.io/helm-charts
   version: 32.0.2
-digest: sha256:041723a2c8e5be63fff4f630587fbef65ec85ef4587185b6e103fccd3ba77b6a
-generated: "2026-11-14T13:29:45.828260599-06:00"
+digest: sha256:a8a79a4bcaa7e581cb206ec505bf26bd72d5f5fc9fc9286baf4a4a5b5a4ec4eb
+generated: "2026-11-16T14:39:51.058115494-06:00"

@@ -1,7 +1,7 @@
 dependencies:
 - name: tockmox-common
   repository: file://../tockmox-common
-  version: 0.8.5
+  version: 0.8.6
 - name: cert-manager
   repository: https://charts.jetstack.io
   version: v1.21.3
@@ -26,5 +26,5 @@ dependencies:
 - name: snapshot-controller
   repository: https://piraeus.io/helm-charts/
   version: 5.4.0
-digest: sha256:dbe20c9f38ae17f79d88e51103553707185f996c0be058e5a21992015990d59b
-generated: "2026-11-14T13:30:56.822972102-06:00"
+digest: sha256:d8b0e6fc0d725249271889814dbe933d8d729482adb20312aba00b9fc67b1e5a
+generated: "2026-11-16T14:40:15.806822121-06:00"
