@@ -1468,6 +1468,137 @@ costs you, with the reasoning in the documentation rather than here.
   Ready (phase: <phase>): <the wait's message>`, on one line, cut at 240
   characters (`docs/operations/backup-restore.md`, "Reading a row").
 
+## [0.8.5] ... 2026-11-15
+
+A patch release carrying a security update for the Traefik ingress proxy,
+display fixes for ten dashboards, two documented commands corrected for macOS,
+and dependency updates for MetalLB and the Argo Workflows chart. To upgrade
+from 0.8.4, change the nine `targetRevision` pins to `v0.8.5` and push.
+Nothing else is required.
+
+### What taking this patch costs
+
+- **Hand actions:** none beyond the nine `targetRevision` pins.
+- **Rollback:** a revision swap for every layer. Traefik and MetalLB keep no
+  database or schema, and no bundled application with a database moved. A
+  rollback from 0.8.5 to 0.8.4 was not run for this release.
+- **Images:** three references in `images.txt` move (Traefik, and MetalLB's
+  controller and speaker), listed under Component versions; the count stays at
+  44, and the SBOM changes only in those versions and the Tockmox version it
+  names.
+- **Contract:** no `stable` values key moved, and no immutable field differs
+  between the 0.8.4 and 0.8.5 renders.
+- **Air-gap:** the static image-redirect check passed on 2026-11-14. An
+  air-gapped install was not exercised for this release.
+
+### Security
+
+- **Traefik v3.7.17** replaces v3.7.14, the default of the traefik chart this
+  line ships (41.7.1, unchanged). It fixes GHSA-xv5x-242w-7hf7 (High): an
+  unauthenticated client sending an NTLM or Negotiate `Authorization` header
+  could make Traefik hold a dedicated backend connection for each client
+  connection until memory ran out. It also carries the fix from v3.7.16 for
+  GHSA-hrpp-p4fc-wwf8 (High), which affects ForwardAuth configured with NTLM or
+  Kerberos; Tockmox 0.8 configures no ForwardAuth. The chart release that
+  defaults to the fixed version is a major with breaking changes, so the image
+  is pinned with `traefik.image.tag` in the platform layer's values. A site
+  that sets its own `traefik.image.tag` keeps its own value.
+
+### Component versions
+
+- Traefik image v3.7.14 -> v3.7.17 (`docker.io/traefik`; the traefik chart
+  stays 41.7.1)
+- metallb chart 0.16.1 -> 0.16.2 (`quay.io/metallb/controller` and
+  `quay.io/metallb/speaker` v0.16.1 -> v0.16.2)
+- argo-workflows chart 2.0.15 -> 2.0.18 (Argo Workflows itself does not
+  change)
+- Documentation build: Markdown 3.11.2 -> 3.11.3, click 8.5.0 -> 8.5.1,
+  platformdirs 4.14.2 -> 4.14.5
+- Tockmox's own components (the Tockmox UI, the Security Posture Probe) did not
+  change.
+
+### Fixed
+
+- **Restore-drill age read nothing, or the best case.** Backup and Restore
+  Proof's drill tile selected Jobs no shipped drill creates, so it was empty;
+  it now reads the drill CronJobs and shows the drill that passed longest ago,
+  rehearsals excluded, so one fresh drill cannot hide another that stopped
+  passing. Argo Workflows' drill trigger panel reads the same names.
+- **Dashboards that showed a missing source as healthy.** Backup and Restore
+  Proof showed "-1 hour" and "0 days" in green when the identity dump or the
+  recoverability point was absent; both are now grey with a word, and its
+  backup timestamp chart reads seconds as seconds (it drew 1970 dates). Admission
+  and Argo Workflows open on the default Prometheus data source, not the first by
+  name. Count tiles with no thresholds of their own (ArgoCD, cert-manager,
+  MetalLB, Storage Contract, Traefik) no longer turn red at 80 or more. Alert
+  Delivery's "since last delivered" tile no longer turns red on a quiet day.
+- **The Authentik board reads your Authentik wherever it runs.** "Workers up"
+  and the memory and CPU panels selected `namespace="authentik"` and read 0 on
+  the default `tockmox-authentik`; they now select the server and worker by
+  scrape job and container. "Process RSS" is now "Memory (working set)", read
+  from the kubelet, and the latency panels read the summary quantiles the
+  exporter emits.
+- **Two documented commands give the right answer on a Mac.** The existing-
+  cluster check for a running LoadBalancer controller and the uninstall page's
+  listing of leftover namespaces used `grep 'a\|b'`, which BSD grep reads as
+  the literal text `a|b`: on macOS the first printed nothing, which the page
+  reads as "no controller", and the second listed `kube-system`. Both use
+  `grep -E` now.
+
+### Changed
+
+- `tools/check-all.sh --strict` exits 2 when any gate was skipped, and every
+  run writes `build/check-all-results.tsv` and a `.meta.json` beside it naming
+  the commit, whether the checkout was clean, the mode and the counts. The
+  documented-blocks inventory and kubeconform print as reports on this line
+  and are in no count; `ci.yaml` runs kubeconform against the full render.
+
+### How this release was tested
+
+- **Upgrade from 0.8.4**, on a single-node k3s lab restored to the state
+  recorded at 0.8.4's release, with a 5,001-row checksum table in each of its
+  two CloudNativePG databases: the nine revision pins and nothing else. Every
+  Application was Synced and Healthy on the candidate at the first read, eight
+  minutes after the pins merged, with no hand action. Both checksums read
+  byte-identical afterwards. Traefik v3.7.17 and MetalLB v0.16.2 (controller
+  and speaker) ran with no restarts, and Traefik kept its pool address.
+- **The ten dashboards** read on the upgraded install: eight as expected. Two
+  tiles are under Known issues, and the Argo Workflows controller queue and
+  the Admission policy-check panels were empty on a quiet single node.
+- **Fresh install** of the candidate, on the same lab holding only k3s, Argo CD
+  and Sealed Secrets: one `root.yaml` applied, every Application Synced and
+  Healthy within ten minutes with no hand action. On that install: continuous
+  archiving on the gateway database, an on-demand database backup, a restore
+  drill that restored that backup into a scratch cluster and found 99 tables,
+  and a test alert delivered to the ntfy server with no failed deliveries.
+- **The SSO blueprint gate** against the lab: all six shipped blueprints
+  present and applied.
+- The static checks on the candidate: every static gate in
+  `tools/check-all.sh` that runs without a cluster (85 passed, none failed),
+  the comparison of the 0.8.4 and 0.8.5 renders for immutable fields (193
+  objects, none flagged), the values contract against 0.8.4 (62 stable keys, none moved), kubeconform over
+  every layer's render, the air-gap image-redirect check, and the comparison of
+  `tockmox-site-template` with the installer's output.
+
+### Known issues
+
+- LiteLLM's database migration Job still logs a `Read-only file system` error
+  from `prisma generate` after the migrations have applied; the Job completes.
+- Backup and Restore Proof's recoverability tile reads "no recoverability
+  point reported" on a cluster that archives through the Barman Cloud plugin,
+  which does not export the metric the tile reads.
+- Alert Delivery's "since last delivered" tile shows an age counted from 1970
+  until the first notification has been delivered.
+
+### Not tested for this release
+
+- Upgrading from 0.8.0, 0.8.1, 0.8.2 or 0.8.3 straight to 0.8.5.
+- A rollback from 0.8.5 to 0.8.4.
+- An air-gapped install.
+- An alert reaching a phone: test alerts are read on the ntfy server, not on a
+  subscribed client.
+- Anything multi-node: the lab is a single node.
+
 ## [0.8.4] ... 2026-11-08
 
 A patch release of dependency updates for the monitoring stack, the
@@ -1939,7 +2070,8 @@ on what hardware, and what has not: [project-status.md](docs/project-status.md).
   experimental features (the Tockmox UI aside) beyond confirming they stay off
   by default.
 
-[Unreleased]: https://github.com/tockmox/tockmox/compare/v0.8.4...main
+[Unreleased]: https://github.com/tockmox/tockmox/compare/v0.8.5...main
+[0.8.5]: https://github.com/tockmox/tockmox/releases/tag/v0.8.5
 [0.8.4]: https://github.com/tockmox/tockmox/releases/tag/v0.8.4
 [0.8.3]: https://github.com/tockmox/tockmox/releases/tag/v0.8.3
 [0.8.2]: https://github.com/tockmox/tockmox/releases/tag/v0.8.2
