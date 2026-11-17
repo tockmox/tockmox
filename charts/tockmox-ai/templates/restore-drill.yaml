@@ -56,14 +56,21 @@ metadata:
   labels:
     {{- include "tockmox.labels" . | nindent 4 }}
 rules:
-  # The drill creates and deletes ONLY its own recovery cluster; Kubernetes
-  # RBAC cannot scope create by name, so the guardrail on the live database
-  # is the script refusing to name anything but {{ $clusterName }} ... and the
-  # register showing what it did. The register is in the object store (the
-  # Secret below), not a ConfigMap, so this Role grants no ConfigMap access.
+  # The drill creates and deletes ONLY its own recovery cluster. Kubernetes
+  # RBAC cannot scope `create` by name, so that one verb stays unnamed and the
+  # script refusing to name anything but {{ $clusterName }} is the guard there.
+  # Everything RBAC CAN name is named (0.8.6): delete and patch on the Cluster,
+  # and exec into its one instance. Before 0.8.6 both were unnamed, so this
+  # identity could delete the live database's Cluster and exec into any pod in
+  # the namespace. The register is in the object store (the Secret below), not
+  # a ConfigMap, so this Role grants no ConfigMap access.
   - apiGroups: ["postgresql.cnpg.io"]
     resources: ["clusters"]
-    verbs: ["get", "list", "watch", "create", "delete"]
+    verbs: ["get", "list", "watch", "create"]
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    resourceNames: [{{ $clusterName | quote }}]
+    verbs: ["delete", "patch"]
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list"]
@@ -73,6 +80,7 @@ rules:
     verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["pods/exec"]
+    resourceNames: [{{ printf "%s-1" $clusterName | quote }}]
     verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

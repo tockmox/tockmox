@@ -499,6 +499,27 @@ for k in ("gateway", "identity"):
         assert "configmaps" not in rule["resources"], (k, rule)              # no ConfigMap access left
 PY
 }
+# D5 (0.8.6): each drill's Role reaches only its own recovery cluster where RBAC can say so. RBAC cannot
+# scope `create` by name, but it can scope `delete`/`patch` on the Cluster and `create` on pods/exec. Before
+# 0.8.6 both were unnamed, so the drill identity could delete the LIVE database's Cluster and exec into any
+# pod in its namespace (the gateway's and the console's, which hold the provider and OIDC secrets).
+d5_roles() { # facts json
+  python3 - "$1" 2>/dev/null <<'PY'
+import sys, json
+f = json.load(open(sys.argv[1]))
+for k in ("gateway", "identity"):
+    rules = f[k + "-role"]
+    for r in rules:
+        res, verbs, names = r.get("resources", []), r.get("verbs", []), r.get("resourceNames") or []
+        if "clusters" in res and set(verbs) & {"delete", "patch", "update", "*"}:
+            assert names and all(n.endswith("-drillcheck") for n in names), (k, r)
+        if "pods/exec" in res:
+            assert names and all(n.endswith("-drillcheck-1") for n in names), (k, r)
+        assert "*" not in verbs and "*" not in res, (k, r)
+    assert any("clusters" in r.get("resources", []) and "delete" in r.get("verbs", []) for r in rules), (k, "no delete on its own cluster")
+    assert any("pods/exec" in r.get("resources", []) for r in rules), (k, "no exec into its own instance")
+PY
+}
 # One writer, two drills: the text between the markers is byte-identical in both rendered scripts.
 d4_one_copy() { # script, script
   local a b
@@ -520,6 +541,9 @@ if [ "${1:-}" = "--selftest" ]; then
   d4 "$T/drill.sh" gateway || { echo "selftest FAIL: D4 red on the real drill"; fail=1; }
   d4 "$T/id-drill.sh" identity || { echo "selftest FAIL: D4 red on the real identity drill"; fail=1; }
   d4_static charts/tockmox-platform/values.yaml || { echo "selftest FAIL: D4 static wiring red on the real tree"; fail=1; }
+  d5_roles "$T/drill.facts.json" || { echo "selftest FAIL: D5 red on the real Roles"; fail=1; }
+  python3 -c 'import json,sys; f=json.load(open(sys.argv[1])); [r.pop("resourceNames",None) for r in f["gateway-role"]]; json.dump(f,open(sys.argv[2],"w"))' "$T/drill.facts.json" "$T/m27.json"
+  if d5_roles "$T/m27.json"; then no "D5 with the gateway drill's delete and exec unnamed (the pre-0.8.6 Role)"; else ok "D5 with the gateway drill's delete and exec unnamed (the pre-0.8.6 Role)"; fi
   d4_one_copy "$T/drill.sh" "$T/id-drill.sh" || { echo "selftest FAIL: D4 one-writer red on the real tree"; fail=1; }
   n1 "$T/ntfy.live" || { echo "selftest FAIL: N1 red on the real ntfy probe"; fail=1; }
   sed 's/for k in NTFY_AUTH_USERS NTFY_AUTH_ACCESS NTFY_AUTH_TOKENS; do/for k in; do/' "$T/ntfy.live" > "$T/m7.sh"
@@ -598,6 +622,7 @@ d3 "$T/id-drill.sh" identity && echo "ok: D3 a failed drill names its cause on t
 d4 "$T/drill.sh" gateway && echo "ok: D4 the model gateway drill records an object, and FAILS when it cannot write it, read it back or match it (model gateway)" || { echo "FAIL: D4 (model gateway)"; rc=1; }
 d4 "$T/id-drill.sh" identity && echo "ok: D4 the identity drill records an object, and FAILS when it cannot write it, read it back or match it (identity)" || { echo "FAIL: D4 (identity)"; rc=1; }
 d4_static charts/tockmox-platform/values.yaml && echo "ok: D4 the drills' bucket, Secret and namespaces are the ones the platform bootstrap creates; no ConfigMap in either Role" || { echo "FAIL: D4 static wiring"; rc=1; }
+d5_roles "$T/drill.facts.json" && echo "ok: D5 each drill's Role deletes and execs into only its own recovery cluster" || { echo "FAIL: D5 a drill's Role reaches beyond its own recovery cluster"; rc=1; }
 d4_one_copy "$T/drill.sh" "$T/id-drill.sh" && echo "ok: D4 both drills carry the same register writer" || { echo "FAIL: D4 one writer"; rc=1; }
 n1 "$T/ntfy.live" && echo "ok: N1 ntfy restarts onto its auth Secret when it appears or rotates" || { echo "FAIL: N1"; rc=1; }
 exit $rc

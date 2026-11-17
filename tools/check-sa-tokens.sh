@@ -118,8 +118,25 @@ def pod_of(o):
     else: return None, None
     return t, t.get('spec')
 errs, owned, left, used, nsd = [], 0, 0, set(), 0
+# 6. (0.8.6) The LAN-facing and node-level observability agents read no Secret cluster-wide: Grafana (a web
+#    application on the LAN, token mounted) and Alloy (a root DaemonSet with the node's /var/log). Their charts'
+#    defaults bound both to get/list/watch on secrets in every namespace, which a compromise of either inherited.
+NOSECRET = ('*grafana*', '*alloy*')
+nosecret_checked = 0
 for f in sorted(glob.glob(d + '/*.yaml')):
     docs = [x for x in yaml.safe_load_all(open(f)) if x]
+    crs = {x['metadata']['name']: x for x in docs if x.get('kind') == 'ClusterRole'}
+    for o in docs:
+        if o.get('kind') != 'ClusterRoleBinding': continue
+        subs = [sj.get('name', '') for sj in o.get('subjects') or [] if sj.get('kind') == 'ServiceAccount']
+        if not any(fnmatch.fnmatch(sn, pat) for sn in subs for pat in NOSECRET): continue
+        nosecret_checked += 1
+        cr = crs.get(o['roleRef']['name']); where = 'ClusterRoleBinding %s (%s)' % (o['metadata']['name'], f.split('/')[-1])
+        if cr is None: errs.append('%s binds ClusterRole %s, which this layer does not render' % (where, o['roleRef']['name'])); continue
+        for r in cr.get('rules') or []:
+            res = r.get('resources') or []
+            if 'secrets' in res or '*' in res:
+                errs.append('%s gives %s cluster-wide Secret read through ClusterRole %s' % (where, ', '.join(subs), cr['metadata']['name']))
     sas = {(x['metadata'].get('namespace') or '', x['metadata']['name']) for x in docs if x.get('kind') == 'ServiceAccount'}
     sanames = {n for _, n in sas}
     defaults = {x['metadata'].get('namespace'): x for x in docs if x.get('kind') == 'ServiceAccount' and x['metadata']['name'] == 'default'}
@@ -174,6 +191,8 @@ print('  %d chart-created namespaces carry a default ServiceAccount with no toke
 print('  %d Tockmox-owned pod templates checked, %d vendored-subchart pod templates left to their charts' % (owned, left))
 if nsd < 8: errs.append('only %d chart-created namespaces found' % nsd)
 if owned < 12: errs.append('only %d owned pod templates found: the scan is not looking at the render' % owned)
+print('  %d Grafana and Alloy ClusterRoleBindings checked for cluster-wide Secret read' % nosecret_checked)
+if nosecret_checked < 2: errs.append('only %d Grafana or Alloy ClusterRoleBindings found: rule 6 is not looking at the render' % nosecret_checked)
 for e in errs: print('::error::' + e)
 sys.exit(1 if errs else 0)
 PY
@@ -212,6 +231,7 @@ mutate "a default account turns its token on" policy.allon.yaml "re.sub(r'(name:
 mutate "the news namespace (createCredentialsNamespaces) loses its default account" platform.site.yaml "re.sub('name: default\n  namespace: news\n','name: defaultx\n  namespace: news\n',s,1)" "Namespace news"
 mutate "a RoleBinding names the default account" policy.allon.yaml "s + '---\napiVersion: rbac.authorization.k8s.io/v1\nkind: RoleBinding\nmetadata: {name: x, namespace: y}\nroleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: r}\nsubjects: [{kind: ServiceAccount, name: default, namespace: y}]\n'" "binds the ServiceAccount default"
 mutate "the drill stops needing its token" ai.allon.yaml "s.replace('automountServiceAccountToken: true','automountServiceAccountToken: false')" "no longer mounts a token"
+mutate "Grafana's ClusterRole regains Secret read (the pre-0.8.6 chart default)" observability.yaml "s.replace('name: tockmox-grafana-sidecar\n  labels:', 'name: tockmox-grafana-sidecar\n  labels:',1).replace('resources: [\"configmaps\"]\n    verbs: [\"get\", \"watch\", \"list\"]','resources: [\"configmaps\", \"secrets\"]\n    verbs: [\"get\", \"watch\", \"list\"]',1)" "cluster-wide Secret read"
 mutate "the authentik server goes back to the default account" identity.yaml "s.replace('serviceAccountName: tockmox-authentik-server','serviceAccountName: default',1)" "pinned vendored) runs as the namespace default"
 mutate "the authentik server's account turns its token on" identity.yaml "re.sub(r'(name: tockmox-authentik-server\n(?:  [^\n]*\n)+automountServiceAccountToken: )false',r'\\1true',s,1)" "does not set automountServiceAccountToken: false"
 mutate "the authentik server's account can be pruned" identity.yaml "re.sub(r'(name: tockmox-authentik-server\n  annotations:\n    argocd.argoproj.io/sync-options: )Prune=false,',r'\\1',s,1)" "can be pruned"

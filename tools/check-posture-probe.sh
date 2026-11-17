@@ -112,6 +112,25 @@ PY
   return $rc
 }
 
+# runnow ADDONDIR: run-now.sh writes a file whose name it reads from the cluster;
+# that name must never leave --out (0.8.6).
+runnow() {
+  local rn="$1/run-now.sh" rc=0 n
+  for n in report-r1.json report-now-20261115.json; do
+    if bash "$rn" --check-report-name "$n"; then echo "  ok run-now accepts the aggregator's own name $n"
+    else echo "  FAIL run-now refuses the aggregator's own name $n"; rc=1; fi
+  done
+  for n in ../../.bashrc report-x/../../y.json .bashrc report-..json "report-a.json
+x" ""; do
+    if bash "$rn" --check-report-name "$n"; then echo "  FAIL run-now accepts a report name that leaves --out: '$n'"; rc=1
+    else echo "  ok run-now refuses '$n'"; fi
+  done
+  if awk '/safe_report_name "\$latest"/ {g=NR} /> "\$OUT\/\$latest"/ {w=NR} END {exit !(g && w && g < w)}' "$rn"; then
+    echo "  ok run-now checks the name before it writes the file"
+  else echo "  FAIL run-now writes \$OUT/\$latest without checking the name first"; rc=1; fi
+  return $rc
+}
+
 unit() { # unit ADDONDIR
   local o
   if o=$(cd "$1" && python3 -m unittest discover -s tests 2>&1); then echo "  ok unit tests: $(printf '%s\n' "$o" | grep -E '^Ran ')"
@@ -121,6 +140,7 @@ unit() { # unit ADDONDIR
 if [ "${1:-}" != "--selftest" ]; then
   rc=0
   check "$CHART" || rc=1
+  runnow "$ADDON" || rc=1
   unit "$ADDON" || rc=1
   [ "$rc" -eq 0 ] && echo "check-posture-probe: ok" || echo "check-posture-probe: FAILED"
   exit "$rc"
@@ -144,7 +164,8 @@ assert n != s, "mutation did not change " + p
 open(p, "w").write(n)
 PY
   local o
-  if [ "${5:-}" = unit ]; then o=$(unit "$work/a" 2>&1) && { echo "selftest FAIL  $1: unit tests stayed GREEN"; fail=1; return; }
+  if [ "${5:-}" = runnow ]; then o=$(runnow "$work/a" 2>&1) && { echo "selftest FAIL  $1: run-now checks stayed GREEN"; fail=1; return; }
+  elif [ "${5:-}" = unit ]; then o=$(unit "$work/a" 2>&1) && { echo "selftest FAIL  $1: unit tests stayed GREEN"; fail=1; return; }
   else o=$(check "$work/a/chart" 2>&1) && { echo "selftest FAIL  $1: gate stayed GREEN"; fail=1; return; }; fi
   if printf '%s' "$o" | grep -F "$4" >/dev/null; then echo "selftest ok    $1: RED on '$4'"
   else echo "selftest FAIL  $1: red, but not for the expected reason"; printf '%s\n' "$o" | grep -E 'FAIL' | head -3; fail=1; fi
@@ -175,4 +196,6 @@ mutate "the schema accepts gateExit 3"    schema/report-v0.schema.json "s.replac
 mutate "unobserved rows read as clean"              posture_probe/differential.py "s.replace('    elif n(\"unknown\"):\n        gate = GATE_ERROR','    elif False:\n        gate = GATE_ERROR')" "test_unobserved_is_1_not_clean" unit
 mutate "the differential skips its write check"     posture_probe/aggregate.py "s.replace('    bad = write_violations(cl, namespaces)','    bad = []')" "test_write_capable_identity_refuses_before_reading_anything" unit
 mutate "identity vantages given network controls (N2)" posture_probe/blackbox.py "s.replace('    if not endpoints:\n','    if False:\n',1)" "test_an_identity_vantage_ignores_its_namespaces_network_controls" unit
+mutate "run-now trusts the report name again"        run-now.sh "s.replace('safe_report_name() { [[ \"\$1\" =~ ^report-[A-Za-z0-9._-]+\\\\.json\$ ]] && [[ \"\$1\" != *..* ]]; }','safe_report_name() { true; }')" "accepts a report name that leaves --out" runnow
+mutate "run-now writes before it checks"             run-now.sh "s.replace('  safe_report_name \"\$latest\" ||','  true ||')" "writes \$OUT/\$latest without checking" runnow
 [ "$fail" -eq 0 ] && echo "selftest ok    every mutation turned the gate red" || exit 1

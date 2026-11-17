@@ -548,15 +548,18 @@ server calls from a node address.
 
 ### Narrowing the default network rules
 
-Three default-on rules are wider than their names read, and the policy layer
-now has a key for each. In 0.7.x **all three defaulted to empty, which kept the
-pre-0.7.0 behaviour**. Since 0.8.0 the first one is required: an empty
+Four default-on rules are wider than their names read, and the policy layer
+now has a key for each. In 0.7.x **the first three defaulted to empty, which
+kept the pre-0.7.0 behaviour**. Since 0.8.0 the first one is required: an empty
 `nodeOriginSources` refuses to render rather than admitting the whole pod
-network. The other two still default to the wider setting. Set them.
+network. The others still default to the wider setting. Set them, and
+`nodeAddresses` first: until it is set, every host on your LAN can reach every
+port of every platform pod.
 
 | Rule | Key | Empty | Set |
 |---|---|---|---|
 | Platform `allow-from-node-network` | `platformNetpol.nodeOriginSources` | **refuses to render** since 0.8.0 (until then: `lanCIDR` plus the whole `clusterCIDR` to every platform pod, every port) | `lanCIDR` plus exactly the listed node gateway addresses; no `clusterCIDR` block |
+| Platform `allow-from-node-network`, the LAN half | `platformNetpol.nodeAddresses` (0.8.6) | the whole `lanCIDR` to every platform pod, every port | exactly the listed node addresses in place of `lanCIDR` |
 | Diagnostic identity, "the Kubernetes API" | `diagnosticIdentity.apiServerCIDRs` | the whole `serviceCIDR` and `lanCIDR` on 443 and 6443 | exactly those addresses on 443 and 6443 |
 | Platform `allow-prometheus-scrape` | `platformNetpol.scrapePorts` | (already narrowed) the metrics ports the shipped monitors scrape | your list |
 
@@ -593,6 +596,28 @@ as an admission webhook timeout, a volume that will not attach, or a pod on
 that node that never turns Ready, on that node only. Add the node's `/31` in
 the same change that adds the node. The render refuses an entry equal to
 `clusterCIDR` or `0.0.0.0/0`, which would restore the hole.
+
+**The nodes' own addresses (`nodeAddresses`, 0.8.6).** The same rule admits the
+whole `global.lanCIDR` to cover the node addresses, and that admits every other
+host on the LAN too, on every port: the Longhorn manager API and UI, which have
+no authentication, and the object store's admin port. A LAN host needs only a
+static route to the pod network through a node to use them. Set
+`platformNetpol.nodeAddresses` to one `/32` per node and the rule admits the
+nodes instead of the LAN. The same helper prints the list next to
+`nodeOriginSources`:
+
+```yaml
+# site/values/policy.yaml ... one /32 per node (its own address)
+platformNetpol:
+  nodeAddresses:
+    - 192.0.2.11/32   # node-a
+    - 192.0.2.12/32   # node-b
+```
+
+The render refuses an entry equal to `lanCIDR`, one containing `clusterCIDR`,
+or `0.0.0.0/0`. A node you add later must be added in the same change, as with
+`nodeOriginSources`. Traefik is not affected: it has its own rule, scoped to the
+Traefik pod.
 
 **A `lanCIDR` that contains the pod network defeats it.** The `lanCIDR` block is
 always rendered. If `global.lanCIDR` is a supernet of `global.clusterCIDR`

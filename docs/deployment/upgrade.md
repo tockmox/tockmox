@@ -33,6 +33,17 @@ points at the *Tockmox* repository. Your values, your `apps/` and your
 they stay correct: a release can need a value you have not set yet, and the
 release notes say which.
 
+**For 0.8.6 and later, set `platformNetpol.nodeAddresses` in the same commit
+as the bump.** Until it is set, the platform namespace's
+`allow-from-node-network` rule admits your whole `global.lanCIDR` to every port
+of every platform pod, including the Longhorn manager API and UI, which have no
+authentication. Print the list with
+`install/tockmox-install.sh --print-netpol-node-sources --context <yours>` (it
+prints `nodeAddresses` next to `nodeOriginSources`) and add it to
+`site/values/policy.yaml`; [external integrations](../administration/external-integrations.md#narrowing-the-default-network-rules)
+explains the rule. Leaving it empty keeps the 0.8.5 behaviour, so nothing breaks
+if you do not, but the hole stays open.
+
 **For 0.9.0, decide where Authentik's database lives before you push the
 revision.** A fresh 0.9.0 install runs Authentik on a CloudNativePG cluster and
 no longer renders the bundled PostgreSQL. An install that runs the bundled

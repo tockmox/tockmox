@@ -19,6 +19,19 @@
 #
 # Exits with the gate's code, or 3 when this script itself could not proceed.
 set -euo pipefail
+
+# Names this script takes from the CLUSTER before it uses them locally (0.8.6).
+# The report's file name is read from /reports/latest on the report volume, and
+# it becomes a path under --out on YOUR machine: anything that can write to that
+# volume could otherwise name a path like ../../.bashrc. The aggregator only
+# ever writes report-<run id>.json, so nothing else is accepted. The image is
+# read from the CronJob and written into the reader pod's YAML below, so it is
+# held to the characters an image reference uses.
+safe_report_name() { [[ "$1" =~ ^report-[A-Za-z0-9._-]+\.json$ ]] && [[ "$1" != *..* ]]; }
+safe_image_ref() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9./:@_-]*$ ]]; }
+# Test hook for tools/check-posture-probe.sh: exits 0 when NAME is accepted.
+if [ "${1:-}" = "--check-report-name" ]; then safe_report_name "${2:-}"; exit $?; fi
+
 CTX=""; NS=tockmox-posture; RUN=""; OUT=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -37,6 +50,8 @@ RUN="${RUN:-now-$(date -u +%Y%m%d%H%M%S)}"
 case "$RUN" in
   *[!abcdefghijklmnopqrstuvwxyz0123456789-]*|-*|"") echo "run-now: --run-id must be lowercase letters, digits and '-'" >&2; exit 3 ;;
 esac
+# The namespace is written into YAML below as well: a Kubernetes name, nothing else.
+[[ "$NS" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || { echo "run-now: --namespace must be a Kubernetes namespace name" >&2; exit 3; }
 k() { kubectl --context "$CTX" "$@"; }
 
 conf=$(k -n "$NS" get configmap posture-probe-config -o 'jsonpath={.data.config\.json}') \
@@ -44,6 +59,7 @@ conf=$(k -n "$NS" get configmap posture-probe-config -o 'jsonpath={.data.config\
 read -r -a NSS <<<"$(printf '%s' "$conf" | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["namespaces"]))')"
 read -r -a VANT <<<"$(printf '%s' "$conf" | python3 -c 'import json,sys; print(" ".join(v["namespace"] for v in json.load(sys.stdin).get("identityVantages", [])))')"
 image=$(k -n "$NS" get cronjob posture-probe-differential -o 'jsonpath={.spec.jobTemplate.spec.template.spec.containers[0].image}')
+safe_image_ref "$image" || { echo "run-now: the differential CronJob's image is not an image reference, refusing to template it: '$image'" >&2; exit 3; }
 
 echo "run $RUN: ${#NSS[@]} collectors, ${#VANT[@]} identity vantage(s), differential in $NS"
 for n in "${NSS[@]}"; do k -n "$n" create job --from=cronjob/posture-probe-collect "posture-probe-collect-$RUN" >/dev/null; done
@@ -82,6 +98,7 @@ YAML
   trap 'k -n "$NS" delete pod "$reader" --ignore-not-found --wait=false >/dev/null' EXIT
   k -n "$NS" wait --for=condition=Ready "pod/$reader" --timeout=120s >/dev/null
   latest=$(k -n "$NS" exec "$reader" -- cat /reports/latest | tr -d '\r\n')
+  safe_report_name "$latest" || { echo "run-now: /reports/latest names '$latest', which is not report-<run id>.json; refusing to write it under $OUT" >&2; exit 3; }
   umask 077
   k -n "$NS" exec "$reader" -- cat "/reports/$latest" > "$OUT/$latest"
   echo "report: $OUT/$latest"

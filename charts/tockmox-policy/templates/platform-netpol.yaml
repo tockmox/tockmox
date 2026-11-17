@@ -41,6 +41,28 @@ narrowing renders as done while changing nothing. Refuse it, naming both values.
 Only a proven containment refuses: an unparseable or IPv6 value is not judged
 here (see tockmox.cidrContains).
 */ -}}
+{{- /*
+NODE ADDRESSES (0.8.6). Until 0.8.6 this rule admitted all of global.lanCIDR,
+on every port, to every pod in this namespace. That is far wider than the
+callers it exists for: the kube-apiserver, the kubelet and MetalLB's SNAT all
+originate on a NODE, so a node address is enough, while the LAN range also
+admits every other host on the LAN to the unauthenticated Longhorn API and UI
+and the object store's admin port. Measured 2026-11-15 on a stock k3s install:
+a non-node LAN host with one static route reached all three.
+
+platformNetpol.nodeAddresses lists the nodes' own addresses (a /32 per node).
+SET, it replaces the lanCIDR block in allow-from-node-network. EMPTY keeps the
+lanCIDR block, so a 0.8.x upgrade does not cut a webhook path on a cluster
+nobody has measured; install/tockmox-install.sh --print-netpol-node-sources
+prints both lists. An entry that is the whole LAN or the pod network (or
+wider) is the rule this key exists to replace, so it refuses.
+*/ -}}
+{{- $nodeAddrs := $pn.nodeAddresses | default list -}}
+{{- range $nodeAddrs }}
+{{- if or (eq . "0.0.0.0/0") (eq . $.Values.global.lanCIDR) (eq (include "tockmox.cidrContains" (dict "outer" . "inner" $.Values.global.clusterCIDR)) "true") }}
+{{- fail (printf "platformNetpol.nodeAddresses contains %s, which is the whole LAN (global.lanCIDR %s), the pod network (global.clusterCIDR %s) or wider. That is exactly the rule this key exists to replace: it would admit every host on that range to every port of every platform pod, including the unauthenticated Longhorn API. List one /32 per node (install/tockmox-install.sh --print-netpol-node-sources prints them)." . $.Values.global.lanCIDR $.Values.global.clusterCIDR) }}
+{{- end }}
+{{- end }}
 {{- if and $sources (eq (include "tockmox.cidrContains" (dict "outer" $.Values.global.lanCIDR "inner" $.Values.global.clusterCIDR)) "true") }}
 {{- fail (printf "platformNetpol.nodeOriginSources is set, but global.lanCIDR (%s) contains global.clusterCIDR (%s). The lanCIDR ipBlock in allow-from-node-network is always rendered, so it re-admits every pod in the cluster and the narrowing you asked for does nothing. Set global.lanCIDR to the node/LAN range that does NOT include the pod network. (Leaving nodeOriginSources empty no longer renders the wide rule; since 0.8.0 it refuses.)" $.Values.global.lanCIDR $.Values.global.clusterCIDR) }}
 {{- end }}
@@ -133,7 +155,9 @@ spec:
 # reached the object store's admin port 3903 (HTTP 200) and S3 port 3900 (403)
 # through this rule.
 #
-# So the rule is lanCIDR + exactly the node gateway addresses listed in
+# So the rule is the node addresses (platformNetpol.nodeAddresses, or the
+# whole global.lanCIDR while that list is empty, see the 0.8.6 note at the
+# top) + exactly the node gateway addresses listed in
 # platformNetpol.nodeOriginSources. The clusterCIDR is NOT admitted. Pods in
 # other namespaces reach nothing here except what another rule in this file
 # opens (Traefik, and the S3 port for backup clients).
@@ -162,8 +186,15 @@ spec:
     - Ingress
   ingress:
     - from:
+        {{- if $nodeAddrs }}
+        {{- range $nodeAddrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+        {{- else }}
         - ipBlock:
             cidr: {{ .Values.global.lanCIDR }}
+        {{- end }}
         {{- range $sources }}
         - ipBlock:
             cidr: {{ . }}
