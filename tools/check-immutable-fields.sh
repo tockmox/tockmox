@@ -42,6 +42,11 @@
 #                                    spec.podManagementPolicy
 #   Service                          spec.clusterIP (when both sides set one)
 #   PersistentVolumeClaim            spec.storageClassName, accessModes, volumeName
+#   ClusterRoleBinding, RoleBinding  roleRef  ... the API refuses a changed
+#       roleRef ("cannot change roleRef"), so an upgrade that renders a binding
+#       under its old name with a different role stops at that object while a
+#       fresh install syncs. The fix is a new binding name, or the subchart's
+#       RBAC off plus a binding of our own under a new name.
 # It does NOT refuse a rendered diff as such: a version bump rewrites labels
 # everywhere, and refusing every bump would get the check turned off. A diff
 # that touches only mutable fields (labels on a Deployment's pod template, an
@@ -111,7 +116,7 @@ cat > "$work/cmp.py" <<'PY'
 import sys, re, yaml, json
 try: Loader = yaml.CSafeLoader
 except AttributeError: Loader = yaml.SafeLoader
-KINDS = ("Job", "Deployment", "DaemonSet", "StatefulSet", "Service", "PersistentVolumeClaim")
+KINDS = ("Job", "Deployment", "DaemonSet", "StatefulSet", "Service", "PersistentVolumeClaim", "ClusterRoleBinding", "RoleBinding")
 KRE = re.compile(r"^kind:\s*(%s)\s*$" % "|".join(KINDS), re.M)
 def load(path):
     out = {}
@@ -156,6 +161,7 @@ RULES = {
  "StatefulSet": ["spec.selector", "spec.serviceName", "spec.volumeClaimTemplates", "spec.podManagementPolicy"],
  "Service": ["spec.clusterIP"],
  "PersistentVolumeClaim": ["spec.storageClassName", "spec.accessModes", "spec.volumeName"],
+ "ClusterRoleBinding": ["roleRef"], "RoleBinding": ["roleRef"],
 }
 allow = []
 if sys.argv[1] != "-":
@@ -184,6 +190,8 @@ for spec in sys.argv[2:]:
             if hit: used.add(hit[0]); allowed.add(msg)
             else: found.add(msg)
 for m in sorted(found): print("FAIL " + m)
+if any(" roleRef changes " in m for m in found):
+    print("  fix: a binding's roleRef cannot change in place. Give the binding a new name, or turn the subchart's RBAC off and render a binding of our own under a new name.")
 for m in sorted(allowed): print("  allowed " + m)
 for e in allow:
     if e not in used: print("  note: allow entry matched nothing, remove it: " + " ".join(e))
@@ -302,7 +310,7 @@ run_pair() { # base-name head-name
   local out; out=$(python3 "$work/cmp.py" "$allowarg" "${specs[@]}"); local rc=$?
   printf '%s\n' "$out" | grep -v '^STATS '
   read -r _ compared changed nfound <<< "$(printf '%s\n' "$out" | grep '^STATS ')"
-  echo "  compared $compared Jobs, workloads, Services and PVCs present at both points across $(echo $layers | wc -w | tr -d ' ') layers x ${#specs[@]} renders; $changed differ in some field; the rendered diff is $dl changed lines; $nfound immutable field change(s) flagged"
+  echo "  compared $compared Jobs, workloads, Services, PVCs and bindings present at both points across $(echo $layers | wc -w | tr -d ' ') layers x ${#specs[@]} renders; $changed differ in some field; the rendered diff is $dl changed lines; $nfound immutable field change(s) flagged"
   return $rc
 }
 
@@ -370,6 +378,16 @@ if [ "$SELFTEST" = 1 ]; then
   expect_red s2 "a StatefulSet serviceName change is flagged" "" 'spec.serviceName changes'
   pair s3 "$(sts 1 db c-1)" "$(sts 1 db c-2)"
   expect_red s3 "a StatefulSet volumeClaimTemplates change (even a label) is flagged" "" 'spec.volumeClaimTemplates changes'
+  crb() { printf 'apiVersion: rbac.authorization.k8s.io/v1\nkind: %s\nmetadata: {name: %s, namespace: ns, labels: {helm.sh/chart: %s}}\nsubjects: [{kind: ServiceAccount, name: %s, namespace: ns}]\nroleRef: {apiGroup: rbac.authorization.k8s.io, kind: %s, name: %s}\n' "$1" "$2" "$3" "$4" "$5" "$6"; }
+  pair r1 "$(crb ClusterRoleBinding sidecar c-1 sa ClusterRole sidecar)" "$(crb ClusterRoleBinding sidecar c-2 sa2 ClusterRole sidecar)"
+  expect_green r1 "a ClusterRoleBinding whose label and subjects move, roleRef unchanged, passes"
+  pair r2 "$(crb ClusterRoleBinding sidecar c-1 sa ClusterRole sidecar)" "$(crb ClusterRoleBinding sidecar c-1 sa ClusterRole sidecar-ours)"
+  expect_red r2 "a ClusterRoleBinding that keeps its name with a changed roleRef is flagged" "" 'FAIL L ClusterRoleBinding ns/sidecar: roleRef changes (.*sidecar.*sidecar-ours'
+  out=$(run r2); printf '%s' "$out" | grep "fix: a binding's roleRef cannot change in place" >/dev/null || die "a roleRef hit did not print the fix: $out"; ok "a roleRef hit prints the fix"
+  pair r3 "$(crb RoleBinding reader c-1 sa Role reader)" "$(crb RoleBinding reader c-1 sa ClusterRole reader)"
+  expect_red r3 "a RoleBinding whose roleRef kind changes is flagged" "" 'FAIL L RoleBinding ns/reader: roleRef changes (.*Role.*ClusterRole'
+  pair r4 "$(crb ClusterRoleBinding sidecar c-1 sa ClusterRole sidecar)" "$(crb ClusterRoleBinding sidecar-ours c-1 sa ClusterRole sidecar-ours)"
+  expect_green r4 "a binding renamed with its new roleRef is a different object and passes"
   pair a1 "$(job creds tockmox-platform-0.6.0 '')" "$(job creds tockmox-platform-0.6.1 '')"
   printf 'L Job creds spec.template # selftest\n' > "$fx/allow.txt"
   out=$(run a1 "" "$fx/allow.txt") || die "an allow-listed hit failed"; printf '%s' "$out" | grep 'allowed L Job ns/creds' >/dev/null || die "allowed hit not printed"; ok "an allow-listed hit passes and is still printed"

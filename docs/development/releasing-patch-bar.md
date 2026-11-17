@@ -77,7 +77,9 @@ side's own `ci/values.yaml` and the all-on overlay, and names any object present
 at both whose immutable field differs: a Job's `spec.template`, a Deployment,
 DaemonSet or StatefulSet `spec.selector`, a StatefulSet's `serviceName`,
 `volumeClaimTemplates` and `podManagementPolicy`, a Service's `clusterIP`, a
-PersistentVolumeClaim's class, access modes and volume. A Job is safe when its
+PersistentVolumeClaim's class, access modes and volume, and a ClusterRoleBinding's
+or RoleBinding's `roleRef`. A binding is safe when its name changes with its
+role. A Job is safe when its
 name changes with the version, or when it is an Argo CD or Helm hook with
 `hook-delete-policy: BeforeHookCreation`, which deletes it before creating the
 new one. A rendered diff that touches only mutable fields is green: a version

@@ -118,7 +118,7 @@ greenfield.** Quote the git pathspec as `'charts/*/templates/*'`.
 
 The list reads template source, not rendered output, and a version bump alone
 changes `helm.sh/chart` on every resource, which Kubernetes refuses on an
-immutable field (a Job's `spec.template`, a workload's `spec.selector`). **`tools/check-immutable-fields.sh` reads the rendered output
+immutable field (a Job's `spec.template`, a workload's `spec.selector`, a binding's `roleRef`). **`tools/check-immutable-fields.sh` reads the rendered output
 :** run it with `BASELINE_REF`; a hit handled elsewhere goes in
 `tools/immutable-fields-allow.txt` with its reason, and anything else is a
 template change recorded against the entry condition in the release notes.
