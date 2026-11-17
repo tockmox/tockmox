@@ -107,6 +107,29 @@ assert_no_control_chars() {
   return 0
 }
 
+# plaintext_key_backups DIR: print each file in the git work tree that holds DIR
+# which carries the sealed-secrets controller's PRIVATE KEY in plaintext (the
+# controller's key label next to a tls.key value). Prints nothing when DIR is
+# not inside a git repository: there is nothing to commit by accident there.
+#
+# WHY (0.8.6). This script's own NEXT note used to print a key backup command
+# with a relative path, and it is run from the site repository, whose generated
+# .gitignore did not exclude the result and whose installer ends with
+# `git add -A`. A committed copy hands every sealed secret in the repository to
+# anyone who can read it. The note, the docs and the .gitignore are fixed; this
+# catches a copy that is already there.
+plaintext_key_backups() {
+  local root f
+  root="$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" || return 0
+  [ -n "$root" ] || return 0
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if grep -Eq '^[[:space:]]*tls\.key:[[:space:]]*[A-Za-z0-9+/=]{16,}' "$f" 2>/dev/null; then
+      printf '%s\n' "$f"
+    fi
+  done < <(grep -rl --exclude-dir=.git -e 'sealedsecrets.bitnami.com/sealed-secrets-key' "$root" 2>/dev/null)
+}
+
 # Proves the guard above actually trips, on the value that actually shipped.
 # Needs no kubectl, no kubeseal and no cluster, so it runs anywhere ... which is
 # the point: the check that was missing must be testable where CI is, not only
@@ -144,6 +167,32 @@ selftest() {
   else
     echo "  ok   grep cannot see the newline, which is why this is a length check"
   fi
+  # The plaintext key-backup guard (0.8.6). Fixtures in a scratch directory;
+  # the key material is a fake that only has the shape of a base64 value, built
+  # at run time so a secret scanner has nothing to match in the source.
+  local kt; kt="$(mktemp -d "${TMPDIR:-/tmp}/mint-selftest.XXXXXX")"
+  _k() { # name expect(found|none) dir
+    local got; got="$(plaintext_key_backups "$3")"
+    if { [ "$2" = found ] && [ -n "$got" ]; } || { [ "$2" = none ] && [ -z "$got" ]; }; then
+      echo "  ok   $1"
+    else
+      echo "  FAIL $1 (expected $2, got '${got:-nothing}')"; fails=$((fails + 1))
+    fi
+  }
+  _keyfile() { printf 'apiVersion: v1\nitems:\n- kind: Secret\n  metadata:\n    labels:\n      sealedsecrets.bitnami.com/sealed-secrets-key: active\n  data:\n    tls.key: %s\n' "$(printf '%048d' 0 | tr 0 A)" > "$1"; }
+  mkdir -p "$kt/repo" "$kt/norepo" "$kt/clean"
+  git -C "$kt/repo" init -q 2>/dev/null; git -C "$kt/clean" init -q 2>/dev/null
+  _keyfile "$kt/repo/sealed-secrets-key.backup.yaml"
+  _keyfile "$kt/norepo/sealed-secrets-key.backup.yaml"
+  printf 'kind: SealedSecret\nspec:\n  encryptedData:\n    password: AgBxyzAgBxyzAgBxyzAgBxyz\n' > "$kt/clean/sealed.yaml"
+  printf 'Back up with: kubectl get secret -l sealedsecrets.bitnami.com/sealed-secrets-key\n' > "$kt/clean/README.md"
+  mkdir -p "$kt/clean/secrets"
+  _k "a plaintext key backup inside a git repo is FOUND"          found "$kt/repo"
+  mkdir -p "$kt/repo/secrets"
+  _k "it is found from a subdirectory of the repo (--out secrets)" found "$kt/repo/secrets"
+  _k "the same file outside any repository is not this guard's"   none  "$kt/norepo"
+  _k "SealedSecrets and a README naming the label are not a key"  none  "$kt/clean/secrets"
+  rm -rf "$kt"
   if [ "$fails" -eq 0 ]; then echo "selftest: all checks passed"; return 0; fi
   echo "selftest: $fails failure(s)" >&2; return 1
 }
@@ -259,6 +308,22 @@ if [ -n "$ONLY" ]; then
   WITH_LITELLM=false; WITH_APPRISE=false; WITH_UI=false; WITH_EVAL=false; WITH_CA=false
 fi
 want() { [ -z "$ONLY" ] && return 0; case ",$ONLY," in *",$1,"*) return 0 ;; esac; return 1; }
+
+# Refuse to mint into a repository that already holds the controller's private
+# key in plaintext (see plaintext_key_backups). Fixing it is the operator's
+# call, so this names the file and stops rather than moving anything.
+_leaked="$(plaintext_key_backups "$(dirname "$OUT")")"
+if [ -n "$_leaked" ]; then
+  echo "REFUSING: these files hold the sealed-secrets controller's PRIVATE KEY in" >&2
+  echo "plaintext, inside the git repository you are minting into:" >&2
+  printf '%s\n' "$_leaked" | sed 's/^/  /' >&2
+  echo "Anyone who can read that repository could decrypt every sealed secret in it." >&2
+  echo "Move the file out of the repository (escrow it encrypted:" >&2
+  echo "docs/operations/sealed-secrets-key-escrow.md), check it was never committed" >&2
+  echo "with \`git log --all --oneline -- <file>\`, and if it was, rotate the key and" >&2
+  echo "re-seal (docs/administration/secrets.md). Then run this again." >&2
+  exit 1
+fi
 if [ -n "$ONLY" ]; then
   want litellm && WITH_LITELLM=true
   want apprise && WITH_APPRISE=true
@@ -901,12 +966,17 @@ cat <<'ENDNOTE'
 NEXT
   1. Commit secrets/ to the repository. SealedSecrets are safe to commit; that
      is the whole point of them.
-  2. BACK UP THE CONTROLLER'S PRIVATE KEY. Without it these files are
-     undecryptable and every credential here has to be minted again:
-       kubectl -n kube-system get secret -l sealedsecrets.bitnami.com/sealed-secrets-key \
-         -o yaml > sealed-secrets-key.backup.yaml
-     Store that off-cluster. It is the one file in this process that a cluster
-     rebuild cannot regenerate.
+  2. BACK UP THE CONTROLLER'S PRIVATE KEY, encrypted and OUTSIDE this
+     repository. Without it these files are undecryptable and every credential
+     here has to be minted again. The procedure, with the encryption, is
+     docs/operations/sealed-secrets-key-escrow.md. A plaintext copy decrypts
+     every secret above: never write it inside a git repository, never commit
+     it. If you must take one now, this writes it to your home directory:
+       ( umask 077; kubectl -n kube-system get secret \
+           -l sealedsecrets.bitnami.com/sealed-secrets-key \
+           -o yaml > "$HOME/sealed-secrets-key-BACKUP.yaml" )
+     Then move it off this machine. It is the one file in this process that a
+     cluster rebuild cannot regenerate.
   3. Rotating one half of a pair breaks the pair. The four pairs are listed at
      the top of this script; delete both files and re-run.
 ENDNOTE

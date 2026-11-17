@@ -1255,6 +1255,11 @@ secrets/*.plain.yaml
 # mint-secrets.sh stages sealed files here while it runs and removes it on exit.
 # Only a killed process leaves one behind.
 secrets/.mint.*/
+# The sealed-secrets controller's private key, should a backup of it ever be
+# written here. It decrypts every SealedSecret in this repository; it belongs
+# encrypted and off the cluster (docs/operations/sealed-secrets-key-escrow.md).
+*sealed-secrets-key*
+*.backup.yaml
 EOF
 
   wr "$SITE_PATH/README.md" <<EOF
