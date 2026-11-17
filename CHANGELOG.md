@@ -1498,6 +1498,143 @@ costs you, with the reasoning in the documentation rather than here.
   Ready (phase: <phase>): <the wait's message>`, on one line, cut at 240
   characters (`docs/operations/backup-restore.md`, "Reading a row").
 
+## [0.8.6] ... 2026-11-17
+
+A security release. It fixes two vulnerabilities, published as GitHub security
+advisories GHSA-5mwq-w359-m76c and GHSA-h962-fh7g-543v, and narrows four more
+permissions. It also stops a restore or a power cycle from firing missed
+CronJob slots into a cold install, and corrects three dashboard tiles.
+**One value needs setting:** `platformNetpol.nodeAddresses` (below). Without
+it, the platform namespace stays open to your whole LAN.
+
+### What taking this patch costs
+
+- **Hand actions:** the nine `targetRevision` pins, plus
+  `platformNetpol.nodeAddresses` in `site/values/policy.yaml` (print it with
+  `install/tockmox-install.sh --print-netpol-node-sources`). Add
+  `*sealed-secrets-key*` and `*.backup.yaml` to your site repository's
+  `.gitignore`, and check its history (advisory GHSA-h962-fh7g-543v).
+- **Rollback:** a revision swap for every layer. No database or schema moves.
+  A rollback from 0.8.6 to 0.8.5 was not run for this release.
+- **Images:** none move. `images.txt` and the SBOM change only in the Tockmox
+  version they name.
+- **Contract:** one new key under the existing Tockmox key `platformNetpol`:
+  `platformNetpol.nodeAddresses`, declared in the policy layer's schema and
+  empty by default (the 0.8.5 behaviour).
+- **Air-gap:** the static image-redirect check passes (no new image that
+  ignores `global.imageRegistry`). An air-gapped install was not exercised for
+  this release.
+
+### Security
+
+- **The platform namespace no longer has to admit the whole LAN**
+  (GHSA-5mwq-w359-m76c, High). Set `platformNetpol.nodeAddresses` to one /32
+  per node; it replaces `global.lanCIDR` in `allow-from-node-network`, and the
+  render refuses an entry equal to `lanCIDR`, one holding the pod network, and
+  `0.0.0.0/0`. Left empty, the rule behaves as in 0.8.5, so an upgrade breaks
+  nothing, but the exposure stays until you set it. From 0.9.0 the list is
+  planned to become required.
+- **The sealed-secrets key backup no longer lands in the site repository**
+  (GHSA-h962-fh7g-543v). The next-step note from `tools/mint-secrets.sh` points
+  to the encrypted escrow procedure and writes any plaintext copy under `$HOME`
+  with mode 0600; two documentation pages and the generated `.gitignore`
+  changed; and `mint-secrets.sh` refuses to run while a plaintext key backup
+  sits in the repository it mints into, and names the file.
+- **Grafana and Alloy no longer read Secrets cluster-wide.** Grafana's
+  dashboard and datasource sidecars watch ConfigMaps only, and Grafana is bound
+  to a ConfigMap-only ClusterRole by a new binding, `tockmox-grafana-sidecar`.
+  On upgrade the Grafana chart's own ClusterRole and binding are pruned; nothing
+  to do. A site that delivers a dashboard or a datasource as a Secret must
+  deliver it as a ConfigMap.
+- **The model-gateway restore drill reaches only its own recovery cluster:**
+  its delete, patch and exec grants are scoped by name.
+- **The installer refuses a `tockmox.repoURL` or `tockmox.revision` that git
+  would read as an option.**
+- **The posture probe's `run-now.sh` refuses a report name that would leave
+  `--out`.**
+
+### Fixed
+
+- **A restore or a power cycle no longer fires a missed CronJob slot into a
+  cold install.** After a restore from a snapshot, or a power cycle across a
+  slot, the console-key check, the model-gateway restore drill and the identity
+  database dump ran their missed slot at boot, before the gateway, the CNPG
+  webhook or the database answered, failed, and held their layer Degraded until
+  the next slot succeeded (up to a week for the drill). Each now sets
+  `startingDeadlineSeconds` (120 for the check, 300 for the drill and the dump),
+  so a slot missed by more than that is skipped and the next one runs on
+  schedule. Nothing to do on upgrade; to run a skipped drill sooner,
+  `kubectl create job --from=cronjob/<name>`.
+- **Three dashboard tiles say what they know on a quiet or freshly restored
+  install.** Alert Delivery's "Since last delivered notification" read an age
+  counted from 1970 until the bridge's first delivery; it now reads "none since
+  the bridge started". Backup & Restore Proof's "Recoverability window" never
+  filled under the Barman Cloud plugin; it now reads the plugin's own
+  `barman_cloud_cloudnative_pg_io_first_recoverability_point`. "Hours since
+  last identity dump" read "no identity dump job" both when the CronJob was
+  absent and when it had never succeeded; the second now reads "no successful
+  dump yet". Nothing to do on upgrade.
+- **`tools/check-all.sh` names a version-manager shim before a selftest fails
+  on it.** A note up front, not a refusal.
+
+### Component versions
+
+- No component version moves. Tockmox's own images (the Tockmox UI, the
+  Security Posture Probe) did not change: the probe's `run-now.sh` runs as the
+  operator and is not in its image.
+
+### How this release was tested
+
+- **Upgrade from 0.8.5**, on a single-node k3s lab restored to the state
+  recorded at 0.8.5's release, with a 5,001-row checksum table in each of its
+  two CloudNativePG databases: the nine revision pins and nothing else. Every
+  Application was Synced and Healthy on the candidate at the first read, five
+  minutes after the pins moved, with no hand action, and both checksums read
+  byte-identical afterwards. Grafana's new binding was in place and the
+  chart's old binding and ClusterRole were gone.
+- **The platform network rule**, from a host on the lab LAN that is not a node,
+  with only a static route to the pod network through the node: with
+  `nodeAddresses` unset (the 0.8.5 behaviour), the Longhorn manager API and UI
+  and the object store's admin and S3 ports answered it; with
+  `nodeAddresses` set to the node's /32, every one of them refused it, the
+  ingress LoadBalancer still answered it, and the admission webhooks
+  (cert-manager, Longhorn), Longhorn volume provisioning and a database backup
+  to the object store all still worked.
+- **The narrowed grants:** the model-gateway restore drill restored the newest
+  backup into its scratch cluster and passed; Grafana loaded its dashboards and
+  datasources, and its ServiceAccount was refused a list of Secrets in any
+  namespace.
+- **A cold restart across two console-key-check slots:** no catch-up Job ran at
+  boot, the next slot ran on schedule, and every Application was Healthy within
+  sixteen minutes. The same restore on 0.8.5 fired the missed slot at boot and
+  failed.
+- **Fresh install** of the candidate, on the same lab holding only k3s, Argo CD
+  and Sealed Secrets, with `nodeAddresses` set: one `root.yaml` applied, every
+  Application Synced and Healthy within ten minutes with no hand action. On
+  that install: an on-demand database backup, a restore drill that restored it
+  into a scratch cluster and found 99 tables, and a test alert delivered to the
+  ntfy server.
+- The static checks on the candidate: every gate in `tools/check-all.sh`,
+  strict (none failed, none skipped), including kubeconform over every layer's
+  render and the air-gap image-redirect check.
+
+### Known issues
+
+- LiteLLM's database migration Job still logs a `Read-only file system` error
+  from `prisma generate` after the migrations have applied; the Job completes.
+- The model-gateway restore drill, run before the first base backup exists (on
+  a fresh install before its first nightly backup), waits out its fifteen-minute
+  timeout and records only "cluster never became Ready".
+
+### Not tested for this release
+
+- Upgrading from 0.8.0 to 0.8.4 straight to 0.8.6.
+- A rollback from 0.8.6 to 0.8.5.
+- An air-gapped install.
+- An alert reaching a phone: test alerts are read on the ntfy server, not on a
+  subscribed client.
+- Anything multi-node: the lab is a single node.
+
 ## [0.8.5] ... 2026-11-15
 
 A patch release carrying a security update for the Traefik ingress proxy,
