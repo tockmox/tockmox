@@ -171,6 +171,7 @@ expect_refusal() {
     echo "  ok refusal ($label)"
   else
     echo "FAIL refusal ($label): failed, but not with the expected message"; rc=1
+    printf '%s\n' "$out" | head -5 | sed 's/^/     got: /'
   fi
 }
 expect_refusal "site replaces litellm.volumes" 'has no `tockmox-hooks` volume' \
