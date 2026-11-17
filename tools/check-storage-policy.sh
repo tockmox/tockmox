@@ -237,19 +237,22 @@ done
 # (the reference homelab's shape, which 0.8.0's first cut of the guard refused).
 G=charts/tockmox-observability
 g2=(--set kube-prometheus-stack.grafana.replicas=2)
+# A refusal that is not the expected one says what it was: the first lines of the render's own output.
+# Without them a red here cannot be told from a load-induced helm failure without a re-run.
+got() { printf '%s\n' "$1" | head -5 | sed 's/^/     got: /'; }
 if out=$(helm template t "$G" -f ci/values.yaml "${g2[@]}" --set kube-prometheus-stack.grafana.persistence.enabled=false 2>&1); then
   echo "FAIL grafana: two replicas on SQLite rendered"; prc=1
 elif printf '%s' "$out" | grep 'grafana.ini names no shared database' >/dev/null; then
   echo "ok   grafana: two replicas on SQLite refused by name"
-else echo "FAIL grafana: two replicas on SQLite failed, but not with the expected message"; prc=1; fi
-if helm template t "$G" -f ci/values.yaml "${g2[@]}" --set kube-prometheus-stack.grafana.persistence.enabled=false \
-     --set 'kube-prometheus-stack.grafana.grafana\.ini.database.type=postgres' >/dev/null 2>&1; then
+else echo "FAIL grafana: two replicas on SQLite failed, but not with the expected message"; got "$out"; prc=1; fi
+if out=$(helm template t "$G" -f ci/values.yaml "${g2[@]}" --set kube-prometheus-stack.grafana.persistence.enabled=false \
+     --set 'kube-prometheus-stack.grafana.grafana\.ini.database.type=postgres' 2>&1); then
   echo "ok   grafana: two replicas on a site-managed postgres (grafana.ini) render"
-else echo "FAIL grafana: two replicas on a site-managed postgres were refused"; prc=1; fi
+else echo "FAIL grafana: two replicas on a site-managed postgres were refused"; got "$out"; prc=1; fi
 if out=$(helm template t "$G" -f ci/values.yaml "${g2[@]}" --set kube-prometheus-stack.grafana.persistence.enabled=true \
      --set 'kube-prometheus-stack.grafana.grafana\.ini.database.type=postgres' 2>&1); then
   echo "FAIL grafana: two replicas with persistence on rendered"; prc=1
 elif printf '%s' "$out" | grep 'with persistence still on' >/dev/null; then
   echo "ok   grafana: two replicas with persistence on refused by name"
-else echo "FAIL grafana: two replicas with persistence on failed, but not with the expected message"; prc=1; fi
+else echo "FAIL grafana: two replicas with persistence on failed, but not with the expected message"; got "$out"; prc=1; fi
 [ "$prc" = 0 ] || exit 1
