@@ -1199,6 +1199,18 @@ costs you, with the reasoning in the documentation rather than here.
   byte-identical to `v0.13.0` (sha256 `5f1bd74c48bf13ab0f82e177ad9e637313b92533d20ead2593d49347a47fc232`, checked 2026-11-09), so the licence terms
   in `docs/frontend-posture.md` stand. The chart runs Open WebUI as a single-replica StatefulSet, so two
   versions never run at once; a site that raised its replica count scales to one before the upgrade.
+- **Open WebUI 0.13.4, chart 18.4.0.** No new database revision: `v0.13.4` carries the same
+  72 Alembic revisions as `v0.13.3`. On first start it turns the image generation settings
+  into image connections and, with persistent config on, stops reading the image variables;
+  Tockmox sets none of them and runs with `ENABLE_PERSISTENT_CONFIG=False`. Upstream removes
+  Direct Connections (`ENABLE_DIRECT_CONNECTIONS`, `ENABLE_DIRECT_INTEGRATIONS` and the
+  Direct Tool Servers permission): models and tool servers a user added under their own
+  Settings no longer appear, and upstream moves them to its Tether desktop app. Tockmox sets
+  none of those. Upstream does not say whether 0.13.3 reads the converted image settings, so
+  treat a rollback as a database restore, as for 0.13.3. Chart 18.4.0 moves only
+  `appVersion`; its `values.yaml` and templates are byte-identical to 18.0.0. The `LICENSE`
+  at `v0.13.4` is byte-identical to `v0.13.3` (sha256 `5f1bd74c48bf13ab0f82e177ad9e637313b92533d20ead2593d49347a47fc232`, checked 2026-11-18), so the licence terms
+  in `docs/frontend-posture.md` stand.
 
 ### Fixed
 
