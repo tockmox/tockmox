@@ -27,6 +27,15 @@ spelling (https or ssh, with or without .git, any case in the host), as the inst
   credential --url URL
                      stdin: one Argo CD repository Secret (kubectl -o json). "names URL's repository", "names another
                      repository", or unreadable.
+  ca-trusted --url URL --ca FILE
+                     stdin: Argo CD's argocd-tls-certs-cm (kubectl -o json). "holds the CA under the URL's host" when
+                     the entry keyed by URL's host name (Argo CD's own key: the host part, no port) holds FILE's
+                     certificate, otherwise "no entry for the URL's host" or "another certificate under the URL's
+                     host". A CA file with no certificate in it is unreadable.
+  conditions [--root NAME]
+                     stdin: Argo CD's Applications. The root Application's own .status.conditions on one line, each
+                     "TYPE: message", or "none". What the path prints when a settle times out, so a run that never
+                     settles says why in Argo CD's words.
 
 Helpers, not verdicts (the path's GLUE):
 
@@ -36,6 +45,9 @@ Helpers, not verdicts (the path's GLUE):
   argo-secret --name N --url URL --credentials FILE
                      stdout: an Argo CD repository Secret (JSON) for URL with FILE's two lines as user and token, for
                      `kubectl apply -f -`, so the token is on no command line.
+  argo-ca --url URL --ca FILE
+                     stdout: a merge patch (JSON) for argocd-tls-certs-cm that adds FILE's certificate under URL's host
+                     name and names no other key, for `kubectl patch --type merge`, so every other entry is kept.
   scrub --host H     stdin to stdout, every H replaced by <external forge>. Empty H changes nothing.
 """
 import argparse
@@ -44,6 +56,7 @@ import json
 import os
 import re
 import sys
+from urllib.parse import urlsplit
 
 URL = re.compile(r'^(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)(?::\d+)?[:/](.+?)(?:\.git)?/?$')
 LINE = re.compile(r'^(\s*(?:-\s+)?repoURL:\s*)(["\']?)([^\s"\'#]+)\2(\s*(?:#.*)?)$')
@@ -210,6 +223,71 @@ def v_credential(a):
     return one("names the URL's repository" if norm(url) == norm(a.url) else "names another repository")
 
 
+PEM = re.compile(r"-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----", re.S)
+
+
+def url_host(u):
+    """The host name Argo CD keys argocd-tls-certs-cm by: the URL's host part, no user and no port, as written."""
+    return urlsplit((u or "").strip()).netloc.rsplit("@", 1)[-1].split(":")[0]
+
+
+def pems(text):
+    return ["".join(x.split()) for x in PEM.findall(text or "")]
+
+
+def read_ca(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return None
+    return text if pems(text) else None
+
+
+def v_ca_trusted(a):
+    ca = read_ca(a.ca)
+    if ca is None:
+        return unreadable("the CA file holds no certificate")
+    host = url_host(a.url)
+    if not host:
+        return unreadable("the URL names no host")
+    try:
+        cm = json.loads(sys.stdin.read())
+        data = cm.get("data") or {}
+        if cm.get("kind") == "Status" or not isinstance(data, dict):
+            raise ValueError
+    except (ValueError, AttributeError):
+        return unreadable("not a ConfigMap")
+    if host not in data:
+        return one("no entry for the URL's host")
+    held = pems(data[host])
+    return one("holds the CA under the URL's host" if all(p in held for p in pems(ca))
+               else "another certificate under the URL's host")
+
+
+def v_conditions(a):
+    apps, why = read_apps(sys.stdin)
+    if apps is None:
+        return unreadable(why)
+    r = apps.get(a.root)
+    if r is None:
+        return unreadable("no Application " + a.root)
+    cs = (r.get("status", {}) or {}).get("conditions") or []
+    out = "; ".join("%s: %s" % (c.get("type", "?"), " ".join(str(c.get("message", "")).split())) for c in cs)
+    return one(out[:600] if out else "none")
+
+
+def h_argo_ca(a):
+    ca = read_ca(a.ca)
+    if ca is None:
+        sys.exit("argo-ca: the CA file holds no certificate")
+    host = url_host(a.url)
+    if not host:
+        sys.exit("argo-ca: the URL names no host")
+    print(json.dumps({"data": {host: ca}}))
+    return 0
+
+
 def h_rewrite(a):
     old, new = norm(a.old), a.new
     files = lines = 0
@@ -279,6 +357,11 @@ def main():
     p.add_argument("--in", dest="in_url", required=True)
     sub.add_parser("pruned").add_argument("--before", required=True)
     sub.add_parser("credential").add_argument("--url", required=True)
+    for n in ("ca-trusted", "argo-ca"):
+        p = sub.add_parser(n)
+        p.add_argument("--url", required=True)
+        p.add_argument("--ca", required=True)
+    sub.add_parser("conditions").add_argument("--root", default="tockmox-root")
     p = sub.add_parser("rewrite")
     p.add_argument("--old", required=True)
     p.add_argument("--new", required=True)
@@ -290,8 +373,8 @@ def main():
     sub.add_parser("scrub").add_argument("--host", default="")
     a = ap.parse_args()
     return {"root": v_root, "revision": v_revision, "settled": v_settled, "reads": v_reads, "moved": v_moved,
-            "pruned": v_pruned, "credential": v_credential, "rewrite": h_rewrite, "argo-secret": h_argo_secret,
-            "scrub": h_scrub}[a.cmd](a)
+            "pruned": v_pruned, "credential": v_credential, "ca-trusted": v_ca_trusted, "conditions": v_conditions,
+            "rewrite": h_rewrite, "argo-secret": h_argo_secret, "argo-ca": h_argo_ca, "scrub": h_scrub}[a.cmd](a)
 
 
 if __name__ == "__main__":

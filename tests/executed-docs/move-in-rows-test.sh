@@ -17,7 +17,9 @@
 #      file that the path's own calls change, and a stand-in tockmox-install.sh does what move-in-forge does to that
 #      state and those repositories. Green end to end, then one broken product per row, each of which must fail the
 #      path at that row while the stand-in still prints the success line. Then mutated copies of P16 that lose a step
-#      or a guard, each of which must not end PASS.
+#      or a guard, each of which must not end PASS. On an external forge on a private CA, the stub's Argo CD reads that
+#      forge only when argocd-tls-certs-cm holds its CA under its host name: S01 must put it there, merged and before
+#      the root, and a copy of P16 that drops that step must not settle, with the root's own condition in its notes.
 #   4. The gate: P16 runs after P09 on the external route with an external forge to move from, and must declare
 #      BLOCKED, with no cluster call, when any of them is missing, or when that forge is on a private CA.
 #
@@ -145,6 +147,24 @@ SJ="$(python3 -I "$PY" argo-secret --name s --url "$FROM_URL" --credentials "${T
 is "argo-secret: a repository Secret for the URL, with the file's two lines" "repository ${FROM_URL} u1 tok1" \
   "$(printf '%s' "$SJ" | python3 -c 'import json,sys,base64; s=json.load(sys.stdin); d=s["data"]; print(s["metadata"]["labels"]["argocd.argoproj.io/secret-type"], *(base64.b64decode(d[k]).decode() for k in ("url","username","password")))')"
 is "scrub: the host is replaced, in any case" "at <external forge>/x and <external forge>" "$(printf 'at forge.stub.invalid/x and FORGE.stub.invalid' | python3 -I "$PY" scrub --host forge.stub.invalid)"
+CA="${TMP}/ca.crt"; printf -- '-----BEGIN CERTIFICATE-----\nc3R1Yi1jYQ==\n-----END CERTIFICATE-----\n' > "$CA"
+OTHER_PEM='-----BEGIN CERTIFICATE-----\nb3RoZXI=\n-----END CERTIFICATE-----\n'
+keys() { python3 -c 'import json,sys; print(*sorted(json.load(sys.stdin)["data"]))'; }
+cm() { # HOST PEM-FILE-OR-TEXT ... a ConfigMap read: that entry under HOST, beside another host's
+  python3 -c 'import json,os,sys; v=sys.argv[2]; v=open(v).read() if os.path.isfile(v) else v.replace("\\n","\n"); print(json.dumps({"kind":"ConfigMap","data":{sys.argv[1]:v,"other.stub.invalid":"x"}}))' "$1" "$2"
+}
+is "argo-ca: a merge patch with the CA under the URL's host, and no other key" "forge.stub.invalid" "$(python3 -I "$PY" argo-ca --url "$FROM_URL" --ca "$CA" | keys)"
+is "argo-ca: the key is the host alone, no user and no port (Argo CD's key)" "forge.stub.invalid" "$(python3 -I "$PY" argo-ca --url "https://git@forge.stub.invalid:8443/ed-org/ed-vm.git" --ca "$CA" | keys)"
+python3 -I "$PY" argo-ca --url "$FROM_URL" --ca "${TMP}/cred" >/dev/null 2>&1 && bad "argo-ca: a CA file with no certificate is refused" "exit 0" || ok "argo-ca: a CA file with no certificate is refused"
+is "ca-trusted: the CA under the URL's host" "holds the CA under the URL's host" "$(cm forge.stub.invalid "$CA" | v ca-trusted --url "$FROM_URL" --ca "$CA")"
+is "ca-trusted: no entry for the host is named" "no entry for the URL's host" "$(cm elsewhere.invalid "$CA" | v ca-trusted --url "$FROM_URL" --ca "$CA")"
+is "ca-trusted: another certificate under the host is named" "another certificate under the URL's host" "$(cm forge.stub.invalid "$OTHER_PEM" | v ca-trusted --url "$FROM_URL" --ca "$CA")"
+isun "ca-trusted: an empty read is unreadable" "$(: | v ca-trusted --url "$FROM_URL" --ca "$CA")"
+isun "ca-trusted: a CA file with no certificate is unreadable" "$(cm forge.stub.invalid "$CA" | v ca-trusted --url "$FROM_URL" --ca "${TMP}/cred")"
+CJ='{"items":[{"metadata":{"name":"tockmox-root"},"spec":{},"status":{"conditions":[{"type":"ComparisonError","message":"Get \"https://forge.stub.invalid/x\":\n x509: certificate signed by unknown authority"}]}}]}'
+is "conditions: the root's own condition, on one line" 'ComparisonError: Get "https://forge.stub.invalid/x": x509: certificate signed by unknown authority' "$(printf '%s' "$CJ" | v conditions)"
+is "conditions: a root with none says none" "none" "$(printf '{"items":[{"metadata":{"name":"tockmox-root"},"status":{}}]}' | v conditions)"
+isun "conditions: an empty read is unreadable" "$(: | v conditions)"
 
 # ------------------------------------------------------------------ 2. the page and the installer
 PAGE="${TREE}/docs/administration/site-forge.md"
@@ -197,6 +217,12 @@ def head(u):
     return subprocess.run(["git", "--git-dir", os.path.join(SB, b), "rev-parse", "main"], capture_output=True, text=True).stdout.strip() if b else ""
 st = json.load(open(SF))
 def save(): json.dump(st, open(SF, "w"))
+def pems(t): return ["".join(x.split()) for x in re.findall(r"-----BEGIN CERTIFICATE-----.+?-----END CERTIFICATE-----", t or "", re.S)]
+def trusted(url):  # Argo CD verifies an https forge on a private CA only with that CA under its host in argocd-tls-certs-cm
+    ca = os.path.join(SB, "from-dir", "ca.crt")
+    if not url.startswith("https://") or not os.path.exists(ca): return True
+    host = url.split("://", 1)[1].split("/", 1)[0].rsplit("@", 1)[-1].split(":")[0]
+    return all(p in pems(st["tls"].get(host, "")) for p in pems(open(ca).read()))
 def point(url):  # every Application's site source names url; the root is synced to its main
     for n, a in st["apps"].items():
         if a.get("site"):
@@ -211,14 +237,27 @@ def kubectl(a):
         for n, x in st["apps"].items():
             items.append({"metadata": {"name": n}, "spec": {"sources": [{"repoURL": u} for u in x["src"]]},
                           "status": {"sync": {"status": x.get("sync", "Synced"), "revision": x.get("rev", "")},
-                                     "health": {"status": x.get("health", "Healthy")},
+                                     "health": {"status": x.get("health", "Healthy")}, "conditions": x.get("cond", []),
                                      "resources": [{"group": "", "kind": k, "namespace": "ns", "name": r} for k, r in x["res"]]}})
         print(json.dumps({"kind": "List", "items": items})); return 0
     if a[-3:-1] == ["apply", "-f"] and a[-1] == "-":
         s = json.loads(sys.stdin.read())
         st["secrets"][s["metadata"]["name"]] = base64.b64decode(s["data"]["url"]).decode(); save(); print("secret configured"); return 0
+    m = re.search(r"-n argocd patch configmap (\S+) --type merge --patch-file (\S+)", j)
+    if m:
+        if m.group(1) != "argocd-tls-certs-cm" or MODE == "no-tls-cm":
+            sys.stderr.write('configmaps "%s" not found\n' % m.group(1)); return 1
+        st["tls"].update(json.load(open(m.group(2)))["data"]); save(); print("configmap/argocd-tls-certs-cm patched"); return 0
+    m = re.search(r"-n argocd get configmap (\S+) -o json", j)
+    if m:
+        if m.group(1) != "argocd-tls-certs-cm" or MODE == "no-tls-cm": return 1
+        print(json.dumps({"kind": "ConfigMap", "metadata": {"name": m.group(1)}, "data": st["tls"]})); return 0
     if a[-3:-1] == ["apply", "-f"]:
         m = re.search(r'repoURL:\s*"?([^\s"#]+)', open(a[-1]).read())
+        if not trusted(m.group(1)):  # Argo CD cannot verify the forge: the root's source changes, its sync does not
+            st["apps"]["tockmox-root"]["src"][-1] = m.group(1); st["apps"]["tockmox-root"]["sync"] = "Unknown"
+            st["apps"]["tockmox-root"]["cond"] = [{"type": "ComparisonError", "message": 'Failed to load target state: rpc error: Get "%s/info/refs": x509: certificate signed by unknown authority' % m.group(1)}]
+            save(); print("application configured"); return 0
         point(m.group(1))
         if MODE == "stage-unsettled":
             st["apps"]["tockmox-ai"]["sync"] = "OutOfSync"
@@ -312,7 +351,7 @@ chmod +x "$BIN"/* "$GT/tockmox/install/tockmox-install.sh"
 # sandbox ... P09's state (its PASS marker, its session naming the site repository), the site repository with its
 # origin on the git daemon, the daemon's, the external forge's and the built-in forge's repositories, Argo CD reading
 # the daemon, and the directory the lane makes for the external forge
-sandbox() {
+sandbox() { # [ca] ... with ca, the external forge is on a private CA (from-dir/ca.crt)
   local d; d="$(mktemp -d "${TMP}/sbx.XXXXXX")"
   mkdir -p "$d/p09" "$d/from-dir"; : > "$d/p09/p09-passed"
   for r in old from forge; do git init -q --bare -b main "$d/$r.git"; done
@@ -329,10 +368,11 @@ sandbox() {
   git -C "$s" remote add origin "$OLD_URL"; GIT_CONFIG_GLOBAL="$d/gitconfig" git -C "$s" push -q origin main
   printf 'declare -x SITE_REPO="%s"\n' "$s" > "$d/p09/session.env"
   printf '%s\n' "$FROM_URL" > "$d/from-dir/git-url"; printf 'git\nstub-token-p16\n' > "$d/from-dir/git-credentials"; printf 'forge.stub.invalid\n' > "$d/from-dir/host"
+  [ "${1:-}" != ca ] || cp "$CA" "$d/from-dir/ca.crt"
   python3 - "$d/state.json" "$OLD_URL" "$PRODUCT_URL" "$(git -C "$s" rev-parse HEAD)" <<'PY'
 import json, sys
 f, old, prod, rev = sys.argv[1:5]
-json.dump({"ns": ["argocd", "kube-system"], "secrets": {}, "apps": {
+json.dump({"ns": ["argocd", "kube-system"], "secrets": {}, "tls": {"other.stub.invalid": "-----BEGIN CERTIFICATE-----\nb3RoZXI=\n-----END CERTIFICATE-----\n"}, "apps": {
   "tockmox-root": {"src": [old], "site": True, "rev": rev, "res": [["Application", "tockmox-ai"], ["Application", "tockmox-identity"]]},
   "tockmox-ai": {"src": [prod, old], "site": True, "res": [["Deployment", "litellm"], ["Service", "litellm"], ["ConfigMap", "values"]]},
   "tockmox-identity": {"src": [old], "site": True, "res": [["Deployment", "authentik"]]},
@@ -402,6 +442,33 @@ mutated "a path that reads the Applications before the move as the ones after it
 mutated "a path that never applies the staged root never puts the site on the external forge" 'kubectl --context="$KUBE_CONTEXT" apply -f "${STATE}/stage/bootstrap/root.yaml"' ':'
 mutated "a path that never pushes the staged history has no external repository to move from" 'xgit -C "${STATE}/stage" push -q --force' ': xgit -C "${STATE}/stage" push -q --force'
 mutated "a path that leaves a placeholder unfilled cannot run the page's block" '-e "s|YOUR_SITE_CHECKOUT|${SITE_DIR}|g"' '-e "s|YOUR_SITE_CHECKOUTX|${SITE_DIR}|g"'
+
+# an external forge on a private CA: S01 gives Argo CD its CA, merged and before the root; without that it cannot settle
+tls_of() { python3 -c 'import json,sys; print(json.dumps({"kind":"ConfigMap","data":json.load(open(sys.argv[1]))["tls"]}))' "$1/state.json"; }
+dc="$(sandbox ca)"; r="$(run_p16 "$P16" "$dc")"
+is "ca: green end to end on a forge on a private CA: exit 0 and a PASS receipt" "0|PASS" "$r"
+is "ca: the forge's CA reached Argo CD's argocd-tls-certs-cm, under the forge's host name" "holds the CA under the URL's host" "$(tls_of "$dc" | v ca-trusted --url "$FROM_URL" --ca "$CA")"
+is "ca: the entry already there is kept (a merge, not a replace)" "forge.stub.invalid other.stub.invalid|other.stub.invalid unchanged" \
+  "$(tls_of "$dc" | keys)|$(tls_of "$dc" | python3 -c 'import json,sys; print("other.stub.invalid", "unchanged" if "b3RoZXI=" in json.load(sys.stdin)["data"]["other.stub.invalid"] else "changed")')"
+awk -F'\t' '$2 ~ /^GLUE: Argo CD trusts the external forge.s private CA/ && $3 == $4' "$dc/p09/p16/verdicts.tsv" | grep -q . \
+  && ok "ca: the path recorded the CA in Argo CD's trust object as a green row" || bad "ca: the trust row" "$(grep -F 'private CA' "$dc/p09/p16/verdicts.tsv")"
+grep -q 'ca.crt was given to Argo CD' "$dc/p09/p16/notes.txt" && ok "ca: a NOTE says the CA was given to Argo CD" || bad "ca: the NOTE" "$(cat "$dc/p09/p16/notes.txt")"
+pl="$(grep -n 'patch configmap argocd-tls-certs-cm' "$dc/calls.log" | head -1 | cut -d: -f1)"; al="$(grep -n 'apply -f .*root.yaml' "$dc/calls.log" | head -1 | cut -d: -f1)"
+[ -n "$pl" ] && [ -n "$al" ] && [ "$pl" -lt "$al" ] && grep -q -- '--context=stub-ctx -n argocd patch configmap argocd-tls-certs-cm --type merge --patch-file' "$dc/calls.log" \
+  && ok "ca: the CA goes in as a merge patch, on the cluster under test, before the root is applied" || bad "ca: order and form" "patch at ${pl:-none}, root at ${al:-none}"
+! grep -rF 'forge.stub.invalid' "$dc/out" "$dc/p09/p16/"*.out "$dc/p09/p16/verdicts.tsv" "$dc/p09/p16/notes.txt" >/dev/null 2>&1 \
+  && ok "ca: the external forge's host is in no log, no verdict and no note" || bad "ca: host leaked" "$(grep -rlF 'forge.stub.invalid' "$dc/out" "$dc/p09/p16/" 2>/dev/null | head -3)"
+mc="$(sandbox ca)"; f="$(mktemp "${GT}/paths/m.XXXXXX")"
+mut "$P16" "$f" 'kubectl --context="$KUBE_CONTEXT" -n "$ARGO_NS" patch configmap' ': kubectl --context="$KUBE_CONTEXT" -n "$ARGO_NS" patch configmap'
+r="$(run_p16 "$f" "$mc")"
+[ "$r" != "0|PASS" ] && failed_rows "$mc" | grep -q "GLUE: Argo CD trusts the external forge's private CA" && failed_rows "$mc" | grep -q "GLUE: every Application is Synced and Healthy" \
+  && ok "mutation: a path that never gives Argo CD the CA: not a PASS (${r}), red at the trust row and at the settle" || bad "mutation: no CA for Argo CD" "rc|receipt=[${r}] red rows: $(failed_rows "$mc" | cut -c1-60 | tr '\n' ';')"
+grep -F "the root Application's conditions: ComparisonError:" "$mc/p09/p16/notes.txt" | grep -F 'x509: certificate signed by unknown authority' | grep -qF '<external forge>' \
+  && ! grep -qF 'forge.stub.invalid' "$mc/p09/p16/notes.txt" "$mc/out" \
+  && ok "settle: a settle that times out notes the root Application's own condition, the host scrubbed" || bad "settle: the root's condition" "$(grep -F 'settle' "$mc/p09/p16/notes.txt" | tail -2)"
+nc="$(sandbox ca)"; r="$(run_p16 "$P16" "$nc" SB_MODE=no-tls-cm)"
+[ "$r" != "0|PASS" ] && failed_rows "$nc" | grep -q "GLUE: Argo CD trusts the external forge's private CA" \
+  && ok "red: an Argo CD with no argocd-tls-certs-cm fails the trust row (the path merges into it, it never creates one)" || bad "red: no argocd-tls-certs-cm" "rc|receipt=[${r}]"
 
 # ------------------------------------------------------------------ 4. the gate
 mkdir -p "${TMP}/gbin"; printf '#!/bin/sh\necho "$@" >> "%s/kcalls"\nexit 1\n' "$TMP" > "${TMP}/gbin/kubectl"; chmod +x "${TMP}/gbin/kubectl"
