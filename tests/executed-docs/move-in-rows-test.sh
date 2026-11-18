@@ -20,6 +20,9 @@
 #      or a guard, each of which must not end PASS. On an external forge on a private CA, the stub's Argo CD reads that
 #      forge only when argocd-tls-certs-cm holds its CA under its host name: S01 must put it there, merged and before
 #      the root, and a copy of P16 that drops that step must not settle, with the root's own condition in its notes.
+#      On a throwaway with no resolver for the internal domain, tockmox-devops is Degraded with 'no such host' in its
+#      log: P16 names it with --accept-unsettled, as the page allows, and its Synced-and-Healthy rows read xfail. Any
+#      other Application off, the same Degraded for another reason, or a resolver named, is still red.
 #   4. The gate: P16 runs after P09 on the external route with an external forge to move from, and must declare
 #      BLOCKED, with no cluster call, when any of them is missing, or when that forge is on a private CA.
 #
@@ -107,6 +110,12 @@ is "settled: one OutOfSync is named" "not settled: tockmox-ai is OutOfSync/Healt
 mk_apps "$A" "$FROM_URL" "$FROM_URL" Synced Degraded
 is "settled: one Degraded is named" "not settled: tockmox-ai is Synced/Degraded" "$(v settled < "$A")"
 isun "settled: no Application at all is unreadable" "$(printf '{"items":[]}' | v settled)"
+mk_apps "$A" "$FROM_URL" "$FROM_URL" Synced Degraded
+is "settled: an accepted Application that is the only one off is named as accepted, never as N Synced and Healthy" \
+  "the rest Synced and Healthy; accepted as it is: tockmox-ai is Synced/Degraded" "$(v settled --accept tockmox-ai < "$A")"
+is "settled: accepting another Application does not hide this one" "not settled: tockmox-ai is Synced/Degraded" "$(v settled --accept tockmox-devops < "$A")"
+mk_apps "$A" "$FROM_URL" "$FROM_URL"
+is "settled: an accepted Application that is Synced and Healthy changes nothing" "3 Synced and Healthy" "$(v settled --accept tockmox-ai < "$A")"
 mk_apps "$A" "$FROM_URL" "$FROM_URL"
 is "reads: two Applications read the external repository" "2 read it" "$(v reads --url "$FROM_URL" < "$A")"
 is "reads: none reads another" "0 read it" "$(v reads --url "$OLD_URL" < "$A")"
@@ -196,6 +205,10 @@ grep -qF -- '--from-ca) FROM_CA=' "$MI" && grep -qF 'OS_CA=(--offsite-git-ca "$F
   && ok "installer: the --from-ca P16 adds for a private CA is an option of move-in-forge's, passed on as --offsite-git-ca, and the page asks for it" \
   || bad "installer: the CA option" "move-in-forge, the page or P16 changed: re-read P16's ca.crt handling and its INVENTORY row"
 
+grep -qF -- '--accept-unsettled) ACCEPT=' "$MI" && pagehas '`--accept-unsettled`' && grep -qF -- '--accept-unsettled' "$P16" \
+  && ok "installer: the --accept-unsettled P16 adds for the lab's DNS row is an option of move-in-forge's, and the page offers it" \
+  || bad "installer: the accept option" "move-in-forge, the page or P16 changed: re-read P16's lab DNS row and its INVENTORY row"
+
 # ------------------------------------------------------------------ 3. the path as a script
 BIN="${TMP}/bin"; mkdir -p "$BIN"
 GT="${TMP}/gt"; mkdir -p "$GT/paths" "$GT/tockmox/install"; ln -s "${HERE}/lib" "$GT/lib"
@@ -261,7 +274,17 @@ def kubectl(a):
         point(m.group(1))
         if MODE == "stage-unsettled":
             st["apps"]["tockmox-ai"]["sync"] = "OutOfSync"
+        if MODE.startswith("devops-"):  # the throwaway's DNS (or another fault): Degraded from the start, and after
+            st["apps"]["tockmox-devops"]["health"] = "Degraded"
+        if MODE == "devops-dns-and-ai":
+            st["apps"]["tockmox-ai"]["sync"] = "OutOfSync"
         save(); print("application configured"); return 0
+    if "-n tockmox-devops logs deploy/tockmox-devops-argo-workflows-server" in j:
+        if MODE.startswith("devops-dns"):
+            print('level=fatal msg="failed to start" error="lookup auth.lab.stub.invalid on dns.stub.invalid:53: no such host"')
+        else:
+            print('level=info msg="Starting Argo Server"')
+        return 0
     if "get namespace tockmox-forge" in j:
         return 0 if "tockmox-forge" in st["ns"] else 1
     m = re.search(r"-n argocd get secret (\S+) -o (name|json)", j)
@@ -279,6 +302,10 @@ def kubectl(a):
 def move_in(op):
     if op == "write":       # what a refusal or a dry run must never do
         st["ns"].append("tockmox-forge")
+    elif op == "unsettled":  # what the real move refuses: an Application not Synced and Healthy it was not told to accept
+        acc = set(x for x in (sys.argv[3] if len(sys.argv) > 3 else "").split(",") if x)
+        print(" ".join(n for n, a in sorted(st["apps"].items())
+                       if (a.get("sync", "Synced"), a.get("health", "Healthy")) != ("Synced", "Healthy") and n not in acc)); return 0
     elif op == "moved?":
         print("yes" if norm(st["apps"]["tockmox-root"]["src"][-1]) == norm(IN) else "no"); return 0
     elif op == "cutover":
@@ -312,9 +339,10 @@ if [ "$cmd" = bootstrap-secrets ]; then
   printf 'age-encryption.org/v1\n-> X25519 stub\n' > "$out"; echo "key backup written"; exit 0
 fi
 [ "$cmd" = move-in-forge ] || { echo "stand-in: $cmd" >&2; exit 2; }
-site=""; from=""; dry=0; ctx=""
+site=""; from=""; dry=0; ctx=""; acc=""
 while [ $# -gt 0 ]; do
-  case "$1" in --site) site="$2"; shift ;; --from) from="$2"; shift ;; --context) ctx="$2"; shift ;; --dry-run) dry=1 ;; --) break ;; esac; shift
+  case "$1" in --site) site="$2"; shift ;; --from) from="$2"; shift ;; --context) ctx="$2"; shift ;; --dry-run) dry=1 ;;
+    --accept-unsettled) acc="${acc:+$acc,}$2"; shift ;; --) break ;; esac; shift
 done
 echo "== Checking the request"
 [ "${SB_MODE:-}" = asks-first ] && [ "$dry" = 0 ] && printf '    Move the site of %s? Type the context name to go on: \n' "$ctx"
@@ -322,6 +350,11 @@ if [ -n "$(git -C "$site" status --porcelain)" ] && [ "${SB_MODE:-}" != no-dirty
   [ "${SB_MODE:-}" = writes-before-refusing ] && S write
   echo "  x $site has uncommitted or untracked changes:" >&2; git -C "$site" status --porcelain >&2
   echo "       Commit and push them, or clean them away. Nothing was touched." >&2; exit 1
+fi
+if [ "$(S moved?)" != yes ] && [ -n "$(S unsettled "$acc")" ]; then
+  echo "  x not every Application is Synced and Healthy, so the check after the move could not tell what the move did:" >&2
+  echo "       $(S unsettled "$acc")" >&2
+  echo "       Nothing was touched. Settle them first, or name each one you accept as it is with --accept-unsettled APP." >&2; exit 1
 fi
 if [ "$(S moved?)" = yes ] && [ "${SB_MODE:-}" != rerun-not-noop ]; then
   echo "  ok Argo CD already reads the built-in forge and every Application is Synced and Healthy. Nothing to do."; exit 0
@@ -376,6 +409,7 @@ json.dump({"ns": ["argocd", "kube-system"], "secrets": {}, "tls": {"other.stub.i
   "tockmox-root": {"src": [old], "site": True, "rev": rev, "res": [["Application", "tockmox-ai"], ["Application", "tockmox-identity"]]},
   "tockmox-ai": {"src": [prod, old], "site": True, "res": [["Deployment", "litellm"], ["Service", "litellm"], ["ConfigMap", "values"]]},
   "tockmox-identity": {"src": [old], "site": True, "res": [["Deployment", "authentik"]]},
+  "tockmox-devops": {"src": [old], "site": True, "res": [["Deployment", "tockmox-devops-argo-workflows-server"]]},
   "charts": {"src": [prod], "res": [["ConfigMap", "c"]]}}}, open(f, "w"))
 PY
   printf '%s' "$d"
@@ -391,7 +425,8 @@ run_p16() {
   local rc=$?
   printf '%s|%s' "$rc" "$(cut -d' ' -f1 "$d/r/P16-move-in-forge" 2>/dev/null)"
 }
-failed_rows() { awk -F'\t' '$3 != $4 {print $2}' "$1/p09/p16/verdicts.tsv" 2>/dev/null; }
+failed_rows() { awk -F'\t' '$3 != $4 && $5 != "xfail" {print $2}' "$1/p09/p16/verdicts.tsv" 2>/dev/null; }
+xfail_rows() { awk -F'\t' '$5 == "xfail" {print $1}' "$1/p09/p16/verdicts.tsv" 2>/dev/null | tr '\n' ' ' | sed 's/ $//'; }
 
 d="$(sandbox)"; r="$(run_p16 "$P16" "$d")"
 is "path: green end to end against an honest product: exit 0 and a PASS receipt" "0|PASS" "$r"
@@ -406,6 +441,7 @@ is "path: the move left the external repository as the off-site copy, the forge'
   "$(git --git-dir "$d/forge.git" rev-parse main)" "$(git --git-dir "$d/from.git" rev-parse main)"
 grep -q 'DOES NOT PROVE' "$d/out" && grep -q 'SUCCESS CONDITIONS STATED' "$d/out" && ok "path: the log says what the run does not prove, and what success conditions the page states" || bad "path: caveats in the log" ""
 grep -q 'GLUE: an untracked file' "$d/out" && grep -q 'EDIT AS THE PAGE SAYS' "$d/out" && ok "path: its GLUE and its edit of the page's block are labelled in the log" || bad "path: labels" ""
+is "path: on an honest product nothing is accepted: no xfail row, and no --accept-unsettled in the block" "|0" "$(xfail_rows "$d")|$(grep -c -- '--accept-unsettled' "$d/p09/p16/S05-move.block")"
 
 # one broken product per row: the path must fail, and at that row; the stand-in still says the move succeeded
 broken() { # MODE LABEL ROW-TEXT
@@ -442,6 +478,36 @@ mutated "a path that reads the Applications before the move as the ones after it
 mutated "a path that never applies the staged root never puts the site on the external forge" 'kubectl --context="$KUBE_CONTEXT" apply -f "${STATE}/stage/bootstrap/root.yaml"' ':'
 mutated "a path that never pushes the staged history has no external repository to move from" 'xgit -C "${STATE}/stage" push -q --force' ': xgit -C "${STATE}/stage" push -q --force'
 mutated "a path that leaves a placeholder unfilled cannot run the page's block" '-e "s|YOUR_SITE_CHECKOUT|${SITE_DIR}|g"' '-e "s|YOUR_SITE_CHECKOUTX|${SITE_DIR}|g"'
+
+# the lab's DNS row: tockmox-devops Degraded, its log ending 'no such host', no resolver named
+dd="$(sandbox)"; r="$(run_p16 "$P16" "$dd" SB_MODE=devops-dns)"
+is "dns: tockmox-devops Degraded on a throwaway with no resolver: exit 0 and a PASS receipt" "0|PASS" "$r"
+[ -z "$(failed_rows "$dd")" ] && ok "dns: no row is red" || bad "dns: red rows" "$(failed_rows "$dd" | cut -c1-80 | tr '\n' ';'); $(tail -5 "$dd/out" | tr '\n' ';' | cut -c1-300)"
+is "dns: exactly the three Synced-and-Healthy rows read xfail (the settle, before the move, after it)" "S01-stage S02-before S06-after" "$(xfail_rows "$dd")"
+grep -F -- '--accept-unsettled tockmox-devops' "$dd/p09/p16/S04-dry-run.block" >/dev/null && grep -F -- '--accept-unsettled tockmox-devops' "$dd/p09/p16/S05-move.block" >/dev/null \
+  && ok "dns: the dry run and the move name tockmox-devops with --accept-unsettled, and only it" || bad "dns: the block" "$(grep -h -- 'move-in-forge' "$dd/p09/p16/"*.block | head -2)"
+grep -F "EDIT AS THE PAGE SAYS: 'an Application that is not Synced and Healthy" "$dd/out" >/dev/null && grep -F "BLOCKED by the environment: only tockmox-devops is not, and its log ends 'no such host'" "$dd/out" >/dev/null \
+  && ok "dns: the edit and the measured reason are in the log" || bad "dns: labels" ""
+dnsred() { # MODE LABEL ROW-TEXT [VAR=VALUE]
+  local d r; d="$(sandbox)"; r="$(run_p16 "$P16" "$d" SB_MODE="$1" ${4:+"$4"})"
+  if [ "$r" = "1|PRODUCT_FAIL" ] && failed_rows "$d" | grep -F -- "$3" >/dev/null && [ "$(grep -c -- '--accept-unsettled' "$d/p09/p16/S05-move.block" 2>/dev/null)" = 0 ]; then ok "$2"
+  else bad "$2" "rc|receipt=[${r}] red rows: $(failed_rows "$d" | cut -c1-80 | tr '\n' ';')"; fi
+}
+dnsred devops-degraded "red: tockmox-devops Degraded for another reason (no 'no such host' in its log) is not accepted" "GLUE: every Application is Synced and Healthy on the external repository"
+dnsred devops-dns-and-ai "red: another Application off beside the DNS row is not accepted, nor is the DNS row then" "GLUE: every Application is Synced and Healthy on the external repository"
+dnsred devops-dns "red: with a resolver named (TOCKMOX_P09_LAN_RESOLVER), the DNS row is not the environment's, and is not accepted" "GLUE: every Application is Synced and Healthy on the external repository" TOCKMOX_P09_LAN_RESOLVER=resolver.stub.invalid
+md="$(sandbox)"; f="$(mktemp "${GT}/paths/m.XXXXXX")"
+mut "$P16" "$f" 'with_ca | with_accept' 'with_ca'
+r="$(run_p16 "$f" "$md" SB_MODE=devops-dns)"
+[ "$r" != "0|PASS" ] && failed_rows "$md" | grep -F "the move exits 0" >/dev/null \
+  && ok "mutation: a path that accepts the row but never adds --accept-unsettled: not a PASS (${r}), the move refused" || bad "mutation: no accept edit" "rc|receipt=[${r}]"
+mg="$(sandbox)"; f="$(mktemp "${GT}/paths/m.XXXXXX")"
+mut "$P16" "$f" "| grep 'no such host' >/dev/null && printf" '| grep . >/dev/null && printf'
+case "$(run_p16 "$f" "$mg" SB_MODE=devops-degraded)" in 1\|PRODUCT_FAIL) bad "mutation: a lab row that does not read the log" "still red on another fault" ;; *) ok "mutation: a lab row that does not read the log accepts another fault, so the red case above is the guard" ;; esac
+grep -vF -- '`--accept-unsettled`' "$PAGE" > "${TMP}/page-without-accept.md"
+pa="$(sandbox)"; r="$(run_p16 "$P16" "$pa" SB_MODE=devops-dns TOCKMOX_P16_PAGE_FILE="${TMP}/page-without-accept.md")"
+[ "$r" = "1|PRODUCT_FAIL" ] && [ -z "$(xfail_rows "$pa")" ] \
+  && ok "dns: on a page that does not offer --accept-unsettled, nothing is accepted and the row is red" || bad "dns: page without the option" "rc|receipt=[${r}] xfail: $(xfail_rows "$pa")"
 
 # an external forge on a private CA: S01 gives Argo CD its CA, merged and before the root; without that it cannot settle
 tls_of() { python3 -c 'import json,sys; print(json.dumps({"kind":"ConfigMap","data":json.load(open(sys.argv[1]))["tls"]}))' "$1/state.json"; }

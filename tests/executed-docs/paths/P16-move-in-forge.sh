@@ -50,6 +50,15 @@
 # insecure flag. The repo-server mounts that ConfigMap, so the change reaches it without a restart, after the
 # kubelet's sync (a minute or so), well inside the settle.
 #
+# THE LAB'S DNS ROW. A throwaway has no resolver for the internal domain, so tockmox-devops stays Synced/Degraded:
+# its argo-workflows-server exits on 'no such host' for auth.<domain>. P09 S17 records that as xfail, the page's own
+# expected-broken row, measured, never assumed. The move refuses an Application that is not Synced and Healthy, and
+# the page says to name one you accept as it is with --accept-unsettled. When P09's measurement holds here (no
+# TOCKMOX_P09_LAN_RESOLVER, and that log ending 'no such host') and the page says so, this path accepts tockmox-devops
+# and nothing else: the settle and the Synced-and-Healthy rows read xfail with that reason, and the block gets
+# --accept-unsettled tockmox-devops, logged as an edit the page asks for. Any other Application not Synced and Healthy
+# is still a failure, and so is tockmox-devops for any other reason.
+#
 # NOTHING IS PUT BACK. The move is the page's end state, so the install is left on the built-in forge, with the
 # external repository as its off-site copy, and the throwaway is destroyed with it. A kept run does not reach this
 # path (the lane skips it). Paths that run after it on the same install read it on the built-in forge.
@@ -141,9 +150,12 @@ SECTION="## Move a running site in"
 NEEDLE='move-in-forge --context'
 SUCCESS_LINE="every Application reads the built-in forge, Synced and Healthy, and nothing was pruned"
 FROM_TREE="${TOCKMOX_P16_FROM_TREE:-${TOCKMOX_P09_FROM_TREE:-0}}"
+if [ "$FROM_TREE" = "1" ]; then page_text="$(cat "$PAGE_FILE" 2>/dev/null || true)"
+else page_text="$(git -C "$HERE" show "${REF}:${PAGE}" 2>/dev/null || true)"; fi
+PAGE_ACCEPTS=0
+# shellcheck disable=SC2016  # the backquotes are the page's own markup, matched literally
+printf '%s' "$page_text" | grep -F -- '`--accept-unsettled`' >/dev/null && PAGE_ACCEPTS=1
 if [ -n "$FROM_CA" ]; then
-  if [ "$FROM_TREE" = "1" ]; then page_text="$(cat "$PAGE_FILE" 2>/dev/null || true)"
-  else page_text="$(git -C "$HERE" show "${REF}:${PAGE}" 2>/dev/null || true)"; fi
   # shellcheck disable=SC2016  # the backquotes are the page's own markup, matched literally
   printf '%s' "$page_text" | grep -F -- '`--from-ca FILE`' >/dev/null \
     || blocked "the external forge in TOCKMOX_P16_FROM_DIR is on a private CA (ca.crt), and ${PAGE} at this ref does not tell that reader to add --from-ca, so the path would add a word the page does not print. Name a forge on a publicly trusted certificate, or a ref whose page has it"
@@ -163,9 +175,11 @@ AGE_ID="${STATE}/age-identity.txt"
 # ------------------------------------------------------------- state helpers (P13's shape)
 done_step() { [ -f "${STATE}/${1}.done" ]; }
 mark_done()  { : > "${STATE}/${1}.done"; }
-record() { # STEP DESC EXPECTED ACTUAL
-  printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "${STATE}/verdicts.tsv"
-  if [ "$3" = "$4" ]; then _emit "RECORDED PASS: ${2}  [${4}]"
+record() { # STEP DESC EXPECTED ACTUAL [xfail]
+  printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "${5:-}" >> "${STATE}/verdicts.tsv"
+  if [ "${5:-}" = "xfail" ]; then
+    _emit "RECORDED (xfail): ${2}"; _emit "  expected: ${3}"; _emit "  actual:   ${4}"
+  elif [ "$3" = "$4" ]; then _emit "RECORDED PASS: ${2}  [${4}]"
   else _emit "RECORDED FAIL: ${2}"; _emit "  expected: ${3}"; _emit "  actual:   ${4}"; fi
 }
 note() { _emit "NOTE:     $*"; printf 'NOTE\t%s\n' "$*" >> "${STATE}/notes.txt"; }
@@ -231,8 +245,36 @@ untouched() {
     "$(verdict revision --root "$ROOT_APP" < "${STATE}/${1}.apps.json" | head -1 | cut -c1-12)" \
     "$(cred_names "$P16_FROM_URL")" "$(from_main | cut -c1-12)"
 }
+# lab_dns ... "tockmox-devops" when the throwaway's lab-only DNS is why that Application may not be Healthy, measured the
+# way P09 S17 measures it: no TOCKMOX_P09_LAN_RESOLVER, and its argo-workflows-server log ending 'no such host'; and only
+# when the page offers --accept-unsettled. Nothing otherwise. See THE LAB'S DNS ROW in the header.
+LAB_APP=tockmox-devops
+lab_dns() {
+  [ -z "${TOCKMOX_P09_LAN_RESOLVER:-}" ] && [ "$PAGE_ACCEPTS" = 1 ] || return 0
+  kubectl --context="$KUBE_CONTEXT" -n "$LAB_APP" logs deploy/tockmox-devops-argo-workflows-server --tail=3 2>/dev/null \
+    | grep 'no such host' >/dev/null && printf '%s' "$LAB_APP"
+  return 0
+}
+# dns_only APPS-FILE ... true when the only Application not Synced and Healthy in APPS-FILE is the lab's DNS row
+dns_only() {
+  local acc; acc="$(lab_dns)"
+  [ -n "$acc" ] || return 1
+  case "$(verdict settled --accept "$acc" < "$1" | head -1)" in "the rest Synced and Healthy; accepted as it is: ${acc} is "*) return 0 ;; esac
+  return 1
+}
+# settled_row STEP DESC APPS-FILE ... "every Application is Synced and Healthy": PASS on a clean read; xfail, with the
+# measured reason, when the lab's DNS row is the only one that is not; FAIL, naming what is not, otherwise
+settled_row() {
+  local v; v="$(verdict settled < "$3" | head -1)"
+  case "$v" in *" Synced and Healthy") record "$1" "$2" settled settled; return ;; esac
+  if dns_only "$3"; then
+    record "$1" "${2} ... BLOCKED by the environment: only ${LAB_APP} is not, and its log ends 'no such host' (P09's expected-broken row 2; clears with DNS, lab only)" settled "${LAB_APP} only, DNS" xfail
+    return
+  fi
+  record "$1" "$2" settled "$v"
+}
 # settle WANT-ROOT LIMIT ... poll until the root reads WANT-ROOT, nothing reads OLD_URL and every Application is Synced
-# and Healthy, or LIMIT seconds pass. Sets SLAST (the settled verdict), SROOT, SWAITED.
+# and Healthy (the lab's DNS row aside, when dns_only holds), or LIMIT seconds pass. Sets SLAST (the settled verdict), SROOT, SWAITED.
 # A settle that times out also notes the root Application's own conditions (Argo CD's words for why, the external
 # host scrubbed), so a run that never settles says what Argo CD saw.
 settle() {
@@ -243,7 +285,10 @@ settle() {
     SLAST="$(verdict settled < "$f" | head -1)"
     SOLD="$(verdict reads --url "$OLD_URL" < "$f" | head -1)"
     SWAITED=$(( $(date +%s) - t0 ))
-    if [ "$SROOT" = "$want" ] && [ "$SOLD" = "0 read it" ]; then case "$SLAST" in *" Synced and Healthy") settled=1; break ;; esac; fi
+    if [ "$SROOT" = "$want" ] && [ "$SOLD" = "0 read it" ]; then
+      case "$SLAST" in *" Synced and Healthy") settled=1; break ;; esac
+      if dns_only "$f"; then settled=1; break; fi
+    fi
     [ "$SWAITED" -ge "$limit" ] && break
     sleep "$POLL"
   done
@@ -260,7 +305,7 @@ pblock() {
 filled() {
   # shellcheck disable=SC2016  # "$P16_FROM_URL" is written into the block for the pasted shell to expand, not this one
   sed -e "s|YOUR_SITE_CHECKOUT|${SITE_DIR}|g" -e 's|YOUR_SITE_REPOSITORY_HTTPS_URL|"$P16_FROM_URL"|g' \
-      -e "s|YOUR_AGE_PUBLIC_KEY|${AGE_PUBLIC_KEY:-NO_AGE_KEY}|g" "$1" | with_ca
+      -e "s|YOUR_AGE_PUBLIC_KEY|${AGE_PUBLIC_KEY:-NO_AGE_KEY}|g" "$1" | with_ca | with_accept
 }
 # with_ca ... stdin: the block; stdout: the same, with --from-ca FILE after its --from-credentials argument when the
 # forge is on a private CA (the page's YOU SUPPLY says to add it), and unchanged otherwise
@@ -271,6 +316,18 @@ t = sys.stdin.read()
 n = len(re.findall(r"--from-credentials \S+", t))
 assert n == 1, "not one --from-credentials"
 sys.stdout.write(re.sub(r"(--from-credentials \S+)", lambda m: m.group(1) + " --from-ca \"" + os.environ["FROM_CA"] + "\"", t, count=1))'
+}
+# with_accept ... stdin: the block; stdout: the same, with --accept-unsettled ACCEPT after --from-credentials (and its
+# --from-ca) when S02 found only the lab's DNS row unsettled (the page: "name one you accept as it is with
+# --accept-unsettled"), and unchanged otherwise
+with_accept() {
+  if [ -z "${ACCEPT:-}" ]; then cat; return; fi
+  ACCEPT="$ACCEPT" python3 -I -c 'import os, re, sys
+t = sys.stdin.read()
+m = list(re.finditer(r"--from-credentials \S+( --from-ca \"[^\"]*\")?", t))
+assert len(m) == 1, "not one --from-credentials"
+e = m[0].end()
+sys.stdout.write(t[:e] + " --accept-unsettled " + os.environ["ACCEPT"] + t[e:])'
 }
 # undry ... stdin: the block; stdout: the same with its one --dry-run taken out, as the page says to run it again
 undry() { python3 -I -c 'import sys; t=sys.stdin.read(); assert t.count(" --dry-run")==1, "not one --dry-run"; sys.stdout.write(t.replace(" --dry-run","",1))'; }
@@ -307,9 +364,13 @@ finish_path() {
   _emit ""; _emit "=== REPLAY of every recorded verdict through lib/assert.sh ==========="
   local st desc exp act _replay_val
   # shellcheck disable=SC2016  # the read is a command string assert.sh evaluates later; $_replay_val must stay unexpanded here
-  while IFS=$'\t' read -r st desc exp act; do
+  while IFS=$'\t' read -r st desc exp act flag; do
     _replay_val="$act"
-    assert_artifact "[${st}] ${desc}" 'printf %s "$_replay_val"' "$exp"
+    if [ "$flag" = "xfail" ]; then
+      assert_artifact_xfail "[${st}] ${desc}" 'printf %s "$_replay_val"' "$exp"
+    else
+      assert_artifact "[${st}] ${desc}" 'printf %s "$_replay_val"' "$exp"
+    fi
   done < "${STATE}/verdicts.tsv"
   _emit ""; _emit "NOTES (from the run):"; sed 's/^NOTE\t/  - /' "${STATE}/notes.txt" 2>/dev/null | while IFS= read -r l; do _emit "$l"; done
 
@@ -319,6 +380,7 @@ finish_path() {
     "That a pull request on the old repository, or its CI, does anything after the move: the page says the forge runs no CI and the mirror pushes after the fact; nothing reads the old repository's workflows." \
     "That the push mirror refuses a force-push the page tells the reader to block: branch rules on the external forge are the reader's and are not set here." \
     "The cutover's failure branch (the printed command that points Argo CD back): the installer's tests run it against stand-ins; here the move settles or the path fails." \
+    "That ${LAB_APP} moves Synced and Healthy on a throwaway: with no resolver for the internal domain it is Degraded before the move and after, so when that is the only Application that is not, the move names it with --accept-unsettled, as the page allows, and its rows read xfail (lab only)." \
     "That the install itself works: that is P09's."
 
   parity_caveat \
@@ -366,8 +428,7 @@ if ! done_step "$S"; then budget_left || yield "S01+"
   kubectl --context="$KUBE_CONTEXT" apply -f "${STATE}/stage/bootstrap/root.yaml" > "${STATE}/root-apply.out" 2>&1
   settle "the external repository" "$SETTLE"
   record "$S" "GLUE: Argo CD's root reads the external repository, and no Application reads the git daemon any more" "the external repository; 0 read it" "${SROOT}; ${SOLD}"
-  case "$SLAST" in *" Synced and Healthy") v=settled ;; *) v="$SLAST" ;; esac
-  record "$S" "GLUE: every Application is Synced and Healthy on the external repository" "settled" "$v"
+  settled_row "$S" "GLUE: every Application is Synced and Healthy on the external repository" "${STATE}/settle.apps.json"
   record "$S" "GLUE: the root is synced to the staged head" "$STAGED" "$(verdict revision --root "$ROOT_APP" < "${STATE}/settle.apps.json" | head -1)"
   rm -rf "$SITE_DIR"
   xgit clone -q "$P16_FROM_URL" "$SITE_DIR" > "${STATE}/clone.out" 2>&1
@@ -404,8 +465,9 @@ if ! done_step "$S"; then budget_left || yield "S02+"
   record "$S" "Argo CD's root is synced to the checkout's revision, which the page asks for" "$(git -C "$SITE_DIR" rev-parse HEAD 2>/dev/null)" "$(verdict revision --root "$ROOT_APP" < "${STATE}/apps-before.json" | head -1)"
   v="$(verdict reads --url "$P16_FROM_URL" < "${STATE}/apps-before.json" | head -1)"
   record "$S" "more than the root reads the external repository, so the move has Applications to cut over" "more than one" "$(case "$v" in 0\ *|1\ *|unreadable*) echo "$v" ;; *) echo "more than one" ;; esac)"
-  case "$(verdict settled < "${STATE}/apps-before.json" | head -1)" in *" Synced and Healthy") v=settled ;; *) v="$(verdict settled < "${STATE}/apps-before.json" | head -1)" ;; esac
-  record "$S" "every Application is Synced and Healthy before the move, so the check after it can tell what the move did" "settled" "$v"
+  settled_row "$S" "every Application is Synced and Healthy before the move, so the check after it can tell what the move did" "${STATE}/apps-before.json"
+  : > "${STATE}/accept"
+  if dns_only "${STATE}/apps-before.json"; then printf '%s' "$LAB_APP" > "${STATE}/accept"; fi
   record "$S" "there is no built-in forge yet" "absent" "$(has_forge)"
   git -C "$SITE_DIR" rev-list --count HEAD > "${STATE}/pre-count" 2>/dev/null
   git -C "$SITE_DIR" rev-parse HEAD > "${STATE}/pre-head" 2>/dev/null
@@ -414,6 +476,7 @@ if ! done_step "$S"; then budget_left || yield "S02+"
   mark_done "$S"
 fi
 PRE="$(cat "${STATE}/pre-head" 2>/dev/null || true)"
+ACCEPT="$(cat "${STATE}/accept" 2>/dev/null || true)"
 PRE_COUNT="$(cat "${STATE}/pre-count" 2>/dev/null || true)"
 BEFORE_LINE="$(cat "${STATE}/untouched-before" 2>/dev/null || true)"
 printf 'Type the context name to go on: \t%s\n' "$KUBE_CONTEXT" > "${STATE}/answers"
@@ -447,6 +510,7 @@ if ! done_step "$S"; then budget_left || yield "S04+"
       "$(sha256sum < "${STATE}/block.sh" | cut -d' ' -f1)"
     _emit "SUBSTITUTION: YOUR_SITE_CHECKOUT -> ${SITE_DIR}; YOUR_SITE_REPOSITORY_HTTPS_URL -> \"\$P16_FROM_URL\" (exported, not printed); YOUR_AGE_PUBLIC_KEY -> the path's age identity's public key  (YOU SUPPLY on the page)"
     [ -z "$FROM_CA" ] || _emit "EDIT AS THE PAGE SAYS: 'if a private CA signed that forge's certificate, the CA as a PEM file, given as --from-ca FILE': --from-ca and the forge's ca.crt are added after --from-credentials"
+    [ -z "$ACCEPT" ] || _emit "EDIT AS THE PAGE SAYS: 'an Application that is not Synced and Healthy (name one you accept as it is with --accept-unsettled)': --accept-unsettled ${ACCEPT} is added, the only Application that is not, for the throwaway's lab-only DNS (see S02)"
     execute_begin "site-forge.md: move-in-forge --dry-run"
     run_ws "$S" "$(filled "${STATE}/block.sh")" "${STATE}/answers"; execute_end $?
     record "$S" "the dry run ends as the page says: it changes nothing" "1" "$(out_of "$S" | grep -c 'Dry run: nothing was changed' | tr -d ' ')"
@@ -484,8 +548,7 @@ record "$S" "row 1: every Application that read the external repository reads th
   "every Application that read the external repository reads the built-in forge ($(verdict reads --url "$P16_FROM_URL" < "${STATE}/apps-before.json" | head -1 | cut -d' ' -f1))" \
   "$(verdict moved --before "${STATE}/apps-before.json" --from "$P16_FROM_URL" --in "$IN_URL" < "${STATE}/apps-after.json" | head -1)"
 record "$S" "row 1: Argo CD's root reads the built-in forge" "the built-in forge" "$(verdict root --root "$ROOT_APP" --from "$P16_FROM_URL" --in "$IN_URL" < "${STATE}/apps-after.json" | head -1)"
-case "$(verdict settled < "${STATE}/apps-after.json" | head -1)" in *" Synced and Healthy") v=settled ;; *) v="$(verdict settled < "${STATE}/apps-after.json" | head -1)" ;; esac
-record "$S" "row 1: every Application is Synced and Healthy after the move" "settled" "$v"
+settled_row "$S" "row 1: every Application is Synced and Healthy after the move" "${STATE}/apps-after.json"
 v="$(verdict pruned --before "${STATE}/apps-before.json" < "${STATE}/apps-after.json" | head -1)"
 note "${S}: ${v}"
 record "$S" "row 2: nothing any Application managed before the move was pruned" "nothing pruned" "$(case "$v" in "nothing pruned ("*) echo "nothing pruned" ;; *) echo "$v" ;; esac)"
