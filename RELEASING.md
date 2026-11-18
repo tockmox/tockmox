@@ -248,7 +248,8 @@ cutoff.
 4. Create and sign the tag on that commit ("The tag" below), and push it.
 5. Sign the gate report (below). From 0.9 the archive and `SHA256SUMS` are
    built by CI after step 6 ("Checksums" below); on `release-0.8` the script
-   still generates them here.
+   still generates them here. From 0.9, sign the release feed next to it by
+   hand ("The release feed" below); the script does not hold the feed key.
 6. Publish the drafted Release with `--verify-tag`, so an unsigned tag cannot be
    created by the Release step.
 
@@ -716,6 +717,47 @@ gh release upload "$TAG" "$REPORT" "${REPORT}.sig"
 - The signature makes the report attributable and tamper-evident. It does not
   make the report true, which is why "what was not tested" is part of the
   signed bytes.
+
+## The release feed, from 0.9.0 onward
+
+The console's opt-in update check reads `releases.json` and the detached
+`releases.json.sig` beside it, and believes them only if the signature
+verifies against a public key the chart pins and the feed has not expired.
+`tools/release-feed.sh` is the only way the feed is written:
+
+```bash
+FEED=releases.json            # the published copy, fetched first
+FEED_KEY=YOUR_FEED_SIGNING_KEY
+
+tools/release-feed.sh add "$FEED" --version X.Y.Z --date YYYY-MM-DD \
+  --notes "One line." --notes-url https://<the release page> \
+  [--min-upgrade-from X.Y.Z] [--breaking "What the operator must do."]... [--security]
+tools/release-feed.sh sign "$FEED" "$FEED_KEY" --pin <current key> --pin <next key>
+tools/release-feed.sh verify "$FEED" <current key> <next key>
+```
+
+Then publish both files together at the feed URL.
+
+- **A dedicated key, not the tag key.** The feed key is an offline Ed25519
+  key. A second, pre-generated key is pinned beside it from the start, in the
+  chart default and in `SECURITY.md`, so the first can be retired without an
+  upgrade that every console must take first. `sign` refuses a key that is not
+  one of the pins you pass it: a feed signed with any other key verifies
+  against nothing a console holds.
+- **It expires.** `sign` sets `expires` to 45 days after signing, always. An
+  old signed feed replayed to a console would hide a newer release; the
+  console refuses an expired one. A feed edited with `add` is unsigned until
+  `sign` runs again, and `add` deletes the stale `.sig`.
+- **Re-sign on a schedule, not only on a release.** Every release re-signs
+  the feed. When no release has gone out, `tools/release-feed.sh due <feed URL>`
+  exits 3 once the feed is 30 days old, so a scheduled job can send the
+  reminder 15 days before consoles start refusing it. Re-signing is
+  `sign` and `verify` again with no `add`.
+- **Public text.** The notes and breaking lines are read by every operator
+  who enabled the check. `add` refuses internal tracker ids in them.
+- OpenSSL 3 is required (`pkeyutl -rawin`); on macOS set `OPENSSL` to a
+  Homebrew OpenSSL 3, since the system `openssl` is LibreSSL.
+  `tools/release-feed.sh --selftest` proves every refusal with throwaway keys.
 
 ## Close the release's own tracking, from 0.6.1 onward
 
