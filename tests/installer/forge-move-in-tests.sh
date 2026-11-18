@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Sourced by run.sh after forge-move-tests.sh, whose stand-in it uses (dp_start, dp_stop,
-# lib/forge-stub.py). Groups MI1-MI7: install/forge-move-in.sh, reached as
+# lib/forge-stub.py). Groups MI1-MI8: install/forge-move-in.sh, reached as
 # `tockmox-install.sh move-in-forge`.
 #
 # HERMETIC, and git is REAL: the site checkout, the forge's repository and the old
@@ -280,4 +280,55 @@ assert_artifact "the CA goes to the off-site run alone, as bootstrap-forge's --o
   "grep -c -- '--offsite-git-ca' '$D/state/bf-args-0' || true; grep -A1 -- '--offsite-git$' '$D/state/bf-args-1' | tail -1; grep -A1 -- '--offsite-git-ca' '$D/state/bf-args-1' | tail -1" \
   "$(printf '0\n%s\n%s' "$MI_FROM_TLS" "$D/ca/ca.crt")"
 kill "$MI_TLS_PID" 2>/dev/null || true; wait "$MI_TLS_PID" 2>/dev/null || true
+dp_stop
+
+# mi_bf_flags DIR ... bootstrap-forge's own site_flag and its two calls for the approvers watcher, taken from the real
+# install/bootstrap-forge.sh, run on DIR as bootstrap-forge runs them on the tree it publishes. Prints how many calls
+# it found (two, or the extraction is broken and the case below proves nothing).
+MI_BF_REAL="$REPO_ROOT/install/bootstrap-forge.sh"
+# shellcheck disable=SC2016  # "$SITE" is bootstrap-forge's own text, matched literally
+mi_bf_flags() {
+  local f="$D/bf-flags.sh"
+  { echo 'set -u'; sed -n '/^site_flag() {/,/^}/p' "$MI_BF_REAL"
+    grep -E '^  if site_flag "\$SITE/site/values/(observability|identity)\.yaml"' "$MI_BF_REAL" \
+      | sed -E 's/^  if (site_flag .*); then$/\1 || true/'
+  } > "$f"
+  grep -c '^site_flag "\$SITE' "$f"
+  SITE="$1" bash "$f" >/dev/null 2>&1 || true
+}
+
+path_begin "MI8" "the approvers watcher's two switches ride the migration commit when bootstrap-forge will connect sign-in, so the forge's main is ONE commit on the site's history and bootstrap-forge has nothing of its own to commit; not with --no-sign-in; an operator's value is left alone"
+mi_start i8 settle
+BEFORE_HEAD="$(mi_git -C "$MI_SITE" rev-parse HEAD)"
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "the move succeeds, and the forge's main is the site's history plus exactly one commit" \
+  "echo $MI_STATUS; mi_forge rev-list --count main; mi_forge rev-parse main~1" "$(printf '0\n3\n%s' "$BEFORE_HEAD")"
+assert_artifact "the migration commit turns the watcher on under sso.apps.forge and under siteForge, after each enabled: true" \
+  "mi_forge show main:site/values/identity.yaml | grep -A2 '^    forge:'; mi_forge show main:site/values/observability.yaml | grep -A2 '^siteForge:'" \
+  "$(printf '    forge:\n      enabled: true\n      approverWatch: true\nsiteForge:\n  enabled: true\n  approverWatch: true')"
+assert_artifact "it says so" "grep -c 'approverWatch: true (bootstrap-forge installs the approvers watcher)' '$D/out/stdout'" "2"
+rm -rf "$D/check"; mi_git clone -q "$D/root/tockmox/site.git" "$D/check"
+assert_artifact "bootstrap-forge's own site_flag (both calls, read from install/bootstrap-forge.sh) finds nothing to add on the forge's main, so it makes no commit of its own" \
+  "mi_bf_flags '$D/check'; mi_git -C '$D/check' status --porcelain | wc -l | tr -d ' '" "$(printf '2\n0')"
+rm -rf "$D/check2"; mi_git clone -q "$D/root/tockmox/site.git" "$D/check2"
+sed -i '/approverWatch/d' "$D/check2/site/values/identity.yaml" "$D/check2/site/values/observability.yaml"
+mi_git -C "$D/check2" -c user.name=t -c user.email=t@example.invalid commit -qam "without the switches"
+assert_artifact "the same check goes red on a tree without the two switches: bootstrap-forge would change both files, its second commit" \
+  "mi_bf_flags '$D/check2'; mi_git -C '$D/check2' status --porcelain | wc -l | tr -d ' '" "$(printf '2\n2')"
+dp_stop
+mi_start i8b settle
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --no-sign-in --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "with --no-sign-in after --, bootstrap-forge installs no watcher, and the migration commit adds neither switch" \
+  "echo $MI_STATUS; mi_forge show main:site/values/identity.yaml | grep -c approverWatch || true; mi_forge show main:site/values/observability.yaml | grep -c approverWatch || true" \
+  "$(printf '0\n0\n0')"
+dp_stop
+mi_start i8c settle
+printf 'sso:\n  enabled: true\n  apps:\n    forge:\n      enabled: true\n      approverWatch: false\n' > "$MI_SITE/site/values/identity.yaml"
+mi_git -C "$MI_SITE" -c user.name=t -c user.email=t@example.invalid commit -qam "the operator turned the watcher off"
+mi_git -C "$MI_SITE" push -q "$D/root/me/site.git" main
+mi_git -C "$MI_SITE" rev-parse HEAD > "$D/state/rev"
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "an approverWatch the operator already set is theirs: left as it is, and said so" \
+  "echo $MI_STATUS; mi_forge show main:site/values/identity.yaml | grep -c approverWatch; mi_forge show main:site/values/identity.yaml | grep approverWatch; grep -c 'left as it is: sso.apps.forge.approverWatch' '$D/out/stdout'" \
+  "$(printf '0\n1\n      approverWatch: false\n1')"
 dp_stop

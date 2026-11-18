@@ -27,8 +27,13 @@
 #      every `repoURL:` that names --from names the built-in forge's in-cluster
 #      address instead, and the built-in values are added (global.siteForge:
 #      built-in, sso.apps.forge.enabled: true where the identity layer is on,
-#      siteForge.enabled: true where the observability layer is on). ONE commit,
-#      with a fixed author and date, so a re-run makes the same commit.
+#      siteForge.enabled: true where the observability layer is on), and, when
+#      bootstrap-forge will connect sign-in (the identity layer is on and
+#      --no-sign-in is not passed after --), the approvers watcher's two switches
+#      bootstrap-forge would otherwise commit itself (approverWatch: true under
+#      sso.apps.forge and under siteForge; a value already there is left alone).
+#      ONE commit, with a fixed author and date, so a re-run makes the same commit,
+#      and bootstrap-forge finds nothing of its own to commit on top of it.
 #   3. A copy of Argo CD's credential for --from, beside the original, so Argo CD
 #      can still read the old repository at every moment of the cutover.
 #   4. bootstrap-forge installs the forge, pushes the whole history plus the
@@ -400,10 +405,35 @@ if grep -q '^KEPT ' "$TMPD/rewrite.txt"; then
   sed -n 's/^KEPT \([0-9]*\) \(.*\)$/      \2 (\1)/p' "$TMPD/rewrite.txt"
 fi
 
+# bootstrap-forge connects sign-in, and with it installs the approvers watcher, unless the site has no identity
+# layer or --no-sign-in is passed to it. Then it writes two switches into the site's values and commits them on top
+# of the migration commit. They go into the migration commit instead, so the forge's main is that ONE commit on the
+# site's history, as the page says.
+WATCH_ON=""
+if [[ -f "$TREE/bootstrap/applications/tockmox-identity.yaml" ]]; then
+  WATCH_ON=watch
+  for a in "${PASS[@]+"${PASS[@]}"}"; do [[ "$a" != --no-sign-in ]] || WATCH_ON=""; done
+fi
+
 # The built-in values. Line edits, each refusing an ambiguous file rather than guessing.
-python3 - "$TREE" > "$TMPD/values.txt" <<'PY'
+python3 - "$TREE" "$WATCH_ON" > "$TMPD/values.txt" <<'PY'
 import os, re, sys
 root = sys.argv[1]
+watch = sys.argv[2] == "watch"
+def watch_flag(ls, parent, end, ind, label):
+    # bootstrap-forge's site_flag, line for line: a KEY already at that indent anywhere is the operator's; otherwise
+    # it goes on the line after the first `enabled: true` inside the block the parent line opens
+    if any(re.match(r'^%sapproverWatch:' % ind, l) for l in ls):
+        print("KEEP %s.approverWatch (already set)" % label); return
+    p = next((i for i, l in enumerate(ls) if re.match(parent, l)), None)
+    if p is not None:
+        for i in range(p + 1, len(ls)):
+            if re.match(r'^%senabled: *true' % ind, ls[i]):
+                ls.insert(i + 1, ind + "approverWatch: true")
+                print("ADD %s.approverWatch: true (bootstrap-forge installs the approvers watcher)" % label); return
+            if re.match(end, ls[i]):
+                break
+    print("SKIP %s.approverWatch (no block with enabled: true for it; bootstrap-forge warns)" % label)
 def rd(p):
     p = os.path.join(root, p)
     return open(p, encoding="utf-8").read().split("\n") if os.path.exists(p) else None
@@ -455,6 +485,8 @@ if os.path.exists(os.path.join(root, "bootstrap/applications/tockmox-identity.ya
                 if en: v[en[0]] = "      enabled: true"
                 else: v.insert(f + 1, "      enabled: true")
                 print("SET sso.apps.forge.enabled: true")
+    if watch:
+        watch_flag(v, r'^    forge:', r'^([^ #]|  [^ ]|    [^ ])', '      ', "sso.apps.forge")
     wr("site/values/identity.yaml", v)
 else:
     print("SKIP sso.apps.forge (no identity layer)")
@@ -469,12 +501,14 @@ if os.path.exists(os.path.join(root, "bootstrap/applications/tockmox-observabili
         if en: v[en[0]] = "  enabled: true"
         else: v.insert(b[0] + 1, "  enabled: true")
         print("SET siteForge.enabled: true")
+    if watch:
+        watch_flag(v, r'^siteForge:', r'^[^ #]', '  ', "siteForge")
     wr("site/values/observability.yaml", v)
 else:
     print("SKIP siteForge (no observability layer)")
 PY
 grep -q '^FAIL ' "$TMPD/values.txt" && die "$(sed -n 's/^FAIL //p' "$TMPD/values.txt" | head -1). Nothing was touched."
-sed -n 's/^\(ADD\|SET\) \(.*\)$/  ✓ \2/p; s/^SKIP \(.*\)$/    skipped: \1/p' "$TMPD/values.txt"
+sed -n 's/^\(ADD\|SET\) \(.*\)$/  ✓ \2/p; s/^SKIP \(.*\)$/    skipped: \1/p; s/^KEEP \(.*\)$/    left as it is: \1/p' "$TMPD/values.txt"
 
 # One commit, deterministic: the parent's date, a fixed author, a fixed message.
 PDATE="$(git -C "$TREE" log -1 --format=%cI)"
