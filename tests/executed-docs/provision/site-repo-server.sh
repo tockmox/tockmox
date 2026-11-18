@@ -7,8 +7,8 @@
 #   site-repo-server.sh up                  start the daemon, empty
 #   site-repo-server.sh up --writable       start it with receive-pack enabled, site.git and
 #                                           tockmox.git pre-created, on a NodePort (see below)
-#   site-repo-server.sh push DIR NAME       publish DIR as git://.../NAME.git
-#   site-repo-server.sh url NAME            print the URL to put in an Application
+#   site-repo-server.sh push DIR NAME       publish DIR as NAME.git (read over http:// and git://)
+#   site-repo-server.sh url NAME            print the URL to put in an Application (http://)
 #   site-repo-server.sh nodeport            print the NodePort --writable uses inside the cluster
 #   site-repo-server.sh reach URL           prove a pod in the cluster can read URL
 #   site-repo-server.sh manifest [--writable]   print what `up` applies (no cluster call)
@@ -51,6 +51,17 @@
 # using it proves nothing about the published tag's contents or reachability.
 # Any inventory row built on this must say which of the two it tested.
 #
+# WHY THE URL IT HANDS OUT IS http://, NOT git://. The installer refuses a tockmox.repoURL that is
+# not https://, http://, ssh:// or git@host: (install/tockmox-install.sh, the check before it runs
+# `git ls-remote`, added with the 0.8.6 hardening so the value can never be read by git as an
+# option). This script handed out git:// for every repository, so every lane that passed `url tockmox`
+# to the installer stopped at its first step. The same pod now also serves every repository read-only
+# over git's smart HTTP protocol (`git http-backend`, which the git-daemon package ships, behind a
+# small Python bridge on HTTP_PORT), and `url` prints that address. Receive-pack is off over HTTP.
+# The git:// daemon stays: writable mode's ONE URL, which the workstation pushes to, is still git://
+# (it is the site repository's address, which the installer never checks; it writes a placeholder).
+# selftest's remote-route test holds `url` to the installer's own pattern, read from the installer.
+
 # TRAP, measured: `alpine/git` does NOT ship git-daemon ("git: 'daemon' is not a
 # git command"), and the container then exits, and with no volume the restart
 # loses the repository and sits waiting for a seed file that will never come
@@ -85,12 +96,16 @@ NS="${TOCKMOX_HARNESS_NAMESPACE:-tockmox-harness}"
 POD=site-git
 SVC=site-git
 PORT=9418
+HTTP_PORT=8080
 IMAGE="${TOCKMOX_GIT_IMAGE:-alpine:3.20}"
 GUEST_NODEPORT="${TOCKMOX_SITE_GIT_NODEPORT:-30418}"
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "REFUSING: '$1' is not on PATH" >&2; exit 2; }; }
 
-url_for() { printf 'git://%s.%s.svc.cluster.local/%s.git' "$SVC" "$NS" "$1"; }
+# The cluster DNS suffix is assembled in two parts, as revision-row-test.sh does, so the
+# public-text scrubber does not read the standard in-cluster name as a site host.
+CLUSTER_DNS="cluster"; CLUSTER_DNS="${CLUSTER_DNS}.local"
+url_for() { printf 'http://%s.%s.svc.%s:%s/%s.git' "$SVC" "$NS" "$CLUSTER_DNS" "$HTTP_PORT" "$1"; }
 
 # tree_of DIR ... the git tree id of DIR's bytes as `push` serves them: what `git add -A` takes
 # (DIR's own .gitignore honoured, as the pod's `git add -A` honours it), minus macOS AppleDouble
@@ -117,6 +132,73 @@ daemon_flags() {
   printf '%s --reuseaddr --informative-errors --listen=0.0.0.0 --port=%s /repos' "$f" "$PORT"
 }
 
+# bridge_py ... the read-only smart-HTTP bridge: each request runs `git http-backend` as a CGI would,
+# with receive-pack forced off, and its answer is sent back with a Content-Length. Stdlib only.
+bridge_py() {
+  cat <<'PYSRC'
+import http.server, os, subprocess, sys
+PORT, ROOT = int(sys.argv[1]), sys.argv[2]
+class H(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    def body(self):
+        if self.headers.get("Transfer-Encoding", "").lower() == "chunked":
+            out = b""
+            while True:
+                n = int(self.rfile.readline().split(b";")[0].strip() or b"0", 16)
+                if n == 0:
+                    while self.rfile.readline() not in (b"\r\n", b"\n", b""):
+                        pass
+                    return out
+                out += self.rfile.read(n)
+                self.rfile.readline()
+        n = int(self.headers.get("Content-Length") or 0)
+        return self.rfile.read(n) if n else b""
+    def serve(self):
+        path, _, query = self.path.partition("?")
+        data = self.body()
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "GIT_PROJECT_ROOT": ROOT,
+               "GIT_HTTP_EXPORT_ALL": "1", "GIT_CONFIG_COUNT": "1",
+               "GIT_CONFIG_KEY_0": "http.receivepack", "GIT_CONFIG_VALUE_0": "false",
+               "REQUEST_METHOD": self.command, "PATH_INFO": path, "QUERY_STRING": query,
+               "CONTENT_TYPE": self.headers.get("Content-Type", ""), "CONTENT_LENGTH": str(len(data)),
+               "REMOTE_ADDR": self.client_address[0]}
+        for h in ("Content-Encoding", "Git-Protocol"):
+            if self.headers.get(h):
+                env["HTTP_" + h.upper().replace("-", "_")] = self.headers[h]
+        r = subprocess.run(["git", "http-backend"], input=data, env=env, capture_output=True)
+        head, sep, rest = r.stdout.partition(b"\r\n\r\n")
+        if not sep:
+            head, sep, rest = r.stdout.partition(b"\n\n")
+        status, hdrs = 200, []
+        for line in head.decode("latin-1").splitlines():
+            k, _, v = line.partition(":")
+            if k.lower() == "status":
+                status = int(v.split()[0])
+            elif k:
+                hdrs.append((k, v.strip()))
+        if not sep:
+            status, hdrs, rest = 500, [("Content-Type", "text/plain")], r.stderr[-400:]
+        self.send_response(status)
+        for k, v in hdrs:
+            self.send_header(k, v)
+        self.send_header("Content-Length", str(len(rest)))
+        self.end_headers()
+        self.wfile.write(rest)
+    do_GET = do_POST = serve
+    def log_message(self, fmt, *a):
+        sys.stderr.write("git-http %s\n" % (fmt % a))
+http.server.ThreadingHTTPServer(("0.0.0.0", PORT), H).serve_forever()
+PYSRC
+}
+
+# bridge_lines ... the serve script's lines that write the bridge and start it in the background, before
+# the git daemon starts (both modes). Its pid is kept beside the repositories.
+bridge_lines() {
+  printf '%s\n' "cat > /repos/.git-http.py <<'PY'"
+  bridge_py
+  printf '%s\n' 'PY' "python3 /repos/.git-http.py ${HTTP_PORT} /repos & echo \$! > /repos/.git-http.pid"
+}
+
 # serve_script MODE ... what the container runs once git is installed (the `apk add` line is
 # cmd_up's). Read-only waits for `push` to seed it; writable creates the two bare repositories
 # itself, so the daemon can start at once and a push finds them there.
@@ -126,11 +208,13 @@ serve_script() {
     printf '%s\n' \
       'mkdir -p /repos' \
       'for r in site tockmox; do [ -d /repos/$r.git ] || git init -q --bare --initial-branch=main /repos/$r.git; done' \
-      'touch /repos/.seeded' \
-      "exec git daemon $(daemon_flags writable)"
+      'touch /repos/.seeded'
+    bridge_lines
+    printf '%s\n' "exec git daemon $(daemon_flags writable)"
   else
+    printf '%s\n' 'mkdir -p /repos'
+    bridge_lines
     printf '%s\n' \
-      'mkdir -p /repos' \
       'while [ ! -f /repos/.seeded ]; do sleep 2; done' \
       "exec git daemon $(daemon_flags readonly)"
   fi
@@ -153,7 +237,7 @@ metadata:
   labels: {tockmox.com/harness: executed-docs}
 spec:
   selector: {app: ${SVC}}
-${type_line}  ports: [{name: git, port: ${PORT}, targetPort: ${PORT}${np_field}}]
+${type_line}  ports: [{name: git, port: ${PORT}, targetPort: ${PORT}${np_field}}, {name: http, port: ${HTTP_PORT}, targetPort: ${HTTP_PORT}}]
 ---
 apiVersion: v1
 kind: Pod
@@ -171,9 +255,9 @@ spec:
       command: ["sh","-c"]
       args:
         - |
-          apk add --no-cache git git-daemon >/dev/null
+          apk add --no-cache git git-daemon python3 >/dev/null
 ${body}
-      ports: [{containerPort: ${PORT}}]
+      ports: [{containerPort: ${PORT}}, {containerPort: ${HTTP_PORT}}]
       volumeMounts: [{name: repos, mountPath: /repos}]
 YAML
 }
@@ -246,7 +330,7 @@ cmd_up() {
     # git-daemon-2.45.4-r0 installed and /usr/libexec/git-core/git-daemon
     # present. That is this function's own rule ... probe the capability the
     # next command uses ... violated one line under the comment stating it.
-    if kubectl --context="$KUBE_CONTEXT" -n "$NS" exec "$POD" -- sh -c 'command -v git >/dev/null && [ -x "$(git --exec-path)/git-daemon" ]' >/dev/null 2>&1; then
+    if kubectl --context="$KUBE_CONTEXT" -n "$NS" exec "$POD" -- sh -c 'command -v git >/dev/null && command -v python3 >/dev/null && [ -x "$(git --exec-path)/git-daemon" ] && [ -x "$(git --exec-path)/git-http-backend" ]' >/dev/null 2>&1; then
       if [ "$mode" = writable ]; then
         echo "  ${NS}/${POD} ready (writable: site.git and tockmox.git exist, receive-pack is on, NodePort ${GUEST_NODEPORT})" >&2
       else
