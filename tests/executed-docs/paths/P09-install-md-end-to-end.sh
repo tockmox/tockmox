@@ -803,6 +803,11 @@ if ! done_step "$S"; then budget_left || yield "S17+"
       record "$S" "readiness bar: clean twice ... BLOCKED by the environment: only tockmox-devops remains and its log ends 'no such host' for auth.${INTERNAL_DOMAIN_V} (the page's expected-broken row 2; clears with DNS, lab only)" "clean twice" "devops only, DNS" xfail
     else
       record "$S" "readiness bar: prints nothing, and nothing again at least three minutes later (site-apps excluded)" "clean twice" "not clean after $(( now - $(cat "${STATE}/root-applied-at") ))s: $(out_of "${S}-bar" | tr '\n' ';' | cut -c1-200)"
+      # Why, in Argo CD's words: each listed Application's last operation, the resources it failed on, its conditions
+      # and the resources not Synced or not Healthy (lib/p09-stuck-apps.py), the site remote and off-site host scrubbed.
+      kubectl --context="$KUBE_CONTEXT" -n argocd get applications -o json 2>/dev/null \
+        | python3 "${HERE}/../lib/p09-stuck-apps.py" --scrub "${SITE_URL}" | offsite_scrub \
+        | while IFS= read -r l; do note "S17: not ready, Argo CD says: ${l}"; done
     fi
   fi
   mark_done "$S"
