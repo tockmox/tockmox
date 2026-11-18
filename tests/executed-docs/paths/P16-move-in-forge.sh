@@ -10,7 +10,8 @@
 #   S01  GLUE: the site as the page finds it. P09's external route serves the site repository from a git daemon on
 #        the throwaway (git://), and the page asks for the repository's https address, so the site is first put on an
 #        external https forge with its whole history: one commit that names that forge in every repoURL, pushed
-#        there, Argo CD given a credential for it (install.md 2c's Secret), the root applied, and every Application
+#        there, Argo CD given a credential for it (install.md 2c's Secret) and, when that forge is on a private CA,
+#        the CA (argocd-tls-certs-cm under the forge's host name, merged), the root applied, and every Application
 #        waited on until it is Synced and Healthy on that forge. Then a clean clone of it is the reader's checkout, an
 #        age identity is made, and the sealing key is exported the way bootstrap-forge asks for it.
 #   S02  before the move: the page's block resolves to one block and holds its three placeholders once each and one
@@ -43,6 +44,11 @@
 # reason, before any call to a cluster. A ca.crt is the forge's private CA: the page tells that reader to add
 # move-in-forge's --from-ca, so this path adds it to the block (an edit the page asks for, and logged as one) and reads
 # the forge with it too. A page that does not say so is BLOCKED, because the path would add a word it does not print.
+# The page says Argo CD needs nothing new for that CA because it already reads that repository; a reader's Argo CD
+# does, P09's does not (its site was on the git daemon), so S01 gives it the CA as GLUE, in the object Argo CD reads
+# a repository's CA from: argocd-tls-certs-cm, keyed by the host name, merged so that every other entry is kept. No
+# insecure flag. The repo-server mounts that ConfigMap, so the change reaches it without a restart, after the
+# kubelet's sync (a minute or so), well inside the settle.
 #
 # NOTHING IS PUT BACK. The move is the page's end state, so the install is left on the built-in forge, with the
 # external repository as its off-site copy, and the throwaway is destroyed with it. A kept run does not reach this
@@ -121,6 +127,7 @@ ADMIN_SECRET=tockmox-forge-admin
 IN_URL="http://${FORGE_SVC}.${FORGE_NS}.svc.cluster.local:3000/tockmox/site.git"
 CRED_SECRET=tockmox-site-repo
 CRED_COPY=tockmox-site-repo-before-move
+TLS_CM=argocd-tls-certs-cm
 MIG_AUTHOR="Tockmox installer"
 P16_FROM_URL="$(head -1 "${FROM_DIR}/git-url" | tr -d '[:space:]')"
 FROM_HOST="$(head -1 "${FROM_DIR}/host" 2>/dev/null | tr -d '[:space:]')"
@@ -226,19 +233,22 @@ untouched() {
 }
 # settle WANT-ROOT LIMIT ... poll until the root reads WANT-ROOT, nothing reads OLD_URL and every Application is Synced
 # and Healthy, or LIMIT seconds pass. Sets SLAST (the settled verdict), SROOT, SWAITED.
+# A settle that times out also notes the root Application's own conditions (Argo CD's words for why, the external
+# host scrubbed), so a run that never settles says what Argo CD saw.
 settle() {
-  local want="$1" limit="$2" t0 f="${STATE}/settle.apps.json"; t0=$(date +%s)
+  local want="$1" limit="$2" t0 f="${STATE}/settle.apps.json" settled=0; t0=$(date +%s)
   while :; do
     apps_now "$f"
     SROOT="$(verdict root --root "$ROOT_APP" --from "$P16_FROM_URL" --in "$IN_URL" < "$f" | head -1)"
     SLAST="$(verdict settled < "$f" | head -1)"
     SOLD="$(verdict reads --url "$OLD_URL" < "$f" | head -1)"
     SWAITED=$(( $(date +%s) - t0 ))
-    if [ "$SROOT" = "$want" ] && [ "$SOLD" = "0 read it" ]; then case "$SLAST" in *" Synced and Healthy") break ;; esac; fi
+    if [ "$SROOT" = "$want" ] && [ "$SOLD" = "0 read it" ]; then case "$SLAST" in *" Synced and Healthy") settled=1; break ;; esac; fi
     [ "$SWAITED" -ge "$limit" ] && break
     sleep "$POLL"
   done
   note "settle: waited ${SWAITED}s (limit ${limit}s): root reads ${SROOT}; the old repository: ${SOLD}; ${SLAST}"
+  [ "$settled" = 1 ] || note "settle: not settled within ${limit}s; the root Application's conditions: $(verdict conditions --root "$ROOT_APP" < "$f" | head -1 | scrub)"
 }
 
 # ------------------------------------------------------------- the page's block
@@ -305,7 +315,7 @@ finish_path() {
 
   does_not_prove \
     "A site that arrived on its forge by its own history: S01 puts P09's site on the external forge with one commit and an applied root, which is what a reader on their own forge already has, not how they got it." \
-    "A private CA on the external forge: this path refuses one (BLOCKED), because the command passes no CA to the off-site copy." \
+    "That a reader's Argo CD already trusts a forge on a private CA, as the page says it does: on such a forge S01 gives the guest's Argo CD the CA (argocd-tls-certs-cm) as GLUE, because P09's site was never on that forge." \
     "That a pull request on the old repository, or its CI, does anything after the move: the page says the forge runs no CI and the mirror pushes after the fact; nothing reads the old repository's workflows." \
     "That the push mirror refuses a force-push the page tells the reader to block: branch rules on the external forge are the reader's and are not set here." \
     "The cutover's failure branch (the printed command that points Argo CD back): the installer's tests run it against stand-ins; here the move settles or the path fails." \
@@ -326,7 +336,7 @@ S=S01-stage
 if ! done_step "$S"; then budget_left || yield "S01+"
   reset_rows "$S"
   _emit ""; _emit "=== STEP ${S} =============================================="
-  _emit "GLUE: the page starts from a site whose repository is on a forge of its own, at an https address; P09's external route serves it at git:// (a daemon on the throwaway), so the site moves to an external https forge first: one commit that names it in every repoURL, the whole history pushed there, Argo CD's credential for it (install.md 2c's Secret), and the root applied"
+  _emit "GLUE: the page starts from a site whose repository is on a forge of its own, at an https address; P09's external route serves it at git:// (a daemon on the throwaway), so the site moves to an external https forge first: one commit that names it in every repoURL, the whole history pushed there, Argo CD's credential for it (install.md 2c's Secret), its CA when it is on a private one, and the root applied"
   rm -rf "${STATE}/stage"
   git clone -q --no-local "$SITE_REPO" "${STATE}/stage" 2>"${STATE}/stage.err"
   v="$(verdict rewrite --old "$OLD_URL" --new "$P16_FROM_URL" "${STATE}/stage" 2>&1 | scrub)"
@@ -340,6 +350,19 @@ if ! done_step "$S"; then budget_left || yield "S01+"
   verdict argo-secret --name "$CRED_SECRET" --url "$P16_FROM_URL" --credentials "${FROM_DIR}/git-credentials" \
     | kubectl --context="$KUBE_CONTEXT" apply -f - > "${STATE}/cred-apply.out" 2>&1
   record "$S" "GLUE: Argo CD's site credential (${ARGO_NS}/${CRED_SECRET}) names the external repository" "names the URL's repository" "$(cred_names "$P16_FROM_URL")"
+  if [ -n "$FROM_CA" ]; then
+    # the CA under the forge's host name in argocd-tls-certs-cm, a merge patch that names no other key, before the root
+    # is applied, so the first read of the external repository can verify it
+    verdict argo-ca --url "$P16_FROM_URL" --ca "$FROM_CA" > "${STATE}/argo-ca-patch.json" 2> "${STATE}/argo-ca.err"
+    kubectl --context="$KUBE_CONTEXT" -n "$ARGO_NS" patch configmap "$TLS_CM" --type merge --patch-file "${STATE}/argo-ca-patch.json" > "${STATE}/argo-ca.out" 2>&1
+    v="$(kubectl --context="$KUBE_CONTEXT" -n "$ARGO_NS" get configmap "$TLS_CM" -o json 2>/dev/null | verdict ca-trusted --url "$P16_FROM_URL" --ca "$FROM_CA" | head -1)"
+    record "$S" "GLUE: Argo CD trusts the external forge's private CA (${ARGO_NS}/${TLS_CM} holds ca.crt under its host name)" "holds the CA under the URL's host" "$v"
+    if [ "$v" = "holds the CA under the URL's host" ]; then
+      note "${S}: the external forge is on a private CA, so its ca.crt was given to Argo CD: ${ARGO_NS}/${TLS_CM}, under the forge's host name, merged (no other entry changed, no insecure flag)"
+    else
+      note "${S}: the external forge is on a private CA, and its ca.crt could not be given to Argo CD (${v}): $(cat "${STATE}/argo-ca.err" "${STATE}/argo-ca.out" 2>/dev/null | tail -c 300 | tr '\n' ' ' | scrub)"
+    fi
+  fi
   kubectl --context="$KUBE_CONTEXT" apply -f "${STATE}/stage/bootstrap/root.yaml" > "${STATE}/root-apply.out" 2>&1
   settle "the external repository" "$SETTLE"
   record "$S" "GLUE: Argo CD's root reads the external repository, and no Application reads the git daemon any more" "the external repository; 0 read it" "${SROOT}; ${SOLD}"
