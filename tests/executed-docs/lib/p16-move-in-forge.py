@@ -12,8 +12,12 @@ spelling (https or ssh, with or without .git, any case in the host), as the inst
                      "the external repository", "the built-in forge", "another repository: X", or "absent".
   revision [--root NAME]
                      stdin: the same. The revision the root is synced to.
-  settled            stdin: the same. "N Synced and Healthy" when every Application is, otherwise "not settled: ..."
-                     naming the first three that are not. No Application at all is unreadable.
+  settled [--accept NAME[,NAME]]
+                     stdin: the same. "N Synced and Healthy" when every Application is, otherwise "not settled: ..."
+                     naming the first three that are not. No Application at all is unreadable. An Application named
+                     with --accept (the path's lab-only DNS row, the move's --accept-unsettled) does not hold the
+                     verdict back: when it is the only one not Synced and Healthy, the verdict is "the rest Synced and
+                     Healthy; accepted as it is: NAME is SYNC/HEALTH", never the "N Synced and Healthy" of a clean read.
   reads --url URL    stdin: the same. "K read it": how many Applications name URL in a source.
   moved --before FILE --from URL --in URL
                      stdin: the Applications now; FILE: the same list before the move. "every Application that read
@@ -145,14 +149,20 @@ def v_revision(a):
     return one(rev) if rev else unreadable("the root reports no revision")
 
 
-def v_settled(_a):
+def v_settled(a):
     apps, why = read_apps(sys.stdin)
     if apps is None:
         return unreadable(why)
     if not apps:
         return unreadable("no Application at all")
-    bad = ["%s is %s/%s" % ((n,) + state(x)) for n, x in sorted(apps.items()) if state(x) != ("Synced", "Healthy")]
-    return one("not settled: " + "; ".join(bad[:3]) if bad else "%d Synced and Healthy" % len(apps))
+    accept = set(x for x in (a.accept or "").split(",") if x)
+    off = [(n, "%s is %s/%s" % ((n,) + state(x))) for n, x in sorted(apps.items()) if state(x) != ("Synced", "Healthy")]
+    bad = [t for n, t in off if n not in accept]
+    if bad:
+        return one("not settled: " + "; ".join(bad[:3]))
+    if off:
+        return one("the rest Synced and Healthy; accepted as it is: " + "; ".join(t for _, t in off))
+    return one("%d Synced and Healthy" % len(apps))
 
 
 def v_reads(a):
@@ -349,7 +359,7 @@ def main():
     p.add_argument("--in", dest="in_url", required=True)
     p.add_argument("--root", default="tockmox-root")
     sub.add_parser("revision").add_argument("--root", default="tockmox-root")
-    sub.add_parser("settled")
+    sub.add_parser("settled").add_argument("--accept", default="")
     sub.add_parser("reads").add_argument("--url", required=True)
     p = sub.add_parser("moved")
     p.add_argument("--before", required=True)
