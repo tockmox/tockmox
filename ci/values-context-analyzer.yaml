@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# THE CONTEXT ANALYZER FIXTURE. Applied ON TOP of ci/values.yaml by
+# tests/context-analyzer/render.sh, which asserts on the RENDER that enabling
+# apps.contextAnalyzer.enabled, with what a site supplies, produces the service,
+# its database, its policy, its scrape, its rules, its dashboard and the hook in
+# the gateway's hooks ConfigMap, after the policy gate.
+#
+# It is deliberately NOT part of ci/values-all-on.yaml: the hook package, the
+# rules and the dashboard come from the Context Analyzer source, which a site
+# supplies, so "all on" has nothing to switch on.
+#
+# The source files below are STAND-INS with the real files' shape (a package of
+# four modules that import each other relatively, a rules file, a dashboard).
+# They exist to be rendered and loaded by tests/context-analyzer/test_loader.py,
+# not to analyse anything.
+
+apps:
+  litellm: { enabled: true }
+  contextAnalyzer: { enabled: true }
+
+contextAnalyzer:
+  image: registry.example.com/site/context-analyzer:0.0.0-ci
+  gatewayId: ci-gateway
+  source:
+    compat.py: |
+      def check_litellm_version():
+          return (None, True)
+    segmentation.py: |
+      def segment_request(data):
+          return []
+    actuation.py: |
+      from .segmentation import segment_request
+
+      def plan_actuations(data):
+          return segment_request(data)
+    hooks.py: |
+      import os
+
+      from .actuation import plan_actuations
+      from .compat import check_litellm_version
+
+
+      class AnalyzerHook:
+          def __init__(self):
+              self.sink = os.environ.get("CTXA_SINK_URL", "")
+              self.mode = os.environ.get("CTXA_TOCKMOX_MODE", "0")
+              self.plan = plan_actuations
+              self.compat = check_litellm_version()
+
+
+      analyzer_hook = AnalyzerHook()
+    prometheus-alerts.yaml: |
+      groups:
+        - name: context-analyzer
+          rules:
+            - alert: CtxaEventStreamStale
+              expr: time() - ctxa_last_event_timestamp_seconds > 900
+              for: 5m
+              labels:
+                severity: warning
+              annotations:
+                summary: "No Context Analyzer event for 15 minutes on {{ $labels.instance }}"
+    context-analyzer-dashboard.json: |
+      {"uid": "ctxa-ci", "title": "Context Analyzer (fixture)", "panels": [], "schemaVersion": 39}
+
+modelGateway:
+  policyGate:
+    enabled: true
+    policyId: ci-policy-gate
+    routePosture:
+      local-chat: restricted
+
+litellm:
+  environmentSecrets:
+    - tockmox-ctxa
+  proxy_config:
+    model_list:
+      - model_name: local-chat
+        litellm_params:
+          model: openai/fake
+          api_base: http://127.0.0.1:18001/v1
+          api_key: none
+          tags: [restricted, internal, open]
+        model_info:
+          endpoint_tier: local
+    router_settings:
+      enable_tag_filtering: true
+    litellm_settings:
+      callbacks:
+        - hooks.tockmox_gate.tockmox_gate
+        - hooks.tockmox_context_analyzer.analyzer_hook

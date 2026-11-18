@@ -101,6 +101,7 @@
           "blackbox",
           "certManager",
           "cnpg",
+          "contextAnalyzer",
           "corednsHa",
           "dashboards",
           "devops_netpol",
@@ -1624,6 +1625,39 @@
               },
               "description": "An estimate per alias, labelled as one on the Budget page."
             }
+          }
+        }
+      }
+    },
+    "contextAnalyzer": {
+      "x-tockmox-stability": "experimental",
+      "x-tockmox-stability-ruled": "2026-11-13",
+      "x-tockmox-stability-rerule": "0.10.0",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The Context Analyzer add-on's settings (ADR-0040). The switch is apps.contextAnalyzer.enabled, off by default. See docs/administration/context-analyzer.md.",
+      "properties": {
+        "image": { "type": "string", "description": "The Analyzer image the site builds from the Context Analyzer source (ADR-0036). Required when enabled." },
+        "imagePullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] },
+        "tokenSecret": { "type": "string", "minLength": 1, "description": "A Secret in this namespace with keys CTXA_TOKEN and CTXA_HASH_SALT. List it in litellm.environmentSecrets too, so the hook reads the same token." },
+        "gatewayId": { "type": "string", "description": "Stamped on every event. Empty: the gateway pod's hostname." },
+        "source": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "propertyNames": { "enum": ["compat.py", "segmentation.py", "actuation.py", "hooks.py", "prometheus-alerts.yaml", "context-analyzer-dashboard.json"] },
+          "description": "File name to text: the hook package, the alert rules and the dashboard from the Context Analyzer source. A file the chart carries under files/context-analyzer/ is used when unset here."
+        },
+        "resources": { "type": "object", "additionalProperties": false, "properties": { "requests": { "type": "object" }, "limits": { "type": "object" } } },
+        "database": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "instances": { "type": "integer", "minimum": 1 },
+            "storage": { "type": "string", "minLength": 1 },
+            "storageClass": { "type": "string" },
+            "imageName": { "type": "string" },
+            "resources": { "type": "object", "additionalProperties": false, "properties": { "requests": { "type": "object" }, "limits": { "type": "object" } } }
           }
         }
       }

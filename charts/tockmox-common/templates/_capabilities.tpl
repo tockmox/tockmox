@@ -165,6 +165,7 @@ argocdMonitoring: observability
 authentik: identity
 openWebui: aiPlane
 litellm: aiPlane
+contextAnalyzer: aiPlane
 garage: dataProtection
 docs: dataProtection
 barmanPlugin: dataProtection

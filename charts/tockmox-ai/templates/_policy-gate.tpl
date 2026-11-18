@@ -79,5 +79,13 @@ require_mcp: {{ ternary "true" "false" (ne (toString $kp.requireMcp) "false") }}
 {{- $_ := set $files "tockmox_key_policy.py" ($.Files.Get "files/key-policy/tockmox_key_policy.py") -}}
 {{- $_ := set $files "tockmox_key_policy.yaml" (include "tockmox.ai.keyPolicyPolicy" $) -}}
 {{- end -}}
+{{- if include "tockmox.ai.ctxaOn" . -}}
+{{- range $k, $v := (include "tockmox.ai.ctxaHookFiles" $ | fromYaml) -}}
+{{- if hasKey $files $k -}}
+{{- fail (printf "modelGateway.hooks.files has a file named %q, and so does the Context Analyzer (apps.contextAnalyzer.enabled). Both land in the same ConfigMap and only one can win; rename your file." $k) -}}
+{{- end -}}
+{{- $_ := set $files $k $v -}}
+{{- end -}}
+{{- end -}}
 {{- toYaml $files -}}
 {{- end -}}

@@ -108,7 +108,7 @@ declare -A OWNER=(
   # direction like the rest.
   [argocdMonitoring]=observability
   [authentik]=identity
-  [openWebui]=aiPlane [litellm]=aiPlane
+  [openWebui]=aiPlane [litellm]=aiPlane [contextAnalyzer]=aiPlane
   [garage]=dataProtection [docs]=dataProtection [barmanPlugin]=dataProtection
   [snapshotController]=dataProtection
   [snmp]=hardwareTelemetry [smartctl]=hardwareTelemetry

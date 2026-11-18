@@ -62,6 +62,7 @@ ai-nodes
 model-lifecycle
 knowledge-mode
 tockmox-ui
+context-analyzer
 group: Platform assurance — experimental
 platform-management
 posture-probe

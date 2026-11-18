@@ -30,7 +30,7 @@ one key. It runs before every other guard so that `apps.openWebui: true` under
 a declined aiPlane is reported as that, not as the console pointing at a
 gateway the declined capability also turned off.
 */ -}}
-{{- include "tockmox.capabilityCoherent" (dict "ctx" $ "capability" "aiPlane" "apps" (list "openWebui" "litellm")) -}}
+{{- include "tockmox.capabilityCoherent" (dict "ctx" $ "capability" "aiPlane" "apps" (list "openWebui" "litellm" "contextAnalyzer")) -}}
 {{- $owui := index .Values "open-webui" | default dict -}}
 {{- /*
 Every guard on the console's backend runs only when the console itself renders.
@@ -157,6 +157,52 @@ the documented "run your own Prometheus operator" route: the capability says
 and rules for the operator I already have". Refusing it made the route
 unreachable in every layer.
 */ -}}
+{{- /*
+THE CONTEXT ANALYZER (ADR-0040). Enabled, the chart renders the service and adds
+the hook's files to the gateway's hooks ConfigMap; the site supplies the image,
+the source, the token Secret and the callback. Each of those missing renders
+cleanly and then either captures nothing or stops the proxy at start-up on an
+import error, so each is a sentence here instead. The registration left in place
+with the add-on off is refused for the same reason the key policy's is.
+*/ -}}
+{{- $ctxaCb := include "tockmox.ai.ctxaCallback" . -}}
+{{- $ctxaLit := .Values.litellm | default dict -}}
+{{- $ctxaCbs := dig "proxy_config" "litellm_settings" "callbacks" list $ctxaLit | default list -}}
+{{- if include "tockmox.ai.ctxaOn" . -}}
+{{- $ca := .Values.contextAnalyzer | default dict -}}
+{{- if not (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm")) -}}
+{{- fail "apps.contextAnalyzer.enabled is true but the model gateway is not enabled, so nothing loads the hook and the Analyzer receives nothing. Enable apps.litellm, or turn the Context Analyzer off." -}}
+{{- end -}}
+{{- if not $ca.image -}}
+{{- fail "apps.contextAnalyzer.enabled is true but contextAnalyzer.image is empty. Tockmox publishes no image for it (ADR-0036): build one from the Context Analyzer source and name it there." -}}
+{{- end -}}
+{{- $ctxaSrc := include "tockmox.ai.ctxaSource" . | fromYaml -}}
+{{- $ctxaMissing := list -}}
+{{- range (include "tockmox.ai.ctxaSourceNames" . | fromYamlArray) -}}
+{{- if not (index $ctxaSrc .) }}{{- $ctxaMissing = append $ctxaMissing . }}{{- end -}}
+{{- end -}}
+{{- if $ctxaMissing -}}
+{{- fail (printf "apps.contextAnalyzer.enabled is true but contextAnalyzer.source has no %s. The hook package, the alert rules and the dashboard come from the Context Analyzer source; set each file's text under contextAnalyzer.source (docs/administration/context-analyzer.md)." (join ", " $ctxaMissing)) -}}
+{{- end -}}
+{{- if not (has $ctxaCb $ctxaCbs) -}}
+{{- fail (printf "apps.contextAnalyzer.enabled is true, but litellm.proxy_config.litellm_settings.callbacks does not list %s, so the hook is mounted and never loaded: the Analyzer would see no traffic while the values say it does. Add that entry to the callbacks list%s." $ctxaCb (ternary ", after hooks.tockmox_gate.tockmox_gate" "" (not (not (include "tockmox.ai.policyGateOn" $))))) -}}
+{{- end -}}
+{{- if include "tockmox.ai.policyGateOn" . -}}
+{{- $gi := -1 -}}{{- $ai := -1 -}}
+{{- range $i, $c := $ctxaCbs -}}
+{{- if and (eq (toString $c) "hooks.tockmox_gate.tockmox_gate") (lt $gi 0) }}{{- $gi = $i }}{{- end -}}
+{{- if and (eq (toString $c) $ctxaCb) (lt $ai 0) }}{{- $ai = $i }}{{- end -}}
+{{- end -}}
+{{- if lt $ai $gi -}}
+{{- fail (printf "litellm.proxy_config.litellm_settings.callbacks lists %s before hooks.tockmox_gate.tockmox_gate. The Analyzer reads each request's class from the policy gate, so it must run after it; in this order every call reads as unclassified and fails closed. Move the Analyzer's entry after the gate's." $ctxaCb) -}}
+{{- end -}}
+{{- end -}}
+{{- if not (has $ca.tokenSecret ($ctxaLit.environmentSecrets | default list)) -}}
+{{- fail (printf "apps.contextAnalyzer.enabled is true, but litellm.environmentSecrets does not list %q, so the hook has no CTXA_TOKEN and the Analyzer refuses every event it sends. Add the Secret's name to litellm.environmentSecrets (it holds CTXA_TOKEN and CTXA_HASH_SALT)." $ca.tokenSecret) -}}
+{{- end -}}
+{{- else if and (has $ctxaCb $ctxaCbs) (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm")) -}}
+{{- fail (printf "litellm.proxy_config.litellm_settings.callbacks lists %s, but apps.contextAnalyzer.enabled is false, so the file is not mounted and the proxy fails at start-up on an import error. Remove that entry as well, or turn the Context Analyzer back on." $ctxaCb) -}}
+{{- end -}}
 {{- /*
 SITE HOOKS FOR THE MODEL GATEWAY. Three things have to agree for a
 hook to load, and they live in three different places: the files
