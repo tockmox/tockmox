@@ -425,6 +425,11 @@ AGE_RECIPIENT=YOUR_AGE_PUBLIC_KEY
 The dry run makes every check and shows the migration commit's files. Run it
 again without `--dry-run` to move; it asks you to type the context name.
 
+When `bootstrap-forge` will connect sign-in (your site has the identity layer and
+you do not pass `--no-sign-in` after `--`), the migration commit also holds the
+approvers watcher's two switches described above, so the forge's `main` is your
+history plus that one commit. A value you have already set there is left alone.
+
 **It refuses, before it writes anything:** uncommitted or untracked changes in
 the checkout; a checkout that is not the revision Argo CD is synced to; a root
 Application that reads another repository (your repository in its ssh spelling,
