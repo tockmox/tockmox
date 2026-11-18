@@ -73,6 +73,9 @@ gates:
   tools/check-cloud-egress.sh --selftest:
     - '@render'
     - tools/check-cloud-egress.sh
+  # 118 s (one run, 2026-11-18; most of it waiting on the throwaway repositories it builds)
+  tools/train-morning.sh --selftest:
+    - tools/train-morning.sh
   # 97 s
   tools/check-storage-policy.sh:
     - '@render'

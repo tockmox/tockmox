@@ -667,6 +667,15 @@ run_gate "the notify-and-drill gate goes red on every mutation" bash tools/check
 # ci.yaml yet, for the reason at the top of this file.
 run_gate "the release bar in tools/release-bars.yaml agrees with RELEASING.md" bash tools/check-release-bars.sh
 run_gate "the release-bars gate goes red on a missing row, a drifted cell and a missing file" bash tools/check-release-bars.sh --selftest
+# The release morning's own refusals and the release feed's signer. Both selftests build their fixtures
+# under a temporary directory and need no network (the morning stubs gh); without these lines CI proved
+# neither script, only whoever ran it by hand. The feed signer needs OpenSSL 3 (Ed25519 raw signing): where
+# it is missing the gate says so by name and is a skip, never a pass.
+run_gate "the release morning refuses every planted bad witness, record, report and tag" bash tools/train-morning.sh --selftest
+# The single quotes are deliberate: the inner bash expands OPENSSL, not this one.
+# shellcheck disable=SC2016
+run_gate "the release-feed signer refuses every bad feed and key, and the console's verifier accepts what it signs" \
+  bash -c 'case "$("${OPENSSL:-openssl}" version 2>/dev/null)" in "OpenSSL 3."*) exec bash tools/release-feed.sh --selftest ;; *) echo "SKIPPED: OpenSSL 3 is not on PATH (set OPENSSL to it), so the release-feed signer cannot be exercised"; exit 2 ;; esac'
 # (REQ-0004 AC-4.1, ruled 2026-10-08): the gateway is the shipped
 # default and the console goes through it on a chart-minted key. Not in
 # ci.yaml yet, for the reason at the top of this file.
