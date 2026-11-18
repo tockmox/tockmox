@@ -92,6 +92,23 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "REFUSING: '$1' is not on PAT
 
 url_for() { printf 'git://%s.%s.svc.cluster.local/%s.git' "$SVC" "$NS" "$1"; }
 
+# tree_of DIR ... the git tree id of DIR's bytes as `push` serves them: what `git add -A` takes
+# (DIR's own .gitignore honoured, as the pod's `git add -A` honours it), minus macOS AppleDouble
+# files (`._NAME`), which `push` never sends. A throwaway index in a scratch repository; DIR itself
+# is not touched, and a .git inside it is ignored as git always ignores it. core.autocrlf is off so
+# a workstation's line-ending setting cannot make the same bytes hash differently here and in the pod.
+tree_of() {
+  local idx rc
+  idx="$(mktemp -d "${TMPDIR:-/tmp}/tockmox-tree.XXXXXX")"
+  git init -q --bare "$idx" \
+    && GIT_DIR="$idx" git -c core.autocrlf=false -c core.safecrlf=false --work-tree="$1" \
+         add -A -- . ':(exclude,glob)**/._*' >/dev/null \
+    && GIT_DIR="$idx" git write-tree
+  rc=$?
+  rm -rf "$idx"
+  return "$rc"
+}
+
 # The flags the daemon is started with. --enable=receive-pack is the whole of writable mode's
 # daemon side; --export-all is what lets a repository without git-daemon-export-ok be served.
 daemon_flags() {
@@ -263,14 +280,24 @@ cmd_push() {
       main|HEAD|*/*|*' '*) echo "REFUSING: REF must be a plain tag name, not '${ref}'" >&2; exit 2 ;;
     esac
   fi
+  # THE TREE THIS PUSH MUST SERVE, computed from the bytes on disk before anything is sent. The
+  # pod refuses to publish anything else (below). On 2026-11-16 a push from macOS served a product
+  # tree with 631 extra `._*` files: bsdtar packs an AppleDouble file for every file carrying an
+  # xattr, the pod's `git add -A` committed them, a chart's `.Files.Glob "dashboards/*.json"` read
+  # them, and the clone probe still passed, so the run tested a tree that was not the one given.
+  local want
+  want="$(tree_of "$dir")" || { echo "REFUSING: could not compute the git tree of ${dir}" >&2; exit 2; }
   local tgz
   tgz="$(mktemp "${TMPDIR:-/tmp}/tockmox-repo.XXXXXX").tgz"
   # A working tree, not a clone: this deliberately publishes what is ON DISK,
   # including uncommitted edits, because that is what a harness run is testing.
-  ( cd "$dir" && tar czf "$tgz" --exclude=.git . )
+  # COPYFILE_DISABLE stops macOS bsdtar writing AppleDouble files; the exclude drops any already
+  # on disk (GNU tar ignores the variable and honours the exclude).
+  ( cd "$dir" && COPYFILE_DISABLE=1 tar czf "$tgz" --exclude=.git --exclude='._*' . )
   kubectl --context="$KUBE_CONTEXT" -n "$NS" cp "$tgz" "${POD}:/tmp/${name}.tgz" >/dev/null
   rm -f "$tgz"
-  kubectl --context="$KUBE_CONTEXT" -n "$NS" exec "$POD" -- sh -c "
+  local served
+  if ! served="$(kubectl --context="$KUBE_CONTEXT" -n "$NS" exec "$POD" -- sh -c "
     set -e
     git config --global --add safe.directory '*'
     git config --global init.defaultBranch main
@@ -279,6 +306,8 @@ cmd_push() {
     rm -rf /tmp/w-${name}
     mkdir -p /tmp/w-${name} && cd /tmp/w-${name} && tar xzf /tmp/${name}.tgz
     git init -q . && git add -A && git commit -qm 'harness snapshot ${ref:-main}'
+    got=\$(git rev-parse 'HEAD^{tree}')
+    if [ \"\$got\" != '${want}' ]; then echo \"TREE_MISMATCH \$got\"; exit 3; fi
     if [ -z '${ref}' ]; then
       rm -rf /repos/${name}.git && git init -q --bare /repos/${name}.git
       git push -q /repos/${name}.git main
@@ -291,7 +320,19 @@ cmd_push() {
         || { git push -q /repos/${name}.git main; git --git-dir=/repos/${name}.git symbolic-ref HEAD refs/heads/main; }
     fi
     touch /repos/.seeded
-  " >/dev/null
+    echo \"SERVED \$got\"
+  " 2>&1)"; then
+    case "$served" in
+      *TREE_MISMATCH*)
+        echo "REFUSING: ${name}.git would have served tree $(printf '%s\n' "$served" | sed -n 's/.*TREE_MISMATCH //p' | tail -1), not ${want}, the tree of ${dir}. Nothing was published. The bytes that reached the pod differ from the directory given (on macOS, look for ._ files in what was sent)." >&2 ;;
+      *) echo "REFUSING: publishing ${name}.git in ${NS}/${POD} failed: $(printf '%s' "$served" | tail -3)" >&2 ;;
+    esac
+    exit 1
+  fi
+  case "$served" in
+    *"SERVED ${want}"*) ;;
+    *) echo "REFUSING: the pod did not confirm ${name}.git serves ${want}: $(printf '%s' "$served" | tail -3)" >&2; exit 1 ;;
+  esac
   # Assert on the artefact, not on the exit code: prove the daemon actually
   # serves it, from inside the cluster, before telling a caller to point an
   # Application at it. A repo that exists and is unservable is the failure this
@@ -306,7 +347,7 @@ cmd_push() {
     kubectl --context="$KUBE_CONTEXT" -n "$NS" logs "$POD" --tail=20 >&2 || true
     exit 1
   fi
-  echo "  published and clone-verified: $(url_for "$name")${ref:+ @ ${ref}}" >&2
+  echo "  published and clone-verified: $(url_for "$name")${ref:+ @ ${ref}}, tree ${want}" >&2
   url_for "$name"
 }
 
