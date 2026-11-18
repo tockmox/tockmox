@@ -1531,5 +1531,21 @@ if [ "$EO_CASES_T" -eq 0 ] || { [ "$EO_RC_T" -ne 0 ] && ! printf '%s\n' "$EO_OUT
   bad "expected-outcomes-test.sh ran its cases" "rc=${EO_RC_T}, ${EO_CASES_T} case(s): $(printf '%s' "$EO_OUT_T" | tail -3)"
 fi
 
+# The harness's git server serves exactly the tree it was given (2026-11-16): a push from macOS served
+# 631 AppleDouble `._*` files the directory never held, and said "published and clone-verified".
+SP_OUT="$(bash "${HERE}/site-repo-push-test.sh" 2>&1)"; SP_RC=$?
+SP_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) SP_CASES=$((SP_CASES+1)); ok "site repo push: ${line#ok   }" ;;
+    "FAIL "*) SP_CASES=$((SP_CASES+1)); bad "site repo push: ${line#FAIL }" "run tests/executed-docs/site-repo-push-test.sh for detail" ;;
+  esac
+done <<EOF_SP
+$SP_OUT
+EOF_SP
+if [ "$SP_CASES" -eq 0 ] || { [ "$SP_RC" -ne 0 ] && ! printf '%s\n' "$SP_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "site-repo-push-test.sh ran its cases" "rc=${SP_RC}, ${SP_CASES} case(s): $(printf '%s' "$SP_OUT" | tail -3)"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
