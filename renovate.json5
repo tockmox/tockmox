@@ -37,7 +37,9 @@
 
   // PRs open without a dashboard tick unless a rule below says otherwise
   // (majors do). Stated explicitly so an inherited default cannot hold every
-  // branch under "Pending Approval".
+  // branch under "Pending Approval". This line does not reach an inherited
+  // packageRule, which is applied before this file's own rules; the first
+  // packageRule below does.
   dependencyDashboardApproval: false,
 
   // One weekly batch rather than a trickle, on Friday night: Fri 18:00 to
@@ -257,6 +259,18 @@
   ],
 
   packageRules: [
+    {
+      // NO UPDATE WAITS FOR A DASHBOARD TICK UNLESS A LATER RULE SAYS SO (the
+      // majors rule, and minors on the release line). FIRST on purpose:
+      // packageRules are last-wins, and a packageRule inherited from outside
+      // this file is applied before this list, where the top-level setting
+      // above cannot override it. Every update type the rules below do not
+      // name fell through to it: the digest refreshes of the pinned Python
+      // and Alpine bases waited under "Pending Approval" though nothing here
+      // asks for a tick (2026-11-18).
+      matchPackageNames: ["*"],
+      dependencyDashboardApproval: false,
+    },
     {
       // THE HASHED LOCKFILES ARE pip-compile's, NEVER pip_requirements'. Its
       // default pattern matches any *requirements*.txt, so it read both
