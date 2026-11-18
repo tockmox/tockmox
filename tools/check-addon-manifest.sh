@@ -27,6 +27,12 @@
 #      WebAssembly module a browser could run, and the enabled render holds no
 #      Ingress, IngressRoute, HTTPRoute or Gateway-API route, and no Service of
 #      type LoadBalancer or NodePort.
+#      adminUi.contributes, when present, is data the console draws with its own
+#      components (rail pages or a section of its own, a stack part, a health
+#      input, a help link, a retired tile); it names only fields the format knows,
+#      a rail goes in the AI or Platform rail, a stack part goes in a band
+#      tockmox-ui/app/stack.yaml ships, a health input needs that part, and a help
+#      link names a page that exists.
 #   4. THE OPERATIONS CONTRACT, each claim checked against the render where a
 #      render can check it: read-only API access means no verb outside
 #      get/list/watch (plus create on the two self-review oracles) and names a
@@ -96,6 +102,101 @@ def helm(chart, ns, sets):
         cmd += ["--set", f"{k}={v}"]
     p = subprocess.run(cmd, capture_output=True, text=True)
     return p.returncode, p.stdout, p.stderr
+
+# adminUi.contributes: the same shape the console reads from its feature registry (tockmox-ui/app/features.yaml)
+# and from features.<id>.contributes in the site values. Data only; the console draws every piece itself.
+CONTRIB = {"section", "rail", "pages", "stack", "health", "help", "retireTile"}
+PAGE_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+GLOB = re.compile(r"^[A-Za-z0-9_*?:.-]{1,80}$")
+
+def stack_bands():
+    p = os.path.join(root, "tockmox-ui", "app", "stack.yaml")
+    try:
+        doc = yaml.safe_load(open(p)) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    return {str(b.get("id")) for b in (doc.get("bands") or []) if isinstance(b, dict)}
+
+def contributes(addon, c):
+    w = "adminUi.contributes"
+    if not isinstance(c, dict) or not c:
+        bad(addon, f"{w} must be a mapping that names at least one contribution")
+        return
+    unknown(addon, w, c, CONTRIB)
+    section, rail, pages = c.get("section", False), c.get("rail"), c.get("pages")
+    if not isinstance(section, bool):
+        bad(addon, f"{w}.section must be true or false")
+    if rail is not None:
+        if not isinstance(rail, dict):
+            bad(addon, f"{w}.rail must be a mapping of section and group")
+        else:
+            unknown(addon, f"{w}.rail", rail, {"section", "group"})
+            if rail.get("section") not in ("ai", "platform"):
+                bad(addon, f"{w}.rail.section must be ai or platform (a rail goes in an existing section's rail)")
+            g = rail.get("group")
+            if not (isinstance(g, str) and g.strip() and len(g) <= 40):
+                bad(addon, f"{w}.rail.group must be a heading of 1 to 40 characters")
+    if pages is not None or section or rail is not None:
+        if section is True and rail is not None:
+            bad(addon, f"{w}: name one place for the pages, section: true or a rail, not both")
+        elif section is not True and rail is None:
+            bad(addon, f"{w}.pages need a place: section: true or a rail")
+        if not isinstance(pages, list) or not 1 <= len(pages) <= 12:
+            bad(addon, f"{w}.pages must list 1 to 12 pages")
+        else:
+            seen = set()
+            for i, pg in enumerate(pages):
+                if not isinstance(pg, dict):
+                    bad(addon, f"{w}.pages[{i}] must be a mapping of id and title")
+                    continue
+                unknown(addon, f"{w}.pages[{i}]", pg, {"id", "title"})
+                if not (isinstance(pg.get("id"), str) and PAGE_ID.match(pg["id"])):
+                    bad(addon, f"{w}.pages[{i}].id must be lowercase letters, digits and hyphens")
+                elif pg["id"] in seen:
+                    bad(addon, f"{w}.pages[{i}].id `{pg['id']}` is listed twice")
+                else:
+                    seen.add(pg["id"])
+                t = pg.get("title")
+                if not (isinstance(t, str) and t.strip() and len(t) <= 40):
+                    bad(addon, f"{w}.pages[{i}].title must be 1 to 40 characters")
+    st = c.get("stack")
+    if st is not None:
+        if not isinstance(st, dict):
+            bad(addon, f"{w}.stack must be a mapping of band, part, namespaces and alerts")
+        else:
+            unknown(addon, f"{w}.stack", st, {"band", "part", "namespaces", "alerts"})
+            bands = stack_bands()
+            if bands is None:
+                bad(addon, f"{w}.stack: tockmox-ui/app/stack.yaml does not read, so the band cannot be checked")
+            elif st.get("band") not in bands:
+                bad(addon, f"{w}.stack.band `{st.get('band')}` is not a band the console ships ({sorted(bands)})")
+            pt = st.get("part")
+            if not (isinstance(pt, str) and pt.strip() and len(pt) <= 40):
+                bad(addon, f"{w}.stack.part must be a name of 1 to 40 characters")
+            for k in ("namespaces", "alerts"):
+                v = st.get(k, [])
+                if not (isinstance(v, list) and all(isinstance(x, str) and GLOB.match(x) for x in v)):
+                    bad(addon, f"{w}.stack.{k} must be a list of names or globs")
+            if not st.get("namespaces") and not st.get("alerts"):
+                bad(addon, f"{w}.stack: a part with no namespaces and no alerts would only ever read Unknown")
+    hl = c.get("health")
+    if hl is not None:
+        if not isinstance(hl, dict):
+            bad(addon, f"{w}.health must be a mapping of alerts")
+        else:
+            unknown(addon, f"{w}.health", hl, {"alerts"})
+            al = hl.get("alerts")
+            if not (isinstance(al, list) and al and all(isinstance(x, str) and GLOB.match(x) for x in al)):
+                bad(addon, f"{w}.health.alerts must list one or more alert names or globs")
+        if st is None:
+            bad(addon, f"{w}.health needs a stack part: a health input reaches the pill and Home's verdict through it")
+    hp = c.get("help")
+    if hp is not None and not (isinstance(hp, str) and hp.startswith("docs/") and hp.endswith(".md")
+                               and ".." not in hp and os.path.isfile(os.path.join(root, hp))):
+        bad(addon, f"{w}.help `{hp}` must be a docs/*.md page that exists")
+    rt = c.get("retireTile")
+    if rt is not None and not (isinstance(rt, str) and PAGE_ID.match(rt)):
+        bad(addon, f"{w}.retireTile must be the id of a Home tile (lowercase letters, digits and hyphens)")
 
 addons_dir = os.path.join(root, "addons")
 if not os.path.isdir(addons_dir):
@@ -186,8 +287,10 @@ for name in names:
 
     # ---- no code in the admin origin ------------------------------------
     ui = m["adminUi"] if isinstance(m["adminUi"], dict) else {}
-    unknown(name, "adminUi", ui, {"code", "exposes"})
+    unknown(name, "adminUi", ui, {"code", "exposes", "contributes"})
     need(name, "adminUi", ui, ["code", "exposes"])
+    if "contributes" in ui:
+        contributes(name, ui["contributes"])
     if ui.get("code") != "none":
         bad(name, f"adminUi.code is {ui.get('code')!r}; an add-on ships no code the admin console loads or runs (must be `none`)")
     if ui.get("exposes") != "none":
@@ -366,6 +469,8 @@ fresh() { # fresh NAME : a copy of the real add-on tree to mutate
   mkdir -p "$work/$1/docs/administration" "$work/$1/tools"
   cp docs/administration/posture-probe.md "$work/$1/docs/administration/"
   cp tools/check-posture-probe.sh "$work/$1/tools/"
+  mkdir -p "$work/$1/tockmox-ui/app"
+  cp tockmox-ui/app/stack.yaml "$work/$1/tockmox-ui/app/"
   find "$work/$1" -name __pycache__ -type d -prune -exec rm -rf {} +
 }
 red() { # red LABEL NEEDLE DIR : the gate must fail on DIR and name NEEDLE
@@ -495,6 +600,33 @@ PY
 red "an open settings schema is refused" "settings.schema is open" "$work/m"
 fresh m; edit "$work/m" "$P/addon.yaml" "namespace: tockmox-posture " "namespace: Tockmox_Posture "
 red "a namespace that is not a DNS label is refused" "DNS label" "$work/m"
+
+# adminUi.contributes: a well-formed block is accepted; each rule goes red on its own planted fault
+CONTRIB_OK='  exposes: none
+  contributes:
+    rail: {section: platform, group: Configuration}
+    pages: [{id: report, title: Report}]
+    stack: {band: platform, part: Security posture probe, namespaces: [tockmox-posture]}
+    health: {alerts: ["TockmoxPostureProbe*"]}
+    help: docs/administration/posture-probe.md
+    retireTile: posture'
+fresh c; edit "$work/c" "$P/addon.yaml" "  exposes: none" "$CONTRIB_OK"
+out=$(check "$work/c" 2>&1); rc=$?
+if [ "$rc" -eq 0 ]; then echo "  ok  a well-formed adminUi.contributes block is accepted"
+else echo "  SELFTEST FAIL: a well-formed contributes block should be accepted (exit $rc):"; printf '%s\n' "$out" | sed 's/^/            /' | head; fail=1; fi
+contrib_red() { # contrib_red LABEL NEEDLE OLD NEW : the well-formed block with one literal changed must go red
+  fresh m; edit "$work/m" "$P/addon.yaml" "  exposes: none" "$CONTRIB_OK"; edit "$work/m" "$P/addon.yaml" "$3" "$4"
+  red "$1" "$2" "$work/m"
+}
+contrib_red "a contribution the format does not name is refused" "unknown field \`script\`" "    retireTile: posture" "    retireTile: posture
+    script: panel.js"
+contrib_red "a rail outside the AI or Platform section is refused" "rail.section must be ai or platform" "section: platform, group" "section: status, group"
+contrib_red "pages with no place to go are refused" "need a place" "    rail: {section: platform, group: Configuration}" "    section: false"
+contrib_red "a stack part in a band the console does not ship is refused" "is not a band the console ships" "band: platform," "band: add-ons,"
+contrib_red "a health input with no stack part is refused" "health needs a stack part" "    stack: {band: platform, part: Security posture probe, namespaces: [tockmox-posture]}" ""
+contrib_red "a help link to a page that does not exist is refused" "must be a docs/*.md page that exists" "help: docs/administration/posture-probe.md" "help: docs/administration/nothing-here.md"
+contrib_red "a help link outside docs/ is refused" "must be a docs/*.md page that exists" "help: docs/administration/posture-probe.md" "help: https://example.com/x.md"
+contrib_red "a page id that is not a lowercase slug is refused" "pages[0].id" "{id: report," "{id: Report_1,"
 
 if [ "$fail" -eq 0 ]; then echo "check-addon-manifest --selftest: PASSED"; exit 0; fi
 echo "check-addon-manifest --selftest: FAILED"; exit 1

@@ -32,7 +32,7 @@ instance and the worked example.
 | `name`, `chart.version`, `stability` | identity; equal to the directory, `Chart.yaml` and its `tockmox.com/stability` annotation | `Chart.yaml` |
 | `docs` | the page an operator reads | the file existing |
 | `settings` | the settings schema (below) and that the add-on is off by default | `values.schema.json`, `values.yaml`, an empty default render |
-| `adminUi` | `code: none`, `exposes: none` (below) | the tree and the enabled render |
+| `adminUi` | `code: none`, `exposes: none`, and optionally `contributes` (below) | the tree, the enabled render, and `tockmox-ui/app/stack.yaml` for a stack part |
 | `operations` | the operations contract (below) | the enabled render, where a render can say |
 | `render.set` | the values that switch the add-on on for a CI render | the gate's own `helm template` |
 
@@ -68,6 +68,36 @@ it never adds a route to the cluster. In practice:
 The reason is the trust boundary. The admin origin holds the operator's session;
 code from anywhere else running there is a way past every control around it.
 
+### What an add-on may contribute to the console
+
+`adminUi.contributes` says where the add-on shows up in the console. It is data,
+in the same shape the console reads for its own first-party features
+(`tockmox-ui/app/features.yaml`), and the console draws every piece with its own
+components. Turn the add-on's feature off and every piece is gone, not greyed out.
+
+```yaml
+adminUi:
+  code: none
+  exposes: none
+  contributes:
+    rail: {section: platform, group: Configuration}      # or section: true, a top-bar section of its own
+    pages: [{id: report, title: Report}]                 # served as tockmox.page/v1 by its read API
+    stack: {band: platform, part: Security posture probe, namespaces: [tockmox-posture]}
+    health: {alerts: ["TockmoxPostureProbe*"]}            # firing, these turn its part, the pill and Home red
+    help: docs/administration/posture-probe.md           # Help for this page, on its pages
+    retireTile: posture                                  # the Home tile it replaces
+```
+
+| Field | Rule |
+|---|---|
+| `section`, `rail`, `pages` | pages go in exactly one place: `section: true`, or a `rail` in the `ai` or `platform` section under a `group` heading of up to 40 characters. 1 to 12 pages, each a lowercase `id` and a `title` |
+| `stack` | a part in a `band` that `tockmox-ui/app/stack.yaml` ships, named by `part`, with the `namespaces` and `alerts` that report on it (at least one, or the part would only ever read Unknown) |
+| `health` | alert names or globs that count toward the add-on's part, and so toward the health pill and Home's verdict. Needs `stack` |
+| `help` | a `docs/*.md` page that exists |
+| `retireTile` | the id of the Home tile the add-on replaces |
+
+A field the format does not name is refused, here as everywhere in the manifest.
+
 ## The operations contract
 
 What an operator can rely on, in the `operations` block. Each line is a claim the
@@ -92,7 +122,7 @@ An add-on is off until enabled: `enabled: false` in `values.yaml`,
 
 | Gate | Holds |
 |---|---|
-| `tools/check-addon-manifest.sh` | the manifest, its agreement with the chart, off by default, no code in the admin origin, the operations contract against the render. `--selftest` plants one violation per rule and requires red |
+| `tools/check-addon-manifest.sh` | the manifest, its agreement with the chart, off by default, no code in the admin origin, the contributes block, the operations contract against the render. `--selftest` plants one violation per rule and requires red |
 | `tools/check-values-tiers.sh` | every settings key is tiered and ruled; a stable key does not move unannounced. `--selftest` includes a planted unruled key under an add-on |
 | the add-on's own gate (for `posture-probe`, `tools/check-posture-probe.sh`) | whatever its `safetyGate` promises, for example the exact verbs of a read-only role |
 
