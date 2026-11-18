@@ -18,9 +18,15 @@
 #
 # SAFETY CONTRACT.
 #   - The candidate SHA comes from THIS machine's git (origin/TRAIN_BRANCH after a
-#     fetch), never from the packet. It must equal head_sha in WITNESS, the lab
-#     executor's own results file, which the train cannot write. The outcome in
-#     WITNESS must be READY; NOT READY, a missing or an empty outcome stop the run.
+#     fetch), never from the packet. It must equal head_sha in the lab witness, which
+#     the train cannot write and nobody assembles by hand: the lab stage writes it into
+#     its own record for the run, and this script reads it by run name (WITNESS_RUN)
+#     from STAGE_REPORTS, a clone of the repo the stage lands its records in. The record
+#     must be on origin's STAGE_REPORTS_BRANCH, created by one commit that adds only it
+#     and names STAGE_SUBMITTER (the stage's caller) as its submitter, never edited after,
+#     and hold exactly one ```json lab-witness block whose run and outcome agree with
+#     the record's heading. The outcome must be READY; NOT READY, a missing or an empty
+#     outcome stop the run. A spec that names a hand-made WITNESS file is refused.
 #   - origin/REL_BRANCH must be an ancestor of the SHA: the fast-forward is a plain
 #     push, never --force, and git refuses anything else.
 #   - The diff origin/REL_BRANCH..SHA may touch none of FORBIDDEN (below): the trust
@@ -73,7 +79,11 @@
 #   REL_BRANCH       release-0.8
 #   TRAIN_BRANCH     train/0.8.2
 #   TAG              v0.8.2
-#   WITNESS          the executor's results file (JSON with "head_sha" and "outcome"), e.g. runs/<id>/run.json
+#   WITNESS_RUN      the lab stage's run name for this candidate (its record is <STAGE_REPORTS_DIR>/<run>.md)
+#   STAGE_REPORTS    a clone of the repo the lab stage lands its run records in (it is fetched, never written)
+#   STAGE_SUBMITTER  the stage's caller, as the record's commit names it (a "Submitted-by: ..." line)
+#   STAGE_REPORTS_DIR     where the records live in that repo               default qa/stage-runs
+#   STAGE_REPORTS_BRANCH  the branch the records merge to                   default main
 #   TEMPLATE_PIN_PR  number of the re-pin PR in TEMPLATE_REPO (default tockmox/tockmox-site-template)
 #   GATE_REPORT      the drafted GATE-REPORT-vX.Y.Z.md
 #   SIGNING_KEY      private half of the tag key; its public half must be in .gitsigners
@@ -137,16 +147,22 @@ load_spec() {
   REQUIRED="ci policy-gate"; OPTIONAL="executed-docs"
   TRAIN_LOG="$HOME/src/_train-log.txt"; ANNOUNCE=""; DIST_DIR=""
   REL_BRANCH=""; TRAIN_BRANCH=""; TAG=""; WITNESS=""; TEMPLATE_PIN_PR=""
+  WITNESS_RUN=""; STAGE_REPORTS=""; STAGE_SUBMITTER=""
+  STAGE_REPORTS_DIR="qa/stage-runs"; STAGE_REPORTS_BRANCH="main"
   GATE_REPORT=""; SIGNING_KEY=""; RELEASE_NOTES=""
   CHECK_ALL_RESULTS=""; ASSETS_WAIT=600; ASSETS_POLL=15
   # shellcheck disable=SC1090
   . "$SPEC"
-  for v in REL_BRANCH TRAIN_BRANCH TAG WITNESS TEMPLATE_PIN_PR GATE_REPORT SIGNING_KEY RELEASE_NOTES; do
+  [ -z "$WITNESS" ] || stop "spec names WITNESS ($WITNESS), a witness file made outside the lab. The witness is read from the lab stage's own record by run name: name WITNESS_RUN, STAGE_REPORTS and STAGE_SUBMITTER instead."
+  for v in REL_BRANCH TRAIN_BRANCH TAG WITNESS_RUN STAGE_REPORTS STAGE_SUBMITTER TEMPLATE_PIN_PR GATE_REPORT SIGNING_KEY RELEASE_NOTES; do
     eval "val=\${$v:-}"; [ -n "$val" ] || stop "spec is missing $v"
   done
+  printf '%s\n' "$WITNESS_RUN" | grep -E '^[a-z0-9]([a-z0-9-]{0,40}[a-z0-9])?$' >/dev/null \
+    || stop "WITNESS_RUN '$WITNESS_RUN' is not a stage run name (lowercase letters, digits and dashes, at most 42)"
+  [ -d "$STAGE_REPORTS/.git" ] || stop "STAGE_REPORTS $STAGE_REPORTS is not a git clone"
   printf '%s\n' "$TAG" | grep -E "$TAG_RE" >/dev/null || stop "TAG '$TAG' is not vX.Y.Z (this script cuts finals; an rc is not a morning)"
   case "$TEMPLATE_PIN_PR" in ''|*[!0-9]*) stop "TEMPLATE_PIN_PR '$TEMPLATE_PIN_PR' is not a PR number" ;; esac
-  for f in "$WITNESS" "$GATE_REPORT" "$RELEASE_NOTES"; do [ -s "$f" ] || stop "spec names a file that is missing or empty: $f"; done
+  for f in "$GATE_REPORT" "$RELEASE_NOTES"; do [ -s "$f" ] || stop "spec names a file that is missing or empty: $f"; done
   [ -z "$CHECK_ALL_RESULTS" ] || [ -s "$CHECK_ALL_RESULTS" ] || stop "spec names a file that is missing or empty: $CHECK_ALL_RESULTS"
   case "$ASSETS_WAIT$ASSETS_POLL" in *[!0-9]*) stop "ASSETS_WAIT and ASSETS_POLL are whole seconds" ;; esac
   [ "$ASSETS_POLL" -gt 0 ] || stop "ASSETS_POLL must be at least 1"
@@ -222,6 +238,69 @@ footer_only_change() { # OLD-SHA NEW-SHA PATH -> 0 if the two versions differ on
   [ -n "$fo_a" ] && [ "$fo_a" = "$fo_b" ]
 }
 
+# ---------------------------------------------------------------- the lab witness, by run name
+# The stage's record for WITNESS_RUN, read from origin (never from a working tree), and the
+# provenance that makes it the stage's: one commit, which adds that file and nothing else and
+# names STAGE_SUBMITTER, and no later commit touches it. Its ```json lab-witness block becomes
+# $WITNESS, the JSON the checks below read; nothing else in the record is trusted.
+sr() { git -C "$STAGE_REPORTS" "$@"; }
+read_witness() {
+  wr_ref="refs/remotes/origin/$STAGE_REPORTS_BRANCH"
+  wr_path="${STAGE_REPORTS_DIR%/}/$WITNESS_RUN.md"
+  say "  fetch the lab records (reads only): git -C $STAGE_REPORTS fetch origin $STAGE_REPORTS_BRANCH"
+  sr fetch -q origin "+refs/heads/$STAGE_REPORTS_BRANCH:$wr_ref" || stop "git fetch of $STAGE_REPORTS_BRANCH in $STAGE_REPORTS failed"
+  sr cat-file -e "$wr_ref:$wr_path" 2>/dev/null \
+    || stop "no lab record for run $WITNESS_RUN: $wr_path is not on origin/$STAGE_REPORTS_BRANCH of $STAGE_REPORTS. The stage has not landed it yet (it merges on green), or the run name is wrong; nothing here is signed without it."
+  wr_commits=$(sr log --format=%H "$wr_ref" -- "$wr_path")
+  wr_n=$(printf '%s\n' "$wr_commits" | grep -c . || true)
+  [ "$wr_n" = 1 ] \
+    || stop "the lab record $wr_path has $wr_n commits on origin/$STAGE_REPORTS_BRANCH: it was changed after the stage wrote it. A record is created once and never edited; it is not read."
+  wr_files=$(sr show --format= --name-status "$wr_commits")
+  [ "$wr_files" = "A	$wr_path" ] \
+    || stop "the commit that wrote $wr_path ($wr_commits) also changes other files, or does not add it: only the stage's own one-file record is read. It changed:
+$wr_files"
+  sr log -1 --format=%B "$wr_commits" | grep -xF "Submitted-by: $STAGE_SUBMITTER" >/dev/null \
+    || stop "the commit that wrote $wr_path ($wr_commits) does not name $STAGE_SUBMITTER as its submitter: it was not landed by the lab stage, so it is not read."
+  WITNESS="$(mktemp)"
+  sr show "$wr_ref:$wr_path" | python3 -I -c '
+import json, re, sys
+run = sys.argv[1]
+lines = sys.stdin.read().splitlines()
+def no(msg):
+    print(msg, file=sys.stderr); sys.exit(1)
+if not lines:
+    no("the record is empty")
+m = re.match(r"^# .+ (\S+): (READY|NOT READY)$", lines[0])
+if not m or m.group(1) != run:
+    no("its heading is not \"# ... %s: READY|NOT READY\" (it reads: %s)" % (run, lines[0][:120]))
+blocks, cur = [], None
+for ln in lines[1:]:
+    if cur is None and ln.strip() == "```json lab-witness":
+        cur = []
+    elif cur is not None and ln.strip() == "```":
+        blocks.append("\n".join(cur)); cur = None
+    elif cur is not None:
+        cur.append(ln)
+if cur is not None:
+    no("its lab-witness block is not closed")
+if len(blocks) != 1:
+    no("it holds %d lab-witness blocks; exactly one is read" % len(blocks))
+try:
+    w = json.loads(blocks[0])
+except ValueError as e:
+    no("its lab-witness block is not JSON (%s)" % e)
+if not isinstance(w, dict) or w.get("schema") != "tockmox.lab-witness/v1":
+    no("its lab-witness block is not schema tockmox.lab-witness/v1")
+if w.get("run") != run:
+    no("its lab-witness block names run %r, not %r" % (w.get("run"), run))
+if "outcome" in w and w.get("outcome") != m.group(2):
+    no("its lab-witness block says outcome=%r while its heading says %s" % (w.get("outcome"), m.group(2)))
+json.dump(w, sys.stdout)
+' "$WITNESS_RUN" > "$WITNESS" 2> "$WITNESS.err" \
+    || stop "the lab record $wr_path cannot be read as a witness: $(cat "$WITNESS.err")"
+  say "  lab record: $wr_path on origin/$STAGE_REPORTS_BRANCH, written once by $STAGE_SUBMITTER (commit ${wr_commits:0:12})"
+}
+
 # ---------------------------------------------------------------- 1. verify
 verify() {
   say "1/8 verify"
@@ -231,16 +310,17 @@ verify() {
     || stop "origin has no branch $TRAIN_BRANCH"
   say "  train head, from this machine's git: $SHA (origin/$TRAIN_BRANCH)"
 
+  read_witness
   WITNESS_SHA=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("head_sha",""))' "$WITNESS") \
-    || stop "cannot read $WITNESS as JSON"
+    || stop "cannot read the lab witness for run $WITNESS_RUN as JSON"
   [ "$WITNESS_SHA" = "$SHA" ] \
-    || stop "witness mismatch: $WITNESS says head_sha=${WITNESS_SHA:-<none>}, origin/$TRAIN_BRANCH is $SHA. The lab tested something else; nothing here is signed for that."
-  say "  witness agrees: $WITNESS head_sha=$WITNESS_SHA"
+    || stop "witness mismatch: the lab witness for run $WITNESS_RUN says head_sha=${WITNESS_SHA:-<none>}, origin/$TRAIN_BRANCH is $SHA. The lab tested something else; nothing here is signed for that."
+  say "  witness agrees: run $WITNESS_RUN head_sha=$WITNESS_SHA"
   WITNESS_OUTCOME=$(python3 -I -c 'import json,sys; o=json.load(open(sys.argv[1])).get("outcome",""); print(o if isinstance(o,str) else json.dumps(o))' "$WITNESS") \
-    || stop "cannot read $WITNESS as JSON"
+    || stop "cannot read the lab witness for run $WITNESS_RUN as JSON"
   [ "$WITNESS_OUTCOME" = READY ] \
-    || stop "witness outcome: $WITNESS says outcome=${WITNESS_OUTCOME:-<none>}, and only READY is signed for. The lab did not pass this candidate; nothing here is signed for it."
-  say "  witness outcome: $WITNESS outcome=$WITNESS_OUTCOME"
+    || stop "witness outcome: the lab witness for run $WITNESS_RUN says outcome=${WITNESS_OUTCOME:-<none>}, and only READY is signed for. The lab did not pass this candidate; nothing here is signed for it."
+  say "  witness outcome: run $WITNESS_RUN outcome=$WITNESS_OUTCOME"
 
   REL_SHA=$(g rev-parse --verify --quiet "refs/remotes/origin/$REL_BRANCH^{commit}") \
     || stop "origin has no branch $REL_BRANCH"
@@ -698,7 +778,41 @@ gh_stub() {  # state lives in $PT_STATE (the fixture directory)
 
 st_commit() { git -C "$1" -c commit.gpgsign=false -c user.name=t -c user.email=t@example.com commit -q --allow-empty -m "$2"; }
 
-st_fixture() { # NAME VARIANT -> builds $PT/NAME with origin.git, repo, template.git, spec
+# The lab stage's records repo: $d/stage.git and its clone $d/stage, holding the record for run sel-run as the
+# stage lands it (one commit, that file only, a Submitted-by line). Variants spoil one thing each.
+st_stage() { # DIR VARIANT WITNESS-SHA
+  sd="$1"; sv="$2"; swsha="$3"
+  git init -q --bare "$sd/stage.git"; git -C "$sd/stage.git" symbolic-ref HEAD refs/heads/main
+  ss="$sd/sseed"; git init -q "$ss"; git -C "$ss" symbolic-ref HEAD refs/heads/main
+  echo "# lab records" > "$ss/README.md"; git -C "$ss" add -A; st_commit "$ss" "seed"
+  shead="READY"; sout='"outcome":"READY",'; srun=sel-run
+  case "$sv" in
+    notready)  shead="NOT READY"; sout='"outcome":"NOT READY",' ;;
+    nooutcome) sout='' ;;
+    wverdict)  shead="NOT READY" ;;
+    wrunname)  srun=other-run ;;
+  esac
+  sblock="{\"schema\":\"tockmox.lab-witness/v1\",\"run\":\"$srun\",$sout\"head_sha\":\"$swsha\"}"
+  mkdir -p "$ss/qa/stage-runs"
+  {
+    printf '# lab-stage sel-run: %s\n\n**Verdict: %s.**\n\n' "$shead" "$shead"
+    # shellcheck disable=SC2016  # the backticks are a markdown fence, not a command
+    if [ "$sv" != wnoblock ]; then printf '```json lab-witness\n%s\n```\n' "$sblock"; fi
+    # shellcheck disable=SC2016
+    if [ "$sv" = wtwoblocks ]; then printf '```json lab-witness\n%s\n```\n' "$sblock"; fi
+  } > "$ss/qa/stage-runs/sel-run.md"
+  if [ "$sv" != wnorecord ]; then
+    if [ "$sv" = wextra ]; then echo "x" > "$ss/other.txt"; fi
+    git -C "$ss" add -A
+    ssub="ci/lab-stage"; if [ "$sv" = wsubmitter ]; then ssub="someone/else"; fi
+    git -C "$ss" -c commit.gpgsign=false -c user.name=t -c user.email=t@example.com commit -q -m "lab-stage sel-run: $shead" -m "Submitted-by: $ssub"
+    if [ "$sv" = wedited ]; then echo "edited" >> "$ss/qa/stage-runs/sel-run.md"; git -C "$ss" add -A; st_commit "$ss" "edit the record"; fi
+  fi
+  git -C "$ss" push -q "$sd/stage.git" refs/heads/main
+  git clone -q "$sd/stage.git" "$sd/stage"
+}
+
+st_fixture() { # NAME VARIANT -> builds $PT/NAME with origin.git, repo, template.git, stage.git, spec
   d="$PT/$1"; v="$2"; mkdir -p "$d"
   git init -q --bare "$d/origin.git"; git -C "$d/origin.git" symbolic-ref HEAD refs/heads/main
   seed="$d/seed"; git init -q "$seed"; git -C "$seed" symbolic-ref HEAD refs/heads/main
@@ -745,11 +859,9 @@ EOS
   git -C "$tseed" push -q "$d/template.git" refs/heads/main refs/heads/pin
   echo OPEN > "$d/pr-state"
   wsha="$B"; [ "$v" = witness ] && wsha="0000000000000000000000000000000000000000"
-  case "$v" in
-    notready)  printf '{"run_id":"selftest","head_sha":"%s","outcome":"NOT READY"}\n' "$wsha" > "$d/run.json" ;;
-    nooutcome) printf '{"run_id":"selftest","head_sha":"%s"}\n' "$wsha" > "$d/run.json" ;;
-    *)         printf '{"run_id":"selftest","head_sha":"%s","outcome":"READY"}\n' "$wsha" > "$d/run.json" ;;
-  esac
+  st_stage "$d" "$v" "$wsha"
+  wit_line=""
+  if [ "$v" = whand ]; then printf '{"head_sha":"%s","outcome":"READY"}\n' "$wsha" > "$d/run.json"; wit_line="WITNESS=\"$d/run.json\""; fi
   printf '# Gate report v0.8.2\n\nCommit %s.\n\nWhat was NOT tested: everything, this is a selftest.\n' "$B" > "$d/GATE-REPORT-v0.8.2.md"
   # check-all evidence: on a 0.9 line a green check-all run on the SHA, on release-0.8 the results
   # of tools/check-all.sh --strict and the .meta.json beside them (variants spoil one thing each)
@@ -779,7 +891,10 @@ TEMPLATE_REPO="example/tockmox-site-template"
 REL_BRANCH="release-0.8"
 TRAIN_BRANCH="train/0.8.2"
 TAG="v0.8.2"
-WITNESS="$d/run.json"
+WITNESS_RUN="sel-run"
+STAGE_REPORTS="$d/stage"
+STAGE_SUBMITTER="ci/lab-stage"
+$wit_line
 TEMPLATE_PIN_PR="7"
 GATE_REPORT="$d/GATE-REPORT-v0.8.2.md"
 SIGNING_KEY="$PT/key"
@@ -828,6 +943,17 @@ selftest_main() {
   st_fixture witness witness;     st_run witness;     st_probe "witness head_sha differs from origin/train" witness 1 "witness mismatch"
   st_fixture notready notready;   st_run notready;    st_probe "witness outcome is NOT READY" notready 1 "outcome=NOT READY"
   st_fixture nooutcome nooutcome; st_run nooutcome;   st_probe "witness has no outcome field" nooutcome 1 "outcome=<none>"
+
+  echo "selftest: the witness is the lab stage's own record, read by run name"
+  st_fixture whand whand;           st_run whand;       st_probe "a spec that names a hand-made WITNESS file" whand 1 "a witness file made outside the lab"
+  st_fixture wnorecord wnorecord;   st_run wnorecord;   st_probe "no record for the run on origin" wnorecord 1 "no lab record for run sel-run"
+  st_fixture wedited wedited;       st_run wedited;     st_probe "the record was edited after the stage wrote it" wedited 1 "has 2 commits"
+  st_fixture wextra wextra;         st_run wextra;      st_probe "the record's commit also changes another file" wextra 1 "also changes other files"
+  st_fixture wsubmitter wsubmitter; st_run wsubmitter;  st_probe "the record was not landed by the stage" wsubmitter 1 "does not name ci/lab-stage"
+  st_fixture wnoblock wnoblock;     st_run wnoblock;    st_probe "the record holds no witness block" wnoblock 1 "holds 0 lab-witness blocks"
+  st_fixture wtwoblocks wtwoblocks; st_run wtwoblocks;  st_probe "the record holds two witness blocks" wtwoblocks 1 "holds 2 lab-witness blocks"
+  st_fixture wrunname wrunname;     st_run wrunname;    st_probe "the witness names another run" wrunname 1 "names run 'other-run'"
+  st_fixture wverdict wverdict;     st_run wverdict;    st_probe "the witness outcome disagrees with the record's heading" wverdict 1 "while its heading says NOT READY"
   st_fixture nonff nonff;         st_run nonff;       st_probe "release branch moved past the train (not fast-forwardable)" nonff 1 "not fast-forwardable"
   st_fixture forbidden forbidden; st_run forbidden;   st_probe "candidate touches docs/deployment/verify.md" forbidden 1 "may not change"
   st_fixture footer footer;       st_run footer;      st_probe "a footer-stamp-only change to verify.md (the version bump) is allowed" footer 0 "footer stamp only, allowed: docs/deployment/verify.md"
@@ -844,7 +970,7 @@ selftest_main() {
   st_fixture cadirty cadirty;     st_run cadirty;     st_probe "check-all results from a dirty checkout" cadirty 1 "checkout was not clean"
   st_fixture capart capart;       st_run capart;      st_probe "check-all results of a --changed-from run" capart 1 "not a full run"
   st_fixture cawfnorun cawfnorun; st_run cawfnorun;   st_probe "a tree with check-all.yaml and no check-all run on the SHA" cawfnorun 1 "no check-all run on"
-  for n in witness notready nooutcome nonff forbidden tagexists wrongkey noimages canone caskip casha cadirty capart cawfnorun; do
+  for n in witness notready nooutcome whand wnorecord wedited wextra wsubmitter wnoblock wtwoblocks wrunname wverdict nonff forbidden tagexists wrongkey noimages canone caskip casha cadirty capart cawfnorun; do
     st_assert "$n: nothing merged, pushed or signed" bash -c "[ ! -f $PT/$n/gh-calls ] && [ \"\$(cat $PT/$n/pr-state)\" = OPEN ] && [ ! -f $PT/$n/GATE-REPORT-v0.8.2.md.sig ]"
   done
 
@@ -852,6 +978,7 @@ selftest_main() {
   st_fixture good good; A=$(git -C "$PT/good/origin.git" rev-parse refs/heads/release-0.8); B=$(git -C "$PT/good/origin.git" rev-parse refs/heads/train/0.8.2)
   st_run good
   st_probe "report-only exits 0" good 0 "REPORT DONE: 9 actions would run"
+  st_probe "it reads the witness from the stage's record by run name" good 0 "lab record: qa/stage-runs/sel-run.md on origin/main, written once by ci/lab-stage"
   st_probe "it reads the check-all results as evidence" good 0 "check-all: 2 gates passed on $B, clean checkout"
   st_probe "it says it would read the Release back" good 0 "would wait up to 3s for every asset"
   st_probe "it prints the fast-forward push" good 0 "would run: \$ git -C .*push origin $B:refs/heads/release-0.8"
