@@ -5,7 +5,7 @@
 #
 #   tools/toolchain.sh --check      the tools on PATH match mise.toml (check-all.sh runs this first)
 #   tools/toolchain.sh --drift      every copy of a pin says what mise.toml says
-#   tools/toolchain.sh --pins       KEY=VALUE lines for a workflow (HELM_VERSION=v4.3.1 ...)
+#   tools/toolchain.sh --pins       KEY=VALUE lines for a workflow (HELM_VERSION=v4.3.2 ...)
 #   tools/toolchain.sh --selftest   both checks go red on a planted mismatch, and green on a match
 #
 # WHY. A render test passed in one environment with Helm 3.16 and failed on a maintainer's Mac and in CI with
