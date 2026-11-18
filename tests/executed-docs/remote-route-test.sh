@@ -30,7 +30,11 @@ LANE_SH="${LANE_SH:-${HERE}/p09-lane.sh}"
 P09="${P09:-${HERE}/paths/P09-install-md-end-to-end.sh}"
 TMP="$(mktemp -d)"
 DPIDS=""
-cleanup() { for p in $DPIDS; do kill "$p" 2>/dev/null; done; rm -rf "$TMP"; }
+cleanup() {
+  for p in $DPIDS; do kill "$p" 2>/dev/null; done
+  for f in "$TMP"/repos-*/.git-http.pid; do [ -f "$f" ] && kill "$(cat "$f")" 2>/dev/null; done
+  rm -rf "$TMP"
+}
 trap cleanup EXIT
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); printf 'ok   %s\n' "$1"; }
@@ -145,7 +149,8 @@ git -C "$TMP/work" add -A
 git -C "$TMP/work" -c user.name=t -c user.email=t@example.invalid commit -q -m first
 export KUBE_CONTEXT=x
 SRS_FOR_DAEMON="$SRS"
-SH_BODY() { bash "$SRS_FOR_DAEMON" script ${1:+"$1"} | sed "s#/repos#$2#g; s#--port=9418#--port=$3#"; }
+# the script also starts the read-only HTTP bridge: on a free port here (DHPORT), its pid kept for cleanup
+SH_BODY() { DHPORT="$(free_port)"; bash "$SRS_FOR_DAEMON" script ${1:+"$1"} | sed "s#/repos#$2#g; s#--port=9418#--port=$3#; s#\.git-http\.py 8080 #.git-http.py ${DHPORT} #"; }
 start_daemon "$SRS" --writable none
 U="git://127.0.0.1:${DPORT}"
 if [ -d "$DREPOS/site.git" ] && [ -d "$DREPOS/tockmox.git" ] && [ "$(git --git-dir="$DREPOS/site.git" symbolic-ref HEAD)" = refs/heads/main ]; then
@@ -173,6 +178,36 @@ start_daemon "$TMP/srs-noflag.sh" --writable none
 NF="git://127.0.0.1:${DPORT}"
 git -C "$TMP/work" push "$NF/site.git" HEAD:refs/heads/main >/dev/null 2>&1 \
   && bad "mutation: no --enable=receive-pack" "the push was accepted" || ok "mutation: without --enable=receive-pack the push is refused (the flag is what the one URL needs)"
+
+# ============================================================ 2b. the product URL the installer is given
+# p09-lane.sh and airgap-lane.sh pass `url tockmox` to the installer as tockmox.repoURL, and the installer refuses
+# anything outside its own pattern. So `url` is held to that pattern, read from the installer, never a copy of it;
+# and the address it names is shown to serve: a clone at a tag over HTTP, with a push over HTTP refused.
+INST="${INST:-${HERE}/../../install/tockmox-install.sh}"
+PAT="$(sed -n 's/^\[\[ "\$TM_REPO" =~ \(.*\) \]\] \\$/\1/p' "$INST" | head -1)"
+url_ok() { [ -n "$PAT" ] && [[ "$1" =~ $PAT ]]; }
+if url_ok "https://github.com/tockmox/tockmox.git" && ! url_ok "--upload-pack=x" && ! url_ok "file:///etc"; then
+  ok "the installer's tockmox.repoURL pattern is read from the installer, and it behaves (https accepted, an option and file:// refused)"
+else bad "installer pattern" "read '${PAT}' from ${INST}"; fi
+run_srs url tockmox; U_TM="$(cat "$TMP/out")"
+url_ok "$U_TM" && ok "the product URL site-repo-server.sh hands out (${U_TM}) is one the installer accepts" \
+  || bad "product url" "'${U_TM}' does not match the installer's pattern '${PAT}'"
+mut "$SRS" "$TMP/srs-giturl.sh" "printf 'http://%s.%s.svc" "printf 'git://%s.%s.svc"
+SRS_USE="$TMP/srs-giturl.sh" run_srs url tockmox
+url_ok "$(cat "$TMP/out")" && bad "mutation: a git:// product URL" "the installer's pattern accepted '$(cat "$TMP/out")'" \
+  || ok "mutation: the git:// product URL the lanes used to hand out is refused by the installer's pattern"
+start_daemon "$SRS" --writable none
+git -C "$TMP/work" push -q "git://127.0.0.1:${DPORT}/tockmox.git" HEAD:refs/heads/main refs/tags/lane-x 2>/dev/null
+HU="http://127.0.0.1:${DHPORT}/tockmox.git"
+for _ in $(seq 1 50); do git ls-remote "$HU" >/dev/null 2>&1 && break; sleep 0.2; done
+rm -rf "$TMP/hclone"; git clone -q --branch lane-x "$HU" "$TMP/hclone" 2>"$TMP/herr"; HRC=$?
+[ "$HRC" = 0 ] && [ "$(git -C "$TMP/hclone" rev-parse HEAD)" = "$(git -C "$TMP/work" rev-parse HEAD)" ] \
+  && ok "the product tree pushed at a tag clones at that tag over the HTTP address (git's smart HTTP)" || bad "http clone" "rc=$HRC $(cat "$TMP/herr")"
+git -c protocol.version=0 ls-remote "$HU" 2>/dev/null | grep -F refs/tags/lane-x >/dev/null \
+  && ok "the HTTP address also answers git's older protocol (v0), as some clients still speak it" || bad "http v0" "no lane-x over protocol v0"
+git -C "$TMP/work" push "$HU" HEAD:refs/heads/over-http >/dev/null 2>"$TMP/herr"; HPRC=$?
+[ "$HPRC" != 0 ] && ! git --git-dir="$DREPOS/tockmox.git" rev-parse -q --verify refs/heads/over-http >/dev/null \
+  && ok "a push over the HTTP address is refused and stores nothing (read-only over HTTP)" || bad "http push" "rc=$HPRC; over-http exists: $(git --git-dir="$DREPOS/tockmox.git" rev-parse -q --verify refs/heads/over-http)"
 
 # ============================================================ 3. throwaway-cluster.sh publish
 mkdir -p "$TMP/tbin" "$TMP/tw"
