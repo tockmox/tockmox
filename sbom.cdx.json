@@ -147,9 +147,9 @@
     },
     {
       "name": "ghcr.io/open-webui/open-webui",
-      "purl": "pkg:oci/open-webui?repository_url=ghcr.io/open-webui/open-webui&tag=v0.13.3",
+      "purl": "pkg:oci/open-webui?repository_url=ghcr.io/open-webui/open-webui&tag=v0.13.4",
       "type": "container",
-      "version": "v0.13.3"
+      "version": "v0.13.4"
     },
     {
       "name": "nginxinc/nginx-unprivileged",
@@ -274,9 +274,9 @@
     {
       "description": "Helm chart dependency of tockmox-ai",
       "name": "open-webui",
-      "purl": "pkg:generic/helm/open-webui@18.0.0",
+      "purl": "pkg:generic/helm/open-webui@18.4.0",
       "type": "application",
-      "version": "18.0.0"
+      "version": "18.4.0"
     },
     {
       "description": "Helm chart dependency of tockmox-ai",
