@@ -29,7 +29,7 @@
 # ships 3.2, see CONTRIBUTING.md) and jq (any release).
 
 [tools]
-helm = "4.3.1"
+helm = "4.3.2"
 kubeconform = "0.8.0"
 shellcheck = "0.11.0"
 gitleaks = "8.30.1"

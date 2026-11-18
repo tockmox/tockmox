@@ -77,7 +77,7 @@ every gate `./tools/check-all.sh --list` prints. Run them yourself first:
 ```
 
 It runs every gate that does not need a live cluster, names each as it goes
-and says which it skipped and why. It needs `helm` (v4.3.1, see below), `python3` with the PyYAML
+and says which it skipped and why. It needs `helm` (v4.3.2, see below), `python3` with the PyYAML
 module (`./tools/dev-env.sh` sets up both), and `jq`, and refuses to start if one is missing or is not
 the pinned version, because several gates cannot tell "the tree is wrong" from "the tool is absent".
 
@@ -99,7 +99,7 @@ harness that executes them.
 
 ### Toolchain, and the smallest check for a documentation-only change
 
-**Use Helm v4.3.1.** Every tool version lives in one file, `mise.toml`, and
+**Use Helm v4.3.2.** Every tool version lives in one file, `mise.toml`, and
 CI reads it from there, so the pinned version is the one a green run on your
 machine predicts. `./tools/dev-env.sh` installs the pinned tools (through
 [mise](https://mise.jdx.dev) where you have it, from checksum-verified release
@@ -129,7 +129,7 @@ named "docs links resolve", "frontmatter contract holds over the docs bundle",
 emoji)". A fifth,
 `./tools/check-doc-claims.sh`, checks the counts a page states against the tree
 and needs a Helm render first: run `./tools/helm-deps.sh` and
-`./tools/render-counts.sh`, which need Helm v4.3.1 and network access to the
+`./tools/render-counts.sh`, which need Helm v4.3.2 and network access to the
 chart repositories. Without them it says it ran partially and exits non-zero.
 If you cannot run it, say so in the pull request and the maintainer will.
 Anything else you change, such as a chart, a value or a script, belongs under
