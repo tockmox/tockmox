@@ -279,10 +279,11 @@ expect: 40
 # 2026-11-05: 483 -> 485, administration/site-forge-recovery.md's "Rehearse the rebuild: the drill" (the rebuild-drill command) and upgrade.md's "On the built-in forge: upgrade the forge first" (upgrade-forge).
 # 2026-11-14: 491 -> 492, administration/site-forge.md's "Move a running site in": the move-in-forge command.
 # 2026-11-14: 492 -> 494, airgap.md's "Make every node trust your registry's CA": the CA placement and the TLS round trip.
+# 2026-11-17: 494 -> 496 and 46 -> 47 pages, the new administration/context-analyzer.md: the helm --set-file that hands the add-on its source, and the token Secret.
 page:   tests/executed-docs/INVENTORY.md
 claim:  fenced bash blocks across
 test:   grep -rhE '^[ \t]*```bash$' docs/ | wc -l | tr -d ' '
-expect: 494
+expect: 496
 states: [0-9]+ fenced bash blocks
 
 # (2026-10-27): two sentences pinned so they cannot be edited
@@ -321,9 +322,9 @@ states: [0-9]+ bash blocks
 # sufficient protection when the collision is on the VALUE rather than on a
 # substring. Edit entries one at a time, or match on the `test:` line.
 page:   tests/executed-docs/INVENTORY.md
-claim:  fenced bash blocks across 46 pages
+claim:  fenced bash blocks across 47 pages
 test:   grep -rlE '^[ \t]*```bash$' docs/ | wc -l | tr -d ' '
-expect: 46
+expect: 47
 states: [0-9]+ pages
 
 # THE COVERAGE FIGURES THE INVENTORY RESTATES THE CARD'S "7 OF N PATHS" AS
@@ -333,9 +334,9 @@ states: [0-9]+ pages
 # status, to the six pages of the per-commit job, or to the written exceptions
 # moves this file in the same commit or goes red.
 page:   tests/executed-docs/INVENTORY.md
-claim:  4 EXECUTED, 12 PARTIAL, 2 EXCEPTION, 28 OPEN of 46 pages
+claim:  4 EXECUTED, 12 PARTIAL, 2 EXCEPTION, 29 OPEN of 47 pages
 test:   awk -F'|' '/^## E\. /{s=1;next} /^---$/{if(s)exit} s && $2 ~ /^ `/ && match($4,/\*\*[A-Z]+\*\*/){k=substr($4,RSTART+2,RLENGTH-4);c[k]++} END{print c["EXECUTED"]+0 ", " c["PARTIAL"]+0 ", " c["EXCEPTION"]+0 ", " c["OPEN"]+0}' tests/executed-docs/INVENTORY.md
-expect: 4, 12, 2, 28
+expect: 4, 12, 2, 29
 
 page:   tests/executed-docs/INVENTORY.md
 claim:  24 blocks (about 5 percent of the denominator)

@@ -1,0 +1,203 @@
+{{- /*
+SPDX-License-Identifier: Apache-2.0
+
+THE CONTEXT ANALYZER (add-on, ADR-0040; REQ-0041). OFF by default: apps.contextAnalyzer.enabled.
+
+The service the gateway hook reports to, with its own database, scrape, alert rules and dashboard. The hook
+itself rides in the gateway's hooks ConfigMap (tockmox.ai.hookFiles), so enabling this adds no volume, init
+container or environment to the LiteLLM chart's own values. preflight.yaml refuses every configuration that
+would render cleanly and capture nothing.
+
+Who reaches it: the gateway's pods (the hook's events) and Prometheus (the scrape, with the same bearer
+token). The policy below selects only this pod and the pod is labelled tockmox.com/isolated, so the policy
+layer's namespace-wide allows skip it (tockmox-policy, ai-default-deny.yaml). It reaches its own database
+through the CNPG Cluster's read-write Service. No Ingress in this slice: the Analyzer's own interface sits
+behind the identity layer once that route is designed.
+*/ -}}
+{{- if include "tockmox.ai.ctxaOn" . -}}
+{{- $ca := .Values.contextAnalyzer -}}
+{{- $db := $ca.database -}}
+{{- $name := include "tockmox.ai.ctxaName" . -}}
+{{- $src := include "tockmox.ai.ctxaSource" . | fromYaml -}}
+{{- $monitorsOn := include "tockmox.capabilityEnabled" (dict "ctx" $ "capability" "observability" "app" "serviceMonitors") -}}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ $db.name }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $db.name }}
+spec:
+  instances: {{ $db.instances }}
+  {{- with $db.imageName }}
+  imageName: {{ . | quote }}
+  {{- end }}
+  {{- with $db.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  monitoring:
+    enablePodMonitor: {{ not (not $monitorsOn) }}
+  storage:
+    {{- /* The storage policy (tools/check-storage-policy.sh): an explicit class wins; otherwise one
+    instance takes global.storageClass and three or more take global.localStorageClass, because a
+    replicated database on replicated storage pays for replication twice. */}}
+    {{- $class := $db.storageClass | default "" -}}
+    {{- if not $class }}
+      {{- if ge (int $db.instances) 3 }}
+        {{- $class = .Values.global.localStorageClass | default "" }}
+      {{- else }}
+        {{- $class = .Values.global.storageClass | default "" }}
+      {{- end }}
+    {{- end }}
+    {{- with $class }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+    size: {{ $db.storage }}
+  bootstrap:
+    initdb:
+      database: context_analyzer
+      owner: context_analyzer
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ $name }}
+  ports:
+    - { name: http, port: 8000, targetPort: http, protocol: TCP }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  replicas: 1
+  {{- /* One writer at a time: a rolling update would run two against the same schema migration. */}}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/part-of: tockmox
+        tockmox.com/isolated: "true"
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: analyzer
+          image: {{ $ca.image | quote }}
+          imagePullPolicy: {{ $ca.imagePullPolicy | default "IfNotPresent" }}
+          env:
+            - name: CTXA_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ $ca.tokenSecret | quote }}, key: CTXA_TOKEN }
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: {{ printf "%s-app" $db.name | quote }}, key: username }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ printf "%s-app" $db.name | quote }}, key: password }
+            - name: DATABASE_URL
+              value: {{ printf "postgresql+psycopg://$(DB_USER):$(DB_PASSWORD)@%s-rw:5432/context_analyzer" $db.name | quote }}
+          ports:
+            - { name: http, containerPort: 8000 }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: ["ALL"] }
+          resources:
+            {{- toYaml $ca.resources | nindent 12 }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: litellm
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ (.Values.namespaces | default dict).monitoring | default "tockmox-monitoring" }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: prometheus
+      ports:
+        - { port: 8000, protocol: TCP }
+{{- if $monitorsOn }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $name }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      {{- /* /metrics is authenticated with the same token the hook sends. */}}
+      authorization:
+        type: Bearer
+        credentials: { name: {{ $ca.tokenSecret | quote }}, key: CTXA_TOKEN }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+spec:
+  {{- /* The Context Analyzer's own shipped rules, as its source carries them; parsed, not templated,
+  so the label references in their annotations reach Prometheus untouched. */}}
+  groups:
+    {{- toYaml (index (index $src "prometheus-alerts.yaml" | fromYaml) "groups") | nindent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}-dashboard
+  labels:
+    {{- include "tockmox.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: Tockmox
+data:
+  context-analyzer.json: |-
+{{ index $src "context-analyzer-dashboard.json" | indent 4 }}
+{{- end }}
+{{- end -}}

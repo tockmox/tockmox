@@ -88,6 +88,7 @@
           "blackbox",
           "certManager",
           "cnpg",
+          "contextAnalyzer",
           "corednsHa",
           "dashboards",
           "devops_netpol",
@@ -545,6 +546,9 @@
       "description": "Not this layer's key. Owned by the policy layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
     },
     "knowledge": {
+      "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
+    },
+    "contextAnalyzer": {
       "description": "Not this layer's key. Owned by the ai layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."
     },
     "siteForge": {

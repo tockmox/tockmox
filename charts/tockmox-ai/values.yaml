@@ -202,6 +202,10 @@ capabilities:
 apps:
   openWebui: {}   # unset: follows capabilities.aiPlane
   litellm:   {}   # unset: follows capabilities.aiPlane (shipped off until 0.8.0)
+  # The Context Analyzer add-on (ADR-0040): OFF by default, and an explicit
+  # false so declining nothing still deploys nothing. true deploys the Analyzer
+  # beside the gateway and loads its hook; settings in contextAnalyzer below.
+  contextAnalyzer: {enabled: false}
   # The ServiceMonitor, PodMonitor and PrometheusRule objects THIS REPO writes,
   # as distinct from the stack that consumes them.
   #
@@ -1006,6 +1010,51 @@ knowledge:
     gitPeriod: 5m
     sourceEgress: []
     sources: []
+
+# ---------------------------------------------------------------------------
+# THE CONTEXT ANALYZER (add-on, ADR-0040; experimental). OFF by default:
+# apps.contextAnalyzer.enabled is the switch, this block is its settings.
+#
+# Enabled, the chart renders the Analyzer (Deployment, Service, a CNPG database,
+# its own NetworkPolicy, the scrape, the alert rules and the dashboard) and adds
+# the hook to the gateway's hooks ConfigMap, the volume LiteLLM already mounts at
+# /etc/litellm/hooks. The hook runs as source in the stock LiteLLM image; nothing
+# Tockmox publishes is pulled (ADR-0036). With the policy gate on, the hook runs
+# in Tockmox mode and reads each request's class from the gate; with it off,
+# neither is set, because one without the other captures nothing.
+#
+# What the site supplies, and preflight names each one that is missing:
+#   image        built from the Context Analyzer source
+#   source       the hook package, alert rules and dashboard, file name to text:
+#                compat.py, segmentation.py, actuation.py, hooks.py (from
+#                src/context_analyzer/), prometheus-alerts.yaml (deploy/) and
+#                context-analyzer-dashboard.json (grafana/). A file the chart
+#                carries under files/context-analyzer/ is used when unset here.
+#   tokenSecret  a Secret with keys CTXA_TOKEN and CTXA_HASH_SALT, also listed
+#                in litellm.environmentSecrets so the hook reads the same token
+#   the callback hooks.tockmox_context_analyzer.analyzer_hook in
+#                litellm.proxy_config.litellm_settings.callbacks, after the
+#                policy gate's entry when the gate is on
+# docs/administration/context-analyzer.md has the whole procedure.
+# ---------------------------------------------------------------------------
+contextAnalyzer:
+  image: ""
+  imagePullPolicy: IfNotPresent
+  tokenSecret: tockmox-ctxa                # keys: CTXA_TOKEN, CTXA_HASH_SALT
+  gatewayId: ""                            # empty: the hook uses the gateway pod's hostname
+  source: {}
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits: { memory: 512Mi }
+  database:
+    name: tockmox-context-analyzer-db
+    instances: 1
+    storage: 5Gi
+    storageClass: ""                       # empty: global.storageClass (global.localStorageClass at 3+ instances)
+    imageName: ""
+    resources:
+      requests: { cpu: 50m, memory: 256Mi }
+      limits: { memory: 512Mi }
 
 # ---------------------------------------------------------------------------
 # THE TOCKMOX UI (experimental in 0.8.0; Jeff 2026-10-07). The admin console
