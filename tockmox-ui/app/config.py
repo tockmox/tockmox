@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 
 import yaml
 
+from . import registry as registry_mod
+
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 
 # Routes the app owns. A launcher id may not shadow one, or a redirect would
@@ -36,6 +38,7 @@ class App:
     description: str = ""
     icon: str = "app"
     groups: tuple[str, ...] = ("*",)
+    origin: str | None = None          # "private": the maintainer's own console; its Home tile says so (SPEC section 10)
 
     def visible_to(self, groups: set[str]) -> bool:
         return "*" in self.groups or bool(groups.intersection(self.groups))
@@ -48,6 +51,7 @@ class Feature:
     enabled: bool
     admin_only: bool = True
     options: dict = field(default_factory=dict)
+    stability: str | None = None       # experimental, provisional or stable: the site's word, else the registry's
 
 
 @dataclass(frozen=True)
@@ -262,26 +266,37 @@ def parse(doc: dict) -> Settings:
             raise ConfigError(f"app id {aid!r} is duplicated")
         seen.add(aid)
         groups = tuple(raw.get("groups") or ["*"])
+        origin = raw.get("origin")
+        if origin not in (None, "private"):
+            raise ConfigError(f"apps.{aid}.origin: the only marker an app may carry is private")
         apps.append(App(id=aid, name=str(raw.get("name", aid)),
                         url=_check_url(str(raw.get("url", "")), f"apps.{aid}.url"),
                         description=str(raw.get("description", "")),
-                        icon=str(raw.get("icon", "app")), groups=groups))
+                        icon=str(raw.get("icon", "app")), groups=groups, origin=origin))
 
     def _opt_url(v, what):
         return _check_url(str(v), what) if v else ""
 
     feats = []
-    names = {"posture": "Security posture", "scanning": "Vulnerability scanning", "agents": "Agents", "platform": "Platform Management"}
+    try:
+        reg = registry_mod.load()           # app/features.yaml: first-party names and stability
+    except (OSError, registry_mod.RegistryError) as e:
+        raise ConfigError(f"the feature registry did not load: {e}") from None
     for fid, raw in (doc.get("features") or {}).items():
         raw = dict(raw or {})
         for k in ("url", "rendererUrl", "apiUrl", "ledgerUrl", "interfaceUrl", "specialistsUrl"):
             if raw.get(k):
                 raw[k] = _opt_url(raw[k], f"features.{fid}.{k}")
-        feats.append(Feature(id=fid, name=raw.get("name", names.get(fid, fid)),
+        entry = reg.get(fid)
+        stab = raw.get("stability", entry.stability if entry else None)
+        if stab is not None and stab not in registry_mod.STABILITY:
+            raise ConfigError(f"features.{fid}.stability must be one of {', '.join(registry_mod.STABILITY)}")
+        feats.append(Feature(id=fid, name=raw.get("name", entry.name if entry else fid),
                              enabled=bool(raw.get("enabled", False)),
                              admin_only=bool(raw.get("adminOnly", True)),
                              options={k: v for k, v in raw.items()
-                                      if k not in ("enabled", "name", "adminOnly")}))
+                                      if k not in ("enabled", "name", "adminOnly", "stability")},
+                             stability=stab))
 
     # /platform is a route only while Platform Management is on, so the id is reserved only then: a site
     # with an app called "platform" and the feature off keeps working after an upgrade.

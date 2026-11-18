@@ -45,7 +45,7 @@
     {% for label, items in groups %}
     <div class="app-group">
       <h2>{{ label }}</h2>
-      {{ app_tiles(items, site) }}
+      {{ app_tiles(items, site, tile_markers) }}
     </div>
     {% endfor %}
   </div>

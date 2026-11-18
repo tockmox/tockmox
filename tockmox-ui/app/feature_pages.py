@@ -65,11 +65,22 @@ class PageRef:
 
 
 @dataclass(frozen=True)
+class StackPart:
+    band: str                           # a band app/stack.yaml ships
+    name: str
+    namespaces: tuple[str, ...] = ()
+    alerts: tuple[str, ...] = ()        # its own, plus the health input's
+
+
+@dataclass(frozen=True)
 class Contribution:
     section: bool                       # its own top-bar section, labelled with the feature's name
     rail_section: str | None            # or: pages in an existing section's rail ...
     rail_group: str | None              # ... under this group heading
-    pages: tuple[PageRef, ...]
+    pages: tuple[PageRef, ...]          # empty when the feature adds no pages, only the kinds below
+    stack: StackPart | None = None      # a part on Status, which feeds the health pill and Home's verdict
+    help: str | None = None             # a docs page, relative to docs/, for Help on the feature's pages
+    retire_tile: str | None = None      # the Home tile (an app id) the feature replaces while it is on
 
 
 def parse_contributes(fid: str, raw, admin_only: bool = True) -> Contribution:
@@ -77,10 +88,16 @@ def parse_contributes(fid: str, raw, admin_only: bool = True) -> Contribution:
     where = f"features.{fid}.contributes"
     if not isinstance(raw, dict):
         raise ValueError(f"{where} must be a mapping")
-    extra = set(raw) - {"section", "rail", "pages"}
+    extra = set(raw) - set(CONTRIBUTION_KEYS)
     if extra:
         raise ValueError(f"{where}: {', '.join(sorted(extra))} is not a contribution this version draws "
-                         "(section, rail, pages)")
+                         f"({', '.join(CONTRIBUTION_KEYS)})")
+    if not raw:
+        raise ValueError(f"{where} names no contribution")
+    stack, help_doc, retire = _other_kinds(where, raw)
+    if not any(k in raw for k in ("section", "rail", "pages")):
+        return Contribution(section=False, rail_section=None, rail_group=None, pages=(),
+                            stack=stack, help=help_doc, retire_tile=retire)
     section = raw.get("section", False)
     if not isinstance(section, bool):
         raise ValueError(f"{where}.section must be true or false")
@@ -117,7 +134,58 @@ def parse_contributes(fid: str, raw, admin_only: bool = True) -> Contribution:
         seen.add(pid)
         refs.append(PageRef(pid, title.strip()))
     return Contribution(section=section, rail_section=rail_section,
-                        rail_group=rail_group.strip() if rail_group else None, pages=tuple(refs))
+                        rail_group=rail_group.strip() if rail_group else None, pages=tuple(refs),
+                        stack=stack, help=help_doc, retire_tile=retire)
+
+
+CONTRIBUTION_KEYS = ("section", "rail", "pages", "stack", "health", "help", "retireTile")
+_GLOB_RE = re.compile(r"[A-Za-z0-9_*?:.-]{1,80}")
+_HELP_RE = re.compile(r"docs/[A-Za-z0-9_./-]+\.md")
+
+
+def _globs(v, where):
+    if v is None:
+        return ()
+    if not isinstance(v, list) or not all(isinstance(x, str) and _GLOB_RE.fullmatch(x) for x in v):
+        raise ValueError(f"{where} must be a list of names or globs")
+    return tuple(v)
+
+
+def _other_kinds(where, raw):
+    """stack, health, help and retireTile: the same rules tools/check-addon-manifest.sh holds an add-on to."""
+    stack = None
+    st = raw.get("stack")
+    if st is not None:
+        if not isinstance(st, dict) or set(st) - {"band", "part", "namespaces", "alerts"}:
+            raise ValueError(f"{where}.stack takes band, part, namespaces and alerts")
+        band, part = st.get("band"), st.get("part")
+        if not isinstance(band, str) or not PAGE_ID_RE.fullmatch(band):
+            raise ValueError(f"{where}.stack.band must name a band on Status")
+        if not isinstance(part, str) or not part.strip() or len(part) > 40:
+            raise ValueError(f"{where}.stack.part must be a name of 1 to 40 characters")
+        ns, al = _globs(st.get("namespaces"), f"{where}.stack.namespaces"), _globs(st.get("alerts"), f"{where}.stack.alerts")
+        if not ns and not al:
+            raise ValueError(f"{where}.stack: a part with no namespaces and no alerts would only ever read Unknown")
+        stack = StackPart(band=band, name=part.strip(), namespaces=ns, alerts=al)
+    hl = raw.get("health")
+    if hl is not None:
+        if not isinstance(hl, dict) or set(hl) - {"alerts"}:
+            raise ValueError(f"{where}.health takes alerts only")
+        al = _globs(hl.get("alerts"), f"{where}.health.alerts")
+        if not al:
+            raise ValueError(f"{where}.health.alerts must list one or more alert names or globs")
+        if stack is None:
+            raise ValueError(f"{where}.health needs a stack part: a health input reaches the pill and Home's verdict "
+                             "through it")
+        stack = StackPart(band=stack.band, name=stack.name, namespaces=stack.namespaces,
+                          alerts=stack.alerts + tuple(a for a in al if a not in stack.alerts))
+    hp = raw.get("help")
+    if hp is not None and (not isinstance(hp, str) or not _HELP_RE.fullmatch(hp) or ".." in hp):
+        raise ValueError(f"{where}.help must be a docs/*.md page")
+    rt = raw.get("retireTile")
+    if rt is not None and (not isinstance(rt, str) or not PAGE_ID_RE.fullmatch(rt)):
+        raise ValueError(f"{where}.retireTile must be the id of a Home tile")
+    return stack, (hp[len("docs/"):] if hp else None), rt
 
 
 # ---------------------------------------------------------------- the document format
@@ -503,13 +571,16 @@ class PageSource:
             return PageReading(reason=f"the page is not in the format this console draws: {e}")
 
 
-def registry(features, apps=()) -> dict:
-    """{feature id: Contribution} for every feature whose values name `contributes`, checked when the app starts, so
-    a typo fails the deploy and not a page view. A feature without `contributes` is not looked at."""
+def registry(features, apps=(), reg=None) -> dict:
+    """{feature id: Contribution} for every feature that contributes: its values' `contributes`, else the first-party
+    registry's (app/features.yaml, `reg`). Checked when the app starts, so a typo fails the deploy and not a page view.
+    A feature that contributes nothing is not looked at; one that contributes no pages needs no apiUrl."""
     from .config import ConfigError
     out = {}
     for f in features:
         raw = f.options.get("contributes")
+        if raw is None and reg is not None and reg.get(f.id) is not None:
+            raw = reg.get(f.id).contributes
         if raw is None:
             continue
         if not PAGE_ID_RE.fullmatch(str(f.id)):
@@ -518,7 +589,7 @@ def registry(features, apps=()) -> dict:
             c = parse_contributes(f.id, raw, f.admin_only)
         except ValueError as e:
             raise ConfigError(str(e)) from None
-        if f.enabled and not f.options.get("apiUrl"):
+        if f.enabled and c.pages and not f.options.get("apiUrl"):
             raise ConfigError(f"features.{f.id}: a feature with pages needs apiUrl, the read API that serves them")
         if f.options.get("origin") not in (None, "private"):
             raise ConfigError(f"features.{f.id}.origin: the only marker a feature may carry is private")
@@ -526,7 +597,7 @@ def registry(features, apps=()) -> dict:
         if tf is not None and not str(tf).startswith("/"):
             raise ConfigError(f"features.{f.id}.tokenFile must be an absolute path")
         out[f.id] = c
-    on = [f for f in features if f.enabled and f.id in out]
+    on = [f for f in features if f.enabled and f.id in out and out[f.id].pages]
     sections = [f.id for f in on if out[f.id].section]
     if len(sections) > MAX_SECTIONS:
         raise ConfigError(f"features: at most two features may add a section to the top bar ({', '.join(sections)})")
@@ -539,7 +610,46 @@ def registry(features, apps=()) -> dict:
 def sources_for(features, reg: dict, timeout: float, transport=None) -> dict:
     """{feature id: PageSource} for every enabled feature that contributes pages."""
     return {f.id: PageSource(str(f.options.get("apiUrl", "")), timeout, str(f.options.get("tokenFile", "") or ""), transport)
-            for f in features if f.enabled and f.id in reg}
+            for f in features if f.enabled and f.id in reg and reg[f.id].pages}
+
+
+def stack_additions(features, reg: dict, base=None) -> dict | None:
+    """The site's `stack:` additions plus a part for each enabled feature that contributes one, in the shape
+    app/stack.py takes. A feature that is off adds nothing, so its part, and its say in the health pill, is gone."""
+    bands = {}
+    for f in features:
+        c = reg.get(f.id)
+        if not f.enabled or c is None or c.stack is None:
+            continue
+        part = {"id": f"feature-{f.id}", "name": c.stack.name, "about": f"Added by the {f.name} feature."}
+        if c.stack.namespaces:
+            part["namespaces"] = list(c.stack.namespaces)
+        if c.stack.alerts:
+            part["alerts"] = list(c.stack.alerts)
+        bands.setdefault(c.stack.band, []).append(part)
+    if not bands:
+        return base
+    out = dict(base or {})
+    site_bands = [dict(b) for b in (out.get("bands") or [])]
+    for bid, parts in bands.items():
+        hit = next((b for b in site_bands if b.get("id") == bid), None)
+        if hit is None:
+            site_bands.append({"id": bid, "parts": parts})
+        else:
+            hit["parts"] = list(hit.get("parts") or []) + parts
+    out["bands"] = site_bands
+    return out
+
+
+def retired_tiles(features, reg: dict) -> set:
+    """App ids whose Home tile an enabled feature replaces."""
+    return {reg[f.id].retire_tile for f in features
+            if f.enabled and f.id in reg and reg[f.id].retire_tile}
+
+
+def help_pages(features, reg: dict) -> dict:
+    """{"/f/<id>/": docs page} for each enabled feature that names its own help page."""
+    return {f"/f/{f.id}/": reg[f.id].help for f in features if f.enabled and f.id in reg and reg[f.id].help}
 
 
 def age_words(sec: float) -> str:
@@ -553,6 +663,6 @@ def age_words(sec: float) -> str:
     return f"{sec // 86400} days ago"
 
 
-__all__ = ["FORMAT", "PageError", "Contribution", "PageRef", "parse_contributes", "validate", "PageSource",
-           "PageReading", "registry", "sources_for", "safe_href", "chart_geometry", "age_words", "fmt_num",
+__all__ = ["FORMAT", "PageError", "Contribution", "PageRef", "StackPart", "parse_contributes", "validate", "PageSource",
+           "PageReading", "registry", "sources_for", "stack_additions", "retired_tiles", "help_pages", "CONTRIBUTION_KEYS", "safe_href", "chart_geometry", "age_words", "fmt_num",
            "MAX_SECTIONS"]

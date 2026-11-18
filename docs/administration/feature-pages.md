@@ -3,7 +3,7 @@ okf_version: "0.2"
 type: Reference
 title: "Feature pages"
 description: "How to let a feature contribute pages to the Tockmox UI by serving JSON page documents that the console draws with its own components."
-tags: [tockmox-ui, feature-pages, extension, experimental]
+tags: [tockmox-ui, feature-pages, extension, release-markers, experimental]
 status: draft
 generated:
   by: hand
@@ -19,7 +19,7 @@ A feature listed under the console's `features.<id>` config may contribute pages
 
 Feature pages are experimental. The config keys, the document format, and the limits can change between releases.
 
-This is the first slice of the console's feature contributions. The other contribution kinds in the UI spec (stack parts, health inputs, settings, and retiring a Home tile) are not drawn yet.
+Pages are one of the things a feature may contribute. It may also add a part to Status (with alerts that count toward the health pill and Home's verdict), name its own help page, and retire a Home tile it replaces. Every contribution is data the console draws itself, and turning the feature off removes all of it. Settings pages drawn from a feature's settings schema are not drawn yet.
 
 ## Turn it on
 
@@ -52,15 +52,28 @@ features:
 | `tokenFile` | no | Absolute path to a file holding a bearer token. |
 | `contributes.section` | one of two | `true` gives the feature its own top-bar section. |
 | `contributes.rail` | one of two | `{section, group}` puts the pages in the AI or Platform rail under `group`. Admins only: a feature with `adminOnly: false` takes `section: true`, because members have no AI or Platform section. |
-| `contributes.pages` | yes | The page list: an `id` (lowercase slug) and a `title` for each. |
+| `contributes.pages` | with `section` or `rail` | The page list: an `id` (lowercase slug) and a `title` for each. |
+| `contributes.stack` | no | `{band, part, namespaces, alerts}`: a part named `part` in a Status band (`band` is a band id the console ships, such as `platform` or `services`), reported on by the alerts and namespaces listed. At least one of the two, or the part could only read Unknown. |
+| `contributes.health` | no | `{alerts}`: alert names or globs that also count toward the feature's part, and so toward the health pill and Home's verdict. Needs `stack`. |
+| `contributes.help` | no | A `docs/*.md` page. "Help for this page" on the feature's pages links to it instead of this document. |
+| `contributes.retireTile` | no | The id of an app in `apps:` whose Home tile the feature replaces. The tile is hidden while the feature is on. |
+| `stability` | no | `experimental`, `provisional` or `stable`. An experimental feature is listed under Experimental on Platform › Capabilities and its pages carry the word Experimental. First-party features take theirs from the console's registry. |
 
-Turning the feature off (`enabled: false`) removes its pages. They return 404 and are absent from navigation. They are not shown as locked.
+Turning the feature off (`enabled: false`) removes everything it contributes. Its pages return 404 and are absent from navigation, its Status part is gone (and with it its say in the health pill), its help page is no longer named, and the Home tile it retired comes back. Nothing is shown as locked.
+
+A feature may contribute only some of these. One with a stack part, a help page or a retired tile and no pages needs no `apiUrl`.
+
+### The first-party registry
+
+The console ships a registry of its own features in the UI image, `tockmox-ui/app/features.yaml`: each feature's name, how mature it is (`stability`), the release that first ships it (`since`), and what it contributes when it is on. A site switches a first-party feature on with `features.<id>.enabled`; the registry supplies the rest, and the site's own `name`, `stability` or `contributes` for that id win. An add-on writes the same `contributes` shape in its manifest (`addons/README.md`), where `tools/check-addon-manifest.sh` holds it.
 
 ### Start-up checks
 
 The UI refuses to start if the config is wrong, so a typo fails the deploy and not a page view. It refuses on any of these:
 
-- an unknown key under `contributes`
+- an unknown key under `contributes`, or a `contributes` that names nothing
+- `health` without `stack`, a `stack` part with no alerts and no namespaces, a `help` that is not a `docs/*.md` page, or a `retireTile` that is not an app id
+- a `stability` other than `experimental`, `provisional` or `stable`, or an app `origin` other than `private`
 - both `section` and `rail`, or neither
 - a `rail.section` other than `ai` or `platform`, or a `rail` on a feature with `adminOnly: false`
 - a third feature with `section: true`
@@ -69,7 +82,7 @@ The UI refuses to start if the config is wrong, so a typo fails the deploy and n
 - on a feature with pages, an `origin` other than `private`, or a relative `tokenFile`
 - an application with the id `f` while any feature has pages, because the console then owns `/f/`
 
-A feature without `contributes` is not affected by any of these checks.
+A feature without `contributes` is not affected by the checks on contributions.
 
 ### Token and egress with the Helm chart
 
@@ -90,7 +103,15 @@ With `adminOnly: true`, only administrators see the section, the rail items, and
 
 ### Release markers
 
-`origin: private` shows the word "Private" beside the section label, on every rail item, and in the page heading. The marker is a word, in copper trim, so it never relies on colour alone. It marks a maintainer's own extension that is not part of the open-source project. An open-source install never sets it.
+A feature's pages, and a Home tile, may carry one word beside their label. It is a word, in copper trim, so it never relies on colour alone, and an item carries at most one, in this order:
+
+| Word | Means | Comes from |
+|---|---|---|
+| Private | The maintainer's own extension, not part of the open-source project. An open-source install never sets it. | `origin: private` on the feature, or on the app in `apps:` for its tile |
+| Preview | In Tockmox on main, not in a tagged release yet. | The registry's `since` for the feature (or its `tiles` entry for a tile), when that release is not in the CHANGELOG the UI image bundles. Never on a tagged build: an image whose bundled CHANGELOG opens on a release rather than on Unreleased shows no Preview at all. |
+| Experimental | Shipped, and still maturing. | `stability: experimental` |
+
+The word shows beside the section label, on every rail item, in the page heading, and on the tile. Platform › Capabilities lists experimental capabilities and features in their own Experimental section with their on or off state; turning one on there opens the same change as any other row.
 
 ## Writing a read API
 

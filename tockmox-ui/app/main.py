@@ -45,6 +45,7 @@ from . import nav
 from . import nodes_routes
 from . import platform as platform_mod
 from . import redirects
+from . import registry as registry_mod
 from . import sources as sources_mod
 from . import stack as stack_mod
 from . import status_api
@@ -160,7 +161,7 @@ class Transports:
 
 
 def create_app(settings: Settings | None = None, transports: Transports | None = None,
-               notes_path: str | None = None) -> FastAPI:
+               notes_path: str | None = None, registry_path: str | None = None) -> FastAPI:
     s = settings or load()
     tp = transports or Transports()
     telemetry.setup_logging()
@@ -229,6 +230,10 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
                                     s.update_interval_s, s.source_timeout_s, tp.feed)
     notes = ReleaseNotes(notes_path or os.environ.get("TOCKMOX_UI_NOTES",
                                                       os.path.join(HERE, "..", "notes", "CHANGELOG.md")))
+    # The first-party feature registry (app/features.yaml) and what this build is, from the CHANGELOG it bundles:
+    # together they say which pages and tiles carry Preview (registry.py). Checked now, so a typo fails the start.
+    reg = registry_mod.load(registry_path)
+    build = registry_mod.Build.from_notes(notes.by_version)
     app.state.settings, app.state.checker, app.state.oidc = s, checker, oidc
     src_inodes = InferenceNodesSource(s.prometheus_url, s.nodes.inventory, s.source_timeout_s, tp.prometheus)
     prober_kw = {"resolver": tp.resolver} if tp.resolver else {}
@@ -244,7 +249,20 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         app.state.sources["open_applications"] = OpenApplicationsSource(
             kube, s.open_apps.namespace, s.open_apps.configmap, s.open_apps.stale_s)
 
-    the_stack = stack_mod.load(site=s.stack_site)
+    # what features contribute, checked now (start-up): pages, a stack part (with its health input), help, a retired tile
+    contribs = fpages.registry(s.features, s.apps, reg)
+    the_stack = stack_mod.load(site=fpages.stack_additions(s.features, contribs, s.stack_site))
+    retired = fpages.retired_tiles(s.features, contribs)
+    feature_help = fpages.help_pages(s.features, contribs)
+
+    def feature_marker(f) -> str | None:
+        """The one word a feature's pages carry: Private, Preview or Experimental (registry.py)."""
+        e = reg.get(f.id)
+        return registry_mod.marker(origin=f.options.get("origin"), since=e.since if e else None,
+                                   stability=f.stability, build=build)
+
+    def tile_marker(a) -> str | None:
+        return registry_mod.marker(origin=a.origin, since=reg.tiles.get(a.id), build=build)
     # trend panels from the same Prometheus, one cached range query per panel per minute.
     the_panels = charts_mod.load()
     for _p in [p for b in the_stack.bands for p in b.parts] + list(the_stack.side):
@@ -253,6 +271,7 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
     panel_index = {pid: i + 1 for i, pid in enumerate(p for p in the_panels if the_panels[p].page != "part")}
     ranger = charts_mod.RangeReader(s.prometheus_url, s.source_timeout_s, tp.prometheus)
     tpl.env.globals.update(chart_alt=charts_mod.alt, chart_fmt=charts_mod.fmt)
+    tpl.env.globals.update(marker_title=registry_mod.marker_title)
 
     # ------------------------------------------------------------ helpers
 
@@ -264,12 +283,11 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
 
     revoked: set = set()   # logged-out session ids; per process (one replica in v0), bounded by session max-age
 
-    contribs = fpages.registry(s.features, s.apps)     # features.<id>.contributes, checked now (start-up)
-
     def tabs_for(u: User):
         # Platform Management is its own area (/platform), never a generic feature tab; a feature with pages
         # (feature_pages.py) puts them where it contributes them, never as a tab.
-        return [f for f in s.features if f.enabled and f.id != "platform" and f.id not in contribs
+        return [f for f in s.features if f.enabled and f.id != "platform"
+                and not (f.id in contribs and contribs[f.id].pages)
                 and (u.is_admin or not f.admin_only)]
 
     page_sources = fpages.sources_for(s.features, contribs, s.source_timeout_s, tp.features)
@@ -283,7 +301,7 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         where, secs, groups = {}, [], {}
         for f in paged_for(u):
             c = contribs[f.id]
-            marker = "Private" if f.options.get("origin") == "private" else None
+            marker = feature_marker(f)
             items = tuple(nav.Item(p.title, f"/f/{f.id}/{p.id}", marker=marker) for p in c.pages)
             key = f"f:{f.id}" if c.section else c.rail_section
             where[f.id] = key
@@ -342,7 +360,8 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         for fid, key in f_where.items():
             if not key.startswith("f:"):
                 rail_px.setdefault(key, []).append(f"/f/{fid}")
-        items = nav.sections(u.is_admin, platform_on(), tabs, f_secs, rail_px)
+        tab_marks = {t.id: feature_marker(t) for t in tabs}
+        items = nav.sections(u.is_admin, platform_on(), tabs, f_secs, rail_px, tab_markers=tab_marks)
         sec = nav.section_of(path, f_where)
         out["sections"] = items
         out["section_item"] = nav.current(items, path)
@@ -358,11 +377,12 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
                           activity=bool(s.actions and s.actions.any),
                           identity=bool(s.actions and s.actions.any and (s.actions.on("recovery-link") or s.actions.on("add-admin"))),
                           changes=bool(s.actions and s.actions.any and s.actions.on("approve-change")),
-                          contributed=f_groups)
+                          contributed=f_groups, tab_markers=tab_marks,
+                          operations_marker=feature_marker(s.feature("platform")) if platform_on() else None)
         out["rail"], out["rail_item"] = groups, nav.rail_current(groups, path) if groups else None
         if u.is_admin:
             out["health"] = stack_mod.pill(placed(readings()))     # parts, not signals
-        page = nav.help_for(path)
+        page = nav.help_for(path, feature_help)
         out["help_href"] = nav.docs_href(s.docs_url, repo_link, page) if page else None
         if footer:
             out["newer"] = footer.get("newer")
@@ -575,13 +595,14 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
             return need_login(request)
         r = readings()
         v = verdict(x.state for x in r.values())
-        apps = [a for a in s.apps if a.visible_to(set(u.groups))]
+        apps = [a for a in s.apps if a.visible_to(set(u.groups)) and a.id not in retired]
         ver = running_version(r["apps"]) if u.is_admin else None
         pl = None
         if u.is_admin:
             checker.check()
             pl = placed(r)                  # Home reads the same part states as Status
         return render(request, "home.html", u, verdict=v, readings=r, apps=apps, version=ver,
+                      tile_markers={a.id: tile_marker(a) for a in apps},
                       target=_latest_target(ver.get("version")) if ver else None,
                       pipeline=list(sources_mod.pipeline_alerts(s.alertmanager_heartbeat)),
                       placed=pl, home=stack_mod.home(pl) if pl is not None else None)
@@ -668,13 +689,33 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
             return forbidden(request, u)
         rd, rows = capability_rows()
         change_on = bool(s.actions and s.actions.any and s.actions.on("set-capability"))
-        feats = [{"id": "platform", "name": act.FEATURES["platform"][0],
-                  "key": ".".join(act.FEATURES["platform"][1][1:]), "on": platform_on(),
-                  "what": "The operations view: the platform's roles, the scheduled work each owns, the numbers each "
-                          "watches, and the agents' cases. Administrators only."}]
-        return render(request, "capabilities.html", u, rows=rows, apps_reading=rd, change_on=change_on,
-                      never_off=act.NEVER_OFF_FROM_THE_CONSOLE, features=feats,
+        feats = console_features()
+        # Experimental ones get their own section: what is still maturing is seen as
+        # such before it is turned on. Turning one on still goes through the same change as any other row.
+        return render(request, "capabilities.html", u, apps_reading=rd, change_on=change_on,
+                      rows=[r for r in rows if r["stability"] != "experimental"],
+                      x_rows=[r for r in rows if r["stability"] == "experimental"],
+                      never_off=act.NEVER_OFF_FROM_THE_CONSOLE,
+                      features=[f for f in feats if f["stability"] != "experimental"],
+                      x_features=[f for f in feats if f["stability"] == "experimental"],
                       feature_change_on=bool(s.actions and s.actions.any and s.actions.on("set-feature")))
+
+    def console_features() -> list[dict]:
+        """Every console feature the registry knows or the site configures: on or off, how mature, and whether
+        the console can open the change that switches it (only the kinds act.FEATURES names)."""
+        out, seen = [], set()
+        for fid in list(reg.features) + [f.id for f in s.features]:
+            if fid in seen:
+                continue
+            seen.add(fid)
+            f, e = s.feature(fid), reg.get(fid)
+            on = platform_on() if fid == "platform" else bool(f and f.enabled)
+            key = ".".join(act.FEATURES[fid][1][1:]) if fid in act.FEATURES else f"config.features.{fid}.enabled"
+            out.append({"id": fid, "name": f.name if f else e.name, "key": key, "on": on,
+                        "stability": (f.stability if f else None) or (e.stability if e else "stable"),
+                        "what": e.about if e and e.about else "A console feature your site configures.",
+                        "switchable": fid in act.FEATURES})
+        return out
 
     @app.get("/version")
     def version_moved(request: Request):
@@ -844,7 +885,7 @@ def create_app(settings: Settings | None = None, transports: Transports | None =
         rd = page_sources[fid].read(pid)
         pg = dict(rd.page, **fpages.freshness(rd.page)) if rd.page else None     # age as of now, not of the fetch
         return render(request, "feature_page.html", u, feature=f, ref=ref, reading=rd, pg=pg,
-                      private=f.options.get("origin") == "private",
+                      page_marker=feature_marker(f),
                       age=fpages.age_words(pg["age_s"]) if pg else None)
 
     # ------------------------------------------------------------ inference nodes (REQ-0047)

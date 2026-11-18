@@ -17,7 +17,7 @@ class Item:
     prefixes: tuple[str, ...] = ()   # paths that light this item up; the longest matching prefix wins
     count: int | None = None
     state: str | None = None         # a warning the rail shows on the item (Capabilities disagreeing)
-    marker: str | None = None        # a release marker in words (SPEC section 10): "Private" today
+    marker: str | None = None        # one word (SPEC section 10, registry.py): Private, Preview or Experimental
 
     def matches(self, path: str) -> int:
         """Length of the longest prefix of `path` this item claims, 0 for none. Exact href counts too."""
@@ -58,7 +58,8 @@ def platform_home(platform_on: bool) -> str:
     return "/platform" if platform_on else "/capabilities"
 
 
-def sections(is_admin: bool, platform_on: bool, user_tabs=(), contributed_sections=(), rail_prefixes=None) -> list[Item]:
+def sections(is_admin: bool, platform_on: bool, user_tabs=(), contributed_sections=(), rail_prefixes=None,
+             tab_markers=None) -> list[Item]:
     """The top bar. Admins get the four sections; everyone else gets Home plus any first-party feature a
     non-admin may open (absent, not locked: a section a user cannot open is not shown). A feature that adds a
     section of its own (at most two, checked at start-up) follows Platform; `contributed_sections` is
@@ -72,7 +73,8 @@ def sections(is_admin: bool, platform_on: bool, user_tabs=(), contributed_sectio
                 Item("Platform", platform_home(platform_on),
                      ("/platform", "/capabilities", "/upgrade", "/version", "/tabs") + tuple(rp.get("platform", ())))]
     else:
-        out += [Item(t.name, f"/tabs/{t.id}") for t in user_tabs if not getattr(t, "admin_only", True)]
+        tm = tab_markers or {}
+        out += [Item(t.name, f"/tabs/{t.id}", marker=tm.get(t.id)) for t in user_tabs if not getattr(t, "admin_only", True)]
     out += [Item(label, href, (f"/f/{fid}",), marker=marker) for label, href, fid, marker in contributed_sections]
     return out
 
@@ -89,10 +91,11 @@ def current(items, path: str):
 
 def rail(section: str | None, is_admin: bool, platform_on: bool, admin_tabs=(), inbox_count: int | None = None,
          capabilities_state: str | None = None, activity: bool = False, identity: bool = False, changes: bool = False,
-         contributed: dict | None = None) -> list[Group]:
+         contributed: dict | None = None, tab_markers=None, operations_marker: str | None = None) -> list[Group]:
     """The page list on the left of a section, or [] when the section has one page (Home, Status).
     `contributed` maps a section key to the Groups features add to it (feature_pages.py): a feature's own
-    section ("f:<id>") is only its group; "ai" and "platform" get theirs after the built-in groups."""
+    section ("f:<id>") is only its group; "ai" and "platform" get theirs after the built-in groups. `tab_markers`
+    and `operations_marker` put a feature's word (Experimental, say) on the pages it adds to the Platform rail."""
     extra = list((contributed or {}).get(section, ()))
     if section and section.startswith("f:"):
         return extra
@@ -113,19 +116,20 @@ def rail(section: str | None, is_admin: bool, platform_on: bool, admin_tabs=(), 
     if section == "platform":
         groups = []
         if platform_on:
+            om = operations_marker
             groups.append(Group("Operations", (
-                Item("Overview", "/platform", ("/platform/agents/",)),
-                Item("Cases", "/platform/cases", ("/platform/cases/",)),
-                Item("Organization", "/platform/organization"),
-                Item("Schedule", "/platform/schedule"),
-                Item("Specialists", "/platform/specialists"),
+                Item("Overview", "/platform", ("/platform/agents/",), marker=om),
+                Item("Cases", "/platform/cases", ("/platform/cases/",), marker=om),
+                Item("Organization", "/platform/organization", marker=om),
+                Item("Schedule", "/platform/schedule", marker=om),
+                Item("Specialists", "/platform/specialists", marker=om),
             )))
         conf = []
         if changes:                     # the site's waiting changes: approve, decline, revert; and its history
             conf.append(Item("Changes", "/platform/changes"))
             conf.append(Item("Site history", "/platform/history"))
         conf.append(Item("Capabilities", "/capabilities", state=capabilities_state))
-        conf += [Item(t.name, f"/tabs/{t.id}") for t in admin_tabs]
+        conf += [Item(t.name, f"/tabs/{t.id}", marker=(tab_markers or {}).get(t.id)) for t in admin_tabs]
         conf.append(Item("Updates", "/platform/updates", ("/upgrade", "/version")))
         if identity:                    # recovery links and user-group membership
             conf.append(Item("Identity", "/platform/identity"))
@@ -188,12 +192,14 @@ HELP_MAP: dict[str, str] = {
 }
 
 
-def help_for(path: str) -> str | None:
-    """The docs page for a path: the longest matching prefix in HELP_MAP, or None."""
-    if path in HELP_MAP:
-        return HELP_MAP[path]
+def help_for(path: str, extra: dict | None = None) -> str | None:
+    """The docs page for a path: the longest matching prefix in HELP_MAP, or None. `extra` adds the help pages
+    features name for their own pages ({"/f/<id>/": page}); being longer, a feature's own prefix wins over "/f/"."""
+    table = dict(HELP_MAP, **(extra or {}))
+    if path in table:
+        return table[path]
     best, score = None, 0
-    for p, doc in HELP_MAP.items():
+    for p, doc in table.items():
         if p != "/" and path.startswith(p.rstrip("/") + "/") and len(p) > score:
             best, score = doc, len(p)
     return best

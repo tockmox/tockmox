@@ -31,6 +31,7 @@ class Capability:
     layer: str                      # the layer chart that deploys the marker: charts/tockmox-<layer>
     markers: tuple                  # ((kind, name regex), ...): ANY present means deployed
     components: str
+    stability: str = "stable"       # experimental ones are listed in their own section, marked as such
 
 
 # The marker is the one workload without which the capability is not there. Names are the
@@ -90,6 +91,7 @@ def evaluate(configured: dict, apps: list | None, stale_names: set) -> list[dict
             why = f"{app['name']}: {hit[0]}" if hit else f"{app['name']} deploys none of its workloads"
         agree = conf is None or dep == UNKNOWN or (conf is True) == (dep == ON)
         rows.append({"key": c.key, "name": c.name, "what": c.what, "components": c.components,
+                     "stability": c.stability,
                      "configured": None if conf is None else (ON if conf else OFF),
                      "deployed": dep, "evidence": why, "agree": agree})
     return rows
