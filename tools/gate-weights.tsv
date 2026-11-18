@@ -7,6 +7,7 @@ inline:every-layer-renders-against-ci-values-site-minimal-yaml	4
 inline:every-tool-is-executable	0
 inline:helm-lint-all-layer-charts-both-value-sets	7
 inline:the-key-policy-s-unit-tests	1
+inline:the-release-feed-signer-refuses-every-bad-feed-and-key-and-t	3
 tests/agent-egress/render.sh	2
 tests/content-logging/render.sh	2
 tests/executed-docs/pages-no-cluster.sh	13
@@ -135,3 +136,4 @@ tools/render-counts.sh --selftest	1
 tools/stamp-docs.sh --check	0
 tools/toolchain.sh --drift	2
 tools/toolchain.sh --selftest	9
+tools/train-morning.sh --selftest	118
