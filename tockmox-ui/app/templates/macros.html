@@ -60,13 +60,14 @@
 {%- endmacro %}
 
 {# App tiles: icon, name, one line. The URL is the link; it is not printed under it. #}
-{% macro app_tiles(items, site) -%}
+{% macro app_tiles(items, site, markers=none) -%}
 <ul class="apps">
   {% for a in items %}
+  {% set mk = (markers or {}).get(a.id) %}
   <li>
     <a class="app" href="/{{ a.id }}/" rel="noopener" target="_blank" title="{{ site.domain and ('tockmox.' ~ site.domain ~ '/' ~ a.id) or ('/' ~ a.id) }}">
       {{ app_icon(a.icon) }}
-      <span class="app-text"><span class="app-name">{{ a.name }}<span class="visually-hidden"> (opens in a new tab)</span></span>
+      <span class="app-text"><span class="app-name">{{ a.name }}{% if mk %}<span class="fmark" title="{{ marker_title(mk) }}">{{ mk }}</span>{% endif %}<span class="visually-hidden"> (opens in a new tab)</span></span>
       {% if a.description %}<span class="app-desc">{{ a.description }}</span>{% endif %}</span>
     </a>
   </li>

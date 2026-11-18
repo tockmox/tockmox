@@ -29,25 +29,56 @@
   </tbody>
 </table>
 </div>
+{% macro feature_row(f, mark=false) -%}
+    <tr>
+      <th scope="row">{{ f.name }}{% if mark %}<span class="fmark" title="{{ marker_title('Experimental') }}">Experimental</span>{% endif %}<br><code class="muted">{{ f.key }}</code></th>
+      <td>{% if f.on %}{{ badge("ok", "On") }}{% else %}{{ badge("unknown", "Off") }}{% endif %}</td>
+      <td>{{ f.what }}</td>
+      {%- if feature_change_on %}
+      <td>{% if f.switchable %}<a class="pill" href="/actions/confirm?kind=set-feature&amp;feature={{ f.id | urlencode }}&amp;enabled={{ 'false' if f.on else 'true' }}">{{ "Turn off" if f.on else "Turn on" }}</a>{% endif %}</td>
+      {%- endif %}
+    </tr>
+{%- endmacro %}
+{% if x_rows or x_features %}
+<h2 id="experimental">Experimental</h2>
+<p class="muted">Shipped, and still maturing: their behaviour and settings may change between releases. Turn one on knowingly; it goes through the same change as any other.</p>
+<div class="table-wrap" role="region" aria-labelledby="x-cap" tabindex="0">
+<table>
+  <caption id="x-cap">Experimental capabilities and features</caption>
+  <thead><tr><th scope="col">Capability or feature</th><th scope="col">Set to</th><th scope="col">What it is</th>{% if change_on or feature_change_on %}<th scope="col"><span class="sr-only">Change</span></th>{% endif %}</tr></thead>
+  <tbody>
+  {% for r in x_rows %}
+    <tr>
+      <th scope="row">{{ r.name }}<span class="fmark" title="{{ marker_title('Experimental') }}">Experimental</span><br><code class="muted">{{ r.key }}</code></th>
+      <td>{% if r.configured == "on" %}{{ badge("ok", "On") }}{% elif r.configured == "off" %}{{ badge("unknown", "Off") }}{% else %}{{ badge("unknown", "Not stated") }}{% endif %}</td>
+      <td>{{ r.what }}<br><span class="muted">{{ r.components }}</span></td>
+      {%- if change_on or feature_change_on %}
+      <td>{% if change_on %}
+        {%- if r.configured == "on" and r.key not in never_off %}<a class="pill" href="/actions/confirm?kind=set-capability&amp;capability={{ r.key | urlencode }}&amp;enabled=false">Turn off</a>
+        {%- elif r.configured != "on" %}<a class="pill" href="/actions/confirm?kind=set-capability&amp;capability={{ r.key | urlencode }}&amp;enabled=true">Turn on</a>
+        {%- endif %}{% endif %}</td>
+      {%- endif %}
+    </tr>
+  {% endfor %}
+  {% for f in x_features %}{{ feature_row(f, true) }}{% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% if features or x_features %}
 <h2 id="console-features">Console features</h2>
-<p class="muted">Areas of this console you switch on in the AI layer's values. They change what the console shows, not what the platform runs.</p>
+<p class="muted">Areas of this console you switch on in the AI layer's values. They change what the console shows, not what the platform runs.{% if x_features %} Experimental ones are listed under <a href="#experimental">Experimental</a> above.{% endif %}</p>
+{% if features %}
 <div class="table-wrap" role="region" aria-labelledby="feat-cap" tabindex="0">
 <table>
   <caption id="feat-cap">Console features</caption>
   <thead><tr><th scope="col">Feature</th><th scope="col">This console</th><th scope="col">What it is</th>{% if feature_change_on %}<th scope="col"><span class="sr-only">Change</span></th>{% endif %}</tr></thead>
   <tbody>
-  {% for f in features %}
-    <tr>
-      <th scope="row">{{ f.name }}<br><code class="muted">{{ f.key }}</code></th>
-      <td>{% if f.on %}{{ badge("ok", "On") }}{% else %}{{ badge("unknown", "Off") }}{% endif %}</td>
-      <td>{{ f.what }}</td>
-      {%- if feature_change_on %}
-      <td><a class="pill" href="/actions/confirm?kind=set-feature&amp;feature={{ f.id | urlencode }}&amp;enabled={{ 'false' if f.on else 'true' }}">{{ "Turn off" if f.on else "Turn on" }}</a></td>
-      {%- endif %}
-    </tr>
-  {% endfor %}
+  {% for f in features %}{{ feature_row(f) }}{% endfor %}
   </tbody>
 </table>
 </div>
+{% endif %}
+{% endif %}
 <p class="muted">{% if change_on %}<strong>Turn on</strong> and <strong>Turn off</strong> open a change to <code>capabilities.&lt;name&gt;.enabled</code> in <code>site/values/global.yaml</code> that waits on Platform › Changes for an approval; nothing changes until then. Single sign-on is not turned off from here, because the console signs in through it.{% else %}To change a capability, set <code>capabilities.&lt;name&gt;.enabled</code> in your site values and commit it; this page changes nothing.{% endif %} A site may set it in one layer's values file only, so the AI layer's view can differ from another layer's, which this page would show as a disagreement.</p>
 {% endblock %}

@@ -4,7 +4,7 @@
 {% from "macros.html" import badge, state_icon %}
 {% block title %}{{ ref.title }} · {{ feature.name }}{% endblock %}
 {% block main %}
-{%- macro marker() -%}{% if private %}<span class="fmark" title="The maintainer's own extension, not in the open-source project">Private</span>{% endif %}{%- endmacro -%}
+{%- macro marker() -%}{% if page_marker %}<span class="fmark" title="{{ marker_title(page_marker) }}">{{ page_marker }}</span>{% endif %}{%- endmacro -%}
 <div class="fp-head">
   <h1>{{ pg.title if pg else ref.title }}</h1>{{ marker() }}
 </div>

@@ -1,0 +1,40 @@
+# SPDX-License-Identifier: Apache-2.0
+# The console's first-party feature registry (specs/tockmox-ui/SPEC.md sections 9 and 10 in the planning repo).
+#
+# DATA, no code, shipped in the UI image. One entry per first-party feature the console knows by id:
+#   name         the label the console uses; a site's features.<id>.name wins
+#   about        one line on what it is, for Platform > Capabilities
+#   stability    experimental, provisional or stable. Platform > Capabilities lists the experimental ones in their own
+#                section, and their pages carry the word Experimental
+#   since        the release that first ships the feature (x.y.z). Until a release with that version is in the
+#                CHANGELOG this image bundles, its pages carry the word Preview; on a tagged build, never
+#   contributes  what the feature adds to the console when it is on, in the shape features.<id>.contributes takes
+#                (docs/administration/feature-pages.md); a site's own contributes for that id wins
+#
+# `tiles` marks first-party Home tiles (an app id from the site's apps list) with the release that first ships them,
+# for the Preview marker; a tile not listed carries none.
+#
+# A key this file does not name is refused when the console starts (app/registry.py), as in every console config.
+version: 1
+
+features:
+  platform:
+    name: Platform Management
+    stability: experimental        # docs/administration/platform-management.md: experimental, and off by default
+    about: >-
+      The operations view: the platform's roles, the scheduled work each owns, the numbers each watches, and the
+      agents' cases. Administrators only.
+  posture:
+    name: Security posture
+    stability: experimental        # addons/posture-probe/addon.yaml: stability experimental
+    about: The Security Posture Probe add-on's latest report, read from where the add-on writes it.
+  scanning:
+    name: Vulnerability scanning
+    stability: experimental
+    about: A placeholder page with a link to the site's vulnerability scanner; its view is not built yet.
+  agents:
+    name: Agents
+    stability: experimental
+    about: A placeholder page with a link to the site's agents console; its view is not built yet.
+
+tiles: {}
