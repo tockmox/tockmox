@@ -142,7 +142,8 @@ Writes to a CLUSTER, after it has checked everything it can without one.
 
  Rebuild drill (tockmox-install.sh rebuild-drill: the rebuild options above, plus)
   --drill-wait-minutes N    wait up to N minutes for every Application to be Synced and
-                            Healthy (default 45; 0 records the time to the rebuild's end)
+                            Healthy, on two reads in a row 10 s apart (default 45; 0 records
+                            the time to the rebuild's end)
   -h, --help                this
 USAGE
 }
@@ -156,6 +157,7 @@ KIT_OUT=""; AGE_RECIPIENT=""; SITE_OUT=""; SEAL_BACKUP=""; NO_SEAL_BACKUP=false
 CONTEXT=""; CONTEXT_GIVEN=false; YES_CONTEXT=""; YES_SERVER=""; NO_PROMPT=false
 FORGE_NS="tockmox-forge"; ARGO_NS=""; CONFIG=""; FORCE=false; DRY_RUN=false
 KEEP_COPY=""; DRILL_WAIT_MIN=45; NO_OFFSITE_SETUP=false
+SETTLE_S="${TOCKMOX_TEST_POLL_S:-10}"   # the gap between the two reads that call Argo CD settled
 PASS_FORGE=(); PASS_SECRETS=()
 
 while [[ $# -gt 0 ]]; do
@@ -435,20 +437,24 @@ if $DRILL; then
       fail "the rebuild command failed (exit $rc): $(grep -m1 '✗' "$TMPD/rebuild.log" | sed 's/^[[:space:]✗]*//' | cut -c1-200)"
     elif [[ "$DRILL_WAIT_MIN" -gt 0 ]]; then
       info "waiting up to $DRILL_WAIT_MIN min for every Application in $ARGO_NS to be Synced and Healthy"
-      deadline=$(( $(date +%s) + DRILL_WAIT_MIN * 60 )); apps=""
+      # Settled means two clean reads in a row, SETTLE_S apart: one clean read can be a moment
+      # between two syncs, and the drill's record must not say pass on it. A first clean read is
+      # confirmed even past the deadline; anything else stops there.
+      deadline=$(( $(date +%s) + ${TOCKMOX_TEST_DRILL_WAIT_S:-$(( DRILL_WAIT_MIN * 60 ))} )); apps=""; clean=0
       while :; do
         apps="$(kubectl --context "$CONTEXT" -n "$ARGO_NS" get applications.argoproj.io \
           -o jsonpath='{range .items[*]}{.metadata.name} {.status.sync.status} {.status.health.status}{"\n"}{end}' 2>/dev/null || true)"
         total="$(printf '%s\n' "$apps" | grep -c . || true)"
         good="$(printf '%s\n' "$apps" | awk '$2=="Synced" && $3=="Healthy"' | grep -c . || true)"
-        [[ "$total" -gt 0 && "$good" -eq "$total" ]] && break
-        if [[ "$(date +%s)" -ge "$deadline" ]]; then
+        if [[ "$total" -gt 0 && "$good" -eq "$total" ]]; then clean=$(( clean + 1 )); else clean=0; fi
+        [[ "$clean" -ge 2 ]] && break
+        if [[ "$clean" -eq 0 && "$(date +%s)" -ge "$deadline" ]]; then
           fail "after $DRILL_WAIT_MIN min, $good of $total Applications are Synced and Healthy: $(printf '%s\n' "$apps" | awk '!($2=="Synced" && $3=="Healthy"){printf "%s %s/%s; ", $1, $2, $3}' | cut -c1-200)"
           break
         fi
-        sleep 15
+        if [[ "$clean" -eq 1 ]]; then sleep "$SETTLE_S"; else sleep "${TOCKMOX_TEST_POLL_S:-15}"; fi
       done
-      [[ "$RESULT" == pass ]] && ok "all $total Applications Synced and Healthy"
+      [[ "$RESULT" == pass ]] && ok "all $total Applications Synced and Healthy, read twice ${SETTLE_S}s apart"
     fi
     SECS=$(( $(date +%s) - T0 ))
   fi

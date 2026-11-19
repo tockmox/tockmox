@@ -250,7 +250,9 @@ and read back`. A drill that fails writes its record too, with the reason, so th
 alert fires a day later instead of nobody knowing. The kit this run writes belongs
 to the throwaway forge; it is not your site's kit, so it goes to a temporary
 directory. `--drill-wait-minutes N` (default 45) is how long it waits for the
-Applications.
+Applications. The record says pass only when every Application reads Synced and
+Healthy on two reads in a row, ten seconds apart, so one caught Healthy for a
+moment between two syncs does not count.
 
 ## What is not certified here
 

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Sourced by run.sh after forge-restore-tests.sh and forge-dump-tests.sh, whose helpers
-# it uses (rs_case, rs_run, dp_start, dp_run, dp_bucket). Groups K1-K7: the rebuild
+# it uses (rs_case, rs_run, dp_start, dp_run, dp_bucket). Groups K1-K8: the rebuild
 # drill.
 #
 #   tockmox-install.sh rebuild-drill   install/forge-restore.sh drill: proves the three
@@ -190,4 +190,30 @@ dp_start k7
 dp_run TASK=drill-check MODE=git GIT_REMOTE_URL="http://127.0.0.1:$DP_PORT/remote/site.git"
 assert_artifact "a pass three days old on forge-drill passes" \
   "echo $DP_STATUS; grep -c 'passed .* (3 days ago)' '$D/out/stdout'" "$(printf '0\n1')"
+dp_stop
+
+# ---------------------------------------------------------------------- K8
+path_begin "K8" "the drill calls Argo CD settled only on two clean reads in a row: an Application that flips after one clean read is a fail, not a pass"
+kd_start k8; kd_upload; echo flip > "$D/state/apps-mode"
+# shellcheck disable=SC2046
+TOCKMOX_DRILL_REBUILD='echo rebuilt' TOCKMOX_TEST_POLL_S=0 TOCKMOX_TEST_DRILL_WAIT_S=0 rs_run rebuild-drill --restore-from offsite \
+  $(kd_offsite) "${RS_KIT[@]}" --context lab-throwaway --drill-wait-minutes 1
+assert_artifact "clean once, then Progressing: past the deadline the first clean read is still confirmed, and the drill fails" \
+  "echo $RS_STATUS; cat '$D/state/apps-reads'; grep -c 'rebuild drill PASSED' '$D/out/stdout' || true" "$(printf '1\n2\n0')"
+assert_artifact "and its record says fail, naming the Application that flipped" \
+  "kd_field result; kd_field reason | grep -c 'tockmox-ai Synced/Progressing'" "$(printf 'fail\n1')"
+dp_stop
+kd_start k8b; kd_upload; echo flicker > "$D/state/apps-mode"
+# shellcheck disable=SC2046
+TOCKMOX_DRILL_REBUILD='echo rebuilt' TOCKMOX_TEST_POLL_S=0 TOCKMOX_TEST_DRILL_WAIT_S=60 rs_run rebuild-drill --restore-from offsite \
+  $(kd_offsite) "${RS_KIT[@]}" --context lab-throwaway --drill-wait-minutes 1
+assert_artifact "clean, Progressing, clean, clean: the Progressing read starts the count again, and the drill passes on the fourth read" \
+  "echo $RS_STATUS; cat '$D/state/apps-reads'; kd_field result" "$(printf '0\n4\npass')"
+dp_stop
+kd_start k8c; kd_upload; echo settle > "$D/state/apps-mode"
+# shellcheck disable=SC2046
+TOCKMOX_DRILL_REBUILD='echo rebuilt' TOCKMOX_TEST_POLL_S=0 TOCKMOX_TEST_DRILL_WAIT_S=60 rs_run rebuild-drill --restore-from offsite \
+  $(kd_offsite) "${RS_KIT[@]}" --context lab-throwaway --drill-wait-minutes 1
+assert_artifact "a rebuild that settles at once is still read twice before the record says pass, and says so" \
+  "echo $RS_STATUS; cat '$D/state/apps-reads'; grep -c 'Synced and Healthy, read twice 0s apart' '$D/out/stdout'; kd_field result" "$(printf '0\n2\n1\npass')"
 dp_stop

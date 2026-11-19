@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Sourced by run.sh after forge-dump-tests.sh, whose stand-in it uses (dp_start, dp_stop,
-# lib/forge-stub.py). Groups M1-M10: install/forge-move.sh, reached as
+# lib/forge-stub.py). Groups M1-M11: install/forge-move.sh, reached as
 # `tockmox-install.sh move-forge`.
 #
 # HERMETIC, and git is REAL: the forge's repository and the target are bare repositories
@@ -25,10 +25,40 @@ case "$a" in
   *" port-forward "*) echo "Forwarding from 127.0.0.1:${FM_PORT} -> 3000"; exec sleep 300 ;;
   *" apply -f - "*) n=$(ls "$FM_STATE"/applied-* 2>/dev/null | wc -l | tr -d ' '); cat > "$FM_STATE/applied-$n"; exit 0 ;;
   *" apply -f "*) cp "${@: -1}" "$FM_STATE/root-applied.yaml"; exit 0 ;;
+  *" get applications.argoproj.io "*) exec python3 "$FM_APPS" ;;
 esac
 echo "kubectl stub: unhandled: $*" >&2; exit 99
 STUB
 chmod +x "$FM_BIN/kubectl"
+# Argo CD, as this kubectl reports it. Before the root is re-applied: everything reads the forge.
+# After: per apps-mode in the state (default settle; flip: clean once, then tockmox-ai Progressing;
+# flicker: Progressing on the second read after the cutover only; prune: tockmox-ai lost a resource;
+# stuck: tockmox-ai still reads the forge). Each read after the cutover is counted in after-reads.
+FM_APPS="$FM_BIN/apps.py"
+cat > "$FM_APPS" <<'PY'
+import json, os
+st = os.environ["FM_STATE"]
+mp = os.path.join(st, "apps-mode")
+mode = open(mp).read().strip() if os.path.exists(mp) else "settle"
+moved = os.path.exists(os.path.join(st, "root-applied.yaml"))
+reads = 0
+if moved:
+    p = os.path.join(st, "after-reads")
+    reads = (int(open(p).read().strip()) if os.path.exists(p) else 0) + 1
+    open(p, "w").write("%d\n" % reads)
+url = os.environ["FM_TO"] if moved else os.environ["FM_IN"]
+ai_url = os.environ["FM_IN"] if (moved and mode == "stuck") else url
+health = "Progressing" if moved and ((mode == "flip" and reads >= 2) or (mode == "flicker" and reads == 2)) else "Healthy"
+ai_res = [("apps", "Deployment", "a"), ("", "Service", "b")]
+if moved and mode == "prune":
+    ai_res = ai_res[:1]
+def app(name, u, res, health="Healthy"):
+    return {"metadata": {"name": name}, "spec": {"source": {"repoURL": u}},
+            "status": {"sync": {"status": "Synced"}, "health": {"status": health},
+                       "resources": [{"group": g, "kind": k, "namespace": "ns", "name": n} for g, k, n in res]}}
+print(json.dumps({"items": [app("tockmox-root", url, [("argoproj.io", "Application", "tockmox-ai")]),
+                            app("tockmox-ai", ai_url, ai_res, health)]}))
+PY
 FM_STATUS=0
 
 # fm_start NAME [ENV=VAL ...]: the stand-in, with the forge's repository holding a small
@@ -53,7 +83,8 @@ fm_start() {
 }
 fm_run() {
   set +e
-  env PATH="$FM_BIN:$DP_PATH" FM_STATE="$D/state" FM_PORT="$DP_PORT" NO_COLOR=1 TOCKMOX_TEST_ALLOW_HTTP=1 \
+  env PATH="$FM_BIN:$DP_PATH" FM_STATE="$D/state" FM_PORT="$DP_PORT" FM_APPS="$FM_APPS" FM_IN="$FM_IN" FM_TO="$FM_TO" \
+    NO_COLOR=1 TOCKMOX_TEST_ALLOW_HTTP=1 TOCKMOX_TEST_POLL_S=0 \
     TMPDIR="$D" bash "$INSTALLER" move-forge "$@" >"$D/out/stdout" 2>"$D/out/stderr" </dev/null
   FM_STATUS=$?
   set -e
@@ -265,12 +296,13 @@ assert_artifact "the pod spec is fixed: the script from its ConfigMap, the run's
     '--in-cluster --namespace tockmox-forge --argocd-namespace argocd --request /run/move/request --credentials /run/move/push --read-credentials /run/move/read --approval-wait-minutes 0' \
     "['request:tockmox-forge-move-request', 'script:tockmox-forge-move-script', 'tmp:tmp']" \
     "1 False True ['HOME', 'NO_COLOR']")"
-assert_artifact "the grant: the forge's admin Secret, Argo CD's one repository Secret (create cannot be named), the one root Application" \
+assert_artifact "the grant: the forge's admin Secret, Argo CD's one repository Secret (create cannot be named), the one root Application, and a read of the Applications for the check after the cutover" \
   "fmt_q grant" "$(printf '%s\n' \
     'tockmox-forge core secrets tockmox-forge-admin get' \
     'argocd core secrets tockmox-site-repo-own get,patch' \
     'argocd core secrets * create' \
     'argocd argoproj.io applications tockmox-root get,patch' \
+    'argocd argoproj.io applications * list' \
     "tockmox-forge tockmox-forge-move [('tockmox-forge-move', 'tockmox-forge')]" \
     "argocd tockmox-forge-move [('tockmox-forge-move', 'tockmox-forge')]")"
 assert_artifact "the Job's image is the one the console's admission policy admits (the chart's moveForge.image default)" \
@@ -278,3 +310,47 @@ assert_artifact "the Job's image is the one the console's admission policy admit
   "$(fmt_q image; fmt_q image)"
 set +e; bash "$REPO_ROOT/install/forge-move-template.sh" --namespace 'Bad NS' --argocd-namespace argocd --image x:1 >/dev/null 2>"$FMT/err"; FMT_RC=$?; set -e
 assert_artifact "a name that is not a Kubernetes name is refused" "echo $FMT_RC; grep -c 'not a Kubernetes name' '$FMT/err'" "$(printf '2\n1')"
+
+path_begin "M11" "after the cutover, settled means two clean reads in a row: an Application that flips after one clean read, loses a resource or still reads the forge keeps the forge's repository unarchived, and --finish carries on"
+fm_start m11 MOVE=merge
+echo flip > "$D/state/apps-mode"
+fm_run --context lab --yes-context lab --to "$FM_TO" --credentials "$D/creds" --approval-wait-minutes 1 --wait-seconds 0
+assert_artifact "clean once, then Progressing: past the deadline the first clean read is still confirmed, and the move fails naming what flipped" \
+  "echo $FM_STATUS; cat '$D/state/after-reads'; grep -c 'tockmox-ai is Synced/Progressing' '$D/out/stderr'" "$(printf '1\n2\n1')"
+assert_artifact "the root was re-applied, but the forge's repository is NOT archived, and it says how to carry on" \
+  "grep -c '$FM_TO' '$D/state/root-applied.yaml'; [ -e '$D/root/archived' ] && echo ARCHIVED || echo not-archived; grep -c 'run move-forge --finish' '$D/out/stdout'" \
+  "$(printf '1\nnot-archived\n1')"
+echo settle > "$D/state/apps-mode"; rm -f "$D/state/after-reads"
+fm_run --context lab --yes-context lab --to "$FM_TO" --credentials "$D/creds" --finish --approval-wait-minutes 1
+assert_artifact "once they settle, --finish reads them (its own before-read, then clean twice) and archives" \
+  "echo $FM_STATUS; cat '$D/state/after-reads'; grep -c 'Synced and Healthy on two reads 0s apart' '$D/out/stdout'; cat '$D/root/archived'; echo" \
+  "$(printf '0\n3\n1\ntrue')"
+dp_stop
+fm_start m11b MOVE=merge
+echo flicker > "$D/state/apps-mode"
+fm_run --context lab --yes-context lab --to "$FM_TO" --credentials "$D/creds" --approval-wait-minutes 1
+assert_artifact "clean, Progressing, clean, clean: the Progressing read starts the count again, and the move finishes on the fourth read" \
+  "echo $FM_STATUS; cat '$D/state/after-reads'; cat '$D/root/archived'; echo" "$(printf '0\n4\ntrue')"
+dp_stop
+fm_start m11c MOVE=merge
+echo prune > "$D/state/apps-mode"
+fm_run --context lab --yes-context lab --to "$FM_TO" --credentials "$D/creds" --approval-wait-minutes 1 --wait-seconds 0
+assert_artifact "a cutover that loses a resource is not called done, and nothing is archived" \
+  "echo $FM_STATUS; grep -c 'tockmox-ai no longer manages 1 resource(s), e.g. Service/ns/b' '$D/out/stderr'; [ -e '$D/root/archived' ] && echo ARCHIVED || echo not-archived" \
+  "$(printf '1\n1\nnot-archived')"
+dp_stop
+fm_start m11d MOVE=merge
+echo stuck > "$D/state/apps-mode"
+fm_run --context lab --yes-context lab --to "$FM_TO" --credentials "$D/creds" --approval-wait-minutes 1 --wait-seconds 0
+assert_artifact "an Application that still reads the forge is named, and nothing is archived" \
+  "echo $FM_STATUS; grep -c 'tockmox-ai still reads the built-in forge' '$D/out/stderr'; [ -e '$D/root/archived' ] && echo ARCHIVED || echo not-archived" \
+  "$(printf '1\n1\nnot-archived')"
+dp_stop
+fm_start m11e MOVE=merge
+fm_root_app
+echo flip > "$D/state/apps-mode"
+fm_ic --approval-wait-minutes 1 --wait-seconds 0
+assert_artifact "in the cluster, the console reads step 5 failed, and the forge stays unarchived" \
+  "echo $FM_STATUS; grep -c '^STEP 5 fail the cutover did not settle' '$D/out/stdout'; [ -e '$D/root/archived' ] && echo ARCHIVED || echo not-archived" \
+  "$(printf '1\n1\nnot-archived')"
+dp_stop

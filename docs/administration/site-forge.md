@@ -515,7 +515,8 @@ the run ends. Argo CD's read credential ends where the command leaves it,
 
 - read the forge's admin Secret;
 - write Argo CD's one repository Secret;
-- patch the one root Application.
+- patch the one root Application;
+- list Argo CD's Applications, read-only, for the check after the cutover.
 
 An admission policy admits a move Job from the console only as that template
 wrote it: its image, script, arguments and volumes. A target on a private CA
@@ -536,8 +537,13 @@ It refuses a repository that is not empty, pushes every branch and tag and reads
 one change on the built-in forge that names the new repository wherever the site
 named the forge. **Approve it in Platform › Changes.** The command waits for that
 (`--approval-wait-minutes`, default 60). Then it pushes the merged `main` to
-the new repository, applies the root Application from it, and **archives** the
-built-in forge's repository: read-only, nothing deleted.
+the new repository, applies the root Application from it, and waits
+(`--wait-seconds`, default 900) until every Application reads the new
+repository, Synced and Healthy, each still managing every resource it managed
+before, on two reads in a row ten seconds apart. Only then does it **archive**
+the built-in forge's repository: read-only, nothing deleted. If they do not
+settle in time, it says what is wrong and archives nothing; fix the cause and
+run the same command with `--finish`, which checks again and archives then.
 
 **Success condition:** it ends with `the built-in forge's repository is
 archived`, and Argo CD's Applications read the new address
