@@ -445,15 +445,18 @@ cutover; `bootstrap-forge` installs the forge and pushes the history plus the
 migration commit; the root Application is applied from the forge; then the
 command waits (`--wait-seconds`, default 900) until every Application reads the
 forge, Synced and Healthy, each still managing every resource it managed before.
-Then the credential copy is removed, and only then does `bootstrap-forge` run
+It calls that settled only on two reads in a row, ten seconds apart, so an
+Application caught Healthy for a moment between two syncs does not end the
+wait. Then the credential copy is removed, and only then does `bootstrap-forge` run
 once more to make your old repository the off-site copy, which pushes the
 migration commit there. Until that moment the old repository is exactly what
 Argo CD read before the move.
 
 **Success condition:** it ends with `every Application reads the built-in forge,
 Synced and Healthy, and nothing was pruned`. Run it again: it says `Nothing to
-do`. Set `site.forge: built-in` in your `tockmox.yaml` before you run the
-installer again.
+do`. Both read every Application twice, ten seconds apart, before they say so.
+Set `site.forge: built-in` in your `tockmox.yaml` before you run the installer
+again.
 
 **If the cutover does not settle,** nothing is undone for you. The command
 prints what is wrong and the one command that points Argo CD back at your old
