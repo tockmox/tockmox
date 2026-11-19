@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Sourced by run.sh after forge-move-tests.sh, whose stand-in it uses (dp_start, dp_stop,
-# lib/forge-stub.py). Groups MI1-MI8: install/forge-move-in.sh, reached as
+# lib/forge-stub.py). Groups MI1-MI9: install/forge-move-in.sh, reached as
 # `tockmox-install.sh move-in-forge`.
 #
 # HERMETIC, and git is REAL: the site checkout, the forge's repository and the old
@@ -43,12 +43,23 @@ echo "kubectl stub: unhandled: $*" >&2; exit 99
 STUB
 chmod +x "$MI_BIN/kubectl"
 # Argo CD, as this kubectl reports it. Before the root is applied from the forge: everything reads
-# the site repository at the checkout's revision. After: per mi-mode (settle, stuck, prune).
+# the site repository at the checkout's revision. After: per mi-mode (settle, stuck, prune; and
+# for the two-read settle, flip: clean once, then tockmox-ai Progressing; flicker: Progressing on
+# the second read only; moved-flip: already moved, clean once, then Progressing). Each read after
+# the move is counted in after-reads.
 cat > "$MI_BIN/apps.py" <<'PY'
 import json, os, subprocess
 st = os.environ["MI_STATE"]
 mode = open(os.path.join(st, "mi-mode")).read().strip()
-moved = mode == "moved" or (os.path.exists(os.path.join(st, "root-applied.yaml")) and mode != "stuck")
+moved = mode in ("moved", "moved-flip") or (os.path.exists(os.path.join(st, "root-applied.yaml")) and mode != "stuck")
+reads = 0
+if moved:
+    p = os.path.join(st, "after-reads")
+    reads = (int(open(p).read().strip()) if os.path.exists(p) else 0) + 1
+    open(p, "w").write("%d\n" % reads)
+ai_health = "Healthy"
+if moved and ((mode in ("flip", "moved-flip") and reads >= 2) or (mode == "flicker" and reads == 2)):
+    ai_health = "Progressing"
 rev = open(os.path.join(st, "rev")).read().strip()
 if moved:
     rev = subprocess.run(["git", "--git-dir", os.environ["MI_FORGE"], "rev-parse", "main"],
@@ -64,7 +75,7 @@ if moved and mode == "prune":
 ai_sync = "OutOfSync" if mode == "unsettled" else "Synced"
 print(json.dumps({"items": [
     app("tockmox-root", site, [("argoproj.io", "Application", "tockmox-ai")], revision=rev),
-    app("tockmox-ai", site if moved else os.environ["MI_FROM"], ai_res, sync=ai_sync),
+    app("tockmox-ai", site if moved else os.environ["MI_FROM"], ai_res, sync=ai_sync, health=ai_health),
     app("charts", "https://github.com/tockmox/tockmox.git", [("", "ConfigMap", "c")]),
 ]}))
 PY
@@ -331,4 +342,35 @@ mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/
 assert_artifact "an approverWatch the operator already set is theirs: left as it is, and said so" \
   "echo $MI_STATUS; mi_forge show main:site/values/identity.yaml | grep -c approverWatch; mi_forge show main:site/values/identity.yaml | grep approverWatch; grep -c 'left as it is: sso.apps.forge.approverWatch' '$D/out/stdout'" \
   "$(printf '0\n1\n      approverWatch: false\n1')"
+dp_stop
+
+path_begin "MI9" "settled means two clean reads in a row: an Application that reads Progressing after one clean read keeps the move from declaring success, and the re-run from saying Nothing to do"
+mi_start i9 flip
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" --wait-seconds 0 -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "clean once, then Progressing: past the deadline the first clean read is still confirmed, and the move fails naming what flipped, without its success line" \
+  "echo $MI_STATUS; cat '$D/state/after-reads'; grep -c 'tockmox-ai is Synced/Progressing' '$D/out/stderr'; grep -c 'nothing was pruned' '$D/out/stdout' || true" \
+  "$(printf '1\n2\n1\n0')"
+assert_artifact "and so it keeps the credential copy and never offers --from to the forge as a mirror" \
+  "grep -c 'delete secret' '$D/state/calls.log' || true; ls '$D/state' | grep -c '^bf-args-'" "$(printf '0\n1')"
+dp_stop
+mi_start i9b flicker
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "clean, Progressing, clean, clean: the Progressing read starts the count again, and the move succeeds on the fourth read" \
+  "echo $MI_STATUS; cat '$D/state/after-reads'; grep -c 'nothing was pruned' '$D/out/stdout'" "$(printf '0\n4\n1')"
+dp_stop
+mi_start i9c settle
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "a cutover that settles at once is still read twice before it is called done, and says so" \
+  "echo $MI_STATUS; cat '$D/state/after-reads'; grep -c 'settled means two clean reads in a row' '$D/out/stdout'" "$(printf '0\n2\n1')"
+dp_stop
+mi_start i9d moved-flip
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "a re-run that reads every Application clean once and then Progressing refuses, writes nothing, and does not say Nothing to do" \
+  "echo $MI_STATUS; cat '$D/state/after-reads'; grep -c 'not every Application is settled' '$D/out/stderr'; grep -c 'tockmox-ai is Synced/Progressing' '$D/out/stderr'; grep -c 'Nothing to do' '$D/out/stdout' || true; mi_writes" \
+  "$(printf '1\n2\n1\n1\n0\n0')"
+dp_stop
+mi_start i9e moved
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "a re-run that reads every Application clean twice says Nothing to do and writes nothing" \
+  "echo $MI_STATUS; cat '$D/state/after-reads'; grep -c 'read twice 0s apart. Nothing to do' '$D/out/stdout'; mi_writes" "$(printf '0\n2\n1\n0')"
 dp_stop

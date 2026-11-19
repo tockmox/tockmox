@@ -102,7 +102,8 @@ with its whole history, and cut Argo CD over to it. Refuses before it writes any
   --no-offsite-copy       leave --from as it is (give bootstrap-forge another destination after --, or none)
   --namespace NS          the forge's namespace (default tockmox-forge)
   --argocd-namespace NS   default argocd
-  --wait-seconds N        how long the cutover check waits (default 900)
+  --wait-seconds N        how long the cutover check waits (default 900). Settled means every Application
+                          reads Synced and Healthy twice in a row, 10 s apart
   --accept-unsettled APP  an Application that is not Synced and Healthy before the move and that you accept
                           as it is (repeatable). It must still read the forge afterwards and lose nothing.
   --dry-run               run every refusal and show the migration commit; change nothing
@@ -113,6 +114,7 @@ USAGE
 
 SITE=""; CONTEXT=""; YES_CONTEXT=""; YES_SERVER=""; NO_PROMPT=false; FROM=""; FROM_CREDS=""; FROM_CA=""
 NO_OFFSITE=false; FORGE_NS="tockmox-forge"; ARGO_NS="argocd"; WAIT_S=900; DRY_RUN=false
+SETTLE_S="${TOCKMOX_TEST_POLL_S:-10}"   # the gap between the two reads that call it settled
 PASS=(); ACCEPT=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -286,13 +288,21 @@ apps_check before > "$TMPD/before.txt"
 grep -q '^NOROOT' "$TMPD/before.txt" && die "there is no Application ${ARGO_NS}/${ROOT_APP}: this command moves a Tockmox site whose root is ${ROOT_APP}"
 read -r _ ROOT_SRC ROOT_REV < <(grep '^ROOT ' "$TMPD/before.txt")
 if [[ "$ROOT_SRC" == "$IN_N" ]]; then
+  # Settled means two reads in a row, SETTLE_S apart: one clean read can be a moment between
+  # two syncs (an Application can read Synced and Healthy, then Progressing a breath later).
   cp "$TMPD/apps-before.json" "$TMPD/apps-now.json"
-  if apps_check after "" | grep '^OK$' >/dev/null; then
-    ok "Argo CD already reads the built-in forge and every Application is Synced and Healthy. Nothing to do."
-    exit 0
+  RESULT="$(apps_check after "")"
+  if grep -q '^OK$' <<<"$RESULT"; then
+    sleep "$SETTLE_S"
+    kubectl "${K[@]}" -n "$ARGO_NS" get applications.argoproj.io -o json > "$TMPD/apps-now.json" 2>/dev/null || : > "$TMPD/apps-now.json"
+    RESULT="$(apps_check after "")"
+    if grep -q '^OK$' <<<"$RESULT"; then
+      ok "Argo CD already reads the built-in forge and every Application is Synced and Healthy, read twice ${SETTLE_S}s apart. Nothing to do."
+      exit 0
+    fi
   fi
   die "Argo CD's root already reads the built-in forge, but not every Application is settled:
-$(apps_check after "" | sed -n 's/^BAD /         /p')
+$(sed -n 's/^BAD /         /p' <<<"$RESULT")
        Nothing was touched. Fix those, or re-run once they settle."
 fi
 [[ "$ROOT_SRC" == "$FROM_N" ]] || die "Argo CD's root Application reads ${ROOT_SRC}, not --from (${FROM_N}).
@@ -599,16 +609,18 @@ say "The cutover"
 kubectl "${K[@]}" apply -f "$TREE/bootstrap/root.yaml" >/dev/null || die "cannot apply the root Application. Argo CD still reads $FROM."
 ok "root Application applied from the migrated tree"
 
-say "Checking every Application (up to ${WAIT_S}s)"
-deadline=$(( $(date +%s) + WAIT_S )); RESULT=""
+say "Checking every Application (up to ${WAIT_S}s; settled means two clean reads in a row, ${SETTLE_S}s apart)"
+deadline=$(( $(date +%s) + WAIT_S )); RESULT=""; CLEAN=0
 while :; do
   kubectl "${K[@]}" -n "$ARGO_NS" get applications.argoproj.io -o json > "$TMPD/apps-now.json" 2>/dev/null || : > "$TMPD/apps-now.json"
   RESULT="$(apps_check after "$FORGE_MAIN")"
-  grep -q '^OK$' <<<"$RESULT" && break
-  [[ "$(date +%s)" -lt "$deadline" ]] || break
-  sleep "${TOCKMOX_TEST_POLL_S:-10}"
+  if grep -q '^OK$' <<<"$RESULT"; then CLEAN=$(( CLEAN + 1 )); else CLEAN=0; fi
+  [[ "$CLEAN" -ge 2 ]] && break
+  # A first clean read is always confirmed, even past the deadline; anything else stops there.
+  [[ "$CLEAN" -eq 1 || "$(date +%s)" -lt "$deadline" ]] || break
+  if [[ "$CLEAN" -eq 1 ]]; then sleep "$SETTLE_S"; else sleep "${TOCKMOX_TEST_POLL_S:-10}"; fi
 done
-if ! grep -q '^OK$' <<<"$RESULT"; then
+if [[ "$CLEAN" -lt 2 ]]; then
   err "the cutover did not settle within ${WAIT_S}s:"
   sed -n 's/^BAD /         /p' <<<"$RESULT" >&2
   info "nothing was undone. To point Argo CD back at $FROM (your checkout was never changed):"
