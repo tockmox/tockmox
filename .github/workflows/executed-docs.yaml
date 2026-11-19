@@ -340,10 +340,48 @@ jobs:
       # reason ... which is what it did when the page was fixed.
 
   # -------------------------------------------------- nightly and pre-release
+  # Room on the rig, before `paths`. A run that meets a rig another run is using
+  # waits here for room, up to TOCKMOX_CAPACITY_WAIT_S, instead of failing at
+  # create's BLOCKED with nothing wrong with the product. Still full at the bound:
+  # room=no, the summary says "not run: lab full", and `paths` is skipped, so the
+  # run ends neutral. `freshness` reads the paths job's own conclusion, and a
+  # skipped one is not a success, so a rig that stays full for days still goes red
+  # there. A rig the check cannot read fails this job, red as before.
+  # tests/executed-docs/README.md, "Capacity preflight", has the rule.
+  room:
+    name: room on the rig
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    runs-on: [self-hosted, tockmox-devtest]
+    timeout-minutes: 55
+    # The same group as `paths`, so a run's room check queues behind another
+    # run's paths job instead of reading that run's VM as a full rig.
+    concurrency:
+      group: executed-docs-tockmox-test
+      cancel-in-progress: false
+    outputs:
+      room: ${{ steps.room.outputs.room }}
+    env:
+      TOCKMOX_TEST_NAMESPACE: tockmox-test
+      TOCKMOX_TEST_VM: ed-${{ github.run_id }}-${{ github.run_attempt }}
+      TOCKMOX_SUBSTRATE_CONTEXT: ${{ vars.TOCKMOX_SUBSTRATE_CONTEXT }}
+      TOCKMOX_CAPACITY_WAIT_S: '2700'
+      TOCKMOX_CAPACITY_POLL_S: '60'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: wait for room, up to 45 minutes
+        id: room
+        shell: bash -euo pipefail {0}
+        run: |
+          : "${TOCKMOX_SUBSTRATE_CONTEXT:?TOCKMOX_SUBSTRATE_CONTEXT is empty: set the repository variable of that name to the kubectl context of the Harvester rig}"
+          bash tests/executed-docs/lib/room-gate.sh
+
   paths:
     name: documented paths against a live cluster
+    needs: room
     # Never on pull_request: a self-hosted runner must not execute fork code.
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    # Only when `room` found room: room=no ends the run neutral, not red.
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push') && needs.room.outputs.room == 'yes'
     runs-on: [self-hosted, tockmox-devtest]
     # The p09 lane is one create, P04 and P05, and P09's whole install (20 to 40 minutes measured on the lab),
     # then the paths that run after it on the same install (P11 to P16, P13 and the network-policy harness).
