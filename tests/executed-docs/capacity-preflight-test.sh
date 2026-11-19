@@ -29,6 +29,11 @@
 #      error (masked, bounded) and its exit code under the REFUSING line, a BLOCKED
 #      capacity refusal as BLOCKED rather than as a provisioning failure, and a
 #      create line on stdout is never taken for the kubeconfig path
+#   9. `room` reads the same rule and changes nothing; it waits for room only while
+#      the rig is BLOCKED, up to TOCKMOX_CAPACITY_WAIT_S, never on an unreadable
+#      source; and lib/room-gate.sh answers room=yes, or room=no with "not run: lab
+#      full" in the step summary and exit 0 (neutral), or no answer and the check's
+#      own exit (red)
 #
 # WHAT IT DOES NOT SHOW: that the numbers in a real Longhorn Node or Pod list have
 # the shape the fixtures give them (the live, read-only run in the PR notes does),
@@ -487,6 +492,106 @@ else bad "run.sh: a create that works runs the path and tears down (the control)
 if printf '%s' "$RREP" | grep -F '  capacity OK: quota: harness-ceiling' >/dev/null; then
   ok "run.sh: a create that works keeps its capacity lines in the report"
 else bad "run.sh: a create that works keeps its capacity lines in the report" "$(printf '%s' "$RREP" | grep -A3 'provisioning ===' | tr '\n' ' ')"; fi
+
+# ---- clause 9: `room` and the rig-full gate ------------------------------------
+# A scheduled or push run that meets a full rig waits a bounded time for room, then
+# ends "not run: lab full" (neutral), never red; a rig it cannot read stays red.
+# The sleep here logs what it was asked for and, when the case left a vms.then.json,
+# frees the rig before the next read (another run's VM going away).
+RBIN="${TMP}/rbin-room"; mkdir -p "$RBIN"
+cat >"${RBIN}/sleep" <<SL
+#!/bin/sh
+echo "SLEEP \$1" >>"\$STUB_STATE/log"
+if [ -f "\$STUB_STATE/fx/vms.then.json" ]; then mv "\$STUB_STATE/fx/vms.then.json" "\$STUB_STATE/fx/vms.json"; fi
+exec ${REAL_SLEEP} 0.01
+SL
+chmod 755 "${RBIN}/sleep"
+ROOMPATH="PATH=${RBIN}:${BIN}:${PATH}"
+sleeps() { grep '^SLEEP ' "$1/log" | sed 's/^SLEEP //' | tr '\n' ' ' | sed 's/ $//'; }
+reads() { grep -c 'get resourcequotas' "$1/calls" || true; }
+GATE="$(dirname "$TC")/../lib/room-gate.sh"
+run_gate() {  # state-dir [extra env ...] -> $OUT, $RC, and $1/gh-output, $1/gh-summary
+  local st="$1"; shift
+  : >"$st/gh-output"; : >"$st/gh-summary"
+  OUT="$(env STUB_STATE="$st" PATH="${RBIN}:${BIN}:${PATH}" KUBECONFIG="${TMP}/substrate.kubeconfig" \
+         TOCKMOX_SUBSTRATE_CONTEXT="stub-substrate" TOCKMOX_WORKDIR="$st/wd" TOCKMOX_TEST_VM="$VM" TMPDIR="$st" \
+         GITHUB_OUTPUT="$st/gh-output" GITHUB_STEP_SUMMARY="$st/gh-summary" "$@" bash "$GATE" 2>&1)"
+  RC=$?
+}
+
+S="${TMP}/room-fits"; new_state "$S"
+run_tc "$S" room "$ROOMPATH" TOCKMOX_CAPACITY_WAIT_S=600
+if [ "$RC" -eq 0 ] && [ "$(reads "$S")" -eq 1 ] && [ -z "$(sleeps "$S")" ] && [ "$(mutations "$S")" -eq 0 ] \
+   && printf '%s' "$OUT" | grep -F 'ROOM: room now' >/dev/null && printf '%s' "$OUT" | grep -F 'capacity OK: quota:' >/dev/null; then
+  ok "room: a rig with room answers at once, from one read, and changes nothing"
+else bad "room: a rig with room answers at once, from one read, and changes nothing" "rc=${RC}, reads=$(reads "$S"), sleeps='$(sleeps "$S")', mutations=$(mutations "$S"): $(printf '%s' "$OUT" | tail -3)"; fi
+
+S="${TMP}/room-full"; new_state "$S" "vms=ed-20261118160700-1"
+run_tc "$S" room "$ROOMPATH" TOCKMOX_CAPACITY_WAIT_S=150 TOCKMOX_CAPACITY_POLL_S=60
+if [ "$RC" -eq 4 ] && [ "$(sleeps "$S")" = "60 60 30" ] && [ "$(reads "$S")" -eq 4 ] && [ "$(mutations "$S")" -eq 0 ] && [ "$(vm_applied "$S")" -eq 0 ] \
+   && printf '%s' "$OUT" | grep -F 'BLOCKED: not run: lab full after 150s (TOCKMOX_CAPACITY_WAIT_S=150); nothing was created' >/dev/null \
+   && printf '%s' "$OUT" | grep -F 'BLOCKED: harness:' >/dev/null && [ "$(printf '%s' "$OUT" | grep -c '^WAITING: lab full')" -eq 3 ]; then
+  ok "room: a rig that stays full is read every poll up to the bound (60, 60, then the 30 left), then BLOCKED with the reason, and nothing is created"
+else bad "room: a rig that stays full is read every poll up to the bound (60, 60, then the 30 left), then BLOCKED with the reason, and nothing is created" "rc=${RC}, sleeps='$(sleeps "$S")', reads=$(reads "$S"), mutations=$(mutations "$S"): $(printf '%s' "$OUT" | tail -3)"; fi
+
+S="${TMP}/room-frees"; new_state "$S" "vms=ed-20261118160700-1"; printf '{"items": []}' >"$S/fx/vms.then.json"
+run_tc "$S" room "$ROOMPATH" TOCKMOX_CAPACITY_WAIT_S=600 TOCKMOX_CAPACITY_POLL_S=60
+if [ "$RC" -eq 0 ] && [ "$(sleeps "$S")" = "60" ] && [ "$(reads "$S")" -eq 2 ] && [ "$(mutations "$S")" -eq 0 ] \
+   && printf '%s' "$OUT" | grep -F 'ROOM: room after 60s of waiting' >/dev/null; then
+  ok "room: a rig that frees up while waiting answers room on the next read"
+else bad "room: a rig that frees up while waiting answers room on the next read" "rc=${RC}, sleeps='$(sleeps "$S")', reads=$(reads "$S"): $(printf '%s' "$OUT" | tail -3)"; fi
+
+S="${TMP}/room-nowait"; new_state "$S" "vms=ed-20261118160700-1"
+run_tc "$S" room "$ROOMPATH"
+if [ "$RC" -eq 4 ] && [ -z "$(sleeps "$S")" ] && [ "$(reads "$S")" -eq 1 ] && printf '%s' "$OUT" | grep -F 'lab full after 0s' >/dev/null; then
+  ok "room: with no TOCKMOX_CAPACITY_WAIT_S it reads once and does not wait"
+else bad "room: with no TOCKMOX_CAPACITY_WAIT_S it reads once and does not wait" "rc=${RC}, sleeps='$(sleeps "$S")': $(printf '%s' "$OUT" | tail -2)"; fi
+
+S="${TMP}/room-forbidden"; new_state "$S"; : >"$S/fx/vms.fail"
+run_tc "$S" room "$ROOMPATH" TOCKMOX_CAPACITY_WAIT_S=600
+if [ "$RC" -eq 5 ] && [ -z "$(sleeps "$S")" ] && [ "$(mutations "$S")" -eq 0 ] && printf '%s' "$OUT" | grep -F 'INFRA_ERROR: capacity-source: cannot read' >/dev/null; then
+  ok "room: an unreadable capacity source is INFRA_ERROR at once, never waited on as a full rig"
+else bad "room: an unreadable capacity source is INFRA_ERROR at once, never waited on as a full rig" "rc=${RC}, sleeps='$(sleeps "$S")': $(printf '%s' "$OUT" | tail -2)"; fi
+
+for badval in "TOCKMOX_CAPACITY_WAIT_S=soon" "TOCKMOX_CAPACITY_WAIT_S=14401" "TOCKMOX_CAPACITY_POLL_S=0" "TOCKMOX_CAPACITY_POLL_S=3601" "TOCKMOX_CAPACITY_POLL_S=-5"; do
+  S="${TMP}/room-bad-${badval}"; new_state "$S" "vms=ed-20261118160700-1"
+  run_tc "$S" room "$ROOMPATH" "$badval"
+  if [ "$RC" -eq 2 ] && [ "$(reads "$S")" -eq 0 ] && [ -z "$(sleeps "$S")" ] && printf '%s' "$OUT" | grep -F "REFUSING: ${badval%%=*}" >/dev/null; then
+    ok "room refuses ${badval} (exit 2), by name, before it reads anything"
+  else bad "room refuses ${badval} (exit 2), by name, before it reads anything" "rc=${RC}, reads=$(reads "$S"): $(printf '%s' "$OUT" | tail -2)"; fi
+done
+
+S="${TMP}/gate-room"; new_state "$S"
+run_gate "$S" TOCKMOX_CAPACITY_WAIT_S=600
+if [ "$RC" -eq 0 ] && [ "$(cat "$S/gh-output")" = "room=yes" ] && [ ! -s "$S/gh-summary" ] && printf '%s' "$OUT" | grep -F 'ROOM-GATE room=yes' >/dev/null; then
+  ok "room-gate: room is room=yes and the paths job runs"
+else bad "room-gate: room is room=yes and the paths job runs" "rc=${RC}, output='$(cat "$S/gh-output")': $(printf '%s' "$OUT" | tail -2)"; fi
+
+S="${TMP}/gate-full"; new_state "$S" "vms=ed-20261118160700-1"
+run_gate "$S" TOCKMOX_CAPACITY_WAIT_S=120 TOCKMOX_CAPACITY_POLL_S=60
+if [ "$RC" -eq 0 ] && [ "$(cat "$S/gh-output")" = "room=no" ] && [ "$(mutations "$S")" -eq 0 ] \
+   && grep -F '### not run: lab full' "$S/gh-summary" >/dev/null && grep -F 'not run: lab full after 120s' "$S/gh-summary" >/dev/null \
+   && grep -F 'harness:' "$S/gh-summary" >/dev/null && grep -F 'Nothing was created' "$S/gh-summary" >/dev/null \
+   && printf '%s' "$OUT" | grep -F 'ROOM-GATE room=no: not run: lab full ... harness:' >/dev/null; then
+  ok "room-gate: a rig still full at the bound is room=no, exit 0 (neutral, not red), with 'not run: lab full' and the reason in the summary"
+else bad "room-gate: a rig still full at the bound is room=no, exit 0 (neutral, not red), with 'not run: lab full' and the reason in the summary" "rc=${RC}, output='$(cat "$S/gh-output")', summary='$(tr '\n' ' ' <"$S/gh-summary")': $(printf '%s' "$OUT" | tail -2)"; fi
+
+S="${TMP}/gate-forbidden"; new_state "$S"; : >"$S/fx/quotas.fail"
+run_gate "$S" TOCKMOX_CAPACITY_WAIT_S=600
+if [ "$RC" -eq 5 ] && [ ! -s "$S/gh-output" ] && [ ! -s "$S/gh-summary" ] && [ -z "$(sleeps "$S")" ]; then
+  ok "room-gate: a rig it cannot read is no answer and its own exit (5), so the job stays red"
+else bad "room-gate: a rig it cannot read is no answer and its own exit (5), so the job stays red" "rc=${RC}, output='$(cat "$S/gh-output")': $(printf '%s' "$OUT" | tail -2)"; fi
+
+S="${TMP}/gate-badval"; new_state "$S"
+run_gate "$S" TOCKMOX_CAPACITY_WAIT_S=forever
+if [ "$RC" -eq 2 ] && [ ! -s "$S/gh-output" ] && printf '%s' "$OUT" | grep -F 'REFUSING: TOCKMOX_CAPACITY_WAIT_S' >/dev/null; then ok "room-gate: a bad setting is no answer and exit 2, red"
+else bad "room-gate: a bad setting is no answer and exit 2, red" "rc=${RC}, output='$(cat "$S/gh-output")'"; fi
+
+S="${TMP}/gate-nogh"; new_state "$S" "vms=ed-20261118160700-1"
+OUT="$(env STUB_STATE="$S" PATH="${RBIN}:${BIN}:${PATH}" KUBECONFIG="${TMP}/substrate.kubeconfig" TOCKMOX_SUBSTRATE_CONTEXT="stub-substrate" \
+       TOCKMOX_WORKDIR="$S/wd" TOCKMOX_TEST_VM="$VM" TMPDIR="$S" GITHUB_OUTPUT= GITHUB_STEP_SUMMARY= bash "$GATE" 2>&1)"; RC=$?
+if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -F 'ROOM-GATE room=no' >/dev/null; then ok "room-gate: outside Actions it prints the same answer and writes no Actions file"
+else bad "room-gate: outside Actions it prints the same answer and writes no Actions file" "rc=${RC}: $(printf '%s' "$OUT" | tail -2)"; fi
 
 # Every kubectl call the check makes names the substrate context.
 S="${TMP}/ctx"; new_state "$S"
