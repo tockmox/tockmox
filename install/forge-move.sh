@@ -71,6 +71,8 @@ with its whole history, and repoint Argo CD at it in one change an approver merg
   --namespace NS            the forge's namespace (default tockmox-forge)
   --argocd-namespace NS     default argocd
   --approval-wait-minutes N how long to wait for the change's approval (default 60)
+  --wait-seconds N          after the cutover, how long to wait for every Application to read the target,
+                            Synced and Healthy, on two reads in a row 10 s apart (default 900)
   --finish                  only step 5, once the change is merged
   --dry-run                 check the target and say what would happen; change nothing
   --in-cluster              run inside the forge's namespace (the console's Job): no --context, the forge
@@ -86,6 +88,7 @@ USAGE
 
 CONTEXT=""; YES_CONTEXT=""; NO_PROMPT=false; TO=""; CREDS=""; READ_CREDS=""
 FORGE_NS="tockmox-forge"; ARGO_NS="argocd"; WAIT_MIN=60; FINISH=false; DRY_RUN=false
+WAIT_S=900; SETTLE_S="${TOCKMOX_TEST_POLL_S:-10}"   # the cutover check, and the gap between its two reads
 IN_POD=false; FORGE_URL=""; REQUESTED_BY=""; REQUEST=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -98,6 +101,7 @@ while [[ $# -gt 0 ]]; do
     --namespace) FORGE_NS="${2:?--namespace needs a name}"; shift 2 ;;
     --argocd-namespace) ARGO_NS="${2:?--argocd-namespace needs a name}"; shift 2 ;;
     --approval-wait-minutes) WAIT_MIN="${2:?--approval-wait-minutes needs a number}"; shift 2 ;;
+    --wait-seconds) WAIT_S="${2:?--wait-seconds needs a number}"; shift 2 ;;
     --finish) FINISH=true; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     --in-cluster) IN_POD=true; shift ;;
@@ -328,6 +332,53 @@ if ! $MERGED; then
 fi
 ok "change #$PR merged"
 step 5 run "change #$PR merged: pushing main again, re-applying the root, archiving the forge's repository"
+[[ "$WAIT_S" =~ ^[0-9]+$ ]] || die_step "--wait-seconds must be a whole number: '$WAIT_S'"
+# What every Application manages before the cutover, so the check after it can tell a pruned resource.
+kubectl "${K[@]}" -n "$ARGO_NS" get applications.argoproj.io -o json > "$TMPD/apps-before.json" 2>"$TMPD/apps.err" \
+  || die_step "cannot list Argo CD's Applications in ${ARGO_NS}: $(tail -1 "$TMPD/apps.err")"
+# apps_settled: reads $TMPD/apps-now.json against apps-before.json; prints BAD lines, then OK or WAIT.
+apps_settled() {
+  python3 - "$TMPD/apps-before.json" "$TMPD/apps-now.json" "$IN_CLUSTER" "$TO" <<'PY'
+import json, re, sys
+before_p, now_p, forge, to = sys.argv[1:5]
+def norm(u):
+    u = (u or "").strip()
+    m = re.match(r'^(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)(?::\d+)?[:/](.+?)(?:\.git)?/?$', u)
+    return (m.group(1).lower() + "/" + m.group(2)) if m else u
+def load(p):
+    try:
+        return {a["metadata"]["name"]: a for a in json.load(open(p)).get("items", [])}
+    except (OSError, ValueError, KeyError):
+        return {}
+def srcs(a):
+    s = a.get("spec", {})
+    return [norm(x.get("repoURL", "")) for x in ([s["source"]] if s.get("source") else []) + s.get("sources", [])]
+def res(a):
+    return {(r.get("group", ""), r.get("kind", ""), r.get("namespace", ""), r.get("name", ""))
+            for r in a.get("status", {}).get("resources", [])}
+before, now, bad = load(before_p), load(now_p), []
+forge_n, to_n = norm(forge), norm(to)
+if not now:
+    bad.append("Argo CD's Applications could not be read")
+for n, a in sorted(before.items()):
+    if n not in now:
+        bad.append("%s is gone" % n); continue
+    b = now[n]
+    if forge_n in srcs(b):
+        bad.append("%s still reads the built-in forge" % n)
+    st = b.get("status", {})
+    s, h = st.get("sync", {}).get("status", "?"), st.get("health", {}).get("status", "?")
+    if s != "Synced" or h != "Healthy":
+        bad.append("%s is %s/%s" % (n, s, h))
+    lost = res(a) - res(b)
+    if lost:
+        bad.append("%s no longer manages %d resource(s), e.g. %s" % (n, len(lost), "/".join(x for x in sorted(lost)[0] if x)))
+if now and to_n not in srcs(now.get("tockmox-root", {})):
+    bad.append("tockmox-root does not read %s" % to)
+for x in bad: print("BAD " + x)
+print("OK" if not bad else "WAIT %d" % len(bad))
+PY
+}
 MAIN_NOW="$(fgit ls-remote "$FORGE/$ORG/$REPO.git" refs/heads/main | awk 'NR==1{print $1}')"
 rm -rf "$TMPD/mirror.git"
 fgit clone -q --mirror "$FORGE/$ORG/$REPO.git" "$TMPD/mirror.git" || die "cannot clone the forge again"
@@ -351,6 +402,27 @@ ROOTCHECK
 fi
 kubectl "${K[@]}" apply -f "$TMPD/work/bootstrap/root.yaml" >/dev/null || die_step "cannot re-apply the root Application from $TO"
 ok "root Application re-applied from $TO"
+# Settled means two clean reads in a row, SETTLE_S apart: one clean read can be a moment between
+# two syncs. A first clean read is confirmed even past the deadline; anything else stops there,
+# and the forge's repository is NOT archived, so nothing is closed off while Argo CD is unsettled.
+say "Checking every Application (up to ${WAIT_S}s; settled means two clean reads in a row, ${SETTLE_S}s apart)"
+deadline=$(( $(date +%s) + WAIT_S )); RESULT=""; CLEAN=0
+while :; do
+  kubectl "${K[@]}" -n "$ARGO_NS" get applications.argoproj.io -o json > "$TMPD/apps-now.json" 2>/dev/null || : > "$TMPD/apps-now.json"
+  RESULT="$(apps_settled)"
+  if grep -q '^OK$' <<<"$RESULT"; then CLEAN=$(( CLEAN + 1 )); else CLEAN=0; fi
+  [[ "$CLEAN" -ge 2 ]] && break
+  [[ "$CLEAN" -eq 1 || "$(date +%s)" -lt "$deadline" ]] || break
+  if [[ "$CLEAN" -eq 1 ]]; then sleep "$SETTLE_S"; else sleep "${TOCKMOX_TEST_POLL_S:-10}"; fi
+done
+if [[ "$CLEAN" -lt 2 ]]; then
+  err "Argo CD reads $TO, but the cutover did not settle within ${WAIT_S}s:"
+  sed -n 's/^BAD /         /p' <<<"$RESULT" >&2
+  info "the built-in forge's repository is NOT archived yet. Fix the cause, then run move-forge --finish"
+  info "with the same options: it pushes nothing new, re-applies the root, checks again, and archives then."
+  die_step "the cutover did not settle within ${WAIT_S}s; the built-in forge's repository is not archived"
+fi
+ok "every Application reads $TO, Synced and Healthy on two reads ${SETTLE_S}s apart, and nothing was pruned"
 api PATCH "/repos/$ORG/$REPO" '{"archived":true}' >/dev/null
 [[ "$(code)" == 200 ]] || die_step "archiving the built-in forge's repository failed (HTTP $(code)). Argo CD already reads $TO; archive it by hand."
 ok "the built-in forge's repository is archived: read-only, nothing deleted"

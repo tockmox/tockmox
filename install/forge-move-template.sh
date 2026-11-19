@@ -80,6 +80,7 @@ rules:
   - { apiGroups: [""], resources: [secrets], resourceNames: [tockmox-site-repo-own], verbs: [get, patch] }
   - { apiGroups: [""], resources: [secrets], verbs: [create] }
   - { apiGroups: [argoproj.io], resources: [applications], resourceNames: [tockmox-root], verbs: [get, patch] }
+  - { apiGroups: [argoproj.io], resources: [applications], verbs: [list] }
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
