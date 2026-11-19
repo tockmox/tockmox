@@ -476,6 +476,18 @@ list is also `INFRA_ERROR`: some API front ends answer a list the credential may
 not make with an empty list instead of `Forbidden`, and an empty list would read
 as an idle rig.
 
+**Waiting for room instead of failing.** `throwaway-cluster.sh room` reads the
+same rule as `create` and creates nothing. When the only refusal is `BLOCKED` (the
+rig is full), it reads again every `TOCKMOX_CAPACITY_POLL_S` seconds (default 60)
+for up to `TOCKMOX_CAPACITY_WAIT_S` (default 0, at most 14400), then exits 0 for
+room or 4 with `BLOCKED: not run: lab full after Ns` and the last reason. An
+unreadable source (5) or a bad setting (2) is returned at once, never waited on.
+`lib/room-gate.sh` puts that answer where a workflow can act on it: `room=yes`, or
+`room=no` with "not run: lab full" and the reason in the step summary and exit 0,
+so a run the rig had no room for ends neutral rather than red; any other answer
+is its own exit, red as before. It does not hold the rig: a run can still take
+the room between the gate and `create`, which then refuses as `BLOCKED`.
+
 **What it does not do.** It reads a moment in time; another tenant can take the
 capacity between the check and the first replica. It does not size anything
 inside the guest. And the 85 percent default is Longhorn's own practice for a

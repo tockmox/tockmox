@@ -2697,6 +2697,7 @@ case "${1:-}" in
   exec)    shift; node_exec "$*" ;;
   reboot)  reboot ;;
   destroy) destroy ;;
+  room)    capacity_room_wait ;;
   reset)   shift; reset_namespace "${1:-}" ;;
   sweep)   shift; sweep_prefix "${1:-}" "${2:-}" ;;
   snapshot)  shift; snapshot "${1:-}" ;;
@@ -2717,5 +2718,5 @@ case "${1:-}" in
   mirror-tls) mirror_tls ;;
   uninstall-proof) uninstall_proof ;;
   evidence) evidence ;;
-  *) echo "usage: $0 {create|await|exec CMD|reboot|destroy|reset --every-vm-in-NS|sweep PREFIX MINUTES|snapshot RUNG|restore RUNG|snapshots|ip|kubeconfig|publish NAME PORT|guard-file|kit-store KIT IDENTITY|kit DIR|offsite-check|offsite-repo DIR|offsite-reach DIR|uninstall-proof|evidence|mirror-proof|mirror-tls}" >&2; exit 2 ;;
+  *) echo "usage: $0 {create|room|await|exec CMD|reboot|destroy|reset --every-vm-in-NS|sweep PREFIX MINUTES|snapshot RUNG|restore RUNG|snapshots|ip|kubeconfig|publish NAME PORT|guard-file|kit-store KIT IDENTITY|kit DIR|offsite-check|offsite-repo DIR|offsite-reach DIR|uninstall-proof|evidence|mirror-proof|mirror-tls}" >&2; exit 2 ;;
 esac

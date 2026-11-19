@@ -129,6 +129,12 @@ costs you, with the reasoning in the documentation rather than here.
   `TOCKMOX_P09_OFFSITE=git` gives the install an off-site copy in a repository of its own that is deleted
   with the VM.
 
+- **The executed-docs harness can wait for room on a full rig.** `throwaway-cluster.sh room`
+  reads the capacity rule without creating anything and, with `TOCKMOX_CAPACITY_WAIT_S`, waits
+  for a full rig to free up; `tests/executed-docs/lib/room-gate.sh` turns a rig still full at
+  the bound into "not run: lab full", exit 0, for a workflow to skip the run on. A rig the
+  check cannot read still fails.
+
 - **An off-site git copy on a private CA.** `bootstrap-forge --offsite-git-ca FILE`,
   beside `--offsite-git`, gives the forge's push mirror and the copy job the CA
   that signed the remote's certificate; the rebuild and the forge repair take the

@@ -132,3 +132,67 @@ capacity_preflight() {
     *) echo "INFRA_ERROR: capacity-source: the evaluator exited ${rc}: ${what}" >&2; exit 5 ;;
   esac
 }
+
+# The `room` verb: is there room for this run now, and if the rig is full, wait a
+# bounded time for it. It reads exactly what `create` reads, through the same
+# capacity_preflight, and creates and deletes nothing.
+#
+# WHY IT EXISTS. A scheduled or push run that meets a rig another run is using
+# used to fail at create's BLOCKED, and the job went red with nothing wrong with
+# the product. A full rig is a reason the run did not happen, not a finding. So a
+# caller that would rather wait than refuse asks `room` first, and lib/room-gate.sh
+# turns a rig that stays full into "not run: lab full" instead of a failure.
+#
+# ONLY BLOCKED IS WAITED ON. An unreadable capacity source (5) or a bad setting (2)
+# is returned at once: neither is a full rig, and waiting would hide it.
+#
+# ENVIRONMENT
+#   TOCKMOX_CAPACITY_WAIT_S   0     how long, in all, to wait for room, 0 to 14400;
+#                                   0 reads once and answers
+#   TOCKMOX_CAPACITY_POLL_S   60    seconds between reads, 1 to 3600
+#
+# EXIT: 0 there is room (the capacity OK lines on stderr); 4 still full at the
+# bound ("BLOCKED: not run: lab full after Ns", then the last BLOCKED line);
+# 5 and 2 as capacity_preflight returns them.
+capacity_room_wait() {
+  local wait_s="${TOCKMOX_CAPACITY_WAIT_S:-0}" poll_s="${TOCKMOX_CAPACITY_POLL_S:-60}"
+  case "$wait_s" in ''|*[!0-9]*)
+    echo "REFUSING: TOCKMOX_CAPACITY_WAIT_S must be a whole number of seconds, got '${wait_s}'" >&2; exit 2 ;; esac
+  case "$poll_s" in ''|*[!0-9]*)
+    echo "REFUSING: TOCKMOX_CAPACITY_POLL_S must be a whole number of seconds, got '${poll_s}'" >&2; exit 2 ;; esac
+  wait_s=$((10#$wait_s)); poll_s=$((10#$poll_s))
+  if [ "$wait_s" -gt 14400 ]; then
+    echo "REFUSING: TOCKMOX_CAPACITY_WAIT_S is ${wait_s}; the most is 14400 (4 h)" >&2; exit 2
+  fi
+  if [ "$poll_s" -lt 1 ] || [ "$poll_s" -gt 3600 ]; then
+    echo "REFUSING: TOCKMOX_CAPACITY_POLL_S is ${poll_s}; it must be 1 to 3600" >&2; exit 2
+  fi
+  local waited=0 rc out last step
+  while :; do
+    # capacity_preflight exits rather than returns on every refusal, so each read
+    # runs in its own subshell and leaves this loop standing.
+    rc=0; out="$( (capacity_preflight) 2>&1 )" || rc=$?
+    case "$rc" in
+      0)
+        printf '%s\n' "$out" >&2
+        if [ "$waited" -gt 0 ]; then echo "ROOM: room after ${waited}s of waiting" >&2
+        else echo "ROOM: room now" >&2; fi
+        return 0 ;;
+      4)
+        last="$(printf '%s\n' "$out" | grep '^BLOCKED:' | tail -1 || true)"
+        if [ "$waited" -ge "$wait_s" ]; then
+          echo "BLOCKED: not run: lab full after ${waited}s (TOCKMOX_CAPACITY_WAIT_S=${wait_s}); nothing was created" >&2
+          printf '%s\n' "${last:-BLOCKED: (the preflight printed no reason)}" >&2
+          exit 4
+        fi
+        step="$poll_s"
+        [ $((wait_s - waited)) -lt "$step" ] && step=$((wait_s - waited))
+        echo "WAITING: lab full, reading again in ${step}s (${waited}s of ${wait_s}s waited): ${last}" >&2
+        sleep "$step"
+        waited=$((waited + step)) ;;
+      *)
+        printf '%s\n' "$out" >&2
+        exit "$rc" ;;
+    esac
+  done
+}
