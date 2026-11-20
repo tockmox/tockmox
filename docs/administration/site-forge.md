@@ -444,10 +444,14 @@ repository is kept beside it, so Argo CD can read it at every moment of the
 cutover; `bootstrap-forge` installs the forge and pushes the history plus the
 migration commit; the root Application is applied from the forge; then the
 command waits (`--wait-seconds`, default 900) until every Application reads the
-forge, Synced and Healthy, each still managing every resource it managed before.
-It calls that settled only on two reads in a row, ten seconds apart, so an
-Application caught Healthy for a moment between two syncs does not end the
-wait. Then the credential copy is removed, and only then does `bootstrap-forge` run
+forge, Synced and Healthy at the forge's `main`, each still managing every
+resource it managed before. The migration commit changes the identity layer's
+blueprints, and Authentik's worker restarts itself onto changed blueprints once
+they reach its volume, which can be a minute or more after Argo CD synced them;
+Argo CD cannot see that restart coming. So the wait also reads the worker and
+counts a read only once it runs on the blueprints the cluster now holds. It calls
+that settled only on two reads in a row, ten seconds apart, so an Application
+caught Healthy for a moment between two syncs does not end the wait. Then the credential copy is removed, and only then does `bootstrap-forge` run
 once more to make your old repository the off-site copy, which pushes the
 migration commit there. Until that moment the old repository is exactly what
 Argo CD read before the move. That second run upgrades the forge and connects
@@ -458,7 +462,7 @@ check. Nothing that can change an Application runs after it.
 
 **Success condition:** it ends with `every Application reads the built-in forge,
 Synced and Healthy, and nothing was pruned`. Run it again: it says `Nothing to
-do`. Both read every Application twice, ten seconds apart, before they say so.
+do`. Both make the same two reads, ten seconds apart, before they say so.
 Set `site.forge: built-in` in your `tockmox.yaml` before you run the installer
 again.
 

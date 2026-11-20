@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Sourced by run.sh after forge-move-tests.sh, whose stand-in it uses (dp_start, dp_stop,
-# lib/forge-stub.py). Groups MI1-MI9: install/forge-move-in.sh, reached as
+# lib/forge-stub.py). Groups MI1-MI11: install/forge-move-in.sh, reached as
 # `tockmox-install.sh move-in-forge`.
 #
 # HERMETIC, and git is REAL: the site checkout, the forge's repository and the old
@@ -27,6 +27,9 @@ cat > "$MI_BIN/kubectl" <<'STUB'
 printf 'kubectl %s\n' "$*" >> "$MI_STATE/calls.log"
 a=" $* "
 case "$a" in
+  *" exec "*) exec python3 "$MI_STATE/worker.py" exec ;;
+  *" -n tockmox-authentik get pods -o json "*) exec python3 "$MI_STATE/worker.py" pods ;;
+  *" -n tockmox-authentik get configmap tockmox-sso-blueprints -o json "*) exec python3 "$MI_STATE/worker.py" configmap ;;
   *" config view "*) printf 'https://lab.example.invalid:6443'; exit 0 ;;
   *" get applications.argoproj.io "*) exec python3 "$MI_STATE/apps.py" ;;
   *" get secret tockmox-forge-admin -o name "*) [[ -f "$MI_STATE/forge-installed" ]] && { echo secret/tockmox-forge-admin; exit 0; }; exit 1 ;;
@@ -53,7 +56,7 @@ cat > "$MI_BIN/apps.py" <<'PY'
 import json, os, subprocess
 st = os.environ["MI_STATE"]
 mode = open(os.path.join(st, "mi-mode")).read().strip()
-moved = mode in ("moved", "moved-flip") or (os.path.exists(os.path.join(st, "root-applied.yaml")) and mode != "stuck")
+moved = mode.startswith("moved") or (os.path.exists(os.path.join(st, "root-applied.yaml")) and mode != "stuck")
 reads = 0
 if moved:
     p = os.path.join(st, "after-reads")
@@ -82,11 +85,72 @@ ai_res = [("apps", "Deployment", "a"), ("", "Service", "b")]
 if moved and mode == "prune":
     ai_res = ai_res[:1]
 ai_sync = "OutOfSync" if mode == "unsettled" else "Synced"
+# tockmox-identity reads the charts and, as its values, the site repository (two sources, so Argo CD reports
+# status.sync.revisions). stale-rev: Synced and Healthy, but still at the site's old head for the first two reads
+# after the move; stale-rev-stuck and moved-stale: at it on every read.
+id_rev = rev
+old_head = open(os.path.join(st, "rev")).read().strip()
+if moved and ((mode == "stale-rev" and reads <= 2) or mode in ("stale-rev-stuck", "moved-stale")):
+    id_rev = old_head
+ident = app("tockmox-identity", "", [("apps", "Deployment", "tockmox-identity-authentik-worker")])
+ident["spec"] = {"sources": [{"repoURL": "https://github.com/tockmox/tockmox.git"}, {"repoURL": site if moved else os.environ["MI_FROM"], "ref": "values"}],
+                 "destination": {"namespace": "tockmox-authentik"}}
+ident["status"]["sync"]["revisions"] = ["c0ffee0000000000000000000000000000000000", id_rev]
 print(json.dumps({"items": [
     app("tockmox-root", site, [("argoproj.io", "Application", "tockmox-ai")], revision=rev),
-    app("tockmox-ai", site if moved else os.environ["MI_FROM"], ai_res, sync=ai_sync, health=ai_health),
+    app("tockmox-ai", site if moved else os.environ["MI_FROM"], ai_res, sync=ai_sync, health=ai_health, revision=rev),
+    ident,
     app("charts", "https://github.com/tockmox/tockmox.git", [("", "ConfigMap", "c")]),
 ]}))
+PY
+# The identity layer's Authentik worker, as the kubectl above reports it: its pod, the blueprint ConfigMap it
+# mounts, and what `kubectl exec` reads in it. The migration commit changes the blueprints (v1 before the move,
+# v2 after). worker-mode (default current) says when the worker holds and runs on v2, counted in worker-reads
+# (one per exec after the move): current, at once; pending, kubelet has not projected v2 on reads 1-2, the worker
+# holds v2 but started on v1 (the probe's restart is still to come) on reads 3-4, runs on v2 from read 5;
+# restart-stuck, holds v2 but started on v1 on every read; late-sync, Argo CD syncs v2 between the first read and
+# the second, which still holds v1. `worker.py state` prints that, counting nothing.
+cat > "$MI_BIN/worker.py" <<'PY'
+import hashlib, json, os, sys
+st = os.environ["MI_STATE"]
+def rd(n, d=""):
+    p = os.path.join(st, n)
+    return open(p).read().strip() if os.path.exists(p) else d
+mode = rd("mi-mode"); wmode = rd("worker-mode", "current")
+moved = mode.startswith("moved") or (os.path.exists(os.path.join(st, "root-applied.yaml")) and mode != "stuck")
+V1 = {"ntfy.yaml": "ntfy: 1\n"}
+V2 = {"ntfy.yaml": "ntfy: 1\n", "forge.yaml": "forge: 1\n"}
+DIR = "/blueprints/mounted/cm-tockmox-sso-blueprints"
+def phase(n):  # (what the volume holds, what the worker started on)
+    if not moved: return V1, V1
+    if wmode == "restart-stuck": return V2, V1
+    if wmode == "late-sync": return V1, V1
+    if wmode == "pending": return (V1, V1) if n <= 2 else (V2, V1) if n <= 4 else (V2, V2)
+    return V2, V2
+def cat(files): return hashlib.sha256("".join(files[k] for k in sorted(files)).encode()).hexdigest()
+reads = int(rd("worker-reads", "0"))
+def current(): return V1 if not moved or (wmode == "late-sync" and reads == 0) else V2
+cmd = sys.argv[1]
+if cmd == "exec":
+    if moved:
+        reads += 1; open(os.path.join(st, "worker-reads"), "w").write("%d\n" % reads)
+    held, began = phase(reads)
+    for k in sorted(held):
+        print("F %s %s/%s" % (hashlib.sha256(held[k].encode()).hexdigest(), DIR, k))
+    print("START " + cat(began)); print("NOW " + cat(held))
+elif cmd == "configmap":
+    print(json.dumps({"metadata": {"name": "tockmox-sso-blueprints"}, "data": current()}))
+elif cmd == "pods":
+    vol = {"name": "blueprints-cm-tockmox-sso-blueprints", "configMap": {"name": "tockmox-sso-blueprints"}}
+    print(json.dumps({"items": [
+        {"metadata": {"name": "tockmox-identity-authentik-worker-0"}, "status": {"phase": "Running"},
+         "spec": {"volumes": [vol], "containers": [{"name": "worker", "volumeMounts": [{"name": vol["name"], "mountPath": DIR}]}]}},
+        {"metadata": {"name": "tockmox-identity-authentik-server-0"}, "status": {"phase": "Running"},
+         "spec": {"volumes": [], "containers": [{"name": "server"}]}}]}))
+elif cmd == "state":
+    held, began = phase(reads)
+    print("does not hold the current blueprints" if held != current() else
+          "a restart is still to come" if held != began else "runs on the current blueprints")
 PY
 # bootstrap-forge's stand-in: record the arguments, then push --site's main to the forge as the real
 # one does (a main the forge holds must be an ancestor), and mark the forge installed. A run with
@@ -131,7 +195,7 @@ mi_start() {
   mi_git -C "$MI_SITE" -c user.name=t -c user.email=t@example.invalid commit -qam "second"
   mkdir -p "$D/root/me"; mi_git clone -q --bare "$MI_SITE" "$D/root/me/site.git"
   mkdir -p "$D/state"; : > "$D/state/calls.log"
-  cp "$MI_BIN/apps.py" "$D/state/apps.py"
+  cp "$MI_BIN/apps.py" "$D/state/apps.py"; cp "$MI_BIN/worker.py" "$D/state/worker.py"
   printf '%s\n' "$2" > "$D/state/mi-mode"
   mi_git -C "$MI_SITE" rev-parse HEAD > "$D/state/rev"
   printf 'pusher\ntok\n' > "$D/creds"; mkdir -p "$D/tmp"
@@ -426,4 +490,55 @@ mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --no-offsite-copy -- --
 assert_artifact "with --no-offsite-copy the last check still runs, after the credential copy is removed, and the success line follows it" \
   "echo $MI_STATUS; cat '$D/state/after-reads'; mi_order 'nothing was pruned' 'Checking every Application again, after the last change' 'tockmox-site-repo-before-move removed'" \
   "$(printf '0\n4\nordered')"
+dp_stop
+
+# mi_worker: what the identity layer's Authentik worker runs on right now, as the stand-in reports it (counts nothing).
+mi_worker() { env MI_STATE="$D/state" python3 "$D/state/worker.py" state; }
+
+path_begin "MI11" "settled is about the forge's main and the cluster as it will stay: an Application synced to an older revision is not settled, and neither is an Authentik worker that has yet to restart onto the blueprints the migration commit changed (Argo CD reads it Synced and Healthy until the restart comes); the move's checks and the re-run share that one predicate"
+mi_start i11 settle
+echo pending > "$D/state/worker-mode"
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "a worker that does not hold the new blueprints yet, then holds them without having restarted, is waited on: the move succeeds only once it runs on them, so the next reader finds no restart to come" \
+  "echo $MI_STATUS; cat '$D/state/worker-reads' 2>/dev/null || echo 0; mi_worker; grep -c 'nothing was pruned' '$D/out/stdout' || true" \
+  "$(printf '0\n8\nruns on the current blueprints\n1')"
+dp_stop
+mi_start i11b settle
+echo restart-stuck > "$D/state/worker-mode"
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" --wait-seconds 0 -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "a worker that never restarts onto the blueprints it holds keeps the cutover from settling: exit 1, the worker named, no success line, no off-site pass" \
+  "echo $MI_STATUS; grep -c 'tockmox-identity: the Authentik worker tockmox-identity-authentik-worker-0 has not restarted onto the blueprints it now holds' '$D/out/stderr' || true; grep -c 'nothing was pruned' '$D/out/stdout' || true; ls '$D/state' | grep -c '^bf-args-'" \
+  "$(printf '1\n1\n0\n1')"
+dp_stop
+mi_start i11c moved
+echo restart-stuck > "$D/state/worker-mode"
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "a re-run reads the worker the same way: Argo CD clean, the worker's restart still to come, so it refuses, names the worker, writes nothing, and does not say Nothing to do" \
+  "echo $MI_STATUS; grep -c 'not every Application is settled' '$D/out/stderr' || true; grep -c 'has not restarted onto the blueprints it now holds' '$D/out/stderr' || true; grep -c 'Nothing to do' '$D/out/stdout' || true; mi_writes" \
+  "$(printf '1\n1\n1\n0\n0')"
+dp_stop
+mi_start i11c2 moved
+echo late-sync > "$D/state/worker-mode"
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "the re-run's second read is the same predicate as its first: a blueprint change synced between them, not yet in the worker's volume, makes it refuse" \
+  "echo $MI_STATUS; cat '$D/state/worker-reads'; grep -c 'does not hold the current blueprints yet' '$D/out/stderr' || true; grep -c 'Nothing to do' '$D/out/stdout' || true; mi_writes" \
+  "$(printf '1\n2\n1\n0\n0')"
+dp_stop
+mi_start i11d stale-rev
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "an Application that reads Synced and Healthy at the site's old head is not counted: two such reads, then two at the forge's main, then the last check's two" \
+  "echo $MI_STATUS; cat '$D/state/after-reads'; grep -c 'nothing was pruned' '$D/out/stdout' || true" "$(printf '0\n6\n1')"
+dp_stop
+mi_start i11e stale-rev-stuck
+OLD_HEAD="$(cut -c1-12 "$D/state/rev")"
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" --wait-seconds 0 -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "one that stays at the old head fails the cutover check, naming it and the revision it is at" \
+  "echo $MI_STATUS; grep -c \"tockmox-identity is synced to ${OLD_HEAD}, not the forge's main\" '$D/out/stderr' || true; grep -c 'nothing was pruned' '$D/out/stdout' || true" \
+  "$(printf '1\n1\n0')"
+dp_stop
+mi_start i11f moved-stale
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "a re-run that finds an Application at an older revision than the root refuses, names it, writes nothing" \
+  "echo $MI_STATUS; grep -c \"tockmox-identity is synced to $(cut -c1-12 "$D/state/rev"), not the forge's main\" '$D/out/stderr' || true; grep -c 'Nothing to do' '$D/out/stdout' || true; mi_writes" \
+  "$(printf '1\n1\n0\n0')"
 dp_stop
