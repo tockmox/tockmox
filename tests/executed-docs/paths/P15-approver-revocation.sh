@@ -374,8 +374,8 @@ finish_path() {
   path_finish
 }
 
-record_success_conditions "$ID_PAGE_FILE" "${ID_PAGE} @ $( [ "$FROM_TREE" = "1" ] && echo WORKTREE || echo "$REF" )"
-record_success_conditions "$SF_PAGE_FILE" "${SF_PAGE} @ $( [ "$FROM_TREE" = "1" ] && echo WORKTREE || echo "$REF" )"
+record_success_conditions "$ID_PAGE_FILE" "${ID_PAGE} @ $(source_label "$REF" "$FROM_TREE")"
+record_success_conditions "$SF_PAGE_FILE" "${SF_PAGE} @ $(source_label "$REF" "$FROM_TREE")"
 
 # ============================================================== THE STEPS
 trap revert_all EXIT
@@ -541,7 +541,7 @@ if ! done_step "$S"; then
   if [ "$PLANTED" = 1 ]; then
     idblock > "${STATE}/block.sh"
     if [ -s "${STATE}/block.sh" ]; then
-      provenance "$( [ "$FROM_TREE" = "1" ] && echo WORKTREE || echo "$REF" )" "$ID_PAGE" "${ID_SECTION}, the bash block containing 'members/<their-forge-name>'" "-" \
+      provenance "$(source_label "$REF" "$FROM_TREE")" "$ID_PAGE" "${ID_SECTION}, the bash block containing 'members/<their-forge-name>'" "-" \
         "$(sha256sum < "${STATE}/block.sh" | cut -d' ' -f1)"
       verbatim "$(cat "${STATE}/block.sh")"
       record "$S" "the page's block holds the two placeholders the path fills, once and twice" "1 2" \

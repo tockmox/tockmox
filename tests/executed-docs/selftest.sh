@@ -1547,5 +1547,23 @@ if [ "$SP_CASES" -eq 0 ] || { [ "$SP_RC" -ne 0 ] && ! printf '%s\n' "$SP_OUT" | 
   bad "site-repo-push-test.sh ran its cases" "rc=${SP_RC}, ${SP_CASES} case(s): $(printf '%s' "$SP_OUT" | tail -3)"
 fi
 
+# A run that reads its pages from the working tree (the p09 lane, always) says whether that tree is the ref under test:
+# "tree: <sha>, clean" when HEAD is the ref's commit and nothing is uncommitted, WORKTREE-DIRTY or WORKTREE-MISMATCH
+# when not. The helper, the real lane and run.sh on a clean, a modified and a one-commit-off tree, the real P09 and
+# P12 read for WORKTREE text of their own, and copies of the helper that lose one comparison each.
+TS_OUT="$(bash "${HERE}/tree-source-test.sh" 2>&1)"; TS_RC=$?
+TS_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) TS_CASES=$((TS_CASES+1)); ok "tree under test: ${line#ok   }" ;;
+    "FAIL "*) TS_CASES=$((TS_CASES+1)); bad "tree under test: ${line#FAIL }" "run tests/executed-docs/tree-source-test.sh for detail" ;;
+  esac
+done <<EOF_TS
+$TS_OUT
+EOF_TS
+if [ "$TS_CASES" -eq 0 ] || { [ "$TS_RC" -ne 0 ] && ! printf '%s\n' "$TS_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "tree-source-test.sh ran its cases" "rc=${TS_RC}, ${TS_CASES} case(s): $(printf '%s' "$TS_OUT" | tail -3)"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

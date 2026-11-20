@@ -153,7 +153,7 @@ xblock() {
 page_yaml() {
   xblock "$2" "$3" "$4" "$5" > "${STATE}/${1}.yaml"
   [ -s "${STATE}/${1}.yaml" ] || return 1
-  provenance "$( [ "$FROM_TREE" = "1" ] && echo "WORKTREE" || echo "$REF" )" "$2" "${4}, the yaml block containing '${5}'" "-" \
+  provenance "$(source_label "$REF" "$FROM_TREE")" "$2" "${4}, the yaml block containing '${5}'" "-" \
     "$(sha256sum < "${STATE}/${1}.yaml" | cut -d' ' -f1)"
 }
 
@@ -229,8 +229,8 @@ finish_path() {
   path_finish
 }
 
-record_success_conditions "$ARGO_PAGE_FILE" "${ARGO_PAGE} @ $( [ "$FROM_TREE" = "1" ] && echo WORKTREE || echo "$REF" )"
-record_success_conditions "$ID_PAGE_FILE" "${ID_PAGE} @ $( [ "$FROM_TREE" = "1" ] && echo WORKTREE || echo "$REF" )"
+record_success_conditions "$ARGO_PAGE_FILE" "${ARGO_PAGE} @ $(source_label "$REF" "$FROM_TREE")"
+record_success_conditions "$ID_PAGE_FILE" "${ID_PAGE} @ $(source_label "$REF" "$FROM_TREE")"
 
 # ============================================================== THE STEPS
 # S01 ... an application with no binding, and the list names it.

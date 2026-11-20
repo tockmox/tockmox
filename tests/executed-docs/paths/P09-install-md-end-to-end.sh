@@ -89,7 +89,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REF="${TOCKMOX_DOCS_REF:?set TOCKMOX_DOCS_REF to the tag under test}"
 # TOCKMOX_P09_FROM_TREE=1 reads the page from the WORKING TREE instead of the
 # ref, for proving a fix before it is committed (extract-block's --file). The
-# provenance line then says WORKTREE so nobody reads it as evidence about a tag.
+# provenance line then says what that tree is (lib/assert.sh source_label):
+# "tree: <sha>, clean" when it is the ref's commit with nothing uncommitted, and
+# WORKTREE-DIRTY or WORKTREE-MISMATCH, not evidence about the ref, when it is not.
 FROM_TREE="${TOCKMOX_P09_FROM_TREE:-0}"
 PAGE="${TOCKMOX_P09_PAGE:-docs/deployment/install.md}"
 # The H1: a section spans everything to the next heading of the same level,
@@ -318,14 +320,14 @@ step_begin() {
   local name="$1" needle="$2" sha
   _emit ""; _emit "=== STEP ${name} =============================================="
   sha="$(block_sha "$needle")" || { _emit "EXCEPTION: no block containing '${needle}' in ${PAGE} @ ${REF}"; return 1; }
-  provenance "$( [ "$FROM_TREE" = "1" ] && echo "WORKTREE (uncommitted; not evidence about ${REF})" || echo "$REF" )" "$PAGE" "block containing: ${needle}" "-" "$sha"
+  provenance "$(source_label "$REF" "$FROM_TREE")" "$PAGE" "block containing: ${needle}" "-" "$sha"
 }
 # step_begin_sec NAME SECTION NEEDLE ... the same, for a block_sec step.
 step_begin_sec() {
   local name="$1" sec="$2" needle="$3" sha
   _emit ""; _emit "=== STEP ${name} =============================================="
   sha="$(block_sec_sha "$sec" "$needle")" || { _emit "EXCEPTION: no single block containing '${needle}' under '${sec}' in ${PAGE} @ ${REF}"; return 1; }
-  provenance "$( [ "$FROM_TREE" = "1" ] && echo "WORKTREE (uncommitted; not evidence about ${REF})" || echo "$REF" )" "$PAGE" "block containing: ${needle} under ${sec}" "-" "$sha"
+  provenance "$(source_label "$REF" "$FROM_TREE")" "$PAGE" "block containing: ${needle} under ${sec}" "-" "$sha"
 }
 
 # block_gone STEP ... a step's block did not resolve to exactly one block on the page.
@@ -829,7 +831,7 @@ if ! done_step "$S"; then budget_left || yield "S19+"
   UNDEF_SECTION="### Then un-default k3s's StorageClass"
   _emit ""; _emit "=== STEP ${S} =============================================="
   sha="$(block_in_sha "$UNDEF_SECTION" 1)" || { _emit "EXCEPTION: no block 1 under '${UNDEF_SECTION}'"; block_gone "$S"; }
-  provenance "$( [ "$FROM_TREE" = "1" ] && echo "WORKTREE (uncommitted; not evidence about ${REF})" || echo "$REF" )" "$PAGE" "$UNDEF_SECTION" 1 "$sha"
+  provenance "$(source_label "$REF" "$FROM_TREE")" "$PAGE" "$UNDEF_SECTION" 1 "$sha"
   execute_begin "install.md un-default gate"; run_ws "$S" "$(block_in "$UNDEF_SECTION" 1)"; execute_end $?
   defaults="$(out_of "$S" | grep -c '(default)' | tr -d ' ')"
   record "$S" "un-default gate: exactly one class marked (default) on a stock install (the page: 'On a stock install it will NOT')" "1" "$defaults"
