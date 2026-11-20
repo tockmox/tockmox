@@ -41,10 +41,13 @@
 #      forge (replacing tockmox-site-repo when that named --from). --from is NOT
 #      touched yet.
 #   5. The cutover: the root Application is applied from the migrated tree.
-#   6. The check: every Application that read --from reads the forge, the root is
-#      synced to the forge's main, every Application is Synced and Healthy, and
-#      every resource each one managed before is still there (nothing pruned).
-#      Then the credential copy from step 3 is removed.
+#   6. The check: every Application that read --from reads the forge, the root and
+#      every Application that reads the forge are synced to the forge's main, every
+#      Application is Synced and Healthy, every resource each one managed before is
+#      still there (nothing pruned), and the identity layer's Authentik worker has
+#      started on the blueprints the cluster now holds (it restarts itself onto the
+#      ones the migration commit changed, a minute or more after Argo CD synced them,
+#      which Argo CD cannot see coming). Then the credential copy from step 3 is removed.
 #   7. Only now, unless --no-offsite-copy: bootstrap-forge again, with --from as the
 #      off-site copy (a push mirror of main), which pushes the migration commit there.
 #      --from-ca goes with it as --offsite-git-ca, the option bootstrap-forge already
@@ -103,7 +106,8 @@ with its whole history, and cut Argo CD over to it. Refuses before it writes any
   --namespace NS          the forge's namespace (default tockmox-forge)
   --argocd-namespace NS   default argocd
   --wait-seconds N        how long the cutover check waits (default 900). Settled means every Application
-                          reads Synced and Healthy twice in a row, 10 s apart
+                          reads Synced and Healthy at the forge's main, and the Authentik worker runs on the
+                          current blueprints, twice in a row, 10 s apart
   --accept-unsettled APP  an Application that is not Synced and Healthy before the move and that you accept
                           as it is (repeatable). It must still read the forge afterwards and lose nothing.
   --dry-run               run every refusal and show the migration commit; change nothing
@@ -262,6 +266,27 @@ if mode == "before":
     for b in bad: print("BAD " + b)
     sys.exit(0)
 now = load(now_p)
+def forge_revs(a):
+    # The revision Argo CD last compared for each source that reads the forge: status.sync.revision for one
+    # source, status.sync.revisions (in the order of spec.sources) for several.
+    s, st = a.get("spec", {}), a.get("status", {}).get("sync", {})
+    if s.get("sources"):
+        revs = st.get("revisions") or []
+        return [revs[i] if i < len(revs) else "" for i, x in enumerate(s["sources"]) if norm(x.get("repoURL", "")) == in_n]
+    return [st.get("revision", "")] if s.get("source") and norm(s["source"].get("repoURL", "")) == in_n else []
+# Synced and Healthy is Argo CD's word about the revision it last compared. Each Application that reads the
+# forge must have compared the forge's main (the root's revision when that is not known, as on a re-run),
+# or its Synced is about an older commit and says nothing about this one.
+want = forge_main or now.get(root, {}).get("status", {}).get("sync", {}).get("revision", "")
+for n, a in sorted(now.items()):
+    if n == root or n in accept or not want:
+        continue
+    old = [r for r in forge_revs(a) if r != want]
+    if old:
+        bad.append("%s is synced to %s, not the forge's main %s yet" % (n, (old[0] or "no revision")[:12], want[:12]))
+idapp = now.get("tockmox-identity", {}).get("spec", {}).get("destination", {}).get("namespace", "")
+if idapp and "tockmox-identity" not in accept:
+    print("IDNS " + idapp)
 for n, a in sorted(before.items()):
     if n not in now:
         bad.append("%s is gone" % n); continue
@@ -284,18 +309,153 @@ print("OK" if not bad else "WAIT %d" % len(bad))
 PY
 }
 
+# blueprints_check NS: has the identity layer's Authentik worker started on the blueprints the cluster holds?
+# The worker restarts ITSELF onto a changed blueprint (its liveness probe compares the mounted files with what
+# they were when it started; charts/tockmox-identity values.yaml, RESTART ONTO A CHANGED BLUEPRINT), and the
+# migration commit changes them (sso.apps.forge, the approvers watcher). That restart comes only after kubelet
+# has put the new ConfigMap into the running pod's volume, which can be a minute or more after Argo CD synced
+# it, and the worker reads Progressing while it starts again. Argo CD cannot see a restart that is still to
+# come, so this reads the worker: every file under its blueprint mounts must be the current ConfigMap's or
+# Secret's (kubelet has projected them), and the probe's own two hashes must agree (it started on them).
+# Prints BAD lines and WAIT N, or OK.
+blueprints_check() {
+  local ns="$1" d="$TMPD/bp" kind name pod ctr dirs
+  rm -rf "$d"; mkdir -p "$d"
+  if ! kubectl "${K[@]}" -n "$ns" get pods -o json > "$d/pods.json" 2>/dev/null; then
+    printf 'BAD tockmox-identity: cannot list the pods in %s\nWAIT 1\n' "$ns"; return 0
+  fi
+  python3 - "$d" > "$d/plan.txt" <<'PY'
+import json, sys
+d = sys.argv[1]
+try:
+    pods = json.load(open(d + "/pods.json")).get("items", [])
+except (OSError, ValueError):
+    pods = []
+plan = {}
+for p in pods:
+    m, sp, st = p.get("metadata", {}), p.get("spec", {}), p.get("status", {})
+    if m.get("deletionTimestamp") or st.get("phase") in ("Succeeded", "Failed"):
+        continue
+    vols = {v.get("name"): v for v in sp.get("volumes", [])}
+    for c in sp.get("containers", []):
+        mounts = []
+        for vm in c.get("volumeMounts", []):
+            path, v = vm.get("mountPath", ""), vols.get(vm.get("name"), {})
+            if not path.startswith("/blueprints/mounted/") or vm.get("subPath"):
+                continue
+            if v.get("configMap"):
+                src = ("configmap", v["configMap"].get("name", ""), v["configMap"].get("items"), v["configMap"].get("optional", False))
+            elif v.get("secret"):
+                src = ("secret", v["secret"].get("secretName", ""), v["secret"].get("items"), v["secret"].get("optional", False))
+            else:
+                continue
+            mounts.append({"dir": path.rstrip("/"), "kind": src[0], "name": src[1], "items": src[2], "optional": src[3]})
+        if not mounts:
+            continue
+        key = "%s %s" % (m.get("name", ""), c.get("name", ""))
+        plan[key] = mounts
+        if st.get("phase") != "Running":
+            print("BAD tockmox-identity: the Authentik worker %s is %s, not running yet" % (m.get("name", ""), st.get("phase", "?")))
+            continue
+        print("POD %s %s" % (key, " ".join(x["dir"] for x in mounts)))
+        for x in mounts:
+            print("OBJ %s %s" % (x["kind"], x["name"]))
+json.dump(plan, open(d + "/plan.json", "w"))
+PY
+  while read -r kind name; do
+    [[ -s "$d/$kind-$name.json" ]] && continue
+    kubectl "${K[@]}" -n "$ns" get "$kind" "$name" -o json > "$d/$kind-$name.json" 2>/dev/null || : > "$d/$kind-$name.json"
+  done < <(sed -n 's/^OBJ //p' "$d/plan.txt")
+  # In the worker: a sha256 of every file under each blueprint mount, then the probe's two hashes, made the way
+  # the probe makes them (the start file is written by the container's postStart).
+  # shellcheck disable=SC2016  # expanded by the pod's shell, not this one
+  local script='for m in "$@"; do for f in "$m"/*; do [ -f "$f" ] && printf "F %s %s\n" "$(sha256sum < "$f" | cut -c1-64)" "$f"; done; done
+printf "START %s\n" "$(cut -c1-64 /tmp/.blueprints-at-start 2>/dev/null)"
+printf "NOW %s\n" "$(cat /blueprints/mounted/*/* 2>/dev/null | sha256sum | cut -c1-64)"'
+  while read -r pod ctr dirs; do
+    # shellcheck disable=SC2086  # the mount directories, one word each
+    kubectl "${K[@]}" -n "$ns" exec "$pod" -c "$ctr" -- sh -c "$script" sh $dirs > "$d/exec-$pod-$ctr.txt" 2>/dev/null \
+      || printf 'EXECFAILED\n' >> "$d/exec-$pod-$ctr.txt"
+  done < <(sed -n 's/^POD //p' "$d/plan.txt")
+  python3 - "$d" <<'PY'
+import base64, hashlib, json, sys
+d = sys.argv[1]
+bad = [l[4:].rstrip("\n") for l in open(d + "/plan.txt") if l.startswith("BAD ")]
+plan = json.load(open(d + "/plan.json"))
+def obj(kind, name):
+    try:
+        return json.load(open("%s/%s-%s.json" % (d, kind, name)))
+    except (OSError, ValueError):
+        return None
+for key, mounts in sorted(plan.items()):
+    pod, ctr = key.split(" ", 1)
+    try:
+        out = open("%s/exec-%s-%s.txt" % (d, pod, ctr)).read().splitlines()
+    except OSError:
+        continue   # not running: named above
+    if "EXECFAILED" in out:
+        bad.append("tockmox-identity: the Authentik worker %s cannot be read yet (it may be starting)" % pod); continue
+    have = {l.split(" ", 2)[2]: l.split(" ", 2)[1] for l in out if l.startswith("F ") and len(l.split(" ", 2)) == 3}
+    start = next((l[6:].strip() for l in out if l.startswith("START ")), "")
+    now = next((l[4:].strip() for l in out if l.startswith("NOW ")), "")
+    want, missing = {}, []
+    for x in mounts:
+        o = obj(x["kind"], x["name"])
+        if not o:
+            if not x["optional"]:
+                missing.append("%s %s" % (x["kind"], x["name"]))
+            continue
+        files = {}
+        if x["kind"] == "configmap":
+            files.update({k: v.encode("utf-8") for k, v in (o.get("data") or {}).items()})
+            files.update({k: base64.b64decode(v) for k, v in (o.get("binaryData") or {}).items()})
+        else:
+            files.update({k: base64.b64decode(v) for k, v in (o.get("data") or {}).items()})
+        paths = {i.get("key"): i.get("path") for i in (x["items"] or [])} if x["items"] else {k: k for k in files}
+        for k, path in paths.items():
+            if k in files:
+                want["%s/%s" % (x["dir"], path)] = hashlib.sha256(files[k]).hexdigest()
+    if missing:
+        bad.append("tockmox-identity: cannot read %s, which the Authentik worker %s mounts" % (", ".join(missing), pod)); continue
+    if have != want:
+        n = len(set(have) ^ set(want)) + sum(1 for k in set(have) & set(want) if have[k] != want[k])
+        bad.append("tockmox-identity: the Authentik worker %s does not hold the current blueprints yet (%d file(s) differ: kubelet has not put them into its volume)" % (pod, n))
+    elif start and start != now:
+        bad.append("tockmox-identity: the Authentik worker %s has not restarted onto the blueprints it now holds (its liveness probe restarts it, and it reads Progressing while it starts)" % pod)
+for b in bad: print("BAD " + b)
+print("OK" if not bad else "WAIT %d" % len(bad))
+PY
+}
+
+# settle_eval WANT: the one predicate every "settled" read uses, the move's checks and the re-run's alike:
+# apps_check on $TMPD/apps-now.json (WANT is the forge's main, or empty on a re-run), then, when that is clean
+# and the identity layer is there, the Authentik worker (blueprints_check). Sets RESULT: BAD lines, then OK or WAIT N.
+settle_eval() {
+  local ns
+  RESULT="$(apps_check after "$1")"
+  ns="$(sed -n 's/^IDNS //p' <<<"$RESULT" | head -1)"
+  if grep -q '^OK$' <<<"$RESULT" && [[ -n "$ns" ]]; then RESULT="$(blueprints_check "$ns")"; fi
+  RESULT="$(grep -v '^IDNS ' <<<"$RESULT" || true)"
+}
+# settle_read WANT: read every Application now, then settle_eval.
+settle_read() {
+  kubectl "${K[@]}" -n "$ARGO_NS" get applications.argoproj.io -o json > "$TMPD/apps-now.json" 2>/dev/null || : > "$TMPD/apps-now.json"
+  settle_eval "$1"
+}
+
 apps_check before > "$TMPD/before.txt"
 grep -q '^NOROOT' "$TMPD/before.txt" && die "there is no Application ${ARGO_NS}/${ROOT_APP}: this command moves a Tockmox site whose root is ${ROOT_APP}"
 read -r _ ROOT_SRC ROOT_REV < <(grep '^ROOT ' "$TMPD/before.txt")
 if [[ "$ROOT_SRC" == "$IN_N" ]]; then
   # Settled means two reads in a row, SETTLE_S apart: one clean read can be a moment between
   # two syncs (an Application can read Synced and Healthy, then Progressing a breath later).
+  # The same predicate as the move's own checks (settle_eval), so a re-run straight after a move says what that
+  # move's last check said.
   cp "$TMPD/apps-before.json" "$TMPD/apps-now.json"
-  RESULT="$(apps_check after "")"
+  settle_eval ""
   if grep -q '^OK$' <<<"$RESULT"; then
     sleep "$SETTLE_S"
-    kubectl "${K[@]}" -n "$ARGO_NS" get applications.argoproj.io -o json > "$TMPD/apps-now.json" 2>/dev/null || : > "$TMPD/apps-now.json"
-    RESULT="$(apps_check after "")"
+    settle_read ""
     if grep -q '^OK$' <<<"$RESULT"; then
       ok "Argo CD already reads the built-in forge and every Application is Synced and Healthy, read twice ${SETTLE_S}s apart. Nothing to do."
       exit 0
@@ -616,8 +776,7 @@ settle_wait() {
   local deadline
   deadline=$(( $(date +%s) + WAIT_S )); RESULT=""; CLEAN=0
   while :; do
-    kubectl "${K[@]}" -n "$ARGO_NS" get applications.argoproj.io -o json > "$TMPD/apps-now.json" 2>/dev/null || : > "$TMPD/apps-now.json"
-    RESULT="$(apps_check after "$FORGE_MAIN")"
+    settle_read "$FORGE_MAIN"
     if grep -q '^OK$' <<<"$RESULT"; then CLEAN=$(( CLEAN + 1 )); else CLEAN=0; fi
     [[ "$CLEAN" -ge 2 ]] && break
     # A first clean read is always confirmed, even past the deadline; anything else stops there.
