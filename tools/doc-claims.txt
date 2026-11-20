@@ -788,7 +788,7 @@ states: [0-9]+ resources
 page:   docs/deployment/airgap.md
 claim:  exemptions at the 0.8.0 tree
 test:   sed -n '/^EXEMPT="/,/^"/p' tools/check-airgap.sh | sed '1d;$d' | sed '/^$/d' | sort -u | wc -l | tr -d ' '
-expect: 22
+expect: 21
 states: [0-9]+ exemptions
 
 # Every count that needs a render of ALL NINE charts, read from the
