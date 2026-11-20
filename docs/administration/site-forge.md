@@ -450,7 +450,11 @@ Application caught Healthy for a moment between two syncs does not end the
 wait. Then the credential copy is removed, and only then does `bootstrap-forge` run
 once more to make your old repository the off-site copy, which pushes the
 migration commit there. Until that moment the old repository is exactly what
-Argo CD read before the move.
+Argo CD read before the move. That second run upgrades the forge and connects
+its sign-in, which can set an Application syncing again, so the command then
+checks every Application once more, the same way (two clean reads in a row,
+within `--wait-seconds`), and prints its success line only after that last
+check. Nothing that can change an Application runs after it.
 
 **Success condition:** it ends with `every Application reads the built-in forge,
 Synced and Healthy, and nothing was pruned`. Run it again: it says `Nothing to
@@ -463,6 +467,9 @@ prints what is wrong and the one command that points Argo CD back at your old
 repository: your checkout's own `bootstrap/root.yaml`, which it never changed.
 Or fix the cause and run the move again: it carries on from what the forge
 holds, with the same migration commit.
+If it is only the last check that does not settle, after the off-site copy is
+made, the move itself is done and Argo CD reads the forge: wait, and run the
+command again; it says `Nothing to do` once every Application has settled.
 
 **Two things change for you.** The built-in forge runs no CI: workflows on your
 old repository no longer gate a change, and they see each change only when the

@@ -609,17 +609,25 @@ say "The cutover"
 kubectl "${K[@]}" apply -f "$TREE/bootstrap/root.yaml" >/dev/null || die "cannot apply the root Application. Argo CD still reads $FROM."
 ok "root Application applied from the migrated tree"
 
+# settle_wait: read every Application until two reads in a row, SETTLE_S apart, are clean, or WAIT_S
+# passes. Sets RESULT (the last read's verdict) and CLEAN (2 when settled). The move runs it after the
+# cutover and again as its very last step, after everything that can change an Application.
+settle_wait() {
+  local deadline
+  deadline=$(( $(date +%s) + WAIT_S )); RESULT=""; CLEAN=0
+  while :; do
+    kubectl "${K[@]}" -n "$ARGO_NS" get applications.argoproj.io -o json > "$TMPD/apps-now.json" 2>/dev/null || : > "$TMPD/apps-now.json"
+    RESULT="$(apps_check after "$FORGE_MAIN")"
+    if grep -q '^OK$' <<<"$RESULT"; then CLEAN=$(( CLEAN + 1 )); else CLEAN=0; fi
+    [[ "$CLEAN" -ge 2 ]] && break
+    # A first clean read is always confirmed, even past the deadline; anything else stops there.
+    [[ "$CLEAN" -eq 1 || "$(date +%s)" -lt "$deadline" ]] || break
+    if [[ "$CLEAN" -eq 1 ]]; then sleep "$SETTLE_S"; else sleep "${TOCKMOX_TEST_POLL_S:-10}"; fi
+  done
+}
+
 say "Checking every Application (up to ${WAIT_S}s; settled means two clean reads in a row, ${SETTLE_S}s apart)"
-deadline=$(( $(date +%s) + WAIT_S )); RESULT=""; CLEAN=0
-while :; do
-  kubectl "${K[@]}" -n "$ARGO_NS" get applications.argoproj.io -o json > "$TMPD/apps-now.json" 2>/dev/null || : > "$TMPD/apps-now.json"
-  RESULT="$(apps_check after "$FORGE_MAIN")"
-  if grep -q '^OK$' <<<"$RESULT"; then CLEAN=$(( CLEAN + 1 )); else CLEAN=0; fi
-  [[ "$CLEAN" -ge 2 ]] && break
-  # A first clean read is always confirmed, even past the deadline; anything else stops there.
-  [[ "$CLEAN" -eq 1 || "$(date +%s)" -lt "$deadline" ]] || break
-  if [[ "$CLEAN" -eq 1 ]]; then sleep "$SETTLE_S"; else sleep "${TOCKMOX_TEST_POLL_S:-10}"; fi
-done
+settle_wait
 if [[ "$CLEAN" -lt 2 ]]; then
   err "the cutover did not settle within ${WAIT_S}s:"
   sed -n 's/^BAD /         /p' <<<"$RESULT" >&2
@@ -629,7 +637,10 @@ if [[ "$CLEAN" -lt 2 ]]; then
   info "or wait and run this command again: it carries on from the forge's main and checks again."
   exit 1
 fi
-ok "every Application reads the built-in forge, Synced and Healthy, and nothing was pruned"
+# Not the success line: the off-site pass below runs bootstrap-forge again (it upgrades the forge and
+# connects its sign-in), which can set an Application syncing again, so the move is called done only
+# after the last check, at the end.
+ok "the cutover settled: every Application reads the forge, read twice ${SETTLE_S}s apart"
 if [[ -n "$CRED_COPY" ]]; then
   if kubectl "${K[@]}" -n "$ARGO_NS" delete secret "$CRED_COPY" >/dev/null 2>&1; then ok "${ARGO_NS}/${CRED_COPY} removed"
   else warn "could not remove ${ARGO_NS}/${CRED_COPY}; delete it by hand"; fi
@@ -652,6 +663,19 @@ if ! $NO_OFFSITE; then
     exit 2
   fi
 fi
+
+# The last check: nothing that can change an Application runs after it, and the success line is
+# printed only once it passes, so whatever reads Argo CD next reads it settled.
+say "Checking every Application again, after the last change (up to ${WAIT_S}s; two clean reads in a row, ${SETTLE_S}s apart)"
+settle_wait
+if [[ "$CLEAN" -lt 2 ]]; then
+  err "the cutover settled, but not every Application settled again within ${WAIT_S}s after the steps that followed it:"
+  sed -n 's/^BAD /         /p' <<<"$RESULT" >&2
+  info "nothing was undone. Argo CD reads the built-in forge; wait and run this command again:"
+  info "it reads every Application twice and says Nothing to do once they settle."
+  exit 1
+fi
+ok "every Application reads the built-in forge, Synced and Healthy, and nothing was pruned"
 
 say "Done"
 if $NO_OFFSITE; then info "$FROM is left as it is (--no-offsite-copy)."
