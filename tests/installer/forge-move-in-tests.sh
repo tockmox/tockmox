@@ -46,7 +46,9 @@ chmod +x "$MI_BIN/kubectl"
 # the site repository at the checkout's revision. After: per mi-mode (settle, stuck, prune; and
 # for the two-read settle, flip: clean once, then tockmox-ai Progressing; flicker: Progressing on
 # the second read only; moved-flip: already moved, clean once, then Progressing). Each read after
-# the move is counted in after-reads.
+# the move is counted in after-reads. Once the off-site pass has run (the stand-in bootstrap-forge
+# leaves offsite-ran), each read is also counted in offsite-reads: offsite-flip reads tockmox-ai
+# Progressing on the first two of them, then Healthy; offsite-stuck reads it Progressing on all.
 cat > "$MI_BIN/apps.py" <<'PY'
 import json, os, subprocess
 st = os.environ["MI_STATE"]
@@ -57,8 +59,15 @@ if moved:
     p = os.path.join(st, "after-reads")
     reads = (int(open(p).read().strip()) if os.path.exists(p) else 0) + 1
     open(p, "w").write("%d\n" % reads)
+post = 0
+if moved and os.path.exists(os.path.join(st, "offsite-ran")):
+    p = os.path.join(st, "offsite-reads")
+    post = (int(open(p).read().strip()) if os.path.exists(p) else 0) + 1
+    open(p, "w").write("%d\n" % post)
 ai_health = "Healthy"
 if moved and ((mode in ("flip", "moved-flip") and reads >= 2) or (mode == "flicker" and reads == 2)):
+    ai_health = "Progressing"
+if (mode == "offsite-flip" and 1 <= post <= 2) or (mode == "offsite-stuck" and post >= 1):
     ai_health = "Progressing"
 rev = open(os.path.join(st, "rev")).read().strip()
 if moved:
@@ -80,11 +89,13 @@ print(json.dumps({"items": [
 ]}))
 PY
 # bootstrap-forge's stand-in: record the arguments, then push --site's main to the forge as the real
-# one does (a main the forge holds must be an ancestor), and mark the forge installed.
+# one does (a main the forge holds must be an ancestor), and mark the forge installed. A run with
+# --offsite-git leaves offsite-ran: the real one upgrades the forge and connects its sign-in then,
+# which can set an Application syncing again after the cutover check.
 cat > "$MI_BIN/bootstrap-forge.sh" <<'BF'
 #!/usr/bin/env bash
 n=$(ls "$MI_STATE"/bf-args-* 2>/dev/null | wc -l | tr -d ' '); printf '%s\n' "$@" > "$MI_STATE/bf-args-$n"
-site=""; while [[ $# -gt 0 ]]; do [[ "$1" == --site ]] && site="$2"; shift; done
+site=""; while [[ $# -gt 0 ]]; do [[ "$1" == --site ]] && site="$2"; [[ "$1" == --offsite-git ]] && touch "$MI_STATE/offsite-ran"; shift; done
 cur="$(git --git-dir "$MI_FORGE" rev-parse -q --verify refs/heads/main || true)"
 if [[ -n "$cur" ]] && ! git -C "$site" merge-base --is-ancestor "$cur" HEAD 2>/dev/null; then
   git -C "$site" fetch -q "$MI_FORGE" main 2>/dev/null || true
@@ -355,13 +366,13 @@ assert_artifact "and so it keeps the credential copy and never offers --from to 
 dp_stop
 mi_start i9b flicker
 mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --kit-out "$D/kit" --age-recipient age1test
-assert_artifact "clean, Progressing, clean, clean: the Progressing read starts the count again, and the move succeeds on the fourth read" \
-  "echo $MI_STATUS; cat '$D/state/after-reads'; grep -c 'nothing was pruned' '$D/out/stdout'" "$(printf '0\n4\n1')"
+assert_artifact "clean, Progressing, clean, clean: the Progressing read starts the count again, and the cutover settles on the fourth read (two more for the last check)" \
+  "echo $MI_STATUS; cat '$D/state/after-reads'; grep -c 'nothing was pruned' '$D/out/stdout'" "$(printf '0\n6\n1')"
 dp_stop
 mi_start i9c settle
 mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --kit-out "$D/kit" --age-recipient age1test
-assert_artifact "a cutover that settles at once is still read twice before it is called done, and says so" \
-  "echo $MI_STATUS; cat '$D/state/after-reads'; grep -c 'settled means two clean reads in a row' '$D/out/stdout'" "$(printf '0\n2\n1')"
+assert_artifact "a cutover that settles at once is still read twice, and twice again after the off-site pass, before it is called done, and says so" \
+  "echo $MI_STATUS; cat '$D/state/after-reads'; grep -c 'settled means two clean reads in a row' '$D/out/stdout'; grep -c 'Checking every Application again, after the last change' '$D/out/stdout'" "$(printf '0\n4\n1\n1')"
 dp_stop
 mi_start i9d moved-flip
 mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --kit-out "$D/kit" --age-recipient age1test
@@ -373,4 +384,46 @@ mi_start i9e moved
 mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --kit-out "$D/kit" --age-recipient age1test
 assert_artifact "a re-run that reads every Application clean twice says Nothing to do and writes nothing" \
   "echo $MI_STATUS; cat '$D/state/after-reads'; grep -c 'read twice 0s apart. Nothing to do' '$D/out/stdout'; mi_writes" "$(printf '0\n2\n1\n0')"
+dp_stop
+
+# mi_read_ai: one read of Argo CD, as whatever reads it right after the move does (P16's next row): tockmox-ai's sync/health.
+mi_read_ai() {
+  env MI_STATE="$D/state" MI_FORGE="$D/root/tockmox/site.git" MI_IN="$MI_IN" MI_FROM="$MI_FROM" MI_FROM_SSH="$MI_FROM_SSH" \
+    python3 "$D/state/apps.py" \
+    | python3 -c 'import json,sys; a={x["metadata"]["name"]: x["status"] for x in json.load(sys.stdin)["items"]}["tockmox-ai"]; print(a["sync"]["status"] + "/" + a["health"]["status"])'
+}
+# mi_line TEXT: the number of the first stdout line holding TEXT (0 when none does).
+mi_line() { grep -n -F -- "$1" "$D/out/stdout" | head -1 | cut -d: -f1 | grep . || echo 0; }
+# mi_order A B C: "ordered" when A's line is after B's and B's after C's (each present), else the three numbers.
+mi_order() {
+  local a b c; a="$(mi_line "$1")"; b="$(mi_line "$2")"; c="$(mi_line "$3")"
+  if [ "$c" -gt 0 ] && [ "$b" -gt "$c" ] && [ "$a" -gt "$b" ]; then echo ordered; else echo "$a $b $c"; fi
+}
+
+path_begin "MI10" "the move's last check runs after the off-site pass (bootstrap-forge again, which can set an Application syncing again), and the success line only after it: whatever reads Argo CD next reads it settled, and the re-run says Nothing to do"
+mi_start i10 offsite-flip
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "an Application the off-site pass sets Progressing is waited on: two Progressing reads, then two clean, then the success line" \
+  "echo $MI_STATUS; ls '$D/state' | grep -c '^bf-args-'; cat '$D/state/offsite-reads' 2>/dev/null || echo 0; grep -c 'nothing was pruned' '$D/out/stdout' || true" \
+  "$(printf '0\n2\n4\n1')"
+assert_artifact "the success line comes after the off-site pass and after the last check's heading" \
+  "mi_order 'nothing was pruned' 'Checking every Application again, after the last change' 'the off-site copy (bootstrap-forge again'" "ordered"
+assert_artifact "the first read after the move, as P16 makes it, finds every Application Synced and Healthy" \
+  "mi_read_ai" "Synced/Healthy"
+: > "$D/state/calls.log"
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" -- --kit-out "$D/kit2" --age-recipient age1test
+assert_artifact "and the re-run reads every Application clean twice, says Nothing to do, exits 0 and writes nothing" \
+  "echo $MI_STATUS; grep -c 'Nothing to do' '$D/out/stdout' || true; mi_writes" "$(printf '0\n1\n0')"
+dp_stop
+mi_start i10b offsite-stuck
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --from-credentials "$D/creds" --wait-seconds 0 -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "an Application the off-site pass leaves Progressing fails the last check: exit 1, named, no success line, the re-run named as the way on" \
+  "echo $MI_STATUS; ls '$D/state' | grep -c '^bf-args-'; grep -c 'not every Application settled again' '$D/out/stderr' || true; grep -c 'tockmox-ai is Synced/Progressing' '$D/out/stderr' || true; grep -c 'nothing was pruned' '$D/out/stdout' || true; grep -c 'run this command again' '$D/out/stdout' || true" \
+  "$(printf '1\n2\n1\n1\n0\n1')"
+dp_stop
+mi_start i10c settle
+mi_run "${MI_OK[@]}" --site "$MI_SITE" --from "$MI_FROM" --no-offsite-copy -- --kit-out "$D/kit" --age-recipient age1test
+assert_artifact "with --no-offsite-copy the last check still runs, after the credential copy is removed, and the success line follows it" \
+  "echo $MI_STATUS; cat '$D/state/after-reads'; mi_order 'nothing was pruned' 'Checking every Application again, after the last change' 'tockmox-site-repo-before-move removed'" \
+  "$(printf '0\n4\nordered')"
 dp_stop
