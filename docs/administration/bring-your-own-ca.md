@@ -498,9 +498,8 @@ and `site-ca` is the only CA issuer left.
 `site/values/global.yaml` already has a top-level `global:` key. The snippet,
 appended as printed, adds a second one, and YAML keeps only the last, so
 `internalDomain` and every other global value are lost. Step 4 now says to edit
-the existing `certIssuer:` line instead. P12 pins the as-printed append as a
-known failure and merges the snippets itself, so it does not run a reader
-following that sentence.
+the existing `certIssuer:` line instead. P12 does that, and asserts that the
+merged file holds exactly one top-level `global:` key.
 
 What P12 does not reach:
 

@@ -238,7 +238,7 @@ if [ "$r" = "0|PASS" ] && ! grep -q '^RECORDED FAIL' "$TMP/out"; then ok "green:
 else bad "green: the whole path passes" "[${r}] $(grep -E '^RECORDED FAIL|^BLOCKED|^INFRA|^FAIL' "$TMP/out" | head -5 | tr '\n' ';' | cut -c1-500)"; fi
 n_rows="$(grep -c '^RECORDED PASS' "$TMP/out")"
 [ "$n_rows" -ge 30 ] && ok "green: ${n_rows} rows recorded, none of them red" || bad "green: row count" "${n_rows}"
-grep -q '^RECORDED (xfail): the global.yaml snippet appended as printed' "$TMP/out" && ok "green: the page's global.yaml snippet is pinned as a known defect (xfail)" || bad "green: xfail row for the global snippet"
+grep -q '^RECORDED PASS: .*edited as the page says: exactly one top-level global key' "$TMP/out" && ! grep -q '^RECORDED (xfail)' "$TMP/out" && ok "green: global.yaml edited as the page says holds exactly one top-level global key, and no row is an expected failure" || bad "green: one-global-key row, or a leftover xfail row"
 # every cluster call names its context, and every block was extracted: the verbatim sha is in the log
 if ! grep -v '^kubeseal ' "$FX/kcalls" | grep -v -e '--context' >/dev/null; then ok "green: every kubectl call the path and the page made carried --context ($(grep -vc '^kubeseal ' "$FX/kcalls") calls)"
 else bad "green: a kubectl call without --context" "$(grep -v '^kubeseal ' "$FX/kcalls" | grep -v -e '--context' | head -2)"; fi
@@ -271,6 +271,7 @@ plant "an issued certificate signed by another CA (the page's own output)" "open
 plant "a second CA issuer still present" "exactly one ClusterIssuer has a CA secret" 'printf "NAME CA\nsite-ca site-ca-root\ntockmox-ca tockmox-ca-root\n" > "$FX/issuers.txt"'
 plant "a stray file left in the site repository clone" "the site repository clone holds nothing but the page's commit" ': > "$FX/knob-stray"'
 plant "a site repository whose remote refuses the push" "origin's main equals the local HEAD" 'git -C "$RUN/site" remote set-url origin "$RUN/does-not-exist.git"'
+plant "a generated global.yaml that already carries a second top-level global key" "exactly one top-level global key" 'printf "global:\n  extra: 1\n" >> "$RUN/site/site/values/global.yaml"; git -C "$RUN/site" commit -qam x; git -C "$RUN/site" push -q origin main'
 plant "a global.yaml with no certIssuer line to merge into" "global.yaml: certIssuer reads site-ca once" 'sed -i "/certIssuer/d" "$RUN/site/site/values/global.yaml"; git -C "$RUN/site" commit -qam x; git -C "$RUN/site" push -q origin main'
 
 # the end-date case needs a CA that is already expired: the path generates its own, so plant one in its state first
@@ -444,6 +445,18 @@ setup_run "$RUN"; : > "$FX/knob-cacrt-other"
 r="$(run_p12 "$TMP/mtree/paths/m-selffp.sh" "$RUN")"
 if ! grep -F "RECORDED FAIL: step 5: the ca.crt fingerprint" "$TMP/out" >/dev/null; then ok "mutation: comparing the ca.crt fingerprint with itself loses the row, so the fixture's red row is the guard (outcome ${r#*|})"
 else bad "mutation: self-compared fingerprint" "the row still failed"; fi
+# the one-global-key row (it replaced an xfail row): a copy without the assertion, and a copy with it inverted, must each stop
+# catching the planted second global key that the real P12 turns red
+mut "$P12" "$TMP/mtree/paths/m-noglobrow.sh" '"1" "$(grep -c '"'"'^global:'"'"' "${SITE_REPO}/${GLOB_PATH}" | tr -d '"'"' '"'"')"' '"1" "1"'
+setup_run "$RUN"; printf 'global:\n  extra: 1\n' >> "$RUN/site/site/values/global.yaml"; git -C "$RUN/site" commit -qam x; git -C "$RUN/site" push -q origin main
+r="$(run_p12 "$TMP/mtree/paths/m-noglobrow.sh" "$RUN")"
+if ! grep -F "RECORDED FAIL: " "$TMP/out" | grep -F "exactly one top-level global key" >/dev/null; then ok "mutation: a global-key row that no longer reads the file loses the row, so the planted second global key is what the real row catches (outcome ${r#*|})"
+else bad "mutation: global-key row with the read removed" "the row still failed"; fi
+mut "$P12" "$TMP/mtree/paths/m-invglobrow.sh" '    "1" "$(grep -c '"'"'^global:'"'"' "${SITE_REPO}/${GLOB_PATH}" | tr -d '"'"' '"'"')"' '    "2" "$(grep -c '"'"'^global:'"'"' "${SITE_REPO}/${GLOB_PATH}" | tr -d '"'"' '"'"')"'
+setup_run "$RUN"
+r="$(run_p12 "$TMP/mtree/paths/m-invglobrow.sh" "$RUN")"
+if grep -F "RECORDED FAIL: " "$TMP/out" | grep -F "exactly one top-level global key" >/dev/null && [ "${r#*|}" = PRODUCT_FAIL ]; then ok "mutation: an inverted global-key row (expects two) turns the green run red, so the row is not vacuous"
+else bad "mutation: inverted global-key row" "[${r}] the green run did not fail"; fi
 # the unsealed Secret compared with what the cluster says about itself
 mut "$P12" "$TMP/mtree/paths/m-selfseal.sh" 'record "$S" "the unsealed ${SITE_SECRET} carries the generated CA'"'"'s certificate (fingerprint)" "$GEN_FP" \' \
   'record "$S" "the unsealed ${SITE_SECRET} carries the generated CA'"'"'s certificate (fingerprint)" "$(openssl x509 -in "${STATE}/${S}.unsealed.crt" -noout -fingerprint -sha256 2>/dev/null | verdict fingerprint)" \'

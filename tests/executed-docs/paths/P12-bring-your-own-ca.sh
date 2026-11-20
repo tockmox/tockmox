@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # tockmox:route=argocd-helm
 #
-# PATH P12 ... `docs/administration/bring-your-own-ca.md`, run. The page says of itself that it has not been
-# executed. This path runs its ten bash blocks, VERBATIM, out of the page at the ref under test (lib/extract-block.sh,
+# PATH P12 ... `docs/administration/bring-your-own-ca.md`, run. The page records what this path proves and what it does
+# not reach. This path runs its ten bash blocks, VERBATIM, out of the page at the ref under test (lib/extract-block.sh,
 # never retyped), pasted into an interactive zsh the way P09 does, against the install P09 made on the same throwaway.
 # It runs AFTER P09 and only when P09 ended PASS. It does not need P11 (the recovery path) to have run, and the lane
 # runs it after P11 so that swapping the CA cannot disturb it.
@@ -52,7 +52,8 @@
 #   - the commit. The page ends step 4 with "commit ... and let ArgoCD sync" and gives no command. The harness writes
 #     the page's YAML blocks (also extracted, not retyped) into the site repository, commits the four files (and the
 #     sealing certificate, when S00 just put it into the repository), pushes to origin, and asks ArgoCD to refresh. The two values snippets are MERGED into the generated files, because
-#     appending the global one as printed repeats the top-level key (a row pins that as a known defect).
+#     appending the global one as printed repeats the top-level key, which the page now says not to do: it says to edit the
+#     existing certIssuer line, and a row asserts the merged file holds exactly one top-level global key.
 #   - the waits, each bounded, each recorded in the notes with what it waited for.
 #
 # WHEN IT RUNS. run.sh discovers paths/P*.sh and gives this one P09's route group, so a plain run.sh reaches it. It does
@@ -466,10 +467,8 @@ if ! done_step "$S"; then budget_left || yield "S06+"
   GLOB_PATH="$(printf '%s\n' "$GLOB_YAML" | sed -n '1s/^# //p')"
   mkdir -p "$(dirname "${SITE_REPO}/${ISSUER_PATH}")"
   printf '%s\n' "$ISSUER_YAML" > "${SITE_REPO}/${ISSUER_PATH}"
-  # the known defect, shown on a copy: the global snippet appended as printed repeats the top-level key, and YAML keeps the last one
-  { cat "${SITE_REPO}/${GLOB_PATH}"; printf '%s\n' "$GLOB_YAML"; } > "${STATE}/global-appended.yaml"
-  record "$S" "the global.yaml snippet appended as printed leaves one top-level global key (xfail: the generated file already has one, and YAML keeps only the last)" \
-    "1" "$(grep -c '^global:' "${STATE}/global-appended.yaml" | tr -d ' ')" xfail
+  # the page says to EDIT the existing certIssuer line, not append the snippet (an append adds a second top-level global key, and YAML
+  # keeps only the last). This edit does that; the row after it asserts the result.
   python3 - "${SITE_REPO}/${GLOB_PATH}" "$GLOB_YAML" <<'PY'
 import re, sys
 path, snippet = sys.argv[1], sys.argv[2]
@@ -479,6 +478,8 @@ t, n = re.subn(r"(?m)^(  certIssuer:).*$", r"\1 " + want, s)
 assert n == 1, "global.yaml has %d certIssuer lines" % n
 open(path, "w").write(t)
 PY
+  record "$S" "${GLOB_PATH}, edited as the page says: exactly one top-level global key (an appended snippet would leave two)" \
+    "1" "$(grep -c '^global:' "${SITE_REPO}/${GLOB_PATH}" | tr -d ' ')"
   if grep -q '^certIssuer:' "${SITE_REPO}/${PLAT_PATH}"; then
     record "$S" "${PLAT_PATH} has no certIssuer key of its own yet, so the snippet can be appended" "absent" "present"
   else
