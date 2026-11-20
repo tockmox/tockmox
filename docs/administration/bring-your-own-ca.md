@@ -26,9 +26,15 @@ means for trust, backups and a rebuilt cluster.
 starts where its option table says "your own ACME or corporate issuer" and the
 sentence stops.
 
-**Nothing on this page has been executed against a cluster.** The facts about
-where the Secret lives and what the chart renders are read from the chart and
-pinned by the docs claims gate; the procedures are not run. Read [what is not certified here](#what-is-not-certified-here) before you
+**The executed-docs harness runs this page.** Its path P12
+(`tests/executed-docs/paths/P12-bring-your-own-ca.sh`) pastes the page's ten
+command blocks, verbatim, into a shell on a throwaway cluster that the install
+path has just built, places a CA it generated, and asserts on what each step
+says it prints: steps 1 to 3, step 4's adoption of the chart's key and the
+switch to the new issuer, and step 5's proof that an issued certificate chains
+to the supplied CA. It ran green on 2026-11-19, with one defect recorded in step
+4's values snippets. Some facts are still read from the chart rather than run,
+and step 4's adopted key is sealed but never applied. Read [what is not certified here](#what-is-not-certified-here) before you
 rely on the move in [step 4](#4-move-the-key-without-re-minting-it--required).
 
 ## Which CA is yours to choose
@@ -291,6 +297,16 @@ global:
   certIssuer: site-ca
 ```
 
+**Edit the two values files; do not append the snippets to them.** Each snippet
+shows where a key sits. The installer writes `site/values/global.yaml` with a
+top-level `global:` key that already holds a `certIssuer:` line: change that
+line to `certIssuer: site-ca` and leave the rest of the file as it is. Appended
+as printed, the snippet adds a second top-level `global:` key, YAML keeps only
+the last, and `internalDomain` and every other global value are lost. Add the
+`certIssuer:` block to `site/values/platform.yaml` as shown when that file has no
+top-level `certIssuer:` key; when it has one, set `enabled: false` under its
+`selfSigned:` instead.
+
 **Set both values in the same commit as the issuer.** The chart refuses to render
 when `global.certIssuer` still names `tockmox-ca` while `selfSigned.enabled` is
 false, because nothing would create that issuer, and it says so. That guard is
@@ -448,29 +464,73 @@ only once nothing issues from it.
 
 ## What is not certified here
 
-**This page has not been executed against a cluster, and the executed-docs
-harness has no path for it: that is not proven.** The harness runs nine paths and
-none of them places an operator-supplied CA, so the second half of the card behind
-this page, "the executed-docs harness runs that path green on a fresh cluster", is
-open.
+**The executed-docs harness runs this page, as path P12, and it ran green on
+2026-11-19.** P12 runs after the install path, P09, on the same throwaway cluster
+and site repository, and replaces that install's CA. What it runs, in order:
+
+- The prerequisite, when `secrets/sealed-secrets-cert.pem` is missing from the
+  site repository: the key export of
+  [escrow the sealed-secrets key](../operations/sealed-secrets-key-escrow.md),
+  step 2, as printed and then without `--dry-run`, as that page says.
+- This page's ten command blocks, verbatim, pasted into an interactive shell
+  with the YOU SUPPLY values filled in: before you begin, step 1 (both
+  blocks), step 2, step 4's adoption and its fingerprint read, step 3, and
+  step 5 (all three blocks). The adoption runs
+  before step 3 because both write `secrets/site-ca-root.sealed.yaml`: the
+  adopted file is checked and set aside, and the file step 3 seals is the one
+  delivered.
+- The commit, which the page gives no command for. The harness writes the
+  page's three YAML blocks into the site repository, merging the two values
+  snippets into the files the installer wrote, commits them with the sealed
+  Secret in one commit, pushes to the site repository's remote, and asks ArgoCD
+  to refresh.
+
+What it proves, each against a value held outside the cluster: step 1 prints the
+namespace that holds `tockmox-ca-root`; step 2's checks print what the page
+says; the unsealed `site-ca-root` carries the supplied certificate and its key;
+the `site-ca` issuer reads `Ready`; every Certificate reads `True` on `site-ca`,
+apart from the two backup-plugin certificates step 5 names; an issued
+certificate's `ca.crt` has the supplied CA's fingerprint and `openssl verify`
+accepts it, while the same certificate is rejected against the chart's own CA;
+and `site-ca` is the only CA issuer left.
+
+**One defect is recorded, in step 4's values snippets.** The installer's
+`site/values/global.yaml` already has a top-level `global:` key. The snippet,
+appended as printed, adds a second one, and YAML keeps only the last, so
+`internalDomain` and every other global value are lost. Step 4 now says to edit
+the existing `certIssuer:` line instead. P12 pins the as-printed append as a
+known failure and merges the snippets itself, so it does not run a reader
+following that sentence.
+
+What P12 does not reach:
+
+- A CA it did not make. Its CA is a throwaway EC key; a corporate CA, an RSA key
+  and an intermediate with its chain are not exercised.
+- The adoption, applied. Step 4's adopted file is sealed and read, never
+  applied, so the key bytes are shown to arrive unchanged for a supplied CA and
+  not for the chart's own.
+- Clients. No browser is involved and the consoles are not restarted.
+- Going back to the chart's CA, and what the chart's CA does at renewal: neither
+  has a block.
+- The built-in forge route. There the commit is a pull request, which a harness
+  does not approve, so P12 runs on the external route only.
 
 What is read from the chart rather than run:
 
-- The Secret's namespace, its default name `tockmox-ca-root`, and the guard that
-  refuses `global.certIssuer: tockmox-ca` with the chart's CA disabled. The claims
-  registry pins the first two to the chart, so a change to either turns the docs
-  gate red.
+- The guard that refuses `global.certIssuer: tockmox-ca` with the chart's CA
+  disabled. P12 sets both values in one commit, so the refusal never fires.
+- The Secret's namespace and its default name `tockmox-ca-root`. P12 reads them
+  on one cluster; the claims registry pins both to the chart, so a change to
+  either turns the docs gate red.
 - That a `ClusterIssuer` of type `ca` reads its Secret from cert-manager's
   cluster resource namespace is the upstream design as the chart's own template
-  comment records it; it was not re-measured for this page.
+  comment records it. P12 shows the issuer `Ready` with the Secret in that
+  namespace; no other namespace is tried.
 
 What is believed:
 
 - That adopting the chart's key (step 4) leaves the CA's fingerprint unchanged and
   re-issues every console certificate from it without a client re-trust.
-- That cert-manager re-issues a Certificate whose issuer changed, so that no
-  console is left on the retired issuer.
-- That the `site-apps` Application can apply a cluster-scoped `ClusterIssuer`.
 - That an intermediate's chain reaches the issued certificate and `ca.crt` in the
   order step 2 gives.
 - What the chart's own CA does at its renewal: whether the key is kept depends on
