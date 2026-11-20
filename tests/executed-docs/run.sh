@@ -125,6 +125,9 @@ else
   echo "executed-documentation harness"
   echo "  ref under test : ${REF}"
   echo "  resolved commit: ${COMMIT}"
+  # Set by the p09 lane, whose paths read their pages from the working tree: whether that tree IS the ref
+  # (lib/assert.sh tree_source; "tree: <sha>, clean", or a WORKTREE-DIRTY or WORKTREE-MISMATCH tag)
+  [ -z "${TOCKMOX_TREE_SOURCE:-}" ] || echo "  tree under test: ${TOCKMOX_TREE_SOURCE}"
   echo "  started        : ${STAMP}"
   echo "  runner         : $(uname -s)/$(uname -m)"
   echo "  report         : ${REPORT}"
@@ -785,6 +788,13 @@ done
   echo ""
   echo "================================================================"
   echo "RUN SUMMARY  ref=${REF}  commit=${COMMIT}"
+  if [ -n "${TOCKMOX_TREE_SOURCE:-}" ]; then
+    echo "  tree under test: ${TOCKMOX_TREE_SOURCE}"
+    case "$TOCKMOX_TREE_SOURCE" in
+      "tree: ${COMMIT}, clean") ;;
+      *) echo "  the pages were read from a tree that is not ${REF} (${COMMIT}): what ran is not evidence about ${REF}" ;;
+    esac
+  fi
   echo "  paths executed : ${RAN}"
   echo "  paths failed   : ${FAILED}"
   echo "  paths absent   : ${SKIPPED}  (not documented at this ref)"

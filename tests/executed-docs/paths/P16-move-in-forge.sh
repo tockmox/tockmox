@@ -389,7 +389,7 @@ finish_path() {
   path_finish
 }
 
-record_success_conditions "$PAGE_FILE" "${PAGE} @ $( [ "$FROM_TREE" = "1" ] && echo WORKTREE || echo "$REF" )"
+record_success_conditions "$PAGE_FILE" "${PAGE} @ $(source_label "$REF" "$FROM_TREE")"
 
 # ============================================================== THE STEPS
 
@@ -506,7 +506,7 @@ if ! done_step "$S"; then budget_left || yield "S04+"
   reset_rows "$S"
   _emit ""; _emit "=== STEP ${S} =============================================="
   if [ -s "${STATE}/block.sh" ]; then
-    provenance "$( [ "$FROM_TREE" = "1" ] && echo WORKTREE || echo "$REF" )" "$PAGE" "${SECTION}, the bash block containing '${NEEDLE}'" "-" \
+    provenance "$(source_label "$REF" "$FROM_TREE")" "$PAGE" "${SECTION}, the bash block containing '${NEEDLE}'" "-" \
       "$(sha256sum < "${STATE}/block.sh" | cut -d' ' -f1)"
     _emit "SUBSTITUTION: YOUR_SITE_CHECKOUT -> ${SITE_DIR}; YOUR_SITE_REPOSITORY_HTTPS_URL -> \"\$P16_FROM_URL\" (exported, not printed); YOUR_AGE_PUBLIC_KEY -> the path's age identity's public key  (YOU SUPPLY on the page)"
     [ -z "$FROM_CA" ] || _emit "EDIT AS THE PAGE SAYS: 'if a private CA signed that forge's certificate, the CA as a PEM file, given as --from-ca FILE': --from-ca and the forge's ca.crt are added after --from-credentials"

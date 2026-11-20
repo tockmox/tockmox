@@ -188,6 +188,8 @@ lib/p16-move-in-forge.py  P16's verdicts: where the root reads, whether every Ap
                        managed, and the GLUE that puts P09's site on an external forge (the repoURL rewrite, Argo CD's credential)
 move-in-rows-test.sh   hermetic proof of P16's rows: the verdicts, the page block and the installer names it relies on, the path
                        against a stub product and real git that breaks one row at a time, and its gate (also run by selftest.sh)
+tree-source-test.sh    hermetic proof that a run reading pages from the working tree names that tree: "tree: <sha>, clean"
+                       only when it is the ref's commit with nothing uncommitted (lib/assert.sh tree_source; also run by selftest.sh)
 selftest.sh            hermetic proof of the machinery above
 pages-no-cluster.sh    the six no-cluster pages (values-contract, customising, capabilities,
                        configuration, platform-management, verify): every bash block extracted

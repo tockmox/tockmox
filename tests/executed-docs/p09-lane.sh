@@ -8,7 +8,8 @@
 #   1. create the throwaway (throwaway-cluster.sh create; its capacity gate refuses first if it does not fit)
 #   2. run.sh P04 P05 against it (TOCKMOX_EXISTING_KUBECONFIG), the state install.md starts from
 #   3. serve this tree from inside it (site-repo-server.sh), so the Applications read THIS tree. On the
-#      external route also the site repository's remote (see "THE EXTERNAL ROUTE'S REMOTE" below)
+#      external route also the site repository's remote (see "THE EXTERNAL ROUTE'S REMOTE" below). First record
+#      whether this tree IS the ref under test (see "THE TREE UNDER TEST" below)
 #   4. run.sh P09 against it, the route TOCKMOX_P09_ROUTE names (built-in or external), its blocks read from
 #      this tree's install.md (TOCKMOX_P09_FROM_TREE=1)
 #   5. on a kept built-in run, keep P09's recovery kit and the age identity that opens it as the Secret
@@ -141,6 +142,13 @@
 # The forge's name and the token never reach this job's log or its report: the provisioner's lines name
 # the Secret and its keys, and P09 replaces the host in what it prints (lib/p09-offsite.sh).
 #
+# THE TREE UNDER TEST. Step 3 serves this tree's bytes on disk and step 4 reads its pages from disk
+# (TOCKMOX_P09_FROM_TREE=1), so what ran is TOCKMOX_DOCS_REF only when the tree's HEAD is that ref's commit and git
+# status --porcelain is empty. Before step 3 the lane records which, with lib/assert.sh's tree_source (the same helper
+# that writes every path's SOURCE line), as TOCKMOX_TREE_SOURCE: "tree: <sha>, clean", or a WORKTREE-DIRTY or
+# WORKTREE-MISMATCH tag that says the run is not evidence about the ref. It prints it at step 3 and again when the
+# lane ends (and in the report it writes when it stops), and run.sh prints it in its report's header and run summary.
+#
 # It is what the executed-docs workflow runs on a dispatch with lane=p09, and it runs the same from a
 # workstation whose credential the harness accepts (a tockmox-test ServiceAccount token, on a network the
 # guest can call back from). Inputs: TOCKMOX_DOCS_REF, TOCKMOX_SUBSTRATE_CONTEXT, TOCKMOX_TEST_NAMESPACE,
@@ -169,6 +177,8 @@ P09_STARTED=0
 # Why the lane itself stopped, before or around run.sh. run.sh writes its own report for P04, P05 and P09; a stop
 # here would leave the workflow's report upload with nothing to send, so finish() writes one line in its place.
 STOPPED=""
+# THE TREE UNDER TEST is this run's own record, made at step 3; one inherited from a caller says nothing about this run
+unset TOCKMOX_TREE_SOURCE
 refuse() { STOPPED="REFUSING: $1"; echo "$STOPPED" >&2; exit 2; }
 fail() { STOPPED="lane: $1"; echo "$STOPPED" >&2; exit 1; }
 # infra REASON ... what the lane could not provide is the environment's fault, not the product's and not a pass: exit 5,
@@ -181,9 +191,12 @@ finish() {
   [ -z "${OFFDIR:-}" ] || rm -rf "$OFFDIR"
   [ -z "${MOVE_DIR:-}" ] || rm -rf "$MOVE_DIR"
   if [ -n "$STOPPED" ]; then
-    printf 'p09 lane (%s): exit %s\n%s\n' "${TOCKMOX_DOCS_REF}" "$rc" "$STOPPED" \
-      >"${TOCKMOX_WORKDIR}/report-p09-lane-$(date -u +%Y%m%dT%H%M%SZ).txt" || true
+    { printf 'p09 lane (%s): exit %s\n' "${TOCKMOX_DOCS_REF}" "$rc"
+      [ -z "${TOCKMOX_TREE_SOURCE:-}" ] || printf '%s\n' "$TOCKMOX_TREE_SOURCE"
+      printf '%s\n' "$STOPPED"
+    } >"${TOCKMOX_WORKDIR}/report-p09-lane-$(date -u +%Y%m%dT%H%M%SZ).txt" || true
   fi
+  [ -z "${TOCKMOX_TREE_SOURCE:-}" ] || echo "lane: what ran was ${TOCKMOX_TREE_SOURCE}"
   # KEEP keeps an install. A lane that stopped before P09 began has none: there is nothing on the
   # VM to inspect, rebuild or drill, and left standing it holds the rig against the next create for
   # as long as its keep-until says (four such VMs on 2026-11-10, each destroyed by hand).
@@ -427,6 +440,15 @@ if [ "$EXT_REMOTE" = 1 ]; then
 else
   bash "${PROV}/site-repo-server.sh" up >/dev/null
 fi
+# THE TREE UNDER TEST (header): is what is served now, and read at step 4, the ref's commit and nothing else?
+# Recorded once, here, before the push. A lib/assert.sh that cannot be read leaves no answer, and no answer is
+# never read as clean.
+TOCKMOX_TREE_SOURCE="$(bash -c '. "$1" && tree_source "$2" "$3"' _ "${HERE}/lib/assert.sh" "$TREE" "$TOCKMOX_DOCS_REF" 2>/dev/null)" \
+  || TOCKMOX_TREE_SOURCE=""
+[ -n "$TOCKMOX_TREE_SOURCE" ] \
+  || TOCKMOX_TREE_SOURCE="WORKTREE-MISMATCH (the tree could not be compared with ${TOCKMOX_DOCS_REF}; not evidence about ${TOCKMOX_DOCS_REF})"
+export TOCKMOX_TREE_SOURCE
+echo "lane 3: the tree under test is ${TOCKMOX_TREE_SOURCE}"
 bash "${PROV}/site-repo-server.sh" push "$TREE" tockmox "$TAG" >/dev/null
 TM_URL="$(bash "${PROV}/site-repo-server.sh" url tockmox)"
 [ -n "$TM_URL" ] || fail "site-repo-server gave no URL"

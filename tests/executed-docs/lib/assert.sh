@@ -54,6 +54,45 @@ provenance() {
   _emit "SHA256:   ${5}"
 }
 
+# What a SOURCE line names as the ref. A path that reads its pages at the ref (git show) names the ref. A path that
+# reads them from the working tree instead (its *_FROM_TREE=1, which the p09 lane sets for every path it runs) read
+# bytes on disk, and those are the ref's only when the tree's HEAD is the ref's commit and git status --porcelain is
+# empty. Then the line says "tree: <sha>, clean", and the run is evidence about that commit. Otherwise it is not, and
+# the tag says why:
+#   WORKTREE-DIRTY     HEAD is the ref's commit, but the tree holds an uncommitted change (an edit, an untracked file)
+#   WORKTREE-MISMATCH  HEAD is not the ref's commit (a commit off it), or either one does not resolve
+# The comparison and every spelling of it live here, once. A path never writes its own WORKTREE text: an unconditional
+# "WORKTREE (not evidence about <ref>)" was printed on every lane run, clean or not, so no lane pass ever read as
+# evidence about its commit.
+#
+#   tree_source <tree> <ref>         the label for that tree against that ref
+#   source_label <ref> <from-tree>   what a path passes to provenance: the ref itself, or, when <from-tree> is 1,
+#                                    tree_source of the tree this library sits in (the tree the pages are read from)
+_ASSERT_TREE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." 2>/dev/null && pwd)"
+tree_source() {
+  local tree="$1" ref="$2" head want changes n
+  head="$(git -C "$tree" rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null)" || head=""
+  want="$(git -C "$tree" rev-parse --verify --quiet "${ref}^{commit}" 2>/dev/null)" || want=""
+  if [ -z "$head" ] || [ -z "$want" ] || [ "$head" != "$want" ]; then
+    printf 'WORKTREE-MISMATCH (tree: HEAD %s, %s is %s; not evidence about %s)\n' \
+      "${head:-unresolved}" "$ref" "${want:-unresolved}" "$ref"
+    return 0
+  fi
+  # --no-optional-locks: reading the status must not write the tree's index. --untracked-files=normal: an untracked
+  # file is served and read like any other, so a configuration that hides them must not hide them here.
+  if ! changes="$(git --no-optional-locks -C "$tree" status --porcelain --untracked-files=normal 2>/dev/null)"; then
+    printf 'WORKTREE-DIRTY (tree: %s, git status could not be read; not evidence about %s)\n' "$head" "$ref"
+  elif [ -n "$changes" ]; then
+    n="$(printf '%s\n' "$changes" | wc -l | tr -d ' ')"
+    printf 'WORKTREE-DIRTY (tree: %s with %s uncommitted change(s); not evidence about %s)\n' "$head" "$n" "$ref"
+  else
+    printf 'tree: %s, clean\n' "$head"
+  fi
+}
+source_label() {
+  if [ "${2:-0}" = 1 ]; then tree_source "$_ASSERT_TREE" "$1"; else printf '%s\n' "$1"; fi
+}
+
 verbatim() {
   # verbatim <command text> ... echo exactly what is about to run
   _emit "--- verbatim from the page -------------------------------------"

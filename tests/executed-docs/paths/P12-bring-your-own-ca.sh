@@ -267,7 +267,7 @@ page_block() {
     _emit "FAIL:     ${name}'s block did not resolve; replaying the verdicts so far and stopping here"
     finish_path; exit $?
   }
-  provenance "$( [ "$FROM_TREE" = "1" ] && echo "WORKTREE (uncommitted; not evidence about ${REF})" || echo "$REF" )" "$PAGE" "$sec: ${needle}" "-" "$sha"
+  provenance "$(source_label "$REF" "$FROM_TREE")" "$PAGE" "$sec: ${needle}" "-" "$sha"
 }
 # run_page NAME DESC ... run BT as a documented block inside an execute phase
 run_page() {
@@ -320,7 +320,7 @@ if ! done_step "$S"; then budget_left || yield "S00+"
         _emit "FAIL:     ${S}'s block did not resolve; replaying the verdicts so far and stopping here"
         finish_path; exit $?
       }
-      provenance "$( [ "$FROM_TREE" = "1" ] && echo "WORKTREE (uncommitted; not evidence about ${REF})" || echo "$REF" )" "$ESCROW_PAGE" "$ESCROW_SECTION: bootstrap-secrets --mode reuse" "-" "$(cat "${STATE}/${S}.sha")"
+      provenance "$(source_label "$REF" "$FROM_TREE")" "$ESCROW_PAGE" "$ESCROW_SECTION: bootstrap-secrets --mode reuse" "-" "$(cat "${STATE}/${S}.sha")"
       printf '%s\n' "$BT" > "${STATE}/${S}.printed"
       execute_begin "sealed-secrets-key-escrow.md step 2, the key export as printed (its --dry-run)"; run_ws "${S}-dry" "$BT"; execute_end $?
       record "$S" "the dry run changes nothing: ${CERT_REL} is still absent" "absent" "$( [ -e "$CERT_FILE" ] && echo present || echo absent )"
@@ -458,7 +458,7 @@ if ! done_step "$S"; then budget_left || yield "S06+"
   [ -n "$ISSUER_YAML" ] && [ -n "$PLAT_YAML" ] && [ -n "$GLOB_YAML" ] || {
     record "$S" "the page's three YAML blocks resolve" "three blocks" "missing or ambiguous"; finish_path; exit $?; }
   for y in ISSUER_YAML PLAT_YAML GLOB_YAML; do
-    provenance "$( [ "$FROM_TREE" = "1" ] && echo "WORKTREE" || echo "$REF" )" "$PAGE" "yaml block ${y}" "-" "$(printf '%s\n' "${!y}" | sha256sum | cut -d' ' -f1)"
+    provenance "$(source_label "$REF" "$FROM_TREE")" "$PAGE" "yaml block ${y}" "-" "$(printf '%s\n' "${!y}" | sha256sum | cut -d' ' -f1)"
   done
   # where the page says each goes: its first line is a comment naming the path
   ISSUER_PATH="$(printf '%s\n' "$ISSUER_YAML" | sed -n '1s/^# //p')"
