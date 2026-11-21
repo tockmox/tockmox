@@ -8,6 +8,9 @@
 #   site-repo-server.sh up --writable       start it with receive-pack enabled, site.git and
 #                                           tockmox.git pre-created, on a NodePort (see below)
 #   site-repo-server.sh push DIR NAME       publish DIR as NAME.git (read over http:// and git://)
+#                                           TOCKMOX_SERVE_FORCE_ADD=PATHSPEC also serves the files it
+#                                           names that .gitignore excludes (the air-gap lane's vendored
+#                                           subchart archives); without it, ignored files are never served
 #   site-repo-server.sh url NAME            print the URL to put in an Application (http://)
 #   site-repo-server.sh nodeport            print the NodePort --writable uses inside the cluster
 #   site-repo-server.sh reach URL           prove a pod in the cluster can read URL
@@ -93,6 +96,7 @@ set -euo pipefail
 : "${KUBE_CONTEXT:?KUBE_CONTEXT is empty: export the context of the cluster under test}"
 
 NS="${TOCKMOX_HARNESS_NAMESPACE:-tockmox-harness}"
+FORCE_ADD=""   # set by push from TOCKMOX_SERVE_FORCE_ADD; read by tree_of
 POD=site-git
 SVC=site-git
 PORT=9418
@@ -118,6 +122,8 @@ tree_of() {
   git init -q --bare "$idx" \
     && GIT_DIR="$idx" git -c core.autocrlf=false -c core.safecrlf=false --work-tree="$1" \
          add -A -- . ':(exclude,glob)**/._*' >/dev/null \
+    && { [ -z "${FORCE_ADD}" ] || GIT_DIR="$idx" git -c core.autocrlf=false -c core.safecrlf=false --work-tree="$1" \
+           add -f -- "${FORCE_ADD}" >/dev/null; } \
     && GIT_DIR="$idx" git write-tree
   rc=$?
   rm -rf "$idx"
@@ -369,6 +375,15 @@ cmd_push() {
   # tree with 631 extra `._*` files: bsdtar packs an AppleDouble file for every file carrying an
   # xattr, the pod's `git add -A` committed them, a chart's `.Files.Glob "dashboards/*.json"` read
   # them, and the clone probe still passed, so the run tested a tree that was not the one given.
+  # FORCE_ADD: one pathspec of files to serve although .gitignore excludes them. The air-gap lane sets
+  # it to the subchart archives tools/helm-deps.sh vendors: `.gitignore` excludes charts/*/charts/ and
+  # *.tgz, so the pod's `git add -A` dropped them and the guest's Argo CD fetched every subchart from
+  # upstream under the cut (2026-11-21). It goes into the tree check below as well, so the tree
+  # pushed is still exactly the tree computed here, and the pod reports how many files it forced.
+  FORCE_ADD="${TOCKMOX_SERVE_FORCE_ADD:-}"
+  if [ -n "$FORCE_ADD" ] && ! [[ "$FORCE_ADD" =~ ^[A-Za-z0-9._*/-]+$ ]]; then
+    echo "REFUSING: TOCKMOX_SERVE_FORCE_ADD must be one plain pathspec (letters, digits, . _ * / -), not '${FORCE_ADD}'" >&2; exit 2
+  fi
   local want
   want="$(tree_of "$dir")" || { echo "REFUSING: could not compute the git tree of ${dir}" >&2; exit 2; }
   local tgz
@@ -389,7 +404,9 @@ cmd_push() {
     git config --global user.name harness
     rm -rf /tmp/w-${name}
     mkdir -p /tmp/w-${name} && cd /tmp/w-${name} && tar xzf /tmp/${name}.tgz
-    git init -q . && git add -A && git commit -qm 'harness snapshot ${ref:-main}'
+    git init -q . && git add -A
+    if [ -n '${FORCE_ADD}' ]; then git add -f -- '${FORCE_ADD}'; echo \"FORCED \$(git ls-files -- '${FORCE_ADD}' | wc -l)\"; fi
+    git commit -qm 'harness snapshot ${ref:-main}'
     got=\$(git rev-parse 'HEAD^{tree}')
     if [ \"\$got\" != '${want}' ]; then echo \"TREE_MISMATCH \$got\"; exit 3; fi
     if [ -z '${ref}' ]; then
@@ -417,6 +434,15 @@ cmd_push() {
     *"SERVED ${want}"*) ;;
     *) echo "REFUSING: the pod did not confirm ${name}.git serves ${want}: $(printf '%s' "$served" | tail -3)" >&2; exit 1 ;;
   esac
+  local forced=""
+  if [ -n "$FORCE_ADD" ]; then
+    forced="$(printf '%s\n' "$served" | sed -n 's/^FORCED *//p' | tail -1)"
+    # The tree check above already holds the forced files to the directory's bytes; this catches the
+    # case it cannot: a pathspec that matched nothing, so the run would go on serving no archives.
+    case "$forced" in
+      ''|0|*[!0-9]*) echo "REFUSING: TOCKMOX_SERVE_FORCE_ADD='${FORCE_ADD}' forced ${forced:-no} file(s) into ${name}.git; the files it names are not in ${dir}" >&2; exit 1 ;;
+    esac
+  fi
   # Assert on the artefact, not on the exit code: prove the daemon actually
   # serves it, from inside the cluster, before telling a caller to point an
   # Application at it. A repo that exists and is unservable is the failure this
@@ -432,6 +458,7 @@ cmd_push() {
     exit 1
   fi
   echo "  published and clone-verified: $(url_for "$name")${ref:+ @ ${ref}}, tree ${want}" >&2
+  [ -z "$forced" ] || echo "  served although .gitignore excludes them: ${forced} file(s) matching ${FORCE_ADD}" >&2
   url_for "$name"
 }
 

@@ -258,7 +258,12 @@ bash "${HERE}/run.sh" P04 P05 || fail "P04/P05 failed, so P09 would start from t
 step "7 serve this tree"
 TAG="airgap-${TOCKMOX_TEST_VM}"
 bash "${PROV}/site-repo-server.sh" up >/dev/null || fail "site-repo-server.sh up failed"
-bash "${PROV}/site-repo-server.sh" push "$TREE" tockmox "$TAG" >/dev/null || fail "site-repo-server.sh push failed"
+# The archives step 1 vendored are what lets the guest's Argo CD render without reaching a chart repository, and
+# .gitignore excludes them (charts/*/charts/, *.tgz), so they are served by name; push refuses if none are there.
+# Without this the served tree held no archives and Argo CD went upstream for every subchart under the cut
+# (2026-11-21: 9 of 10 Applications sync Unknown, tcp/443 denies to the chart repositories' hosts).
+TOCKMOX_SERVE_FORCE_ADD='charts/*/charts/*.tgz' bash "${PROV}/site-repo-server.sh" push "$TREE" tockmox "$TAG" >/dev/null \
+  || fail "site-repo-server.sh push failed (with the vendored subchart archives forced in)"
 TM_URL="$(bash "${PROV}/site-repo-server.sh" url tockmox)"
 [ -n "$TM_URL" ] || fail "site-repo-server gave no URL"
 echo "airgap lane 7: this tree served at ${TM_URL} @ ${TAG}"
