@@ -58,6 +58,7 @@ PROV="${HERE}/provision"
 EDC="${HERE}/lib/edge-deny-count.sh"
 
 STOPPED=""
+STOP_DETAIL=""   # what a failed step said, under STOPPED in the report: the provisioner's own stderr when create fails
 RESULT=""
 CREATED=0
 INSTALL_STARTED=0
@@ -104,6 +105,8 @@ for i in $IGNORE; do
 done
 KEEP="${TOCKMOX_KEEP_CLUSTER:-0}"
 case "$KEEP" in 0|1) ;; *) refuse "TOCKMOX_KEEP_CLUSTER must be 0 or 1" ;; esac
+CREATE_TAIL_LINES="${TOCKMOX_CREATE_TAIL_LINES:-40}"
+case "$CREATE_TAIL_LINES" in ''|*[!0-9]*|0) refuse "TOCKMOX_CREATE_TAIL_LINES must be a positive whole number" ;; esac
 [ -f "$EDC" ] || refuse "this tree has no tests/executed-docs/lib/edge-deny-count.sh, so the edge cannot be counted"
 for t in kubectl python3; do command -v "$t" >/dev/null 2>&1 || refuse "'${t}' is not on PATH"; done
 
@@ -124,6 +127,7 @@ finish() {
   [ -z "$STALL_PID" ] || kill "$STALL_PID" 2>/dev/null || true
   [ -n "$RESULT" ] || case "$rc" in 0) RESULT=PASS ;; 2) RESULT=REFUSED ;; 4) RESULT=BLOCKED ;; 5) RESULT=INFRA_ERROR ;; *) RESULT=FAIL ;; esac
   [ -z "$STOPPED" ] || printf '%s\n' "$STOPPED" >> "$REPORT"
+  [ -z "$STOP_DETAIL" ] || printf '%s\n' "$STOP_DETAIL" >> "$REPORT"
   # A kept run keeps an install. A run stopped before the cut install began has none, so its VM goes.
   if [ "$CREATED" = 1 ] && [ "$KEEP" = 1 ] && [ "$INSTALL_STARTED" != 1 ] && [ "$rc" != 0 ]; then
     echo "airgap lane: stopped before the cut install began, so there is nothing to keep; destroying ${TOCKMOX_TEST_VM}"
@@ -181,13 +185,33 @@ fi
 # 2. the throwaway, on the segment
 step "2 create the throwaway"
 echo "airgap lane 2: creating ${TOCKMOX_TEST_VM} on ${TOCKMOX_SUBSTRATE_CONTEXT}, ${TOCKMOX_VM_NETWORK}"
+# What create said goes in the report, not only in the job log (run.sh and p09-lane.sh do the same): its stderr is
+# copied to a file while it still streams to the job log, and a failed create puts its last stderr line in the summary
+# line and a bounded tail, masked by lib/stderr-tail.py's rule, beneath it. Without that helper nothing is copied.
+CREATE_ERR="${LANE}/create-stderr.txt"
+TAIL_PY="${HERE}/lib/stderr-tail.py"
+create_said() {
+  echo "  --- the provisioner's stderr, last ${CREATE_TAIL_LINES} lines (terminal codes stripped, credential-shaped text masked) ---"
+  if [ -f "$TAIL_PY" ]; then
+    python3 "$TAIL_PY" --lines "$CREATE_TAIL_LINES" "$1" 2>&1 | sed 's/^/  | /'
+  else
+    echo "  | (this tree has no lib/stderr-tail.py to mask it with, so it is in the job log only)"
+  fi
+  echo "  --- end ---"
+}
+create_reason() {
+  if [ -f "$TAIL_PY" ] && python3 "$TAIL_PY" --last "$1" 2>/dev/null; then return 0; fi
+  echo "its stderr is in the job log"
+}
 create_rc=0
-out="$(bash "${PROV}/throwaway-cluster.sh" create)" || create_rc=$?
+why=""
+out="$( { bash "${PROV}/throwaway-cluster.sh" create 2>&1 1>&3 3>&- | tee "$CREATE_ERR" >&2; } 3>&1 )" || create_rc=$?
+[ "$create_rc" = 0 ] || { STOP_DETAIL="$(create_said "$CREATE_ERR")"; why="$(create_reason "$CREATE_ERR")"; }
 case "$create_rc" in
   0) ;;
-  4) blocked "create refused: the rig is full (its capacity gate)" ;;
-  5) infra "create could not read the rig (exit 5)" ;;
-  *) CREATED=1; fail "create failed (exit ${create_rc})" ;;
+  4) blocked "create refused: the rig is full (its capacity gate): ${why}" ;;
+  5) infra "create could not read the rig (exit 5): ${why}" ;;
+  *) CREATED=1; fail "provisioning failed (create exit ${create_rc}): ${why}" ;;
 esac
 CREATED=1
 KC="$(printf '%s\n' "$out" | tail -1)"

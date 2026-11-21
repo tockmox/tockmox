@@ -14,6 +14,11 @@
 #   an earlier failure's status is never replaced by a later path's
 #   netpol-adversary.sh (not a path: no receipt, so its exit status is mapped once): 0 PASS lane 0, 1 PRODUCT_FAIL lane 1,
 #   2 (its own "skipped") BLOCKED lane 4, anything else ABORTED lane 1; last, only when P09's receipt said PASS
+#   a create that fails                                               lane 1, and the lane's report names the
+#                                                                     provisioner's own error (its last stderr line,
+#                                                                     then a bounded tail, masked), never only
+#                                                                     "create failed"; a create that works writes no
+#                                                                     report and still streams its stderr
 #
 # p09-lane.sh runs unmodified beside stubs of what it calls; the stub run.sh writes the receipts a real one would.
 # Then mutated copies of the lane that drop each check must go green where they must not.
@@ -42,13 +47,18 @@ PY
 }
 
 L="$TMP/tree/tests/executed-docs"
-mkdir -p "$L/provision" "$TMP/lbin"
+mkdir -p "$L/provision" "$L/lib" "$TMP/lbin"
 cp "$LANE_SH" "$L/p09-lane.sh"
+cp "${HERE}/lib/stderr-tail.py" "$L/lib/stderr-tail.py"
 cat > "$L/provision/throwaway-cluster.sh" <<'STUB'
 #!/usr/bin/env bash
 echo "$1" >> "$LANE_LOG"
 case "$1" in
-  create) echo apiVersion: v1 > "$LANE_TMP/guest.kubeconfig"; echo "$LANE_TMP/guest.kubeconfig" ;;
+  create)
+    [ -z "${STUB_CREATE_ERR:-}" ] || printf '%b' "$STUB_CREATE_ERR" >&2
+    # a failed create prints what kubectl printed on stdout, as the real one can: never a kubeconfig path
+    if [ "${STUB_CREATE_RC:-0}" != 0 ]; then echo "virtualmachine.kubevirt.io/ed-lane created"; exit "$STUB_CREATE_RC"; fi
+    echo apiVersion: v1 > "$LANE_TMP/guest.kubeconfig"; echo "$LANE_TMP/guest.kubeconfig" ;;
   publish) echo node.stub.invalid:31234 ;;
   guard-file) echo "$LANE_TMP/guard" ;;
 esac
@@ -106,6 +116,32 @@ run_lane STUB_P11_OUT=BLOCKED STUB_P11_RC=6
 [ "$RC" = 6 ] && ok "an earlier failure is not replaced: a P11 that failed with 6 keeps 6 although its outcome would map to 4" || bad "P11 status kept" "rc=$RC"
 run_lane STUB_P09_RC=3 STUB_P09_OUT=PRODUCT_FAIL
 [ "$RC" = 3 ] && [ "$(ran P11)" = 0 ] && [ "$(marker)" = no ] && ok "a P09 that failed keeps its own status; no marker, no P11" || bad "P09 failed" "rc=$RC"
+
+# create: what the provisioner said reaches the lane's report, which is all a reader without the job log gets
+lreport() { cat "$LH/work"/report-p09-lane-*.txt 2>/dev/null; }
+QUOTA='Error from server (Forbidden): pods "virt-launcher-ed-lane" is forbidden: exceeded quota: harness-quota, requested: limits.memory=24Gi, limit: limits.memory=26Gi'
+run_lane STUB_CREATE_RC=1 STUB_CREATE_ERR="waiting for ed-lane\nauth: bearer s3cr3t-stub-value\n${QUOTA}\n"
+[ "$RC" = 1 ] && [ "$(ran P09)" = 0 ] \
+  && lreport | grep -F "lane: provisioning failed (create exit 1): ${QUOTA}" >/dev/null \
+  && lreport | grep -F "  | ${QUOTA}" >/dev/null && lreport | grep -F '  | waiting for ed-lane' >/dev/null \
+  && ok "create fails with a named error: the lane exits 1, its report's summary line and stderr tail name the provisioner's error" \
+  || bad "create fails with a named error" "rc=$RC report: $(lreport | tr '\n' ';')"
+! lreport | grep -F 's3cr3t' >/dev/null && lreport | grep -F 'bearer [masked]' >/dev/null \
+  && ! lreport | grep -F 'virtualmachine.kubevirt.io' >/dev/null && ! say 'create printed no kubeconfig path' \
+  && ok "... the tail is masked, and the create line on stdout is never read as a kubeconfig path" \
+  || bad "create failure masked, stdout not a path" "$(lreport | tr '\n' ';')"
+run_lane STUB_CREATE_RC=5 STUB_CREATE_ERR="$(for i in $(seq -w 1 99); do printf 'progress %s\\n' "$i"; done)capacity INFRA_ERROR: the substrate did not answer\n" TOCKMOX_CREATE_TAIL_LINES=20
+[ "$RC" = 1 ] && lreport | grep -F 'lane: provisioning failed (create exit 5): capacity INFRA_ERROR: the substrate did not answer' >/dev/null \
+  && lreport | grep -F '(80 earlier lines not shown)' >/dev/null && ! lreport | grep -F 'progress 80' >/dev/null \
+  && [ "$(lreport | grep -c '^  | progress ')" = 19 ] \
+  && ok "a long stderr is bounded (TOCKMOX_CREATE_TAIL_LINES=20: the last 20 lines, the rest counted) and the summary names the last line and the exit" \
+  || bad "create stderr bounded" "rc=$RC $(lreport | head -5 | tr '\n' ';')"
+run_lane STUB_CREATE_ERR="creating ed-lane: the stub's own progress line\n"
+[ "$RC" = 0 ] && [ -z "$(lreport)" ] && [ "$(grep -cF "creating ed-lane: the stub's own progress line" "$TMP/lout")" = 1 ] && [ "$(ran P09)" = 1 ] \
+  && ok "a create that works: no lane report, its stderr still reaches the job log once, and its kubeconfig is used" \
+  || bad "create works" "rc=$RC report=$(lreport | head -2 | tr '\n' ';') $(tail -2 "$TMP/lout")"
+run_lane TOCKMOX_CREATE_TAIL_LINES=0
+[ "$RC" = 2 ] && ! grep -x create "$LH/log" >/dev/null && ok "TOCKMOX_CREATE_TAIL_LINES=0 is refused (exit 2) before anything is created" || bad "tail lines refusal" "rc=$RC"
 
 # P09: exit 0 is not a pass
 run_lane TOCKMOX_P09_ROUTE=external STUB_P09_OUT=BLOCKED STUB_REASON="no writable site remote configured for this run (TOCKMOX_P09_SITE_REPO_URL)"

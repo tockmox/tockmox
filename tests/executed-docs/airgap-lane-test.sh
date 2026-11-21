@@ -23,6 +23,8 @@
 #  14. a kept run that stops before the cut install is destroyed anyway; a kept run that passes is not
 #  15. a step that writes nothing for longer than TOCKMOX_AIRGAP_STALL prints an AIRGAP-STALL line while it hangs
 #  16. Loki counts more deny lines than it returns: the lines it did not return count against the clause
+#  17. create fails with a named error: FAIL, and the report's summary line and a masked stderr tail name it
+#  18. the rig is full (create exits 4): the BLOCKED line in the report carries the capacity gate's own words
 #
 # What it does not show: that the edge logs, that the segment has no other way out, or that P09 passes from the
 # mirror. The lab run is that proof.
@@ -38,6 +40,7 @@ T="$W/tree"; C="$W/ctl"; B="$W/bin"
 mkdir -p "$T/tests/executed-docs/lib" "$T/tests/executed-docs/provision" "$T/tools" "$C" "$B"
 cp "${HERE}/airgap-lane.sh" "$T/tests/executed-docs/"
 cp "${HERE}/lib/edge-deny-count.sh" "$T/tests/executed-docs/lib/"
+cp "${HERE}/lib/stderr-tail.py" "$T/tests/executed-docs/lib/"
 
 # ---- the stand-ins ------------------------------------------------------------------------------------------------
 # pop FILE: the first line of a queue file, the last line repeated once the queue is down to one
@@ -51,7 +54,8 @@ cat > "$T/tests/executed-docs/provision/throwaway-cluster.sh" <<'SH'
 C="${AGT_CTL:?}"; echo "tc $*" >> "$C/calls"
 case "$1" in
   create)
-    rc="$(cat "$C/create_rc" 2>/dev/null || echo 0)"; [ "$rc" = 0 ] || exit "$rc"
+    [ ! -s "$C/create_err" ] || cat "$C/create_err" >&2
+    rc="$(cat "$C/create_rc" 2>/dev/null || echo 0)"; [ "$rc" = 0 ] || { echo "virtualmachine.kubevirt.io/ed-1-1 created"; exit "$rc"; }
     mkdir -p "$TOCKMOX_WORKDIR"; kc="$TOCKMOX_WORKDIR/${TOCKMOX_TEST_VM}.kubeconfig"; echo "fake" > "$kc"
     echo "creating"; echo "$kc" ;;
   exec)
@@ -131,7 +135,7 @@ WEB='60,,,rule-cut,vtnet2,match,block,in,4,0x0,,64,1,0,DF,6,tcp,60,192.0.2.60,19
 
 # set_case KEY=VALUE...: a fresh control directory with the happy path's values, then the case's own
 set_case() {
-  rm -f "$C/calls" "$C/lines" "$C/p0405_sleep"
+  rm -f "$C/calls" "$C/lines" "$C/p0405_sleep" "$C/create_err"
   echo resolved > "$C/dns"; echo PASS > "$C/tls"; echo PASS > "$C/proof"; echo 0 > "$C/create_rc"; echo 0 > "$C/p0405_rc"
   printf 'reached\nrefused\n' > "$C/control"; printf '1\n2\n' > "$C/counts"; printf '%s\n%s\n' "$NTP" "$NTP" > "$C/lines"
   echo PASS > "$C/p09_outcome"; echo 0 > "$C/p09_rc"
@@ -220,6 +224,20 @@ else fail "14: kept-stopped=$k1 kept-pass=$k2"; fi
 set_case counts='1\n3\n' lines="${NTP}\n"; lane
 if [ "$RC" = 1 ] && has 'AIRGAP-DENY ? unread 2'; then pass "16: denies counted but not returned count against the clause"
 else fail "16: rc=$RC $(printf '%s' "$OUT" | tail -4 | tr '\n' '|')"; fi
+
+report() { cat "$W/work"/report-airgap-lane-*.txt 2>/dev/null; }
+QUOTA='Error from server (Forbidden): pods "virt-launcher-ed-1-1" is forbidden: exceeded quota: harness-quota'
+set_case create_rc=1 create_err="waiting for ed-1-1\\nauth: bearer s3cr3t-stub-value\\n${QUOTA}\\n"; lane
+if [ "$RC" = 1 ] && report | grep -F "airgap lane: provisioning failed (create exit 1): ${QUOTA}" >/dev/null \
+   && report | grep -F "  | ${QUOTA}" >/dev/null && ! report | grep -F 's3cr3t' >/dev/null \
+   && ! report | grep -F 'virtualmachine.kubevirt.io' >/dev/null && called 'tc destroy'; then
+  pass "17: create fails with a named error: FAIL, the report names it in the summary and a masked tail, destroyed"
+else fail "17: rc=$RC $(report | tr '\n' '|')"; fi
+
+set_case create_rc=4 create_err='  capacity BLOCKED: memory: the VM needs 24.5 GiB, the node has 9.9 GiB free\n'; lane
+if [ "$RC" = 4 ] && report | grep -F 'BLOCKED: create refused: the rig is full (its capacity gate): capacity BLOCKED: memory: the VM needs 24.5 GiB' >/dev/null \
+   && ! called 'tc destroy'; then pass "18: the rig is full: the BLOCKED line carries the capacity gate's own words"
+else fail "18: rc=$RC $(report | tr '\n' '|')"; fi
 
 set_case p0405_sleep=6; lane TOCKMOX_AIRGAP_STALL=2
 if [ "$RC" = 0 ] && has "AIRGAP-STALL .* in step '6 P04 and P05'"; then pass "15: a quiet step raises AIRGAP-STALL while it hangs"

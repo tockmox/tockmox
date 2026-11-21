@@ -177,6 +177,8 @@ P09_STARTED=0
 # Why the lane itself stopped, before or around run.sh. run.sh writes its own report for P04, P05 and P09; a stop
 # here would leave the workflow's report upload with nothing to send, so finish() writes one line in its place.
 STOPPED=""
+# What a failed step said, for the report, under STOPPED: the provisioner's own stderr when create fails.
+STOP_DETAIL=""
 # THE TREE UNDER TEST is this run's own record, made at step 3; one inherited from a caller says nothing about this run
 unset TOCKMOX_TREE_SOURCE
 refuse() { STOPPED="REFUSING: $1"; echo "$STOPPED" >&2; exit 2; }
@@ -194,6 +196,7 @@ finish() {
     { printf 'p09 lane (%s): exit %s\n' "${TOCKMOX_DOCS_REF}" "$rc"
       [ -z "${TOCKMOX_TREE_SOURCE:-}" ] || printf '%s\n' "$TOCKMOX_TREE_SOURCE"
       printf '%s\n' "$STOPPED"
+      [ -z "$STOP_DETAIL" ] || printf '%s\n' "$STOP_DETAIL"
     } >"${TOCKMOX_WORKDIR}/report-p09-lane-$(date -u +%Y%m%dT%H%M%SZ).txt" || true
   fi
   [ -z "${TOCKMOX_TREE_SOURCE:-}" ] || echo "lane: what ran was ${TOCKMOX_TREE_SOURCE}"
@@ -337,9 +340,39 @@ case "$NETPOL" in
   *) refuse "TOCKMOX_P09_NETPOL must be auto, 1 or 0, not: ${NETPOL}" ;;
 esac
 
+# WHAT `create` SAID GOES IN THE REPORT, not only in the job log. A create that failed used to stop the lane with
+# "create failed" and nothing else, so the report a reader gets without the job log never named the cause (run.sh
+# does the same for its own create). Its stderr is copied to a file while it still streams to the job log; a failed
+# create puts its exit status and its last stderr line in the summary line, and a bounded tail of its stderr, masked
+# by lib/stderr-tail.py's rule, beneath it. A tree without that helper copies nothing rather than copy it unmasked.
+CREATE_TAIL_LINES="${TOCKMOX_CREATE_TAIL_LINES:-40}"
+case "$CREATE_TAIL_LINES" in ''|*[!0-9]*|0) refuse "TOCKMOX_CREATE_TAIL_LINES must be a positive whole number" ;; esac
+CREATE_ERR="${LANE}/create-stderr.txt"
+TAIL_PY="${HERE}/lib/stderr-tail.py"
+# create_said ERRFILE: the bounded, masked tail of what create wrote to stderr, as report lines
+create_said() {
+  echo "  --- the provisioner's stderr, last ${CREATE_TAIL_LINES} lines (terminal codes stripped, credential-shaped text masked) ---"
+  if [ -f "$TAIL_PY" ]; then
+    python3 "$TAIL_PY" --lines "$CREATE_TAIL_LINES" "$1" 2>&1 | sed 's/^/  | /'
+  else
+    echo "  | (this tree has no lib/stderr-tail.py to mask it with, so it is in the job log only)"
+  fi
+  echo "  --- end ---"
+}
+# create_reason ERRFILE: create's last stderr line that is not blank, masked, for the summary line
+create_reason() {
+  if [ -f "$TAIL_PY" ] && python3 "$TAIL_PY" --last "$1" 2>/dev/null; then return 0; fi
+  echo "its stderr is in the job log"
+}
+
 # 1. the throwaway
 echo "lane 1: creating ${TOCKMOX_TEST_VM} on ${TOCKMOX_SUBSTRATE_CONTEXT}"
-out="$(bash "${PROV}/throwaway-cluster.sh" create)" || fail "create failed"
+create_rc=0
+out="$( { bash "${PROV}/throwaway-cluster.sh" create 2>&1 1>&3 3>&- | tee "$CREATE_ERR" >&2; } 3>&1 )" || create_rc=$?
+if [ "$create_rc" != 0 ]; then
+  STOP_DETAIL="$(create_said "$CREATE_ERR")"
+  fail "provisioning failed (create exit ${create_rc}): $(create_reason "$CREATE_ERR")"
+fi
 CREATED=1
 KC="$(printf '%s\n' "$out" | tail -1)"
 [ -s "$KC" ] || fail "create printed no kubeconfig path"
