@@ -105,6 +105,8 @@ tools/check-resilient-profile.sh	12
 tools/check-resilient-profile.sh --selftest	17
 tools/check-sa-tokens.sh	26
 tools/check-sa-tokens.sh --selftest	196
+tools/check-script-images.sh	0
+tools/check-script-images.sh --selftest	1
 tools/check-site-follows-product.sh	3
 tools/check-site-follows-product.sh --selftest	28
 tools/check-sso-bindings.sh	1
