@@ -17,6 +17,10 @@
 #   B. the bytes that reach the pod differ from the directory (the stub adds a file in transit): the
 #      push refuses, names both trees, and publishes nothing.
 #   C. a tag push serves the same tree under the tag.
+#   D. TOCKMOX_SERVE_FORCE_ADD names ignored subchart archives: the push serves them, the served tree is
+#      the directory's tree with exactly those files added, and it says how many it served.
+#   E. TOCKMOX_SERVE_FORCE_ADD names files the directory does not hold: the push refuses and publishes
+#      nothing; and a pathspec carrying shell characters is refused before anything is sent.
 #
 #   ./tests/executed-docs/site-repo-push-test.sh
 set -uo pipefail
@@ -113,6 +117,35 @@ out="$(bash "$SRS" push "$DIR" tockmox v9.9.9 2>&1)"; rc=$?
 served="$(git --git-dir="${POD_ROOT}/repos/tockmox.git" rev-parse 'v9.9.9^{tree}' 2>/dev/null)"
 if [ "$rc" -eq 0 ] && [ "$served" = "$want" ]; then ok "C: a tag push serves the directory's tree under the tag"
 else bad "C: a tag push serves the directory's tree under the tag" "rc=$rc, served ${served:-none}: $(printf '%s' "$out" | tail -2)"; fi
+
+# ------------------------------------------------------------------------------- D
+# The air-gap lane's case: .gitignore excludes charts/*/charts/ and *.tgz, tools/helm-deps.sh vendors the
+# archives there, and the guest's Argo CD can only render without a chart repository if they are served.
+CDIR="${TMP}/charts-tree"
+mkdir -p "${CDIR}/charts/layer/charts"
+printf 'apiVersion: v2\nname: layer\n' > "${CDIR}/charts/layer/Chart.yaml"
+printf 'charts/*/charts/\n*.tgz\n' > "${CDIR}/.gitignore"
+printf 'archive-a' > "${CDIR}/charts/layer/charts/a-1.0.0.tgz"
+printf 'archive-b' > "${CDIR}/charts/layer/charts/b-2.0.0.tgz"
+cwant="$(mkdir -p "${TMP}/cref" && cp -R "${CDIR}/." "${TMP}/cref/" && cd "${TMP}/cref" && git init -q . \
+         && git add -A && git add -f -- 'charts/*/charts/*.tgz' && git write-tree)"
+out="$(TOCKMOX_SERVE_FORCE_ADD='charts/*/charts/*.tgz' bash "$SRS" push "$CDIR" forced 2>&1)"; rc=$?
+served="$(git --git-dir="${POD_ROOT}/repos/forced.git" rev-parse 'main^{tree}' 2>/dev/null)"
+if [ "$rc" -eq 0 ] && [ "$served" = "$cwant" ]; then ok "D: the ignored archives named by TOCKMOX_SERVE_FORCE_ADD are served, and nothing else changes"
+else bad "D: the ignored archives named by TOCKMOX_SERVE_FORCE_ADD are served" "rc=$rc, served ${served:-none}, want ${cwant}: $(printf '%s' "$out" | tail -2)"; fi
+case "$out" in *"2 file(s) matching charts/*/charts/*.tgz"*) ok "D: push says how many ignored files it served" ;;
+  *) bad "D: push says how many ignored files it served" "$(printf '%s' "$out" | tail -2)" ;; esac
+plain="$(bash "$SRS" push "$CDIR" plain 2>&1 >/dev/null; git --git-dir="${POD_ROOT}/repos/plain.git" ls-tree -r --name-only main 2>/dev/null | grep -c '\.tgz$')"
+if [ "${plain##*$'\n'}" = 0 ]; then ok "D: without TOCKMOX_SERVE_FORCE_ADD the archives are not served"
+else bad "D: without TOCKMOX_SERVE_FORCE_ADD the archives are not served" "served ${plain##*$'\n'} .tgz file(s)"; fi
+
+# ------------------------------------------------------------------------------- E
+out="$(TOCKMOX_SERVE_FORCE_ADD='vendor/*.tgz' bash "$SRS" push "$CDIR" none 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ] && [ ! -e "${POD_ROOT}/repos/none.git" ]; then ok "E: a pathspec that names nothing in the directory is refused and nothing is published"
+else bad "E: a pathspec that names nothing is refused" "rc=$rc: $(printf '%s' "$out" | tail -2)"; fi
+out="$(TOCKMOX_SERVE_FORCE_ADD="x';touch ${TMP}/PWNED;'" bash "$SRS" push "$CDIR" inj 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && [ ! -e "${TMP}/PWNED" ] && [ ! -e "${POD_ROOT}/repos/inj.git" ]; then ok "E: a pathspec carrying shell characters is refused before anything is sent"
+else bad "E: a pathspec carrying shell characters is refused" "rc=$rc, PWNED $( [ -e "${TMP}/PWNED" ] && echo exists || echo absent ): $(printf '%s' "$out" | tail -2)"; fi
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
