@@ -3,6 +3,8 @@
 """The last lines of a provisioner's stderr, safe to put in a run report.
 
     stderr-tail.py --lines 40 FILE
+    stderr-tail.py --last FILE      the last line that is not blank, cleaned the same way and cut
+                                    at 300 characters: one line for a report's summary line
 
 The run report is uploaded as a CI artifact and read by people and agents who
 never open the job log, so what goes into it is bounded and cleaned:
@@ -61,6 +63,7 @@ def clean(line):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--lines", type=int, default=40)
+    ap.add_argument("--last", action="store_true")
     ap.add_argument("file")
     a = ap.parse_args()
     if a.lines < 1:
@@ -85,6 +88,10 @@ def main():
         out.append(clean(line))
     if not any(x.strip() for x in out):
         print("(the provisioner wrote nothing to stderr)")
+        return 0
+    if a.last:
+        last = [x for x in out if x.strip()][-1].strip()
+        print(last if len(last) <= 300 else last[:297] + "...")
         return 0
     shown = out[-a.lines:]
     if len(out) > len(shown):
