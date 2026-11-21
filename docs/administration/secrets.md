@@ -393,7 +393,7 @@ and there is no cluster to borrow.
 ```bash
 ntfy_run() {
   kubectl -n default run "ntfy-mint-$$" --rm -i --restart=Never \
-    --image=binwiederhier/ntfy:v2.27.0 --command -- ntfy "$@" 2>/dev/null
+    --image=binwiederhier/ntfy:v2.37.2 --command -- ntfy "$@" 2>/dev/null
 }
 ```
 
@@ -415,7 +415,7 @@ its output, because both prompts land on the same line as the answer.
 Set `YOU_PASS` to something you can type ... you will be typing it on a phone.
 
 ```bash
-NTFY=binwiederhier/ntfy:v2.27.0
+NTFY=binwiederhier/ntfy:v2.37.2
 
 hash() { printf '%s\n%s\n' "$1" "$1" \
          | docker run --rm -i "$NTFY" user hash | awk '{print $NF}'; }

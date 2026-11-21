@@ -12,12 +12,16 @@ usage: zsh-paste.py BLOCKFILE [ANSWERFILE]
 env:
   ZSH                   zsh binary (default: zsh on PATH)
   ZSH_PASTE_ZDOTDIR     ZDOTDIR with an empty .zshrc (isolates the run from the user's rc)
-  ZSH_PASTE_TIMEOUT     seconds to wait for the block to return (default 600)
+  ZSH_PASTE_TIMEOUT     seconds to wait for the block to return (default 600). When it
+                        passes, the block is interrupted (Ctrl-C, then the terminal is
+                        hung up, then the shell is killed), a ZSH-PASTE TIMEOUT line ends
+                        the transcript, and the exit status is 124. A block that never
+                        returns can no longer hold its caller past this bound.
   ZSH_PASTE_INTERRUPT   seconds after which Ctrl-C is sent (for a `-w` watch; default: never)
   ZSH_PASTE_ENVOUT      file to receive `export -p` after the block (carry exports)
 stdout: the transcript, control sequences stripped. exit status: the block's $?.
 """
-import os, pty, sys, time, select, re, shutil
+import os, pty, sys, time, select, re, shutil, signal
 ZSH=os.environ.get("ZSH") or shutil.which("zsh") or "zsh"
 TMO=float(os.environ.get("ZSH_PASTE_TIMEOUT","600"))
 INT=float(os.environ.get("ZSH_PASTE_INTERRUPT","0") or 0)
@@ -53,9 +57,10 @@ os.write(fd,b"\x1b[200~"+block.encode()+b"\x1b[201~\r")
 trans=b""; start=time.time()
 remaining=list(answers)
 sent_int=False
+timed_out=False
 while True:
     left=TMO-(time.time()-start)
-    if left<=0: break
+    if left<=0: timed_out=True; break
     step=min(left, 1.0)
     also=remaining[0][0].encode() if remaining else None
     chunk,why=rd(nxt(n+1),step,also)
@@ -75,13 +80,52 @@ while True:
         os.write(fd,remaining[0][1].encode()+b"\r"); remaining.pop(0); continue
     if INT and not sent_int and time.time()-start>INT:
         os.write(fd,b"\x03"); sent_int=True
-os.write(fd,b"echo "+S2.encode()+b"=$?\r")
-chunk,_=rd(nxt(n+1),10); trans+=chunk; n+=1
-if ENVOUT:
-    os.write(fd,b"export -p > "+ENVOUT.encode()+b"\r"); rd(nxt(n+1),10); n+=1
-os.write(fd,b"exit\r")
-try: os.waitpid(pid,0)
-except Exception: pass
+def reap(within):
+    # Wait for the shell, but never without a bound: a shell still running a
+    # foreground job ignores `exit`, and an unbounded waitpid then holds the
+    # caller forever (2026-11-21, P09 S14f under the air-gap lane, 2 h 10 min).
+    end=time.time()+within
+    while time.time()<end:
+        try:
+            done,_=os.waitpid(pid,os.WNOHANG)
+        except ChildProcessError:
+            return True
+        if done: return True
+        time.sleep(0.1)
+    return False
+if timed_out:
+    # Interrupt the foreground job the way a person at the terminal would, and
+    # give the shell a moment to come back to its prompt.
+    for _ in range(2):
+        try: os.write(fd,b"\x03")
+        except OSError: break
+        chunk,why=rd(nxt(n+1),3); trans+=chunk
+        if why=="until": n+=1; break
+    else:
+        # Still busy: hang up the terminal (SIGHUP to its foreground group and the
+        # shell), then kill the shell outright if it is still there.
+        try: os.close(fd)
+        except OSError: pass
+        if not reap(5):
+            try: os.killpg(pid,signal.SIGKILL)
+            except Exception:
+                try: os.kill(pid,signal.SIGKILL)
+                except Exception: pass
+            reap(5)
+        fd=None
+if fd is not None:
+    os.write(fd,b"echo "+S2.encode()+b"=$?\r")
+    chunk,_=rd(nxt(n+1),10); trans+=chunk; n+=1
+    if ENVOUT and not timed_out:
+        os.write(fd,b"export -p > "+ENVOUT.encode()+b"\r"); rd(nxt(n+1),10); n+=1
+    os.write(fd,b"exit\r")
+    if not reap(10):
+        try: os.close(fd)
+        except OSError: pass
+        if not reap(5):
+            try: os.kill(pid,signal.SIGKILL)
+            except Exception: pass
+            reap(5)
 txt=trans.decode("utf-8","replace").replace("\r\n","\n").replace("\r","")
 txt=re.sub(r"\x1b\[[0-9;?]*[A-Za-z]","",txt)
 txt=re.sub(r"\x1b[=>78]","",txt)          # keypad / cursor save-restore, two-byte ESC sequences
@@ -115,5 +159,8 @@ for l in txt.split("\n"):
     if not s or re.fullmatch(r"(%\s*)+e?%?\s*",s) or "unsetopt beep" in s: continue
     out.append(l)
 txt="\n".join(out)
+if timed_out:
+    txt+=("\n" if txt else "")+"ZSH-PASTE TIMEOUT: the block did not return within %gs; it was interrupted (exit 124)" % TMO
+    rc=124
 sys.stdout.write(txt+("\n" if txt else ""))
 sys.exit(rc)

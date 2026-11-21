@@ -75,7 +75,10 @@ CERT=""; CONTEXT=""; DRY=false; WITH_LITELLM=true; WITH_APPRISE=false; WITH_UI=f
 # the same hole ... which is the argument against "just rename the release".
 CONTROLLER_NAME="sealed-secrets"
 CONTROLLER_NS="kube-system"
-NTFY_IMAGE="binwiederhier/ntfy:v2.28.0"
+# The ntfy image the chart runs (images.txt). An air-gapped mirror holds the product's image set, so a
+# borrow pod pinned to any other tag cannot be pulled there and the real mint fails after the dry run
+# listed everything. Keep this equal to the chart's ntfy image.
+NTFY_IMAGE="binwiederhier/ntfy:v2.37.2"
 NTFY_PASSWORD=""; NTFY_PASSWORD_FILE=""; NO_NEXT=false; NO_PROMPT=false
 
 # A secret value containing a control character is never correct, and every
