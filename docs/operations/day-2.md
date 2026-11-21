@@ -421,6 +421,15 @@ kubectl get cronjobs -A -l app.kubernetes.io/part-of=tockmox \
 Every row's TZ column is your zone. A row reading `<none>` is a CronJob that
 does not take the value, not a failed change.
 
+A shipped CronJob does not run a slot it missed while the cluster was down.
+Each sets `startingDeadlineSeconds`, so after a restore from a snapshot or a
+power cycle across a slot, a slot more than that late is skipped and the next
+one runs on schedule, instead of firing at boot before the services the Job
+needs answer and holding its layer Degraded. The weekly kube-bench scan is the
+exception by design: it needs only the node, so a scan less than a day late
+still runs at boot. To run a skipped job sooner:
+`kubectl create job --from=cronjob/<name> <name>-now -n <namespace>`.
+
 ## What is not certified here
 
 **No task on this page has been executed start to finish and recorded as

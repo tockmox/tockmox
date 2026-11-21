@@ -661,6 +661,10 @@ run_gate "no Tockmox-owned pod uses the default ServiceAccount or an unlisted AP
 run_gate "the service-account token gate goes red on a default account, a missing field and an unlisted token" bash tools/check-sa-tokens.sh --selftest
 run_gate "every rendered container has a memory limit or a written reason" bash tools/check-memory-limits.sh
 run_gate "the memory-limit gate goes red on a dropped limit, a new container and a stale residue entry" bash tools/check-memory-limits.sh --selftest
+# A restore or a power cycle must not fire a missed CronJob slot into a cold cluster: every shipped
+# CronJob states its startingDeadlineSeconds. Not in ci.yaml yet, for the reason at the top of this file.
+run_gate "every shipped CronJob sets startingDeadlineSeconds, so a slot missed while the cluster was down is not run at boot" bash tools/check-cronjob-catchup.sh
+run_gate "the CronJob catch-up gate goes red on a dropped, tiny or non-integer deadline, a new CronJob and a vanished one" bash tools/check-cronjob-catchup.sh --selftest
 run_gate "the alert bridge logs each delivery, ntfy stays single-replica, drill rows name their backup" bash tools/check-notify-and-drill.sh
 run_gate "the notify-and-drill gate goes red on every mutation" bash tools/check-notify-and-drill.sh --selftest
 # The release bar kept as data (tools/release-bars.yaml) says what RELEASING.md says. Not in
