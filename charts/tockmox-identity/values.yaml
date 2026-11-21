@@ -232,7 +232,7 @@ databaseBackup:
   # tools/check-identity-seams.sh S10 now fails the build when the two majors
   # differ, and `grep -c postgres: images.txt` reads 1 when they agree.
   postgresImage: docker.io/library/postgres:17.11-bookworm
-  uploaderImage: alpine/k8s:1.37.1
+  uploaderImage: alpine/k8s:1.37.2
 
 sso:
   enabled: true
