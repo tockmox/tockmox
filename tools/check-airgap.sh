@@ -71,7 +71,6 @@ LAYERS=(crds platform policy identity observability exporters ai devops selfchec
 EXEMPT="
 busybox
 docker.io/grafana/alloy
-docker.io/traefik
 ghcr.io/berriai/litellm-database
 ghcr.io/cloudnative-pg/cloudnative-pg
 ghcr.io/cloudnative-pg/plugin-barman-cloud
