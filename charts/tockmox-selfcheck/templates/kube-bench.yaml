@@ -43,6 +43,11 @@ spec:
   schedule: {{ $bench.schedule | quote }}
   timeZone: {{ .Values.global.timezone | quote }}
   concurrencyPolicy: Forbid
+  # A SLOT MISSED WHILE THE CLUSTER WAS DOWN RUNS AT BOOT IF IT IS LESS THAN A
+  # DAY LATE. The scan reads only the node's own files, so a cold cluster does
+  # not fail it, and skipping it would cost a week of coverage. Set anyway, so
+  # the catch-up is a decision and not the controller's default.
+  startingDeadlineSeconds: 86400
   successfulJobsHistoryLimit: {{ $bench.successfulJobsHistoryLimit }}
   failedJobsHistoryLimit: {{ $bench.failedJobsHistoryLimit }}
   jobTemplate:
