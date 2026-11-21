@@ -111,6 +111,11 @@ spec:
   schedule: {{ $w.schedule | default "17 6 * * *" | quote }}
   timeZone: "UTC"
   concurrencyPolicy: Forbid
+  # Skip a slot missed while the controller was down (a restore, a power
+  # cycle): at boot the gateway and the network it reads through are not up
+  # yet, and a failed daily run holds the layer Degraded until the next day.
+  # 300 s, as for the restore drills; a skipped day is the next day's run.
+  startingDeadlineSeconds: 300
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   jobTemplate:

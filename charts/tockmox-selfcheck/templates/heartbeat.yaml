@@ -30,6 +30,14 @@ spec:
   schedule: {{ .Values.heartbeat.schedule | quote }}
   timeZone: {{ .Values.global.timezone | quote }}
   concurrencyPolicy: Forbid
+  # SKIP A SLOT THE CONTROLLER MISSED; DO NOT RUN IT AT BOOT. After a restore
+  # or a power cycle the controller fires a missed slot as soon as it syncs,
+  # which on a cold node can be before Alertmanager answers; the wait below
+  # covers two minutes of that and a slower boot fails the Job. A start later
+  # than the deadline means the controller was not running at the slot, so the
+  # slot is skipped. 120 s, as for the AI layer's console-key check: the next
+  # slot is at most 15 minutes away, and the heartbeat it sends lasts 30.
+  startingDeadlineSeconds: 120
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
   jobTemplate:
