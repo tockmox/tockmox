@@ -688,6 +688,8 @@ run_gate "the gateway-default gate goes red on every mutation" bash tools/check-
 run_gate "the resilient profile refuses an in-cluster backup target and keeps its drill alarm with the drill off" bash tools/check-resilient-profile.sh
 run_gate "the resilient-profile gate goes red on every mutation" bash tools/check-resilient-profile.sh --selftest
 run_gate "global.imageRegistry redirects every image" bash tools/check-airgap.sh
+run_gate "every image a script under install/ or tools/ runs is in the set an air-gapped mirror holds" bash tools/check-script-images.sh
+run_gate "the script-images gate goes red on a drifted pin, a missing image and a stale exception, and green on the revert" bash tools/check-script-images.sh --selftest
 # the five surfaces of a disconnected install are declared in
 # tools/airgap-manifest.yaml, and the table at the top of airgap.md is generated from it.
 run_gate "the five air-gap surfaces are declared once, every tool and step exists, and airgap.md's table matches" bash tools/check-airgap-manifest.sh
