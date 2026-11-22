@@ -752,6 +752,42 @@ if ! done_step "$S"; then budget_left || yield "S16+"
   mark_done "$S"
 fi
 
+# bar_diag ... when S17's readiness bar records a FAIL: for each Application the bar still lists (names on stdin), what
+# its destination namespace holds, read with get only: pods (-o wide), PersistentVolumeClaims, each container that is
+# not running and ready and why (lib/p09-bar-diag.py --pods: ImagePullBackOff and its image, a pod Pending on an
+# unbound claim), and the last 50 events. Each line is "DIAG: <namespace>: ...", so a lane run destroyed at the safe
+# end can be read from its log alone. Bounded: a namespace once however many Applications land in it, at most 200
+# lines a namespace, each cut at 400 characters, every call capped at 20 seconds. The site remote and the off-site
+# host are scrubbed. Output only: it records no verdict and changes no outcome.
+bar_diag() {
+  local app ns seen=" " ev
+  while IFS= read -r app; do
+    case "$app" in ''|*[!a-z0-9.-]*) continue ;; esac
+    ns="$(kubectl --context="$KUBE_CONTEXT" --request-timeout=20s -n argocd get application "$app" \
+            -o jsonpath='{.spec.destination.namespace}' 2>/dev/null </dev/null)"
+    case "$ns" in ''|*[!a-z0-9-]*) _emit "DIAG: ${app}: no destination namespace could be read"; continue ;; esac
+    case "$seen" in *" ${ns} "*) _emit "DIAG: ${ns}: Application ${app} deploys here too (above)"; continue ;; esac
+    seen="${seen}${ns} "
+    {
+      echo "Application ${app} deploys here"
+      echo "-- get pods -o wide"
+      kubectl --context="$KUBE_CONTEXT" --request-timeout=20s -n "$ns" get pods -o wide 2>&1
+      echo "-- get pvc"
+      kubectl --context="$KUBE_CONTEXT" --request-timeout=20s -n "$ns" get pvc 2>&1
+      echo "-- containers not running and ready, and why"
+      kubectl --context="$KUBE_CONTEXT" --request-timeout=20s -n "$ns" get pods -o json 2>/dev/null \
+        | python3 -I "${HERE}/../lib/p09-bar-diag.py" --pods
+      echo "-- last 50 events, oldest first"
+      ev="$(kubectl --context="$KUBE_CONTEXT" --request-timeout=20s -n "$ns" get events \
+              --sort-by=.metadata.creationTimestamp 2>&1)"
+      printf '%s\n' "$ev" | head -n 1
+      printf '%s\n' "$ev" | sed 1d | tail -n 50
+    } </dev/null | offsite_scrub | python3 -I "${HERE}/../lib/p09-bar-diag.py" --frame "$ns" --scrub "${SITE_URL}" \
+      | while IFS= read -r l; do _emit "$l"; done
+  done
+  return 0
+}
+
 # S17 ... 3c watch the waves. `-w` never returns; a reader presses Ctrl-C.
 # Twenty seconds of the watch is pasted, then the page's own success
 # condition (the readiness-bar block further down) is read TWICE, three
@@ -810,6 +846,9 @@ if ! done_step "$S"; then budget_left || yield "S17+"
       kubectl --context="$KUBE_CONTEXT" -n argocd get applications -o json 2>/dev/null \
         | python3 "${HERE}/../lib/p09-stuck-apps.py" --scrub "${SITE_URL}" | offsite_scrub \
         | while IFS= read -r l; do note "S17: not ready, Argo CD says: ${l}"; done
+      # And what those Applications' namespaces hold (pods, volumes, why a container is not running, events), as DIAG
+      # lines, so a run whose VM is gone by the safe end can still name the cause (bar_diag, above this step).
+      out_of "${S}-bar" | awk '{print $1}' | sort -u | bar_diag
     fi
   fi
   mark_done "$S"

@@ -1565,5 +1565,23 @@ if [ "$TS_CASES" -eq 0 ] || { [ "$TS_RC" -ne 0 ] && ! printf '%s\n' "$TS_OUT" | 
   bad "tree-source-test.sh ran its cases" "rc=${TS_RC}, ${TS_CASES} case(s): $(printf '%s' "$TS_OUT" | tail -3)"
 fi
 
+# What P09 leaves in its log when S17's readiness bar records a FAIL: each not-ready Application's namespace, its pods,
+# claims, last 50 events and why each container is not running, as bounded DIAG lines. The step is read out of P09 and
+# run against a stub kubectl on a forced FAIL (the block is written, read-only, and adds no verdict) and on a PASS (it
+# is not). Folded in like the cases above.
+BD_OUT="$(bash "${HERE}/bar-diag-test.sh" 2>&1)"; BD_RC=$?
+BD_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) BD_CASES=$((BD_CASES+1)); ok "readiness diag: ${line#ok   }" ;;
+    "FAIL "*) BD_CASES=$((BD_CASES+1)); bad "readiness diag: ${line#FAIL }" "run tests/executed-docs/bar-diag-test.sh for detail" ;;
+  esac
+done <<EOF_BD
+$BD_OUT
+EOF_BD
+if [ "$BD_CASES" -eq 0 ] || { [ "$BD_RC" -ne 0 ] && ! printf '%s\n' "$BD_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "bar-diag-test.sh ran its cases" "rc=${BD_RC}, ${BD_CASES} case(s): $(printf '%s' "$BD_OUT" | tail -3)"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
