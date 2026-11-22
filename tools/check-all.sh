@@ -583,6 +583,7 @@ run_gate "a product bump of Open WebUI or LiteLLM reaches a site with no site ed
 run_gate "the site-follows-product gate goes red on every mutation" bash tools/check-site-follows-product.sh --selftest
 run_gate "site LiteLLM hooks load through values alone" bash tools/check-litellm-hooks.sh
 run_gate "LiteLLM uses its bundled price map when global.imageRegistry is set, and fetches it otherwise" bash tools/check-litellm-price-map.sh
+run_gate "Grafana's plugin update check and plugin preinstall are off when global.airGapped is true or global.imageRegistry is set, and at their defaults otherwise" bash tools/check-grafana-airgap.sh
 run_gate "the LiteLLM proxy and its migrations Job have Prisma telemetry off (CHECKPOINT_DISABLE=1) on every site" bash tools/check-litellm-telemetry.sh
 # No known-bad LiteLLM digest or 1.107.0 tag (the incident) is named in images.txt, the SBOM, a chart or any
 # other file outside the docs; the list is tools/litellm-bad-digests.txt. Not in ci.yaml yet, for the reason at

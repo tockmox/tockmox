@@ -4,7 +4,8 @@ global:
   certIssuer: "tockmox-ca"
   imageRegistry: ""
   # true on a site with no route out (docs/deployment/airgap.md). Read by
-  # tockmox-ai: the model gateway uses LiteLLM's bundled price map.
+  # tockmox-ai: the model gateway uses LiteLLM's bundled price map. Read here:
+  # Grafana's plugin update check and plugin preinstall are off.
   airGapped: false
   timezone: "UTC"
   clusterCIDR: "10.42.0.0/16"
@@ -874,12 +875,35 @@ kube-prometheus-stack:
     # trap was already written down one chart over, for Open WebUI's version
     # check, and was fixed for that console rather than turned into a check.
     # Replacing the gate's assertion is the rest of that work and is NOT this.
+    #
+    # NO PLUGIN CALLS TO GRAFANA.COM ON AN AIR-GAPPED SITE (2026-11-22).
+    #
+    # Two more grafana.com callers were left on: the plugin update check
+    # (`[analytics] check_for_plugin_updates`, default true, a GET every ten
+    # minutes) and plugin preinstall (`[plugins] preinstall_disabled`, default
+    # false: from Grafana 12 on, a built-in list of app plugins is installed
+    # from grafana.com at start). On the air-gap lane the guest looked up
+    # grafana.com at Grafana's start and every ten minutes after, each lookup
+    # followed by denied connections; the component was read from that timing,
+    # not from a Grafana log, and an air-gap run is what proves the fix.
+    #
+    # Both follow the site's own statement, the signal the model gateway reads:
+    # `global.airGapped` true, or `global.imageRegistry` set (the fallback
+    # path, air-gapped by construction). Elsewhere they render Grafana's own
+    # defaults, so a connected site keeps the update badge and the preinstalled
+    # apps. The subchart passes string values in grafana.ini through `tpl`,
+    # which is what lets a values file decide them at render time; globals reach
+    # it through kube-prometheus-stack. tools/check-grafana-airgap.sh asserts
+    # both keys on the rendered ConfigMap, connected and air-gapped.
     grafana.ini:
       analytics:
         check_for_updates: false
         reporting_enabled: false
+        check_for_plugin_updates: '{{ if or .Values.global.airGapped .Values.global.imageRegistry }}false{{ else }}true{{ end }}'
       news:
         news_feed_enabled: false
+      plugins:
+        preinstall_disabled: '{{ if or .Values.global.airGapped .Values.global.imageRegistry }}true{{ else }}false{{ end }}'
     # 512Mi WAS measured, and it was still too low. Both halves of that sentence
     # matter, so the original finding is kept rather than overwritten.
     #
