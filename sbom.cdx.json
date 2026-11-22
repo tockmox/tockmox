@@ -68,6 +68,60 @@
       "version": "17.12-bookworm"
     },
     {
+      "name": "docker.io/longhornio/backing-image-manager",
+      "purl": "pkg:oci/backing-image-manager?repository_url=docker.io/longhornio/backing-image-manager&tag=v1.13.0",
+      "type": "container",
+      "version": "v1.13.0"
+    },
+    {
+      "name": "docker.io/longhornio/csi-attacher",
+      "purl": "pkg:oci/csi-attacher?repository_url=docker.io/longhornio/csi-attacher&tag=v4.13.0",
+      "type": "container",
+      "version": "v4.13.0"
+    },
+    {
+      "name": "docker.io/longhornio/csi-node-driver-registrar",
+      "purl": "pkg:oci/csi-node-driver-registrar?repository_url=docker.io/longhornio/csi-node-driver-registrar&tag=v2.18.0",
+      "type": "container",
+      "version": "v2.18.0"
+    },
+    {
+      "name": "docker.io/longhornio/csi-provisioner",
+      "purl": "pkg:oci/csi-provisioner?repository_url=docker.io/longhornio/csi-provisioner&tag=v6.3.0",
+      "type": "container",
+      "version": "v6.3.0"
+    },
+    {
+      "name": "docker.io/longhornio/csi-resizer",
+      "purl": "pkg:oci/csi-resizer?repository_url=docker.io/longhornio/csi-resizer&tag=v2.2.1",
+      "type": "container",
+      "version": "v2.2.1"
+    },
+    {
+      "name": "docker.io/longhornio/csi-snapshotter",
+      "purl": "pkg:oci/csi-snapshotter?repository_url=docker.io/longhornio/csi-snapshotter&tag=v8.6.0",
+      "type": "container",
+      "version": "v8.6.0"
+    },
+    {
+      "name": "docker.io/longhornio/livenessprobe",
+      "purl": "pkg:oci/livenessprobe?repository_url=docker.io/longhornio/livenessprobe&tag=v2.20.0",
+      "type": "container",
+      "version": "v2.20.0"
+    },
+    {
+      "name": "docker.io/longhornio/longhorn-engine",
+      "purl": "pkg:oci/longhorn-engine?repository_url=docker.io/longhornio/longhorn-engine&tag=v1.13.0",
+      "type": "container",
+      "version": "v1.13.0"
+    },
+    {
+      "name": "docker.io/longhornio/longhorn-instance-manager",
+      "purl": "pkg:oci/longhorn-instance-manager?repository_url=docker.io/longhornio/longhorn-instance-manager&tag=v1.13.0",
+      "type": "container",
+      "version": "v1.13.0"
+    },
+    {
       "name": "docker.io/longhornio/longhorn-manager",
       "purl": "pkg:oci/longhorn-manager?repository_url=docker.io/longhornio/longhorn-manager&tag=v1.13.0",
       "type": "container",
@@ -84,6 +138,12 @@
       "purl": "pkg:oci/longhorn-ui?repository_url=docker.io/longhornio/longhorn-ui&tag=v1.13.0",
       "type": "container",
       "version": "v1.13.0"
+    },
+    {
+      "name": "docker.io/longhornio/support-bundle-kit",
+      "purl": "pkg:oci/support-bundle-kit?repository_url=docker.io/longhornio/support-bundle-kit&tag=v0.0.98",
+      "type": "container",
+      "version": "v0.0.98"
     },
     {
       "name": "docker.io/nginx/nginx-unprivileged",

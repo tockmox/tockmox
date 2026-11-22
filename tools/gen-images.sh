@@ -59,6 +59,86 @@ forge_image_ref() {
   fi
   echo "        image: ${move}"
 }
+# THE IMAGES LONGHORN STARTS ITSELF. longhorn-manager creates the engine and
+# instance-manager pods, the backing-image and support-bundle managers and the CSI
+# driver (attacher, provisioner, resizer, snapshotter, node-driver-registrar,
+# livenessprobe), naming each image in a container arg or an env value. No
+# `image:` line in the render names them, so the extractor never saw them: until
+# 2026-11-21 images.txt carried longhorn-manager, -share-manager and -ui only, and
+# an air-gapped install could provision no Longhorn volume at all.
+#
+# DERIVED FROM THE VENDORED CHART, NOT TYPED. The set is every component under the
+# vendored chart's own `image.longhorn` and `image.csi` values, with any
+# tockmox-platform or CI override of `longhorn.image` laid over it, so a Longhorn
+# bump that moves a tag or adds a component changes this list by itself, and
+# `--check` fails until images.txt is regenerated. The registry is the one the
+# chart's templates choose: global.imageRegistry, then privateRegistry.registryUrl,
+# then global.cattle.systemDefaultRegistry, then the component's own registry,
+# then docker.io. A component with no repository is left out: the only one is
+# image.openshift.oauthProxy, which is empty unless a site runs OpenShift and is
+# not under these two keys anyway. longhorn-cli, which Longhorn's own
+# longhorn-images.txt also lists, is a client an operator runs by hand, not an
+# image the cluster pulls, and the chart has no value for it.
+#
+# CROSS-CHECKED AGAINST THE RENDER. Every quoted longhornio reference in the
+# rendered platform layer (the args and env values the manager reads) must be in
+# the derived set. One that is not means Longhorn named an image somewhere this
+# derivation does not read, and that is an error, never a shorter list.
+longhorn_image_refs() {
+  local render="$1" tgz
+  tgz=$(ls charts/tockmox-platform/charts/longhorn-*.tgz 2>/dev/null || true)
+  if [ -z "$tgz" ] || [ "$(printf '%s\n' "$tgz" | grep -c .)" -ne 1 ]; then
+    echo "ERROR: expected exactly one vendored charts/tockmox-platform/charts/longhorn-*.tgz (run tools/helm-deps.sh), found: ${tgz:-none}" >&2
+    exit 1
+  fi
+  if ! python3 -c 'import yaml' 2>/dev/null; then
+    echo "ERROR: python3 with PyYAML is needed to read the vendored Longhorn chart's image values (tools/dev-env.sh provides it)" >&2
+    exit 1
+  fi
+  local refs
+  refs=$(helm show values "$tgz" | python3 -c '
+import sys, yaml
+chart = yaml.safe_load(sys.stdin) or {}
+layers = [yaml.safe_load(open(f)) or {} for f in sys.argv[1:]]
+def merge(a, b):
+    if isinstance(a, dict) and isinstance(b, dict):
+        out = dict(a)
+        for k, v in b.items():
+            out[k] = merge(a.get(k), v)
+        return out
+    return b if b is not None else a
+lh = chart
+glob = {}
+for v in layers:
+    lh = merge(lh, v.get("longhorn") or {})
+    glob = merge(glob, v.get("global") or {})
+g = merge(lh.get("global") or {}, glob)
+common = g.get("imageRegistry") or (lh.get("privateRegistry") or {}).get("registryUrl") \
+    or (g.get("cattle") or {}).get("systemDefaultRegistry") or ""
+img = lh.get("image") or {}
+n = 0
+for section in ("longhorn", "csi"):
+    for name, c in sorted((img.get(section) or {}).items()):
+        if not isinstance(c, dict) or not c.get("repository"):
+            continue
+        if not c.get("tag"):
+            sys.exit("ERROR: image.%s.%s in the vendored Longhorn chart has a repository and no tag" % (section, name))
+        reg = common or c.get("registry") or "docker.io"
+        print("%s/%s:%s" % (reg, c["repository"], c["tag"]))
+        n += 1
+if n == 0:
+    sys.exit("ERROR: no image.longhorn / image.csi components in the vendored Longhorn chart")
+' charts/tockmox-platform/values.yaml ci/values.yaml) || { echo "ERROR: could not derive Longhorn's images from $tgz" >&2; exit 1; }
+  local seen missing
+  seen=$(printf '%s\n' "$render" | grep -oE '"([^" ]*/)?longhornio/[^" ]+:[^" ]+"' | tr -d '"' | sort -u || true)
+  missing=$(comm -23 <(printf '%s\n' "$seen" | sed '/^$/d') <(printf '%s\n' "$refs" | sort -u))
+  if [ -n "$missing" ]; then
+    echo "ERROR: the rendered Longhorn names images its chart values under image.longhorn / image.csi do not:" >&2
+    printf '%s\n' "$missing" | sed 's/^/  /' >&2
+    exit 1
+  fi
+  printf '%s\n' "$refs" | sed 's/^/        image: /'
+}
 OUT="$(mktemp "${TMPDIR:-/tmp}/tockmox-images.XXXXXX")"
 trap 'rm -f "$OUT"' EXIT
 {
@@ -83,10 +163,15 @@ trap 'rm -f "$OUT"' EXIT
     #
     # --no-hooks would have fixed the symptom and dropped the three real Jobs
     # with it.
-    helm template t "$c" \
+    r=$(helm template t "$c" \
       -f ci/values.yaml \
-      --skip-tests \
+      --skip-tests) \
       || { echo "RENDER FAILED for $c" >&2; exit 1; }
+    printf '%s\n' "$r"
+    # Longhorn's own set, which no `image:` line names (longhorn_image_refs above).
+    if [ "$c" = "charts/tockmox-platform" ]; then
+      longhorn_image_refs "$r"
+    fi
     # THE IDENTITY LAYER ONCE MORE WITH THE BUNDLED SERVER KEPT. From
     # 0.9.0 a default render runs Authentik on CNPG, so the bundled PostgreSQL
     # server and the pg_dump client drop out of it; an install that keeps the
