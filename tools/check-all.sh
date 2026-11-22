@@ -482,6 +482,13 @@ run_gate "every tool is executable" bash -c '
 run_gate "helm-deps goes offline only when every upstream subchart is vendored at its Chart.lock version" \
   bash tools/helm-deps.sh --selftest
 
+# The archives the dependency step above vendored, against what the Chart.yaml files declare: the count
+# a disconnected Argo CD needs served, and every name at its version. Reads files only, no network.
+run_gate "the vendored subchart archives number the declared dependencies, each at its version" \
+  bash tools/check-vendored-charts.sh
+run_gate "the vendored-charts gate goes red on a missing, an extra and a mis-versioned archive, and green on each revert" \
+  bash tools/check-vendored-charts.sh --selftest
+
 # THE TWO GUARDS THAT EXIST BECAUSE SOMETHING SHIPPED, added 2026-09-16. Both
 # run here rather than by hand, because both classes travelled all the way into
 # a cluster with nothing looking, and a self-test nobody invokes is the same as

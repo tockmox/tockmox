@@ -119,6 +119,8 @@ tools/check-values-duplicate-keys.sh	0
 tools/check-values-tiers.sh	2
 tools/check-values-typos.sh	6
 tools/check-values-typos.sh --selftest	17
+tools/check-vendored-charts.sh	0
+tools/check-vendored-charts.sh --selftest	1
 tools/gate-plan.py --selftest	0
 tools/gate-plan.py check-inputs	1
 tools/gen-dashboard-overview.py --check	0
