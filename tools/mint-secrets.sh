@@ -78,7 +78,7 @@ CONTROLLER_NS="kube-system"
 # The ntfy image the chart runs (images.txt). An air-gapped mirror holds the product's image set, so a
 # borrow pod pinned to any other tag cannot be pulled there and the real mint fails after the dry run
 # listed everything. Keep this equal to the chart's ntfy image.
-NTFY_IMAGE="binwiederhier/ntfy:v2.37.2"
+NTFY_IMAGE="binwiederhier/ntfy:v2.38.0"
 NTFY_PASSWORD=""; NTFY_PASSWORD_FILE=""; NO_NEXT=false; NO_PROMPT=false
 
 # A secret value containing a control character is never correct, and every
