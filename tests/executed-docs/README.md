@@ -190,6 +190,10 @@ move-in-rows-test.sh   hermetic proof of P16's rows: the verdicts, the page bloc
                        against a stub product and real git that breaks one row at a time, and its gate (also run by selftest.sh)
 tree-source-test.sh    hermetic proof that a run reading pages from the working tree names that tree: "tree: <sha>, clean"
                        only when it is the ref's commit with nothing uncommitted (lib/assert.sh tree_source; also run by selftest.sh)
+lib/p09-bar-diag.py    what P09 prints, as DIAG lines, when its readiness bar records a FAIL: why each container in a
+                       not-ready Application's namespace is not running, and the bounded, scrubbed framing of that dump
+bar-diag-test.sh       hermetic proof of that dump: P09's S17 step against a stub kubectl, on a forced FAIL and on a PASS
+                       (also run by selftest.sh)
 selftest.sh            hermetic proof of the machinery above
 pages-no-cluster.sh    the six no-cluster pages (values-contract, customising, capabilities,
                        configuration, platform-management, verify): every bash block extracted
