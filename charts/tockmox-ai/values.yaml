@@ -1865,6 +1865,16 @@ litellm:
     # Where the migrations Job (and anything else in the image) puts temp files
     # now that the root filesystem is read-only. See litellm.volumes above.
     TMPDIR: /scratch
+    # NO VENDOR TELEMETRY FROM PRISMA, ON EVERY SITE. LiteLLM runs the Prisma
+    # CLI for its schema migrations (the migrations Job) and at proxy start,
+    # and Prisma sends a version check and usage data to checkpoint.prisma.io
+    # unless this is set. A self-hosted install should not call a vendor by
+    # default, so it is set unconditionally, not only on an air-gapped site
+    # (where it is a denied connection on every migration). This map reaches
+    # the proxy container and the migrations Job both, and Helm merges maps,
+    # so a site that adds its own litellm.envVars keeps it.
+    # tools/check-litellm-telemetry.sh asserts it on the rendered workloads.
+    CHECKPOINT_DISABLE: "1"
 
   # ------------------------------------------------------------------------
   # THE PRICE MAP ON AN AIR-GAPPED SITE. LiteLLM fetches its model price map
