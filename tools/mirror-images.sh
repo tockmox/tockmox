@@ -118,6 +118,33 @@ STUB
   if [ "$rc" -eq 2 ] && grep -q 'carries no image entries' <<<"$out"; then ok "an empty images file refuses (exit 2, saying so) rather than passing vacuously"
   else bad "empty images file: expected exit 2 and the no-entries message, got rc=$rc: $out"; fi
 
+  # The copy path, for a reference carrying both a tag and a digest. This stub
+  # skopeo refuses such a reference as the real one does, finds nothing at any
+  # destination, and logs every copy it accepts as "SRC DST".
+  mkdir -p "$T/copybin"
+  cat > "$T/copybin/skopeo" <<'STUB'
+#!/usr/bin/env bash
+[ "$1" = copy ] || exit 1          # inspect: nothing is there yet
+eval "src=\${$(($# - 1))}"; eval "dst=\${$#}"
+for r in "$src" "$dst"; do
+  n="${r#docker://}"; n="${n%%@*}"; n="${n##*/}"
+  case "$r" in *@sha256:*) case "$n" in *:*)
+    echo "Error: invalid source name $r: Docker references with both a tag and digest are currently not supported" >&2; exit 1 ;;
+  esac ;; esac
+done
+echo "${src#docker://} ${dst#docker://}" >> "$STUB_LOG"
+STUB
+  chmod +x "$T/copybin/skopeo"
+  dg="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  printf 'quay.io/org/reloader:v1.2@sha256:%s\nlocalhost:5000/org/app:v3@sha256:%s\n' "$dg" "$dg" > "$T/tagdigest.txt"
+  : > "$T/copy.log"
+  out="$(STUB_LOG="$T/copy.log" PATH="$T/copybin:$PATH" bash "$SELF" --registry reg.test/m --images "$T/tagdigest.txt" 2>&1)"; rc=$?
+  if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q '2 copied, 0 already current, 0 failed' \
+     && grep -qxF "quay.io/org/reloader@sha256:$dg reg.test/m/org/reloader:sha256-0123456789ab" "$T/copy.log" \
+     && grep -qxF "localhost:5000/org/app@sha256:$dg reg.test/m/org/app:sha256-0123456789ab" "$T/copy.log"; then
+    ok "a tag-plus-digest reference copies by digest to the derived tag --verify asks for (a registry port is kept)"
+  else bad "tag-plus-digest copy: expected exit 0, 2 copied, by digest to the derived tag; got rc=$rc: $out; log: $(cat "$T/copy.log")"; fi
+
   echo; echo "mirror-images --selftest: $pass passed, $fail failed"
   [ "$fail" -eq 0 ]; exit $?
 fi
@@ -208,6 +235,7 @@ while IFS= read -r img; do
   case "$img" in ''|'#'*) continue ;; esac
 
   path=$(dest_path "$img")
+  src="$img"
   case "$img" in
     *@sha256:*)
       # Digest-pinned source: land it under a derived tag. The copy preserves
@@ -218,6 +246,14 @@ while IFS= read -r img; do
       # host is already stripped, so a colon here can only be a tag separator.
       case "$base" in *:*) base="${base%:*}" ;; esac
       dest="${REG}/${base}:sha256-$(printf '%s' "$d" | cut -c1-12)"
+      # Read the source by digest alone. skopeo refuses a reference carrying
+      # both a tag and a digest ("Docker references with both a tag and digest
+      # are currently not supported"), and the digest is what the chart pulls.
+      # Only the last path element can carry the tag; a colon before it is a
+      # registry port.
+      name="${img%%@*}"; last="${name##*/}"
+      case "$last" in *:*) name="${name%:*}" ;; esac
+      src="${name}@sha256:${d}"
       ;;
     *) dest="${REG}/${path}" ;;
   esac
@@ -256,7 +292,7 @@ while IFS= read -r img; do
   fi
 
   for d in $dests; do
-    s=$(src_digest "$img"); t=$(dst_digest "$d")
+    s=$(src_digest "$src"); t=$(dst_digest "$d")
     if [ -n "$s" ] && [ "$s" = "$t" ]; then
       echo "up to date  $d"
       SKIPPED=$((SKIPPED + 1))
@@ -265,7 +301,7 @@ while IFS= read -r img; do
 
     echo "copying     $img"
     echo "        ->  $d"
-    if copy_image "$img" "$d"; then
+    if copy_image "$src" "$d"; then
       COPIED=$((COPIED + 1))
     else
       echo "FAILED      $img" >&2
