@@ -138,6 +138,14 @@ INTERNAL_DOMAIN_V="${TOCKMOX_P09_INTERNAL_DOMAIN:-p09.internal}"
 LAN_CIDR_V="$TOCKMOX_P09_LAN_CIDR"
 POOL_V="$TOCKMOX_P09_POOL"
 SITE_NAME_V="${TOCKMOX_P09_SITE_NAME:-p09}"
+# TOCKMOX_P09_AIRGAPPED=1 (airgap-lane.sh sets it): S08 also does what docs/deployment/airgap.md tells a disconnected
+# site to add to the global.yaml Phase 1 wrote, reading the line from that page's own block (ablock below).
+AIRGAPPED="${TOCKMOX_P09_AIRGAPPED:-0}"
+case "$AIRGAPPED" in 0|1) : ;; *)
+  _emit "INFRA: TOCKMOX_P09_AIRGAPPED must be 0 or 1, not '${AIRGAPPED}'"
+  path_outcome INFRA_ERROR "bad TOCKMOX_P09_AIRGAPPED"; exit 1 ;; esac
+AIRGAP_PAGE="docs/deployment/airgap.md"
+AIRGAP_SECTION="### Then tell the charts the site is air-gapped"
 
 if [ "$WS_SHELL" = "zsh" ] && ! command -v "${ZSH:-zsh}" >/dev/null 2>&1; then
   _emit "INFRA: no zsh on this runner and TOCKMOX_WS_SHELL=zsh. Install zsh, or set"
@@ -198,6 +206,12 @@ block() {
 block_sha() {
   if [ "$FROM_TREE" = "1" ]; then "$EXTRACT" --file "$PAGE" --section "$SECTION" --lang bash --containing "$1" --sha 2>/dev/null
   else "$EXTRACT" --ref "$REF" --page "$PAGE" --section "$SECTION" --lang bash --containing "$1" --sha 2>/dev/null; fi
+}
+
+# ablock LANG NEEDLE ... the same, for the block of airgap.md's "Then tell the charts the site is air-gapped"
+ablock() {
+  if [ "$FROM_TREE" = "1" ]; then "$EXTRACT" --file "$AIRGAP_PAGE" --section "$AIRGAP_SECTION" --lang "$1" --containing "$2" 2>/dev/null
+  else "$EXTRACT" --ref "$REF" --page "$AIRGAP_PAGE" --section "$AIRGAP_SECTION" --lang "$1" --containing "$2" 2>/dev/null; fi
 }
 
 # run_ws NAME BLOCKTEXT [ANSWERFILE] ... paste one WORKSTATION block into the
@@ -543,6 +557,19 @@ if ! done_step "$S"; then budget_left || yield "S08+"
     fi
     note "S08: lab only: sso.adminUsers names akadmin in site/values/identity.yaml (identity.md, Naming the first admins)"
     record "$S" "lab: the site names akadmin in sso.adminUsers before it is published" "1" "$(grep -c '^  adminUsers: \[akadmin\]$' "$idv" | tr -d ' ')"
+  fi
+  # Air-gap lane only: airgap.md, "Then tell the charts the site is air-gapped". The line comes out of the page's
+  # block and goes under the global: block the file already has, as the page says, not as a second global: block.
+  if [ "$AIRGAPPED" = 1 ]; then
+    gv="${SITE_REPO:-/nonexistent}/site/values/global.yaml"
+    agline="$(ablock yaml 'airGapped:' | grep -E '^  airGapped:' | head -1)" || agline=""
+    record "$S" "airgap.md: the page's block sets global.airGapped" "  airGapped: true" "$agline"
+    if [ -n "$agline" ] && [ -f "$gv" ] && ! grep -q '^  airGapped:' "$gv"; then
+      awk -v l="$agline" '{ print } /^global:$/ && !d { print l; d = 1 }' "$gv" > "$gv.p09" && mv "$gv.p09" "$gv"
+    fi
+    note "S08: air-gap lane: global.airGapped added under global: in site/values/global.yaml (airgap.md, Then tell the charts the site is air-gapped)"
+    record "$S" "air-gap lane: global.yaml sets airGapped: true once, under its one top-level global key" "1 1" \
+      "$(grep -c '^  airGapped: true$' "$gv" 2>/dev/null | tr -d ' ') $(grep -c '^global:' "$gv" 2>/dev/null | tr -d ' ')"
   fi
   mark_done "$S"
 fi

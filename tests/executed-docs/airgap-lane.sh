@@ -22,7 +22,8 @@
 #      guest within the same window; only then is the cut proven, and the counter proven able to count. A refusal with
 #      no deny line, three times, is a FAIL (the counter cannot count); no refusal within TOCKMOX_AIRGAP_CUT_WAIT
 #      seconds is BLOCKED (the cut was never made)
-#   9. run.sh P09 (built-in route, this tree's install.md), timed: the cut window
+#   9. run.sh P09 (built-in route, this tree's install.md, and global.airGapped where airgap.md says), timed: the
+#      cut window
 #  10. the edge's deny lines for the guest over the cut window, counted and grouped by destination. A deny whose
 #      protocol and port are on TOCKMOX_AIRGAP_IGNORE (default udp/123, the OS's time sync) is reported and does not
 #      fail the clause; any other deny does, and the line names where the install reached
@@ -302,7 +303,9 @@ done
 step "9 P09 under the cut"
 NODE_IP="$(kubectl --context="$KUBE_CONTEXT" get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')"
 [ -n "$NODE_IP" ] || fail "the throwaway reports no node InternalIP"
-export TOCKMOX_P09_ROUTE=built-in TOCKMOX_P09_FROM_TREE=1
+# TOCKMOX_P09_AIRGAPPED: P09 also sets global.airGapped where airgap.md says to, so the cut run has the values the page
+# gives a disconnected site, not only install.md's.
+export TOCKMOX_P09_ROUTE=built-in TOCKMOX_P09_FROM_TREE=1 TOCKMOX_P09_AIRGAPPED=1
 export TOCKMOX_P09_TOCKMOX_REPO_URL="$TM_URL" TOCKMOX_P09_TOCKMOX_REVISION="$TAG" TOCKMOX_P09_TOCKMOX_CLONE="$TREE"
 export TOCKMOX_P09_STATE="${LANE}/p09-state" TOCKMOX_P09_BUDGET="${TOCKMOX_P09_BUDGET:-3000}"
 export TOCKMOX_P09_LAN_CIDR="${TOCKMOX_P09_LAN_CIDR:-${NODE_IP%.*}.0/24}"

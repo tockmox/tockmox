@@ -13,14 +13,19 @@
 # writes its env lists without `tpl`, so the value cannot be decided at render
 # time inside the Deployment: the Deployment names an optional key in the
 # ConfigMap `tockmox-litellm-airgap-env`, and the parent chart renders that
-# ConfigMap only when `global.imageRegistry` is set. This checks the variable
-# each container would actually get, resolved the way the kubelet resolves it
-# (an optional reference to a missing ConfigMap sets nothing).
+# ConfigMap only when the site says it is air-gapped: `global.airGapped` is
+# true, or `global.imageRegistry` is set. The first is the site's own
+# statement, and the one a site on the node-side containerd mirror (the primary
+# path, with global.imageRegistry empty) has; the second is the fallback path,
+# which is air-gapped by construction. This checks the variable each container
+# would actually get, resolved the way the kubelet resolves it (an optional
+# reference to a missing ConfigMap sets nothing).
 #
-# WHAT IT PROVES: with global.imageRegistry empty, neither the LiteLLM proxy nor
-# its migrations Job gets LITELLM_LOCAL_MODEL_COST_MAP; with it set, both get
-# "True"; and a site that replaces litellm.extraEnvVars without the entry is
-# refused by name while global.imageRegistry is set.
+# WHAT IT PROVES: with neither set (and with global.airGapped false), neither
+# the LiteLLM proxy nor its migrations Job gets LITELLM_LOCAL_MODEL_COST_MAP;
+# with global.airGapped true, with global.imageRegistry set, and with both,
+# both get "True"; and a site that replaces litellm.extraEnvVars without the
+# entry is refused by name on either trigger.
 #
 # WHAT IT DOES NOT PROVE: that LiteLLM is the only caller of
 # raw.githubusercontent.com on a cut site, or that a running proxy makes no
@@ -37,11 +42,30 @@ CHART=charts/tockmox-ai
 BASE=ci/values.yaml
 MIRROR=registry.example/mirror
 
-helm template t "$CHART" -f "$BASE" > "$tmp/connected.yaml"
-helm template t "$CHART" -f "$BASE" --set "global.imageRegistry=$MIRROR" > "$tmp/airgap.yaml"
+# label | helm arguments | the value each LiteLLM container must get ("-" for none)
+CASES=(
+  "connected|-|-"
+  "connected, global.airGapped false|--set global.airGapped=false|-"
+  "air-gapped (global.airGapped)|--set global.airGapped=true|True"
+  "air-gapped (global.imageRegistry)|--set global.imageRegistry=$MIRROR|True"
+  "air-gapped (both)|--set global.airGapped=true --set global.imageRegistry=$MIRROR|True"
+)
+args=()
+i=0
+for c in "${CASES[@]}"; do
+  IFS='|' read -r label hargs want <<<"$c"
+  # shellcheck disable=SC2086  # hargs is a fixed list of words written above
+  if [ "$hargs" = "-" ]; then
+    helm template t "$CHART" -f "$BASE" > "$tmp/$i.yaml"
+  else
+    helm template t "$CHART" -f "$BASE" $hargs > "$tmp/$i.yaml"
+  fi
+  args+=("$label" "$tmp/$i.yaml" "$want")
+  i=$((i+1))
+done
 
 rc=0
-python3 - "$tmp/connected.yaml" "$tmp/airgap.yaml" <<'PY' || rc=1
+python3 - "${args[@]}" <<'PY' || rc=1
 import sys, yaml
 
 VAR = "LITELLM_LOCAL_MODEL_COST_MAP"
@@ -91,7 +115,9 @@ def fail(msg):
 def ok(msg):
     print("  ok " + msg)
 
-for label, path, want in (("connected", sys.argv[1], None), ("air-gapped", sys.argv[2], "True")):
+a = sys.argv[1:]
+for label, path, want in zip(a[0::3], a[1::3], a[2::3]):
+    want = None if want == "-" else want
     ds = list(docs(path))
     cms = {d["metadata"]["name"]: d for d in ds if d["kind"] == "ConfigMap"}
     found = litellm_containers(ds)
@@ -110,16 +136,19 @@ sys.exit(1 if bad else 0)
 PY
 
 # -------------------------------------------------- refusal, by its message
-out=""
-if out=$(helm template t "$CHART" -f "$BASE" --set "global.imageRegistry=$MIRROR" \
-      --set 'litellm.extraEnvVars[0].name=OTHER' --set 'litellm.extraEnvVars[0].value=x' 2>&1); then
-  echo "FAIL refusal (site replaces litellm.extraEnvVars on an air-gapped site): the render succeeded"; rc=1
-elif printf '%s' "$out" | grep -- 'litellm.extraEnvVars does not carry LITELLM_LOCAL_MODEL_COST_MAP' >/dev/null; then
-  echo "  ok refusal (site replaces litellm.extraEnvVars on an air-gapped site)"
-else
-  echo "FAIL refusal (site replaces litellm.extraEnvVars on an air-gapped site): failed, but not with the expected message"; rc=1
-  printf '%s\n' "$out" | head -5 | sed 's/^/     got: /'
-fi
+for trig in "global.airGapped=true" "global.imageRegistry=$MIRROR"; do
+  what="site replaces litellm.extraEnvVars with ${trig%%=*} set"
+  out=""
+  if out=$(helm template t "$CHART" -f "$BASE" --set "$trig" \
+        --set 'litellm.extraEnvVars[0].name=OTHER' --set 'litellm.extraEnvVars[0].value=x' 2>&1); then
+    echo "FAIL refusal ($what): the render succeeded"; rc=1
+  elif printf '%s' "$out" | grep -- 'litellm.extraEnvVars does not carry LITELLM_LOCAL_MODEL_COST_MAP' >/dev/null; then
+    echo "  ok refusal ($what)"
+  else
+    echo "FAIL refusal ($what): failed, but not with the expected message"; rc=1
+    printf '%s\n' "$out" | head -5 | sed 's/^/     got: /'
+  fi
+done
 
 if [ "$rc" -eq 0 ]; then echo "check-litellm-price-map: ok"; else echo "check-litellm-price-map: FAILED"; fi
 exit "$rc"

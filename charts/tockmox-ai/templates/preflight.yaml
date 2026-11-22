@@ -391,18 +391,18 @@ tockmox-hooks entry first when a site replaced both. */ -}}
 {{- fail "litellm.envVars.TMPDIR is /scratch, but litellm.volumeMounts does not mount `tockmox-scratch` at /scratch. With the read-only root filesystem the migrations Job then has nowhere to write. litellm.volumeMounts is a list, and a site that sets it replaces the shipped entries; restate it: {name: tockmox-scratch, mountPath: /scratch}." -}}
 {{- end -}}
 {{- end -}}
-{{- /* THE BUNDLED PRICE MAP ON AN AIR-GAPPED SITE. With global.imageRegistry
-set, templates/litellm-airgap-env.yaml renders LITELLM_LOCAL_MODEL_COST_MAP and
-the shipped litellm.extraEnvVars entry carries it into the proxy and the
-migrations Job. extraEnvVars is a list, so a site that sets it drops the entry
+{{- /* THE BUNDLED PRICE MAP ON AN AIR-GAPPED SITE. With global.airGapped true
+or global.imageRegistry set, templates/litellm-airgap-env.yaml renders
+LITELLM_LOCAL_MODEL_COST_MAP and the shipped litellm.extraEnvVars entry carries
+it into the proxy and the migrations Job. extraEnvVars is a list, so a site that sets it drops the entry
 and LiteLLM goes back to fetching its price map from the internet on every
 start, which a cut site sees only as denied connections. A site that sets the
 variable itself in litellm.envVars is left alone. */ -}}
-{{- if and $litellmOn .Values.global.imageRegistry (not (hasKey ($lit.envVars | default dict) "LITELLM_LOCAL_MODEL_COST_MAP")) -}}
+{{- if and $litellmOn (or .Values.global.airGapped .Values.global.imageRegistry) (not (hasKey ($lit.envVars | default dict) "LITELLM_LOCAL_MODEL_COST_MAP")) -}}
 {{- $hasCostMap := false -}}
 {{- range ($lit.extraEnvVars | default list) }}{{- if and (kindIs "map" .) (eq (.name | default "") "LITELLM_LOCAL_MODEL_COST_MAP") }}{{- $hasCostMap = true }}{{- end }}{{- end -}}
 {{- if not $hasCostMap -}}
-{{- fail "global.imageRegistry is set, but litellm.extraEnvVars does not carry LITELLM_LOCAL_MODEL_COST_MAP, so LiteLLM fetches its price map from raw.githubusercontent.com on every start. litellm.extraEnvVars is a list, and a site that sets it replaces the shipped entry; restate it: {name: LITELLM_LOCAL_MODEL_COST_MAP, valueFrom: {configMapKeyRef: {name: tockmox-litellm-airgap-env, key: LITELLM_LOCAL_MODEL_COST_MAP, optional: true}}}." -}}
+{{- fail "global.airGapped is true or global.imageRegistry is set, but litellm.extraEnvVars does not carry LITELLM_LOCAL_MODEL_COST_MAP, so LiteLLM fetches its price map from raw.githubusercontent.com on every start. litellm.extraEnvVars is a list, and a site that sets it replaces the shipped entry; restate it: {name: LITELLM_LOCAL_MODEL_COST_MAP, valueFrom: {configMapKeyRef: {name: tockmox-litellm-airgap-env, key: LITELLM_LOCAL_MODEL_COST_MAP, optional: true}}}." -}}
 {{- end -}}
 {{- end -}}
 {{- /* THE MIGRATIONS JOB IS THE SUBCHART'S, AS AN ARGO SYNC HOOK. Four
