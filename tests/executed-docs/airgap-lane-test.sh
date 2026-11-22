@@ -25,6 +25,10 @@
 #  16. Loki counts more deny lines than it returns: the lines it did not return count against the clause
 #  17. create fails with a named error: FAIL, and the report's summary line and a masked stderr tail name it
 #  18. the rig is full (create exits 4): the BLOCKED line in the report carries the capacity gate's own words
+#  19. the charts repository is served by the documented path: install/charts-vendored-tag.sh (this tree's own) commits
+#      the vendored archives under airgap-<vm>-vendored, site-repo-server.sh push-ref serves that tag with them in it,
+#      P09 installs that tag, and TOCKMOX_SERVE_FORCE_ADD is never set; with an archive missing the lane FAILs before
+#      the cut, naming it, and P09 never runs
 #
 # What it does not show: that the edge logs, that the segment has no other way out, or that P09 passes from the
 # mirror. The lab run is that proof.
@@ -37,8 +41,16 @@ pass() { echo "PASS $1"; }
 fail() { echo "FAIL $1"; FAILS=$((FAILS+1)); }
 
 T="$W/tree"; C="$W/ctl"; B="$W/bin"
-mkdir -p "$T/tests/executed-docs/lib" "$T/tests/executed-docs/provision" "$T/tools" "$C" "$B"
+mkdir -p "$T/tests/executed-docs/lib" "$T/tests/executed-docs/provision" "$T/tools" "$T/install" "$C" "$B"
 cp "${HERE}/airgap-lane.sh" "$T/tests/executed-docs/"
+cp "${HERE}/../../install/charts-vendored-tag.sh" "$T/install/"
+# A charts tree shaped like this one: one layer with one locked upstream dependency, ignored the way .gitignore does.
+mkdir -p "$T/charts/tockmox-platform"
+printf 'charts/*/charts/\n*.tgz\n' > "$T/.gitignore"
+printf 'apiVersion: v2\nname: tockmox-platform\nversion: 9.9.9\ndependencies:\n  - name: upstream\n    version: 1.2.3\n    repository: "https://charts.example.invalid"\n' \
+  > "$T/charts/tockmox-platform/Chart.yaml"
+printf 'dependencies:\n- name: upstream\n  repository: https://charts.example.invalid\n  version: 1.2.3\ndigest: sha256:0\n' \
+  > "$T/charts/tockmox-platform/Chart.lock"
 cp "${HERE}/lib/edge-deny-count.sh" "$T/tests/executed-docs/lib/"
 cp "${HERE}/lib/stderr-tail.py" "$T/tests/executed-docs/lib/"
 
@@ -79,17 +91,24 @@ case "$1" in
   P09)
     d="$TOCKMOX_WORKDIR/receipts-$(date -u +%Y%m%dT%H%M%S%N)"; mkdir -p "$d"
     printf '%s fake reason\n' "$(cat "$C/p09_outcome")" > "$d/P09-install-md-end-to-end"
+    echo "p09 revision ${TOCKMOX_P09_TOCKMOX_REVISION:-none}" >> "$C/calls"
     exit "$(cat "$C/p09_rc")" ;;
 esac
 SH
 cat > "$T/tests/executed-docs/provision/site-repo-server.sh" <<'SH'
 #!/usr/bin/env bash
-echo "srs $*" >> "${AGT_CTL:?}/calls"
-case "$1" in url) echo "git://192.0.2.9/tockmox.git" ;; esac
+echo "srs $* force=${TOCKMOX_SERVE_FORCE_ADD:-unset}" >> "${AGT_CTL:?}/calls"
+case "$1" in
+  url) echo "git://192.0.2.9/tockmox.git" ;;
+  # What the served tag carries, read from the repository it is served from, as push-ref serves it: as committed.
+  push-ref) echo "served-archives $(git -C "$2" ls-tree -r --name-only "refs/tags/$4" | grep -c '/charts/.*\.tgz$')" >> "$AGT_CTL/calls" ;;
+esac
 SH
 cat > "$T/tools/helm-deps.sh" <<'SH'
 #!/usr/bin/env bash
 echo "helm-deps" >> "${AGT_CTL:?}/calls"
+rm -rf charts/tockmox-platform/charts
+[ -e "$AGT_CTL/no_archive" ] || { mkdir -p charts/tockmox-platform/charts && printf 'archive' > charts/tockmox-platform/charts/upstream-1.2.3.tgz; }
 SH
 cat > "$B/kubectl" <<'SH'
 #!/usr/bin/env bash
@@ -135,7 +154,7 @@ WEB='60,,,rule-cut,vtnet2,match,block,in,4,0x0,,64,1,0,DF,6,tcp,60,192.0.2.60,19
 
 # set_case KEY=VALUE...: a fresh control directory with the happy path's values, then the case's own
 set_case() {
-  rm -f "$C/calls" "$C/lines" "$C/p0405_sleep" "$C/create_err"
+  rm -f "$C/calls" "$C/lines" "$C/p0405_sleep" "$C/create_err" "$C/no_archive"
   echo resolved > "$C/dns"; echo PASS > "$C/tls"; echo PASS > "$C/proof"; echo 0 > "$C/create_rc"; echo 0 > "$C/p0405_rc"
   printf 'reached\nrefused\n' > "$C/control"; printf '1\n2\n' > "$C/counts"; printf '%s\n%s\n' "$NTP" "$NTP" > "$C/lines"
   echo PASS > "$C/p09_outcome"; echo 0 > "$C/p09_rc"
@@ -242,5 +261,16 @@ else fail "18: rc=$RC $(report | tr '\n' '|')"; fi
 set_case p0405_sleep=6; lane TOCKMOX_AIRGAP_STALL=2
 if [ "$RC" = 0 ] && has "AIRGAP-STALL .* in step '6 P04 and P05'"; then pass "15: a quiet step raises AIRGAP-STALL while it hangs"
 else fail "15: rc=$RC, no stall line"; fi
+
+set_case; lane
+if [ "$RC" = 0 ] && called 'srs push-ref .*/charts-checkout tockmox airgap-ed-1-1-vendored force=unset' && called 'served-archives 1' \
+   && called 'p09 revision airgap-ed-1-1-vendored' && ! grep -q 'force=charts' "$C/calls" && ! called 'srs push '; then
+  pass "19: the served tag is airgap-ed-1-1-vendored with the archive committed, P09 installs it, no TOCKMOX_SERVE_FORCE_ADD"
+else fail "19: rc=$RC $(tr '\n' '|' < "$C/calls")"; fi
+set_case no_archive=1; lane
+if [ "$RC" = 1 ] && has 'install/charts-vendored-tag.sh refused' && has 'charts/tockmox-platform/charts/upstream-1.2.3.tgz' \
+   && ! has 'AIRGAP-PAUSE' && ! called 'run P09' && ! called 'srs push-ref' && called 'tc destroy'; then
+  pass "19: an archive missing FAILs before the cut, naming it; nothing is served and P09 never runs"
+else fail "19: missing archive: rc=$RC $(printf '%s' "$OUT" | tail -3 | tr '\n' '|')"; fi
 
 [ "$FAILS" = 0 ] || exit 1

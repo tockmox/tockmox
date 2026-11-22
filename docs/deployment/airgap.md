@@ -164,7 +164,7 @@ connected install and this one.
 | Before you touch a node | Stand up a LAN time source and point every node at it | [1](#1-point-every-node-at-a-lan-time-source--required) |
 | Any time before the install, on a connected host | Mirror 56 images; vendor 19 chart archives; pull the two prerequisite charts and `kubeseal` | [2](#2-mirror-the-images--required), [3](#3-vendor-the-upstream-helm-subcharts--required), [4](#4-carry-in-the-three-prerequisites--required) |
 | [fresh-install § 6 install ArgoCD](fresh-install.md#6-install-argocd) and [§ 7 sealed-secrets](fresh-install.md#7-install-sealed-secrets-with-your-own-key) | `helm install` from the carried-in archives instead of from a repository URL | [4](#4-carry-in-the-three-prerequisites--required) |
-| [install § Phase 1 generate](install.md#phase-1--generate-your-site-repository) | Set `tockmox.repoURL` at your internal charts clone | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |
+| [install § Phase 1 generate](install.md#phase-1--generate-your-site-repository) | Set `tockmox.repoURL` at your internal charts clone, and `tockmox.revision` at the tag that carries the archives | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |
 | [install § Phase 2 publish it](install.md#phase-2--publish-it) | Push to your internal git server, not to GitHub. It must speak the smart protocol | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |
 | [install § Phase 2.5 mint your credentials](install.md#phase-25--mint-your-credentials) | `mint-secrets.sh --cert FILE`, sealing against a fetched certificate rather than a live controller | [4](#4-carry-in-the-three-prerequisites--required) |
 | Every node, before Phase 3 | Point containerd at your mirror in `/etc/rancher/k3s/registries.yaml`, put your registry's CA where its `ca_file` points and check one TLS round trip, then restart k3s. This is the primary mechanism | [2](#2-mirror-the-images--required) |
@@ -527,10 +527,33 @@ The two counts match. At the 0.6.0 tree on 2026-09-01 that number is **28**:
 in total is a belief carried from the 2026-08-25 exercise**, not a figure
 re-measured here; read the `du` line rather than trusting it.
 
-Then either carry the archives inside and keep them beside the charts clone, or
-mirror the 14 repositories into a chart repository you host and point
-`Chart.yaml` at it. Carrying the archives is the smaller job and is what the
-2026-08-25 exercise did.
+**Then put the archives in git, under a tag of their own.** ArgoCD renders
+from the commit `tockmox.revision` names and nothing else, and `.gitignore`
+keeps the archives out of every commit, so a clone with the archives beside it
+still serves none of them: ArgoCD goes to the repositories above for every
+subchart, and inside the boundary every layer stops at sync `Unknown`. The
+air-gap lane showed exactly that on 2026-11-21.
+`install/charts-vendored-tag.sh` makes the commit that carries them: the release
+tag plus exactly the archives each layer's `Chart.lock` names, and nothing
+else, tagged `THE_TAG_YOU_CLONED-vendored`. **That tag is your
+`tockmox.revision`** in [step 5](#5-serve-both-git-repositories-inside-the-boundary--required).
+
+- **With the built-in forge**, `bootstrap-forge --charts-repo` makes the tag
+  for you from the archives in the checkout, and pushes it
+  ([below](#serve-the-charts-repository-from-the-built-in-forge)). Carry the
+  checkout inside with the archives in it.
+- **With your own git server**, make it here, in the clone:
+  `./install/charts-vendored-tag.sh . THE_TAG_YOU_CLONED` prints the tag, its
+  commit and how many archives it carries. The tag then travels inside with the
+  clone like any other tag, and you push it to your git server beside the
+  release tag.
+
+Either way it refuses, and writes no tag, while an archive is missing, and a
+tag it made earlier is never moved, so running it again changes nothing.
+Mirroring the 14 repositories into a chart repository you host and pointing
+`Chart.yaml` at it is the other way, and it edits the release's own files.
+Carrying the archives is the smaller job and is what the 2026-08-25 exercise
+did.
 
 ## 4. Carry in the three prerequisites ... Required
 
@@ -665,7 +688,7 @@ cannot apply anything at all.
 # site/tockmox.yaml
 tockmox:
   repoURL: git://GIT_HOST/tockmox.git
-  revision: THE_TAG_YOU_CLONED
+  revision: THE_TAG_YOU_CLONED-vendored   # the tag that carries the archives, step 3
 ```
 
 **Serve the smart protocol, and do not trust the git CLI to tell you whether you
@@ -688,8 +711,8 @@ needs nothing carried in (same section).
 ### Serve the charts repository from the built-in forge
 
 Only with `site.forge: built-in`. Give `bootstrap-forge` your
-internal checkout of the charts repository (the one with the vendored chart
-archives from step 3) and the release tag it was cloned at:
+internal checkout of the charts repository, with the chart archives step 3
+vendored in it, and the release tag it was cloned at:
 
 **WORKSTATION** ... inside the boundary, in the directory that holds your charts checkout
 
@@ -698,16 +721,30 @@ tockmox-install.sh bootstrap-forge ... --charts-repo ./tockmox --charts-tag THE_
 ```
 
 It creates `tockmox/charts` in the forge, readable by the same read-only machine
-user ArgoCD already uses for your site repository, pushes that tag and `main`,
-reads both back, and writes the second ArgoCD repository Secret
-(`tockmox-charts-repo`). Then name the address it prints as `tockmox.repoURL`
-and the same tag as `tockmox.revision`. It refuses, and changes nothing, if the
-tag is not in your checkout, if the checkout is not the Tockmox charts
-repository, if the forge already has that tag at a different commit (a tag the
-Applications trust is never moved), or if the forge's `main` holds history your
-checkout lacks. Re-running it with the same inputs changes nothing. Rebuild and
-repair of the forge do not reseed this repository yet. This path has not been
-run in an air-gapped environment.
+user ArgoCD already uses for your site repository, commits the archives under
+`THE_TAG_YOU_CLONED-vendored` as [step 3](#3-vendor-the-upstream-helm-subcharts--required)
+describes, pushes that tag, the release tag and `main`, reads all three back,
+and writes the second ArgoCD repository Secret (`tockmox-charts-repo`).
+
+**Name both before you generate the site**, because `bootstrap-forge` pushes the
+site it is given. In `site/tockmox.yaml`, `tockmox.repoURL` is the built-in
+forge's address, the "Its address" row of
+[site forge § a prerequisite, not a layer](../administration/site-forge.md#a-prerequisite-not-a-layer),
+with `tockmox/charts.git` in place of `tockmox/site.git`; `bootstrap-forge`
+prints the same value at its end. `tockmox.revision` is
+`THE_TAG_YOU_CLONED-vendored`. The installer cannot reach that address from the
+workstation, so it says it is not confirming the revision; that is expected
+here.
+
+It refuses, and changes nothing, if an archive a `Chart.lock` names is not in
+your checkout, if the site's Applications read the charts at any other tag, if
+the tag is not in your checkout, if the checkout is not the Tockmox charts
+repository, if the forge already has either tag at a different commit (a tag
+the Applications trust is never moved), or if the forge's `main` holds history
+your checkout lacks. Re-running it with the same inputs changes nothing, and
+vendoring the archives again does not move the tag. Rebuild and repair of the
+forge do not reseed this repository yet. This path has not been run in an
+air-gapped environment.
 
 **Success condition**, run from inside the boundary, both repositories:
 
@@ -825,7 +862,8 @@ back. `tools/mirror-images.sh` adds images and never removes one.
 | The same clone path on the **workstation inside the boundary** | Sub-steps 8.5 to 8.7 run there. It is the clone that filled your internal git server | `git -C "$TOCKMOX" tag --list "$CURRENT_REVISION"` prints your current revision |
 | The release notes read, from your current revision to the target | They name every action the update needs, and say when ArgoCD or k3s must move first | [upgrade § 1](upgrade.md#1-read-the-release-notes) |
 
-**YOU SUPPLY:** the revision you run now and the one you are moving to. Set them
+**YOU SUPPLY:** the revision you run now (installed from this page, a
+`-vendored` tag) and the release tag you are moving to. Set them
 on each host you use, with the path to its clone of the source tree.
 
 **CONNECTED** ... outside the boundary, never a cluster NODE
@@ -920,8 +958,11 @@ rm -rf charts/*/charts
 ```
 
 **Success condition:** the two counts in
-[step 3](#3-vendor-the-upstream-helm-subcharts--required) match. Then carry the
-archives inside the way you did the first time, replacing the old ones.
+[step 3](#3-vendor-the-upstream-helm-subcharts--required) match. Then commit
+them under the target's own vendored tag, as in step 3:
+`./install/charts-vendored-tag.sh . "$TARGET_REVISION"` makes
+`$TARGET_REVISION-vendored`. It is a new tag, so nothing the running site reads
+moves.
 
 ### 8.5 Carry the target tag inside ... Required
 
@@ -937,7 +978,7 @@ your git server.
 : "${CURRENT_REVISION:?export CURRENT_REVISION first, see the start of step 8}"
 : "${TARGET_REVISION:?export TARGET_REVISION first, see the start of step 8}"
 git -C "$TOCKMOX" bundle create "$HOME/tockmox-$TARGET_REVISION.bundle" \
-  "$CURRENT_REVISION..$TARGET_REVISION"
+  "$CURRENT_REVISION..$TARGET_REVISION" "$TARGET_REVISION-vendored"
 ```
 
 Move `tockmox-$TARGET_REVISION.bundle` across the boundary. On the inside, from
@@ -953,12 +994,13 @@ export TARGET_REVISION=YOUR_TARGET_REVISION
 export BUNDLE=YOUR_BUNDLE_PATH
 export CHARTS_REMOTE=YOUR_INTERNAL_CHARTS_REMOTE
 git -C "$TOCKMOX" bundle verify "$BUNDLE"
-git -C "$TOCKMOX" fetch "$BUNDLE" "refs/tags/$TARGET_REVISION:refs/tags/$TARGET_REVISION"
-git -C "$TOCKMOX" push "$CHARTS_REMOTE" "$TARGET_REVISION"
+git -C "$TOCKMOX" fetch "$BUNDLE" "refs/tags/$TARGET_REVISION:refs/tags/$TARGET_REVISION" \
+  "refs/tags/$TARGET_REVISION-vendored:refs/tags/$TARGET_REVISION-vendored"
+git -C "$TOCKMOX" push "$CHARTS_REMOTE" "$TARGET_REVISION" "$TARGET_REVISION-vendored"
 ```
 
-**Success condition:** `bundle verify` prints `is okay`, and the tag is now on the
-server ArgoCD reads (8.6 checks that). `bundle verify` failing with `requires
+**Success condition:** `bundle verify` prints `is okay`, and both tags are now on
+the server ArgoCD reads (8.6 checks the vendored one). `bundle verify` failing with `requires
 this ref` means the inside clone does not hold your current revision; fix that
 before going on.
 
@@ -973,7 +1015,7 @@ actually be asked for.
 : "${TOCKMOX:?export TOCKMOX first, see the start of step 8}"
 : "${TARGET_REVISION:?export TARGET_REVISION first, see the start of step 8}"
 : "${GIT_HOST:?export GIT_HOST first, see step 5}"
-git ls-remote --tags "git://$GIT_HOST/tockmox.git" "$TARGET_REVISION"
+git ls-remote --tags "git://$GIT_HOST/tockmox.git" "$TARGET_REVISION-vendored"
 cd "$TOCKMOX"
 git checkout --detach "$TARGET_REVISION"
 ./tools/mirror-images.sh --registry REGISTRY_HOST/mirror --verify
@@ -991,9 +1033,10 @@ lists with `git ls-remote` can still be unreadable to ArgoCD's repo-server.
 
 Now, and not before, run [upgrade to a new release](upgrade.md) from
 [step 0](upgrade.md#0-write-down-what-you-are-on-now) through
-[step 7](upgrade.md#7-confirm-the-workloads-actually-came-up), unchanged. Its
-step 1 read of the notes and its step 2 backup apply here as they do on a
-connected site.
+[step 7](upgrade.md#7-confirm-the-workloads-actually-came-up), unchanged, with
+one difference: the revision you move to is `$TARGET_REVISION-vendored`, the tag
+that carries the archives, not the release tag. Its step 1 read of the notes and
+its step 2 backup apply here as they do on a connected site.
 
 Add one check to the end of step 7, from step 7 of this page:
 
@@ -1050,6 +1093,14 @@ connected checkout, and the bundle commands in 8.5 against a scratch repository
 rather than the Tockmox one. The order it insists on (everything inside before the
 revision moves) and the failures it names for the wrong order are reasoned from
 how ArgoCD resolves a revision and how a node pulls an image, not observed.
+
+**The vendored tag of step 3 has not yet served a disconnected install.**
+`install/charts-vendored-tag.sh` is tested hermetically against a scratch
+charts repository (`tests/executed-docs/charts-vendored-test.sh`: a missing
+archive refused, a vendored tag that lacks one refused, the same commit made in
+any clone, a tag never moved), and the air-gap lane now serves the tag it makes
+from the tree under test instead of forcing the archives into a snapshot; no
+lane run has done that yet.
 
 Two claims on this page are **beliefs rather than measurements**, because
 nothing tests them:

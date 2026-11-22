@@ -11,6 +11,9 @@
 #                                           TOCKMOX_SERVE_FORCE_ADD=PATHSPEC also serves the files it
 #                                           names that .gitignore excludes (the air-gap lane's vendored
 #                                           subchart archives); without it, ignored files are never served
+#   site-repo-server.sh push-ref REPO NAME TAG  publish the tag TAG of the git repository REPO as committed, as
+#                                           the tag TAG of NAME.git: a git bundle, so no .gitignore applies (the
+#                                           air-gap lane serves install/charts-vendored-tag.sh's TAG-vendored this way)
 #   site-repo-server.sh url NAME            print the URL to put in an Application (http://)
 #   site-repo-server.sh nodeport            print the NodePort --writable uses inside the cluster
 #   site-repo-server.sh reach URL           prove a pod in the cluster can read URL
@@ -443,10 +446,18 @@ cmd_push() {
       ''|0|*[!0-9]*) echo "REFUSING: TOCKMOX_SERVE_FORCE_ADD='${FORCE_ADD}' forced ${forced:-no} file(s) into ${name}.git; the files it names are not in ${dir}" >&2; exit 1 ;;
     esac
   fi
-  # Assert on the artefact, not on the exit code: prove the daemon actually
-  # serves it, from inside the cluster, before telling a caller to point an
-  # Application at it. A repo that exists and is unservable is the failure this
-  # whole file exists to avoid.
+  clone_probe "$name" "$ref"
+  echo "  published and clone-verified: $(url_for "$name")${ref:+ @ ${ref}}, tree ${want}" >&2
+  [ -z "$forced" ] || echo "  served although .gitignore excludes them: ${forced} file(s) matching ${FORCE_ADD}" >&2
+  url_for "$name"
+}
+
+# clone_probe NAME [REF] ... assert on the artefact, not on the exit code: prove the daemon actually
+# serves it, from inside the cluster, before telling a caller to point an
+# Application at it. A repo that exists and is unservable is the failure this
+# whole file exists to avoid.
+clone_probe() {
+  local name="$1" ref="${2:-}"
   kubectl --context="$KUBE_CONTEXT" -n "$NS" delete pod "gitprobe-${name}" --ignore-not-found >/dev/null 2>&1 || true
   local probe="git clone -q $(url_for "$name") /tmp/c && test -n \"\$(ls -A /tmp/c)\""
   [ -n "$ref" ] && probe="git clone -q --branch '${ref}' $(url_for "$name") /tmp/c && test -n \"\$(ls -A /tmp/c)\""
@@ -457,8 +468,62 @@ cmd_push() {
     kubectl --context="$KUBE_CONTEXT" -n "$NS" logs "$POD" --tail=20 >&2 || true
     exit 1
   fi
-  echo "  published and clone-verified: $(url_for "$name")${ref:+ @ ${ref}}, tree ${want}" >&2
-  [ -z "$forced" ] || echo "  served although .gitignore excludes them: ${forced} file(s) matching ${FORCE_ADD}" >&2
+}
+
+# push-ref REPO NAME TAG ... publish the tag TAG of the git repository REPO, exactly as committed, as the tag TAG of
+# NAME.git (created if it is not there; its main, when it has none, is the same commit). `push` publishes a working
+# directory through the pod's `git add -A`, which honours .gitignore, so it can never serve the subchart archives
+# (charts/*/charts/, *.tgz) without TOCKMOX_SERVE_FORCE_ADD. An operator's git server is handed a commit, not a
+# directory: install/charts-vendored-tag.sh commits the archives under TAG-vendored, and this serves that commit the
+# way `git push` would, as a git bundle, so the air-gap lane serves what the documented path serves. The tree the
+# pod ends up serving must be the tag's tree, or nothing is reported published.
+cmd_push_ref() {
+  need kubectl
+  need git
+  local repo="$1" name="$2" ref="$3"
+  [ -d "$repo" ] || { echo "REFUSING: no such directory: $repo" >&2; exit 2; }
+  [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "REFUSING: NAME must be a plain repository name, not '${name}'" >&2; exit 2; }
+  [[ "$ref" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] && [ "$ref" != HEAD ] && [ "$ref" != main ] \
+    || { echo "REFUSING: TAG must be a plain tag name, not '${ref}'" >&2; exit 2; }
+  local commit want
+  commit="$(git -C "$repo" rev-parse -q --verify "refs/tags/${ref}^{commit}" 2>/dev/null)" \
+    || { echo "REFUSING: there is no tag '${ref}' in ${repo}. Nothing was published." >&2; exit 2; }
+  want="$(git -C "$repo" rev-parse "${commit}^{tree}")"
+  local bundle
+  bundle="$(mktemp "${TMPDIR:-/tmp}/tockmox-ref.XXXXXX")"
+  rm -f "$bundle"; bundle="${bundle}.bundle"
+  git -C "$repo" bundle create "$bundle" "refs/tags/${ref}" >/dev/null 2>&1 \
+    || { rm -f "$bundle"; echo "REFUSING: could not bundle ${ref} from ${repo}" >&2; exit 1; }
+  kubectl --context="$KUBE_CONTEXT" -n "$NS" cp "$bundle" "${POD}:/tmp/${name}.bundle" >/dev/null
+  rm -f "$bundle"
+  local served
+  if ! served="$(kubectl --context="$KUBE_CONTEXT" -n "$NS" exec "$POD" -- sh -c "
+    set -e
+    git config --global --add safe.directory '*'
+    [ -d /repos/${name}.git ] || git init -q --bare /repos/${name}.git
+    git --git-dir=/repos/${name}.git fetch -q /tmp/${name}.bundle '+refs/tags/${ref}:refs/tags/${ref}'
+    got=\$(git --git-dir=/repos/${name}.git rev-parse 'refs/tags/${ref}^{tree}')
+    if [ \"\$got\" != '${want}' ]; then echo \"TREE_MISMATCH \$got\"; exit 3; fi
+    if ! git --git-dir=/repos/${name}.git rev-parse --verify -q 'refs/heads/main' >/dev/null; then
+      git --git-dir=/repos/${name}.git update-ref refs/heads/main '${commit}'
+      git --git-dir=/repos/${name}.git symbolic-ref HEAD refs/heads/main
+    fi
+    rm -f /tmp/${name}.bundle
+    touch /repos/.seeded
+    echo \"SERVED \$got\"
+  " 2>&1)"; then
+    case "$served" in
+      *TREE_MISMATCH*) echo "REFUSING: ${name}.git would serve tree $(printf '%s\n' "$served" | sed -n 's/.*TREE_MISMATCH //p' | tail -1) at ${ref}, not ${want}." >&2 ;;
+      *) echo "REFUSING: publishing ${ref} as ${name}.git in ${NS}/${POD} failed: $(printf '%s' "$served" | tail -3)" >&2 ;;
+    esac
+    exit 1
+  fi
+  case "$served" in
+    *"SERVED ${want}"*) ;;
+    *) echo "REFUSING: the pod did not confirm ${name}.git serves ${want} at ${ref}: $(printf '%s' "$served" | tail -3)" >&2; exit 1 ;;
+  esac
+  clone_probe "$name" "$ref"
+  echo "  published and clone-verified: $(url_for "$name") @ ${ref}, tree ${want}, as committed" >&2
   url_for "$name"
 }
 
@@ -500,7 +565,8 @@ case "${1:-}" in
   nodeport) check_nodeport; printf '%s\n' "$GUEST_NODEPORT" ;;
   reach) shift; [ $# -eq 1 ] || { echo "usage: $0 reach URL" >&2; exit 2; }; cmd_reach "$1" ;;
   push) shift; [ $# -eq 2 ] || [ $# -eq 3 ] || { echo "usage: $0 push DIR NAME [REF]" >&2; exit 2; }; cmd_push "$1" "$2" "${3:-}" ;;
+  push-ref) shift; [ $# -eq 3 ] || { echo "usage: $0 push-ref REPO NAME TAG" >&2; exit 2; }; cmd_push_ref "$1" "$2" "$3" ;;
   url)  shift; [ $# -eq 1 ] || { echo "usage: $0 url NAME" >&2; exit 2; }; url_for "$1"; echo ;;
   down) cmd_down ;;
-  *) echo "usage: $0 {up [--writable]|push DIR NAME [REF]|url NAME|nodeport|reach URL|manifest|script|down}" >&2; exit 2 ;;
+  *) echo "usage: $0 {up [--writable]|push DIR NAME [REF]|push-ref REPO NAME TAG|url NAME|nodeport|reach URL|manifest|script|down}" >&2; exit 2 ;;
 esac

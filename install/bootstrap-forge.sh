@@ -238,11 +238,13 @@ the encrypted recovery kit.
   --no-sign-in           no sign-in, no Ingress: the forge answers only in the cluster
 
  The Tockmox charts repository, for a site with no route to GitHub
-  --charts-repo DIR      a git checkout of the Tockmox charts repository (your internal copy, with the
-                         vendored chart archives, if you made one). It is pushed to the forge as
-                         ${ORG}/${CHARTS_REPO}, where the Applications can read it
-  --charts-tag TAG       the release tag in DIR that tockmox.revision names. Required with --charts-repo;
-                         it must exist in DIR, and a tag already in the forge is never moved
+  --charts-repo DIR      a git checkout of the Tockmox charts repository (your internal copy) with the
+                         subchart archives tools/helm-deps.sh vendored in it. It is pushed to the forge
+                         as ${ORG}/${CHARTS_REPO}, where the Applications can read it, with the archives
+                         committed under TAG-vendored (install/charts-vendored-tag.sh), the tag
+                         tockmox.revision names. Refused while an archive is missing
+  --charts-tag TAG       the release tag in DIR. Required with --charts-repo; it must exist in DIR,
+                         and a tag already in the forge is never moved
 
  Forge
   --namespace NS         default ${FORGE_NS_DEFAULT} (the in-cluster address names it;
@@ -275,6 +277,7 @@ RESTORE_HISTORY=""; CONNECT_ONLY=false; NO_SIGN_IN=false; REPLACE_ARGO_CRED=fals
 IDENTITY_NS="tockmox-authentik"; PLATFORM_NS="tockmox-platform"; AUTH_HOST=""
 MONITORING_NS="tockmox-monitoring"; IDENTITY_SVC="tockmox-identity-authentik-server"; WATCH=false
 CHARTS_REPO="charts"; CHARTS_DIR=""; CHARTS_TAG=""; CHARTS_COMMIT=""
+CHARTS_SERVED_TAG=""; CHARTS_SERVED_COMMIT=""; CHARTS_ARCHIVES=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -355,6 +358,7 @@ fi
 [[ "$WAIT_SECONDS" =~ ^[0-9]+$ ]] || die "--wait-seconds must be a number: '$WAIT_SECONDS'"
 [[ "$FORGE_NS" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || die "--namespace is not a namespace name: '$FORGE_NS'"
 REPO_URL="http://${RELEASE}-http.${FORGE_NS}.svc.cluster.local:3000/${ORG}/${REPO}.git"
+CHARTS_REPO_URL="http://${RELEASE}-http.${FORGE_NS}.svc.cluster.local:3000/${ORG}/${CHARTS_REPO}.git"
 
 # The site must name the forge. A site generated for an external forge carries the
 # placeholder; one generated with another namespace names a different address.
@@ -545,6 +549,23 @@ if [[ -n "$CHARTS_DIR$CHARTS_TAG" ]]; then
   git -C "$CHARTS_DIR" cat-file -e "${CHARTS_COMMIT}:charts/tockmox-platform/Chart.yaml" 2>/dev/null \
     || die "tag '$CHARTS_TAG' in $CHARTS_DIR has no charts/tockmox-platform/Chart.yaml: this is not the Tockmox charts repository"
   ok "charts repository: tag ${CHARTS_TAG} (${CHARTS_COMMIT:0:12}) in ${CHARTS_DIR}"
+  # The archives Argo CD renders the layers from: .gitignore keeps them out of every release commit, so the forge
+  # serves them in a commit of their own, TAG-vendored (install/charts-vendored-tag.sh says why and how). Checked
+  # here, writing no ref, so a missing archive stops the run before the cluster is touched; made for real at the push.
+  VENDORED="$(bash "$HERE/charts-vendored-tag.sh" --dry-run "$CHARTS_DIR" "$CHARTS_TAG")" \
+    || die "the charts repository cannot be served with its subchart archives (above). Nothing was touched."
+  read -r CHARTS_SERVED_TAG CHARTS_SERVED_COMMIT CHARTS_ARCHIVES <<<"$VENDORED"
+  [[ -n "$CHARTS_ARCHIVES" ]] || die "install/charts-vendored-tag.sh printed '$VENDORED', not a tag, a commit and a count"
+  ok "vendored subchart archives: ${CHARTS_ARCHIVES}, committed under ${CHARTS_SERVED_TAG} (${CHARTS_SERVED_COMMIT:0:12})"
+  # The site's Applications must read the tag that carries them. One generated with the release tag as
+  # tockmox.revision would render every subchart from its chart repository, which a disconnected cluster cannot reach.
+  WRONG_REV="$(awk -v url="$CHARTS_REPO_URL" -v want="$CHARTS_SERVED_TAG" '
+    $0 ~ /repoURL:/ { sub(/.*repoURL:[ \t]*/, ""); gsub(/["\047]/, ""); here = ($0 == url); next }
+    here && /targetRevision:/ { sub(/.*targetRevision:[ \t]*/, ""); gsub(/["\047]/, ""); if ($0 != want) print FILENAME ": " $0; here = 0 }
+  ' "$SITE"/bootstrap/applications/*.yaml 2>/dev/null | head -3)"
+  [[ -z "$WRONG_REV" ]] || die "the site reads ${ORG}/${CHARTS_REPO} at a revision without the vendored archives:
+         ${WRONG_REV}
+       Set tockmox.revision: ${CHARTS_SERVED_TAG} in tockmox.yaml and generate the site again. Nothing was touched."
 fi
 ok "request is consistent"
 
@@ -556,7 +577,7 @@ info "API server  ${SERVER:-unknown}"
 info "site        ${SITE}"
 info "forge       release ${RELEASE} in namespace ${FORGE_NS}, chart ${CHART_REF} ${CHART_VERSION}"
 info "repository  ${REPO_URL}"
-[[ -z "$CHARTS_DIR" ]] || info "charts      ${CHARTS_DIR} at ${CHARTS_TAG}, to ${ORG}/${CHARTS_REPO}"
+[[ -z "$CHARTS_DIR" ]] || info "charts      ${CHARTS_DIR} at ${CHARTS_TAG}, to ${ORG}/${CHARTS_REPO}; tockmox.revision ${CHARTS_SERVED_TAG}"
 if $SIGN_IN; then
   info "sign-in     ${FORGE_URL} through Authentik at ${AUTH_HOST}; ${ADMIN_GROUP} -> team ${APPROVERS_TEAM}"
 else
@@ -574,7 +595,10 @@ if $DRY_RUN; then
   info "install or adopt the forge; fence its port to ArgoCD (${ARGO_NS}), the AI layer (${AI_NS}) and its own namespace"
   info "create ${ORG}/${REPO}, ${BOT_READ}, ${BOT_CHANGE}, team ${APPROVERS_TEAM}"
   info "push ${SITE} as main; protect main; write the ArgoCD repository Secret in ${ARGO_NS}"
-  [[ -z "$CHARTS_DIR" ]] || info "create ${ORG}/${CHARTS_REPO} (read by ${BOT_READ}); push tag ${CHARTS_TAG} and main from ${CHARTS_DIR}; write the ArgoCD repository Secret tockmox-charts-repo in ${ARGO_NS}"
+  if [[ -n "$CHARTS_DIR" ]]; then
+    info "create ${ORG}/${CHARTS_REPO} (read by ${BOT_READ}); push tag ${CHARTS_TAG} and main from ${CHARTS_DIR}; write the ArgoCD repository Secret tockmox-charts-repo in ${ARGO_NS}"
+    info "tag ${CHARTS_SERVED_COMMIT:0:12} in ${CHARTS_DIR} as ${CHARTS_SERVED_TAG} (${CHARTS_TAG} plus ${CHARTS_ARCHIVES} vendored subchart archives) and push it: the tag tockmox.revision names"
+  fi
   info "give the model watcher the change bot's token: Secret ${RELEASE}-change-bot in ${AI_NS}"
   info "give tockmox-actions its own token for the same bot: Secret ${RELEASE}-actions-bot in ${AI_NS}"
   if $SIGN_IN; then
@@ -637,7 +661,6 @@ if ! $CONNECT_ONLY; then
   fi
 fi
 
-CHARTS_REPO_URL="http://${RELEASE}-http.${FORGE_NS}.svc.cluster.local:3000/${ORG}/${CHARTS_REPO}.git"
 if [[ -n "$CHARTS_DIR" ]]; then
   CUR_ERR="$(kubectl "${K[@]}" -n "$ARGO_NS" get secret tockmox-charts-repo -o name 2>&1 >/dev/null)" \
     || [[ "$CUR_ERR" == *NotFound* ]] \
@@ -1324,8 +1347,12 @@ fi
 # The Tockmox charts repository, for a site that cannot reach GitHub: every Application's
 # first source is tockmox.repoURL at tockmox.revision, and ArgoCD reads it on every
 # reconcile. The forge serves it beside the site, and the same read-only machine user
-# reads both. Nothing is rewritten and nothing is moved: a tag already in the forge that
-# names another commit stops the run, because a tag the Applications trust must not change.
+# reads both. main and the release tag are pushed as they are; the subchart archives,
+# which .gitignore keeps out of every release commit, go in TAG-vendored, the release
+# plus exactly those archives (install/charts-vendored-tag.sh), and that is the tag
+# tockmox.revision names. Nothing is rewritten and nothing is moved: a tag already in the
+# forge that names another commit stops the run, because a tag the Applications trust
+# must not change.
 if [[ -n "$CHARTS_DIR" ]]; then
   say "The Tockmox charts repository"
   api GET "/repos/$ORG/$CHARTS_REPO" >/dev/null
@@ -1341,6 +1368,12 @@ if [[ -n "$CHARTS_DIR" ]]; then
   [[ -n "$READERS_ID" ]] || die "cannot find team readers"
   api PUT "/teams/$READERS_ID/repos/$ORG/$CHARTS_REPO" >/dev/null; expect "adding $ORG/$CHARTS_REPO to team readers" 204
   CH_URL="http://127.0.0.1:${PORT}/${ORG}/${CHARTS_REPO}.git"
+  # Made for real now (the check above wrote no ref). It refuses rather than move a tag, so it can only name the
+  # commit the check named; a different one means the checkout changed under this run.
+  VENDORED="$(bash "$HERE/charts-vendored-tag.sh" "$CHARTS_DIR" "$CHARTS_TAG")" \
+    || die "could not tag the vendored subchart archives in ${CHARTS_DIR} (above)"
+  [[ "$VENDORED" == "${CHARTS_SERVED_TAG} ${CHARTS_SERVED_COMMIT} ${CHARTS_ARCHIVES}" ]] \
+    || die "install/charts-vendored-tag.sh made '${VENDORED}', not the '${CHARTS_SERVED_TAG} ${CHARTS_SERVED_COMMIT} ${CHARTS_ARCHIVES}' it checked: ${CHARTS_DIR} changed during this run"
   CH_MAIN="$(gita ls-remote "$CH_URL" refs/heads/main 2>/dev/null | cut -f1 || true)"
   # An annotated tag lists twice; the last line is the commit it names.
   CH_TAG="$(gita ls-remote "$CH_URL" "refs/tags/${CHARTS_TAG}" "refs/tags/${CHARTS_TAG}^{}" 2>/dev/null | tail -1 | cut -f1 || true)"
@@ -1348,22 +1381,30 @@ if [[ -n "$CHARTS_DIR" ]]; then
     die "the forge already has tag ${CHARTS_TAG} at ${CH_TAG}, and ${CHARTS_DIR} has it at ${CHARTS_COMMIT}.
        A tag the Applications read is never moved. Use a new tag, or delete that tag in the forge yourself."
   fi
+  CH_VTAG="$(gita ls-remote "$CH_URL" "refs/tags/${CHARTS_SERVED_TAG}" 2>/dev/null | cut -f1 || true)"
+  if [[ -n "$CH_VTAG" && "$CH_VTAG" != "$CHARTS_SERVED_COMMIT" ]]; then
+    die "the forge already has tag ${CHARTS_SERVED_TAG} at ${CH_VTAG}, and ${CHARTS_DIR} has it at ${CHARTS_SERVED_COMMIT}.
+       A tag the Applications read is never moved. Make ${CHARTS_SERVED_TAG} in ${CHARTS_DIR} from the archives the forge
+       already serves, or delete that tag in the forge yourself."
+  fi
   if [[ -n "$CH_MAIN" && "$CH_MAIN" != "$CHARTS_COMMIT" ]]; then
     git -C "$CHARTS_DIR" merge-base --is-ancestor "$CH_MAIN" "$CHARTS_COMMIT" 2>/dev/null \
       || die "the forge's ${CHARTS_REPO} main (${CH_MAIN}) is not an ancestor of tag ${CHARTS_TAG} (${CHARTS_COMMIT}) in ${CHARTS_DIR}.
        The forge holds history this checkout does not. Refusing to overwrite it."
   fi
-  if [[ "$CH_MAIN" == "$CHARTS_COMMIT" && "$CH_TAG" == "$CHARTS_COMMIT" ]]; then
-    ok "the forge already holds ${CHARTS_REPO} at tag ${CHARTS_TAG} (${CHARTS_COMMIT:0:12})"
+  if [[ "$CH_MAIN" == "$CHARTS_COMMIT" && "$CH_TAG" == "$CHARTS_COMMIT" && "$CH_VTAG" == "$CHARTS_SERVED_COMMIT" ]]; then
+    ok "the forge already holds ${CHARTS_REPO} at tag ${CHARTS_TAG} (${CHARTS_COMMIT:0:12}) and ${CHARTS_SERVED_TAG} (${CHARTS_SERVED_COMMIT:0:12})"
   else
     gita -C "$CHARTS_DIR" push -q "$CH_URL" "${CHARTS_COMMIT}:refs/heads/main" "refs/tags/${CHARTS_TAG}:refs/tags/${CHARTS_TAG}" \
+      "refs/tags/${CHARTS_SERVED_TAG}:refs/tags/${CHARTS_SERVED_TAG}" \
       || die "pushing the charts repository to the forge failed"
-    ok "charts repository pushed: tag ${CHARTS_TAG} and main at ${CHARTS_COMMIT:0:12}"
+    ok "charts repository pushed: tag ${CHARTS_TAG} and main at ${CHARTS_COMMIT:0:12}, ${CHARTS_SERVED_TAG} at ${CHARTS_SERVED_COMMIT:0:12} with ${CHARTS_ARCHIVES} archives"
   fi
   CH_MAIN="$(gita ls-remote "$CH_URL" refs/heads/main | cut -f1)"
   CH_TAG="$(gita ls-remote "$CH_URL" "refs/tags/${CHARTS_TAG}" "refs/tags/${CHARTS_TAG}^{}" | tail -1 | cut -f1)"
-  [[ "$CH_MAIN" == "$CHARTS_COMMIT" && "$CH_TAG" == "$CHARTS_COMMIT" ]] \
-    || die "after the push the forge's ${CHARTS_REPO} has main '$CH_MAIN' and tag '$CH_TAG', not '$CHARTS_COMMIT'"
+  CH_VTAG="$(gita ls-remote "$CH_URL" "refs/tags/${CHARTS_SERVED_TAG}" | cut -f1)"
+  [[ "$CH_MAIN" == "$CHARTS_COMMIT" && "$CH_TAG" == "$CHARTS_COMMIT" && "$CH_VTAG" == "$CHARTS_SERVED_COMMIT" ]] \
+    || die "after the push the forge's ${CHARTS_REPO} has main '$CH_MAIN', tag '$CH_TAG' and ${CHARTS_SERVED_TAG} '$CH_VTAG', not '$CHARTS_COMMIT' and '$CHARTS_SERVED_COMMIT'"
 fi
 
 # ---------------------------------------------------------------- credentials
@@ -1711,8 +1752,8 @@ else
        console says so (No off-site copy) until you add one: re-run with --offsite-s3-* or --offsite-git."
 fi
 if [[ -n "$CHARTS_DIR" ]]; then
-  ok "the Tockmox charts repository is in the forge at tag ${CHARTS_TAG}: ${CHARTS_REPO_URL}"
-  info "a site generated for it names that address as tockmox.repoURL and ${CHARTS_TAG} as tockmox.revision"
+  ok "the Tockmox charts repository is in the forge at tag ${CHARTS_TAG}, with its subchart archives at ${CHARTS_SERVED_TAG}: ${CHARTS_REPO_URL}"
+  info "a site generated for it names that address as tockmox.repoURL and ${CHARTS_SERVED_TAG} as tockmox.revision"
 fi
 info "next: kubectl --context $CTX apply -f $SITE/bootstrap/root.yaml"
 if $SIGN_IN && ! $SIGNED_IN; then

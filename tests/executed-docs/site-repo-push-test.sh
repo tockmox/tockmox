@@ -21,6 +21,9 @@
 #      the directory's tree with exactly those files added, and it says how many it served.
 #   E. TOCKMOX_SERVE_FORCE_ADD names files the directory does not hold: the push refuses and publishes
 #      nothing; and a pathspec carrying shell characters is refused before anything is sent.
+#   F. push-ref serves a tag of a git repository as committed, so a tag whose commit carries the vendored
+#      subchart archives (install/charts-vendored-tag.sh, the air-gap lane's path) is served with them and with
+#      nothing else; a tag the repository does not hold is refused and nothing is published.
 #
 #   ./tests/executed-docs/site-repo-push-test.sh
 set -uo pipefail
@@ -146,6 +149,28 @@ else bad "E: a pathspec that names nothing is refused" "rc=$rc: $(printf '%s' "$
 out="$(TOCKMOX_SERVE_FORCE_ADD="x';touch ${TMP}/PWNED;'" bash "$SRS" push "$CDIR" inj 2>&1)"; rc=$?
 if [ "$rc" -eq 2 ] && [ ! -e "${TMP}/PWNED" ] && [ ! -e "${POD_ROOT}/repos/inj.git" ]; then ok "E: a pathspec carrying shell characters is refused before anything is sent"
 else bad "E: a pathspec carrying shell characters is refused" "rc=$rc, PWNED $( [ -e "${TMP}/PWNED" ] && echo exists || echo absent ): $(printf '%s' "$out" | tail -2)"; fi
+
+# ------------------------------------------------------------------------------- F
+RDIR="${TMP}/ref-repo"
+mkdir -p "${RDIR}/charts/layer/charts"
+printf 'apiVersion: v2\nname: layer\n' > "${RDIR}/charts/layer/Chart.yaml"
+printf 'charts/*/charts/\n*.tgz\n' > "${RDIR}/.gitignore"
+( cd "${RDIR}" && git init -q -b main . && git add -A && git -c user.name=t -c user.email=t@example.com commit -q -m release \
+    && git tag v1 && printf 'archive-a' > charts/layer/charts/a-1.0.0.tgz && printf 'archive-b' > charts/layer/charts/b-2.0.0.tgz \
+    && git add -f charts/layer/charts/a-1.0.0.tgz charts/layer/charts/b-2.0.0.tgz \
+    && git -c user.name=t -c user.email=t@example.com commit -q -m vendored && git tag v1-vendored && git checkout -q v1 ) >/dev/null 2>&1
+rwant="$(git -C "${RDIR}" rev-parse 'v1-vendored^{tree}')"
+out="$(bash "$SRS" push-ref "$RDIR" tockmox-ref v1-vendored 2>&1)"; rc=$?
+served="$(git --git-dir="${POD_ROOT}/repos/tockmox-ref.git" rev-parse 'v1-vendored^{tree}' 2>/dev/null)"
+ntgz="$(git --git-dir="${POD_ROOT}/repos/tockmox-ref.git" ls-tree -r --name-only v1-vendored 2>/dev/null | grep -c '\.tgz$')"
+if [ "$rc" -eq 0 ] && [ -n "$rwant" ] && [ "$served" = "$rwant" ] && [ "$ntgz" = 2 ]; then
+  ok "F: push-ref serves the tag as committed, the vendored archives with it"
+else bad "F: push-ref serves the tag as committed" "rc=$rc, served ${served:-none}, want ${rwant}, ${ntgz} .tgz: $(printf '%s' "$out" | tail -2)"; fi
+case "$out" in *"tree ${rwant}"*) ok "F: push-ref names the tree it served" ;;
+  *) bad "F: push-ref names the tree it served" "$(printf '%s' "$out" | tail -2)" ;; esac
+out="$(bash "$SRS" push-ref "$RDIR" tockmox-none v9-vendored 2>&1)"; rc=$?
+if [ "$rc" -eq 2 ] && [ ! -e "${POD_ROOT}/repos/tockmox-none.git" ]; then ok "F: push-ref of a tag the repository does not hold is refused and nothing is published"
+else bad "F: push-ref of a missing tag is refused" "rc=$rc: $(printf '%s' "$out" | tail -2)"; fi
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
