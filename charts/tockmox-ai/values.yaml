@@ -1855,6 +1855,34 @@ litellm:
     # now that the root filesystem is read-only. See litellm.volumes above.
     TMPDIR: /scratch
 
+  # ------------------------------------------------------------------------
+  # THE PRICE MAP ON AN AIR-GAPPED SITE. LiteLLM fetches its model price map
+  # from raw.githubusercontent.com when it starts, unless
+  # LITELLM_LOCAL_MODEL_COST_MAP is "True", in which case it uses the copy
+  # bundled in the image. A connected site keeps the live fetch (newer prices);
+  # a site with no route out would see a denied connection on every start.
+  #
+  # The signal is `global.imageRegistry` being set, the one air-gap key this
+  # chart already reads. The subchart writes envVars and extraEnvVars with no
+  # `tpl`, so the choice cannot be rendered into the Deployment directly.
+  # Instead this entry names an OPTIONAL key in the ConfigMap
+  # `tockmox-litellm-airgap-env`, which templates/litellm-airgap-env.yaml
+  # renders only when global.imageRegistry is set. With no ConfigMap the
+  # kubelet sets nothing, and LiteLLM fetches as before. The proxy and the
+  # migrations Job both read this list.
+  #
+  # A LIST, so a site that sets litellm.extraEnvVars replaces this entry;
+  # templates/preflight.yaml refuses that on a site with global.imageRegistry
+  # set, naming the entry to restate.
+  # ------------------------------------------------------------------------
+  extraEnvVars:
+    - name: LITELLM_LOCAL_MODEL_COST_MAP
+      valueFrom:
+        configMapKeyRef:
+          name: tockmox-litellm-airgap-env
+          key: LITELLM_LOCAL_MODEL_COST_MAP
+          optional: true
+
   # Schema migrations run in their own Job rather than racing on proxy startup,
   # and the Job is the SUBCHART'S OWN. Since 0.9.0 Tockmox renders no
   # migrations Job of its own: litellm-helm's `migrationJob` is on and carries an
