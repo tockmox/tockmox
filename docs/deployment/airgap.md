@@ -41,7 +41,7 @@ what it buys you, is in
 |---|---|---|
 | A **connected host** with `skopeo` (or `crane`), `helm` and `git` | Steps 2, 3 and 4 all run there. `skopeo` is multi-arch correct with no daemon; `docker` copies only the running machine's architecture | `command -v skopeo helm git` prints three paths |
 | A **transfer path** from that host into the boundary | Every artifact below crosses it. A one-way diode is fine | You have moved a 1 GB file across it once, end to end |
-| A **registry inside the boundary**, with push access | 46 images land in it and the cluster pulls from it | `curl -fsS https://REGISTRY_HOST/v2/ -o /dev/null && echo reachable`, run from a node |
+| A **registry inside the boundary**, with push access | 56 images land in it and the cluster pulls from it | `curl -fsS https://REGISTRY_HOST/v2/ -o /dev/null && echo reachable`, run from a node |
 | A **git server inside the boundary** speaking git's **smart** protocol | ArgoCD reads two repositories on every reconcile, not just at install | See the smart-protocol test below. A static file server passes `git clone` and fails ArgoCD |
 | A **LAN time source** ([choosing one](time-sync.md#1-choose-the-time-source--required)) | Nothing on a disconnected network reaches `pool.ntp.org`, and clock drift breaks TLS and SSO with errors that name neither | `chronyd -Q -t 5 'server TIME_SOURCE_IP iburst'` reports an offset, or `ntpdate -q TIME_SOURCE_IP` answers |
 | An **internal CA**, and the key material for it | Public ACME issuance needs internet. Renewal has to work offline forever | You can name the `ClusterIssuer` you will create and you hold its key. See [TLS and trust](../administration/tls-and-trust.md) |
@@ -65,7 +65,7 @@ raw file bytes. Why the failure is worth catching now:
 [ArgoCD § a static file server fools the git CLI and not the repo-server](../administration/argocd.md#a-static-file-server-fools-the-git-cli-and-not-the-repo-server).
 
 **Estimate, not a measurement: half a day**, most of it the image copy and the
-transfer. The copy is 46 images; the chart archives are about 4 MB.
+transfer. The copy is 56 images; the chart archives are about 4 MB.
 
 ## The registry prerequisite
 
@@ -127,7 +127,7 @@ has a tool shipped with it.
 <!-- tockmox:airgap-surfaces:begin -->
 | # | Dependency | Size | What Tockmox ships for it | Step |
 |---|---|---|---|---|
-| 1 | Tockmox's own workload images | 46 | `images.txt` and `tools/mirror-images.sh` | [2](#2-mirror-the-images--required) |
+| 1 | Tockmox's own workload images | 56 | `images.txt` and `tools/mirror-images.sh` | [2](#2-mirror-the-images--required) |
 | 2 | Upstream Helm subcharts | 18 dependencies across 14 repositories | `tools/helm-deps.sh` | [3](#3-vendor-the-upstream-helm-subcharts--required) |
 | 3 | Prerequisites: ArgoCD, sealed-secrets, `kubeseal` | 2 charts and 1 binary | nothing | [4](#4-carry-in-the-three-prerequisites--required) |
 | 4 | The Tockmox charts git repository | 1 repository | `tockmox.repoURL` points at your copy; `bootstrap-forge --charts-repo` can serve it | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |
@@ -142,12 +142,12 @@ a tool that does not exist, a step heading that moved, a prerequisite its step
 never mentions. It reads the repository only; it does not look at your site, and
 it is a list, not an offline bundle.
 
-Counts re-read on 2026-11-03: `images.txt` carries 46 non-comment lines (its
+Counts re-read on 2026-11-03: `images.txt` carries 56 non-comment lines (its
 header names the day `tools/gen-images.sh` generated it); the `Chart.yaml` files carry 19
 non-local dependencies across 14 distinct upstream repositories. These move
 with the tree.
 
-**Row 3 is the one that stops you before you start.** Mirror all 46 images,
+**Row 3 is the one that stops you before you start.** Mirror all 56 images,
 vendor every chart, host both git repositories internally, and you still cannot
 begin, because the three things that must exist before Tockmox installs appear
 in no mirroring artefact Tockmox ships. That is why it is step 4 here and last
@@ -162,7 +162,7 @@ connected install and this one.
 | Point in the normal flow | What a disconnected site does differently | Step |
 |---|---|---|
 | Before you touch a node | Stand up a LAN time source and point every node at it | [1](#1-point-every-node-at-a-lan-time-source--required) |
-| Any time before the install, on a connected host | Mirror 46 images; vendor 19 chart archives; pull the two prerequisite charts and `kubeseal` | [2](#2-mirror-the-images--required), [3](#3-vendor-the-upstream-helm-subcharts--required), [4](#4-carry-in-the-three-prerequisites--required) |
+| Any time before the install, on a connected host | Mirror 56 images; vendor 19 chart archives; pull the two prerequisite charts and `kubeseal` | [2](#2-mirror-the-images--required), [3](#3-vendor-the-upstream-helm-subcharts--required), [4](#4-carry-in-the-three-prerequisites--required) |
 | [fresh-install § 6 install ArgoCD](fresh-install.md#6-install-argocd) and [§ 7 sealed-secrets](fresh-install.md#7-install-sealed-secrets-with-your-own-key) | `helm install` from the carried-in archives instead of from a repository URL | [4](#4-carry-in-the-three-prerequisites--required) |
 | [install § Phase 1 generate](install.md#phase-1--generate-your-site-repository) | Set `tockmox.repoURL` at your internal charts clone | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |
 | [install § Phase 2 publish it](install.md#phase-2--publish-it) | Push to your internal git server, not to GitHub. It must speak the smart protocol | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |
@@ -236,8 +236,8 @@ wc -l < images.txt
 grep -vcE '^[[:punct:]]|^$' images.txt
 ```
 
-The first prints 49 lines: every image reference, plus a three-line header. The
-second prints 46 image references, the number to mirror ... it drops the blank
+The first prints 59 lines: every image reference, plus a three-line header. The
+second prints 56 image references, the number to mirror ... it drops the blank
 lines and the header, whose lines open with a comment marker rather than with a
 registry path.
 
@@ -280,7 +280,7 @@ It also encodes the path handling that bites anyone rolling their own, because
 ./tools/mirror-images.sh --registry REGISTRY_HOST/mirror --verify
 ```
 
-It prints `46 entries, 46 present, 0 missing` and exits 0. **Every entry, not a
+It prints `56 entries, 56 present, 0 missing` and exits 0. **Every entry, not a
 catalogue count**: on 2026-08-24 a registry catalogue held 41 entries while 3
 of the 44 then in the list were unresolvable, because a repository appears in the catalogue
 as soon as one architecture variant lands. `--verify` asks for each entry's

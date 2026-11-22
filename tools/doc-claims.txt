@@ -166,38 +166,41 @@ states: [0-9]+ dependencies
 # from install/bootstrap-forge.sh's pin).
 # 2026-11-21: 45 -> 46 (and 48 -> 49 lines), the extractor learned a CloudNativePG
 # Cluster's imageName, so the PostgreSQL image every CNPG database runs joined the list.
+# 2026-11-21: 46 -> 56 (and 49 -> 59 lines), gen-images.sh derives the ten images
+# longhorn-manager starts itself (engine, instance manager, backing-image manager,
+# support-bundle-kit, six CSI sidecars) from the vendored Longhorn chart's values.
 # THE IMAGE COUNT, phrased the ways the `images` class cannot match. Added
 # 2026-10-04: the list went 45 -> 44 in 0.7.1, the four sentences that
 # say "44 images" were updated, and the four below, which say the same number
 # another way, stayed at 45 and passed every gate. An outside reader found them.
 page:   docs/deployment/airgap.md
-claim:  carries 46 non-comment lines
+claim:  carries 56 non-comment lines
 test:   grep -v '^#' images.txt | grep -c .
-expect: 46
+expect: 56
 states: [0-9]+ non-comment lines
 
 page:   docs/deployment/airgap.md
-claim:  second prints 46 image references
+claim:  second prints 56 image references
 test:   grep -v '^#' images.txt | grep -c .
-expect: 46
+expect: 56
 states: [0-9]+ image references
 
 page:   docs/deployment/airgap.md
-claim:  `46 entries, 46 present, 0 missing`
+claim:  `56 entries, 56 present, 0 missing`
 test:   grep -v '^#' images.txt | grep -c .
-expect: 46
+expect: 56
 states: [0-9]+ entries, [0-9]+ present
 
 page:   docs/deployment/airgap.md
-claim:  | Tockmox's own workload images | 46 |
+claim:  | Tockmox's own workload images | 56 |
 test:   grep -v '^#' images.txt | grep -c .
-expect: 46
+expect: 56
 states: [0-9]+ \| `images\.txt`
 
 page:   docs/deployment/airgap.md
-claim:  The first prints 49 lines
+claim:  The first prints 59 lines
 test:   wc -l < images.txt | tr -d ' '
-expect: 49
+expect: 59
 states: [0-9]+ lines: every image reference
 
 # THE GATE COUNT, added 2026-09-02. `testing-standard.md` opens by naming how
@@ -641,7 +644,7 @@ expect: 6
 class:  images (digits)
 match:  [0-9]+ (runtime )?images\b
 test:   grep -v '^#' images.txt | grep -c .
-expect: 46
+expect: 56
 
 # The PR template's "45 images" is an EXAMPLE of a phrase this class matches,
 # not a count of the tree. The template is human-maintained (an agent's change
