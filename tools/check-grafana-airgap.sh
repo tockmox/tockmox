@@ -1,37 +1,39 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Assert, ON THE RENDERED ARTIFACT, that Grafana makes no plugin call to
-# grafana.com on an air-gapped site, and keeps its upstream behaviour elsewhere.
+# Assert, ON THE RENDERED ARTIFACT, that Grafana never checks grafana.com for
+# plugin updates, and makes no other plugin call to grafana.com on an
+# air-gapped site.
 #
 #   ./tools/check-grafana-airgap.sh
 #
 # WHY THIS IS A GATE. Grafana checks grafana.com for plugin updates every ten
-# minutes ([analytics] check_for_plugin_updates, default true) and, from
-# Grafana 12 on, installs a built-in list of app plugins from grafana.com at
-# start ([plugins] preinstall_disabled, default false). On a site with no route
-# out both are denied connections, at start and every ten minutes after, and
-# nothing in `helm lint` shows it. The observability chart writes both keys
-# into grafana.ini through the Grafana subchart's `tpl`, decided by the same
-# signal the model gateway reads: `global.airGapped` true, or
-# `global.imageRegistry` set (the fallback path, air-gapped by construction).
+# minutes ([analytics] check_for_plugin_updates, default true), installs a
+# built-in list of app plugins from grafana.com at start from Grafana 12 on
+# ([plugins] preinstall_disabled, default false), and fetches the plugin
+# signing key every ten days ([plugins] public_key_retrieval_disabled, default
+# false). On a site with no route out each is a denied connection, and nothing
+# in `helm lint` shows it. The update check is off on every site, as the
+# version check is. The other two follow the signal the model gateway reads:
+# `global.airGapped` true, or `global.imageRegistry` set (the fallback path,
+# air-gapped by construction), written into grafana.ini through the Grafana
+# subchart's `tpl`.
 #
-# WHAT IT PROVES: with neither set (and with global.airGapped false), Grafana
-# gets its own defaults for both keys (check_for_plugin_updates = true,
-# preinstall_disabled = false; a key grafana.ini leaves out reads as its
-# default, so a connected site behaves as it did before the keys); with
-# global.airGapped true, with global.imageRegistry set, and with both, it
-# carries check_for_plugin_updates = false and preinstall_disabled = true. In
-# every case the ConfigMap is the one the Grafana Deployment mounts, nothing
-# the render gives the Grafana container as environment overrides either key
-# (GF_<SECTION>_<KEY> wins over grafana.ini: its env list, and the rendered
-# ConfigMaps and Secrets its envFrom names), and the update check, usage
+# WHAT IT PROVES: in every case check_for_plugin_updates = false. With neither
+# signal set (and with global.airGapped false), preinstall_disabled = false and
+# public_key_retrieval_disabled = false (a key grafana.ini leaves out reads as
+# Grafana's default, so a connected site keeps the preinstalled apps and the
+# signing key fetch); with global.airGapped true, with global.imageRegistry set,
+# and with both, preinstall_disabled = true and public_key_retrieval_disabled =
+# true. In every case the ConfigMap is the one the Grafana Deployment mounts,
+# nothing the render gives the Grafana container as environment overrides these
+# keys (GF_<SECTION>_<KEY> wins over grafana.ini: its env list, and the rendered
+# ConfigMaps and Secrets its envFrom names), and the version check, usage
 # reporting and news feed stay off as they ship.
 #
 # WHAT IT DOES NOT PROVE: that these are Grafana's only calls to grafana.com
-# on a cut site (the plugin signing key is fetched every ten days unless
-# [plugins] public_key_retrieval_disabled is set), or that a running Grafana
-# makes no call. That needs an air-gap run, and is not run here.
+# on a cut site, or that a running Grafana makes no call. That needs an air-gap
+# run, and is not run here.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -44,25 +46,25 @@ CHART=charts/tockmox-observability
 BASE=ci/values.yaml
 MIRROR=registry.example/mirror
 
-# label | helm arguments | check_for_plugin_updates | preinstall_disabled
+# label | helm arguments | check_for_plugin_updates | preinstall_disabled | public_key_retrieval_disabled
 CASES=(
-  "connected|-|true|false"
-  "connected, global.airGapped false|--set global.airGapped=false|true|false"
-  "air-gapped (global.airGapped)|--set global.airGapped=true|false|true"
-  "air-gapped (global.imageRegistry)|--set global.imageRegistry=$MIRROR|false|true"
-  "air-gapped (both)|--set global.airGapped=true --set global.imageRegistry=$MIRROR|false|true"
+  "connected|-|false|false|false"
+  "connected, global.airGapped false|--set global.airGapped=false|false|false|false"
+  "air-gapped (global.airGapped)|--set global.airGapped=true|false|true|true"
+  "air-gapped (global.imageRegistry)|--set global.imageRegistry=$MIRROR|false|true|true"
+  "air-gapped (both)|--set global.airGapped=true --set global.imageRegistry=$MIRROR|false|true|true"
 )
 args=()
 i=0
 for c in "${CASES[@]}"; do
-  IFS='|' read -r label hargs upd pre <<<"$c"
+  IFS='|' read -r label hargs upd pre pk <<<"$c"
   # shellcheck disable=SC2086  # hargs is a fixed list of words written above
   if [ "$hargs" = "-" ]; then
     helm template t "$CHART" -f "$BASE" > "$tmp/$i.yaml"
   else
     helm template t "$CHART" -f "$BASE" $hargs > "$tmp/$i.yaml"
   fi
-  args+=("$label" "$tmp/$i.yaml" "$upd" "$pre")
+  args+=("$label" "$tmp/$i.yaml" "$upd" "$pre" "$pk")
   i=$((i+1))
 done
 
@@ -73,7 +75,8 @@ import configparser, sys, yaml
 # (section, key, Grafana's own default when grafana.ini leaves it out), from
 # conf/defaults.ini of the Grafana the subchart pins
 WANTED = [("analytics", "check_for_plugin_updates", "true"),
-          ("plugins", "preinstall_disabled", "false")]
+          ("plugins", "preinstall_disabled", "false"),
+          ("plugins", "public_key_retrieval_disabled", "false")]
 SHIPPED_OFF = [("analytics", "check_for_updates", "false"),
                ("analytics", "reporting_enabled", "false"),
                ("news", "news_feed_enabled", "false")]
@@ -109,7 +112,7 @@ def ok(msg):
     print("  ok " + msg)
 
 a = sys.argv[1:]
-for label, path, upd, pre in zip(a[0::4], a[1::4], a[2::4], a[3::4]):
+for label, path, upd, pre, pk in zip(a[0::5], a[1::5], a[2::5], a[3::5], a[4::5]):
     ds = list(docs(path))
     name, c, inis, cms = grafana(ds)
     if name is None:
@@ -130,7 +133,7 @@ for label, path, upd, pre in zip(a[0::4], a[1::4], a[2::4], a[3::4]):
             src = pool.get(ref["name"]) or {}
             for k in list((src.get("data") or {})) + list((src.get("stringData") or {})):
                 envnames[ef.get("prefix", "") + k] = "%s %s" % (kind, ref["name"])
-    for (sec, key, default), want in zip(WANTED, (upd, pre)):
+    for (sec, key, default), want in zip(WANTED, (upd, pre, pk)):
         got = ini.get(sec, key, fallback=None)
         eff = default if got is None else got
         if eff != want:
