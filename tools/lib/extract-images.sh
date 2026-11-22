@@ -34,6 +34,11 @@
 #
 #   POSIX bracket expressions only: no `\s`, no `\d`, nothing that needs GNU.
 #
+#   TWO KEYS, `image:` and `imageName:`. A CloudNativePG Cluster names its
+#   PostgreSQL image under `spec.imageName`, and every database the charts ship
+#   is one. `(image|imageName):` is a POSIX ERE alternation, so BSD grep reads
+#   it as GNU grep does.
+#
 #   `|| true` ON THE GREP, deliberately. grep exits 1 when nothing matches, and
 #   under the `set -euo pipefail` both callers use that aborts the script at the
 #   assignment, with no message. Both callers ALREADY assert non-empty straight
@@ -42,7 +47,7 @@
 #   operator to read than a silent exit. Emptiness is the caller's question to
 #   ask, not this function's to die on.
 extract_images() {
-  { grep -oE '^[[:space:]]*image:[[:space:]]*.+' || true; } \
+  { grep -oE '^[[:space:]]*(image|imageName):[[:space:]]*.+' || true; } \
     | awk '{print $2}' \
     | tr -d "\"'" \
     | sed '/^$/d' \
@@ -107,6 +112,17 @@ extract_images_selftest() {
            "        imagePullPolicy: IfNotPresent"
   _ei_case "a nested key ending in Image is not an image" "" \
            "        sidecarImage: reg.example/nope:1"
+
+  # A CloudNativePG Cluster names its PostgreSQL image under `imageName:`, not
+  # `image:`. Until 2026-11-21 the extractor read `image:` only, so images.txt
+  # and every closed set built from it lacked the image every CNPG database
+  # runs, and an air-gapped install's databases could not start. The key is
+  # matched whole: a longer key that merely starts with `imageName` is not one.
+  _ei_case "a CNPG Cluster's imageName is an image" \
+           "ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie" \
+           '  imageName: "ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie"'
+  _ei_case "imageNamePrefix is not an image" "" \
+           "  imageNamePrefix: reg.example/nope"
 
   if [ "$fails" -eq 0 ]; then echo "extract_images: all checks passed"; return 0; fi
   echo "extract_images: $fails failure(s)" >&2; return 1
