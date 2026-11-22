@@ -575,6 +575,7 @@ run_gate "every OIDC console gets a trust bundle" bash tools/check-trust-wiring.
 run_gate "a product bump of Open WebUI or LiteLLM reaches a site with no site edit" bash tools/check-site-follows-product.sh
 run_gate "the site-follows-product gate goes red on every mutation" bash tools/check-site-follows-product.sh --selftest
 run_gate "site LiteLLM hooks load through values alone" bash tools/check-litellm-hooks.sh
+run_gate "LiteLLM uses its bundled price map when global.imageRegistry is set, and fetches it otherwise" bash tools/check-litellm-price-map.sh
 # No known-bad LiteLLM digest or 1.107.0 tag (the incident) is named in images.txt, the SBOM, a chart or any
 # other file outside the docs; the list is tools/litellm-bad-digests.txt. Not in ci.yaml yet, for the reason at
 # the top of this file.
