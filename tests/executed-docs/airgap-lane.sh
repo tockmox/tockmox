@@ -9,7 +9,11 @@
 #   2. create the throwaway on the segment (throwaway-cluster.sh create, TOCKMOX_REGISTRY_MODE=nofallback,
 #      TOCKMOX_UPSTREAM_DENY=edge, the mirror's CA placed by TOCKMOX_REGISTRY_CA)
 #   3. the guest resolves a public name. Under the cut a name that does not resolve sends no packet, so the edge would
-#      have nothing to refuse or count, and a zero would mean nothing
+#      have nothing to refuse or count, and a zero would mean nothing. Then the guest cluster's own pod and Service
+#      ranges, learned at run time: from the guest's k3s config and unit flags (cluster-cidr, service-cidr) where they
+#      name them, else from the live cluster (the nodes' podCIDRs; the ServiceCIDR object, else the range the API
+#      server names when a server-side dry run asks for an address outside it). A range that cannot be learned, or
+#      one wider than /12, is a FAIL: the clause never exempts a range it has not read, or one that wide
 #   4. mirror-tls and mirror-proof both PASS: one verified TLS round trip from the node to the mirror, and the mirror is
 #      the node's only registry
 #   5. the guest is quieted (apt timers, unattended upgrades, snap refresh, motd news), so the denies under the cut are
@@ -29,12 +33,13 @@
 #   9. run.sh P09 (built-in route, this tree's install.md, and global.airGapped where airgap.md says), timed: the
 #      cut window
 #  10. the edge's deny lines for the guest over the cut window, counted and grouped by destination. A deny whose
-#      protocol and port are on TOCKMOX_AIRGAP_IGNORE (default udp/123, the OS's time sync) is reported and does not
-#      fail the clause; any other deny does, and the line names where the install reached
+#      protocol and port are on TOCKMOX_AIRGAP_IGNORE (default udp/123, the OS's time sync), or whose destination is
+#      in the guest cluster's own pod or Service range (step 3: an address the guest owns, not a way out), is reported
+#      and does not fail the clause; any other deny does, and the line names where the install reached
 #  11. destroy the throwaway, unless TOCKMOX_KEEP_CLUSTER=1
 #
 # THE CLAUSE PASSES when P09 declared PASS and the edge refused nothing for the guest over the cut window outside
-# TOCKMOX_AIRGAP_IGNORE. Every count is printed, ignored ones included.
+# TOCKMOX_AIRGAP_IGNORE and the guest cluster's own ranges. Every count is printed, ignored ones included.
 #
 # THE SITE'S VALUES come from the environment, never from this tree:
 #   TOCKMOX_REGISTRY_MIRROR, TOCKMOX_REGISTRY_CA   the closed-set mirror (host/project) and the CA that signs it
@@ -51,7 +56,8 @@
 #   TOCKMOX_KEEP_CLUSTER.
 #
 # WHAT IT PRINTS for a caller to grep: AIRGAP-PAUSE, AIRGAP-CUT (the control's proof), AIRGAP-WINDOW,
-# AIRGAP-DENY <proto> <destination>:<port> <count> [ignored], AIRGAP-STALL, and last AIRGAP-RESULT <outcome>.
+# AIRGAP-DENY <proto> <destination>:<port> <count> [ignored|guest-cluster], AIRGAP-STALL, and last
+# AIRGAP-RESULT <outcome>.
 #
 # Exit: 0 PASS; 1 FAIL (a step failed, P09 did not pass, or the install reached past the edge); 2 a refused
 # precondition, before anything is created; 4 BLOCKED (the guest resolves nothing, or the cut was not made in time);
@@ -235,6 +241,62 @@ case "$dns" in
   *AIRGAP-DNS-NONE*) blocked "the guest resolves no public name (${CONTROL_HOST}), so under the cut nothing it asks for would leave a packet to count. Open the segment's resolver to recursion for the run" ;;
   *) infra "the guest did not answer the resolver check" ;;
 esac
+# The guest cluster's own ranges. A packet to a ClusterIP or pod address that leaves the node by the default route is
+# refused at the edge, but it is bound for an address the guest owns, not for the internet; the clause reports it
+# (guest-cluster) and does not fail on it. Only the ranges this guest uses, learned now; nothing is assumed.
+k3s_cfg="$(gexec 'cat /etc/rancher/k3s/config.yaml /etc/rancher/k3s/config.yaml.d/*.yaml /etc/systemd/system/k3s.service 2>/dev/null; echo AIRGAP-K3S-CONFIG-END' 2>/dev/null || true)"
+case "$k3s_cfg" in
+  *AIRGAP-K3S-CONFIG-END*) ;;
+  *) infra "the guest did not answer the read of its k3s config, so its own pod and Service ranges are unknown" ;;
+esac
+gk() { KUBECONFIG="$KC" kubectl --context="$KUBE_CONTEXT" "$@"; }
+live_pod="$(gk get nodes -o jsonpath='{.items[*].spec.podCIDRs[*]}' 2>/dev/null || true)"
+live_svc="$(gk get servicecidrs.networking.k8s.io kubernetes -o jsonpath='{.spec.cidrs[*]}' 2>/dev/null || true)"
+svc_probe=""
+# Without a ServiceCIDR object, a server-side dry run (nothing is created) for an address outside the range makes the
+# API server name the range it allocates from.
+[ -n "$live_svc" ] || svc_probe="$(gk create service clusterip airgap-lane-range-probe --tcp=1 --clusterip=192.0.2.1 \
+  --dry-run=server -o name 2>&1 || true)"
+GUEST_RANGES="$(printf '%s\n' "$k3s_cfg" | python3 -c '
+import ipaddress, re, sys
+live_pod, live_svc, probe = sys.argv[1], sys.argv[2], sys.argv[3]
+cfg = {}
+for line in sys.stdin:
+    for m in re.finditer(r"(?:^|[\s\x27\"])-{0,2}(cluster-cidr|service-cidr)\s*[:=\s]\s*[\x27\"]?([0-9A-Fa-f.:/,]+)", line):
+        cfg[m.group(1)] = m.group(2)   # the last wins: config.yaml.d over config.yaml, the unit flags over both
+found = re.findall(r"range of valid IPs is ([0-9A-Fa-f.:/]+)", probe)
+learned = {
+    "cluster-cidr": ("pod", cfg.get("cluster-cidr") and (cfg["cluster-cidr"], "the k3s config")
+                     or live_pod.split() and (",".join(live_pod.split()), "the nodes\x27 podCIDRs")),
+    "service-cidr": ("service", cfg.get("service-cidr") and (cfg["service-cidr"], "the k3s config")
+                     or live_svc.split() and (",".join(live_svc.split()), "the ServiceCIDR object")
+                     or found and (",".join(found), "the API server, for a dry-run Service")),
+}
+nets, said = [], []
+for key, (what, got) in learned.items():
+    if not got:
+        sys.exit("the guest cluster %s range could not be learned (no %s in its k3s config, and the live cluster did not say)" % (what, key))
+    value, src = got
+    v4 = []
+    for part in value.split(","):
+        try:
+            net = ipaddress.ip_network(part.strip(), strict=False)
+        except ValueError:
+            sys.exit("%s %r from %s is not a network" % (what, part.strip(), src))
+        if net.version != 4:
+            continue
+        if net.prefixlen < 12:
+            sys.exit("%s range %s from %s is wider than /12, so the clause would ignore too much" % (what, net, src))
+        v4.append(net)
+    if not v4:
+        sys.exit("the guest cluster %s range could not be learned: %s names no IPv4 network" % (what, src))
+    nets += v4
+    said.append("%s %s (%s)" % (what, " ".join(map(str, v4)), src))
+print(" ".join(map(str, nets)) + "|" + ", ".join(said))
+' "$live_pod" "$live_svc" "$svc_probe" 2>"${LANE}/guest-ranges.err")" \
+  || fail "the guest cluster's own ranges: $(tail -1 "${LANE}/guest-ranges.err")"
+note "airgap lane 3: the guest cluster's own ranges, reported and not counted against the clause: ${GUEST_RANGES#*|}"
+GUEST_RANGES="${GUEST_RANGES%%|*}"
 
 # 4. the mirror: a verified TLS round trip, and the only registry
 step "4 mirror-tls and mirror-proof"
@@ -358,9 +420,16 @@ n="$(count "$T0" "$T1" --lines 2000 2>"${LANE}/cut-denies.txt")" || n_rc=$?
 note "airgap lane 10: ${n} deny line(s) for ${GUEST_IP} over the cut window"
 counted=0
 if [ "$n" -gt 0 ]; then
-  python3 - "$GUEST_IP" "$IGNORE" "$n" "${LANE}/cut-denies.txt" > "${LANE}/cut-by-destination.txt" <<'PY' || fail "the cut window's deny lines could not be grouped"
-import collections, sys
+  python3 - "$GUEST_IP" "$IGNORE" "$n" "${LANE}/cut-denies.txt" "$GUEST_RANGES" > "${LANE}/cut-by-destination.txt" <<'PY' || fail "the cut window's deny lines could not be grouped"
+import collections, ipaddress, sys
 guest, ignore, total, path = sys.argv[1], set(sys.argv[2].split()), int(sys.argv[3]), sys.argv[4]
+own = [ipaddress.ip_network(r) for r in sys.argv[5].split()]
+def owned(dst):
+    try:
+        a = ipaddress.ip_address(dst)
+    except ValueError:
+        return False
+    return any(a in r for r in own)
 rows = collections.Counter()
 seen = 0
 for raw in open(path, encoding="utf-8", errors="replace"):
@@ -378,9 +447,9 @@ for raw in open(path, encoding="utf-8", errors="replace"):
     rows[key] += 1
 bad = 0
 for (proto, dst, port), c in rows.most_common():
-    ign = f"{proto}/{port}" in ignore
-    bad += 0 if ign else c
-    print(f"AIRGAP-DENY {proto} {dst}{':' + port if port else ''} {c}{' ignored' if ign else ''}")
+    mark = " ignored" if f"{proto}/{port}" in ignore else " guest-cluster" if owned(dst) else ""
+    bad += 0 if mark else c
+    print(f"AIRGAP-DENY {proto} {dst}{':' + port if port else ''} {c}{mark}")
 unread = max(0, total - seen)
 if unread:
     print(f"AIRGAP-DENY ? unread {unread}")
@@ -390,7 +459,7 @@ PY
   grep '^AIRGAP-DENY' "${LANE}/cut-by-destination.txt" | tee -a "$REPORT"
   counted="$(sed -n 's/^COUNTED //p' "${LANE}/cut-by-destination.txt")"
 fi
-note "airgap lane 10: ${counted} deny line(s) count against the clause (ignored: ${IGNORE:-none})"
+note "airgap lane 10: ${counted} deny line(s) count against the clause (ignored: ${IGNORE:-none}; the guest cluster's own: ${GUEST_RANGES})"
 
 # 11. the judgment; finish() destroys the throwaway and prints AIRGAP-RESULT
 if [ "$P09_RC" != 0 ] || [ "${p09_rec%% *}" != PASS ]; then
@@ -400,5 +469,5 @@ if [ "$P09_RC" != 0 ] || [ "${p09_rec%% *}" != PASS ]; then
     *) fail "P09 did not pass under the cut (exit ${P09_RC}, ${p09_rec})" ;;
   esac
 fi
-[ "$counted" = 0 ] || fail "the install reached past the edge under the cut: ${counted} deny line(s) outside ${IGNORE:-nothing ignored} (the AIRGAP-DENY lines above name where)"
+[ "$counted" = 0 ] || fail "the install reached past the edge under the cut: ${counted} deny line(s) outside ${IGNORE:-nothing ignored} and the guest cluster's own ranges (the AIRGAP-DENY lines above name where)"
 note "airgap lane: the clause holds: P09 passed from the mirror alone, and the edge refused nothing the clause counts"
