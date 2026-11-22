@@ -164,38 +164,40 @@ states: [0-9]+ dependencies
 
 # 2026-11-03: 44 -> 45, the built-in forge's image joined the list (gen-images.sh reads it
 # from install/bootstrap-forge.sh's pin).
+# 2026-11-21: 45 -> 46 (and 48 -> 49 lines), the extractor learned a CloudNativePG
+# Cluster's imageName, so the PostgreSQL image every CNPG database runs joined the list.
 # THE IMAGE COUNT, phrased the ways the `images` class cannot match. Added
 # 2026-10-04: the list went 45 -> 44 in 0.7.1, the four sentences that
 # say "44 images" were updated, and the four below, which say the same number
 # another way, stayed at 45 and passed every gate. An outside reader found them.
 page:   docs/deployment/airgap.md
-claim:  carries 45 non-comment lines
+claim:  carries 46 non-comment lines
 test:   grep -v '^#' images.txt | grep -c .
-expect: 45
+expect: 46
 states: [0-9]+ non-comment lines
 
 page:   docs/deployment/airgap.md
-claim:  second prints 45 image references
+claim:  second prints 46 image references
 test:   grep -v '^#' images.txt | grep -c .
-expect: 45
+expect: 46
 states: [0-9]+ image references
 
 page:   docs/deployment/airgap.md
-claim:  `45 entries, 45 present, 0 missing`
+claim:  `46 entries, 46 present, 0 missing`
 test:   grep -v '^#' images.txt | grep -c .
-expect: 45
+expect: 46
 states: [0-9]+ entries, [0-9]+ present
 
 page:   docs/deployment/airgap.md
-claim:  | Tockmox's own workload images | 45 |
+claim:  | Tockmox's own workload images | 46 |
 test:   grep -v '^#' images.txt | grep -c .
-expect: 45
+expect: 46
 states: [0-9]+ \| `images\.txt`
 
 page:   docs/deployment/airgap.md
-claim:  The first prints 48 lines
+claim:  The first prints 49 lines
 test:   wc -l < images.txt | tr -d ' '
-expect: 48
+expect: 49
 states: [0-9]+ lines: every image reference
 
 # THE GATE COUNT, added 2026-09-02. `testing-standard.md` opens by naming how
@@ -639,7 +641,17 @@ expect: 6
 class:  images (digits)
 match:  [0-9]+ (runtime )?images\b
 test:   grep -v '^#' images.txt | grep -c .
-expect: 45
+expect: 46
+
+# The PR template's "45 images" is an EXAMPLE of a phrase this class matches,
+# not a count of the tree. The template is human-maintained (an agent's change
+# never writes .github/*), so a live count there turns every image added by an
+# agent's PR into a hand-carried template edit. It should not state a count at
+# all; until a human rewords it, the example is waived. When the tree is at 45
+# again or the template changes, this waiver goes unused and fails: delete it.
+waive:  .github/PULL_REQUEST_TEMPLATE.md
+match:  ^45 images$
+why:    an illustrative phrase in a human-maintained template, not a count of images.txt
 
 class:  chart repositories (digits)
 match:  [0-9]+ repositories\b
@@ -788,7 +800,7 @@ states: [0-9]+ resources
 page:   docs/deployment/airgap.md
 claim:  exemptions at the 0.8.0 tree
 test:   sed -n '/^EXEMPT="/,/^"/p' tools/check-airgap.sh | sed '1d;$d' | sed '/^$/d' | sort -u | wc -l | tr -d ' '
-expect: 21
+expect: 22
 states: [0-9]+ exemptions
 
 # Every count that needs a render of ALL NINE charts, read from the

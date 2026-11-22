@@ -122,6 +122,12 @@
       "version": "v0.15.1"
     },
     {
+      "name": "ghcr.io/cloudnative-pg/postgresql",
+      "purl": "pkg:oci/postgresql?repository_url=ghcr.io/cloudnative-pg/postgresql&tag=18.6-system-trixie",
+      "type": "container",
+      "version": "18.6-system-trixie"
+    },
+    {
       "name": "ghcr.io/goauthentik/server",
       "purl": "pkg:oci/server?repository_url=ghcr.io/goauthentik/server&tag=2026.8.5",
       "type": "container",

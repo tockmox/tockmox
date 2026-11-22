@@ -67,6 +67,15 @@ LAYERS=(crds platform policy identity observability exporters ai devops selfchec
 # registry (tockmox-ui.md, "Build the image"). Redirecting a reference the site
 # wrote would be wrong, so the chart does not; the gate first saw the UI when
 # the all-on overlay turned it on.
+#
+# ghcr.io/cloudnative-pg/postgresql IS EXEMPT DELIBERATELY, added 2026-11-21,
+# when the extractor learned to read a CloudNativePG Cluster's `imageName:`.
+# It is the PostgreSQL image every CNPG database runs (the identity chart pins
+# it; the others take the operator default, at CNPG 1.30.1 the same image).
+# The chart writes the reference into the Cluster's `imageName` as given, and
+# global.imageRegistry does not rewrite a Cluster's imageName, so a
+# fallback-path site sets that value to its mirror by hand. A node-side mirror
+# covers it like any other pull.
 # ---------------------------------------------------------------------------
 EXEMPT="
 busybox
@@ -74,6 +83,7 @@ docker.io/grafana/alloy
 ghcr.io/berriai/litellm-database
 ghcr.io/cloudnative-pg/cloudnative-pg
 ghcr.io/cloudnative-pg/plugin-barman-cloud
+ghcr.io/cloudnative-pg/postgresql
 ghcr.io/goauthentik/server
 ghcr.io/kubereboot/kured
 ghcr.io/open-webui/open-webui

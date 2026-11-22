@@ -325,9 +325,10 @@ identity:
     # than a fresh one, which is the drift the restore drill had to learn to
     # read around. The tag is the minor the reference site's CNPG
     # databases run. A major-version jump on an existing data directory is a
-    # dump and restore, not an image bump. Mirror it for an air-gapped install:
-    # like the model gateway's, it is not listed in images.txt and
-    # global.imageRegistry does not rewrite it.
+    # dump and restore, not an image bump. images.txt lists it (the extractor
+    # reads a Cluster's imageName), so a mirror built from that list carries
+    # it; global.imageRegistry does not rewrite it, so a fallback-path site
+    # sets this value to its mirror by hand.
     imageName: ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie
     # The postgres container's resources (spec.resources on the Cluster). The
     # bundled server's figures, carried over: request 128Mi from the 0.8.0
