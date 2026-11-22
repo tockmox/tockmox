@@ -1218,6 +1218,21 @@ costs you, with the reasoning in the documentation rather than here.
   at `v0.13.4` is byte-identical to `v0.13.3` (sha256 `5f1bd74c48bf13ab0f82e177ad9e637313b92533d20ead2593d49347a47fc232`, checked 2026-11-18), so the licence terms
   in `docs/frontend-posture.md` stand.
 
+- **Non-major dependency refresh.** kube-prometheus-stack 92.18.0 to 92.22.0 (Prometheus
+  Operator v0.95.x, node-exporter chart v5, which now runs node-exporter with RuntimeDefault
+  seccomp, no capabilities and no privilege escalation), Loki chart 21.0.0 to 21.2.3 (Loki
+  3.7.10; the gateway image moves from `nginxinc/nginx-unprivileged` to
+  `nginx/nginx-unprivileged`, so a mirror that lists images by name takes the new path), Alloy
+  v1.22.0, the blackbox and SNMP exporter charts, Traefik chart 42.4.0 (Traefik v3.7.18), Argo
+  Workflows chart 2.0.18, ntfy v2.38.0, apprise 2.1.0, the alert bridge on `python:3.15-slim`,
+  and docs-site build packages. Traefik's image now follows `global.imageRegistry`, so the
+  air-gap gate carries 21 exemptions, not 22, and a fallback-path site no longer wires
+  Traefik's registry by hand. The identity backup client moves to `postgres:17.12-bookworm`,
+  and the bundled PostgreSQL server pin moves with it from `17.11-bookworm`, a patch release
+  on the same Debian, so the two stay one image (check-identity-seams S10) and nothing is
+  reindexed. The bundled server is off by default; an install still running it takes a
+  PostgreSQL patch restart.
+
 ### Fixed
 
 - **A restore or a power cycle no longer fires a missed CronJob slot into a cold

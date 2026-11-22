@@ -254,7 +254,7 @@ databaseBackup:
   # this line against the rendered StatefulSet on every authentik bump ...
   # tools/check-identity-seams.sh S10 now fails the build when the two majors
   # differ, and `grep -c postgres: images.txt` reads 1 when they agree.
-  postgresImage: docker.io/library/postgres:17.11-bookworm
+  postgresImage: docker.io/library/postgres:17.12-bookworm
   uploaderImage: alpine/k8s:1.37.2
 
 # ---------------------------------------------------------------------------
@@ -873,7 +873,7 @@ authentik:
     # the move to trixie (with the reindex) belongs to a minor release. Keep it
     # equal to databaseBackup.postgresImage above (check-identity-seams S10).
     image:
-      tag: "17.11-bookworm"
+      tag: "17.12-bookworm"
     auth:
       existingSecret: tockmox-authentik-postgres
     primary:

@@ -445,7 +445,7 @@ global:
 **`global.imageRegistry` does not reach every image, and that is a documented
 limitation of the fallback rather than a defect queue.** It is a convention that
 works only in charts that read it, and `tools/check-airgap.sh` carries
-22 exemptions at the 0.8.0 tree, naming the images it does not reach: 21
+21 exemptions at the 0.8.0 tree, naming the images it does not reach: 20
 upstream images, and the Tockmox UI's, which your site builds and names in full
 in `tockmoxUi.image`, so there is nothing to redirect. The gate
 stays, because a site on this path needs to know exactly which images to wire
