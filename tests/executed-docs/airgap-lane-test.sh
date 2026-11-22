@@ -29,6 +29,12 @@
 #      the vendored archives under airgap-<vm>-vendored, site-repo-server.sh push-ref serves that tag with them in it,
 #      P09 installs that tag, and TOCKMOX_SERVE_FORCE_ADD is never set; with an archive missing the lane FAILs before
 #      the cut, naming it, and P09 never runs
+#  20. the guest cluster's own pod and Service ranges, learned at run time: from its k3s config where it names them,
+#      else from the live cluster (the nodes' podCIDRs; the ServiceCIDR object, else the range the API server names
+#      when a server-side dry run asks for an address outside it). Denies to them are reported as guest-cluster and
+#      do not fail the clause; a deny outside them still does; a range wider than /12 FAILs before P04; ranges that
+#      cannot be learned FAIL closed before P04, never an exemption; a guest that does not answer the read is
+#      INFRA_ERROR before the cut
 #
 # What it does not show: that the edge logs, that the segment has no other way out, or that P09 passes from the
 # mirror. The lab run is that proof.
@@ -75,6 +81,7 @@ case "$1" in
     case "$*" in
       *getent*) case "$(cat "$C/dns")" in resolved) echo AIRGAP-DNS-RESOLVED ;; none) echo AIRGAP-DNS-NONE ;; *) exit 255 ;; esac ;;
       *curl*) case "$(pop "$C/control")" in reached) echo AIRGAP-CONTROL-REACHED ;; refused) echo AIRGAP-CONTROL-REFUSED ;; *) exit 255 ;; esac ;;
+      *k3s/config.yaml*) [ ! -e "$C/k3s_silent" ] || exit 255; cat "$C/k3s_config" 2>/dev/null; echo AIRGAP-K3S-CONFIG-END ;;
       *) echo quiet ;;
     esac ;;
   mirror-tls) echo "mirror-tls: $(cat "$C/tls")" ;;
@@ -114,6 +121,11 @@ cat > "$B/kubectl" <<'SH'
 #!/usr/bin/env bash
 case "$*" in
   *current-context*) echo fake-guest ;;
+  *podCIDRs*) cat "${AGT_CTL:?}/k_pod" 2>/dev/null ;;
+  *servicecidrs*) [ -s "${AGT_CTL:?}/k_svc" ] || { echo 'error: the server doesn'"'"'t have a resource type "servicecidrs"' >&2; exit 1; }
+    cat "$AGT_CTL/k_svc" ;;
+  *dry-run=server*) [ ! -s "${AGT_CTL:?}/k_probe" ] || { cat "$AGT_CTL/k_probe" >&2; exit 1; }
+    echo service/airgap-lane-range-probe created ;;
   *"get nodes"*) echo 192.0.2.60 ;;
   *) exit 1 ;;
 esac
@@ -154,7 +166,8 @@ WEB='60,,,rule-cut,vtnet2,match,block,in,4,0x0,,64,1,0,DF,6,tcp,60,192.0.2.60,19
 
 # set_case KEY=VALUE...: a fresh control directory with the happy path's values, then the case's own
 set_case() {
-  rm -f "$C/calls" "$C/lines" "$C/p0405_sleep" "$C/create_err" "$C/no_archive"
+  rm -f "$C/calls" "$C/lines" "$C/p0405_sleep" "$C/create_err" "$C/no_archive" "$C/k3s_config" "$C/k3s_silent" "$C/k_probe"
+  echo 198.18.0.0/24 > "$C/k_pod"; echo 198.19.0.0/16 > "$C/k_svc"
   echo resolved > "$C/dns"; echo PASS > "$C/tls"; echo PASS > "$C/proof"; echo 0 > "$C/create_rc"; echo 0 > "$C/p0405_rc"
   printf 'reached\nrefused\n' > "$C/control"; printf '1\n2\n' > "$C/counts"; printf '%s\n%s\n' "$NTP" "$NTP" > "$C/lines"
   echo PASS > "$C/p09_outcome"; echo 0 > "$C/p09_rc"
@@ -272,5 +285,46 @@ if [ "$RC" = 1 ] && has 'install/charts-vendored-tag.sh refused' && has 'charts/
    && ! has 'AIRGAP-PAUSE' && ! called 'run P09' && ! called 'srs push-ref' && called 'tc destroy'; then
   pass "19: an archive missing FAILs before the cut, naming it; nothing is served and P09 never runs"
 else fail "19: missing archive: rc=$RC $(printf '%s' "$OUT" | tail -3 | tr '\n' '|')"; fi
+
+# 20. the guest cluster's own pod and Service ranges, learned at run time (documentation and benchmark ranges here)
+deny_to() { printf '60,,,rule-cut,vtnet2,match,block,in,4,0x0,,63,1,0,DF,6,tcp,60,192.0.2.60,%s,40000,%s,0,S,1,,64240,,mss' "$1" "$2"; }
+SVC="$(deny_to 198.19.209.85 9090)"; POD="$(deny_to 198.18.0.15 8080)"; NEAR="$(deny_to 198.18.1.1 443)"
+PINNED="$(deny_to 203.0.113.140 4000)"
+set_case counts='1\n4\n' lines="${NTP}\n${SVC}\n${SVC}\n${POD}\n"; lane
+if [ "$RC" = 0 ] && has 'AIRGAP-RESULT PASS' && has 'AIRGAP-DENY tcp 198.19.209.85:9090 2 guest-cluster' \
+   && has 'AIRGAP-DENY tcp 198.18.0.15:8080 1 guest-cluster' && has 'airgap lane 10: 0 deny line(s) count against the clause' \
+   && has "pod 198.18.0.0/24 (the nodes' podCIDRs), service 198.19.0.0/16 (the ServiceCIDR object)"; then
+  pass "20: denies to the live cluster's own pod and Service ranges are reported as guest-cluster and pass"
+else fail "20: own ranges: rc=$RC $(printf '%s' "$OUT" | tail -6 | tr '\n' '|')"; fi
+set_case counts='1\n3\n' lines="${SVC}\n${POD}\n${NEAR}\n"; lane
+if [ "$RC" = 1 ] && has 'AIRGAP-DENY tcp 198.18.1.1:443 1' && ! has '198.18.1.1:443 1 guest-cluster' \
+   && has 'reached past the edge under the cut: 1 deny line(s)'; then
+  pass "20: a deny just past the node's pod range (198.18.1.1) still FAILs the clause"
+else fail "20: just outside: rc=$RC $(printf '%s' "$OUT" | tail -6 | tr '\n' '|')"; fi
+set_case counts='1\n2\n' lines="${SVC}\n${PINNED}\n" \
+  k3s_config='write-kubeconfig-mode: "0600"\ncluster-cidr: "203.0.113.0/25"\nservice-cidr: 203.0.113.128/25\n'; lane
+if [ "$RC" = 1 ] && has 'AIRGAP-DENY tcp 203.0.113.140:4000 1 guest-cluster' && has 'AIRGAP-DENY tcp 198.19.209.85:9090 1' \
+   && ! has '198.19.209.85:9090 1 guest-cluster' && has 'pod 203.0.113.0/25 (the k3s config), service 203.0.113.128/25 (the k3s config)'; then
+  pass "20: ranges the guest's k3s config names are used, not the live ones: 203.0.113.140 passes, 198.19 now FAILs"
+else fail "20: pinned ranges: rc=$RC $(printf '%s' "$OUT" | tail -6 | tr '\n' '|')"; fi
+set_case k_svc='' k_probe='The Service "airgap-lane-range-probe" is invalid: spec.clusterIPs: Invalid value: ["192.0.2.1"]: failed to allocate IP 192.0.2.1: the provided IP (192.0.2.1) is not in the valid range. The range of valid IPs is 198.19.0.0/16\n' \
+  counts='1\n1\n' lines="${SVC}\n"; lane
+if [ "$RC" = 0 ] && has 'AIRGAP-DENY tcp 198.19.209.85:9090 1 guest-cluster' && has 'service 198.19.0.0/16 (the API server'; then
+  pass "20: with no ServiceCIDR object, the range the API server names for a dry-run Service is used"
+else fail "20: dry-run probe: rc=$RC $(printf '%s' "$OUT" | tail -6 | tr '\n' '|')"; fi
+set_case k3s_config='cluster-cidr: 0.0.0.0/0\n'; lane
+if [ "$RC" = 1 ] && has 'wider than /12' && ! called 'run P04' && called 'tc destroy'; then
+  pass "20: a guest range wider than /12 FAILs before P04, never a clause that ignores everything"
+else fail "20: wide range: rc=$RC $(printf '%s' "$OUT" | tail -3 | tr '\n' '|')"; fi
+set_case k_pod=''; lane
+r1=0; [ "$RC" = 1 ] && has 'could not be learned' && has 'pod range' && ! called 'run P04' && r1=1
+set_case k_svc='' k_probe='Error from server (Forbidden): services is forbidden\n'; lane
+r2=0; [ "$RC" = 1 ] && has 'could not be learned' && has 'service range' && ! called 'run P04' && r2=1
+if [ "$r1" = 1 ] && [ "$r2" = 1 ]; then pass "20: a pod or Service range that cannot be learned FAILs closed before P04, nothing exempted"
+else fail "20: unlearnable: pod=$r1 service=$r2 $(printf '%s' "$OUT" | tail -3 | tr '\n' '|')"; fi
+set_case k3s_silent=1; lane
+if [ "$RC" = 5 ] && has 'AIRGAP-RESULT INFRA_ERROR' && ! called 'run P09' && ! has 'AIRGAP-PAUSE'; then
+  pass "20: the guest does not answer the k3s config read: INFRA_ERROR before the cut"
+else fail "20: silent config: rc=$RC $(printf '%s' "$OUT" | tail -3 | tr '\n' '|')"; fi
 
 [ "$FAILS" = 0 ] || exit 1
