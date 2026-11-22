@@ -24,6 +24,10 @@
         "imageRegistry": {
           "type": "string"
         },
+        "airGapped": {
+          "type": "boolean",
+          "description": "true on a site with no route out, whichever way it pulls images (docs/deployment/airgap.md). The node-side containerd mirror leaves imageRegistry empty, so this is the signal there. tockmox-ai reads it, or imageRegistry set, to make LiteLLM use the price map bundled in its image."
+        },
         "timezone": {
           "type": "string"
         },

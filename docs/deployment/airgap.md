@@ -168,7 +168,7 @@ connected install and this one.
 | [install § Phase 2 publish it](install.md#phase-2--publish-it) | Push to your internal git server, not to GitHub. It must speak the smart protocol | [5](#5-serve-both-git-repositories-inside-the-boundary--required) |
 | [install § Phase 2.5 mint your credentials](install.md#phase-25--mint-your-credentials) | `mint-secrets.sh --cert FILE`, sealing against a fetched certificate rather than a live controller | [4](#4-carry-in-the-three-prerequisites--required) |
 | Every node, before Phase 3 | Point containerd at your mirror in `/etc/rancher/k3s/registries.yaml`, put your registry's CA where its `ca_file` points and check one TLS round trip, then restart k3s. This is the primary mechanism | [2](#2-mirror-the-images--required) |
-| Your site values, before Phase 3 | Set `global.certIssuer`. Set `global.imageRegistry` only on the fallback path, where you cannot configure the nodes | [2](#2-mirror-the-images--required), [6](#6-switch-the-certificate-issuer-to-your-internal-ca--required) |
+| Your site values, before Phase 3 | Set `global.airGapped: true` and `global.certIssuer`. Set `global.imageRegistry` only on the fallback path, where you cannot configure the nodes | [2](#2-mirror-the-images--required), [6](#6-switch-the-certificate-issuer-to-your-internal-ca--required) |
 | [install § Phase 3 apply](install.md#phase-3--apply) | Nothing. This step is unchanged | ... |
 | After the platform layer is Healthy | Publish the product documentation from a directory built on a connected machine: `tools/publish-docs.sh --context CTX --site DIR`. The docs site shows a placeholder until you do | [7](#7-run-the-install--required) |
 | Each later release | Mirror the new images, re-vendor the chart archives and carry the new tag inside first, then run the ordinary upgrade from inside | [8](#8-update-a-disconnected-install--required-at-every-release) |
@@ -454,6 +454,24 @@ values. Which key, per chart, is
 [registry § how `global.imageRegistry` rewrites an image reference](registry.md#how-globalimageregistry-rewrites-an-image-reference).
 A site with the node-side mirror in place needs none of this and can leave the
 key empty.
+
+### Then tell the charts the site is air-gapped
+
+**On either path, set `global.airGapped: true`** in your site values, once
+[install § Phase 1](install.md#phase-1--generate-your-site-repository) has
+generated them. Add it under the `global:` block the file already has, not as a
+second `global:` block:
+
+```yaml
+# site/values/global.yaml
+global:
+  airGapped: true
+```
+
+With the node-side mirror `global.imageRegistry` stays empty, so this is what
+tells the charts there is no route out: the model gateway then uses the price
+map bundled in LiteLLM's image instead of fetching it from the internet on
+every start.
 
 ## 3. Vendor the upstream Helm subcharts ... Required
 

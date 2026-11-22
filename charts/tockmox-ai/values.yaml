@@ -3,6 +3,17 @@ global:
   internalDomain: ""
   certIssuer: "tockmox-ca"
   imageRegistry: ""
+  # THE SITE HAS NO ROUTE OUT. Set it to true on an air-gapped site, whichever
+  # way it pulls images (docs/deployment/airgap.md). On the primary path, the
+  # node-side containerd mirror, global.imageRegistry stays empty, so nothing
+  # else here tells this chart the site is cut off. Read by the model gateway:
+  # true, or global.imageRegistry set, makes LiteLLM use the price map bundled
+  # in its image instead of fetching it (litellm.extraEnvVars below says how).
+  #
+  # Declared, unlike `resilience` below, although the litellm chart hashes its
+  # whole values tree into the migrations Job: the key arrived in the same
+  # release as the litellm.extraEnvVars entry, which changes that hash anyway.
+  airGapped: false
   timezone: "UTC"
   clusterCIDR: "10.42.0.0/16"
   serviceCIDR: "10.43.0.0/16"
@@ -1862,18 +1873,18 @@ litellm:
   # bundled in the image. A connected site keeps the live fetch (newer prices);
   # a site with no route out would see a denied connection on every start.
   #
-  # The signal is `global.imageRegistry` being set, the one air-gap key this
-  # chart already reads. The subchart writes envVars and extraEnvVars with no
-  # `tpl`, so the choice cannot be rendered into the Deployment directly.
-  # Instead this entry names an OPTIONAL key in the ConfigMap
-  # `tockmox-litellm-airgap-env`, which templates/litellm-airgap-env.yaml
-  # renders only when global.imageRegistry is set. With no ConfigMap the
-  # kubelet sets nothing, and LiteLLM fetches as before. The proxy and the
-  # migrations Job both read this list.
+  # The signal is `global.airGapped` true, or `global.imageRegistry` set (see
+  # global.airGapped at the top of this file). The subchart writes envVars and
+  # extraEnvVars with no `tpl`, so the choice cannot be rendered into the
+  # Deployment directly. Instead this entry names an OPTIONAL key in the
+  # ConfigMap `tockmox-litellm-airgap-env`, which
+  # templates/litellm-airgap-env.yaml renders only on an air-gapped site. With
+  # no ConfigMap the kubelet sets nothing, and LiteLLM fetches as before. The
+  # proxy and the migrations Job both read this list.
   #
   # A LIST, so a site that sets litellm.extraEnvVars replaces this entry;
-  # templates/preflight.yaml refuses that on a site with global.imageRegistry
-  # set, naming the entry to restate.
+  # templates/preflight.yaml refuses that on an air-gapped site, naming the
+  # entry to restate.
   # ------------------------------------------------------------------------
   extraEnvVars:
     - name: LITELLM_LOCAL_MODEL_COST_MAP

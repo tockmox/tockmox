@@ -3,16 +3,19 @@ SPDX-License-Identifier: Apache-2.0
 
 Environment the model gateway gets only on an air-gapped site.
 
-Rendered when the gateway is enabled and `global.imageRegistry` is set. The
-proxy and its migrations Job read it through the optional configMapKeyRef in
-the shipped `litellm.extraEnvVars` (values.yaml says why it is a reference and
-not a value). With global.imageRegistry empty this renders nothing, the
-reference resolves to nothing, and LiteLLM keeps its live price-map fetch.
+Rendered when the gateway is enabled and the site says it is air-gapped:
+`global.airGapped` is true (the site's own statement, and the only signal on
+the node-side containerd mirror path, where global.imageRegistry stays empty),
+or `global.imageRegistry` is set (the fallback path). The proxy and its
+migrations Job read it through the optional configMapKeyRef in the shipped
+`litellm.extraEnvVars` (values.yaml says why it is a reference and not a
+value). With neither, this renders nothing, the reference resolves to nothing,
+and LiteLLM keeps its live price-map fetch.
 
 THE NAME IS FIXED, not derived from the release name, for the same reason as
 `tockmox-litellm-hooks`: the subchart takes extraEnvVars as literal values.
 */ -}}
-{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm")) .Values.global.imageRegistry }}
+{{- if and (include "tockmox.appEnabled" (dict "ctx" $ "app" "litellm")) (or .Values.global.airGapped .Values.global.imageRegistry) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

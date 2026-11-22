@@ -7,6 +7,9 @@ global:
   internalDomain: ""
   certIssuer: "tockmox-ca"
   imageRegistry: ""
+  # true on a site with no route out (docs/deployment/airgap.md). Read by
+  # tockmox-ai: the model gateway uses LiteLLM's bundled price map.
+  airGapped: false
   timezone: "UTC"
   # Pod network CIDR. k3s default shown.
   clusterCIDR: "10.42.0.0/16"
