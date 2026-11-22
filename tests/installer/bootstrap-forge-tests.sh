@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Sourced by run.sh. Groups F1-F35: install/bootstrap-forge.sh.
+# Sourced by run.sh. Groups F1-F52: install/bootstrap-forge.sh.
 #
 # HERMETIC, and deliberately narrow: every case here is a REFUSAL, and the
 # assertion that matters in each is that the refusal came before any write to a
@@ -250,10 +250,19 @@ assert_artifact "F24 ... before any write to the cluster" "fs_writes" "0"
 # run.sh stubs git to always fail (offline determinism); these cases need the real one,
 # so the stub's directory is taken off PATH for the calls below and only for them.
 REAL_PATH="${PATH//$STUB:/}"
-mk_charts() {  # DIR [with-chart|without-chart]  -> repo at DIR, tag v9.9.9 on its one commit
+mk_charts() {  # DIR [with-chart|without-chart|with-deps]  -> repo at DIR, tag v9.9.9 on its one commit
   local d="$1"; mkdir -p "$d/charts/tockmox-platform"
   if [ "${2:-with-chart}" = with-chart ]; then
     printf 'apiVersion: v2\nname: tockmox-platform\nversion: 9.9.9\n' > "$d/charts/tockmox-platform/Chart.yaml"
+  elif [ "$2" = with-deps ]; then
+    # One upstream dependency, locked, and ignored the way the real tree ignores it; its archive is vendored
+    # (not committed) beside the checkout, as tools/helm-deps.sh leaves it.
+    printf 'charts/*/charts/\n*.tgz\n' > "$d/.gitignore"
+    printf 'apiVersion: v2\nname: tockmox-platform\nversion: 9.9.9\ndependencies:\n  - name: upstream\n    version: 1.2.3\n    repository: "https://charts.example.invalid"\n' \
+      > "$d/charts/tockmox-platform/Chart.yaml"
+    printf 'dependencies:\n- name: upstream\n  repository: https://charts.example.invalid\n  version: 1.2.3\ndigest: sha256:0\n' \
+      > "$d/charts/tockmox-platform/Chart.lock"
+    mkdir -p "$d/charts/tockmox-platform/charts"; printf 'archive' > "$d/charts/tockmox-platform/charts/upstream-1.2.3.tgz"
   else
     printf 'nothing here\n' > "$d/README"
   fi
@@ -290,11 +299,46 @@ ch_run --charts-repo "$D/charts-src" --charts-tag 'v9 9'
 assert_artifact "F29 a tag that is not a tag name is refused" \
   "echo $FS_STATUS; fs_err | grep -c 'is not a tag name'" "$(printf '1\n1')"
 
-fs_case f30; mk_charts "$D/charts-src"
+fs_case f30; mk_charts "$D/charts-src" with-deps
 ch_run --charts-repo "$D/charts-src" --charts-tag v9.9.9 --dry-run
-assert_artifact "F30 a dry run with a good checkout exits clean and names the charts repository and tag" \
-  "echo $FS_STATUS; grep -c 'create tockmox/charts (read by' '$D/out/stdout'; grep -c 'push tag v9.9.9 and main' '$D/out/stdout'" "$(printf '0\n1\n1')"
+assert_artifact "F30 a dry run with a good checkout exits clean and names the charts repository, the tag and the vendored tag" \
+  "echo $FS_STATUS; grep -c 'create tockmox/charts (read by' '$D/out/stdout'; grep -c 'push tag v9.9.9 and main' '$D/out/stdout'; grep -c 'as v9.9.9-vendored (v9.9.9 plus 1 vendored subchart archives) and push it' '$D/out/stdout'" "$(printf '0\n1\n1\n1')"
 assert_artifact "F30 ... and writes nothing to the cluster" "fs_writes" "0"
+assert_artifact "F30 ... and no ref in the checkout" \
+  "PATH='$REAL_PATH' git -C '$D/charts-src' tag --list 'v9.9.9-vendored' | wc -l | tr -d ' '" "0"
+
+# F50-F52. The subchart archives reach the forge in a commit of their own, TAG-vendored, the tag
+# tockmox.revision names: .gitignore keeps them out of the release commit, and a disconnected Argo CD that reads a
+# commit without them fetches every subchart from its chart repository (the 2026-11-21 air-gap lane). Each case is a
+# refusal before any write; install/charts-vendored-tag.sh's own cases are tests/executed-docs/charts-vendored-test.sh.
+fs_case f50; mk_charts "$D/charts-src" with-deps; rm -f "$D/charts-src/charts/tockmox-platform/charts/upstream-1.2.3.tgz"
+ch_run --charts-repo "$D/charts-src" --charts-tag v9.9.9
+assert_artifact "F50 a missing subchart archive is refused, naming it and tools/helm-deps.sh" \
+  "echo $FS_STATUS; fs_err | grep -c 'charts/tockmox-platform/charts/upstream-1.2.3.tgz'; fs_err | grep -c 'tools/helm-deps.sh'" "$(printf '1\n1\n1')"
+assert_artifact "F50 ... before any write to the cluster" "fs_writes" "0"
+
+fs_case f51; mk_charts "$D/charts-src" with-deps
+# The in-cluster address, its DNS suffix in two parts as site-repo-server.sh writes it, so the public-text
+# scrubber does not read the standard in-cluster name as a site host.
+CH_DNS="cluster"; CH_DNS="${CH_DNS}.local"
+CH_URL_IN="http://tockmox-forge-http.tockmox-forge.svc.${CH_DNS}:3000/tockmox/charts.git"
+for f in "$D/site/bootstrap/applications/"*.yaml; do
+  awk -v url="$CH_URL_IN" '/- repoURL:/ && !done { sub(/repoURL:.*/, "repoURL: " url); done=1; first=1; print; next }
+    first && /targetRevision:/ { sub(/targetRevision:.*/, "targetRevision: v9.9.9"); first=0 } { print }' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+done
+ch_run --charts-repo "$D/charts-src" --charts-tag v9.9.9
+assert_artifact "F51 a site that reads the charts at the release tag, which carries no archives, is refused, naming the vendored tag" \
+  "echo $FS_STATUS; fs_err | grep -c 'Set tockmox.revision: v9.9.9-vendored'" "$(printf '1\n1')"
+assert_artifact "F51 ... before any write to the cluster" "fs_writes" "0"
+
+fs_case f52; mk_charts "$D/charts-src" with-deps; PATH="$REAL_PATH" git -C "$D/charts-src" tag v9.9.9-vendored v9.9.9
+ch_run --charts-repo "$D/charts-src" --charts-tag v9.9.9-vendored
+assert_artifact "F52 a vendored tag given as --charts-tag is refused, naming the release tag" \
+  "echo $FS_STATUS; fs_err | grep -c \"Name the release tag it is made from ('v9.9.9')\"" "$(printf '1\n1')"
+ch_run --charts-repo "$D/charts-src" --charts-tag v9.9.9
+assert_artifact "F52 a v9.9.9-vendored in the checkout whose tree lacks the archives is refused, naming the archive" \
+  "echo $FS_STATUS; fs_err | grep -c 'v9.9.9-vendored lacks charts/tockmox-platform/charts/upstream-1.2.3.tgz'" "$(printf '1\n1')"
+assert_artifact "F52 ... before any write to the cluster" "fs_writes" "0"
 
 # F31-F35. --offsite-git-ca: a git remote on a private CA (and a private address).
 # Refusals before any write, and the dry run's plan naming the trust and the one host

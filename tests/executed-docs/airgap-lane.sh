@@ -15,7 +15,11 @@
 #   5. the guest is quieted (apt timers, unattended upgrades, snap refresh, motd news), so the denies under the cut are
 #      the install's
 #   6. run.sh P04 P05 (Argo CD, sealed-secrets), the state install.md starts from, from the mirror
-#   7. this tree served from inside the throwaway (site-repo-server.sh)
+#   7. this tree served from inside the throwaway the way docs/deployment/airgap.md serves the charts repository: a
+#      checkout of it, tagged, with the archives step 1 vendored committed under TAG-vendored by
+#      install/charts-vendored-tag.sh (what bootstrap-forge --charts-repo runs), served as committed
+#      (site-repo-server.sh push-ref), and that tag is the revision P09 installs. A refused helper is a FAIL here,
+#      before the cut, never a served tree without the archives
 #   8. THE CUT. The lane prints one AIRGAP-PAUSE line naming what the operator switches (TOCKMOX_AIRGAP_CUT_HINT), then
 #      runs the positive control every TOCKMOX_AIRGAP_POLL seconds: the guest asks an upstream registry directly. While
 #      that request is answered the cut is not made. When it is refused, the edge must have logged a deny line for the
@@ -255,19 +259,35 @@ echo "airgap lane 6: P04 + P05 (Argo CD, sealed-secrets), from the mirror"
 export KUBECONFIG="$KC"
 bash "${HERE}/run.sh" P04 P05 || fail "P04/P05 failed, so P09 would start from the wrong state"
 
-# 7. this tree, served from inside the throwaway
+# 7. this tree, served from inside the throwaway, by the documented path
 step "7 serve this tree"
-TAG="airgap-${TOCKMOX_TEST_VM}"
 bash "${PROV}/site-repo-server.sh" up >/dev/null || fail "site-repo-server.sh up failed"
 # The archives step 1 vendored are what lets the guest's Argo CD render without reaching a chart repository, and
-# .gitignore excludes them (charts/*/charts/, *.tgz), so they are served by name; push refuses if none are there.
-# Without this the served tree held no archives and Argo CD went upstream for every subchart under the cut
-# (2026-11-21: 9 of 10 Applications sync Unknown, tcp/443 denies to the chart repositories' hosts).
-TOCKMOX_SERVE_FORCE_ADD='charts/*/charts/*.tgz' bash "${PROV}/site-repo-server.sh" push "$TREE" tockmox "$TAG" >/dev/null \
-  || fail "site-repo-server.sh push failed (with the vendored subchart archives forced in)"
+# .gitignore excludes them (charts/*/charts/, *.tgz), so no commit of this tree carries them: on 2026-11-21 the served
+# tree held none, and Argo CD went upstream for every subchart under the cut (9 of 10 Applications sync Unknown,
+# tcp/443 denies to the chart repositories' hosts). docs/deployment/airgap.md has the operator commit them under
+# TAG-vendored with install/charts-vendored-tag.sh (bootstrap-forge --charts-repo runs it) and name that tag as
+# tockmox.revision, so the lane does the same: a checkout of this tree's bytes, tagged as the release, the helper
+# run on it, and that tag served as committed. TOCKMOX_SERVE_FORCE_ADD, the harness-only shortcut #329 added, is
+# not used here; site-repo-server.sh keeps it for its own test.
+REL_TAG="airgap-${TOCKMOX_TEST_VM}"
+CHECKOUT="${LANE}/charts-checkout"
+rm -rf "$CHECKOUT"; mkdir -p "$CHECKOUT"
+( cd "$TREE" && COPYFILE_DISABLE=1 tar cf - --exclude=.git --exclude='._*' . ) | ( cd "$CHECKOUT" && tar xf - ) \
+  || fail "could not copy this tree to ${CHECKOUT}"
+( cd "$CHECKOUT" && git init -q -b main . && git add -A \
+    && git -c user.name=airgap-lane -c user.email=airgap-lane@tockmox.invalid -c commit.gpgsign=false -c core.hooksPath=/dev/null \
+         commit -q -m "this tree at ${TOCKMOX_DOCS_REF}" && git tag "$REL_TAG" ) > "${LANE}/charts-checkout.log" 2>&1 \
+  || fail "could not make a checkout of this tree tagged ${REL_TAG} (${LANE}/charts-checkout.log)"
+VENDORED="$(bash "${TREE}/install/charts-vendored-tag.sh" "$CHECKOUT" "$REL_TAG" 2> "${LANE}/charts-vendored.log")" \
+  || fail "install/charts-vendored-tag.sh refused, so the served tree would lack the subchart archives: $(grep -v '^ *$' "${LANE}/charts-vendored.log" | tail -2 | tr '\n' ' ')"
+read -r TAG VEN_COMMIT VEN_COUNT <<<"$VENDORED"
+case "${VEN_COUNT:-}" in ''|0|*[!0-9]*) fail "install/charts-vendored-tag.sh printed '${VENDORED}': no archive is committed under the served tag" ;; esac
+bash "${PROV}/site-repo-server.sh" push-ref "$CHECKOUT" tockmox "$TAG" >/dev/null \
+  || fail "site-repo-server.sh push-ref of ${TAG} failed"
 TM_URL="$(bash "${PROV}/site-repo-server.sh" url tockmox)"
 [ -n "$TM_URL" ] || fail "site-repo-server gave no URL"
-echo "airgap lane 7: this tree served at ${TM_URL} @ ${TAG}"
+echo "airgap lane 7: this tree served at ${TM_URL} @ ${TAG} (${REL_TAG} plus ${VEN_COUNT} vendored subchart archives, ${VEN_COMMIT:0:12})"
 
 # 8. the cut, proven by the positive control
 step "8 waiting for the cut"

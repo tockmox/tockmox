@@ -1547,6 +1547,23 @@ if [ "$SP_CASES" -eq 0 ] || { [ "$SP_RC" -ne 0 ] && ! printf '%s\n' "$SP_OUT" | 
   bad "site-repo-push-test.sh ran its cases" "rc=${SP_RC}, ${SP_CASES} case(s): $(printf '%s' "$SP_OUT" | tail -3)"
 fi
 
+# The commit tockmox.revision names carries the vendored subchart archives: install/charts-vendored-tag.sh,
+# which bootstrap-forge --charts-repo and the air-gap lane run, refuses a missing archive and a vendored tag whose tree
+# lacks one, and makes the release plus exactly the archives, the same commit in any clone, never moving a tag.
+CV_OUT="$(bash "${HERE}/charts-vendored-test.sh" 2>&1)"; CV_RC=$?
+CV_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) CV_CASES=$((CV_CASES+1)); ok "vendored charts tag: ${line#ok   }" ;;
+    "FAIL "*) CV_CASES=$((CV_CASES+1)); bad "vendored charts tag: ${line#FAIL }" "run tests/executed-docs/charts-vendored-test.sh for detail" ;;
+  esac
+done <<EOF_CV
+$CV_OUT
+EOF_CV
+if [ "$CV_CASES" -eq 0 ] || { [ "$CV_RC" -ne 0 ] && ! printf '%s\n' "$CV_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "charts-vendored-test.sh ran its cases" "rc=${CV_RC}, ${CV_CASES} case(s): $(printf '%s' "$CV_OUT" | tail -3)"
+fi
+
 # A run that reads its pages from the working tree (the p09 lane, always) says whether that tree is the ref under test:
 # "tree: <sha>, clean" when HEAD is the ref's commit and nothing is uncommitted, WORKTREE-DIRTY or WORKTREE-MISMATCH
 # when not. The helper, the real lane and run.sh on a clean, a modified and a one-commit-off tree, the real P09 and

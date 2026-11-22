@@ -1235,6 +1235,20 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **A disconnected install's charts repository now carries the vendored subchart
+  archives.** `.gitignore` keeps them out of every release commit, so ArgoCD read
+  a commit without them and fetched every subchart from its chart repository,
+  which a disconnected cluster cannot reach. `bootstrap-forge --charts-repo` now
+  commits them under `TAG-vendored` (the release plus exactly the archives each
+  `Chart.lock` names, made by the new `install/charts-vendored-tag.sh`) and pushes
+  that tag beside the release tag; it refuses while an archive is missing, and it
+  never moves either tag. An operator with their own git server runs the same
+  script and pushes the tag. The air-gap lane serves that tag instead of forcing
+  the archives into its snapshot (docs/deployment/airgap.md, steps 3, 5 and 8).
+  **Action, for a site generated for `--charts-repo`:** set `tockmox.revision` to
+  `TAG-vendored` and generate it again; `bootstrap-forge` refuses a site whose
+  Applications read the charts at another tag.
+
 - **A restore or a power cycle no longer fires a missed CronJob slot into a cold
   cluster.** The console-key check, the model-gateway and Authentik restore
   drills and the Authentik database dump ran the slot they had missed as soon as
