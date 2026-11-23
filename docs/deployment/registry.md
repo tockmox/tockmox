@@ -131,7 +131,10 @@ handling; it is the part that bites if you roll your own.
 
 **One reference is pinned by digest**, `prometheus-config-reloader`. A copy
 that preserves digests lands it under a derived tag and the manifest's
-`@sha256` reference still resolves. It is the only digest-pinned entry in
+`@sha256` reference still resolves. Its entry also carries a tag, and the
+Prometheus and Alertmanager pods pull it by that tag alone, so
+`tools/mirror-images.sh` lands the same digest under the tag as well, and
+`--verify` asks for both. It is the only digest-pinned entry in
 `images.txt` at the 0.6.0 tree.
 
 **It is a convention, not a Helm feature**, so it works only in charts that

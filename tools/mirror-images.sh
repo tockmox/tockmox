@@ -30,7 +30,9 @@
 # failure appears later as ImagePullBackOff on the one disconnected cluster
 # where you cannot just pull. Digest-pinned references are safe here because
 # copies preserve digests; they land under a derived tag and the manifest's
-# @sha256 reference resolves against the blob, not the tag.
+# @sha256 reference resolves against the blob, not the tag. A reference that
+# carries a tag beside its digest (NAME:TAG@sha256:...) also lands under that
+# tag, because some charts pull it by the tag alone; --verify asks for both.
 #
 # Prefers skopeo (multi-arch correct, no daemon); falls back to crane, then
 # docker (single-arch: warns, since a mirror built on amd64 with docker will
@@ -139,11 +141,43 @@ STUB
   printf 'quay.io/org/reloader:v1.2@sha256:%s\nlocalhost:5000/org/app:v3@sha256:%s\n' "$dg" "$dg" > "$T/tagdigest.txt"
   : > "$T/copy.log"
   out="$(STUB_LOG="$T/copy.log" PATH="$T/copybin:$PATH" bash "$SELF" --registry reg.test/m --images "$T/tagdigest.txt" 2>&1)"; rc=$?
-  if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q '2 copied, 0 already current, 0 failed' \
+  if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q '4 copied, 0 already current, 0 failed' \
      && grep -qxF "quay.io/org/reloader@sha256:$dg reg.test/m/org/reloader:sha256-0123456789ab" "$T/copy.log" \
      && grep -qxF "localhost:5000/org/app@sha256:$dg reg.test/m/org/app:sha256-0123456789ab" "$T/copy.log"; then
     ok "a tag-plus-digest reference copies by digest to the derived tag --verify asks for (a registry port is kept)"
-  else bad "tag-plus-digest copy: expected exit 0, 2 copied, by digest to the derived tag; got rc=$rc: $out; log: $(cat "$T/copy.log")"; fi
+  else bad "tag-plus-digest copy: expected exit 0, 4 copied, by digest to the derived tag; got rc=$rc: $out; log: $(cat "$T/copy.log")"; fi
+
+  # The same entries land under their own tag too, by digest, since a pull by
+  # the tag alone (a chart that drops the digest, or a node's registry rewrite
+  # of that pull) asks the mirror for NAME:TAG.
+  if grep -qxF "quay.io/org/reloader@sha256:$dg reg.test/m/org/reloader:v1.2" "$T/copy.log" \
+     && grep -qxF "localhost:5000/org/app@sha256:$dg reg.test/m/org/app:v3" "$T/copy.log"; then
+    ok "a tag-plus-digest reference also lands under its own tag, copied by digest"
+  else bad "tag-plus-digest copy by tag: expected copies to reg.test/m/org/reloader:v1.2 and reg.test/m/org/app:v3; log: $(cat "$T/copy.log")"; fi
+
+  # --verify asks for the tag form as well: a mirror holding only the derived
+  # tag is a miss, named at the tag.
+  printf 'quay.io/org/reloader:v1.2@sha256:%s\n' "$dg" > "$T/td-verify.txt"
+  printf 'reg.test/m/org/reloader:sha256-0123456789ab\n' > "$T/td-derived.txt"
+  out="$(STUB_PRESENT="$T/td-derived.txt" PATH="$T/bin:$PATH" bash "$SELF" --registry reg.test/m --images "$T/td-verify.txt" --verify 2>&1)"; rc=$?
+  if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'at  reg.test/m/org/reloader:v1.2' && printf '%s' "$out" | grep -q '0 present, 1 missing'; then
+    ok "--verify: a tag-plus-digest entry held only under its derived tag is a miss, named at the tag"
+  else bad "tag-plus-digest verify: expected exit 1 naming reg.test/m/org/reloader:v1.2, got rc=$rc: $out"; fi
+  printf 'reg.test/m/org/reloader:v1.2\n' >> "$T/td-derived.txt"
+  out="$(STUB_PRESENT="$T/td-derived.txt" PATH="$T/bin:$PATH" bash "$SELF" --registry reg.test/m --images "$T/td-verify.txt" --verify 2>&1)"; rc=$?
+  if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q '1 present, 0 missing'; then
+    ok "--verify: the same entry held under both its derived tag and its own tag is present"
+  else bad "tag-plus-digest verify, both held: expected exit 0 and 1/0, got rc=$rc: $out"; fi
+
+  # A Docker Hub official image with a tag and a digest: both forms, each also under library/.
+  printf 'busybox:1.36@sha256:%s\n' "$dg" > "$T/td-official.txt"
+  out="$(bash "$SELF" --registry reg.test/m --images "$T/td-official.txt" --dry-run 2>&1)"
+  if [ "$(printf '%s\n' "$out" | grep -c '^        ->  ')" = 4 ] \
+     && printf '%s' "$out" | grep -qx '        ->  reg.test/m/busybox:1.36' \
+     && printf '%s' "$out" | grep -qx '        ->  reg.test/m/library/busybox:1.36' \
+     && printf '%s' "$out" | grep -qx '        ->  reg.test/m/library/busybox:sha256-0123456789ab'; then
+    ok "dry run: an official tag-plus-digest image lands under its tag and its derived tag, each also under library/"
+  else bad "official tag-plus-digest dry run: expected four destinations, got: $out"; fi
 
   echo; echo "mirror-images --selftest: $pass passed, $fail failed"
   [ "$fail" -eq 0 ]; exit $?
@@ -252,8 +286,13 @@ while IFS= read -r img; do
       # Only the last path element can carry the tag; a colon before it is a
       # registry port.
       name="${img%%@*}"; last="${name##*/}"
-      case "$last" in *:*) name="${name%:*}" ;; esac
+      tag=""
+      case "$last" in *:*) tag="${last##*:}"; name="${name%:*}" ;; esac
       src="${name}@sha256:${d}"
+      # A tag beside the digest is a name something may pull by: a chart that
+      # renders the tag alone, or a node's registry rewrite of that pull. Land
+      # the same digest under it too, so the tag resolves in the mirror.
+      if [ -n "$tag" ]; then dest="$dest ${REG}/${base}:${tag}"; fi
       ;;
     *) dest="${REG}/${path}" ;;
   esac
@@ -264,7 +303,9 @@ while IFS= read -r img; do
   # global.imageRegistry asks for PREFIX/NAME. Land both, so either mechanism
   # finds the image; --verify asks for both.
   dests="$dest"
-  if docker_official "$img"; then dests="$dest ${REG}/library/${dest#"${REG}"/}"; fi
+  if docker_official "$img"; then
+    for d in $dest; do dests="$dests ${REG}/library/${d#"${REG}"/}"; done
+  fi
 
   ENTRIES=$((ENTRIES + 1))
   if [ "$DRY" = 1 ]; then
