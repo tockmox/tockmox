@@ -35,6 +35,11 @@
 #      do not fail the clause; a deny outside them still does; a range wider than /12 FAILs before P04; ranges that
 #      cannot be learned FAIL closed before P04, never an exemption; a guest that does not answer the read is
 #      INFRA_ERROR before the cut
+#  21. the Service-creation race probe observes and never changes the outcome: it records the backend that holds nat
+#      KUBE-SERVICES and the route into the learned Service range, its sampler reads nft or iptables and
+#      /proc/net/nf_conntrack or conntrack -L and is stopped at the end of step 9, and AIRGAP-RACE says confirmed only
+#      when each deny to the Service range falls after its Service's create, before its ClusterIP's first-seen, with
+#      an un-NATed flow
 #
 # What it does not show: that the edge logs, that the segment has no other way out, or that P09 passes from the
 # mirror. The lab run is that proof.
@@ -326,5 +331,163 @@ set_case k3s_silent=1; lane
 if [ "$RC" = 5 ] && has 'AIRGAP-RESULT INFRA_ERROR' && ! called 'run P09' && ! has 'AIRGAP-PAUSE'; then
   pass "20: the guest does not answer the k3s config read: INFRA_ERROR before the cut"
 else fail "20: silent config: rc=$RC $(printf '%s' "$OUT" | tail -3 | tr '\n' '|')"; fi
+
+# 21. the Service-creation race probe, which observes and never changes the outcome. Here the guest's side
+#     runs on this host: the lane's own probe and sampler scripts, against stand-in iptables, nft, ip, conntrack and
+#     date in $W/guest, with /proc/net/nf_conntrack and k3s's bundled aux directory pointed at fixtures. The stand-in
+#     Loki stamps the i-th deny line i ns after the epoch, so these Services are created at the epoch and the sampler's
+#     clock (ctl/race_clock: its start, each tick, then a time past its deadline, so it ends by itself) starts there.
+G="$W/guest"; mkdir -p "$G/aux"
+cp "$T/tests/executed-docs/provision/throwaway-cluster.sh" "$C/tc.orig"; cp "$B/kubectl" "$C/kubectl.orig"
+cat > "$T/tests/executed-docs/provision/throwaway-cluster.sh" <<'SH'
+#!/usr/bin/env bash
+# The race probe's guest scripts run here when ctl/race_guest exists; everything else goes to the original stand-in.
+C="${AGT_CTL:?}"; G="$C/../guest"
+if [ "${1:-}" = exec ] && [ -e "$C/race_guest" ]; then
+  case "${2:-}" in
+    *AIRGAP-RACE-SAMPLER*|*AIRGAP-RACE-BACKEND*)
+      echo "tc $*" >> "$C/calls"
+      [ ! -e "$C/race_fail" ] || exit 255
+      case "$2" in *AIRGAP-RACE-SAMPLER*)
+        if [ -e "$C/sampler_hang" ]; then echo $$ > "$C/sampler_pid"; echo "AIRGAP-RACE-SAMPLER conntrack=proc kube-services=none ranges=x every 0.5 s"; exec sleep 30; fi
+        export AGT_SAMPLER=1 ;;
+      esac
+      sed -e "s#/proc/net/nf_conntrack#${C}/nf_conntrack#g" -e "s#/var/lib/rancher/k3s/data/current/bin/aux#${G}/aux#g" <<<"$2" \
+        | PATH="${G}:${PATH}" bash -s
+      exit ;;
+  esac
+fi
+exec bash "$C/tc.orig" "$@"
+SH
+cat > "$B/kubectl" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  *creationTimestamp*) [ -f "${AGT_CTL:?}/k_services" ] || exit 1; cat "$AGT_CTL/k_services" ;;
+  *) exec bash "${AGT_CTL:?}/kubectl.orig" "$@" ;;
+esac
+SH
+cat > "$G/date" <<'SH'
+#!/usr/bin/env bash
+if [ -n "${AGT_SAMPLER:-}" ] && [ "$*" = "+%s.%N" ] && [ -s "${AGT_CTL:?}/race_clock" ]; then exec pop "$AGT_CTL/race_clock"; fi
+exec /bin/date "$@"
+SH
+# one iptables stand-in for each front end: it lists ctl/ks.<dir>-<name> (ks.guest-iptables-nft, ks.aux-iptables-legacy)
+cat > "$G/iptables-nft" <<'SH'
+#!/usr/bin/env bash
+f="${AGT_CTL:?}/ks.$(basename "$(dirname "$0")")-$(basename "$0")"; [ -f "$f" ] || exit 1; cat "$f"
+SH
+for f in "$G/iptables-legacy" "$G/aux/iptables-legacy" "$G/aux/iptables-nft"; do cp "$G/iptables-nft" "$f"; done
+cat > "$G/nft" <<'SH'
+#!/usr/bin/env bash
+case "$*" in
+  "list ruleset") cat "${AGT_CTL:?}/nft_ruleset" 2>/dev/null || exit 1 ;;
+  "list chain ip nat KUBE-SERVICES") cat "${AGT_CTL:?}/nft_chain" 2>/dev/null || exit 1 ;;
+  *) exit 1 ;;
+esac
+SH
+cat > "$G/ip" <<'SH'
+#!/usr/bin/env bash
+[ "$1 $2" = "route get" ] && echo "$3 via 192.0.2.1 dev enp1s0 src 192.0.2.60 uid 0"
+SH
+cat > "$G/conntrack" <<'SH'
+#!/usr/bin/env bash
+cat "${AGT_CTL:?}/conntrack_l" 2>/dev/null || exit 1
+SH
+chmod +x "$G"/* "$G/aux"/* "$B/kubectl" "$T/tests/executed-docs/provision/throwaway-cluster.sh"
+
+KS_RULES='-N KUBE-SERVICES
+-A KUBE-SERVICES -d 198.19.0.1/32 -p tcp -m comment --comment "default/kubernetes:https cluster IP" -m tcp --dport 443 -j KUBE-SVC-NPX46M4PTMTKRN6Y
+-A KUBE-SERVICES -d 198.19.40.10/32 -p tcp -m comment --comment "demo/web:http cluster IP" -m tcp --dport 4000 -j KUBE-SVC-DEMOWEB0000000000
+-A KUBE-SERVICES -m comment --comment "kubernetes service nodeports" -m addrtype --dst-type LOCAL -j KUBE-NODEPORTS
+'
+NFT_CHAIN='table ip nat {
+	chain KUBE-SERVICES {
+		meta l4proto tcp ip daddr 198.19.0.1 tcp dport 443 counter packets 0 bytes 0 jump KUBE-SVC-NPX46M4PTMTKRN6Y
+		meta l4proto tcp ip daddr 198.19.40.10 tcp dport 4000 counter packets 0 bytes 0 jump KUBE-SVC-DEMOWEB0000000000
+	}
+}
+'
+# an un-NATed SYN to demo/web (its reply would come from the ClusterIP itself), a DNATed flow to the API, and a flow
+# outside the Service range
+CT_UNNAT='tcp      6 117 SYN_SENT src=198.18.0.15 dst=198.19.40.10 sport=40000 dport=4000 [UNREPLIED] src=198.19.40.10 dst=198.18.0.15 sport=4000 dport=40000 mark=0 use=1'
+CT_NATTED='tcp      6 86397 ESTABLISHED src=198.18.0.20 dst=198.19.0.1 sport=51000 dport=443 src=192.0.2.60 dst=198.18.0.20 sport=6443 dport=51000 [ASSURED] mark=0 use=1'
+CT_OUT='udp      17 29 src=198.18.0.15 dst=203.0.113.53 sport=5353 dport=53 src=203.0.113.53 dst=192.0.2.60 sport=53 dport=5353 mark=0 use=1'
+SVCS='default/kubernetes 198.19.0.1 1970-01-01T00:00:00Z\ndemo/web 198.19.40.10 1970-01-01T00:00:00Z\n'
+RACE="$(deny_to 198.19.40.10 4000)"
+# race_case KEY=VALUE...: set_case, then the probe's guest fixtures: k3s's bundled iptables-legacy holds
+# KUBE-SERVICES, /proc/net/nf_conntrack holds the three flows, two denies to demo/web at 1 and 2 ns
+race_case() {
+  rm -f "$C"/race_* "$C"/ks.* "$C/nf_conntrack" "$C/conntrack_l" "$C/nft_ruleset" "$C/nft_chain" "$C/k_services" "$C"/sampler_*
+  printf '%s' "$KS_RULES" > "$C/ks.aux-iptables-legacy"; : > "$C/ks.guest-iptables-nft"
+  printf 'ipv4     2 %s\nipv4     2 %s\nipv4     2 %s\n' "$CT_UNNAT" "$CT_NATTED" "$CT_OUT" > "$C/nf_conntrack"
+  printf '0.000000000\n0.400000000\n99999\n' > "$C/race_clock"
+  set_case counts='1\n3\n' lines="${NTP}\n${RACE}\n${RACE}\n" k_services="$SVCS" "$@"
+  touch "$C/race_guest"
+}
+sampler() { cat "$W/work/airgap-lane/race-sampler.txt" 2>/dev/null; }
+in_sampler() { grep -q -- "$1" "$W/work/airgap-lane/race-sampler.txt" 2>/dev/null; }
+
+race_case; lane
+if [ "$RC" = 0 ] && has 'AIRGAP-RESULT PASS' && has 'KUBE-SERVICES held by .*/aux/iptables-legacy (3 rules)' \
+   && has 'ip route get 198.19.0.1: 198.19.0.1 via 192.0.2.1' && has 'conntrack from proc' \
+   && in_sampler '^AIRGAP-RACE-SAMPLER conntrack=proc kube-services=.*/aux/iptables-legacy -w 1 -t nat -S KUBE-SERVICES' \
+   && in_sampler '^svc-seen 0.400000000 198.19.40.10$' \
+   && in_sampler '^unnat 0.400000000 tcp 198.18.0.15:40000 198.19.40.10:4000 SYN_SENT UNREPLIED$' \
+   && in_sampler '^nat-seen 0.400000000 tcp 198.19.0.1:443 192.0.2.60$' && ! in_sampler '203.0.113.53' \
+   && [ "$(has 'AIRGAP-RACE-DENY tcp 198.19.40.10:4000 at .* service demo/web created 1970-01-01T00:00:00.000000Z first-seen 1970-01-01T00:00:00.400000Z un-NATed .*: fits' && grep -c '^AIRGAP-RACE-DENY .*: fits$' <<<"$OUT")" = 2 ] \
+   && has 'AIRGAP-RACE confirmed: 2 of 2 deny line(s) to the Service range' && has 'race sampler had already ended: 1 tick(s)'; then
+  pass "21: race probe: the backend holding KUBE-SERVICES and the route to the learned Service range are recorded; denies after the create, before the first-seen, with an un-NATed flow: confirmed, and the lane still PASSes"
+else fail "21: confirmed: rc=$RC $(printf '%s' "$OUT" | grep -i race | tr '\n' '|') sampler: $(sampler | tr '\n' '|')"; fi
+
+race_case race_clock='0.000000000\n0.000000000\n99999\n'; lane
+if [ "$RC" = 0 ] && has 'AIRGAP-RESULT PASS' && has "misses, after its ClusterIP's first-seen" \
+   && has 'AIRGAP-RACE not-confirmed: 0 of 2 deny line(s) to the Service range fit'; then
+  pass "21: race probe: the ClusterIP first-seen before the deny refutes it; the lane's outcome is unchanged"
+else fail "21: first-seen first: rc=$RC $(printf '%s' "$OUT" | grep -i race | tr '\n' '|')"; fi
+
+race_case k_services='demo/web 198.19.40.10 1970-01-01T00:00:01Z\n'; lane
+if [ "$RC" = 0 ] && has "misses, before its Service's create" && has 'AIRGAP-RACE not-confirmed: 0 of 2'; then
+  pass "21: race probe: a deny before its Service's creationTimestamp refutes it"
+else fail "21: before create: rc=$RC $(printf '%s' "$OUT" | grep -i race | tr '\n' '|')"; fi
+
+race_case; printf 'ipv4     2 %s\n' "$CT_NATTED" > "$C/nf_conntrack"; lane
+if [ "$RC" = 0 ] && has 'misses, no un-NATed flow to it' && has 'AIRGAP-RACE not-confirmed: 0 of 2'; then
+  pass "21: race probe: with no un-NATed flow to the ClusterIP it is not confirmed"
+else fail "21: no un-NATed flow: rc=$RC $(printf '%s' "$OUT" | grep -i race | tr '\n' '|')"; fi
+
+# nft alone holds KUBE-SERVICES, and there is no /proc/net/nf_conntrack: the sampler reads nft and conntrack -L
+race_case; rm -f "$C/nf_conntrack" "$C/ks.aux-iptables-legacy"
+printf 'table ip nat {\n\tchain KUBE-SERVICES {\n' > "$C/nft_ruleset"; printf '%s' "$NFT_CHAIN" > "$C/nft_chain"
+printf '%s\n%s\n' "$CT_UNNAT" "$CT_NATTED" > "$C/conntrack_l"; lane
+if [ "$RC" = 0 ] && has 'KUBE-SERVICES held by nft (1 chain(s)' && has 'conntrack from conntrack-tool' \
+   && in_sampler '^AIRGAP-RACE-SAMPLER conntrack=conntrack-tool kube-services=nft list chain ip nat KUBE-SERVICES' \
+   && in_sampler '^svc-seen 0.400000000 198.19.40.10$' && has 'AIRGAP-RACE confirmed: 2 of 2'; then
+  pass "21: race probe: nft alone holds KUBE-SERVICES and there is no /proc/net/nf_conntrack: nft and conntrack -L are read, and the choice recorded"
+else fail "21: nft and conntrack -L: rc=$RC $(printf '%s' "$OUT" | grep -i race | tr '\n' '|') sampler: $(sampler | tr '\n' '|')"; fi
+
+race_case k3s_config='cluster-cidr: 203.0.113.0/25\nservice-cidr: 203.0.113.128/25\n' counts='1\n1\n' lines="${NTP}\n"; lane
+if [ "$RC" = 0 ] && has 'ip route get 203.0.113.129: 203.0.113.129 via' && grep -q "RANGES='203.0.113.128/25'" "$C/calls" \
+   && has 'AIRGAP-RACE not-confirmed: no deny to the Service range (203.0.113.128/25)'; then
+  pass "21: race probe: the route and the sampler follow the Service range the guest's k3s config names"
+else fail "21: pinned range: rc=$RC $(printf '%s' "$OUT" | grep -i race | tr '\n' '|')"; fi
+
+race_case race_fail=1 k_services=''; rm -f "$C/k_services"; lane
+p1=0; [ "$RC" = 0 ] && has 'AIRGAP-RESULT PASS' && has 'AIRGAP-RACE not-confirmed: the sampler recorded no tick' && p1=1
+race_case race_fail=1 counts='1\n3\n' lines="${NTP}\n${RACE}\n${WEB}\n"; lane
+p2=0; [ "$RC" = 1 ] && has 'reached past the edge under the cut: 1 deny line(s)' && has '^AIRGAP-RACE not-confirmed' && p2=1
+race_case counts='1\n3\n' lines="${NTP}\n${RACE}\n${WEB}\n"; lane
+p3=0; [ "$RC" = 1 ] && has 'AIRGAP-RESULT FAIL' && has 'AIRGAP-RACE confirmed: 1 of 1' && p3=1
+if [ "$p1" = 1 ] && [ "$p2" = 1 ] && [ "$p3" = 1 ]; then
+  pass "21: race probe: a guest that does not answer it and Services that cannot be listed leave a PASS a PASS; a FAIL stays a FAIL, even when the probe confirms"
+else fail "21: never fails the lane: pass-kept=$p1 fail-kept=$p2 fail-with-probe=$p3 rc=$RC $(printf '%s' "$OUT" | tail -4 | tr '\n' '|')"; fi
+
+race_case sampler_hang=1; s0="$(date +%s)"; lane; s1="$(date +%s)"
+sp="$(cat "$C/sampler_pid" 2>/dev/null)"; sst="$(ps -o stat= -p "${sp:-0}" 2>/dev/null | tr -d ' ')"
+# gone, or a zombie (dead, not yet reaped where the host's init does not reap), is not running
+if [ "$RC" = 0 ] && [ -n "$sp" ] && case "$sst" in ''|Z*) true ;; *) false ;; esac && has 'race sampler stopped: 0 tick(s)' \
+   && [ $((s1 - s0)) -lt 30 ] && in_sampler '^AIRGAP-RACE-SAMPLER stopped-by-lane '; then
+  pass "21: race probe: a sampler still running at the end of step 9 is stopped there, not left running"
+else fail "21: sampler stop: rc=$RC pid=${sp:-none} state=${sst:-gone} $((s1 - s0))s"; kill "${sp:-0}" 2>/dev/null; fi
+cp "$C/tc.orig" "$T/tests/executed-docs/provision/throwaway-cluster.sh"; cp "$C/kubectl.orig" "$B/kubectl"
 
 [ "$FAILS" = 0 ] || exit 1
