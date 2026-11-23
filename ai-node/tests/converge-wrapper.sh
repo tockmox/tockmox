@@ -8,7 +8,10 @@
 #     and a fake ansible: warn proceeds with signature_ok 0, enforce refuses with exit 12, a signed
 #     history verifies, a signer rotation is honoured only when a pinned key signed it, and a play
 #     that does not load is exit 14 with failed=-1;
-#   - a run started with another account's HOME (sudo -u keeps it) uses this account's own home.
+#   - a run started with another account's HOME (sudo -u keeps it) uses this account's own home;
+#   - a fetch that fails while the network comes up (the run at boot) is tried again before it fails;
+#   - the facts writer never complains about its cache, and engines_serving reads 0 for an engine
+#     that answers /v1/models but not /health.
 #
 #   ai-node/tests/converge-wrapper.sh
 #
@@ -159,7 +162,7 @@ EOF
 { signer_line g good; } > "$ROOT/etc/allowed_signers"
 
 run() {  # extra args; output to $W/run.out; returns the wrapper's exit code
-  TOCKMOX_ROOT="$ROOT" TOCKMOX_ANSIBLE="$W/bin/ansible" TOCKMOX_LAUNCHCTL="$W/bin/launchctl" \
+  TOCKMOX_FETCH_RETRY_DELAYS="${TOCKMOX_FETCH_RETRY_DELAYS:-0}" TOCKMOX_ROOT="$ROOT" TOCKMOX_ANSIBLE="$W/bin/ansible" TOCKMOX_LAUNCHCTL="$W/bin/launchctl" \
     TOCKMOX_LAUNCHD_DIR="$W/launchd" TOCKMOX_SUDO="" TOCKMOX_SOPS=/nonexistent \
     bash "$CONVERGE" "$@" > "$W/run.out" 2>&1 < /dev/null
 }
@@ -438,6 +441,32 @@ eq "a site file that is not a mapping is refused before ansible (exit 14)" "$rc"
 check "ansible never ran" bash -c "[ ! -s '$W/ansible.calls' ]"
 check "no temporary file is left" bash -c "! ls '$ROOT/var' | grep -q sitevars"
 
+# 15. the run at boot: the network is not up yet when the first fetch goes out
+echo "a fetch while the network comes up"
+rm -rf "$SITE/.git"; git -C "$SITE" init -q; write_site "" b1; fleet_tk "$TK" v1; commit_signed good "boot"
+NB="$W/netbin"; mkdir -p "$NB"
+# ssh as git runs it, failing the first $FAKE_NET_DOWN calls the way it does before the network is up.
+cat > "$NB/ssh" <<'EOF'
+#!/bin/bash
+n=$(( $(cat "$FAKE_NET_COUNT" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$FAKE_NET_COUNT"
+if [ "$n" -le "${FAKE_NET_DOWN:-0}" ]; then echo "ssh: Could not resolve hostname site.example.invalid: nodename nor servname provided" >&2; exit 255; fi
+while [ $# -gt 0 ]; do case "$1" in -i|-o|-p|-l) shift 2 ;; -*) shift ;; *) break ;; esac; done
+shift
+eval "$*"
+EOF
+chmod +x "$NB/ssh"
+set_env SITE_REPO "ssh://git@site.example.invalid$SITE"; set_env SIGNING_MODE warn
+export FAKE_NET_COUNT="$W/net.count"
+rm -f "$FAKE_NET_COUNT"; reset_state
+PATH="$NB:$(git --exec-path):$PATH" FAKE_NET_DOWN=2 TOCKMOX_FETCH_RETRY_DELAYS="0 0 0" FAKE_ANSIBLE=ok run; rc=$?
+eq "two failed fetches while the network comes up, then a converge (exit 0)" "$rc" 0
+check "the log says it tried again" grep -q 'trying again' "$W/run.out"
+rm -f "$FAKE_NET_COUNT"; reset_state
+PATH="$NB:$(git --exec-path):$PATH" FAKE_NET_DOWN=99 TOCKMOX_FETCH_RETRY_DELAYS="0 0" FAKE_ANSIBLE=ok run; rc=$?
+eq "a network that never comes up is still a failed fetch (exit 11)" "$rc" 11
+eq "it tried three times" "$(cat "$FAKE_NET_COUNT")" 3
+set_env SITE_REPO "$SITE"
+
 # ----------------------------------------------------------------- the facts script
 
 echo "the facts script"
@@ -462,6 +491,50 @@ mkdir -p "$FR/m"; echo data > "$FR/m/f"; printf 'm2\trev2\thf\t%s\n' "$FR/m" >> 
 TOCKMOX_ROOT="$FR" bash "$FACTS" >/dev/null 2>&1
 check "a model on disk is present" grep -q 'model_present{.*model="m2".*} 1$' "$FP"
 check "a model missing from disk is not claimed" bash -c "! grep -q 'model=\"m1\"' '$FP'"
+
+echo "the facts script: its GPU cache and the engines it must see serving"
+FB="$W/factsbin"; mkdir -p "$FB"
+cat > "$FB/ioreg" <<'EOF'
+#!/bin/sh
+echo '  | |   "gpu-core-count" = 80'
+EOF
+chmod +x "$FB/ioreg"
+mkdir -p "$FR/var/service-home"; chmod 0555 "$FR/var"
+PATH="$FB:$PATH" TOCKMOX_ROOT="$FR" bash "$FACTS" > "$W/facts.out" 2>&1
+chmod 0755 "$FR/var"
+check "the facts writer prints no Permission denied for its cache" bash -c "! grep -q 'Permission denied' '$W/facts.out'"
+check "the GPU core count reaches the info series" grep -q 'gpu_cores="80"' "$FP"
+check "the count is cached where the service account can write" grep -qx 80 "$FR/var/service-home/gpu-cores"
+# a stand-in mlx-lm: /v1/models answers 200 while /health answers HEALTH (503: the generation thread died)
+cat > "$W/standin.py" <<'EOF'
+import http.server, os, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        code = 200 if self.path == "/v1/models" else int(open(sys.argv[2]).read().strip()) if self.path == "/health" else 404
+        self.send_response(code); self.end_headers(); self.wfile.write(b"{}")
+    def log_message(self, *a): pass
+s = http.server.HTTPServer(("127.0.0.1", 0), H)
+open(sys.argv[1], "w").write(str(s.server_address[1]))
+s.serve_forever()
+EOF
+echo 503 > "$W/standin.health"; rm -f "$W/standin.port"
+python3 "$W/standin.py" "$W/standin.port" "$W/standin.health" & standin=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$W/standin.port" ] && break; sleep 0.3; done
+sport="$(cat "$W/standin.port" 2>/dev/null)"
+check "the stand-in mlx-lm answers /v1/models 200" bash -c "[ \"\$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$sport/v1/models)\" = 200 ]"
+printf '# label<TAB>port<TAB>path\ncom.example.n.mlx-lm-8080\t%s\t/health\n' "$sport" > "$FR/etc/engines.tsv"
+TOCKMOX_ROOT="$FR" bash "$FACTS" >/dev/null 2>&1
+check "an mlx-lm that answers /v1/models but 503 on /health reads engines_serving 0" grep -q 'check="engines_serving"} 0$' "$FP"
+check "and that instance reads 0" grep -q 'engine_serving{.*label="com.example.n.mlx-lm-8080".*} 0$' "$FP"
+echo 200 > "$W/standin.health"
+TOCKMOX_ROOT="$FR" bash "$FACTS" >/dev/null 2>&1
+check "the same engine healthy reads engines_serving 1" grep -q 'check="engines_serving"} 1$' "$FP"
+kill "$standin" 2>/dev/null; wait "$standin" 2>/dev/null
+TOCKMOX_ROOT="$FR" bash "$FACTS" >/dev/null 2>&1
+check "an engine that does not answer at all reads 0" grep -q 'check="engines_serving"} 0$' "$FP"
+rm -f "$FR/etc/engines.tsv"
+TOCKMOX_ROOT="$FR" bash "$FACTS" >/dev/null 2>&1
+check "with no engines list the check is absent (unknown), never 1" bash -c "! grep -q 'engines_serving' '$FP'"
 
 echo
 echo "converge-wrapper: $pass passed, $fail failed"
