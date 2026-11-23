@@ -53,6 +53,14 @@
       EXPECTED_BUILD={{ tn_expected_build }}
       ROOTFACTS_MAX_AGE={{ [3600, (tn_converge_interval | int) * 3] | max }}
 
+- name: Tell the facts writer which engines must be serving
+  ansible.builtin.template:
+    src: engines.tsv.j2
+    dest: "{{ tn_root }}/etc/engines.tsv"
+    owner: "{{ tn_converge_user }}"
+    group: staff
+    mode: "0644"
+
 - name: Run the facts writer every minute
   ansible.builtin.include_role:
     name: launchd_service

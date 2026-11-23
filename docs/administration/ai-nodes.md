@@ -458,6 +458,8 @@ The last command changes nothing and shows what a converge would change.
 | `tockmox_ai_node_converge_signature_ok` | 1 when every new commit verified |
 | `tockmox_ai_node_readiness{check=...}` | 1 holds, 0 does not, absent is unknown |
 | `tockmox_ai_node_model_present` | A pinned model revision that is on disk |
+| `tockmox_ai_node_readiness{check="engines_serving"}` | 1 when every instance in `desired.yaml` answers its serving path 200 (mlx-lm and llama-server `/health`, Ollama `/api/version`); an mlx-lm that still answers `/v1/models` but 503 on `/health` reads 0 |
+| `tockmox_ai_node_engine_serving{label=...,port=...}` | The same, per instance, as the facts writer saw it |
 | `tockmox_ai_node_engine_healthy{label=...,port=...}` | 1 when the engine's health path answered 200 at the last check |
 | `tockmox_ai_node_engine_restarts_total{label=...,port=...}` | Restarts the engine watch made because the engine was up but unhealthy |
 | `tockmox_ai_node_engine_patch_info{engine=...,version=...,patch=...}` | A toolkit patch the engine runs with, 1 per patch; absent means the release as published |
@@ -468,6 +470,11 @@ process is up but its generation thread died, which launchd's KeepAlive never
 sees: the watch restarts that engine with `launchctl kickstart -k` and counts
 it. No answer at all (the process is down or loading its model) is left to
 launchd and the converge. Its log is `/opt/tockmox/log/engine-watch.log`.
+
+The converge job also runs at load, so at boot, usually before the network is
+up. A fetch that fails is tried again after 5, 10, 20 and 40 seconds before the
+run reports a failed fetch (exit 11), so a reboot no longer shows a failed
+converge for a whole interval.
 
 Absent means unknown and nothing downstream should read it as healthy. The
 facts writer runs as the unprivileged service account; the few facts only root can

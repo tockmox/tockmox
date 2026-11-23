@@ -140,6 +140,38 @@ class NoSubmit(unittest.TestCase):
 
 
 @unittest.skipIf(jinja2 is None, "jinja2 is not installed")
+class EnginesList(unittest.TestCase):
+    """etc/engines.tsv: what the facts writer's engines_serving asks, one line per wanted instance."""
+
+    def render(self, instances):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("tockmox_filters", os.path.join(AI, "playbooks/filter_plugins/tockmox.py"))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        # Ansible's template module trims block lines; so does this.
+        env = jinja2.Environment(undefined=jinja2.StrictUndefined, keep_trailing_newline=True, trim_blocks=True)
+        env.filters.update(mod.FilterModule().filters())
+        import yaml
+        with open(os.path.join(AI, "roles/converge_timer/defaults/main.yml")) as f:
+            paths = yaml.safe_load(f)["converge_timer_serving_path"]
+        with open(os.path.join(AI, "roles/converge_timer/templates/engines.tsv.j2")) as f:
+            out = env.from_string(f.read()).render(tn_prefix="com.example.n", tn_instances=instances,
+                                                   converge_timer_serving_path=paths)
+        return [line.split("\t") for line in out.splitlines() if line and not line.startswith("#")]
+
+    def test_every_instance_with_the_path_that_fails_when_it_cannot_serve(self):
+        rows = self.render([{"id": "mlx-lm-8080", "engine": "mlx-lm", "port": 8080},
+                            {"id": "emb", "engine": "llama-server", "port": 8090},
+                            {"id": "ollama", "engine": "ollama", "port": 11434}])
+        self.assertEqual(rows, [["com.example.n.mlx-lm-8080", "8080", "/health"],
+                                ["com.example.n.llama-server-emb", "8090", "/health"],
+                                ["com.example.n.ollama", "11434", "/api/version"]])
+
+    def test_no_instance_no_line(self):
+        self.assertEqual(self.render([]), [])
+
+
+@unittest.skipIf(jinja2 is None, "jinja2 is not installed")
 class Firewall(unittest.TestCase):
     CTX = dict(
         firewall_boot_marker="/var/db/tockmox-ai-node/pf-boot-ok", firewall_sysctl="/usr/sbin/sysctl", firewall_launchctl="/bin/launchctl",

@@ -1,0 +1,7 @@
+{# SPDX-License-Identifier: Apache-2.0 -#}
+# Managed by tockmox-ai-node (role converge_timer). Read by tockmox-ai-node-facts (engines_serving):
+# every instance the site wants and the path that answers 200 only while it can serve.
+# label<TAB>port<TAB>path
+{% for i in tn_instances %}
+{{ [i | tockmox_instance_label(tn_prefix), i.port, converge_timer_serving_path[i.engine] | default('/v1/models')] | join('\t') }}
+{% endfor %}

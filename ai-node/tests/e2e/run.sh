@@ -150,6 +150,7 @@ check "the facts job runs as the service account every 60 s" "[ \"\$(plist_get f
 check "the engine watch runs as root every 60 s" "[ -e $S/loaded/$(label engine-watch) ] && [ \"\$(plist_get engine-watch UserName)\" = None ] && [ \"\$(plist_get engine-watch StartInterval)\" = 60 ] && plist_get engine-watch args | grep -x /opt/tockmox/bin/tockmox-ai-node-engine-watch"
 check "the engine watch is installed" "[ -x /opt/tockmox/bin/tockmox-ai-node-engine-watch ]"
 check "the engine watch lists every mlx-lm instance with /health" "[ \"\$(grep -v '^#' /opt/tockmox/etc/engine-watch.d/mlx-lm.tsv)\" = \"\$(printf '%s\\t8080\\t/health\\n%s\\t8082\\t/health' $(label mlx-lm-8080) $(label mlx-lm-8082))\" ]"
+check "the facts writer is told every instance and its serving path" "grep -qx \"\$(printf '%s\\t8080\\t/health' $(label mlx-lm-8080))\" /opt/tockmox/etc/engines.tsv && grep -qx \"\$(printf '%s\\t11434\\t/api/version' $(label ollama))\" /opt/tockmox/etc/engines.tsv"
 check "the wired limit is set live" "[ \"\$(cat $S/iogpu)\" = 229376 ]"
 check "the pf anchor blocks the managed ports for everyone else" "grep -q '^block return in quick proto tcp from any to any port' /etc/pf.anchors/com.tockmox.ai-node.allowlist"
 check "the anchor admits the administrators to port 22 with flags any" "grep -q 'from <tockmox_admin> to any port \$admin_ports flags any' /etc/pf.anchors/com.tockmox.ai-node.allowlist"

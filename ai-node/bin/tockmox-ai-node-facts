@@ -28,6 +28,12 @@
 #   macmon_up               curl http://127.0.0.1:<macmon port>/metrics  unprivileged
 #   apple_account_signed_out rootfacts.d/apple_account_signed_out ONLY (reads other users' homes)
 #   os_build                sw_vers, only when os.expectedBuild is set   (extension; see README)
+#   engines_serving         curl http://127.0.0.1:<port><path> for every   unprivileged
+#                           instance in etc/engines.tsv: 1 only when each
+#                           answers 200. mlx-lm and llama-server on /health
+#                           (mlx-lm answers /v1/models 200 while its
+#                           generation thread is dead; /health is 503),
+#                           Ollama on /api/version
 #
 # Bash 3.2 and BSD userland only.
 
@@ -43,6 +49,7 @@ OUT="$ROOT/textfile/facts.prom"
 ENVF="$ROOT/etc/facts.env"
 ROOTFACTS="$ROOT/var/rootfacts.d"
 MODELS_TSV="$ROOT/var/models-present.tsv"
+ENGINES_TSV="$ROOT/etc/engines.tsv"
 
 # Defaults, overridden by facts.env.
 AI_NODE_ID=""
@@ -116,13 +123,22 @@ readiness() {
   esac
 }
 
+# gpu_cores: cached, because system_profiler is slow. var/ belongs to the converge account and this
+# runs as the service account, so the cache goes to the service account's own directory under var/;
+# a cache that cannot be written is skipped without a word.
 gpu_cores() {
-  local c cache="$ROOT/var/gpu-cores"
-  if [ -r "$cache" ]; then cat "$cache"; return; fi
+  local c f
+  for f in "$ROOT/var/service-home/gpu-cores" "$ROOT/var/gpu-cores"; do
+    [ -r "$f" ] || continue
+    c="$(head -1 "$f" | tr -cd '0-9')"
+    [ -n "$c" ] && { printf '%s\n' "$c"; return; }
+  done
   c="$(ioreg -rd1 -c AGXAccelerator 2>/dev/null | sed -n 's/.*"gpu-core-count" = \([0-9]*\).*/\1/p' | head -1)"
   [ -n "$c" ] || c="$(system_profiler SPDisplaysDataType 2>/dev/null | sed -n 's/.*Total Number of Cores: \([0-9]*\).*/\1/p' | head -1)"
   [ -n "$c" ] || return 0
-  printf '%s\n' "$c" > "$cache" 2>/dev/null || true
+  if [ -d "$ROOT/var/service-home" ] && [ -w "$ROOT/var/service-home" ]; then
+    { printf '%s\n' "$c" > "$ROOT/var/service-home/gpu-cores"; } 2>/dev/null || true
+  fi
   printf '%s\n' "$c"
 }
 
@@ -247,6 +263,23 @@ main() {
     if [ "$os_build" = "$EXPECTED_BUILD" ]; then readiness os_build 1; else readiness os_build 0; fi
   fi
 
+  # engines_serving: every instance the site wants answers its serving path 200. A converge can end
+  # ok while an engine waits on the firewall's boot marker, and an mlx-lm whose generation thread died
+  # still answers /v1/models, so neither "converged" nor "listening" says the node serves.
+  local servlines="" elabel eport epath ecode eall=1
+  if [ -r "$ENGINES_TSV" ]; then
+    while IFS="$(printf '\t')" read -r elabel eport epath; do
+      case "$elabel" in ''|'#'*) continue ;; esac
+      case "$eport" in ''|*[!0-9]*) continue ;; esac
+      [ -n "$epath" ] || epath=/health
+      ecode="$(curl -s -o /dev/null -m 3 -w '%{http_code}' "http://127.0.0.1:${eport}${epath}" 2>/dev/null)"
+      if [ "$ecode" = 200 ]; then v=1; else v=0; eall=0; fi
+      servlines="${servlines}tockmox_ai_node_engine_serving{ai_node=\"$IDL\",label=\"$(prom_escape "$elabel")\",port=\"$eport\"} $v
+"
+    done < "$ENGINES_TSV"
+    readiness engines_serving "$eall"
+  fi
+
   # Models: what the converger recorded, checked against the disk now.
   if [ -r "$MODELS_TSV" ]; then
     local model rev path kb bytes seen=""
@@ -272,6 +305,12 @@ main() {
       emit '# TYPE tockmox_ai_node_model_bytes gauge'
       printf '%s' "$bytelines" >> "$TMP"
     fi
+  fi
+
+  if [ -n "$servlines" ]; then
+    emit '# HELP tockmox_ai_node_engine_serving 1 when the instance answered its serving path 200 (mlx-lm and llama-server /health, Ollama /api/version).'
+    emit '# TYPE tockmox_ai_node_engine_serving gauge'
+    printf '%s' "$servlines" >> "$TMP"
   fi
 
   chmod 0644 "$TMP"

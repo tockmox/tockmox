@@ -42,7 +42,7 @@
 # Homebrew ansible, JSON with the standard library.
 #
 # Test seams (environment): TOCKMOX_ROOT, TOCKMOX_SUDO, TOCKMOX_ANSIBLE,
-# TOCKMOX_SOPS, TOCKMOX_PYTHON, TOCKMOX_LAUNCHCTL, TOCKMOX_LAUNCHD_DIR,
+# TOCKMOX_SOPS, TOCKMOX_PYTHON, TOCKMOX_LAUNCHCTL, TOCKMOX_LAUNCHD_DIR, TOCKMOX_FETCH_RETRY_DELAYS,
 # TOCKMOX_SOURCE_ONLY=1 (define the functions and return, for tests).
 
 set -uo pipefail
@@ -63,6 +63,9 @@ ANSIBLE="${TOCKMOX_ANSIBLE:-ansible-playbook}"
 SOPS="${TOCKMOX_SOPS:-sops}"
 LAUNCHCTL="${TOCKMOX_LAUNCHCTL:-launchctl}"
 LAUNCHD_DIR="${TOCKMOX_LAUNCHD_DIR:-/Library/LaunchDaemons}"
+# The run at load (so at boot) starts before the network is up. A fetch that fails is tried again
+# after each of these pauses, in seconds, before the run reports a failed fetch.
+FETCH_RETRY_DELAYS="${TOCKMOX_FETCH_RETRY_DELAYS:-5 10 20 40}"
 
 # Exit codes. ansible's own code is passed through for load/run.
 EX_LOCKED=75
@@ -502,6 +505,20 @@ fetch_site() {
   return 0
 }
 
+# with_retries CMD...: run CMD; when it fails, wait each FETCH_RETRY_DELAYS pause in turn and run it
+# again. Returns CMD's last status.
+with_retries() {
+  local d
+  "$@" && return 0
+  for d in $FETCH_RETRY_DELAYS; do
+    case "$d" in ''|*[!0-9]*) continue ;; esac
+    log "$1 failed; trying again in ${d}s (at boot the network may not be up yet)"
+    sleep "$d"
+    "$@" && return 0
+  done
+  return 1
+}
+
 fetch_toolkit() {
   local repo="$1" ref="$2" head
   if [ ! -d "$TOOLKIT_DIR/.git" ]; then
@@ -804,7 +821,7 @@ main() {
 
   # ---- fetch the site
   PHASE=fetch
-  fetch_site || fail_phase fetch "$EX_FETCH" "could not fetch $SITE_REF from the site repository (deploy key registered? host key pinned?)"
+  with_retries fetch_site || fail_phase fetch "$EX_FETCH" "could not fetch $SITE_REF from the site repository (deploy key registered? host key pinned?)"
   log "site head $SITE_HEAD"
 
   # ---- verify, BEFORE anything from the new head is read or run
@@ -868,7 +885,7 @@ except Exception:
   interval="$(yaml_get "$fleet" defaults.convergeIntervalSeconds 900)"
   case "$interval" in ''|*[!0-9]*) interval=900 ;; esac
   [ "$interval" -ge 60 ] 2>/dev/null || interval=900
-  fetch_toolkit "$t_repo" "$t_ref" || fail_phase fetch "$EX_FETCH" "could not fetch toolkit ref $t_ref from $t_repo"
+  with_retries fetch_toolkit "$t_repo" "$t_ref" || fail_phase fetch "$EX_FETCH" "could not fetch toolkit ref $t_ref from $t_repo"
   TOOLKIT_REF_USED="$t_ref"
   [ "$SIG_OK" = 1 ] && NEXT_VERIFIED_TOOLKIT_REF="$t_ref"
   log "toolkit $t_ref at $(git -C "$TOOLKIT_DIR" rev-parse --short HEAD)"
