@@ -125,6 +125,19 @@ def branch_slug(s: str) -> str:
     return full[: BRANCH_SLUG_MAX - 9].strip("-") + "-" + hashlib.sha256(s.encode("utf-8")).hexdigest()[:8]
 
 
+def upstream_block(lines) -> str:
+    """Text a registry answered with (a candidate's detail and URL), as a fenced code block for a PR body.
+
+    Hardening (0.9.0): the body of a PR is Markdown a human reads before approving, and this text comes from an
+    upstream answer, not from the operator. Inside a fence it cannot render a link, an image, HTML or a note that
+    looks like the opener's own. CommonMark closes a backtick fence only on a line of at least as many backticks,
+    so the fence is made longer than the longest backtick run in the text and the text cannot close it."""
+    text = "\n".join(str(x) for x in lines if x).replace("\r", "")
+    run = max((len(m) for m in re.findall(r"`+", text)), default=0)
+    fence = "`" * max(3, run + 1)
+    return f"{fence}text\n{text}\n{fence}\n"
+
+
 def _values_text(doc, header):
     return "".join(f"# {h}\n" for h in header) + yaml.dump(doc, Dumper=nm._Dumper, sort_keys=False, width=120)
 
@@ -221,7 +234,8 @@ def plan(values: dict, report: dict | None, verdicts, open_branches=(), max_open
             out.skipped.append((cand.id, "the change would fail the gate"))
             continue
         hosted = cand.kind == "frontier"
-        body = (f"{cand.detail}\n\n" + (f"Upstream: {cand.url}\n\n" if cand.url else "")
+        body = ("What the watcher read upstream, verbatim:\n\n"
+                + upstream_block([cand.detail, f"Upstream: {cand.url}" if cand.url else ""]) + "\n"
                 + "".join(f"- {n}\n" for n in notes)
                 + ("\nThe eval gateway serves hosted candidates from the catalog (stage candidate), tagged open alone (public eval data only).\n" if hosted else "")
                 + "\nMerging this is the first approval (REQ-0048): the candidate can be evaluated. No agent can call it.")
