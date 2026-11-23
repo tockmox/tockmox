@@ -101,13 +101,13 @@ panels.append(row("AI: can it serve, where did it run, what did it cost", y)); y
 # Top row: "can I use it right now", plus the two control checks, plus one Platform tile so a platform
 # problem is visible without scrolling.
 panels.append(stat("Platform", [t(f'(((({CRIT} > 0) + 1000) or ({WARN} or on() vector(0))) and on() ({HEARTBEAT} > 0)) or on() vector(-1)')],
-                   0, y, w=4, h=5, thr=steps((None, GREY), (0, GREEN), (1, AMBER), (1000, RED)),
+                   0, y, w=4, h=5, unit="suffix: warnings", decimals=0, thr=steps((None, GREY), (0, GREEN), (1, AMBER), (1000, RED)),
                    mappings=[{"type": "value", "options": {"-1": {"text": "UNKNOWN: alert pipeline silent", "color": GREY, "index": 0},
                                                            "0": {"text": "OK", "color": GREEN, "index": 1}}},
-                             {"type": "range", "options": {"from": 1, "to": 999, "result": {"text": "warnings: ${__value.raw}", "color": AMBER, "index": 2}}},
                              {"type": "range", "options": {"from": 1000, "to": 1e9, "result": {"text": "CRITICAL firing", "color": RED, "index": 3}}}],
                    desc="The platform verdict. OK needs two facts: no critical or warning alert firing AND Alertmanager's always-firing Watchdog present. "
-                        "Without the heartbeat an empty alert list proves nothing, so the tile reads UNKNOWN. The detail is in Is it working? below.",
+                        "Without the heartbeat an empty alert list proves nothing, so the tile reads UNKNOWN. 1 to 999 is the count of warnings firing (its word comes from the unit: "
+                        "a mapping's text is printed literally, so it cannot carry the number). The detail is in Is it working? below.",
                    link=("Alert delivery", "tockmox-alert-delivery")))
 panels.append(stat("Local engines down", [t("count(tockmox_ai_node_engine_healthy == 0) or (count(tockmox_ai_node_engine_healthy) * 0)")],
                    4, y, w=3, h=5, thr=steps((None, GREEN), (1, RED)), mappings=unknown_map("no AI nodes enrolled", minus_one=False),
@@ -119,7 +119,8 @@ panels.append(stat("Gate errors (24h)", [t('sum(increase(tockmox_gate_served_tot
 panels.append(stat("Gateway errors (24h)", [t('(sum(increase(litellm_proxy_total_requests_metric_total{status_code!~"2.."}[24h])) or on() vector(0)) / sum(increase(litellm_proxy_total_requests_metric_total[24h]))')],
                    10, y, w=3, h=5, unit="percentunit", decimals=1, thr=steps((None, GREEN), (0.02, AMBER), (0.1, RED)),
                    mappings=unknown_map("no traffic", minus_one=False),
-                   desc="Non-2xx share of LiteLLM requests over a day. A day, not 15 minutes: a site with a few requests an hour would otherwise read 'no traffic' most of the time."))
+                   desc="Non-2xx share of LiteLLM requests over a day. A day, not 15 minutes: a site with a few requests an hour would otherwise read 'no traffic' most of the time. "
+                        "LiteLLM's counter is born at a series' first request, so increase() undercounts both sides after a restart; for request counts read the gate tiles."))
 panels.append(stat("Gateway p95 (24h)", [t("histogram_quantile(0.95, sum by (le) (rate(litellm_request_total_latency_metric_bucket[24h])))")],
                    13, y, w=3, h=5, unit="s", decimals=1, thr=steps((None, GREEN), (120, AMBER), (300, RED)), mappings=unknown_map("no traffic", minus_one=False),
                    desc="95th percentile of a whole request through the gateway over a day, long generations included, which is why the bands are minutes, not seconds."))
@@ -133,8 +134,10 @@ y += 5
 LOCAL = 'sum(increase(tockmox_gate_served_total{endpoint_tier="local",status="ok"}[24h])) / sum(increase(tockmox_gate_served_total{endpoint_tier=~"local|external",status="ok"}[24h]))'
 panels.append(stat("Served locally, last 24h", [t(LOCAL)], 0, y, w=4, h=6, unit="percentunit", decimals=0, color_mode="value",
                    thr=steps((None, BLUE)), mappings=unknown_map("no gated traffic", minus_one=False),
-                   desc="Share of AI requests the policy gate served from a local model (tockmox_gate_served_total, endpoint_tier). The gate's tier is the authority: LiteLLM's api_provider says 'openai' for a local OpenAI-compatible server, so it cannot tell local from frontier. No threshold: the right share is a site decision."))
+                   desc="Share of AI requests the policy gate served from a local model (tockmox_gate_served_total, endpoint_tier). The gate's tier is the authority: LiteLLM's api_provider says 'openai' for a local OpenAI-compatible server, so it cannot tell local from frontier. No threshold: the right share is a site decision. "
+                        "The gate is a LiteLLM callback, so every request through the gateway passes it. Its served counter is pre-created at 0, so increase() counts the first request too. LiteLLM's own request counter is born at a series' first request, and increase() cannot see a counter's first sample, so it drops the first value of every new key, model and pod series: after a restart it reads below this, while the raw totals agree."))
 panels.append({"id": nid(), "type": "timeseries", "title": "AI requests served, by tier", "datasource": DS,
+               "description": "Requests the policy gate saw served, per hour, by the tier that served them (tockmox_gate_served_total). " + "The gate is a LiteLLM callback, so every request through the gateway passes it. Its served counter is pre-created at 0, so increase() counts the first request too. LiteLLM's own request counter is born at a series' first request, and increase() cannot see a counter's first sample, so it drops the first value of every new key, model and pod series: after a restart it reads below this, while the raw totals agree.",
                "gridPos": {"x": 4, "y": y, "w": 6, "h": 6},
                "targets": [{"datasource": DS, "expr": 'sum by (endpoint_tier) (increase(tockmox_gate_served_total{endpoint_tier=~"local|external",status="ok"}[1h]))',
                             "legendFormat": "{{endpoint_tier}}", "refId": "A", "interval": "1h"}],
@@ -153,8 +156,10 @@ panels.append({"id": nid(), "type": "bargauge", "title": "Frontier spend by mode
                "fieldConfig": {"defaults": {"unit": "currencyUSD", "decimals": 2, "color": {"mode": "fixed", "fixedColor": "orange"}, "min": 0}},
                "options": {"orientation": "horizontal", "displayMode": "basic", "showUnfilled": True, "reduceOptions": {"calcs": ["lastNotNull"], "values": True}}})
 panels.append(stat("Least budget left on a key", [t("min(litellm_remaining_api_key_budget_metric / litellm_api_key_max_budget_metric)")],
-                   20, y, w=4, h=6, unit="percentunit", decimals=0, thr=steps((None, RED), (0.05, AMBER), (0.2, GREEN)), mappings=unknown_map("no key budgets set", minus_one=False),
-                   desc="The tightest key's remaining budget. LiteLLM reports a key only while it holds it in memory, so a key that has been idle since a restart is not counted here."))
+                   20, y, w=4, h=6, unit="percentunit", decimals=0, thr=steps((None, RED), (0.05, AMBER), (0.2, GREEN)), mappings=unknown_map("no key budget reported", minus_one=False),
+                   desc="The tightest key's remaining budget, over keys that have a max budget. By default LiteLLM reports a key's budget only after that key's first request "
+                        "since the proxy started, so after a restart this reads grey until a budgeted key is used. With litellm_settings.prometheus_initialize_budget_metrics: true "
+                        "LiteLLM reads every key from its database every 5 minutes and reports them all. Grey means no budget was reported, not that none is set."))
 y += 6
 
 # ---------------------------------------------------------------- capacity
@@ -246,6 +251,25 @@ board = {
                              "name": "datasource", "query": "prometheus", "type": "datasource"}]},
     "panels": panels,
 }
+
+
+def _mapping_texts(panel):
+    for m in panel.get("fieldConfig", {}).get("defaults", {}).get("mappings", []):
+        opts = m.get("options", {})
+        results = [opts["result"]] if "result" in opts else [v for v in opts.values() if isinstance(v, dict)]
+        for r in results:
+            if "text" in r:
+                yield r["text"]
+
+
+# A value mapping's text is printed as written: Grafana does not interpolate ${...} in it, so a tile that
+# means "warnings: 11" prints the variable's name instead. Show a number with the unit (suffix:...).
+for _p in panels:
+    for _txt in _mapping_texts(_p):
+        if "${" in _txt:
+            sys.exit(f"panel {_p['title']!r}: value-mapping text {_txt!r} holds a variable, which Grafana prints literally; "
+                     "drop the text and carry the word in the unit (suffix:...)")
+
 OUT = os.path.join(DASH, "overview.json")
 text = json.dumps(board, indent=2) + "\n"
 if "--check" in sys.argv:

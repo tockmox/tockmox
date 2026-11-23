@@ -1235,6 +1235,15 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **The overview's Platform tile shows its warning count.** With warnings firing
+  it printed `warnings: ${__value.raw}`: Grafana prints a value mapping's text as
+  written. The count now shows with the word as its unit (`11 warnings`), and
+  `tools/gen-dashboard-overview.py` refuses a mapping text that holds a variable.
+  The AI request tiles and the key-budget tile now say what they count: LiteLLM's
+  own request counter reads low after a restart (each new series loses its first
+  value to `increase()`), and a key's budget is reported only once that key is
+  used, unless `litellm_settings.prometheus_initialize_budget_metrics` is true.
+  Nothing to do on upgrade.
 - **A disconnected install's charts repository now carries the vendored subchart
   archives.** `.gitignore` keeps them out of every release commit, so ArgoCD read
   a commit without them and fetched every subchart from its chart repository,
