@@ -194,6 +194,10 @@ lib/p09-bar-diag.py    what P09 prints, as DIAG lines, when its readiness bar re
                        not-ready Application's namespace is not running, and the bounded, scrubbed framing of that dump
 bar-diag-test.sh       hermetic proof of that dump: P09's S17 step against a stub kubectl, on a forced FAIL and on a PASS
                        (also run by selftest.sh)
+lib/p09-stuck-apps.py  what P09 notes when the readiness bar times out: each stuck Application, with Argo CD's own
+                       words for why, bounded and with the site repository scrubbed
+stuck-apps-test.sh     hermetic proof of those notes, against fixtures of the Applications list, and that P09 runs it
+                       in the bar's failing branch (also run by selftest.sh)
 selftest.sh            hermetic proof of the machinery above
 pages-no-cluster.sh    the six no-cluster pages (values-contract, customising, capabilities,
                        configuration, platform-management, verify): every bash block extracted
