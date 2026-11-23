@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Runs bootstrap-node.sh end to end on a Linux box against fakes of the macOS tools it calls
-# (uname, sw_vers, id, sudo, dscl, sysadminctl, dseditgroup, brew, stat, chown, ssh, ssh-keyscan, ...),
+# (uname, sw_vers, id, sudo, dscl, sysadminctl, dseditgroup, brew, stat, chown, ssh, ssh-keyscan,
+# xcode-select, softwareupdate, gpg, and a git that behaves like the stub until the Command Line Tools are in),
 # a real git site repository whose commits are signed with ssh-keygen, and a fake ansible. It tests
 # the script's own logic: the order, what it asks and refuses, what it pins, what it never prints,
 # and that a second run changes nothing. It tests nothing about macOS itself.
@@ -31,6 +32,7 @@ T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
 REAL_PATH="$PATH"
 REAL_GIT_EXEC="$(git --exec-path)"
+REAL_GIT="$(command -v git)"
 export GIT_CONFIG_GLOBAL="$T/gitconfig" GIT_CONFIG_SYSTEM=/dev/null
 git config --global user.name tester; git config --global user.email t@example.invalid
 git config --global init.defaultBranch main; git config --global commit.gpgsign false
@@ -74,6 +76,19 @@ case "$cmd" in
 esac
 export PATH="'"$REAL_GIT_EXEC"':$PATH"
 eval "$cmd"'
+# The Command Line Tools: present when $F/clt/usr/bin/git is. Until then git is Apple's stub, which fails.
+CLT="$F/clt"
+fake xcode-select "[ \"\${1:-}\" = -p ] && [ -x '$CLT/usr/bin/git' ] && { echo '$CLT'; exit 0; }; exit 2"
+fake softwareupdate "echo \"softwareupdate \$*\" >> '$STATE/softwareupdate.log'
+case \"\${1:-}\" in
+  -l) [ -e \"\$TOCKMOX_CLT_MARKER\" ] && printf '* Label: Command Line Tools for Xcode-26.0\\n\\tTitle: old\\n* Label: Command Line Tools for Xcode-26.1\\n\\tTitle: new\\n'; exit 0 ;;
+  -i) mkdir -p '$CLT/usr/bin' && ln -sf '$REAL_GIT' '$CLT/usr/bin/git'; exit 0 ;;
+esac; exit 0"
+fake git "[ -x '$CLT/usr/bin/git' ] || { echo 'xcrun: error: invalid active developer path, missing xcrun' >&2; exit 1; }; exec '$REAL_GIT' \"\$@\""
+# gpg: the bare name is what sudo's secure_path finds (nothing useful); Homebrew's is the real one.
+fake gpg 'exit 0'
+printf '#!/bin/bash\n[ -n "${FAKE_GPG_EMPTY:-}" ] && exit 0\nprintf "pub   ed25519/0123456789ABCDEF 2026-01-01 [SC]\\n      Key fingerprint = 0123 4567 89AB CDEF 0123  4567 89AB CDEF 0123 4567\\nuid                 Forge merge signer\\n"\n' > "$BREW/bin/gpg"
+chmod +x "$BREW/bin/gpg"
 fake ssh-keyscan "echo \"\$FAKE_HOSTNAME \$(cut -d' ' -f1,2 '$F/hostkey.pub')\""
 ssh-keygen -q -t ed25519 -N '' -C hostkey -f "$F/hostkey"
 
@@ -115,11 +130,12 @@ boot() {  # ANSWERS-TEXT args...; output in $T/out; sets rc
   PATH="$BIN:$REAL_PATH" TOCKMOX_ROOT="$R" TOCKMOX_BREW_PREFIX="$BREW" TOCKMOX_SUDOERS_DIR="$F/sudoers.d" \
     TOCKMOX_BOOTSTRAP_ANSWERS="$T/answers" TOCKMOX_ANSIBLE="$BIN/ansible" TOCKMOX_LAUNCHCTL="$BIN/launchctl" \
     TOCKMOX_LAUNCHD_DIR="$F/launchd" FAKE_HOSTNAME=git.example.invalid FAKE_SSH_READONLY="$F/readonly" \
+    TOCKMOX_USERS_DIR="$F/Users" TOCKMOX_CLT_MARKER="$F/clt-marker" \
     bash "$BOOT" "$@" > "$T/out" 2>&1 < /dev/null
   rc=$?
 }
 mkdir -p "$F/sudoers.d" "$F/launchd"
-fresh() { rm -rf "$R" "$STATE/users" "$STATE/admins" "$STATE/brew" "$STATE/brew-owner" "$F/sudoers.d"; mkdir -p "$STATE/users" "$STATE/admins" "$STATE/brew" "$F/sudoers.d" "$F/launchd"; rm -f "$F/readonly"; }
+fresh() { rm -rf "$R" "$STATE/users" "$STATE/admins" "$STATE/brew" "$STATE/brew-owner" "$F/sudoers.d" "$F/Users" "$CLT"; mkdir -p "$STATE/users" "$STATE/admins" "$STATE/brew" "$F/sudoers.d" "$F/launchd" "$F/Users" "$CLT/usr/bin"; ln -s "$REAL_GIT" "$CLT/usr/bin/git"; rm -f "$F/readonly" "$F/clt-marker" "$STATE/softwareupdate.log"; }
 
 # ================================================================== 1. a public site over a path, warn mode
 echo "first run, site reached without a key"
@@ -129,6 +145,7 @@ eq "it exits 0" "$rc" 0
 check "the converge account and the service account were created" bash -c "[ -e '$STATE/users/tockmox' ] && [ -e '$STATE/users/inference' ]"
 check "the service account was hidden" bash -c "[ \"\$(cat '$STATE/users/inference.hidden')\" = 1 ]"
 check "the converge account joined admin" test -e "$STATE/admins/tockmox"
+check "the converge account's home was made, 0700" bash -c "[ \"\$(stat -c %a '$F/Users/tockmox')\" = 700 ]"
 check "Homebrew was handed to the converge account" bash -c "[ \"\$(cat '$STATE/brew-owner')\" = tockmox ]"
 check "ansible git sops age gnupg were installed" bash -c "for p in ansible git sops age gnupg; do [ -e '$STATE/brew/'\$p ] || exit 1; done"
 check "the tree exists with the secrets directory 0711" bash -c "[ -d '$R/models/hf' ] && [ \"\$(stat -c %a '$R/secrets')\" = 711 ]"
@@ -210,6 +227,48 @@ check "the env file skips the converge timer" grep -q '^SKIP_TAGS=' "$R/etc/ai-n
 check "both legacy labels are in the env file, space separated" grep -q '^LEGACY_CONVERGER_LABELS="com.example.old com.example.older"$' "$R/etc/ai-node.env"
 check "the preview ran before anything was applied" bash -c "grep -q 'what a converge WOULD change' '$T/out'"
 check "declining the apply left only a preview" bash -c "grep -q 'left as a preview' '$T/out' && [ ! -s '$R/var/state.json' ]"
+
+# ================================================================== 4a. found on the first Mac
+echo "a Mac with no Command Line Tools: they go in before the first git call"
+R="$T/root11"; fresh; rm -rf "$CLT"
+boot $'\n'$'yes\n' --ai-node-id n1 --site-repo "$SITE" --toolkit-repo "$TK" --toolkit-ref v0.0.1 --no-apply
+eq "it exits 0" "$rc" 0
+check "softwareupdate installed the newest Command Line Tools label" grep -q 'softwareupdate -i Command Line Tools for Xcode-26.1' "$STATE/softwareupdate.log"
+check "the in-progress marker is removed afterwards" test ! -e "$F/clt-marker"
+check "the git stub was never hit" bash -c "! grep -q 'invalid active developer path' '$T/out'"
+
+echo "a dry run on a Mac with no Command Line Tools"
+R="$T/root12"; fresh; rm -rf "$CLT"
+boot '' --ai-node-id n1 --site-repo "$SITE" --toolkit-repo "$TK" --toolkit-ref v0.0.1 --dry-run
+eq "it exits 0" "$rc" 0
+check "it says it would install them" grep -q 'would install the Command Line Tools' "$T/out"
+check "it installed nothing" bash -c "[ ! -e '$STATE/softwareupdate.log' ] && [ ! -e '$CLT/usr/bin/git' ]"
+
+echo "an existing account whose home was never made"
+R="$T/root13"; fresh; touch "$STATE/users/tockmox"
+boot $'\n'$'yes\n' --ai-node-id n1 --site-repo "$SITE" --toolkit-repo "$TK" --toolkit-ref v0.0.1 --no-apply
+eq "it exits 0" "$rc" 0
+check "the missing home is made on a re-run" test -d "$F/Users/tockmox"
+
+echo "a toolkit ref that is a branch other than the default"
+git -C "$TK" checkout -q -b rel && echo rel > "$TK/rel" && git -C "$TK" add -A && git -C "$TK" commit -q -m rel && git -C "$TK" checkout -q main
+R="$T/root14"; fresh
+boot $'\n'$'yes\n' --ai-node-id n1 --site-repo "$SITE" --toolkit-repo "$TK" --toolkit-ref rel --no-apply
+eq "it exits 0" "$rc" 0
+eq "the toolkit is checked out at the branch's head" "$(git -C "$R/toolkit" rev-parse HEAD 2>/dev/null)" "$(git -C "$TK" rev-parse rel)"
+
+echo "the forge's GPG signers are shown with Homebrew's gpg"
+SITE3="$T/site3"; make_site "$SITE3"; printf 'not really armored\n' > "$SITE3/ai-nodes/gpg-signers.asc"
+git -C "$SITE3" add -A; git -C "$SITE3" -c gpg.format=ssh -c "user.signingkey=$K/good" commit -q -S -m gpg
+R="$T/root15"; fresh
+boot $'\n'$'yes\n'$'yes\n' --ai-node-id n1 --site-repo "$SITE3" --toolkit-repo "$TK" --toolkit-ref v0.0.1 --no-apply
+eq "it exits 0" "$rc" 0
+check "the GPG fingerprint was shown before pinning" grep -q 'Key fingerprint = 0123' "$T/out"
+check "gpg-signers.asc was pinned" cmp -s "$SITE3/ai-nodes/gpg-signers.asc" "$R/etc/gpg-signers.asc"
+R="$T/root16"; fresh
+FAKE_GPG_EMPTY=1 boot $'\n'$'yes\n'$'yes\n' --ai-node-id n1 --site-repo "$SITE3" --toolkit-repo "$TK" --toolkit-ref v0.0.1 --no-apply
+check "an empty GPG key list stops the bootstrap" bash -c "[ $rc != 0 ] && grep -q 'shows no keys' '$T/out'"
+check "an empty GPG key list pins nothing" test ! -e "$R/etc/gpg-signers.asc"
 
 # ================================================================== 5. dry run
 echo "a dry run touches nothing"

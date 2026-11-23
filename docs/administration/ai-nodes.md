@@ -151,10 +151,13 @@ to run again: a step that is done says so and moves on.
 
 What it does, in order, and where it stops:
 
-1. Checks it is on Apple silicon at or above the OS floor, and that both
-   repositories answer.
-2. Creates `tockmox` and `inference` with `sysadminctl`, hides `inference`, and
-   gives it no login shell.
+1. Checks it is on Apple silicon at or above the OS floor, installs the Command
+   Line Tools with `softwareupdate` if they are missing (a fresh Mac has only a
+   `git` stub, so this comes before any `git` call; `--dry-run` only says it
+   would), and checks that both repositories answer.
+2. Creates `tockmox` and `inference` with `sysadminctl`, makes the home
+   directory `tockmox` needs for Homebrew (`sysadminctl` records it but does not
+   create it), hides `inference`, and gives it no login shell.
 3. Installs Homebrew as you, hands it to `tockmox`, and installs `ansible`,
    `git`, `sops`, `age` and `gnupg`.
 4. Builds the `/opt/tockmox` tree with the owners and modes the roles expect and
@@ -170,11 +173,15 @@ What it does, in order, and where it stops:
    scan over the network proves nothing by itself.
 8. Clones the site and the toolkit, and tries a push with `--dry-run`. If the
    deploy key can write, the script stops: a node that can change its own
-   configuration defeats the signing.
+   configuration defeats the signing. The toolkit ref is fetched and checked out
+   detached the way the converger does it, so a branch, a tag or a full commit
+   all work.
 9. Shows the signers in `ai-nodes/allowed_signers` with their fingerprints and
    pins them in `/opt/tockmox/etc` only if you type `yes`. This is the trust
    anchor. Later commits are checked against what you pinned here, and a commit
-   can change the signer set only if an already-pinned key signed it.
+   can change the signer set only if an already-pinned key signed it. A
+   `gpg-signers.asc` is shown with Homebrew's `gpg`; a file that shows no keys
+   stops the script and nothing is pinned.
 10. Writes `/opt/tockmox/etc/ai-node.env` (no secrets in it) and runs the first
     converge with you watching.
 

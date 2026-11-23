@@ -10,7 +10,8 @@
 # because it asks you to confirm things. It is the only step that is not driven from git, and
 # it does the smallest amount that can be done safely and then hands over to the converger.
 #
-#   1  preflight         Apple silicon, macOS version, the repositories answer
+#   1  preflight         Apple silicon, macOS version, the Command Line Tools (installed headlessly
+#                        when missing, before the first git call), the repositories answer
 #   2  accounts          tockmox (administrator, no login) and inference (hidden service account)
 #   3  Homebrew          installed as you, then handed to tockmox; ansible git sops age gnupg installed
 #   4  the /opt/tockmox tree, owners and modes as the toolkit expects, and the sudoers fragment
@@ -64,6 +65,7 @@ ROOT="${TOCKMOX_ROOT:-/opt/tockmox}"
 CONVERGE_USER="tockmox"
 SERVICE_USER="inference"
 BREW_PREFIX="${TOCKMOX_BREW_PREFIX:-/opt/homebrew}"
+USERS_DIR="${TOCKMOX_USERS_DIR:-/Users}"
 SELF="${BASH_SOURCE[0]:-$0}"
 ADMIN_USER="$(id -un)"
 
@@ -74,7 +76,7 @@ step() { printf '\n== %s\n' "$*"; }
 note() { printf '   %s\n' "$*"; }
 die()  { printf 'bootstrap-node: %s\n' "$*" >&2; exit 1; }
 
-usage() { sed -n '4,46p' "$SELF" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '4,47p' "$SELF" | sed 's/^# \{0,1\}//'; }
 
 # act DESCRIPTION CMD...: print what is about to happen; run it unless this is a dry run.
 act() {
@@ -197,6 +199,47 @@ esac
 
 # ------------------------------------------------------------------ 1 preflight
 
+# A fresh Mac has only the /usr/bin/git stub, which fails until the Command Line Tools are installed.
+# clt_ready: the active developer directory exists and has a real git.
+clt_ready() {
+  local d
+  d="$(xcode-select -p 2>/dev/null)" || return 1
+  [ -n "$d" ] && [ -x "$d/usr/bin/git" ]
+}
+
+# install_clt: the headless install Homebrew's installer uses: the in-progress marker makes
+# softwareupdate list the Command Line Tools, then install the newest label it lists.
+install_clt() {
+  local marker="${TOCKMOX_CLT_MARKER:-/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress}" label
+  note "installing the Command Line Tools (softwareupdate, no dialog); this takes a few minutes"
+  sudo touch "$marker" || die "could not write $marker"
+  label="$(softwareupdate -l 2>/dev/null | grep -E '^[[:space:]]*[*] Label: Command Line Tools' \
+           | sed -e 's/^.*Label: //' | tail -n 1)"
+  if [ -z "$label" ]; then
+    sudo rm -f "$marker"
+    die "softwareupdate lists no Command Line Tools. Install them at the console (xcode-select --install) and run this again."
+  fi
+  sudo softwareupdate -i "$label" >/dev/null 2>&1
+  sudo rm -f "$marker"
+  clt_ready || die "the Command Line Tools ($label) did not install. Install them at the console (xcode-select --install) and run this again."
+  note "installed the Command Line Tools ($label)"
+}
+
+# can_read_repo URL: can this repository be read without credentials? With git once the Command Line
+# Tools are in; before that (a dry run on a fresh Mac) an https URL is asked with curl and anything
+# else cannot be checked yet.
+can_read_repo() {
+  local url="$1"
+  if clt_ready; then
+    GIT_TERMINAL_PROMPT=0 git ls-remote --heads "$url" >/dev/null 2>&1
+    return $?
+  fi
+  case "$url" in
+    https://*) curl -fsS -o /dev/null --max-time 20 "${url%/}/info/refs?service=git-upload-pack" ;;
+    *) note "[dry-run] cannot check $url before the Command Line Tools are installed"; return 0 ;;
+  esac
+}
+
 preflight() {
   step "1 preflight"
   [ "$(uname -s)" = Darwin ] || die "this is for macOS (Linux support is phase 6)"
@@ -213,9 +256,16 @@ preflight() {
     sudo -v || die "sudo did not accept the password"
     start_sudo_keepalive
   fi
+  if clt_ready; then
+    note "the Command Line Tools are installed"
+  elif [ "$DRY_RUN" = 1 ]; then
+    note "[dry-run] would install the Command Line Tools (softwareupdate, headlessly) before any git call"
+  else
+    install_clt
+  fi
   note "toolkit repository: $TOOLKIT_REPO"
-  if ! GIT_TERMINAL_PROMPT=0 git ls-remote --heads "$TOOLKIT_REPO" >/dev/null 2>&1; then
-    die "cannot read the toolkit repository $TOOLKIT_REPO (is the network up? is git installed? xcode-select --install)"
+  if ! can_read_repo "$TOOLKIT_REPO"; then
+    die "cannot read the toolkit repository $TOOLKIT_REPO (is the network up?)"
   fi
   if [ "$SITE_SSH" = 1 ]; then
     if command -v nc >/dev/null 2>&1 && ! nc -z -G 5 "$SITE_HOST" "$SITE_PORT" >/dev/null 2>&1; then
@@ -224,7 +274,7 @@ preflight() {
     note "site repository host answers: $SITE_HOST:$SITE_PORT"
   else
     case "$SITE_REPO" in
-      https://*) GIT_TERMINAL_PROMPT=0 git ls-remote --heads "$SITE_REPO" >/dev/null 2>&1 \
+      https://*) can_read_repo "$SITE_REPO" \
                    || die "cannot read $SITE_REPO without credentials. A private site repository needs an ssh URL and a deploy key." ;;
     esac
     note "site repository is read without a key: $SITE_REPO"
@@ -262,9 +312,20 @@ make_account() {
   note "created the account $name"
 }
 
+# ensure_home NAME HOME: sysadminctl records a home but does not make it, and Homebrew run as the
+# account (sudo -u -H) needs it. Made here, owned by the account, 0700; an existing one is kept.
+ensure_home() {
+  local name="$1" home="$2"
+  if [ -d "$home" ]; then note "$name's home $home exists"; return 0; fi
+  if [ "$DRY_RUN" = 1 ]; then note "[dry-run] would make $name's home $home (owner $name, mode 0700)"; return 0; fi
+  sudo install -d -o "$name" -g staff -m 0700 "$home" || die "could not make $name's home $home"
+  note "made $name's home $home"
+}
+
 accounts() {
   step "2 accounts"
-  make_account "$CONVERGE_USER" "Tockmox converge" 1 "/Users/$CONVERGE_USER" /bin/bash
+  make_account "$CONVERGE_USER" "Tockmox converge" 1 "$USERS_DIR/$CONVERGE_USER" /bin/bash
+  ensure_home "$CONVERGE_USER" "$USERS_DIR/$CONVERGE_USER"
   make_account "$SERVICE_USER" "Tockmox inference service" 0 /var/empty /usr/bin/false
   if [ "$DRY_RUN" = 0 ] && user_exists "$SERVICE_USER"; then
     if [ "$(dscl . -read "/Users/$SERVICE_USER" IsHidden 2>/dev/null | awk '{print $2}')" != 1 ]; then
@@ -500,8 +561,12 @@ print((d.get("toolkit") or {}).get("ref") or "")
 ' "$sd/ai-nodes/fleet.yaml" 2>/dev/null)"
   fi
   [ -n "$TOOLKIT_REF" ] || die "no toolkit ref: pass --toolkit-ref or set toolkit.ref in ai-nodes/fleet.yaml"
-  as_converge env GIT_TERMINAL_PROMPT=0 git -C "$td" fetch --quiet --tags --force origin >/dev/null 2>&1 || true
-  as_converge git -C "$td" checkout --quiet --detach "$TOOLKIT_REF" || die "the toolkit has no ref $TOOLKIT_REF"
+  case "$TOOLKIT_REF" in -*|*..*|*[!A-Za-z0-9._/+@-]*) die "the toolkit ref is not a plain branch, tag or commit name" ;; esac
+  # Resolve the ref the converger's way (fetch it, check out FETCH_HEAD detached): a branch that is
+  # not the clone's default has no local branch, and checkout --detach of its name fails.
+  as_converge env GIT_TERMINAL_PROMPT=0 git -C "$td" fetch --quiet --tags --force origin "$TOOLKIT_REF" >/dev/null 2>&1 \
+    || die "the toolkit has no ref $TOOLKIT_REF"
+  as_converge git -C "$td" checkout --quiet --force --detach FETCH_HEAD || die "the toolkit has no ref $TOOLKIT_REF"
   note "toolkit at $TOOLKIT_REF ($(as_converge git -C "$td" rev-parse --short HEAD))"
 }
 
@@ -509,7 +574,7 @@ print((d.get("toolkit") or {}).get("ref") or "")
 
 pin_signers() {
   step "9 the signers"
-  local sd="$ROOT/site/ai-nodes" etc="$ROOT/etc" src line key tmp shown=0
+  local sd="$ROOT/site/ai-nodes" etc="$ROOT/etc" src line key tmp gpgout shown=0
   if [ "$DRY_RUN" = 1 ]; then
     note "[dry-run] would show ai-nodes/allowed_signers (and gpg-signers.asc) with fingerprints and pin them in $etc if you type yes"
     return 0
@@ -542,8 +607,13 @@ pin_signers() {
   if as_converge test -s "$etc/gpg-signers.asc"; then
     note "gpg-signers.asc is already pinned"
   elif as_converge test -s "$sd/gpg-signers.asc"; then
+    # By its full path: sudo's secure_path has no Homebrew, so a bare gpg is not found and the list
+    # would print empty while asking to pin keys nobody can see.
+    gpgout="$(as_converge "$BREW_PREFIX/bin/gpg" --show-keys --with-fingerprint --keyid-format long "$sd/gpg-signers.asc" 2>/dev/null)"
+    printf '%s\n' "$gpgout" | grep -E '^pub' >/dev/null \
+      || die "ai-nodes/gpg-signers.asc shows no keys with $BREW_PREFIX/bin/gpg; nothing was pinned"
     say "The forge's merge-signing key(s) (GPG):"
-    as_converge gpg --show-keys --with-fingerprint --keyid-format long "$sd/gpg-signers.asc" 2>/dev/null | sed 's/^/   /'
+    printf '%s\n' "$gpgout" | sed 's/^/   /'
     ask "Pin these GPG key(s)?" || die "not pinned. Nothing was changed."
     as_converge install -m 0644 "$sd/gpg-signers.asc" "$etc/gpg-signers.asc"
     note "pinned gpg-signers.asc"

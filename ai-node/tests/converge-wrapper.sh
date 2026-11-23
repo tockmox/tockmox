@@ -7,7 +7,8 @@
 #   - the whole wrapper against a fake root, a real git site repository signed with ssh-keygen,
 #     and a fake ansible: warn proceeds with signature_ok 0, enforce refuses with exit 12, a signed
 #     history verifies, a signer rotation is honoured only when a pinned key signed it, and a play
-#     that does not load is exit 14 with failed=-1.
+#     that does not load is exit 14 with failed=-1;
+#   - a run started with another account's HOME (sudo -u keeps it) uses this account's own home.
 #
 #   ai-node/tests/converge-wrapper.sh
 #
@@ -131,6 +132,7 @@ cat > "$W/bin/ansible" <<'EOF'
 #!/bin/sh
 # Prints what ansible-playbook would, selected by FAKE_ANSIBLE.
 echo "$*" >> "$FAKE_LOG"
+echo "${HOME:-}" > "$FAKE_LOG.home"
 # keep what the extra-vars file said, for the tests to read
 for a in "$@"; do case "$a" in @*) cp "${a#@}" "$FAKE_LOG.vars" 2>/dev/null ;; esac; done
 case "${FAKE_ANSIBLE:-ok}" in
@@ -298,6 +300,14 @@ kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null
 rm -rf "$ROOT/var/converge.lock"
 FAKE_ANSIBLE=ok run; rc=$?
 eq "a lock whose owner is gone is removed" "$rc" 0
+
+# 12a. run as `sudo -u tockmox ...` the caller's HOME comes along; the converger must not use it
+mkdir -p "$W/callerhome"; chmod 0555 "$W/callerhome"; rm -f "$FAKE_LOG.home"
+reset_state; HOME="$W/callerhome" FAKE_ANSIBLE=ok run
+check "the playbook ran" test -s "$FAKE_LOG.home"
+check "the playbook does not get the caller's HOME" bash -c "[ \"\$(cat '$FAKE_LOG.home')\" != '$W/callerhome' ]"
+check "the HOME it gets is a directory this account can write" bash -c "h=\"\$(cat '$FAKE_LOG.home')\"; [ -d \"\$h\" ] && [ -w \"\$h\" ]"
+chmod 0755 "$W/callerhome"
 
 # 12. confirm-firewall leaves its markers
 mkdir -p "$W/db"; : > "$W/db/pf-rolled-back"

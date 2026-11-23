@@ -237,6 +237,35 @@ version_ge() {
   return 0
 }
 
+# --------------------------------------------------------------------- home
+
+# home_of USER: the home directory the account database records for USER (dscl on macOS).
+home_of() {
+  local u="$1" h=""
+  if command -v dscl >/dev/null 2>&1; then
+    h="$(dscl . -read "/Users/$u" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+  elif command -v getent >/dev/null 2>&1; then
+    h="$(getent passwd "$u" 2>/dev/null | cut -d: -f6)"
+  fi
+  printf '%s\n' "$h"
+}
+
+# own_home: `sudo -u tockmox tockmox-ai-node-converge` keeps the caller's HOME, and ansible, git and
+# gpg would then write into another account's home (ansible dies creating ~/.ansible there). Use this
+# account's own home; when that is missing or not writable, a private directory under var/.
+own_home() {
+  local me h
+  me="$(id -un 2>/dev/null)"
+  h="$(home_of "$me")"
+  if [ -z "$h" ] || [ ! -d "$h" ] || [ ! -w "$h" ]; then
+    h="$VAR/home"
+    mkdir -p "$h" 2>/dev/null && chmod 0700 "$h" 2>/dev/null
+  fi
+  [ "${HOME:-}" = "$h" ] || log "HOME is $h (was ${HOME:-unset})" >&2
+  HOME="$h"
+  export HOME
+}
+
 # --------------------------------------------------------------------- lock
 
 acquire_lock() {
@@ -742,6 +771,7 @@ main() {
   # Homebrew's tools (sops, age, gpg, ansible) first, before anything below needs one: launchd and
   # sudo both hand a job a minimal PATH.
   export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:$PATH"
+  own_home
   setup_git_env
 
   case "$ACTION" in
