@@ -107,7 +107,7 @@
       "id": 4,
       "type": "stat",
       "title": "Platform",
-      "description": "The platform verdict. OK needs two facts: no critical or warning alert firing AND Alertmanager's always-firing Watchdog present. Without the heartbeat an empty alert list proves nothing, so the tile reads UNKNOWN. The detail is in Is it working? below.",
+      "description": "The platform verdict. OK needs two facts: no critical or warning alert firing AND Alertmanager's always-firing Watchdog present. Without the heartbeat an empty alert list proves nothing, so the tile reads UNKNOWN. 1 to 999 is the count of warnings firing (its word comes from the unit: a mapping's text is printed literally, so it cannot carry the number). The detail is in Is it working? below.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -133,7 +133,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
+          "unit": "suffix: warnings",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -174,18 +174,6 @@
             {
               "type": "range",
               "options": {
-                "from": 1,
-                "to": 999,
-                "result": {
-                  "text": "warnings: ${__value.raw}",
-                  "color": "orange",
-                  "index": 2
-                }
-              }
-            },
-            {
-              "type": "range",
-              "options": {
                 "from": 1000,
                 "to": 1000000000.0,
                 "result": {
@@ -199,7 +187,8 @@
           "color": {
             "mode": "thresholds"
           },
-          "noValue": "no data"
+          "noValue": "no data",
+          "decimals": 0
         },
         "overrides": []
       },
@@ -416,7 +405,7 @@
       "id": 7,
       "type": "stat",
       "title": "Gateway errors (24h)",
-      "description": "Non-2xx share of LiteLLM requests over a day. A day, not 15 minutes: a site with a few requests an hour would otherwise read 'no traffic' most of the time.",
+      "description": "Non-2xx share of LiteLLM requests over a day. A day, not 15 minutes: a site with a few requests an hour would otherwise read 'no traffic' most of the time. LiteLLM's counter is born at a series' first request, so increase() undercounts both sides after a restart; for request counts read the gate tiles.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -790,7 +779,7 @@
       "id": 11,
       "type": "stat",
       "title": "Served locally, last 24h",
-      "description": "Share of AI requests the policy gate served from a local model (tockmox_gate_served_total, endpoint_tier). The gate's tier is the authority: LiteLLM's api_provider says 'openai' for a local OpenAI-compatible server, so it cannot tell local from frontier. No threshold: the right share is a site decision.",
+      "description": "Share of AI requests the policy gate served from a local model (tockmox_gate_served_total, endpoint_tier). The gate's tier is the authority: LiteLLM's api_provider says 'openai' for a local OpenAI-compatible server, so it cannot tell local from frontier. No threshold: the right share is a site decision. The gate is a LiteLLM callback, so every request through the gateway passes it. Its served counter is pre-created at 0, so increase() counts the first request too. LiteLLM's own request counter is born at a series' first request, and increase() cannot see a counter's first sample, so it drops the first value of every new key, model and pod series: after a restart it reads below this, while the raw totals agree.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -882,6 +871,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
+      "description": "Requests the policy gate saw served, per hour, by the tier that served them (tockmox_gate_served_total). The gate is a LiteLLM callback, so every request through the gateway passes it. Its served counter is pre-created at 0, so increase() counts the first request too. LiteLLM's own request counter is born at a series' first request, and increase() cannot see a counter's first sample, so it drops the first value of every new key, model and pod series: after a restart it reads below this, while the raw totals agree.",
       "gridPos": {
         "x": 4,
         "y": 10,
@@ -1116,7 +1106,7 @@
       "id": 15,
       "type": "stat",
       "title": "Least budget left on a key",
-      "description": "The tightest key's remaining budget. LiteLLM reports a key only while it holds it in memory, so a key that has been idle since a restart is not counted here.",
+      "description": "The tightest key's remaining budget, over keys that have a max budget. By default LiteLLM reports a key's budget only after that key's first request since the proxy started, so after a restart this reads grey until a budgeted key is used. With litellm_settings.prometheus_initialize_budget_metrics: true LiteLLM reads every key from its database every 5 minutes and reports them all. Grey means no budget was reported, not that none is set.",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -1166,7 +1156,7 @@
               "options": {
                 "match": "null",
                 "result": {
-                  "text": "no key budgets set",
+                  "text": "no key budget reported",
                   "color": "#808080",
                   "index": 0
                 }
@@ -1177,7 +1167,7 @@
               "options": {
                 "match": "nan",
                 "result": {
-                  "text": "no key budgets set",
+                  "text": "no key budget reported",
                   "color": "#808080",
                   "index": 2
                 }
