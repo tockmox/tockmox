@@ -13,7 +13,8 @@
 #      ranges, learned at run time: from the guest's k3s config and unit flags (cluster-cidr, service-cidr) where they
 #      name them, else from the live cluster (the nodes' podCIDRs; the ServiceCIDR object, else the range the API
 #      server names when a server-side dry run asks for an address outside it). A range that cannot be learned, or
-#      one wider than /12, is a FAIL: the clause never exempts a range it has not read, or one that wide
+#      one wider than /12, is a FAIL: the clause never exempts a range it has not read, or one that wide. The race
+#      probe (below) records which backend holds nat KUBE-SERVICES and the guest's route into its Service range
 #   4. mirror-tls and mirror-proof both PASS: one verified TLS round trip from the node to the mirror, and the mirror is
 #      the node's only registry
 #   5. the guest is quieted (apt timers, unattended upgrades, snap refresh, motd news), so the denies under the cut are
@@ -31,7 +32,7 @@
 #      no deny line, three times, is a FAIL (the counter cannot count); no refusal within TOCKMOX_AIRGAP_CUT_WAIT
 #      seconds is BLOCKED (the cut was never made)
 #   9. run.sh P09 (built-in route, this tree's install.md, and global.airGapped where airgap.md says), timed: the
-#      cut window
+#      cut window. The race probe's sampler reads the guest every 0.5 s while it runs, and is stopped at its end
 #  10. the edge's deny lines for the guest over the cut window, counted and grouped by destination. A deny whose
 #      protocol and port are on TOCKMOX_AIRGAP_IGNORE (default udp/123, the OS's time sync), or whose destination is
 #      in the guest cluster's own pod or Service range (step 3: an address the guest owns, not a way out), is reported
@@ -56,8 +57,9 @@
 #   TOCKMOX_KEEP_CLUSTER.
 #
 # WHAT IT PRINTS for a caller to grep: AIRGAP-PAUSE, AIRGAP-CUT (the control's proof), AIRGAP-WINDOW,
-# AIRGAP-DENY <proto> <destination>:<port> <count> [ignored|guest-cluster], AIRGAP-STALL, and last
-# AIRGAP-RESULT <outcome>.
+# AIRGAP-DENY <proto> <destination>:<port> <count> [ignored|guest-cluster], AIRGAP-STALL, the race probe's
+# AIRGAP-RACE-DENY lines and its AIRGAP-RACE confirmed|not-confirmed line (they observe; they never change the outcome),
+# and last AIRGAP-RESULT <outcome>.
 #
 # Exit: 0 PASS; 1 FAIL (a step failed, P09 did not pass, or the install reached past the edge); 2 a refused
 # precondition, before anything is created; 4 BLOCKED (the guest resolves nothing, or the cut was not made in time);
@@ -74,6 +76,7 @@ RESULT=""
 CREATED=0
 INSTALL_STARTED=0
 STALL_PID=""
+SAMPLER_PID=""   # the race probe's sampler on the guest, while step 9 runs
 refuse() { STOPPED="REFUSING: $1"; echo "$STOPPED" >&2; RESULT=REFUSED; exit 2; }
 fail() { STOPPED="airgap lane: $1"; echo "$STOPPED" >&2; RESULT=FAIL; exit 1; }
 blocked() { STOPPED="airgap lane: BLOCKED: $1"; echo "$STOPPED" >&2; RESULT=BLOCKED; exit 4; }
@@ -136,6 +139,7 @@ step() { printf '%s\n' "$1" > "${LANE}/step"; }
 finish() {
   local rc=$?
   [ -z "$STALL_PID" ] || kill "$STALL_PID" 2>/dev/null || true
+  [ -z "$SAMPLER_PID" ] || race_kill "$SAMPLER_PID" || true
   [ -n "$RESULT" ] || case "$rc" in 0) RESULT=PASS ;; 2) RESULT=REFUSED ;; 4) RESULT=BLOCKED ;; 5) RESULT=INFRA_ERROR ;; *) RESULT=FAIL ;; esac
   [ -z "$STOPPED" ] || printf '%s\n' "$STOPPED" >> "$REPORT"
   [ -z "$STOP_DETAIL" ] || printf '%s\n' "$STOP_DETAIL" >> "$REPORT"
@@ -169,6 +173,7 @@ stall_watch() {
 best=(0,"")
 for d,_,fs in os.walk(sys.argv[1]):
     for f in fs:
+        if f == "race-sampler.txt": continue  # the race sampler writes every 0.5 s; it is not the run making progress
         p=os.path.join(d,f)
         try: best=max(best,(os.path.getmtime(p),p))
         except OSError: pass
@@ -182,6 +187,325 @@ if best[1]: print("%d %s" % best)' "$TOCKMOX_WORKDIR" 2>/dev/null || true)"
   done
 }
 stall_watch & STALL_PID=$!
+
+# ---- the Service-creation race probe: it observes, and it never changes the outcome --------------------------------
+# A hypothesis from the earlier cut runs: CoreDNS answers a new ClusterIP before k3s's embedded kube-proxy has
+# programmed its DNAT, so the first SYN finds no rule in nat KUBE-SERVICES and leaves by the default route, and
+# conntrack then keeps its retransmits un-NATed. The edge refuses them, and the clause reports them as guest-cluster.
+# The probe records what would confirm or refute that, in race-* files under the lane directory and AIRGAP-RACE lines
+# in the report:
+#   step 3  which backend holds KUBE-SERVICES (iptables-legacy, iptables-nft, k3s's bundled ones, nft) and the route
+#           the guest takes to the first address of its own Service range, learned above, never assumed
+#   step 9  a read-only sampler on the guest, every 0.5 s while P09 runs: the first time each ClusterIP appears in nat
+#           KUBE-SERVICES, and each conntrack flow to the Service range that was not DNATed (its reply comes from the
+#           address it was sent to), read from /proc/net/nf_conntrack where it exists, else `conntrack -L`
+#   after   each Service's creationTimestamp, and for each deny to the Service range: its time, its Service, that
+#           Service's create, its ClusterIP's first-seen and whether an un-NATed flow went to it. Then one line,
+#           AIRGAP-RACE confirmed (every such deny falls after its Service's create, before its ClusterIP's first-seen,
+#           with an un-NATed flow) or AIRGAP-RACE not-confirmed and why
+# Each piece runs in a subshell with errexit off, or is called with || true, and calls none of refuse, fail, blocked
+# and infra. The guest's clock is compared with this host's once, at step 3, and printed; it is not applied, because
+# the edge's times are Loki's.
+RACE_AUX="/var/lib/rancher/k3s/data/current/bin/aux"
+RACE_SVC=""   # the guest's Service range(s), set at step 3
+race_ts() { python3 -c 'import time; print("%.6f" % time.time())'; }
+# race_kill PID: the process and everything under it (the sampler is ssh under bash under a subshell)
+race_kill() {
+  local c
+  for c in $(pgrep -P "$1" 2>/dev/null); do race_kill "$c"; done
+  kill "$1" 2>/dev/null || true
+}
+# race_leaves PID: the processes under PID that have none of their own. Stopping those first lets each parent reap its
+# child and end by itself; a parent killed first leaves its child unreaped.
+race_leaves() {
+  local c any=""
+  for c in $(pgrep -P "$1" 2>/dev/null); do any=1; race_leaves "$c"; done
+  [ -n "$any" ] || echo "$1"
+}
+
+# race_step3: the backend that holds KUBE-SERVICES, the route to the Service range, the guest's clock
+race_step3() (
+  set +eu +o pipefail
+  ip0="$(python3 -c 'import ipaddress, sys; print(ipaddress.ip_network(sys.argv[1].split()[0]).network_address + 1)' "$RACE_SVC" 2>/dev/null)"
+  [[ "$ip0" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || { note "airgap lane 3: race probe: no Service range to probe (${RACE_SVC:-none})"; exit 0; }
+  script="$(cat <<GUEST
+echo "AIRGAP-RACE-CLOCK \$(date +%s.%N)"
+for c in iptables-legacy iptables-nft ${RACE_AUX}/iptables-legacy ${RACE_AUX}/iptables-nft; do
+  if command -v "\$c" >/dev/null 2>&1; then
+    echo "AIRGAP-RACE-BACKEND \$c rules=\$("\$c" -w 1 -t nat -S KUBE-SERVICES 2>/dev/null | grep -c '^-A KUBE-SERVICES')"
+  else
+    echo "AIRGAP-RACE-BACKEND \$c absent"
+  fi
+done
+if command -v nft >/dev/null 2>&1; then
+  echo "AIRGAP-RACE-BACKEND nft chains=\$(nft list ruleset 2>/dev/null | grep -c 'chain KUBE-SERVICES')"
+else
+  echo "AIRGAP-RACE-BACKEND nft absent"
+fi
+echo "AIRGAP-RACE-ROUTE \$(ip route get ${ip0} 2>&1 | head -1)"
+if [ -r /proc/net/nf_conntrack ]; then echo "AIRGAP-RACE-CONNTRACK proc"
+elif command -v conntrack >/dev/null 2>&1; then echo "AIRGAP-RACE-CONNTRACK conntrack-tool"
+else echo "AIRGAP-RACE-CONNTRACK none"; fi
+echo AIRGAP-RACE-END
+GUEST
+)"
+  h0="$(race_ts)"; gexec "$script" > "${LANE}/race-step3.txt" 2>&1; h1="$(race_ts)"
+  python3 - "${LANE}/race-step3.txt" "$h0" "$h1" "$ip0" "${LANE}/race-ks" <<'PY' > "${LANE}/race-step3.note" 2>/dev/null
+import re, sys
+path, h0, h1, ip0, ks_out = sys.argv[1], float(sys.argv[2]), float(sys.argv[3]), sys.argv[4], sys.argv[5]
+holders, nft, route, clock, ct = [], 0, "", None, ""
+for line in open(path, encoding="utf-8", errors="replace"):
+    line = line.rstrip("\n")
+    m = re.match(r"AIRGAP-RACE-BACKEND nft chains=(\d+)$", line)
+    if m:
+        nft = int(m.group(1))
+        continue
+    m = re.match(r"AIRGAP-RACE-BACKEND ([A-Za-z0-9/_.+-]+) rules=(\d+)$", line)
+    if m and int(m.group(2)) > 0:
+        holders.append((int(m.group(2)), m.group(1)))
+    m = re.match(r"AIRGAP-RACE-ROUTE (.*)$", line)
+    if m:
+        route = m.group(1).strip()
+    m = re.match(r"AIRGAP-RACE-CLOCK ([0-9]+(?:\.[0-9]*)?)", line)
+    if m:
+        clock = float(m.group(1))
+    m = re.match(r"AIRGAP-RACE-CONNTRACK (\S+)$", line)
+    if m:
+        ct = m.group(1)
+order = sorted(holders, key=lambda h: -h[0])   # stable: the first listed wins a tie
+if order:
+    ks = "%s -w 1 -t nat -S KUBE-SERVICES" % order[0][1]
+    held = ", ".join("%s (%d rules)" % (n, r) for r, n in holders)
+    if len(holders) > 1:
+        held += "; more than one holds it, and the sampler reads %s" % order[0][1]
+elif nft:
+    ks = "nft list chain ip nat KUBE-SERVICES"
+    held = "nft (%d chain(s); no iptables front end listed it)" % nft
+else:
+    ks = ""
+    held = "nothing the probe could read, so the sampler records no first-seen"
+open(ks_out, "w").write(ks + "\n")
+skew = "unknown" if clock is None else "%+.3f s (+/-%.3f)" % (clock - (h0 + h1) / 2, (h1 - h0) / 2)
+print("airgap lane 3: race probe: KUBE-SERVICES held by %s; ip route get %s: %s; conntrack from %s; guest clock minus "
+      "this host's %s" % (held, ip0, route or "no answer", ct or "unknown", skew))
+PY
+  if [ -s "${LANE}/race-step3.note" ]; then note "$(cat "${LANE}/race-step3.note")"
+  else note "airgap lane 3: race probe: the guest's answer could not be read (${LANE}/race-step3.txt)"; fi
+)
+
+# race_sampler_start: the sampler, in the background, until race_sampler_stop. It waits up to 10 s for the first tick,
+# so P09 never starts before the sampler is reading.
+race_sampler_start() {
+  local ks limit script i=0 ks_ok='^[A-Za-z0-9/_.+ -]*$' svc_ok='^[0-9./ ]+$'
+  ks="$(head -1 "${LANE}/race-ks" 2>/dev/null || true)"
+  [[ "$ks" =~ $ks_ok ]] || ks=""
+  [[ "$RACE_SVC" =~ $svc_ok ]] || { note "airgap lane 9: race sampler not started: no Service range"; return 0; }
+  limit="${TOCKMOX_P09_BUDGET:-3000}"
+  case "$limit" in ''|*[!0-9]*) limit=3000 ;; esac
+  limit=$((limit + 600))
+  script="$(printf "RANGES='%s'\nKS='%s'\nLIMIT=%s\n" "$RACE_SVC" "$ks" "$limit"; cat <<'GUEST'
+if [ -r /proc/net/nf_conntrack ]; then CT='cat /proc/net/nf_conntrack'; CTSRC=proc
+elif command -v conntrack >/dev/null 2>&1; then CT='conntrack -L -f ipv4'; CTSRC=conntrack-tool
+else CT=''; CTSRC=none; fi
+echo "AIRGAP-RACE-SAMPLER conntrack=${CTSRC} kube-services=${KS:-none} ranges=${RANGES} every 0.5 s"
+awk -v ks="${KS:+$KS 2>/dev/null}" -v ct="${CT:+$CT 2>/dev/null}" -v ranges="$RANGES" -v limit="$LIMIT" '
+function ipn(s,  a) { if (split(s, a, ".") != 4) return -1; return ((a[1] * 256 + a[2]) * 256 + a[3]) * 256 + a[4] }
+function owned(s,  n, i, d) {
+  n = ipn(s); if (n < 0) return 0
+  for (i = 1; i <= nr; i++) { d = 2 ^ (32 - rp[i]); if (int(n / d) == int(rn[i] / d)) return 1 }
+  return 0
+}
+function now(  c, t) { c = "date +%s.%N"; c | getline t; close(c); return t }
+BEGIN {
+  nr = split(ranges, r, " ")
+  for (i = 1; i <= nr; i++) { split(r[i], p, "/"); rn[i] = ipn(p[1]); rp[i] = p[2] + 0 }
+  t0 = now(); print "AIRGAP-RACE-SAMPLER start " t0; fflush()
+  while (1) {
+    t = now(); if (t + 0 >= t0 + limit) break
+    if (ks != "") {
+      while ((ks | getline l) > 0) {
+        n = split(l, f, " ")
+        for (i = 1; i < n; i++) if (f[i] == "-d" || f[i] == "daddr") {
+          ip = f[i + 1]; sub(/\/32$/, "", ip)
+          if (ip ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && !(ip in seen)) { seen[ip] = t; print "svc-seen " t " " ip }
+        }
+      }
+      close(ks)
+    }
+    if (ct != "") {
+      while ((ct | getline l) > 0) {
+        n = split(l, f, " "); proto = ""; st = ""; un = ""; ns = 0; nd = 0; nsp = 0; ndp = 0
+        src[1] = src[2] = dst[1] = sp[1] = dp[1] = ""
+        for (i = 1; i <= n; i++) {
+          if (proto == "" && (f[i] == "tcp" || f[i] == "udp")) proto = f[i]
+          else if (f[i] ~ /^src=/) src[++ns] = substr(f[i], 5)
+          else if (f[i] ~ /^dst=/) dst[++nd] = substr(f[i], 5)
+          else if (f[i] ~ /^sport=/) sp[++nsp] = substr(f[i], 7)
+          else if (f[i] ~ /^dport=/) dp[++ndp] = substr(f[i], 7)
+          else if (st == "" && f[i] ~ /^[A-Z_]+$/) st = f[i]
+          else if (f[i] == "[UNREPLIED]") un = " UNREPLIED"
+        }
+        if (proto == "" || !owned(dst[1])) continue
+        if (src[2] == dst[1]) {
+          k = proto " " src[1] ":" sp[1] " " dst[1] ":" dp[1]
+          if (!(k in flows)) { flows[k] = t; print "unnat " t " " k " " (st == "" ? "-" : st) un }
+        } else {
+          k = proto " " dst[1] ":" dp[1]
+          if (!(k in natted)) { natted[k] = t; print "nat-seen " t " " k " " src[2] }
+        }
+      }
+      close(ct)
+    }
+    print "tick " t; fflush()
+    system("sleep 0.5")
+  }
+  print "AIRGAP-RACE-SAMPLER deadline " t; fflush()
+}'
+GUEST
+)"
+  gexec "$script" > "${LANE}/race-sampler.txt" 2>&1 &
+  SAMPLER_PID=$!
+  while [ "$i" -lt 20 ] && kill -0 "$SAMPLER_PID" 2>/dev/null && ! grep -q '^tick ' "${LANE}/race-sampler.txt" 2>/dev/null; do
+    sleep 0.5; i=$((i + 1))
+  done
+  echo "airgap lane 9: race sampler started on the guest ($(head -1 "${LANE}/race-sampler.txt" 2>/dev/null || echo 'nothing yet'))"
+}
+
+# race_sampler_stop: the end of step 9. A sampler that already ended is said so; one still running is stopped.
+race_sampler_stop() {
+  local how="had already ended"
+  [ -n "$SAMPLER_PID" ] || return 0
+  if kill -0 "$SAMPLER_PID" 2>/dev/null; then
+    local leaf i=0
+    for leaf in $(race_leaves "$SAMPLER_PID"); do kill "$leaf" 2>/dev/null || true; done
+    while [ "$i" -lt 10 ] && kill -0 "$SAMPLER_PID" 2>/dev/null; do sleep 0.2; i=$((i + 1)); done
+    ! kill -0 "$SAMPLER_PID" 2>/dev/null || race_kill "$SAMPLER_PID"
+    how="stopped"
+  fi
+  wait "$SAMPLER_PID" 2>/dev/null || true
+  SAMPLER_PID=""
+  echo "AIRGAP-RACE-SAMPLER stopped-by-lane $(race_ts)" >> "${LANE}/race-sampler.txt"
+  note "airgap lane 9: race sampler ${how}: $(grep -c '^tick ' "${LANE}/race-sampler.txt" 2>/dev/null) tick(s), $(grep -c '^svc-seen ' "${LANE}/race-sampler.txt" 2>/dev/null) ClusterIP(s) first-seen, $(grep -c '^unnat ' "${LANE}/race-sampler.txt" 2>/dev/null) un-NATed flow(s) to the Service range ($(sed -n 's/^AIRGAP-RACE-SAMPLER \(conntrack=[^ ]* kube-services=.*\) ranges=.*/\1/p' "${LANE}/race-sampler.txt" 2>/dev/null | head -1))"
+}
+
+# race_services: after P09, every Service's namespace/name, ClusterIP and creationTimestamp
+race_services() (
+  set +eu +o pipefail
+  gk get services -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name} {.spec.clusterIP} {.metadata.creationTimestamp}{"\n"}{end}' \
+    > "${LANE}/race-services.txt" 2> "${LANE}/race-services.err" \
+    || note "airgap lane 9: race probe: the Services could not be listed ($(tail -1 "${LANE}/race-services.err"))"
+)
+
+# race_verdict DENIES: each deny over the cut window to the Service range, with its time from Loki, against the
+# sampler and the Services; then the AIRGAP-RACE line
+race_verdict() (
+  set +eu +o pipefail
+  : > "${LANE}/race-deny-times.txt"
+  if [ "${1:-0}" -gt 0 ] 2>/dev/null; then
+    python3 - "$TOCKMOX_EDGE_LOKI_URL" "$TOCKMOX_EDGE_LOKI_SELECTOR" "$TOCKMOX_EDGE_DENY_MATCH" "$GUEST_IP" "$T0" "$T1" \
+      > "${LANE}/race-deny-times.txt" 2> "${LANE}/race-deny-times.err" <<'PY'
+import json, sys, urllib.parse, urllib.request
+from datetime import datetime
+url, sel, match, guest, since, until = sys.argv[1:7]
+t0, t1 = (datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp() for s in (since, until))
+pipe = f'|= "{match}" |~ "(^|[^0-9.]){guest.replace(".", "[.]")}([^0-9.]|$)"'
+q = urllib.parse.urlencode({"query": f"{sel} {pipe}", "start": str(int(t0 * 1e9)), "end": str(int(t1 * 1e9)),
+                            "limit": "2000", "direction": "forward"})
+with urllib.request.urlopen(f"{url.rstrip('/')}/loki/api/v1/query_range?{q}", timeout=20) as r:
+    d = json.load(r)
+for stream in (d.get("data") or {}).get("result") or []:
+    for ts, line in stream.get("values") or []:
+        print(f"{ts}\t{line[:300]}")
+PY
+  fi
+  python3 - "$GUEST_IP" "$RACE_SVC" "${LANE}/race-sampler.txt" "${LANE}/race-services.txt" "${LANE}/race-deny-times.txt" \
+    > "${LANE}/race-verdict.txt" 2> "${LANE}/race-verdict.err" <<'PY'
+import ipaddress, re, sys
+from datetime import datetime, timezone
+guest, ranges, sampler, services, stamps = sys.argv[1:6]
+nets = [ipaddress.ip_network(r) for r in ranges.split()]
+def in_svc(a):
+    try:
+        return any(ipaddress.ip_address(a) in n for n in nets)
+    except ValueError:
+        return False
+def lines(p):
+    try:
+        return open(p, encoding="utf-8", errors="replace").read().splitlines()
+    except OSError:
+        return []
+def iso(t):
+    return datetime.fromtimestamp(t, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+ticks, seen, unnat, source = 0, {}, {}, "conntrack=? kube-services=?"
+for l in lines(sampler):
+    p = l.split()
+    try:
+        if l.startswith("AIRGAP-RACE-SAMPLER conntrack="):
+            source = " ".join(p[1:3])
+        elif p and p[0] == "tick":
+            ticks += 1
+        elif p and p[0] == "svc-seen" and len(p) >= 3:
+            seen.setdefault(p[2], float(p[1]))
+        elif p and p[0] == "unnat" and len(p) >= 5:
+            ip, _, port = p[4].rpartition(":")
+            unnat.setdefault((p[2], ip, port), float(p[1]))
+    except ValueError:
+        pass
+svc = {}
+for l in lines(services):
+    p = l.split()
+    if len(p) == 3:
+        try:
+            svc[p[1]] = (p[0], datetime.fromisoformat(p[2].replace("Z", "+00:00")).timestamp())
+        except ValueError:
+            pass
+denies = []
+for l in lines(stamps):
+    ts, _, raw = l.partition("\t")
+    t = [x.strip() for x in raw.split(",")]
+    if guest not in t or not ts.isdigit():
+        continue
+    i = t.index(guest)
+    proto = next((x for x in reversed(t[:i]) if x in ("tcp", "udp", "icmp", "igmp")), "?")
+    dst = t[i + 1] if i + 1 < len(t) else "?"
+    port = t[i + 3] if proto in ("tcp", "udp") and i + 3 < len(t) else ""
+    if in_svc(dst):
+        denies.append((int(ts) / 1e9, proto, dst, port))
+read_ks = "kube-services=none" not in source and bool(seen)
+fit = 0
+for t, proto, dst, port in denies:
+    why = []
+    name, created = svc.get(dst, ("no Service", None))
+    if created is None:
+        why.append("no Service holds this ClusterIP after P09")
+    elif t < created:
+        why.append("before its Service's create")
+    fs = seen.get(dst)
+    if fs is None and not read_ks:
+        why.append("KUBE-SERVICES was not read")
+    elif fs is not None and t >= fs:
+        why.append("after its ClusterIP's first-seen")
+    flow = unnat.get((proto, dst, port))
+    if flow is None:
+        why.append("no un-NATed flow to it")
+    fit += 0 if why else 1
+    print("AIRGAP-RACE-DENY %s %s:%s at %s service %s created %s first-seen %s un-NATed %s: %s" % (
+        proto, dst, port, iso(t), name, iso(created) if created is not None else "-",
+        iso(fs) if fs is not None else "never", iso(flow) if flow is not None else "none",
+        "fits" if not why else "misses, " + "; ".join(why)))
+if not ticks:
+    print("AIRGAP-RACE not-confirmed: the sampler recorded no tick, so nothing was observed (%s)" % source)
+elif not denies:
+    print("AIRGAP-RACE not-confirmed: no deny to the Service range (%s) over the cut window (%s)" % (ranges, source))
+elif fit == len(denies):
+    print("AIRGAP-RACE confirmed: %d of %d deny line(s) to the Service range fall after their Service's create, "
+          "before their ClusterIP's first-seen in KUBE-SERVICES, with an un-NATed flow (%s)" % (fit, len(denies), source))
+else:
+    print("AIRGAP-RACE not-confirmed: %d of %d deny line(s) to the Service range fit (%s)" % (fit, len(denies), source))
+PY
+  if grep -q '^AIRGAP-RACE ' "${LANE}/race-verdict.txt" 2>/dev/null; then tee -a "$REPORT" < "${LANE}/race-verdict.txt"
+  else note "AIRGAP-RACE not-confirmed: the probe's verdict could not be made ($(tail -1 "${LANE}/race-verdict.err" 2>/dev/null))"; fi
+)
 
 note "airgap lane: commit ${TOCKMOX_DOCS_REF} on ${TOCKMOX_VM_NETWORK}, guest ${GUEST_IP}, mirror ${TOCKMOX_REGISTRY_MIRROR} (nofallback, counted at the edge)"
 
@@ -296,7 +620,11 @@ print(" ".join(map(str, nets)) + "|" + ", ".join(said))
 ' "$live_pod" "$live_svc" "$svc_probe" 2>"${LANE}/guest-ranges.err")" \
   || fail "the guest cluster's own ranges: $(tail -1 "${LANE}/guest-ranges.err")"
 note "airgap lane 3: the guest cluster's own ranges, reported and not counted against the clause: ${GUEST_RANGES#*|}"
+RACE_SVC="$(printf '%s' "${GUEST_RANGES#*|}" | python3 -c 'import re, sys
+m = re.search(r"(?:^|, )service ((?:[0-9.]+/[0-9]+ ?)+) \(", sys.stdin.read())
+print(m.group(1).strip() if m else "")' 2>/dev/null || true)"
 GUEST_RANGES="${GUEST_RANGES%%|*}"
+race_step3 || true
 
 # 4. the mirror: a verified TLS round trip, and the only registry
 step "4 mirror-tls and mirror-proof"
@@ -392,6 +720,7 @@ export TOCKMOX_P09_TOCKMOX_REPO_URL="$TM_URL" TOCKMOX_P09_TOCKMOX_REVISION="$TAG
 export TOCKMOX_P09_STATE="${LANE}/p09-state" TOCKMOX_P09_BUDGET="${TOCKMOX_P09_BUDGET:-3000}"
 export TOCKMOX_P09_LAN_CIDR="${TOCKMOX_P09_LAN_CIDR:-${NODE_IP%.*}.0/24}"
 export TOCKMOX_P09_POOL="${TOCKMOX_P09_POOL:-${NODE_IP%.*}.240-${NODE_IP%.*}.250}"
+race_sampler_start || true
 T0="$(now)"
 INSTALL_STARTED=1
 echo "airgap lane 9: P09 under the cut, from ${T0}"
@@ -411,6 +740,8 @@ if [ -n "$d" ] && [ -s "${d}/P09-install-md-end-to-end" ]; then
   p09_rec="${o:-MISSING} ${r:-}"
 fi
 note "airgap lane 9: P09 exit ${P09_RC}, declared ${p09_rec}"
+race_sampler_stop || true
+race_services || true
 
 # 10. the edge's denies over the cut window, by destination
 step "10 count the edge's denies"
@@ -460,6 +791,7 @@ PY
   counted="$(sed -n 's/^COUNTED //p' "${LANE}/cut-by-destination.txt")"
 fi
 note "airgap lane 10: ${counted} deny line(s) count against the clause (ignored: ${IGNORE:-none}; the guest cluster's own: ${GUEST_RANGES})"
+race_verdict "$n" || true
 
 # 11. the judgment; finish() destroys the throwaway and prints AIRGAP-RESULT
 if [ "$P09_RC" != 0 ] || [ "${p09_rec%% *}" != PASS ]; then
