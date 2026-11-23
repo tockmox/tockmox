@@ -498,6 +498,10 @@ run_gate "the image extractor handles every quoting form" \
   bash tools/lib/extract-images.sh --selftest
 run_gate "mint-secrets refuses a value with a control character" \
   bash tools/mint-secrets.sh --selftest
+# The air-gap mirror script's own selftest, which nothing ran before: --verify goes red on one miss,
+# and a NAME:TAG@sha256 entry lands, and is verified, under its tag as well as its derived tag.
+run_gate "mirror-images lands a tag-plus-digest entry under its tag too, and --verify goes red on one miss" \
+  bash tools/mirror-images.sh --selftest
 
 # A TOOL THAT CANNOT RUN IS NOT A FINDING, added 2026-10-16. Four gates
 # partition on a missing helm or promtool; each now also treats one that is on
