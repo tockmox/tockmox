@@ -259,6 +259,36 @@ costs you, with the reasoning in the documentation rather than here.
   release marker. No change for a site that names no `contributes`
   (docs/administration/feature-pages.md).
 
+- **The console has a feature registry, and an add-on can contribute to it
+  (experimental).** The Tockmox UI ships a registry of its own features
+  (`tockmox-ui/app/features.yaml`: each one's name, `stability`, the release
+  that first ships it and what it contributes), read and checked at start-up. A
+  feature, or an add-on through a new data-only `adminUi.contributes` block in
+  `addon.yaml`, can add rail pages, at most two top-bar sections, a part on
+  Status with alerts that count toward the health pill, a help page and a Home
+  tile to retire; turning the feature off removes all of it. A `contributes`
+  block that names a field the format does not is refused, by the console at
+  start-up and by `tools/check-addon-manifest.sh`, whose selftest plants each
+  fault. Pages and Home tiles carry at most one release marker, Private, Preview
+  or Experimental. Preview is computed from the CHANGELOG the UI image bundles:
+  it marks a feature the running build has and no tagged release lists, so it
+  never shows on a tagged build. Platform > Capabilities lists experimental
+  features in an Experimental section of their own. No change for a site that
+  names no `contributes` (docs/administration/feature-pages.md, "Release
+  markers"; addons/README.md).
+
+- **The Context Analyzer add-on, off by default (experimental).**
+  `apps.contextAnalyzer.enabled: true` in the AI layer renders the Analyzer (a
+  Deployment and a Service), its own CNPG database, a NetworkPolicy that admits
+  only the gateway's pods and Prometheus, a scrape, alert rules and a Grafana
+  dashboard, and loads its hook into the model gateway through the existing
+  hooks ConfigMap, so it records what each request carried, its class and the
+  route that served it. A default render is unchanged. Tockmox publishes no
+  image for it: the site builds one from the Context Analyzer source and sets it
+  under `contextAnalyzer`, and the render refuses, naming each missing item, a
+  configuration that would capture nothing. Held below stable at 0.9.0
+  (docs/administration/context-analyzer.md).
+
 - **Fuzzing for the console's two input parsers.** ClusterFuzzLite (`.github/workflows/fuzz.yaml`, build in `.clusterfuzzlite/`) runs atheris targets in `tockmox-ui/fuzz/` against the short-path redirect and the cron evaluator: for five minutes on a pull request that changes the console's code, and weekly for twenty. Each target asserts properties, not only "no exception": a redirect never leaves the configured host, never carries a control character, space or dot segment; a cron answer is a real fire time on the right side of now, with none skipped. Nothing ships in the image. `tockmox-ui/fuzz/README.md`.
 
 - **The console can send someone a password recovery link and change who is in the user group (experimental, off by default).** **Platform › Identity** lists the people Authentik knows. For a person who is not an administrator it makes a recovery link, good once for 1 hour, 24 hours or 3 days, shown to you once to send them and kept in no record or log line; and it adds a person to, or removes them from, the user group. Each asks for a fresh sign-in and lands in Activity. The bounds are Authentik's own: one service account, `tockmox-console-actions`, whose role sees users and nothing else globally, holds add and remove on the user group object only, and holds a recovery link only for the people a new CronJob, `tockmox-console-identity-grants`, grants it (active, a person, not a superuser, not in the admin group or a group under it), taking it back from everyone else and failing closed. Creating and deactivating users stay in Authentik's console, because Authentik 2026.8 cannot grant either without letting the account set a user's groups, the admin group included. Turn on with `tools/mint-secrets.sh --with-console-actions` (or the same flag on `install/bootstrap-secrets.sh`), then `sso.consoleActions.enabled` in the identity layer and `tockmoxUi.actions.identity.enabled` in the AI layer. docs/administration/identity.md, "From the console".
@@ -906,7 +936,54 @@ costs you, with the reasoning in the documentation rather than here.
   evaluates the expression against every ServiceAccount the nine layers ship.
   See `docs/administration/namespace-guard.md`.
 
+- **`global.airGapped` says a site has no route out, and the model gateway then
+  uses the price map bundled in LiteLLM's image.** LiteLLM fetches its model
+  price map from the internet each time it starts, which on a cut-off site is a
+  denied connection on every start and restart. With `global.airGapped: true`,
+  or `global.imageRegistry` set, the AI layer sets `LITELLM_LOCAL_MODEL_COST_MAP`
+  for the proxy and the migrations Job through an optional ConfigMap,
+  `tockmox-litellm-airgap-env`; a connected site keeps the live fetch and its
+  newer prices. A site on the node-side containerd mirror leaves
+  `global.imageRegistry` empty, so this key is what tells the charts it is cut
+  off. It is declared, default `false`, in every layer's values and schema, and
+  a preflight refuses an air-gapped site that replaces `litellm.extraEnvVars`
+  without the entry. `tools/check-litellm-price-map.sh` renders the connected,
+  `airGapped`, `imageRegistry` and both-set cases. The migrations Job, which the
+  gateway chart names from a hash of its values, is created once under a new
+  name on the first upgrade. **Action, for a site with no route out:** set
+  `global.airGapped: true` under the `global:` block of your site values
+  (docs/deployment/airgap.md, step 2).
+
+- **A gate counts the vendored subchart archives.**
+  `tools/check-vendored-charts.sh`, run by `tools/check-all.sh`, checks that
+  every dependency declared in `charts/*/Chart.yaml` has its archive under
+  `charts/*/charts/` at the declared version and that no undeclared archive is
+  there, and its selftest goes red on a missing, an extra and a mis-versioned
+  archive. It says so and skips where the dependencies are not fetched. It
+  holds the line under the `TAG-vendored` archives a disconnected install's
+  charts repository now carries (see Fixed).
+
 ### Changed
+
+- **Prisma's telemetry is off for the model gateway on every site.** LiteLLM
+  runs the Prisma CLI for its migrations and when the proxy starts, and Prisma
+  sends a version check and usage data to `checkpoint.prisma.io` unless
+  `CHECKPOINT_DISABLE` is set. The AI layer now sets it in `litellm.envVars`,
+  which reaches the proxy and the migrations Job, and a site's own
+  `litellm.envVars` entries are merged with it. `tools/check-litellm-telemetry.sh`
+  asserts it on the rendered workloads. Nothing to do on upgrade.
+
+- **Grafana never checks grafana.com for plugin updates, and an air-gapped site
+  makes no other plugin call there.** The observability layer's `grafana.ini`
+  sets `check_for_plugin_updates = false` on every site, as it already does for
+  Grafana's own version check. With `global.airGapped: true` or
+  `global.imageRegistry` set it also sets `preinstall_disabled = true` and
+  `public_key_retrieval_disabled = true`, so Grafana neither installs its
+  built-in app plugins from grafana.com at start nor fetches the plugin signing
+  key; an air-gapped Grafana therefore starts without those app plugins. A
+  connected site keeps Grafana's defaults for both. `tools/check-grafana-airgap.sh`
+  asserts all three keys on the rendered ConfigMap, connected and air-gapped.
+  Nothing to do on upgrade.
 
 - **Tockmox / Overview leads with AI.** The first row now answers "can the AI
   serve right now": a one-tile platform verdict (OK, warnings, critical or
