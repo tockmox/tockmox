@@ -1631,6 +1631,13 @@ costs you, with the reasoning in the documentation rather than here.
   Ready (phase: <phase>): <the wait's message>`, on one line, cut at 240
   characters (`docs/operations/backup-restore.md`, "Reading a row").
 
+- **Upstream text in a model-admission pull request now renders as code.** The
+  detail and URL a model registry answered with are quoted in the body of the
+  pull request the model watcher opens inside a fenced block whose fence is
+  longer than any backtick run in that text, so the text cannot render a link,
+  an image, HTML or a note that reads like the opener's own in a body a human
+  reads before approving. Nothing to change on upgrade.
+
 ## [0.8.6] ... 2026-11-17
 
 A security release. It fixes two vulnerabilities, published as GitHub security

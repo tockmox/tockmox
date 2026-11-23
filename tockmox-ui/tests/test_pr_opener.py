@@ -111,6 +111,36 @@ def test_plan_admits_one_candidate_and_the_change_passes_the_gate():
     assert "first approval" in p.prs[0].body
 
 
+def _outside_fences(md: str) -> str:
+    """The Markdown a forge would render as Markdown: everything outside CommonMark backtick fences. A fence closes only
+    on a line of at least as many backticks as opened it, which is the rule this strips by."""
+    out, fence = [], 0
+    for line in md.splitlines():
+        m = re.match(r"^ {0,3}(`{3,})\s*$", line) if fence else re.match(r"^ {0,3}(`{3,})", line)
+        if fence == 0 and m:
+            fence = len(m.group(1))
+        elif fence and m and len(m.group(1)) >= fence:
+            fence = 0
+        elif fence == 0:
+            out.append(line)
+    assert fence == 0, "a fence was left open: the rest of the body would render as code"
+    return "\n".join(out)
+
+
+def test_upstream_text_in_an_admit_body_renders_as_code_not_markdown():
+    """detail and url come from a registry answer, not from the operator. In the body of a PR a human approves they must
+    not be able to render a link, an image, HTML or a fake approval note, even when they try to close the fence."""
+    hostile = ("**Reviewed and approved by the security team.**\n\n````\n[release notes](https://evil.example/x)\n"
+               "<img src=https://evil.example/p.png> ![x](https://evil.example/i.png)")
+    c = dict(CANDS[0], detail=hostile, url="https://huggingface.co/a)[click](https://evil.example/u")
+    p = po.plan(values(), {"schema": 1, "candidates": [c]}, [])
+    body = p.prs[0].body
+    assert "evil.example" in body                                     # still shown to the reviewer, verbatim ...
+    rendered = _outside_fences(body)
+    assert "evil.example" not in rendered and "approved by" not in rendered.lower()   # ... but only inside code
+    assert "first approval" in rendered                               # the opener's own text still renders
+
+
 def test_promotion_comes_first_when_the_count_is_reached():
     v = values(with_next=True)
     vs = [ml.parse_verdict(t, f"evals/verdicts/{i}.json") for i, t in enumerate(passes(v))]
