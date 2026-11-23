@@ -1600,5 +1600,22 @@ if [ "$BD_CASES" -eq 0 ] || { [ "$BD_RC" -ne 0 ] && ! printf '%s\n' "$BD_OUT" | 
   bad "bar-diag-test.sh ran its cases" "rc=${BD_RC}, ${BD_CASES} case(s): $(printf '%s' "$BD_OUT" | tail -3)"
 fi
 
+# What P09 notes when the readiness bar times out: each stuck Application with Argo CD's own words for why, bounded,
+# with the site repository scrubbed, and unreadable input never read as "none" (lib/p09-stuck-apps.py, against fixtures
+# of `kubectl get applications -o json`). It was run by nothing until it was folded in here, like the cases above.
+SA_OUT="$(bash "${HERE}/stuck-apps-test.sh" 2>&1)"; SA_RC=$?
+SA_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) SA_CASES=$((SA_CASES+1)); ok "stuck apps: ${line#ok   }" ;;
+    "FAIL "*) SA_CASES=$((SA_CASES+1)); bad "stuck apps: ${line#FAIL }" "run tests/executed-docs/stuck-apps-test.sh for detail" ;;
+  esac
+done <<EOF_SA
+$SA_OUT
+EOF_SA
+if [ "$SA_CASES" -eq 0 ] || { [ "$SA_RC" -ne 0 ] && ! printf '%s\n' "$SA_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "stuck-apps-test.sh ran its cases" "rc=${SA_RC}, ${SA_CASES} case(s): $(printf '%s' "$SA_OUT" | tail -3)"
+fi
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
