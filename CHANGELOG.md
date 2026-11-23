@@ -1312,6 +1312,16 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **An AI node's bootstrap runs on a fresh Mac with no hand step.**
+  `ai-node/bootstrap-node.sh` installs the Command Line Tools headlessly before
+  its first `git` call (a fresh Mac has only the stub, so even `--dry-run`
+  stopped), makes the `tockmox` account's home directory that Homebrew needs,
+  checks out a toolkit ref that is a branch other than the default (it failed
+  with `'--detach' cannot be used with '-b'`), and shows the forge's GPG signers
+  with Homebrew's `gpg` and stops on an empty list instead of asking you to pin
+  keys it did not show. The converger uses its own account's home, so the
+  documented `sudo -u tockmox ... tockmox-ai-node-converge` commands no longer
+  fail writing into your home. Nothing to do on upgrade.
 - **The overview's Platform tile shows its warning count.** With warnings firing
   it printed `warnings: ${__value.raw}`: Grafana prints a value mapping's text as
   written. The count now shows with the word as its unit (`11 warnings`), and
