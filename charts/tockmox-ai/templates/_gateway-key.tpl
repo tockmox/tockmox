@@ -68,7 +68,7 @@ spec:
     seccompProfile: { type: RuntimeDefault }
   containers:
     - name: mint
-      image: {{ include "tockmox.image" (dict "ctx" $ctx "repo" ($ck.image | default "alpine/k8s:1.37.1")) }}
+      image: {{ include "tockmox.image" (dict "ctx" $ctx "repo" ($ck.image | default "alpine/k8s:1.37.2")) }}
       securityContext:
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: true

@@ -3,9 +3,9 @@
   "components": [
     {
       "name": "alpine/k8s",
-      "purl": "pkg:oci/k8s?repository_url=alpine/k8s&tag=1.37.1",
+      "purl": "pkg:oci/k8s?repository_url=alpine/k8s&tag=1.37.2",
       "type": "container",
-      "version": "1.37.1"
+      "version": "1.37.2"
     },
     {
       "name": "binwiederhier/ntfy",
@@ -249,9 +249,9 @@
     },
     {
       "name": "redis",
-      "purl": "pkg:oci/redis?tag=7.4.11-alpine",
+      "purl": "pkg:oci/redis?tag=7.4.12-alpine",
       "type": "container",
-      "version": "7.4.11-alpine"
+      "version": "7.4.12-alpine"
     },
     {
       "name": "registry.k8s.io/kube-state-metrics/kube-state-metrics",
@@ -310,9 +310,9 @@
     {
       "description": "Helm chart dependency of tockmox-exporters",
       "name": "prometheus-smartctl-exporter",
-      "purl": "pkg:generic/helm/prometheus-smartctl-exporter@0.19.0",
+      "purl": "pkg:generic/helm/prometheus-smartctl-exporter@0.19.2",
       "type": "application",
-      "version": "0.19.0"
+      "version": "0.19.2"
     },
     {
       "description": "Helm chart dependency of tockmox-identity",
