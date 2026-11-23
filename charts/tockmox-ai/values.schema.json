@@ -76,6 +76,25 @@
     "apps": {
       "type": "object",
       "description": "Which components of this layer are deployed.",
+      "properties": {
+        "contextAnalyzer": {
+          "type": "object",
+          "description": "The Context Analyzer add-on's switch (apps.contextAnalyzer.enabled, off by default). Experimental at 0.9.0, held below stable and ruled again at 0.10.0, though `apps` itself is stable.",
+          "properties": {
+            "enabled": {
+              "type": [
+                "boolean",
+                "null"
+              ],
+              "description": "true or false to decide explicitly; unset or null to follow the owning capability."
+            }
+          },
+          "additionalProperties": false,
+          "x-tockmox-stability": "experimental",
+          "x-tockmox-stability-ruled": "2026-11-22",
+          "x-tockmox-stability-rerule": "0.10.0"
+        }
+      },
       "additionalProperties": {
         "type": "object",
         "properties": {
@@ -1668,11 +1687,11 @@
     },
     "tockmoxUi": {
       "x-tockmox-stability": "experimental",
-      "x-tockmox-stability-ruled": "2026-10-08",
-      "x-tockmox-stability-rerule": "0.9.0",
+      "x-tockmox-stability-ruled": "2026-11-22",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "object",
       "additionalProperties": false,
-      "description": "The Tockmox UI (experimental in 0.8.0): opt-in Deployment with its own NetworkPolicy; site-built image. See docs/administration/tockmox-ui.md.",
+      "description": "The Tockmox UI (experimental): opt-in Deployment with its own NetworkPolicy; site-built image. Held below stable at 0.9.0, re-ruled at 0.10.0, with everything beneath it: config.features.platform.* (including ledgerUrl) and platformCatalog. See docs/administration/tockmox-ui.md.",
       "properties": {
         "enabled": {
           "type": "boolean"
@@ -1684,6 +1703,19 @@
           "type": "object",
           "description": "The UI's own config.yaml (site, apps, roles, oidc, features, updateCheck ...).",
           "properties": {
+            "features": {
+              "type": "object",
+              "description": "The UI's feature switches. Only the keys this schema names are listed; the others are read from config.yaml as given.",
+              "properties": {
+                "platform": {
+                  "type": "object",
+                  "description": "Platform Management (enabled, ledgerUrl, siteNamespaces and the rest; docs/administration/platform-management.md). Experimental at 0.9.0: the keys under it may change before they are ruled again at 0.10.0.",
+                  "x-tockmox-stability": "experimental",
+                  "x-tockmox-stability-ruled": "2026-11-22",
+                  "x-tockmox-stability-rerule": "0.10.0"
+                }
+              }
+            },
             "tockmoxRepo": {
               "type": "string",
               "description": "Optional. Unset, the Tockmox layers are the Applications whose source path is charts/tockmox-<layer>, whichever repository serves them. Set it to match on one repository URL."
