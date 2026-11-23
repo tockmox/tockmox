@@ -354,9 +354,9 @@
     {
       "description": "Helm chart dependency of tockmox-crds",
       "name": "prometheus-operator-crds",
-      "purl": "pkg:generic/helm/prometheus-operator-crds@32.0.2",
+      "purl": "pkg:generic/helm/prometheus-operator-crds@33.0.2",
       "type": "application",
-      "version": "32.0.2"
+      "version": "33.0.2"
     },
     {
       "description": "Helm chart dependency of tockmox-devops",
