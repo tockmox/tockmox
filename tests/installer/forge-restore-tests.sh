@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Sourced by run.sh. Groups R1-R19: install/forge-restore.sh, reached as
+# Sourced by run.sh. Groups R1-R20: install/forge-restore.sh, reached as
 # `tockmox-install.sh --restore-from ...` and `tockmox-install.sh repair-forge`.
 #
-# HERMETIC. Every case is a refusal, or a dry run, and each one comes before any
-# contact with a cluster: the assertion that matters is that the shims' call log
-# holds no kubectl or helm call at all. The copy and the kit are REAL: a site
+# HERMETIC. Every case but R20 is a refusal, or a dry run, and each one comes before
+# any contact with a cluster: the assertion that matters is that the shims' call log
+# holds no kubectl or helm call at all. R20 goes on to the repair's compare of Argo
+# CD's Applications, with bootstrap-forge stood in for: what it checks is the
+# script's own reading of those Applications, not the forge install. The copy and the kit are REAL: a site
 # repository committed and bundled with git, its SHA-256 written the way the off-site
 # job writes it, and a kit encrypted with openssl the way bootstrap-forge writes it,
 # carrying a sealing key backup encrypted the way bootstrap-secrets writes one. The
@@ -229,3 +231,34 @@ rs_case r19; rs_dump tockmox/site 2
 rs_run --restore-from file:media/site.bundle --dump media/dump.tar.gz "${RS_KIT[@]}" --site-out ./restored --dry-run
 assert_artifact "R19 a dump that does not read whole is refused" \
   "echo $RS_STATUS; rs_err | grep -c 'the forge dump does not read whole: MANIFEST says pull-requests 2, but 1 were read'" "$(printf '1\n1')"
+
+# R20. The repair stage itself, reached hermetically. The route is a copy of install/
+# whose bootstrap-forge.sh is a stand-in that only records its call (installing and
+# seeding a real forge was run on a lab cluster, as above); the shims answer Argo CD's
+# Applications. The case is the compare after the forge is back: one read of an
+# Application caught mid-sync (Progressing) is not a change, so repair reads again
+# SETTLE_S later and reports only what differs on both reads.
+rs_repair_route() {  # -> $D/inst: install/ with a bootstrap-forge.sh that records its call
+  rm -rf "$D/inst"; cp -R "$(dirname "$INSTALLER")" "$D/inst"
+  cat > "$D/inst/bootstrap-forge.sh" <<'STAND_IN'
+#!/usr/bin/env bash
+printf 'bootstrap-forge %s\n' "$*" >> "$FAKE_STATE/calls.log"
+STAND_IN
+  mkdir -p "$D/state/cluster/ns"; : > "$D/state/cluster/ns/argocd"
+}
+RS_REPAIR=(repair-forge --restore-from file:media/site.bundle --kit-out kits/new.kit --passphrase-file inputs/pass
+  --no-sealing-key-backup --no-review-history --context lab-test --yes-context lab-test --yes-server https://192.0.2.10:6443)
+rs_out() { cat "$D/out/stdout" "$D/out/stderr"; }
+rs_case r20; rs_repair_route; echo flicker > "$D/state/apps-mode"
+INSTALLER="$D/inst/tockmox-install.sh" TOCKMOX_TEST_POLL_S=0 rs_run "${RS_REPAIR[@]}"
+assert_artifact "R20 the repair route reaches the compare: the forge is seeded and the repair ends done" \
+  "echo $RS_STATUS; grep -c '^bootstrap-forge ' '$D/state/calls.log'; rs_out | grep -c 'the forge was repaired from the copy at'" \
+  "$(printf '0\n1\n1')"
+assert_artifact "R20 an Application Progressing on one read, then Synced and Healthy, is read again and reported as no change" \
+  "cat '$D/state/apps-reads'; rs_out | grep -c 'read the same revision and health as before'; rs_out | grep -c 'differs from before the repair' || true" \
+  "$(printf '3\n1\n0')"
+rs_case r20b; rs_repair_route; echo flip > "$D/state/apps-mode"
+INSTALLER="$D/inst/tockmox-install.sh" TOCKMOX_TEST_POLL_S=0 rs_run "${RS_REPAIR[@]}"
+assert_artifact "R20 an Application that differs on both reads is still reported, as it reads now" \
+  "echo $RS_STATUS; cat '$D/state/apps-reads'; rs_out | grep -c 'differs from before the repair'; rs_out | grep -c '^ *> tockmox-ai Synced Progressing\$'" \
+  "$(printf '0\n3\n1\n1')"
