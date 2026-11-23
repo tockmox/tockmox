@@ -535,6 +535,23 @@ claim:  litellm.proxy_config.model_list
 test:   awk '/^modelGateway:/{M=1;next} M && /^[a-zA-Z]/{M=0} M && /model_list/{f=1} END{print f+0}' charts/tockmox-ai/values.yaml
 expect: 0
 
+# The volume coverage table in backup-restore.md has one row per claim the
+# charts' own templates write. A template that adds a claim changes this count,
+# and the table needs a row for it before the count is raised here.
+page:   docs/operations/backup-restore.md
+claim:  templates write five claims of their own
+test:   grep -rho 'kind: PersistentVolumeClaim' charts/*/templates | wc -l
+expect: 5
+states: [A-Za-z0-9]+ claims of their own
+
+# Stated NEGATIVELY on the same page: no Longhorn volume is backed up on a
+# schedule, because no chart renders a Longhorn RecurringJob. The day one does,
+# the coverage table's "taken by you" rows become wrong.
+page:   docs/operations/backup-restore.md
+claim:  wire Longhorn recurring jobs
+test:   grep -rl 'kind: RecurringJob' charts/*/templates | wc -l
+expect: 0
+
 # ---------------------------------------------------------------------------
 # CLASSES, added 2026-09-04. The structural half of the 2026-09-03
 # finding: the entries above check sentences somebody remembered to register,

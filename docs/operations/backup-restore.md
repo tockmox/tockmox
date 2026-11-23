@@ -725,6 +725,42 @@ grep -c 'tls.key' "$KEY_BACKUP"
 
 At least 1, on a copy that is not on the machine that built the cluster.
 
+### Every volume the database backups do not cover
+
+The CNPG backups on this page cover the model gateway's database, Authentik's
+database on CloudNativePG and, when `grafanaDatabase.enabled` is on, Grafana's.
+Every other claim below holds data those backups never see. The charts' own
+templates write five claims of their own; the upstream charts and the built-in
+forge write the rest.
+
+**Nothing backs up a Longhorn volume on a schedule.** The chart wires Longhorn's
+BackupTarget and ships the `longhorn-backup` snapshot class, but it does not
+wire Longhorn recurring jobs, so a Longhorn volume has a backup only when
+someone takes a `VolumeSnapshot` through that class. Each row therefore names
+the path that exists and either the run that proved it or what is lost without
+it. A volume on `local-path` cannot use the class at all: the class's driver is
+Longhorn's.
+
+| Claim | When it exists | What it holds | Backup path | Proved by, or lost without it |
+|---|---|---|---|---|
+| Open WebUI's data volume (upstream chart) | `aiPlane` on | The console's own database (the chart sets no `DATABASE_URL`, so the upstream default holds it on this volume): accounts, chats, uploads | `VolumeSnapshot` through `longhorn-backup`, taken by you | **Restored** 2026-10-01 in the production migration, with its restore drill passing afterwards ([below](#what-is-not-certified-here)). No scheduled backup or drill |
+| Garage `meta` and `data` (`tockmox-platform`) | `dataProtection` on | Every object in the shipped store: database archives sent to it, Longhorn backups sent to it, the drill register | `VolumeSnapshot` through `longhorn-backup` to an off-cluster BackupTarget, never into Garage itself ([circular](#longhorn-backups-into-the-shipped-garage-are-circular)) | **Restored**, the metadata volume, 2026-10-01, with its restore drill passing afterwards. Without a copy off the cluster, losing the cluster loses every backup held only here and the register's history |
+| Grafana's volume (upstream chart) | observability on, `grafanaDatabase.enabled` off (the default) | Grafana's own database: preferences, annotations, local accounts, anything built in the UI | `VolumeSnapshot` through `longhorn-backup`, or move Grafana onto its CNPG database ([monitoring](monitoring.md)) | **Lost without it:** everything not in git. Dashboards come back from their ConfigMaps, SSO users on their next sign-in, the admin from its Secret |
+| Alertmanager's volume (upstream chart) | observability on | Silences and the notification log | `VolumeSnapshot` through `longhorn-backup` | **Lost without it:** every silence, so each deliberately quieted alert fires again; the notification log rebuilds within one repeat interval |
+| `tockmox-ntfy` (`tockmox-observability`) | notifications on, ntfy on | The message cache (24 hours by default), attachments, and the auth database | `VolumeSnapshot` through `longhorn-backup` | **Lost without it:** the topic's recent messages and attachments. Users, access rules and tokens come back, because they are provisioned from the `tockmox-ntfy-auth` Secret at start |
+| Prometheus TSDB (upstream chart) | observability on | Metric history | None: `local-path`, by the [storage policy](../administration/storage.md) | **Lost without it:** all metric history, and a rescheduled pod starts empty as well |
+| Loki's volume (upstream chart) | observability on | Log history | None: `local-path`, by the storage policy | **Lost without it:** all log history |
+| `tockmox-model-watch-report` (`tockmox-ai`) | the model watcher on (off by default) | The latest watch report | None | **Lost without it:** the last report, until the next scheduled run writes a new one |
+| `tockmox-eval-runner-status` (`tockmox-ai`) | the eval runner on (off by default) | Run progress, and the results and verdicts the runs write | `evidence.pullRequests: true` also puts the evidence in the site repository | **Lost without it:** run progress and every result or verdict kept only here |
+| The Context Analyzer's database (`tockmox-ai`, a CNPG cluster) | `apps.contextAnalyzer.enabled` (off by default) | What each gateway request carried | None: its Cluster has no object store or scheduled backup | **Lost without it:** the Analyzer's whole record |
+| Authentik's bundled Postgres (upstream chart) | `authentik.postgresql.enabled`, on an install that keeps it | Authentik's database | The nightly `pg_dump` in the table above | **Restored** 2026-10-10 on a lab, with a sign-in afterwards |
+| The built-in forge's volume | the built-in forge | The site repository, its pull requests and reviews | The off-site copy, the nightly forge dump and the recovery kit ([rebuilding from the off-site copy](../administration/site-forge-recovery.md)) | **Rebuilt** on lab clusters; what a rebuild can lose is stated on that page |
+| `posture-probe-reports` (the Posture Probe add-on) | the add-on installed | The kept reports | None | **Lost without it:** the kept reports, until the next run writes one |
+
+To see which of these a site actually has, `kubectl get pvc -A` lists every
+claim with its class. A claim that is neither a row above nor a database this
+page backs up is one you added; give it a row of your own.
+
 ## 7. The whole-cluster story, in one place
 
 Everything above protects data inside a cluster that still exists. Losing the
