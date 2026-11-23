@@ -31,16 +31,26 @@ case "${rest[0]:-} ${rest[1]:-}" in
       exit 0 ;;
   "create namespace") : > "$C/ns/${rest[2]}"; exit 0 ;;
   "get applications.argoproj.io")
-      # Argo CD's Applications, for the rebuild drill's wait (forge-drill-tests.sh K8), per
-      # $FAKE_STATE/apps-mode: settle (always clean), flip (clean once, then tockmox-ai
-      # Progressing) or flicker (Progressing on the second read only). Each read is counted in
-      # apps-reads. No apps-mode: nothing to list, as before.
+      # Argo CD's Applications, for the rebuild drill's wait (forge-drill-tests.sh K8) and the
+      # forge repair's compare (forge-restore-tests.sh R20), per $FAKE_STATE/apps-mode: settle
+      # (always clean), flip (clean once, then tockmox-ai Progressing) or flicker (Progressing on
+      # the second read only). Each read of their state is counted in apps-reads. No apps-mode:
+      # nothing to list, as before.
       [ -e "$S/apps-mode" ] || exit 1
+      # The repair's other two reads, not counted: when each was last compared (always after the
+      # repair seeded the forge) and their conditions (none).
+      case " ${rest[*]} " in
+        *reconciledAt*) printf '2099-01-01T00:00:00Z\n2099-01-01T00:00:00Z\n'; exit 0 ;;
+        *conditions*)   printf 'tockmox-root \ntockmox-ai \n'; exit 0 ;;
+      esac
       mode="$(cat "$S/apps-mode")"; n=$(( $(cat "$S/apps-reads" 2>/dev/null || echo 0) + 1 ))
       printf '%s\n' "$n" > "$S/apps-reads"
       ai=Healthy
       { [ "$mode" = flip ] && [ "$n" -ge 2 ]; } || { [ "$mode" = flicker ] && [ "$n" -eq 2 ]; } && ai=Progressing
       printf 'tockmox-root Synced Healthy\ntockmox-ai Synced %s\n' "$ai"
+      exit 0 ;;
+  "annotate application.argoproj.io")
+      [ -e "$S/apps-mode" ] || exit 1   # the repair asks Argo CD to compare again; nothing to keep
       exit 0 ;;
   "get crd")  [ -n "$ctrl_name" ]; exit $? ;;
   "get deploy")

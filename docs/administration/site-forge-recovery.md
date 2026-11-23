@@ -206,7 +206,9 @@ backup to fold in.
 
 **Success condition:** it ends with `the forge was repaired from the copy at
 <commit> (<age>)`, after checking that every Application reads the same revision
-and health against the new forge as before. **It refuses a forge that answers and
+and health against the new forge as before. An Application that reads differently
+is read again 10 seconds later, and only one that differs on both reads is
+reported: one caught mid-sync (`Progressing`) that settles is not a change. **It refuses a forge that answers and
 already holds the copy's commit** (there is nothing to repair; `--force` overrides
 that), and it refuses when the forge is down but its volume is intact, which is a
 restart, not a repair.

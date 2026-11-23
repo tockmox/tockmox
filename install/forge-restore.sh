@@ -889,6 +889,17 @@ if [[ "$ACTION" == repair ]]; then
   done
   AFTER="$(apps_state)" || die "the forge is repaired, but Argo CD's Applications could not be listed to compare"
   CHANGED="$(diff <(printf '%s\n' "$BEFORE") <(printf '%s\n' "$AFTER") | grep -E '^[<>]' || true)"
+  if [[ -n "$CHANGED" ]]; then
+    # One read can catch an Application mid-sync (Progressing) that settles a moment
+    # later: that is not a change. Read again SETTLE_S later and report only the
+    # Applications that differ on both reads, as they read the second time.
+    sleep "$SETTLE_S"
+    AFTER2="$(apps_state)" || die "the forge is repaired, but Argo CD's Applications could not be listed to compare again"
+    CHANGED2="$(diff <(printf '%s\n' "$BEFORE") <(printf '%s\n' "$AFTER2") | grep -E '^[<>]' || true)"
+    BOTH="$(comm -12 <(printf '%s\n' "$CHANGED" | awk 'NF>1{print $2}' | sort -u) \
+                     <(printf '%s\n' "$CHANGED2" | awk 'NF>1{print $2}' | sort -u))"
+    CHANGED="$(printf '%s\n' "$CHANGED2" | awk 'NR==FNR{if (NF) keep[$1]=1; next} NF>1 && ($2 in keep)' <(printf '%s\n' "$BOTH") - || true)"
+  fi
   ERRS="$(kubectl "${K[@]}" -n "$ARGO_NS" get applications.argoproj.io \
     -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.conditions[*].type}{"\n"}{end}' 2>/dev/null | awk '/ComparisonError/{print $1}')"
   FRESH="$(apps_reconciled_since "$SEEDED")"
