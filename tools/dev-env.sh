@@ -126,5 +126,10 @@ echo "dev-env: vendored subcharts in place (tools/helm-deps.sh)"
 echo
 bash tools/toolchain.sh --check
 echo
-echo "Ready. Put these first on PATH in your shell with:"
+if command -v mise >/dev/null 2>&1; then
+  echo "Ready. With mise activated in your shell (eval \"\$(mise activate zsh)\" in ~/.zshrc), cd into this tree"
+  echo "and the tools and build/gates-venv are first on PATH by themselves (mise.toml [env]). Without that, run:"
+else
+  echo "Ready. Put these first on PATH in your shell with:"
+fi
 echo "  eval \"\$(tools/dev-env.sh --env)\""

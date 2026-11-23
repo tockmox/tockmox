@@ -715,6 +715,7 @@ serial_gate "the built documentation site makes no network request" \
 run_gate "the committed SBOM matches the tree" bash tools/gen-sbom.sh --check
 run_gate "the committed images.txt matches the charts" bash tools/gen-images.sh --check
 run_gate "documentation stamps are current" bash tools/stamp-docs.sh --check
+run_gate "documentation stamps ignore the clock and can go red" bash tools/stamp-docs.sh --selftest
 # The layer table and the four section READMEs are generated. The
 # selftest proves the check goes red on a flipped wave, a flipped installer
 # mapping, a hand-edited table and an unlisted page.

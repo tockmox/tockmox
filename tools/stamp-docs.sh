@@ -6,6 +6,7 @@
 #
 #   ./tools/stamp-docs.sh            rewrite the blocks in place
 #   ./tools/stamp-docs.sh --check    fail if any file is out of date (CI)
+#   ./tools/stamp-docs.sh --selftest prove the check ignores the clock and can go red
 #
 # WHY GENERATED. A version number typed into forty markdown files is forty
 # places to forget on release day, and the failure is invisible: the docs simply
@@ -18,8 +19,37 @@
 # saying a source of drift. All nine layer charts must agree, and this script
 # refuses to run if they do not -- a split version is a release bug worth
 # catching here rather than in an issue three weeks later.
+#
+# WHY THE YEAR COMES FROM NOTICE, NOT THE CLOCK. The footer's copyright year was
+# once `date -u +%Y`, so on 1 January every open pull request went red at once,
+# though nothing in it had changed. The year is now the last year on NOTICE's
+# "Copyright" line, which is the legal statement this footer repeats: moving to a
+# new year is one edit to NOTICE and one run of this script, in a change of its own.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+if [ "${1:-}" = "--selftest" ]; then
+  # The tree must be current first: a stale tree would make both cases below meaningless.
+  bash tools/stamp-docs.sh --check >/dev/null || { echo "selftest: stamps are not current; run tools/stamp-docs.sh first" >&2; exit 1; }
+  T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
+  next=$(( $(sed -n 's/^Copyright .*\([0-9]\{4\}\) .*/\1/p' NOTICE | head -n 1) + 1 ))
+  # A `date` that answers as if it were next 1 January, first on PATH.
+  printf '#!/bin/sh\ncase "$*" in *%%Y*) echo %s ;; *) echo "Fri Jan  1 00:00:05 UTC %s" ;; esac\n' "$next" "$next" > "$T/date"
+  chmod +x "$T/date"
+  rc=0
+  if PATH="$T:$PATH" bash tools/stamp-docs.sh --check >/dev/null 2>&1; then
+    echo "selftest: ok: the check stays green with the clock at 1 January $next"
+  else
+    echo "selftest: FAILED: the check went red with the clock at 1 January $next (the year is read from the clock)"; rc=1
+  fi
+  sed "s/^Copyright .*/Copyright $next Tockmox LLC/" NOTICE > "$T/NOTICE"
+  if STAMP_DOCS_NOTICE="$T/NOTICE" bash tools/stamp-docs.sh --check >/dev/null 2>&1; then
+    echo "selftest: FAILED: the check stayed green with NOTICE at $next (the year is not read from NOTICE)"; rc=1
+  else
+    echo "selftest: ok: red as required with NOTICE at $next"
+  fi
+  exit "$rc"
+fi
 
 CHECK=0
 [ "${1:-}" = "--check" ] && CHECK=1
@@ -31,7 +61,12 @@ if [ "$(printf '%s\n' "$versions" | wc -l)" -ne 1 ]; then
   exit 1
 fi
 VERSION="$versions"
-YEAR=$(date -u +%Y)
+NOTICE_FILE="${STAMP_DOCS_NOTICE:-NOTICE}"  # the selftest points this at a copy
+YEAR=$(sed -n 's/^Copyright .*\([0-9]\{4\}\) .*/\1/p' "$NOTICE_FILE" | head -n 1)
+if [ -z "$YEAR" ]; then
+  echo "ERROR: $NOTICE_FILE has no \"Copyright <year> <holder>\" line to take the year from" >&2
+  exit 1
+fi
 
 VERSION="$VERSION" YEAR="$YEAR" CHECK="$CHECK" python3 - <<'PY'
 import os

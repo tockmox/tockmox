@@ -19,6 +19,12 @@
 # With mise (https://mise.jdx.dev): `mise install`, then run the gates through
 # `mise exec -- ./tools/check-all.sh`, or activate mise in your shell.
 #
+# THE GATES' VENV. The [env] table below puts build/gates-venv (built by
+# tools/dev-env.sh) first on PATH and sets VIRTUAL_ENV, so with mise activated
+# in your shell, entering this tree or any of its worktrees is all a hand-run
+# check-all needs: no `eval "$(tools/dev-env.sh --env)"`. Where the venv does
+# not exist yet, tools/mise-venv.sh prints one line pointing at tools/dev-env.sh.
+#
 # Python is pinned to its minor version only. CI runners ship their own patch
 # release, so toolchain.sh holds python3 to this minor version and not to a
 # patch. The Python PACKAGES the gates import are pinned exactly, with hashes,
@@ -37,3 +43,7 @@ python = "3.12"
 
 [settings]
 lockfile = true
+
+[env]
+_.path = ["{{config_root}}/build/gates-venv/bin"]
+_.source = { path = "tools/mise-venv.sh" }

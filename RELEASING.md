@@ -18,7 +18,9 @@ something; the history is in [releasing background](docs/development/releasing-b
    `tockmox.revision`. CI compares it against `tockmox-common`.
 
 Then `tools/stamp-docs.sh`, which rewrites every docs footer from Chart.yaml
-and refuses to run if the ten charts disagree.
+and refuses to run if the ten charts disagree. The footer's copyright year comes
+from NOTICE, never the clock: a new year is its own change, an edit to NOTICE's
+`Copyright` line and one run of `tools/stamp-docs.sh`.
 
 Version-shaped and not generated, so check by hand at every bump:
 `install/tockmox.yaml.example`'s `revision:` and the `targetRevision` in

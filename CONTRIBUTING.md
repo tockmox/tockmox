@@ -105,7 +105,12 @@ machine predicts. `./tools/dev-env.sh` installs the pinned tools (through
 [mise](https://mise.jdx.dev) where you have it, from checksum-verified release
 assets on Linux x86_64 where you do not) and the gates' Python packages from
 `tools/requirements-gates.txt`, then `eval "$(./tools/dev-env.sh --env)"` puts
-them first on your PATH. `check-all.sh` refuses to start when the tools on your
+them first on your PATH. With mise activated in your shell (`eval "$(mise
+activate zsh)"` in `~/.zshrc`, or the bash equivalent) and the clone trusted
+once (`mise trust`), you can skip that eval line: entering the clone or any of
+its worktrees puts the pinned tools and the gates' venv (`build/gates-venv`)
+first on PATH by itself, and where the venv does not exist yet mise prints one
+line pointing at `./tools/dev-env.sh`. `check-all.sh` refuses to start when the tools on your
 PATH are not the pinned ones (`./tools/toolchain.sh --check` says which).
 Helm 3 and Helm 4 have disagreed on a render before (a parent's `null` does not
 delete a subchart default under Helm 4), and this project has not verified its
