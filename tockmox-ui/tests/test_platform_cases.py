@@ -6,6 +6,7 @@ and reading it back as client/tockmox-ui, so these tests hold the page to the de
 a rollback, its problem PRB-0001 with a root cause a model worded, the fix CHG-0001 waiting on Jeff's PR approval,
 INC-0002 asking Jeff to approve a restore, and INC-0003 closed as a false positive."""
 import copy
+import importlib.util
 import json
 import os
 import shutil
@@ -363,6 +364,54 @@ def test_the_generator_refuses_two_rosters_that_disagree(tmp_path):
     roles.write_text(yaml.safe_dump({"roles": [{"id": "x-role", "title": "Nobody Here", "specialists": []}]}))
     r = subprocess.run([sys.executable, GEN, "--check", str(roles), pm.DEFAULT_CATALOG], capture_output=True, text=True)
     assert r.returncode == 1 and "not one roster" in r.stdout
+
+
+def _roles_from_shipped_catalog(tmp_path):
+    """A roles file that names exactly what the shipped catalog names, and a copy of the catalog to check."""
+    import yaml
+    cat = tmp_path / "catalog.yaml"
+    shutil.copy(pm.DEFAULT_CATALOG, cat)
+    doc = {"schema": 1, "roles": [{"id": a.agent_role, "title": a.name, "specialists": [dict(s) for s in a.specialists]}
+                                  for a in pm.load_catalog(str(cat)).all()]}
+    roles = tmp_path / "roles.yaml"
+    roles.write_text(yaml.safe_dump(doc, sort_keys=False))
+    assert subprocess.run([sys.executable, GEN, str(roles), str(cat)], capture_output=True, text=True).returncode == 0
+    return roles, cat
+
+
+def _index(roles, ids, sha=None):
+    import yaml
+    gen = importlib.util.spec_from_file_location("gen_platform_specialists", GEN)
+    mod = importlib.util.module_from_spec(gen)
+    gen.loader.exec_module(mod)
+    return {"roles": {"file": "roles/platform-roles.yaml", "sha256": sha or mod.roles_sha(yaml.safe_load(roles.read_text()))},
+            "specialists": [{"id": i} for i in ids]}
+
+
+def test_the_check_against_the_hosts_index_names_a_served_specialist_no_role_names(tmp_path):
+    roles, cat = _roles_from_shipped_catalog(tmp_path)
+    run = lambda idx: subprocess.run([sys.executable, GEN, "--check", "--served", str(idx), str(roles), str(cat)],
+                                     capture_output=True, text=True)
+    idx = tmp_path / "index.json"
+    idx.write_text(json.dumps(_index(roles, ["service-desk", "incident-responder"])))
+    r = run(idx)
+    assert r.returncode == 0 and "what the host serves" in r.stdout, r.stdout
+    idx.write_text(json.dumps(_index(roles, ["service-desk", "ghost-agent"])))
+    r = run(idx)
+    assert r.returncode == 1 and "ghost-agent" in r.stdout and "no page lists it" in r.stdout, r.stdout
+    idx.write_text(json.dumps(_index(roles, ["service-desk"], sha="e" * 64)))
+    r = run(idx)
+    assert r.returncode == 1 and "eeeeeeeeeeee" in r.stdout, "an index made from another roles file is drift"
+
+
+def test_the_shipped_catalog_lists_every_role_the_roles_file_names_and_the_specialists_served_today():
+    cat = pm.load_catalog()
+    roles = {a.agent_role for a in cat.all()}
+    assert {"ai-model-manager", "performance-manager"} <= roles, "the roles file has 21 roles; the catalog must too"
+    named = {s["id"] for a in cat.all() for s in a.specialists}
+    assert {"performance-steward", "vulnerability-manager"} <= named
+    states = {s["id"]: s["state"] for a in cat.all() for s in a.specialists}
+    assert states["vulnerability-manager"] == "built" and states["performance-steward"] == "built"
 
 
 def test_a_catalog_specialist_with_a_bad_state_is_the_pages_503(world, tmp_path):
