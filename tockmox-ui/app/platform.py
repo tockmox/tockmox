@@ -392,7 +392,7 @@ class CronWorkflowsSource(Source):
         super().__init__(ttl)
         self.kube, self.prom_url, self.timeout = kube, prom_url, timeout
         self.success_query, self.transport = success_query, transport
-        self.runs_error = ""
+        self.runs_error, self.not_served = "", False
 
     def _runs(self) -> dict:
         """(namespace, cronworkflow) -> its newest run: {t, phase, started, finished}. The run's time is the
@@ -413,8 +413,22 @@ class CronWorkflowsSource(Source):
                              "finished": _parse_ts(st.get("finishedAt"))}
         return newest
 
+    LIST = "/apis/argoproj.io/v1alpha1/cronworkflows"
+    NOT_SERVED = ("none: this cluster does not serve Argo's CronWorkflow API (argoproj.io/v1alpha1 cronworkflows; "
+                  "Argo Workflows is not installed, or serves another version)")
+
     def fetch(self):
-        doc = self.kube.get("/apis/argoproj.io/v1alpha1/cronworkflows")
+        # A 404 on the cluster-wide list is the API server saying the resource is not served here: no CRD, or
+        # not this version. That is a cluster with no scheduled workflows, an empty section with its reason,
+        # never a source failure. Every other error still is one.
+        self.not_served = False
+        try:
+            doc = self.kube.get(self.LIST)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code != 404:
+                raise
+            self.not_served, self.runs_error = True, ""
+            return []
         try:
             runs, self.runs_error = self._runs(), ""
         except Exception as e:  # noqa: BLE001 - outcomes fall back to the metric; the schedule list still shows
@@ -461,6 +475,8 @@ class CronWorkflowsSource(Source):
         return out
 
     def evaluate(self, items):
+        if self.not_served:
+            return OK, self.NOT_SERVED
         if self.runs_error:
             return WARN, f"{len(items)} found; how their runs ended cannot be read ({self.runs_error})"
         return OK, f"{len(items)} found"

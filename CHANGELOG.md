@@ -1312,6 +1312,12 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Fixed
 
+- **A cluster without Argo Workflows no longer reads its scheduled workflows as
+  Unknown.** When the Kubernetes API answers 404 to the cluster-wide
+  CronWorkflow list (the CRD is not installed, or another API version is
+  served), the Platform pages show an empty "Scheduled workflows (Argo)" section
+  with that reason, instead of `HTTP 404` and a counted source failure. Every
+  other error on that list still reads Unknown. Nothing to do on upgrade.
 - **An AI node's bootstrap runs on a fresh Mac with no hand step.**
   `ai-node/bootstrap-node.sh` installs the Command Line Tools headlessly before
   its first `git` call (a fresh Mac has only the stub, so even `--dry-run`
