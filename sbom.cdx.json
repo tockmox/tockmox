@@ -9,15 +9,15 @@
     },
     {
       "name": "binwiederhier/ntfy",
-      "purl": "pkg:oci/ntfy?repository_url=binwiederhier/ntfy&tag=v2.38.0",
+      "purl": "pkg:oci/ntfy@sha256:771309aecfce18d8fe2bfb8069994ddd6be6ca6ccdd7badace3d791a0045ff0d?repository_url=binwiederhier/ntfy&tag=v2.38.0",
       "type": "container",
-      "version": "v2.38.0"
+      "version": "sha256:771309aecfce18d8fe2bfb8069994ddd6be6ca6ccdd7badace3d791a0045ff0d"
     },
     {
       "name": "caronc/apprise",
-      "purl": "pkg:oci/apprise?repository_url=caronc/apprise&tag=2.1.0",
+      "purl": "pkg:oci/apprise@sha256:bd7dc73b75882326b97d2963b7c3dd2a5e033df27d84c51f0090465d583fb316?repository_url=caronc/apprise&tag=2.1.0",
       "type": "container",
-      "version": "2.1.0"
+      "version": "sha256:bd7dc73b75882326b97d2963b7c3dd2a5e033df27d84c51f0090465d583fb316"
     },
     {
       "name": "code.forgejo.org/forgejo/forgejo",
@@ -159,9 +159,9 @@
     },
     {
       "name": "dxflrs/garage",
-      "purl": "pkg:oci/garage?repository_url=dxflrs/garage&tag=v2.5.0",
+      "purl": "pkg:oci/garage@sha256:677e5b758e4425a325b811c425c026bf35a4bf42f7ddbaa773de3f4fd779a5a5?repository_url=dxflrs/garage&tag=v2.5.0",
       "type": "container",
-      "version": "v2.5.0"
+      "version": "sha256:677e5b758e4425a325b811c425c026bf35a4bf42f7ddbaa773de3f4fd779a5a5"
     },
     {
       "name": "ghcr.io/berriai/litellm-database",
@@ -219,15 +219,15 @@
     },
     {
       "name": "nginxinc/nginx-unprivileged",
-      "purl": "pkg:oci/nginx-unprivileged?repository_url=nginxinc/nginx-unprivileged&tag=1.31-alpine",
+      "purl": "pkg:oci/nginx-unprivileged@sha256:b5047b9b76845eac124358373c6852377c52e4b05834a47647e955dd91cb8f1e?repository_url=nginxinc/nginx-unprivileged&tag=1.31-alpine",
       "type": "container",
-      "version": "1.31-alpine"
+      "version": "sha256:b5047b9b76845eac124358373c6852377c52e4b05834a47647e955dd91cb8f1e"
     },
     {
       "name": "python",
-      "purl": "pkg:oci/python?tag=3.15-slim",
+      "purl": "pkg:oci/python@sha256:63bb298d2b7b88f176f51b5189f54ce6535c997682ea70885d2132f5d473a8a5?tag=3.15-slim",
       "type": "container",
-      "version": "3.15-slim"
+      "version": "sha256:63bb298d2b7b88f176f51b5189f54ce6535c997682ea70885d2132f5d473a8a5"
     },
     {
       "name": "quay.io/argoproj/argocli",

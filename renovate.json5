@@ -223,11 +223,15 @@
     // (used when a site empties the value) and the wait-for-db init container in tockmox-ai's values,
     // which threads the registry through tpl. Unmatched, a batch moved the keys and left these behind,
     // so images.txt carried two alpine/k8s tags and the air-gap counts went red (PR #187, 2026-11-07).
+    // A DIGEST BESIDE THE TAG (alpine/k8s:X@sha256:Y) is its own capture group in each of them, never
+    // part of the version: without it the version reads "X@sha256:Y", no tag of that name exists, and
+    // the pin stops moving while it looks pinned. On a bump Renovate rewrites the tag and the digest
+    // together. helm-values already reads the digest of an `image: NAME:TAG@sha256:Y` key itself.
     {
       customType: "regex",
       description: "alpine/k8s fallbacks in chart templates (default \"alpine/k8s:X\")",
       managerFilePatterns: ["/^charts/[^/]+/templates/.+\\.(ya?ml|tpl)$/"],
-      matchStrings: ["default \"alpine/k8s:(?<currentValue>[0-9][^\"\\s]*)\""],
+      matchStrings: ["default \"alpine/k8s:(?<currentValue>[0-9][^\"\\s@]*)(?:@(?<currentDigest>sha256:[a-f0-9]{64}))?\""],
       depNameTemplate: "alpine/k8s",
       datasourceTemplate: "docker",
     },
@@ -236,7 +240,7 @@
       customType: "regex",
       description: "alpine/k8s move-forge Job image in install/bootstrap-forge.sh",
       managerFilePatterns: ["/^install/bootstrap-forge\\.sh$/"],
-      matchStrings: ["\\nMOVE_IMAGE_DEFAULT=\"alpine/k8s:(?<currentValue>[0-9][^\"]*)\""],
+      matchStrings: ["\\nMOVE_IMAGE_DEFAULT=\"alpine/k8s:(?<currentValue>[0-9][^\"@]*)(?:@(?<currentDigest>sha256:[a-f0-9]{64}))?\""],
       depNameTemplate: "alpine/k8s",
       datasourceTemplate: "docker",
     },
@@ -244,7 +248,7 @@
       customType: "regex",
       description: "alpine/k8s wait-for-db init container in tockmox-ai (registry threaded through tpl)",
       managerFilePatterns: ["/^charts/tockmox-ai/values\\.yaml$/"],
-      matchStrings: ["\\{\\{ end \\}\\}alpine/k8s:(?<currentValue>[0-9][^'\"\\s]*)'"],
+      matchStrings: ["\\{\\{ end \\}\\}alpine/k8s:(?<currentValue>[0-9][^'\"\\s@]*)(?:@(?<currentDigest>sha256:[a-f0-9]{64}))?'"],
       depNameTemplate: "alpine/k8s",
       datasourceTemplate: "docker",
     },
@@ -252,7 +256,7 @@
       customType: "regex",
       description: "busybox wait-for-ca init container (registry threaded through tpl)",
       managerFilePatterns: ["/^charts/tockmox-devops/values\\.yaml$/"],
-      matchStrings: ["/library/busybox:(?<currentValue>[0-9][^'\"\\s]*)"],
+      matchStrings: ["/library/busybox:(?<currentValue>[0-9][^'\"\\s@]*)(?:@(?<currentDigest>sha256:[a-f0-9]{64}))?"],
       depNameTemplate: "busybox",
       datasourceTemplate: "docker",
     },

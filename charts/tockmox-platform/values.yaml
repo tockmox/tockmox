@@ -857,7 +857,7 @@ longhorn:
 # who do not.
 # ---------------------------------------------------------------------------
 garage:
-  image: dxflrs/garage:v2.5.0
+  image: dxflrs/garage:v2.5.0@sha256:677e5b758e4425a325b811c425c026bf35a4bf42f7ddbaa773de3f4fd779a5a5
   # ONE COPY, honestly. A single replica cannot satisfy a higher factor, and
   # claiming one would leave every write degraded while looking careful.
   replicationFactor: 1
