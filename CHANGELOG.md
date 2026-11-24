@@ -82,6 +82,8 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **A subchart byte lock: a verified tag now vouches for the bytes of every upstream subchart you vendor.** `subcharts.sha256` records one sha256 per upstream subchart archive a `Chart.lock` pins. `tools/helm-deps.sh` refuses an archive whose bytes differ from its line, on its offline path and after a download alike, and never re-records it; `tools/helm-deps.sh --record` adds the line for a new or bumped subchart and drops lines no `Chart.lock` pins, and a new gate holds the file to every `Chart.lock`. Argo CD's own subchart download on a connected site is still not checked, and the verify page now says so. Verifying the tag is now Required in the upgrade procedure, and step 6 compares the commit Argo CD synced with the commit you verified (docs/deployment/verify.md, "What a signed tag does not cover"; docs/deployment/upgrade.md, steps 1 and 6). **Action, for anyone who bumps a subchart in a fork:** run `tools/helm-deps.sh --record` and commit `subcharts.sha256` with the `Chart.lock` change.
+
 - **Platform › Schedule shows how each Argo CronWorkflow's newest run ended.** The console reads the
   newest Workflow each CronWorkflow made and shows its phase (Succeeded, Failed, Running) with the
   time it finished or started, instead of "it ran, but its outcome is not visible here". When Argo has

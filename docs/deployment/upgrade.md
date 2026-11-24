@@ -302,12 +302,15 @@ target's: breaking changes are per-release and do not accumulate forward.
 between the two revisions, or say that there are none. If you cannot, you have
 not finished this step.
 
-**Optional, and it belongs here rather than later:** verify the tag itself
-before you point a cluster at it. What you get is the signature and the
-checksums on the source ArgoCD is about to render. What you lose by skipping it
-is the only chance to check the artifact before it is live, since ArgoCD clones
-the tag on its own. The procedure is
-[verifying what you downloaded](verify.md).
+**Required, and it belongs here rather than later:** verify the tag itself
+before you point a cluster at it. ArgoCD follows the tag by name and checks no
+signature, so this is the only check that the tree it is about to render is
+the one the maintainer signed, and the only chance to make it before that tree
+is live. The procedure is [verifying what you downloaded](verify.md), in a
+clone exported as `TOCKMOX`; [step 6](#6-confirm-every-layer-landed-on-the-new-revision)
+reads that clone again, to confirm ArgoCD synced the commit you verified. What
+the signature does not cover is listed there too
+([verify § what a signed tag does not cover](verify.md#what-a-signed-tag-does-not-cover)).
 
 ## 2. Back up what a rollback will not bring back
 
@@ -510,14 +513,30 @@ normal; not landing is not.
 
 ```bash
 : "${KUBE_CONTEXT:?export KUBE_CONTEXT first, see Before you begin}"
+: "${TARGET_REVISION:?export TARGET_REVISION first, see Before you begin}"
+: "${TOCKMOX:?export TOCKMOX first: the clone you verified the tag in, step 1}"
 kubectl --context="$KUBE_CONTEXT" -n argocd get applications -o \
   custom-columns='LAYER:.metadata.name,REVISION:.spec.sources[0].targetRevision,SYNC:.status.sync.status,HEALTH:.status.health.status'
+verified="$(git -C "$TOCKMOX" rev-parse "${TARGET_REVISION}^{commit}")"
+echo "verified commit: $verified"
+kubectl --context="$KUBE_CONTEXT" -n argocd get applications --no-headers -o \
+  custom-columns='LAYER:.metadata.name,REVISION:.spec.sources[0].targetRevision,COMMIT:.status.sync.revisions[0]' \
+  | awk -v rev="$TARGET_REVISION" -v want="$verified" '$2 == rev { print $1, ($3 == want ? "synced the verified commit" : "DIFFERENT COMMIT " $3) }'
 ```
 
-**Success condition:** every row shows `$TARGET_REVISION`, `Synced` and
-`Healthy`. Compare it against the output you saved in
+**Success condition:** every row of the first table shows `$TARGET_REVISION`,
+`Synced` and `Healthy`. Compare it against the output you saved in
 [step 0](#0-write-down-what-you-are-on-now); the only column that should have
-changed is the revision.
+changed is the revision. Then every layer in the last lines reads `synced the
+verified commit`.
+
+**`DIFFERENT COMMIT` on any layer means stop.** ArgoCD resolved the tag name to
+a commit other than the one you verified in step 1, so the tag moved after you
+checked it, or your clone and the cluster read different repositories. Do not
+roll forward or back on that layer until you know which; report it as a
+security issue ([SECURITY.md](../../SECURITY.md)). On a site whose Applications
+read a `-vendored` tag ([air-gap step 3](airgap.md#3-vendor-the-upstream-helm-subcharts--required)),
+`TARGET_REVISION` is that tag and `TOCKMOX` the clone you made it in.
 
 **Two partial results, and they mean different things:**
 

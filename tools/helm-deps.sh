@@ -3,7 +3,9 @@
 #
 # Fetch chart dependencies for every layer.
 #
-#   ./tools/helm-deps.sh
+#   ./tools/helm-deps.sh            fetch, or check what is vendored, then check the bytes
+#   ./tools/helm-deps.sh --record   the same, and record a new or bumped subchart in subcharts.sha256
+#   ./tools/helm-deps.sh --selftest
 #
 # Run this once per clone before `helm template`, `helm lint` or `helm install`.
 #
@@ -30,15 +32,43 @@ cd "$(dirname "$0")/.."
 
 # --selftest runs tools/test-helm-deps.sh: the offline path below is taken only
 # when it is safe, and never reaches the network when it is.
-if [ "${1:-}" = "--selftest" ]; then
-  exec bash tools/test-helm-deps.sh
-fi
+RECORD=0
+case "${1:-}" in
+  --selftest) exec bash tools/test-helm-deps.sh ;;
+  --record) RECORD=1 ;;
+  "") ;;
+  *) echo "usage: $0 [--record | --selftest]" >&2; exit 2 ;;
+esac
+
+# THE SUBCHART BYTE LOCK. Chart.lock pins each upstream subchart by name and
+# version; its `digest:` hashes the dependency list, not the archives. So a
+# chart repository, its CDN or a lapsed domain could serve other bytes under a
+# version the lock already names, and both paths below would take them.
+# subcharts.sha256 records one sha256 per upstream archive, committed beside
+# Chart.lock, so the bytes are under the signed tag. Every run ends with
+# verify_sums: an archive whose bytes differ from its line is refused, on the
+# offline path and after a download alike, and is never re-recorded. An archive
+# with no line (a new or bumped dependency) is refused unless --record, which
+# adds its line and drops lines no Chart.lock pins. --record never changes the
+# hash of a name and version already recorded: new bytes under an old version
+# are a reason to stop and find out why, not to re-record.
+# tools/check-subchart-sums.sh holds the file to every Chart.lock.
+SUMS=subcharts.sha256
+sha256_of() {  # <file> -> lowercase hex
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
 
 # Attempts per network-touching helm call, including the first.
 HELM_DEPS_RETRIES="${HELM_DEPS_RETRIES:-3}"
 
 _retry_log="$(mktemp)"
-trap 'rm -f "$_retry_log"' EXIT
+_sums_new="$(mktemp)"
+_sums_old="$(mktemp)"
+trap 'rm -f "$_retry_log" "$_sums_new" "$_sums_old"' EXIT
 
 # retry LABEL COMMAND... -- run COMMAND, retrying on failure with backoff.
 #
@@ -131,6 +161,59 @@ LOCK
   echo "online: $why" >&2
   return 1
 }
+# verify_sums: every upstream archive a Chart.lock pins, against subcharts.sha256.
+verify_sums() {
+  local c p h actual bad=0 n_ok=0 n_new=0 n_drop=0
+  if [ ! -f "$SUMS" ] && [ "$RECORD" != 1 ]; then
+    echo "REFUSED: $SUMS does not exist, so no subchart archive can be checked. Record it with: HELM_DEPS_ONLINE=1 $0 --record" >&2
+    return 1
+  fi
+  if [ -f "$SUMS" ]; then cat "$SUMS" > "$_sums_old"; else : > "$_sums_old"; fi
+  : > "$_sums_new"
+  for c in charts/tockmox-*; do
+    [ -f "$c/Chart.lock" ] || continue
+    while IFS="$(printf '\t')" read -r n r v; do
+      [ -n "$n" ] || continue
+      case "$r" in file://*) continue ;; esac
+      p="$c/charts/$n-$v.tgz"
+      if [ ! -f "$p" ]; then
+        echo "  REFUSED: $p is not in the tree after the dependency step" >&2; bad=1; continue
+      fi
+      actual="$(sha256_of "$p")"
+      h="$(awk -v p="$p" '$2 == p {print $1; exit}' "$_sums_old")"
+      if [ -z "$h" ]; then
+        if [ "$RECORD" = 1 ]; then
+          printf '%s  %s\n' "$actual" "$p" >> "$_sums_new"
+          echo "  recorded: $p $actual"
+          n_new=$((n_new + 1))
+        else
+          echo "  REFUSED: $p has no line in $SUMS. A new or bumped subchart is recorded with: $0 --record" >&2
+          bad=1
+        fi
+      elif [ "$h" != "$actual" ]; then
+        echo "  REFUSED: $p does not match $SUMS: expected $h, found $actual. It was not replaced and is not re-recorded. Find out why the bytes changed under the same version before anything renders from it; then delete it and run this again." >&2
+        bad=1
+      else
+        printf '%s  %s\n' "$h" "$p" >> "$_sums_new"
+        n_ok=$((n_ok + 1))
+      fi
+    done <<LOCK
+$(lock_deps "$c")
+LOCK
+  done
+  [ "$bad" = 0 ] || return 1
+  n_drop=$(( $(grep -c . "$_sums_old" || true) - n_ok ))
+  if [ "$RECORD" = 1 ]; then
+    LC_ALL=C sort -k2,2 "$_sums_new" > "$SUMS"
+    [ "$n_drop" -gt 0 ] && echo "  dropped $n_drop line(s) no Chart.lock pins"
+    echo "subchart bytes: $n_ok matched, $n_new recorded in $SUMS (commit it)"
+  else
+    [ "$n_drop" -gt 0 ] && echo "  note: $n_drop line(s) in $SUMS name an archive no Chart.lock pins; tools/check-subchart-sums.sh fails on them, and --record drops them" >&2
+    echo "subchart bytes: $n_ok archive(s) match $SUMS"
+  fi
+  return 0
+}
+
 if [ "${HELM_DEPS_ONLINE:-0}" != 1 ] && offline_ok; then
   echo "offline: every upstream subchart is already in charts/*/charts (Chart.lock versions); no repository is contacted"
   for c in charts/tockmox-*; do
@@ -144,6 +227,7 @@ $(lock_deps "$c")
 LOCK
     printf '  %-34s %s\n' "$c" "ok (offline)"
   done
+  verify_sums || exit 1
   echo "done"
   exit 0
 fi
@@ -199,4 +283,5 @@ for c in charts/tockmox-*; do
     exit 1
   fi
 done
+verify_sums || exit 1
 echo "done"

@@ -489,6 +489,13 @@ run_gate "the vendored subchart archives number the declared dependencies, each 
 run_gate "the vendored-charts gate goes red on a missing, an extra and a mis-versioned archive, and green on each revert" \
   bash tools/check-vendored-charts.sh --selftest
 
+# The subchart byte lock: subcharts.sha256 names every upstream archive every Chart.lock pins, and the
+# vendored archives have the bytes it records (helm-deps.sh above refuses any that do not).
+run_gate "the subchart byte lock names every Chart.lock dependency, and the vendored archives match it" \
+  bash tools/check-subchart-sums.sh
+run_gate "the subchart byte lock gate goes red on a planted fault of each kind, and green on each revert" \
+  bash tools/check-subchart-sums.sh --selftest
+
 # THE TWO GUARDS THAT EXIST BECAUSE SOMETHING SHIPPED, added 2026-09-16. Both
 # run here rather than by hand, because both classes travelled all the way into
 # a cluster with nothing looking, and a self-test nobody invokes is the same as
