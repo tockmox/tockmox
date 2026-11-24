@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "macros.html" import badge, state_icon, source_line, mascot, trend_row %}
-{% from "platform_macros.html" import sched_badge, mode_tag, rail, when, practice_badge, case_table, case_groups %}
+{% from "platform_macros.html" import sched_badge, mode_tag, rail, when, practice_badge, case_table, case_groups, tiles_row %}
 {% block title %}Platform Management{% endblock %}
 {% block main %}
 <div class="titled">{% if org_state == "ok" %}{{ mascot("foreman", 56) }}{% endif %}<h1>Platform Management</h1></div>
@@ -14,6 +14,8 @@
     <p class="muted">As of <time datetime="{{ now | iso }}">{{ now | local(tz) }}</time>. Agent runs: {% if ledger_on %}read from the agent ledger{% else %}not connected, so this verdict comes from live signals and scheduled jobs only{% endif %}.</p>
   </div>
 </section>
+
+{{ tiles_row(tiles) }}
 
 {{ trend_row(trend_panels("platform"), "The platform, last 7 days") }}
 

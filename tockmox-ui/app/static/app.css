@@ -105,6 +105,22 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .facts-band { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem 1.5rem; padding: 1rem 1.15rem; background: var(--tx-surface); border: 1px solid var(--tx-border); border-top: 3px solid var(--tx-trim); border-radius: var(--tx-radius-md); }
 .facts-band .kicker { font: 600 var(--fs-0) var(--ui-font); text-transform: uppercase; letter-spacing: .05em; color: var(--tx-text-muted); margin: 0 0 .3rem; }
 .facts-band .why { margin-top: .3rem; }
+/* a role's four blocks (platform_report.role_report) and the Overview's tiles: a source it could not read is a sentence */
+.role-blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 1rem; margin: 1rem 0 1.5rem; }
+.rblock { padding: .9rem 1.1rem; background: var(--tx-surface); border: 1px solid var(--tx-border); border-top: 3px solid var(--tx-trim); border-radius: var(--tx-radius-md); }
+.rblock h2 { margin: 0 0 .5rem; font-size: var(--fs-2, 1.1rem); }
+.rb-list li { padding: .3rem 0; border-bottom: 1px solid var(--tx-border); }
+.rb-list li:last-child { border-bottom: 0; }
+.rb-name { font-weight: 600; }
+.rb-health { display: grid; grid-template-columns: max-content 1fr; gap: .4rem .9rem; margin: 0; }
+.rb-health dt { font-weight: 600; }
+.rb-health dd { margin: 0; }
+.gap { margin: .5rem 0 0; font-size: .9rem; }
+.pm-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 1rem; margin: 1rem 0; }
+.pm-tile { padding: .8rem 1rem; background: var(--tx-surface); border: 1px solid var(--tx-border); border-radius: var(--tx-radius-md); }
+.pm-tile-label { margin: 0; font: 600 var(--fs-0) var(--ui-font); text-transform: uppercase; letter-spacing: .05em; color: var(--tx-text-muted); }
+.pm-tile-value { margin: .2rem 0 .35rem; font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pm-tile .gap { color: var(--tx-text); }
 .scope { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem 1.5rem; }
 .scope ul { margin: .25rem 0 0; padding-left: 1.1rem; display: grid; gap: .2rem; }
 .scope .never h3 { color: var(--st-critical); }

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "macros.html" import badge, source_line %}
-{% from "platform_macros.html" import sched_badge, signal_badge, mode_tag, when, practice_badge, case_table, spec_name, job_name, newest_run %}
+{% from "platform_macros.html" import sched_badge, signal_badge, mode_tag, when, practice_badge, case_table, spec_name, job_name, newest_run, role_blocks %}
 {% block title %}{{ v.agent.name }} · Platform Management{% endblock %}
 {% block main %}
 <p class="crumb"><a href="/platform">Platform Management</a> / {{ team_obj.name }}{% if not v.agent.is_lead %} / reports to <a href="/platform/agents/{{ lead.agent.id }}">the {{ lead.agent.name }}</a>{% else %} / leads the team{% endif %}</p>
@@ -8,11 +8,7 @@
 <p class="ref-line">ITIL 4: {{ v.agent.reference.itil }}. FitSM: {{ v.agent.reference.fitsm }}.</p>
 <p class="mission">{{ v.agent.mission }}</p>
 
-<section class="facts-band" aria-label="Status">
-  <div><h2 class="kicker">Practice</h2>{{ practice_badge(v.practice_state) }}<p class="why">{{ v.practice_reason | sentence }}</p></div>
-  <div><h2 class="kicker">Agent</h2>{{ badge(v.agent_state, v.agent_word) }}<p class="why">{{ v.agent_reason | sentence }}</p></div>
-  <div><h2 class="kicker">Mode</h2>{{ mode_tag(v.agent) }}<p class="why">{{ v.agent.mode_text }}</p></div>
-</section>
+{{ role_blocks(report, v, tz, sched_words, type_words, state_words, ask_words, by_agent_role) }}
 
 <section aria-labelledby="scope">
   <h2 id="scope">What it may do</h2>
@@ -85,7 +81,7 @@
 
 {% if v.signals %}
 <section aria-labelledby="signals">
-  <h2 id="signals">What it watches</h2>
+  <h2 id="signals">Its signals and their rules</h2>
   <div class="table-wrap" tabindex="0" role="region" aria-labelledby="signals">
   <table>
     <caption>Live from Prometheus. No answer reads Unknown, never healthy.{% if grafana and v.agent.grafana %} History: <a href="{{ grafana.url }}/d/{{ v.agent.grafana }}">the {{ v.agent.name }} board in Grafana</a>.{% endif %}</caption>
