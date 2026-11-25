@@ -1,14 +1,23 @@
 {{- if .Values.apps.traefik_headers.enabled }}
 # SPDX-License-Identifier: Apache-2.0
 ---
-# Shared Traefik security-headers middleware. INERT until an IngressRoute/Ingress
-# references it ... attach per-route with the lines below. The namespace in them
-# is `namespaces.traefik` (tockmox-platform unless you changed it), rendered from
-# the same value this Middleware is created in, so the rendered manifest always
-# shows the string that actually resolves. Not the upstream `traefik` namespace:
-# Traefik runs in the platform layer's namespace here.
-#   IngressRoute:  spec.routes[].middlewares: [{name: secure-headers, namespace: {{ .Values.namespaces.traefik }}}]
+# Shared Traefik security-headers middleware. INERT until an Ingress or IngressRoute
+# references it ... attach per-route with the lines below. It is created in
+# `namespaces.traefik` (tockmox-platform unless you changed it), and the lines
+# below render that same value, so the rendered manifest always shows the string
+# that actually resolves. Not the upstream `traefik` namespace: Traefik runs in
+# the platform layer's namespace here.
 #   Ingress anno:  traefik.ingress.kubernetes.io/router.middlewares: {{ .Values.namespaces.traefik }}-secure-headers@kubernetescrd
+#     (an Ingress in any namespace: the provider-qualified name reaches across namespaces)
+#   IngressRoute:  spec.routes[].middlewares: [{name: secure-headers}]
+#     (an IngressRoute in {{ .Values.namespaces.traefik }} only)
+# An IngressRoute in any other namespace cannot attach this Middleware. With
+# providers.kubernetesCRD.allowCrossNamespace off (the upstream default, and what
+# the platform chart leaves it at), Traefik refuses a Middleware from another
+# namespace and every `@kubernetescrd` reference, and answers the route 404. Give
+# such a route a Middleware of its own in its namespace with the spec below, as the
+# platform layer's dashboard route does. tools/check-forward-auth.sh (F7) fails a
+# render with an IngressRoute that reaches across namespaces.
 #
 # Context: these are internal-only services (*.int.example.com, LAN + Tailscale,
 # your internal CA TLS, most behind Authentik OIDC), so this is hardening polish, not an
