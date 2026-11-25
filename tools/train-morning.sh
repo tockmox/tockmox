@@ -884,13 +884,15 @@ EOS
   case "$v" in ciassets|cibadsum|cibadarch|cibadprov) echo 5 > "$d/ci-attach" ;; esac
   case "$v" in cibadsum) touch "$d/ci-badsum" ;; cibadarch) touch "$d/ci-badarch" ;; cibadprov) touch "$d/prov-bad" ;; tamper) touch "$d/tamper" ;; esac
   printf 'Release notes for the selftest.\n' > "$d/notes.md"
+  spec_tag="v0.8.2"   # badtag*: a TAG this script must refuse before anything else (it cuts finals only)
+  case "$v" in badtagrc) spec_tag="v0.8.2-rc1" ;; badtagnov) spec_tag="0.8.2" ;; badtagpart) spec_tag="v0.8" ;; esac
   cat > "$d/spec" <<EOF
 REPO="$d/repo"
 GH_REPO="example/tockmox"
 TEMPLATE_REPO="example/tockmox-site-template"
 REL_BRANCH="release-0.8"
 TRAIN_BRANCH="train/0.8.2"
-TAG="v0.8.2"
+TAG="$spec_tag"
 WITNESS_RUN="sel-run"
 STAGE_REPORTS="$d/stage"
 STAGE_SUBMITTER="ci/lab-stage"
@@ -940,6 +942,9 @@ selftest_main() {
   export -f gh
 
   echo "selftest: refusals"
+  st_fixture badtagrc badtagrc;     st_run badtagrc;    st_probe "an rc tag is not a morning" badtagrc 1 "TAG 'v0.8.2-rc1' is not vX.Y.Z"
+  st_fixture badtagnov badtagnov;   st_run badtagnov;   st_probe "a tag without its leading v" badtagnov 1 "TAG '0.8.2' is not vX.Y.Z"
+  st_fixture badtagpart badtagpart; st_run badtagpart;  st_probe "a tag with two parts" badtagpart 1 "TAG 'v0.8' is not vX.Y.Z"
   st_fixture witness witness;     st_run witness;     st_probe "witness head_sha differs from origin/train" witness 1 "witness mismatch"
   st_fixture notready notready;   st_run notready;    st_probe "witness outcome is NOT READY" notready 1 "outcome=NOT READY"
   st_fixture nooutcome nooutcome; st_run nooutcome;   st_probe "witness has no outcome field" nooutcome 1 "outcome=<none>"
@@ -970,7 +975,7 @@ selftest_main() {
   st_fixture cadirty cadirty;     st_run cadirty;     st_probe "check-all results from a dirty checkout" cadirty 1 "checkout was not clean"
   st_fixture capart capart;       st_run capart;      st_probe "check-all results of a --changed-from run" capart 1 "not a full run"
   st_fixture cawfnorun cawfnorun; st_run cawfnorun;   st_probe "a tree with check-all.yaml and no check-all run on the SHA" cawfnorun 1 "no check-all run on"
-  for n in witness notready nooutcome whand wnorecord wedited wextra wsubmitter wnoblock wtwoblocks wrunname wverdict nonff forbidden tagexists wrongkey noimages canone caskip casha cadirty capart cawfnorun; do
+  for n in badtagrc badtagnov badtagpart witness notready nooutcome whand wnorecord wedited wextra wsubmitter wnoblock wtwoblocks wrunname wverdict nonff forbidden tagexists wrongkey noimages canone caskip casha cadirty capart cawfnorun; do
     st_assert "$n: nothing merged, pushed or signed" bash -c "[ ! -f $PT/$n/gh-calls ] && [ \"\$(cat $PT/$n/pr-state)\" = OPEN ] && [ ! -f $PT/$n/GATE-REPORT-v0.8.2.md.sig ]"
   done
 
