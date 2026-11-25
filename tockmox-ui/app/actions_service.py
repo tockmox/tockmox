@@ -129,6 +129,16 @@ def _iso(ts: float) -> str:
     return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
 
+
+def _argo_refusal(what: str, status: int) -> str:
+    """The reason line for an Argo CD answer that was not a success: the status class and fixed words only, never the
+    upstream body or Location header. A redirect is nearly always Argo CD sending plain HTTP to HTTPS."""
+    if 300 <= status < 400:
+        return (f"Argo CD redirected the console to HTTPS ({status}) and {what}; check that actions.argocd.url "
+                "starts with https:// and whether Argo CD runs with server.insecure")
+    return f"Argo CD {what} ({status})"
+
+
 class Kube:
     """The few verbs the allowlists need, against the API server, with this pod's token."""
 
@@ -524,7 +534,7 @@ class Service:
         with self._argo() as c:
             r = c.get(f"/api/v1/applications/{app}", params={"refresh": "normal"})
             if r.status_code >= 300:
-                raise act.Refused(f"Argo CD did not refresh it ({r.status_code})")
+                raise act.Refused(_argo_refusal("did not refresh it", r.status_code))
         return {"ref": [app], "detail": "refresh requested"}
 
     def do_sync(self, it, who):
@@ -533,7 +543,7 @@ class Service:
             r = c.post(f"/api/v1/applications/{app}/sync", json={"prune": False, "dryRun": False})
             if r.status_code >= 300:
                 log.warning("Argo CD did not start a sync of %s for %s (%s): %s", app, it["key"], r.status_code, r.text[:200])
-                raise act.Refused(f"Argo CD did not start a sync ({r.status_code})")
+                raise act.Refused(_argo_refusal("did not start a sync", r.status_code))
         return {"ref": [app], "detail": "sync started"}
 
     def do_restart(self, it, who):

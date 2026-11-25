@@ -660,6 +660,36 @@ def test_an_upstream_error_body_reaches_the_log_not_the_caller(kind, status, tmp
     assert kind == "run-job" or it["key"] in caplog.text
 
 
+def _argo_answers(status, tmp_path, kind, headers=None):
+    tok = tmp_path / "argocd-token"
+    tok.write_text("t")
+    s, _, _ = service(actions=dict(ACTIONS, argocd={"enabled": True, "url": "http://argocd.test", "tokenFile": str(tok)}))
+    s.tp_argo = httpx.MockTransport(lambda req: httpx.Response(status, headers=headers or {}, text=f"body: {SENTINEL}"))
+    extra = {"auth_time": time.time() - 60} if kind == "sync" else {}
+    return s, act.intent(kind, {"app": "forgejo"}, {}, "a"), extra
+
+
+@pytest.mark.parametrize("kind", ["refresh", "sync"])
+@pytest.mark.parametrize("status", [301, 307, 308])
+def test_an_argocd_redirect_says_it_went_to_https_and_what_to_check(kind, status, tmp_path):
+    s, it, extra = _argo_answers(status, tmp_path, kind, {"location": "https://argocd.test/api/v1/x"})
+    code, out = s.handle({"intent": it, "id_token": token(act.nonce_for(it), **extra)})
+    assert code == 403 and out["result"] == "refused"
+    why = out["reason"]
+    assert "redirected" in why and "HTTPS" in why                       # what happened
+    assert "actions.argocd.url" in why and "server.insecure" in why     # what to check
+    assert str(status) in why and not why.endswith(".")                 # the page adds the full stop
+    assert SENTINEL not in why and "argocd.test/api" not in why         # no upstream body, no Location
+
+
+@pytest.mark.parametrize("kind, status, words", [("refresh", 500, "did not refresh"), ("sync", 500, "did not start a sync")])
+def test_an_argocd_error_that_is_not_a_redirect_keeps_its_short_reason(kind, status, words, tmp_path):
+    s, it, extra = _argo_answers(status, tmp_path, kind)
+    code, out = s.handle({"intent": it, "id_token": token(act.nonce_for(it), **extra)})
+    assert code == 403 and words in out["reason"] and "500" in out["reason"]
+    assert "server.insecure" not in out["reason"] and SENTINEL not in out["reason"]
+
+
 def test_a_refusal_carries_its_reason_as_an_attribute():
     e = act.Refused("the sign-in was not made for this action")
     assert e.reason == str(e) == "the sign-in was not made for this action"
