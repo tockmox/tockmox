@@ -14,7 +14,8 @@
 #   an earlier failure's status is never replaced by a later path's
 #   netpol-adversary.sh (not a path: no receipt, so its exit status is mapped once): 0 PASS lane 0, 1 PRODUCT_FAIL lane 1,
 #   2 (its own "skipped") BLOCKED lane 4, anything else ABORTED lane 1; last, only when P09's receipt said PASS
-#   a create that fails                                               lane 1, and the lane's report names the
+#   a create refused by its capacity gate (exit 4) / that cannot read the rig (exit 5)   lane 4 / 5, its own status
+#   a create that fails any other way                                 lane 1, and the lane's report names the
 #                                                                     provisioner's own error (its last stderr line,
 #                                                                     then a bounded tail, masked), never only
 #                                                                     "create failed"; a create that works writes no
@@ -131,11 +132,26 @@ run_lane STUB_CREATE_RC=1 STUB_CREATE_ERR="waiting for ed-lane\nauth: bearer s3c
   && ok "... the tail is masked, and the create line on stdout is never read as a kubeconfig path" \
   || bad "create failure masked, stdout not a path" "$(lreport | tr '\n' ';')"
 run_lane STUB_CREATE_RC=5 STUB_CREATE_ERR="$(for i in $(seq -w 1 99); do printf 'progress %s\\n' "$i"; done)capacity INFRA_ERROR: the substrate did not answer\n" TOCKMOX_CREATE_TAIL_LINES=20
-[ "$RC" = 1 ] && lreport | grep -F 'lane: provisioning failed (create exit 5): capacity INFRA_ERROR: the substrate did not answer' >/dev/null \
+[ "$RC" = 5 ] && lreport | grep -F 'lane: INFRA_ERROR: create could not read the rig (create exit 5): capacity INFRA_ERROR: the substrate did not answer' >/dev/null \
   && lreport | grep -F '(80 earlier lines not shown)' >/dev/null && ! lreport | grep -F 'progress 80' >/dev/null \
   && [ "$(lreport | grep -c '^  | progress ')" = 19 ] \
   && ok "a long stderr is bounded (TOCKMOX_CREATE_TAIL_LINES=20: the last 20 lines, the rest counted) and the summary names the last line and the exit" \
   || bad "create stderr bounded" "rc=$RC $(lreport | head -5 | tr '\n' ';')"
+# the capacity gate's own statuses pass through: a refusal that created nothing is BLOCKED (4), a rig it could not
+# read is INFRA_ERROR (5), so a caller retries a busy rig instead of reading a red run; neither leaves a VM to destroy
+CAPACITY='BLOCKED: harness: other harness VM(s) in the namespace'
+run_lane STUB_CREATE_RC=4 STUB_CREATE_ERR="${CAPACITY}\n"
+[ "$RC" = 4 ] && [ "$(ran P09)" = 0 ] && [ "$(grep -cx destroy "$LH/log")" = 0 ] \
+  && lreport | grep -F "lane: BLOCKED: create refused: the rig is full (its capacity gate, create exit 4): ${CAPACITY}" >/dev/null \
+  && ok "create refused by its capacity gate (exit 4): the lane exits 4, BLOCKED, runs nothing, destroys nothing, and its report says why" \
+  || bad "create exit 4" "rc=$RC $(tr '\n' ';' < "$LH/log") report: $(lreport | head -3 | tr '\n' ';')"
+run_lane STUB_CREATE_RC=5 STUB_CREATE_ERR="capacity INFRA_ERROR: the substrate did not answer\n"
+[ "$RC" = 5 ] && [ "$(ran P09)" = 0 ] && [ "$(grep -cx destroy "$LH/log")" = 0 ] \
+  && ok "create could not read the rig (exit 5): the lane exits 5, INFRA_ERROR, runs nothing, destroys nothing" \
+  || bad "create exit 5" "rc=$RC $(tr '\n' ';' < "$LH/log")"
+run_lane STUB_CREATE_RC=3 STUB_CREATE_ERR="something else broke\n"
+[ "$RC" = 1 ] && [ "$(ran P09)" = 0 ] && lreport | grep -F 'lane: provisioning failed (create exit 3): something else broke' >/dev/null \
+  && ok "any other create failure (exit 3) stays a failed lane: exit 1" || bad "create exit 3" "rc=$RC $(lreport | head -2 | tr '\n' ';')"
 run_lane STUB_CREATE_ERR="creating ed-lane: the stub's own progress line\n"
 [ "$RC" = 0 ] && [ -z "$(lreport)" ] && [ "$(grep -cF "creating ed-lane: the stub's own progress line" "$TMP/lout")" = 1 ] && [ "$(ran P09)" = 1 ] \
   && ok "a create that works: no lane report, its stderr still reaches the job log once, and its kubeconfig is used" \
@@ -178,6 +194,12 @@ run_lane STUB_P09_RC=3 STUB_P09_OUT=PRODUCT_FAIL
 
 # mutated copies of the lane: each drops one check and must go green where it must not
 mutlane() { mut "$LANE_SH" "$L/p09-lane.sh" "$1" "$2"; }
+mutlane '    4) blocked "create refused' '    4) fail "create refused'
+run_lane STUB_CREATE_RC=4
+[ "$RC" = 1 ] && ok "mutation: a lane that reads create's exit 4 as a failure ends 1 over a busy rig, so the exit 4 case above is the guard" || bad "mutation: create exit 4" "rc=$RC"
+mutlane '    5) infra "create could not read' '    5) fail "create could not read'
+run_lane STUB_CREATE_RC=5
+[ "$RC" = 1 ] && ok "mutation: a lane that reads create's exit 5 as a failure ends 1 over an unreadable rig, so the exit 5 case above is the guard" || bad "mutation: create exit 5" "rc=$RC"
 mutlane 'if [ "$P09_RC" = 0 ] && [ "${P09_REC%% *}" = PASS ]; then' 'if [ "$P09_RC" = 0 ]; then'
 run_lane TOCKMOX_P09_ROUTE=external STUB_P09_OUT=BLOCKED
 [ "$RC" = 0 ] && ok "mutation: a lane that trusts P09's exit status ends 0 over a BLOCKED P09 (and runs P11), so the case above is the guard" || bad "mutation: P09 outcome" "rc=$RC"

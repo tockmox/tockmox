@@ -186,6 +186,9 @@ fail() { STOPPED="lane: $1"; echo "$STOPPED" >&2; exit 1; }
 # infra REASON ... what the lane could not provide is the environment's fault, not the product's and not a pass: exit 5,
 # the status lane_code gives INFRA_ERROR below.
 infra() { STOPPED="lane: INFRA_ERROR: $1"; echo "$STOPPED" >&2; exit 5; }
+# blocked REASON ... the venue refused before anything was made (the rig is busy): not the product's fault and not a
+# pass, so a caller retries instead of reading a red run: exit 4, the status lane_code gives BLOCKED below.
+blocked() { STOPPED="lane: BLOCKED: $1"; echo "$STOPPED" >&2; exit 4; }
 # shellcheck disable=SC2329  # invoked by the EXIT trap below
 finish() {
   local rc=$?
@@ -369,9 +372,15 @@ create_reason() {
 echo "lane 1: creating ${TOCKMOX_TEST_VM} on ${TOCKMOX_SUBSTRATE_CONTEXT}"
 create_rc=0
 out="$( { bash "${PROV}/throwaway-cluster.sh" create 2>&1 1>&3 3>&- | tee "$CREATE_ERR" >&2; } 3>&1 )" || create_rc=$?
+# create's capacity gate refuses before it makes anything: its exit 4 (BLOCKED, the rig is full) and 5 (INFRA_ERROR, the
+# rig could not be read) are the lane's own, as the qa-lab lane template reads them; there is no VM to destroy.
 if [ "$create_rc" != 0 ]; then
   STOP_DETAIL="$(create_said "$CREATE_ERR")"
-  fail "provisioning failed (create exit ${create_rc}): $(create_reason "$CREATE_ERR")"
+  case "$create_rc" in
+    4) blocked "create refused: the rig is full (its capacity gate, create exit 4): $(create_reason "$CREATE_ERR")" ;;
+    5) infra "create could not read the rig (create exit 5): $(create_reason "$CREATE_ERR")" ;;
+    *) fail "provisioning failed (create exit ${create_rc}): $(create_reason "$CREATE_ERR")" ;;
+  esac
 fi
 CREATED=1
 KC="$(printf '%s\n' "$out" | tail -1)"
