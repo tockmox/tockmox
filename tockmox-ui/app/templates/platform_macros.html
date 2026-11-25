@@ -144,3 +144,100 @@
 </table>
 </div>
 {%- endmacro %}
+
+{# ---- Each role reports on its area: four blocks, the same four for every role (platform_report.role_report). A
+   source it could not read is a sentence naming it, never an empty block or a healthy word. #}
+{% macro block_gaps(gaps) -%}
+{%- for g in gaps %}<p class="gap">{{ badge("unknown", "Unknown") }} {{ g }}</p>{% endfor -%}
+{%- endmacro %}
+
+{% macro role_blocks(rp, v, tz, sched_words, type_words, state_words, ask_words, by_agent_role) -%}
+<div class="role-blocks">
+<section class="rblock" aria-labelledby="rb-watches">
+  <h2 id="rb-watches">What it watches</h2>
+  {% set w = rp.watches %}
+  {% if w.signals %}
+  <ul class="plain rb-list">
+  {% for x in w.signals %}<li><span class="rb-name">{{ x.sig.label }}</span> <span class="num">{{ x.text }}</span> {{ signal_badge(x.state) }}{% if x.why %}<span class="why">{{ x.why }}</span>{% endif %}</li>{% endfor %}
+  </ul>
+  {% elif v.agent.is_lead %}
+  <p class="quiet">No signal of its own. It is judged by its team, below.</p>
+  {% else %}
+  <p class="quiet">No live signal of its own yet.</p>
+  {% endif %}
+  <p class="muted small">Scheduled work it owns: {% if w.deployed_known %}{{ w.deployed | length }} deployed{% else %}deployed: unknown{% endif %}, {{ w.planned | length }} planned. <a href="#work">The jobs</a></p>
+  {{ block_gaps(w.gaps) }}
+</section>
+
+<section class="rblock" aria-labelledby="rb-logged">
+  <h2 id="rb-logged">What it logged since you last looked</h2>
+  {% set lg = rp.logged %}
+  <p class="muted small">{% if lg.first_look %}This browser has not opened this page in the last 90 days, so this shows the last 24 hours, from {{ when(lg.since, tz) }}.{% else %}Since {{ when(lg.since, tz) }}, when this browser last opened this page.{% endif %}</p>
+  {% if lg.entries %}
+  <ul class="plain rb-list">
+  {% for e in lg.entries %}<li>
+    {%- if e.kind == "case" -%}<a href="/platform/cases/{{ e.id }}"><code>{{ e.id }}</code></a> {{ type_words.get(e.type, "Record") }}, now {{ state_words.get(e.state, e.state | replace("_", " ")) | lower }}{% if e.title %}<span class="why">{{ e.title }}</span>{% endif %}
+    {%- elif e.kind == "run" -%}Agent run <code>{{ e.id }}</code> {{ badge(e.state, e.word) }}
+    {%- else -%}Scheduled job {{ e.id }} ran {{ sched_badge(e.sched_state, sched_words) }}{%- endif %}
+    <span class="why">{{ when(e.t, tz) }}</span></li>{% endfor %}
+  </ul>
+  {% if lg.more %}<p class="muted small">And {{ lg.more }} more, older.</p>{% endif %}
+  {% elif lg.gaps %}
+  <p class="quiet">Nothing logged from the sources that answered.</p>
+  {% else %}
+  <p class="quiet">Nothing logged since then. Every source it reports through answered.</p>
+  {% endif %}
+  {{ block_gaps(lg.gaps) }}
+</section>
+
+<section class="rblock" aria-labelledby="rb-open">
+  <h2 id="rb-open">Its open items</h2>
+  {% set op = rp.open %}
+  {% if op.rows %}
+  <ul class="plain rb-list">
+  {% for i in op.rows %}<li>
+    {%- if i.kind == "case" -%}<a href="/platform/cases/{{ i.id }}"><code>{{ i.id }}</code></a> {{ type_words.get(i.type, "Record") }} {{ wait_badge(i) }}<span class="why">{{ wait_text(i, ask_words, by_agent_role) }}</span>
+    {%- elif i.kind == "decision" -%}<code>{{ i.id }}</code> {{ badge("warning", "Waiting on you") }}<span class="why">{% if i.unrouted %}An agent with no role in this catalog waits on your decision in the conversation; it is listed with this team's lead.{% else %}Its agent waits on your decision in the conversation.{% endif %}</span>
+    {%- else -%}Scheduled job {{ i.id }} {{ sched_badge(i.sched_state, sched_words) }}<span class="why">{{ i.job.why }}</span>{%- endif -%}
+  </li>{% endfor %}
+  </ul>
+  {% if op.more %}<p class="muted small">And {{ op.more }} more.</p>{% endif %}
+  {% elif op.gaps %}
+  <p class="quiet">No open item from the sources that answered.</p>
+  {% else %}
+  <p class="quiet">No open item. Every source it reports through answered and holds none.</p>
+  {% endif %}
+  {{ block_gaps(op.gaps) }}
+</section>
+
+<section class="rblock" aria-labelledby="rb-health">
+  <h2 id="rb-health">Its health</h2>
+  {% set h = rp.health %}
+  <dl class="rb-health">
+    <dt>Practice</dt><dd>{{ practice_badge(h.practice_state) }}<span class="why">{{ h.practice_reason | sentence }}</span></dd>
+    <dt>Agent</dt><dd>{{ badge(h.agent_state, h.agent_word) }}<span class="why">{{ h.agent_reason | sentence }}</span></dd>
+    <dt>Mode</dt><dd>{{ mode_tag(v.agent) }}<span class="why">{{ v.agent.mode_text }}</span></dd>
+  </dl>
+  {{ block_gaps(h.gaps) }}
+</section>
+</div>
+{%- endmacro %}
+
+{# ---- The Overview's tiles (platform_report.overview_tiles): a count, its state, and where it comes from. #}
+{% macro tiles_row(tiles) -%}
+<section aria-labelledby="pm-tiles">
+  <h2 id="pm-tiles" class="visually-hidden">The platform in four numbers</h2>
+  <ul class="pm-tiles plain">
+  {% for t in tiles %}
+  <li class="pm-tile" id="tile-{{ t.id }}">
+    <p class="pm-tile-label">{{ t.label }}</p>
+    <p class="pm-tile-value">{{ t.value }}</p>
+    {% if t.state == "info" %}{{ signal_badge("info") }}{% else %}{{ badge(t.state) }}{% endif %}
+    {% if t.note %}<p class="why">{{ t.note }}</p>{% endif %}
+    <p class="why">From {{ t.source }}.</p>
+    {% for g in t.gaps %}<p class="gap">{{ g }}</p>{% endfor %}
+  </li>
+  {% endfor %}
+  </ul>
+</section>
+{%- endmacro %}

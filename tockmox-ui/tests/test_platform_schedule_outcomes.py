@@ -62,8 +62,9 @@ def client(world, doc, cronworkflows=(), workflows=None):
 
 
 def row_of(page, name):
-    """The schedule table row holding a job's name."""
-    i = page.index(name)
+    """The schedule table row holding a job's name. A role page names a job first in its four blocks (what it
+    logged, its open items), so the table is looked for from the role page's scheduled work on."""
+    i = page.index(name, max(page.find('id="work"'), 0))
     return page[page.rfind("<tr>", 0, i):page.index("</tr>", i)]
 
 

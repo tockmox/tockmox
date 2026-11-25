@@ -42,7 +42,7 @@ import yaml
 from fastapi import Request
 from zoneinfo import ZoneInfo
 
-from . import platform_cases
+from . import platform_cases, platform_report
 from .cronexpr import Cron, describe
 from .sources import CRIT, OK, UNKNOWN, WARN, KubeClient, Reading, Source, _parse_ts, _why, worst
 
@@ -1049,7 +1049,9 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
         rail = day_rail([v for v in views if v.schedules], unowned, time.time(), tz, site=site)
         dr, rows = desk()
         yours = platform_cases.needs_you(rows)      # the same set the Cases page opens on
-        return render(request, "platform_overview.html", u, readings=r, views=views, teams=teams,
+        tiles = platform_report.overview_tiles(views, unowned, r, dr, rows, cases_on=srcs["desk"].configured(),
+                                               ledger_on=srcs["ledger"].configured())
+        return render(request, "platform_overview.html", u, readings=r, views=views, teams=teams, tiles=tiles,
                       org_state=verdict, org_why=why, unowned=unowned, site_work=site, waiting=waiting, rota=rail,
                       ledger_on=srcs["ledger"].configured(), desk=dr, case_counts=platform_cases.summarize(rows),
                       yours=yours, groups=platform_cases.group_cases(yours), **common(u))
@@ -1101,9 +1103,19 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
         pending = platform_cases.with_act(pending, interface_url)
         idx = srcs["index"].read()
         served = ((idx.data or {}).get("served") or {}) if idx.fetched_at is not None else None
-        return render(request, "platform_agent.html", u, readings=r, v=v, team=team, team_obj=t,
+        now = time.time()
+        cookie = platform_report.seen_cookie(aid)
+        seen_from, first = platform_report.since(request.cookies.get(cookie), now)
+        report = platform_report.role_report(v, r, dr, mine, cases_on=srcs["desk"].configured(),
+                                             ledger_on=srcs["ledger"].configured(), seen_from=seen_from,
+                                             first_look=first, now=now)
+        resp = render(request, "platform_agent.html", u, readings=r, v=v, team=team, team_obj=t,
                       lead=by[t.lead.id], desk=dr, pending=pending, done=done, served=served, index=idx,
-                      drift=platform_cases.drift(cat, idx), **common(u))
+                      drift=platform_cases.drift(cat, idx), report=report, **common(u))
+        # the viewer's own "last looked", kept in their browser; the platform stores nothing
+        resp.set_cookie(cookie, str(int(now)), max_age=platform_report.SEEN_MAX_AGE, path="/platform",
+                        httponly=True, secure=s.secure_cookies, samesite="lax")
+        return resp
 
     platform_cases.register(app, cat, srcs, guard, render, common)
     return srcs
