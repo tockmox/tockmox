@@ -1,0 +1,182 @@
+# TockmoxPersistentVolumeFillingUp (tockmox-selfcheck).
+#
+# DO NOT SET rule_files; tools/check-alert-rules.sh injects the rendered rules.
+#
+# THE CASE THIS FILE EXISTS FOR. On k3s every control-plane component runs in
+# one process, so the etcd metrics port (2381) serves the kubelet's series as
+# well as etcd's. A cluster that scrapes both therefore holds TWO copies of
+# kubelet_volume_stats_* for every volume on a server node: one under
+# job="kubelet" and one under job="kube-etcd", with different label sets
+# (only the kubelet copy carries node, endpoint, service and metrics_path).
+# The rule used to divide the two metrics as they came, with no aggregation,
+# so one full volume fired the alert once per job: two critical alerts, and
+# two incidents downstream, for one disk. Measured on a running k3s site: 80
+# available/capacity ratio series for 55 volumes, 25 of them doubled.
+#
+# THE FIX aggregates to one series per volume,
+# `max by (namespace, persistentvolumeclaim)` over the fill ratio, the same
+# shape TockmoxPrometheusTSDBVolumeTroughRising already uses. max of the FILL
+# keeps the worst reading, so a duplicate copy can never hide a full volume.
+# It also drops node and instance, so the `for` clock no longer restarts when
+# the pod moves node (case 4).
+#
+# No job filter on purpose: the stock KubePersistentVolumeFillingUp filters
+# job="kubelet", which would also fix the double, but it ties the rule to one
+# scrape job name, and a cluster that names the job differently would lose the
+# alert altogether. Aggregation is right whatever the jobs are called.
+#
+#   1  one volume, two scrape jobs, 95% full     ONE alert, labels per volume
+#   2  the same volume via both jobs, 85% full   silent (no sum, no low line)
+#   3  two full volumes in one namespace         TWO alerts (claim is kept)
+#   4  a full volume whose pod moves node        fires on the 15m clock from
+#      at 10m (new instance and node labels)     the first sample, not the move
+#   5  the two copies disagree (95% and 85%)     ONE alert: the worst reading
+#                                                wins, so a copy cannot hide it
+#
+# Cases 1, 3, 4 and 5 are red against the old, unaggregated expression: case
+# 1 sees two alerts carrying job and instance, cases 3 and 5 see alerts
+# carrying job, instance and node, and case 4 sees none at 16m because the
+# post-move series has been pending for only six minutes. Case 2 is the
+# silent half and passes either way.
+#
+# Capacity is 10e9 in every case, so available 5e8 is 95% full and 1.5e9 is
+# 85% full.
+evaluation_interval: 1m
+
+tests:
+  # 1. ONE VOLUME, TWO SCRAPE JOBS. Silent before the 15m `for`, then exactly
+  #    one alert whose labels are the volume's, not either scrape's.
+  - interval: 1m
+    input_series:
+      - series: 'kubelet_volume_stats_available_bytes{job="kubelet", endpoint="https-metrics", instance="node-a:10250", metrics_path="/metrics", node="node-a", service="kubelet", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '500000000x30'
+      - series: 'kubelet_volume_stats_capacity_bytes{job="kubelet", endpoint="https-metrics", instance="node-a:10250", metrics_path="/metrics", node="node-a", service="kubelet", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '10000000000x30'
+      - series: 'kubelet_volume_stats_available_bytes{job="kube-etcd", instance="node-a:2381", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '500000000x30'
+      - series: 'kubelet_volume_stats_capacity_bytes{job="kube-etcd", instance="node-a:2381", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '10000000000x30'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: TockmoxPersistentVolumeFillingUp
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: TockmoxPersistentVolumeFillingUp
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: tockmox-platform
+              persistentvolumeclaim: data-tockmox-garage-0
+            exp_annotations:
+              summary: "PVC data-tockmox-garage-0 is over 90% full"
+              description: "Volume tockmox-platform/data-tockmox-garage-0 has under 10% free. Storage that fills silently takes the workload with it."
+
+  # 2. THE SILENT HALF. The same two copies at 85% full. Fails if the
+  #    aggregation SUMS the copies (1.7 is over any line) or if the line
+  #    drops below 85%.
+  - interval: 1m
+    input_series:
+      - series: 'kubelet_volume_stats_available_bytes{job="kubelet", instance="node-a:10250", node="node-a", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '1500000000x30'
+      - series: 'kubelet_volume_stats_capacity_bytes{job="kubelet", instance="node-a:10250", node="node-a", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '10000000000x30'
+      - series: 'kubelet_volume_stats_available_bytes{job="kube-etcd", instance="node-a:2381", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '1500000000x30'
+      - series: 'kubelet_volume_stats_capacity_bytes{job="kube-etcd", instance="node-a:2381", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '10000000000x30'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: TockmoxPersistentVolumeFillingUp
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: TockmoxPersistentVolumeFillingUp
+        exp_alerts: []
+
+  # 3. TWO FULL VOLUMES IN ONE NAMESPACE stay two alerts. Fails if the
+  #    aggregation drops persistentvolumeclaim and folds distinct disks into
+  #    one.
+  - interval: 1m
+    input_series:
+      - series: 'kubelet_volume_stats_available_bytes{job="kubelet", instance="node-a:10250", node="node-a", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '500000000x30'
+      - series: 'kubelet_volume_stats_capacity_bytes{job="kubelet", instance="node-a:10250", node="node-a", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '10000000000x30'
+      - series: 'kubelet_volume_stats_available_bytes{job="kubelet", instance="node-b:10250", node="node-b", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-1"}'
+        values: '500000000x30'
+      - series: 'kubelet_volume_stats_capacity_bytes{job="kubelet", instance="node-b:10250", node="node-b", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-1"}'
+        values: '10000000000x30'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: TockmoxPersistentVolumeFillingUp
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: tockmox-platform
+              persistentvolumeclaim: data-tockmox-garage-0
+            exp_annotations:
+              summary: "PVC data-tockmox-garage-0 is over 90% full"
+              description: "Volume tockmox-platform/data-tockmox-garage-0 has under 10% free. Storage that fills silently takes the workload with it."
+          - exp_labels:
+              severity: critical
+              namespace: tockmox-platform
+              persistentvolumeclaim: data-tockmox-garage-1
+            exp_annotations:
+              summary: "PVC data-tockmox-garage-1 is over 90% full"
+              description: "Volume tockmox-platform/data-tockmox-garage-1 has under 10% free. Storage that fills silently takes the workload with it."
+
+  # 4. THE POD MOVES NODE at 10m, as a rolling reboot does. The old series is
+  #    marked stale at 10m and a new one (new instance, new node) starts in the
+  #    same minute. One series per volume means one unbroken `for` clock from
+  #    0, so the alert fires at 16m. Fails if node or instance is kept: the
+  #    new series would only have been pending since 10m.
+  - interval: 1m
+    input_series:
+      - series: 'kubelet_volume_stats_available_bytes{job="kubelet", instance="node-a:10250", node="node-a", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '500000000x9 stale'
+      - series: 'kubelet_volume_stats_capacity_bytes{job="kubelet", instance="node-a:10250", node="node-a", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '10000000000x9 stale'
+      - series: 'kubelet_volume_stats_available_bytes{job="kubelet", instance="node-b:10250", node="node-b", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '_x10 500000000x20'
+      - series: 'kubelet_volume_stats_capacity_bytes{job="kubelet", instance="node-b:10250", node="node-b", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '_x10 10000000000x20'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: TockmoxPersistentVolumeFillingUp
+        exp_alerts: []
+      - eval_time: 16m
+        alertname: TockmoxPersistentVolumeFillingUp
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: tockmox-platform
+              persistentvolumeclaim: data-tockmox-garage-0
+            exp_annotations:
+              summary: "PVC data-tockmox-garage-0 is over 90% full"
+              description: "Volume tockmox-platform/data-tockmox-garage-0 has under 10% free. Storage that fills silently takes the workload with it."
+
+  # 5. THE COPIES DISAGREE. Two scrapes of one volume need not land on the same
+  #    sample: here the kubelet copy reads 95% full and the etcd-port copy 85%.
+  #    The fuller reading wins and the alert fires once. Fails if the
+  #    aggregation keeps the EMPTIER copy (min of the fill, or max of the free
+  #    ratio), which would let a lagging copy hide a full volume.
+  - interval: 1m
+    input_series:
+      - series: 'kubelet_volume_stats_available_bytes{job="kubelet", instance="node-a:10250", node="node-a", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '500000000x30'
+      - series: 'kubelet_volume_stats_capacity_bytes{job="kubelet", instance="node-a:10250", node="node-a", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '10000000000x30'
+      - series: 'kubelet_volume_stats_available_bytes{job="kube-etcd", instance="node-a:2381", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '1500000000x30'
+      - series: 'kubelet_volume_stats_capacity_bytes{job="kube-etcd", instance="node-a:2381", namespace="tockmox-platform", persistentvolumeclaim="data-tockmox-garage-0"}'
+        values: '10000000000x30'
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: TockmoxPersistentVolumeFillingUp
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: tockmox-platform
+              persistentvolumeclaim: data-tockmox-garage-0
+            exp_annotations:
+              summary: "PVC data-tockmox-garage-0 is over 90% full"
+              description: "Volume tockmox-platform/data-tockmox-garage-0 has under 10% free. Storage that fills silently takes the workload with it."
