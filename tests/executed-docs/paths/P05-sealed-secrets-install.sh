@@ -67,6 +67,7 @@ REF="${TOCKMOX_DOCS_REF:?set TOCKMOX_DOCS_REF to the tag under test}"
 PAGE="${TOCKMOX_P05_PAGE:-docs/deployment/fresh-install.md}"
 SECTION="${TOCKMOX_P05_SECTION:-## 7. Install sealed-secrets, with your own key}"
 EXTRACT="${HERE}/../lib/extract-block.sh"
+. "${HERE}/../lib/registry-error.sh"
 
 path_begin "P05-sealed-secrets-install" \
   "install sealed-secrets with the release name the page's own success condition assumes, then back up the controller key"
@@ -85,9 +86,10 @@ verbatim "$CMD1"
 # SEALED_SECRETS_CHART_VERSION here and block 2 guards on it.
 _B1OUT="$(mktemp "${TMPDIR:-/tmp}/p05-b1.XXXXXX")"
 run_block_carrying_exports "$CMD1" > "$_B1OUT" 2>&1
-_P05_RC1=$?
-BLOCK1_OUT="$(cat "$_B1OUT")"; rm -f "$_B1OUT"
+# The status is read HERE, straight after the block. It used to be read after the `rm -f` below,
+# so "block 1 exited N" always printed rm's 0.
 RC1=$?
+BLOCK1_OUT="$(cat "$_B1OUT")"; rm -f "$_B1OUT"
 printf '%s\n' "$BLOCK1_OUT" | sed 's/^/    | /'
 _emit "(block 1 exited ${RC1}; the exit code is not the assertion)"
 _emit ""
@@ -96,6 +98,14 @@ CHART_VERSION="$(printf '%s\n' "$BLOCK1_OUT" | awk -F': *' '/^version:/{print $2
 _emit "SUBSTITUTION MADE:"
 _emit "  SEALED_SECRETS_CHART_VERSION carried from block 1 -> ${SEALED_SECRETS_CHART_VERSION:-<unset>}"
 _emit ""
+
+# No version AND a registry or helm error line: the registry refused the request (Docker Hub's
+# anonymous pull limit answers 429), which says nothing about the page. INFRA_ERROR, status 5,
+# never declarable, with the registry's own line quoted.
+if [ -z "$CHART_VERSION" ] && REG_ERR="$(registry_error_line "$BLOCK1_OUT")"; then
+  path_outcome INFRA_ERROR "block 1 got a registry error, not a version (block 1 exited ${RC1}): ${REG_ERR}"
+  exit 5
+fi
 
 if [ -z "$CHART_VERSION" ]; then
   _emit "EXCEPTION: could not parse a chart version out of block 1's own output."
