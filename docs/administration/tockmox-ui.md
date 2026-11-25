@@ -698,11 +698,50 @@ tockmoxUi:
   actions:
     argocd:
       enabled: true
-      url: http://argocd-server.argocd.svc
+      url: https://argocd-server.argocd.svc
       tokenSecret: tockmox-actions-argocd
 ```
 
 The render fails with the reason when `enabled` is set without both.
+
+**Use the https URL.** A stock `argocd-server` serves TLS and answers a plain
+`http://` request with a 307 redirect to `https://`. The console does not follow
+redirects (it sends the account's token, and a redirect would hide a wrong URL
+behind a success), so with an `http://` URL against a stock Argo CD, **Refresh**
+and **Sync** report "did not happen (307)". The chart leaves `url` empty: it is
+yours to set, and `https://argocd-server.argocd.svc` is the one that works
+against a stock install.
+
+**The certificate it must chain to.** The console verifies Argo CD's
+certificate against its trust bundle: the public roots in the UI's image plus
+the Tockmox CA (see "Trusting the Tockmox CA" above). That bundle is the only
+place the console looks, and the certificate Argo CD generates for itself
+chains to neither, so the first https call fails with "certificate verify
+failed". Give `argocd-server` a certificate for `argocd-server.argocd.svc`
+issued by the Tockmox CA (a cert-manager Certificate whose Secret is
+`argocd-server-tls` in the `argocd` namespace, which `argocd-server` reads
+when it starts), restart `argocd-server`, and the console trusts it with no
+further setting. A certificate from any other CA is trusted only if that CA is
+in the bundle.
+
+**The alternative: plain http inside the cluster.** Set `server.insecure` in
+the `argocd-cmd-params-cm` ConfigMap in the `argocd` namespace, restart
+`argocd-server` (it reads the ConfigMap at start, so the change does nothing
+until it restarts), and the `http://argocd-server.argocd.svc` URL works:
+
+```bash
+kubectl -n argocd patch configmap argocd-cmd-params-cm --type merge -p '{"data":{"server.insecure":"true"}}'
+kubectl -n argocd rollout restart deployment argocd-server
+```
+
+The trade-off is that the hop from the console to Argo CD is then plaintext, and
+the account's bearer token crosses the pod network unencrypted. It stays inside
+the cluster, but anything that can read that traffic can read the token, and
+the token can sync every application the account may get. The setting is for
+the whole `argocd-server`, not for the console: an Ingress or other client
+that reaches Argo CD over https must be changed to match, because the server
+then speaks plain http on its one port. Prefer the https URL and a certificate
+the console trusts; use this where issuing that certificate is not an option.
 
 **The record.** Every attempt, refused ones too, is one JSON line on the
 service's log, which Loki keeps:
