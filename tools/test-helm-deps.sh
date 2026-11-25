@@ -25,7 +25,9 @@
 #      writes its line;
 #   9. --record never rewrites the hash of a name and version already recorded;
 #  10. no subcharts.sha256 at all: refused;
-#  11. --record drops a line no Chart.lock pins.
+#  11. --record drops a line no Chart.lock pins;
+#  12. a bump to a new version: refused without --record; --record trusts it on first use, records its
+#      hash and drops the old line; other bytes under that now-recorded version stop --record.
 #
 # Exit: 0 all pass, 1 a case failed, 2 cannot run (no helm). Bash 3.2 clean.
 set -u
@@ -277,6 +279,38 @@ if [ "$rc" = 0 ] && ! grep -q 'gone-0.0.1' "$T/r11/subcharts.sha256" && grep -q 
   ok "--record drops a line no Chart.lock pins and keeps the rest"
 else
   no "--record drop: rc=$rc, file: $(tr '\n' ';' < "$T/r11/subcharts.sha256")"
+fi
+
+# 12. a Renovate-style bump: Chart.lock moves to a NEW version of a recorded subchart.
+#     Plain run: refused (no line). --record: trusts the new version on first use, records its hash,
+#     drops the old version's line. Other bytes under that now-recorded version still stop --record.
+fresh "$T/r12" new
+oldline="$(cat "$T/r12/subcharts.sha256")"
+sed -i.bak 's/version: 1.0.2/version: 1.0.3/' "$T/r12/charts/tockmox-x/Chart.lock" && rm -f "$T/r12/charts/tockmox-x/Chart.lock.bak"
+rm -rf "$T/up3"; mkdir -p "$T/up3"; chart "$T/up3/upstream" upstream 1.0.3
+"$REAL_HELM" package "$T/up3/upstream" -d "$T/r12/charts/tockmox-x/charts" >/dev/null
+rm -f "$T/r12/charts/tockmox-x/charts/upstream-1.0.2.tgz"
+run "$T/r12"
+if [ "$rc" != 0 ] && echo "$out" | grep -q 'upstream-1.0.3.tgz has no line in subcharts.sha256' \
+   && [ "$(cat "$T/r12/subcharts.sha256")" = "$oldline" ]; then
+  ok "a bumped subchart with no line is refused without --record, and the file is untouched"
+else
+  no "bump without --record: rc=$rc, out: $(echo "$out" | tail -3 | tr '\n' ';')"
+fi
+out="$(cd "$T/r12" && env PATH="$T/bin:$PATH" HELM_STUB_LOG="$T/log" HELM_DEPS_RETRIES=1 bash tools/helm-deps.sh --record 2>&1)"; rc=$?
+if [ "$rc" = 0 ] \
+   && [ "$(cat "$T/r12/subcharts.sha256")" = "$(printf '%s  %s' "$(sha256_of "$T/r12/charts/tockmox-x/charts/upstream-1.0.3.tgz")" charts/tockmox-x/charts/upstream-1.0.3.tgz)" ]; then
+  ok "--record trusts a NEW version on first use: its line is added, the old version's line is dropped"
+else
+  no "bump with --record: rc=$rc, file: $(tr '\n' ';' < "$T/r12/subcharts.sha256") out: $(echo "$out" | tail -3 | tr '\n' ';')"
+fi
+cp "$T/r12/subcharts.sha256" "$T/r12.before"
+tamper "$T/r12/charts/tockmox-x/charts/upstream-1.0.3.tgz"
+out="$(cd "$T/r12" && env PATH="$T/bin:$PATH" HELM_STUB_LOG="$T/log" HELM_DEPS_RETRIES=1 bash tools/helm-deps.sh --record 2>&1)"; rc=$?
+if [ "$rc" != 0 ] && cmp -s "$T/r12.before" "$T/r12/subcharts.sha256"; then
+  ok "once recorded, other bytes under the same version stop --record and leave the file as it was"
+else
+  no "tamper after first use: rc=$rc, out: $(echo "$out" | tail -3 | tr '\n' ';')"
 fi
 
 [ "$fail" = 0 ] && echo "test-helm-deps: all passed" || echo "test-helm-deps: FAILED"
