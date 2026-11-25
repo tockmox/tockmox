@@ -25,7 +25,7 @@ is the one that covers every release. The other two answer different questions.
 
 | Check | Answers | Required? |
 |---|---|---|
-| [1. Signed tag](#1-verify-the-signed-tag) | Did the maintainer publish this exact tree | **Required** |
+| [1. Signed tag](#1-verify-the-signed-tag) | Did the maintainer publish this exact source tree, and, where the tree has `subcharts.sha256`, the bytes of every upstream subchart it pins. Not what a running cluster renders from it: [what a signed tag does not cover](#what-a-signed-tag-does-not-cover) | **Required** |
 | [2. Checksum](#2-check-the-archive-checksum) | Did this archive arrive intact | **Conditional**: only if you downloaded a release archive rather than cloning |
 | [3. SBOM](#3-read-the-deployment-sbom) | What will this deployment pull | **Optional**: for review and policy, not for authenticity |
 | [4. Gate report](#4-verify-the-gate-report) | What the maintainer ran against this tag, and what they did not | **Optional**: 0.6.0 and later |
@@ -36,7 +36,7 @@ is the one that covers every release. The other two answer different questions.
 |---|---|---|
 | `git` 2.34 or newer | SSH signature verification (`gpg.ssh.allowedSignersFile`) landed in 2.34 | `git --version` |
 | A clone of the repository, or the release archive | Step 1 needs the git objects; step 2 needs the archive | `git -C <clone> rev-parse --is-inside-work-tree` prints `true` |
-| `sha256sum` or `shasum` | Step 2 only | `command -v sha256sum \|\| command -v shasum` |
+| `sha256sum` or `shasum` | Step 2, and the subchart check after step 1 | `command -v sha256sum \|\| command -v shasum` |
 | `python3` | Step 3 only, to read the SBOM | `python3 --version` |
 | `ssh-keygen` from OpenSSH 8.1 or newer | Step 4 only. `ssh-keygen -Y sign` / `-Y verify` appeared in 8.1 | `ssh -V` |
 | **No network access at all** | Every check here is offline by design, which is the point for the air-gapped deployments this platform exists for | Nothing to check. This is a property, not a prerequisite |
@@ -86,11 +86,16 @@ file.** What carries an archive checksum is the part that changed:
 **Every release carries a gate report too**, signed with the same key as the
 tag; pre-releases do not get one.
 
-**What a signed tag does not cover: the container images.** The charts name
-their images by tag, and one image is pinned by digest
-([registry](registry.md)), so a verified tag tells you which images were
-intended, not that a registry served you those exact bytes. A release lock that
-pins every image by digest is not built yet.
+<a id="what-a-signed-tag-does-not-cover"></a>
+
+**What a signed tag does not cover.** It covers the files in the tree, and
+nothing those files point at by name. Three things are pointed at by name:
+
+| What | Why the signature does not reach it | What covers it today |
+|---|---|---|
+| **The container images** | The charts name their images by tag, and one image is pinned by digest ([registry](registry.md)). A verified tag tells you which images were intended, not that a registry served you those exact bytes | Nothing yet. A release lock that pins every image by digest is not built |
+| **The upstream subcharts, on a connected site** | `.gitignore` keeps the subchart archives out of git, so Argo CD's repo server downloads them from their chart repositories when it renders, and checks no hash | Where the archives are vendored (CI, the maintainer, an air-gapped site), `subcharts.sha256` in the tree records one sha256 per archive and `tools/helm-deps.sh` refuses an archive that differs. Argo CD's own download on a connected site is not checked |
+| **Which commit the tag name means to Argo CD** | Argo CD follows `targetRevision` by name on every reconciliation and verifies no signature. A tag moved after you verified it is followed without a warning | Nothing in the cluster. [Upgrade step 6](upgrade.md#6-confirm-every-layer-landed-on-the-new-revision) compares the commit Argo CD synced with the commit you verified |
 
 ## 1. Verify the signed tag
 
@@ -151,6 +156,16 @@ A tag carrying no signature at all reports `error: no signature found` and exits
 not prove that key belongs to anyone in particular, and `.gitsigners` travels in
 the same repository as the tag it vouches for. The same fingerprint is published
 in [SECURITY.md](../../SECURITY.md); if the two ever disagree, stop.
+
+**If you vendor the upstream subcharts** (an air-gapped site does, at
+[air-gap step 3](airgap.md#3-vendor-the-upstream-helm-subcharts--required)),
+the verified tree vouches for their bytes too. `tools/helm-deps.sh` checks
+every archive against `subcharts.sha256` and refuses one that differs, naming
+it, the hash it expected and the hash it found. To check them again yourself,
+offline, run `sha256sum -c subcharts.sha256` (or `shasum -a 256 -c
+subcharts.sha256`) from the root of the verified clone after `helm-deps.sh`.
+**Success condition:** every line ends in `OK`. A line that reads `FAILED` is
+an archive with other bytes than the release recorded: do not render from it.
 
 ## 2. Check the archive checksum
 
