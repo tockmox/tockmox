@@ -47,6 +47,9 @@
 #      and the AIRGAP-DENY table for the window it had is still printed before the safe end, INFRA_ERROR naming the stop
 #  24. a step that stays quiet raises AIRGAP-STALL again every TOCKMOX_AIRGAP_STALL seconds, not once
 #  25. a TOCKMOX_AIRGAP_P09_WALL outside 2 to 14400 is refused before anything is created
+#  26. after P09 and before the safe end the lane prints every guest pod's namespace, pod, container (init included), state
+#      and imageID in one AIRGAP-IMAGES block, on a passing run and on a failing one, with no environment variable or
+#      argument in it; a guest that does not answer leaves UNREADABLE and the outcome as it was
 #
 # What it does not show: that the edge logs, that the segment has no other way out, or that P09 passes from the
 # mirror. The lab run is that proof.
@@ -144,6 +147,7 @@ case "$*" in
     cat "$AGT_CTL/k_svc" ;;
   *dry-run=server*) [ ! -s "${AGT_CTL:?}/k_probe" ] || { cat "$AGT_CTL/k_probe" >&2; exit 1; }
     echo service/airgap-lane-range-probe created ;;
+  *"get pods"*) case " $* " in *" -A "*" -o json "*) cat "${AGT_CTL:?}/pods.json" ;; *) echo 'fake kubectl: get pods needs -A and -o json' >&2; exit 1 ;; esac ;;
   *"get nodes"*) echo 192.0.2.60 ;;
   *) exit 1 ;;
 esac
@@ -330,6 +334,43 @@ set_case; lane TOCKMOX_AIRGAP_P09_WALL=1; { [ "$RC" = 2 ] && has 'TOCKMOX_AIRGAP
 set_case; lane TOCKMOX_AIRGAP_P09_WALL=14401; { [ "$RC" = 2 ] && ! called 'tc create'; } || ok=0
 if [ "$ok" = 1 ]; then pass "25: a P09 bound outside 2 to 14400 is refused before create"
 else fail "25: a bad TOCKMOX_AIRGAP_P09_WALL reached create (last rc=$RC)"; fi
+
+# 26. the guest pods' image IDs, in one marked block after P09 and before the safe end
+cat > "$C/pods.json" <<'J'
+{"items":[
+{"metadata":{"namespace":"kube-system","name":"coredns-1"},
+ "spec":{"initContainers":[{"name":"init-config-reloader"}],"containers":[{"name":"coredns","env":[{"name":"TOKEN","value":"SECRETVAL"}],"args":["--password=SECRETVAL"]}]},
+ "status":{"initContainerStatuses":[{"name":"init-config-reloader","state":{"terminated":{"reason":"Completed"}},"imageID":"mirror.example/closed/reloader@sha256:aaaa"}],
+           "containerStatuses":[{"name":"coredns","state":{"running":{"startedAt":"x"}},"imageID":"mirror.example/closed/coredns@sha256:bbbb"}]}},
+{"metadata":{"namespace":"demo","name":"web-1"},"spec":{"containers":[{"name":"web"}]},
+ "status":{"containerStatuses":[{"name":"web","state":{"waiting":{"reason":"ImagePullBackOff"}},"imageID":""}]}},
+{"metadata":{"namespace":"demo","name":"pending-1"},"spec":{"containers":[{"name":"app","env":[{"name":"TOKEN","value":"SECRETVAL"}],"args":["--password=SECRETVAL"]}]},"status":{"phase":"Pending"}}
+]}
+J
+cp "$C/pods.json" "$W/pods.keep"
+ln_of() { grep -n -m1 -F -- "$1" <<<"$OUT" | cut -d: -f1; }
+img_block_ok() {
+  local w b e d r
+  w="$(ln_of 'AIRGAP-WINDOW')"; b="$(ln_of 'AIRGAP-IMAGES BEGIN')"; e="$(ln_of 'AIRGAP-IMAGES END')"; d="$(ln_of 'airgap lane: destroying ed-1-1')"; r="$(ln_of 'AIRGAP-RESULT')"
+  [ -n "$w" ] && [ -n "$b" ] && [ -n "$e" ] && [ -n "$d" ] && [ -n "$r" ] && [ "$w" -lt "$b" ] && [ "$b" -lt "$e" ] && [ "$e" -lt "$d" ] && [ "$d" -lt "$r" ]
+}
+set_case; lane
+if [ "$RC" = 0 ] && has 'AIRGAP-RESULT PASS' && img_block_ok \
+   && has '^AIRGAP-IMAGE kube-system coredns-1 init-config-reloader init terminated:Completed mirror.example/closed/reloader@sha256:aaaa$' \
+   && has '^AIRGAP-IMAGE kube-system coredns-1 coredns app running mirror.example/closed/coredns@sha256:bbbb$' \
+   && has '^AIRGAP-IMAGE demo web-1 web app waiting:ImagePullBackOff -$' \
+   && has '^AIRGAP-IMAGE demo pending-1 app app no-status -$' && [ "$(grep -c '^AIRGAP-IMAGE ' <<<"$OUT")" = 4 ] \
+   && ! has 'SECRETVAL' && ! report | grep -F 'SECRETVAL' >/dev/null && report | grep -F 'AIRGAP-IMAGES END' >/dev/null; then
+  pass "26: the guest pods' namespace, pod, container (init too), state and imageID are printed in one block after P09, before the safe end, with no env or args"
+else fail "26: rc=$RC $(printf '%s' "$OUT" | grep 'AIRGAP-IMAGE' | tr '\n' '|')"; fi
+rm -f "$C/pods.json"; set_case; lane
+if [ "$RC" = 0 ] && has 'AIRGAP-RESULT PASS' && has 'AIRGAP-IMAGES UNREADABLE' && img_block_ok; then
+  pass "26: a guest that does not answer the pod list leaves UNREADABLE in the block and the PASS as it was"
+else fail "26: unreadable: rc=$RC $(printf '%s' "$OUT" | grep 'AIRGAP-IMAGE' | tr '\n' '|')"; fi
+cp "$W/pods.keep" "$C/pods.json"; set_case p09_outcome=FAIL p09_rc=1; lane
+if [ "$RC" = 1 ] && has 'AIRGAP-RESULT FAIL' && img_block_ok && has '^AIRGAP-IMAGE kube-system coredns-1 init-config-reloader init '; then
+  pass "26: a failing P09 still prints the image IDs before the safe end"
+else fail "26: failing run: rc=$RC $(printf '%s' "$OUT" | grep 'AIRGAP-IMAGE' | tr '\n' '|')"; fi
 
 # 20. the guest cluster's own pod and Service ranges, learned at run time (documentation and benchmark ranges here)
 deny_to() { printf '60,,,rule-cut,vtnet2,match,block,in,4,0x0,,63,1,0,DF,6,tcp,60,192.0.2.60,%s,40000,%s,0,S,1,,64240,,mss' "$1" "$2"; }
