@@ -252,7 +252,8 @@ class DeskSource(Source):
 
 
 class IndexSource(Source):
-    """The specialist host's index (no auth): which specialists it serves, at which version, and the roles file's hash."""
+    """The specialist host's index (no auth): which specialists it serves, at which version, what each may do and call
+    (specialist_page.clean_entry), and the roles file's hash."""
     name = "Specialist host"
 
     def __init__(self, url, timeout, transport=None, ttl=60.0):
@@ -265,14 +266,20 @@ class IndexSource(Source):
 
     def fetch(self):
         doc = self.host.index()
-        served = {}
+        from .specialist_page import clean_entry
+        served, entries = {}, {}
         for s in doc["specialists"]:
             if isinstance(s, dict) and SPEC_ID.fullmatch(str(s.get("id") or "")):
+                if s.get("served") is False:     # listed, but the host says it does not load it
+                    entries[s["id"]] = clean_entry(s)
+                    continue
                 served[s["id"]] = {"version": _short(s.get("version"), 20), "status": _short(s.get("status"), 20),
                                    "title": _short(s.get("title"), 80), "owner_role": _short(s.get("owner_role"), 60)}
+                entries[s["id"]] = clean_entry(s)
         roles = doc.get("roles") if isinstance(doc.get("roles"), dict) else {}
         sha = roles.get("sha256") if re.fullmatch(r"[0-9a-f]{64}", str(roles.get("sha256") or "")) else ""
-        return {"served": served, "roles_sha256": sha}
+        # served: what the role pages and the list read; entries: the whole cleaned row the specialist's own page reads
+        return {"served": served, "entries": entries, "roles_sha256": sha}
 
     def evaluate(self, data):
         return OK, f"{len(data['served'])} specialists served"

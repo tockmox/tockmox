@@ -636,3 +636,5 @@ details.menu-d { margin-top: 0; }
 .fp-card.fs-ok { border-left: 3px solid var(--st-ok); }
 .fp-tag { display: inline-block; margin-right: .35rem; font-family: var(--tx-font-mono, monospace); font-size: var(--fs-0, .75rem); color: var(--tx-text-muted); }
 .fp-note.fs-warning { border-color: var(--st-warning); } .fp-note.fs-critical { border-color: var(--st-critical); }
+/* a specialist's operations (platform_specialist.html): name, then what it does */
+.ops dt { font-weight: 600; margin-top: .5rem; } .ops dd { margin: 0 0 .25rem; }
