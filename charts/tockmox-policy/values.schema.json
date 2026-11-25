@@ -967,8 +967,8 @@
         }
       },
       "x-tockmox-stability": "provisional",
-      "x-tockmox-stability-ruled": "2026-10-08",
-      "x-tockmox-stability-rerule": "0.9.0"
+      "x-tockmox-stability-ruled": "2026-11-24",
+      "x-tockmox-stability-rerule": "0.10.0"
     },
     "podSecurity": {
       "type": "object",
@@ -1027,9 +1027,7 @@
           "description": "Level for a created namespace with no entry in enforce. Empty renders none."
         }
       },
-      "x-tockmox-stability": "provisional",
-      "x-tockmox-stability-ruled": "2026-10-08",
-      "x-tockmox-stability-rerule": "0.9.0"
+      "x-tockmox-stability": "stable"
     },
     "grafanaDatabase": {
       "description": "Not this layer's key. Owned by the observability layer. Accepted and ignored here because one values file is passed to every layer; see docs/administration/values-contract.md."

@@ -558,8 +558,8 @@
         }
       },
       "x-tockmox-stability": "provisional",
-      "x-tockmox-stability-ruled": "2026-10-08",
-      "x-tockmox-stability-rerule": "0.9.0"
+      "x-tockmox-stability-ruled": "2026-11-24",
+      "x-tockmox-stability-rerule": "0.10.0"
     },
     "ingress": {
       "type": "object",
@@ -907,8 +907,8 @@
     },
     "inferenceNodes": {
       "x-tockmox-stability": "experimental",
-      "x-tockmox-stability-ruled": "2026-10-08",
-      "x-tockmox-stability-rerule": "0.9.0",
+      "x-tockmox-stability-ruled": "2026-11-24",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "object",
       "additionalProperties": true,
       "description": "REQ-0047 inference nodes: machines outside the cluster that serve models. Experimental in 0.8.0. The gateway's routes to them are derived from this block when render.enabled. See docs/administration/inference-nodes.md.",
@@ -1121,8 +1121,8 @@
     },
     "modelLifecycle": {
       "x-tockmox-stability": "experimental",
-      "x-tockmox-stability-ruled": "2026-10-08",
-      "x-tockmox-stability-rerule": "0.9.0",
+      "x-tockmox-stability-ruled": "2026-11-24",
+      "x-tockmox-stability-rerule": "0.10.0",
       "type": "object",
       "additionalProperties": true,
       "description": "REQ-0048 model lifecycle: the catalog, promotion settings and the eval gateway. Experimental. See docs/administration/model-lifecycle.md.",

@@ -350,8 +350,8 @@
       "additionalProperties": true,
       "description": "Tockmox-owned block: the shipped object store used as the backup target, and (garage.web) the static sites it serves.",
       "x-tockmox-stability": "provisional",
-      "x-tockmox-stability-ruled": "2026-10-08",
-      "x-tockmox-stability-rerule": "0.9.0",
+      "x-tockmox-stability-ruled": "2026-11-24",
+      "x-tockmox-stability-rerule": "0.10.0",
       "properties": {
         "createCredentialsNamespaces": {
           "type": "array",
