@@ -93,11 +93,22 @@ spec:
               scraping for 10 minutes.
 
         - alert: TockmoxPersistentVolumeFillingUp
+          # ONE SERIES PER VOLUME. On k3s the etcd metrics port serves the
+          # kubelet's series too, so a cluster that scrapes both holds two
+          # copies of kubelet_volume_stats_* for every volume on a server node
+          # (job="kubelet" and job="kube-etcd"). Divided as they came, one
+          # full volume fired this alert once per copy. The aggregation keeps
+          # one series per (namespace, persistentvolumeclaim), the same shape
+          # as TockmoxPrometheusTSDBVolumeTroughRising, and max of the FILL
+          # means a second copy can never hide a full volume. It also drops
+          # node and instance, so the `for` clock no longer restarts when the
+          # pod moves node. No job filter: that would tie the rule to one
+          # scrape job name. Cases in tests/rules/selfcheck-pvc-filling-up.yaml.
           expr: |
-            (
-              kubelet_volume_stats_available_bytes
-              / kubelet_volume_stats_capacity_bytes
-            ) < 0.10
+            max by (namespace, persistentvolumeclaim) (
+              1 - kubelet_volume_stats_available_bytes
+                / kubelet_volume_stats_capacity_bytes
+            ) > 0.90
           for: 15m
           labels:
             severity: critical
