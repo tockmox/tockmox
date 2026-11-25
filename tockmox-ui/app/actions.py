@@ -474,6 +474,16 @@ def _until(hours: int, now: float | None = None) -> float:
     return (now or time.time()) + hours * 3600
 
 
+def human_span(minutes: float) -> str:
+    """A length in the words the forms use: 1 hour, 24 hours, 7 days, and any other as days, hours and minutes
+    ("7 days, 2 hours, 30 minutes"). Whole days show only from two days up, so a day stays "24 hours" as the form says."""
+    m = max(int(round(minutes)), 0)
+    d, rem = divmod(m, 1440) if m >= 2880 else (0, m)
+    h, mi = divmod(rem, 60)
+    parts = [f"{n} {word}{'' if n == 1 else 's'}" for n, word in ((d, "day"), (h, "hour"), (mi, "minute")) if n]
+    return ", ".join(parts) or "0 minutes"
+
+
 def describe(it: dict, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime(ts)), choosing: bool = False) -> dict:
     """Target, effect and undo in words, for the confirm panel and the Activity row. choosing: the confirm panel, where
     the admin still picks how long (a silence, a recovery link), so the words name no length (the lab run, 2026-11-01:
@@ -489,7 +499,7 @@ def describe(it: dict, fmt_time=lambda ts: time.strftime("%H:%M", time.localtime
         if "" in nss and any(nss):
             where += ", and alerts that name no namespace"
         return {"title": f"Silence {n} alert{'s' if n != 1 else ''} on {label}?",
-                "summary": f"Silenced {n} alert{'s' if n != 1 else ''} on {label} for {p.get('hours')}h",
+                "summary": f"Silenced {n} alert{'s' if n != 1 else ''} on {label} for {human_span(int(p.get('hours', 1)) * 60)}",
                 "target": f"{', '.join(names)} ({where})",
                 "effect": f"Alertmanager stops notifying for every alert of {'these names' if len(names) != 1 else 'this name'} "
                           f"in {where} {'for as long as you choose below' if choosing else 'until ' + until}, on this part "
