@@ -40,6 +40,13 @@
 #      /proc/net/nf_conntrack or conntrack -L and is stopped at the end of step 9, and AIRGAP-RACE says confirmed only
 #      when each deny to the Service range falls after its Service's create, before its ClusterIP's first-seen, with
 #      an un-NATed flow
+#  22. P09 hangs past TOCKMOX_AIRGAP_P09_WALL: the whole of P09 is stopped at the bound (its process gone, not orphaned),
+#      AIRGAP-P09-BOUND names it, and the lane still counts the cut window (the AIRGAP-DENY table), destroys the VM and
+#      ends INFRA_ERROR, in seconds rather than at P09's own pace
+#  23. the lane is stopped from outside (SIGTERM, as when its Workflow is stopped) while P09 runs: P09 is stopped with it,
+#      and the AIRGAP-DENY table for the window it had is still printed before the safe end, INFRA_ERROR naming the stop
+#  24. a step that stays quiet raises AIRGAP-STALL again every TOCKMOX_AIRGAP_STALL seconds, not once
+#  25. a TOCKMOX_AIRGAP_P09_WALL outside 2 to 14400 is refused before anything is created
 #
 # What it does not show: that the edge logs, that the segment has no other way out, or that P09 passes from the
 # mirror. The lab run is that proof.
@@ -101,6 +108,12 @@ C="${AGT_CTL:?}"; echo "run $*" >> "$C/calls"
 case "$1" in
   P04) sleep "$(cat "$C/p0405_sleep" 2>/dev/null || echo 0)"; exit "$(cat "$C/p0405_rc" 2>/dev/null || echo 0)" ;;
   P09)
+    # a hang (ctl/p09_sleep), and with ctl/p09_term a stop from outside: TERM to the lane, this script's grandparent
+    if [ -s "$C/p09_sleep" ]; then
+      sleep "$(cat "$C/p09_sleep")" & echo $! > "$C/p09_sleep_pid"
+      [ ! -e "$C/p09_term" ] || kill -TERM "$(ps -o ppid= -p "$PPID" | tr -d ' ')"
+      wait
+    fi
     d="$TOCKMOX_WORKDIR/receipts-$(date -u +%Y%m%dT%H%M%S%N)"; mkdir -p "$d"
     printf '%s fake reason\n' "$(cat "$C/p09_outcome")" > "$d/P09-install-md-end-to-end"
     echo "p09 revision ${TOCKMOX_P09_TOCKMOX_REVISION:-none}" >> "$C/calls"
@@ -171,7 +184,7 @@ WEB='60,,,rule-cut,vtnet2,match,block,in,4,0x0,,64,1,0,DF,6,tcp,60,192.0.2.60,19
 
 # set_case KEY=VALUE...: a fresh control directory with the happy path's values, then the case's own
 set_case() {
-  rm -f "$C/calls" "$C/lines" "$C/p0405_sleep" "$C/create_err" "$C/no_archive" "$C/k3s_config" "$C/k3s_silent" "$C/k_probe"
+  rm -f "$C/calls" "$C/lines" "$C/p0405_sleep" "$C/create_err" "$C/p09_sleep" "$C/p09_term" "$C/p09_sleep_pid" "$C/no_archive" "$C/k3s_config" "$C/k3s_silent" "$C/k_probe"
   echo 198.18.0.0/24 > "$C/k_pod"; echo 198.19.0.0/16 > "$C/k_svc"
   echo resolved > "$C/dns"; echo PASS > "$C/tls"; echo PASS > "$C/proof"; echo 0 > "$C/create_rc"; echo 0 > "$C/p0405_rc"
   printf 'reached\nrefused\n' > "$C/control"; printf '1\n2\n' > "$C/counts"; printf '%s\n%s\n' "$NTP" "$NTP" > "$C/lines"
@@ -290,6 +303,33 @@ if [ "$RC" = 1 ] && has 'install/charts-vendored-tag.sh refused' && has 'charts/
    && ! has 'AIRGAP-PAUSE' && ! called 'run P09' && ! called 'srs push-ref' && called 'tc destroy'; then
   pass "19: an archive missing FAILs before the cut, naming it; nothing is served and P09 never runs"
 else fail "19: missing archive: rc=$RC $(printf '%s' "$OUT" | tail -3 | tr '\n' '|')"; fi
+
+# 22 to 25: P09's hard bound, a stop from outside, a repeating stall line, and the bound's refusal
+gone() { local p; p="$(cat "$C/p09_sleep_pid" 2>/dev/null)"; [ -n "$p" ] && case "$(ps -o stat= -p "$p" 2>/dev/null | tr -d ' ')" in ''|Z*) true ;; *) false ;; esac; }
+set_case p09_sleep=40; s0="$(date +%s)"; lane TOCKMOX_AIRGAP_P09_WALL=3; s1="$(date +%s)"
+if [ "$RC" = 5 ] && has 'AIRGAP-P09-BOUND P09 ran past its bound of 3s' && has 'AIRGAP-DENY udp 203.0.113.7:123 2 ignored' \
+   && has 'did not finish within its bound of 3s' && has 'AIRGAP-RESULT INFRA_ERROR' && called 'tc destroy' \
+   && [ $((s1 - s0)) -lt 30 ] && gone; then
+  pass "22: P09 hung past its bound: stopped there, the cut window still counted, the VM destroyed, INFRA_ERROR"
+else fail "22: rc=$RC $((s1 - s0))s gone=$(gone && echo yes || echo no) $(printf '%s' "$OUT" | tail -5 | tr '\n' '|')"; kill "$(cat "$C/p09_sleep_pid" 2>/dev/null)" 2>/dev/null; fi
+
+set_case p09_sleep=40 p09_term=1; s0="$(date +%s)"; lane; s1="$(date +%s)"
+if [ "$RC" = 5 ] && has 'stopped from outside (SIGTERM)' && has 'the run ended early (INFRA_ERROR)' \
+   && has 'AIRGAP-DENY udp 203.0.113.7:123 2 ignored' && has 'AIRGAP-RESULT INFRA_ERROR' && called 'tc destroy' \
+   && [ $((s1 - s0)) -lt 30 ] && gone; then
+  pass "23: stopped from outside while P09 runs: P09 stopped with it, the deny table printed, the VM destroyed, INFRA_ERROR"
+else fail "23: rc=$RC $((s1 - s0))s gone=$(gone && echo yes || echo no) $(printf '%s' "$OUT" | tail -5 | tr '\n' '|')"; kill "$(cat "$C/p09_sleep_pid" 2>/dev/null)" 2>/dev/null; fi
+
+set_case p0405_sleep=7; lane TOCKMOX_AIRGAP_STALL=2
+if [ "$RC" = 0 ] && [ "$(grep -c "AIRGAP-STALL .* in step '6 P04 and P05'" <<<"$OUT")" -ge 2 ]; then
+  pass "24: a step that stays quiet raises AIRGAP-STALL again, not once"
+else fail "24: rc=$RC, $(grep -c 'AIRGAP-STALL' <<<"$OUT") stall line(s)"; fi
+
+ok=1
+set_case; lane TOCKMOX_AIRGAP_P09_WALL=1; { [ "$RC" = 2 ] && has 'TOCKMOX_AIRGAP_P09_WALL must be' && ! called 'tc create'; } || ok=0
+set_case; lane TOCKMOX_AIRGAP_P09_WALL=14401; { [ "$RC" = 2 ] && ! called 'tc create'; } || ok=0
+if [ "$ok" = 1 ]; then pass "25: a P09 bound outside 2 to 14400 is refused before create"
+else fail "25: a bad TOCKMOX_AIRGAP_P09_WALL reached create (last rc=$RC)"; fi
 
 # 20. the guest cluster's own pod and Service ranges, learned at run time (documentation and benchmark ranges here)
 deny_to() { printf '60,,,rule-cut,vtnet2,match,block,in,4,0x0,,63,1,0,DF,6,tcp,60,192.0.2.60,%s,40000,%s,0,S,1,,64240,,mss' "$1" "$2"; }

@@ -32,7 +32,11 @@
 #      no deny line, three times, is a FAIL (the counter cannot count); no refusal within TOCKMOX_AIRGAP_CUT_WAIT
 #      seconds is BLOCKED (the cut was never made)
 #   9. run.sh P09 (built-in route, this tree's install.md, and global.airGapped where airgap.md says), timed: the
-#      cut window. The race probe's sampler reads the guest every 0.5 s while it runs, and is stopped at its end
+#      cut window. The race probe's sampler reads the guest every 0.5 s while it runs, and is stopped at its end.
+#      P09 runs under a hard bound, TOCKMOX_AIRGAP_P09_WALL: its own budget (TOCKMOX_P09_BUDGET) is checked only
+#      between its steps, so one step that never returns would hold the rig to the job's deadline. At the bound the
+#      whole of P09 (its process group) is stopped, AIRGAP-P09-BOUND says so, and the lane goes on to the count, the
+#      safe end and a result (INFRA_ERROR: P09 did not finish)
 #  10. the edge's deny lines for the guest over the cut window, counted and grouped by destination. A deny whose
 #      protocol and port are on TOCKMOX_AIRGAP_IGNORE (default udp/123, the OS's time sync), or whose destination is
 #      in the guest cluster's own pod or Service range (step 3: an address the guest owns, not a way out), is reported
@@ -53,11 +57,17 @@
 #   TOCKMOX_AIRGAP_CUT_WAIT (default 1800 s, 1 to 7200), TOCKMOX_AIRGAP_POLL (default 30 s, 1 to 300),
 #   TOCKMOX_AIRGAP_SETTLE (default 20 s, 1 to 120: how long a deny line takes to reach Loki),
 #   TOCKMOX_AIRGAP_CONTROL_HOST (default registry-1.docker.io), TOCKMOX_AIRGAP_IGNORE (default "udp/123"),
-#   TOCKMOX_AIRGAP_STALL (default 300 s, 2 to 3600: an AIRGAP-STALL line when the run has written nothing for that long),
-#   TOCKMOX_KEEP_CLUSTER.
+#   TOCKMOX_AIRGAP_STALL (default 300 s, 2 to 3600: an AIRGAP-STALL line when the run has written nothing for that long,
+#   repeated every STALL seconds while it stays quiet), TOCKMOX_AIRGAP_P09_WALL (default TOCKMOX_P09_BUDGET plus 600 s,
+#   2 to 14400: the hard bound on step 9), TOCKMOX_KEEP_CLUSTER.
+#
+# AN EARLY END. A run that ends after P09 began and before step 10 counted (a failed step, or SIGTERM or SIGINT from
+# outside, such as the Workflow being stopped) still prints the AIRGAP-DENY table for the cut window it had, from P09's
+# start to its end, before the safe end: the egress record is the clause's evidence even when P09 did not finish. A
+# stop from outside is INFRA_ERROR, named in the report.
 #
 # WHAT IT PRINTS for a caller to grep: AIRGAP-PAUSE, AIRGAP-CUT (the control's proof), AIRGAP-WINDOW,
-# AIRGAP-DENY <proto> <destination>:<port> <count> [ignored|guest-cluster], AIRGAP-STALL, the race probe's
+# AIRGAP-DENY <proto> <destination>:<port> <count> [ignored|guest-cluster], AIRGAP-STALL, AIRGAP-P09-BOUND, the race probe's
 # AIRGAP-RACE-DENY lines and its AIRGAP-RACE confirmed|not-confirmed line (they observe; they never change the outcome),
 # and last AIRGAP-RESULT <outcome>.
 #
@@ -77,6 +87,9 @@ CREATED=0
 INSTALL_STARTED=0
 STALL_PID=""
 SAMPLER_PID=""   # the race probe's sampler on the guest, while step 9 runs
+BOUND_PID=""     # P09 under its hard bound, while step 9 runs
+T0=""            # P09's start: the cut window opens here
+DENY_DONE=0      # the AIRGAP-DENY table was printed
 refuse() { STOPPED="REFUSING: $1"; echo "$STOPPED" >&2; RESULT=REFUSED; exit 2; }
 fail() { STOPPED="airgap lane: $1"; echo "$STOPPED" >&2; RESULT=FAIL; exit 1; }
 blocked() { STOPPED="airgap lane: BLOCKED: $1"; echo "$STOPPED" >&2; RESULT=BLOCKED; exit 4; }
@@ -111,6 +124,9 @@ CUT_WAIT="${TOCKMOX_AIRGAP_CUT_WAIT:-1800}"; int_in "$CUT_WAIT" 1 7200 || refuse
 POLL="${TOCKMOX_AIRGAP_POLL:-30}";          int_in "$POLL" 1 300 || refuse "TOCKMOX_AIRGAP_POLL must be 1 to 300 seconds"
 SETTLE="${TOCKMOX_AIRGAP_SETTLE:-20}";      int_in "$SETTLE" 1 120 || refuse "TOCKMOX_AIRGAP_SETTLE must be 1 to 120 seconds"
 STALL="${TOCKMOX_AIRGAP_STALL:-300}";       int_in "$STALL" 2 3600 || refuse "TOCKMOX_AIRGAP_STALL must be 2 to 3600 seconds"
+P09_BUDGET_S="${TOCKMOX_P09_BUDGET:-3000}"; int_in "$P09_BUDGET_S" 1 14400 || refuse "TOCKMOX_P09_BUDGET must be 1 to 14400 seconds"
+P09_WALL="${TOCKMOX_AIRGAP_P09_WALL:-$((P09_BUDGET_S + 600))}"
+int_in "$P09_WALL" 2 14400 || refuse "TOCKMOX_AIRGAP_P09_WALL must be 2 to 14400 seconds"
 CONTROL_HOST="${TOCKMOX_AIRGAP_CONTROL_HOST:-registry-1.docker.io}"
 [[ "$CONTROL_HOST" =~ ^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$ ]] || refuse "TOCKMOX_AIRGAP_CONTROL_HOST must be a host name"
 IGNORE="${TOCKMOX_AIRGAP_IGNORE-udp/123}"
@@ -140,7 +156,16 @@ finish() {
   local rc=$?
   [ -z "$STALL_PID" ] || kill "$STALL_PID" 2>/dev/null || true
   [ -z "$SAMPLER_PID" ] || race_kill "$SAMPLER_PID" || true
+  if [ -n "$BOUND_PID" ]; then kill -TERM "$BOUND_PID" 2>/dev/null || true; wait "$BOUND_PID" 2>/dev/null || true; fi
   [ -n "$RESULT" ] || case "$rc" in 0) RESULT=PASS ;; 2) RESULT=REFUSED ;; 4) RESULT=BLOCKED ;; 5) RESULT=INFRA_ERROR ;; *) RESULT=FAIL ;; esac
+  # An early end after the cut install began: the egress record for the window it had, before the safe end.
+  if [ "$INSTALL_STARTED" = 1 ] && [ "$DENY_DONE" != 1 ] && [ -n "$T0" ]; then
+    DENY_DONE=1
+    sleep "$SETTLE"
+    local t1; t1="$(now)"
+    note "airgap lane: the run ended early (${RESULT}); the edge's denies for the cut window it had, ${T0} to ${t1}:"
+    deny_table "$T0" "$t1" || note "airgap lane: the early-end deny table could not be made: ${DENY_WHY}"
+  fi
   [ -z "$STOPPED" ] || printf '%s\n' "$STOPPED" >> "$REPORT"
   [ -z "$STOP_DETAIL" ] || printf '%s\n' "$STOP_DETAIL" >> "$REPORT"
   # A kept run keeps an install. A run stopped before the cut install began has none, so its VM goes.
@@ -180,13 +205,60 @@ for d,_,fs in os.walk(sys.argv[1]):
 if best[1]: print("%d %s" % best)' "$TOCKMOX_WORKDIR" 2>/dev/null || true)"
     [ -n "$newest" ] || continue
     age=$(( $(date +%s) - ${newest%% *} ))
-    if [ "$age" -ge "$STALL" ] && [ "$warned" != "${newest%% *}" ]; then
-      warned="${newest%% *}"
+    # Once, then again every STALL seconds while the run stays quiet, so a hang is seen growing rather than once.
+    if [ "$age" -ge "$STALL" ] && [ $(( $(date +%s) - ${warned:-0} )) -ge "$STALL" ]; then
+      warned="$(date +%s)"
       echo "AIRGAP-STALL ${age}s with nothing written, in step '$(cat "${LANE}/step" 2>/dev/null || echo unknown)'; newest file: ${newest#* }"
     fi
   done
 }
 stall_watch & STALL_PID=$!
+
+# A stop from outside (the Workflow stopped, or the pod's deadline) ends the run through finish(): the deny table for the
+# window it had, the safe end and a result, never a silent kill. A trapped signal interrupts `wait`, so this runs at once
+# while P09 is bounded below.
+on_signal() { STOPPED="airgap lane: INFRA_ERROR: stopped from outside (SIG${1}) in step '$(cat "${LANE}/step" 2>/dev/null || echo unknown)'"; echo "$STOPPED" >&2; RESULT=INFRA_ERROR; exit 5; }
+trap 'on_signal TERM' TERM
+trap 'on_signal INT' INT
+
+# bounded SECONDS MARK CMD...: CMD in a process group of its own, in the background so a trapped signal is seen while it
+# runs. At SECONDS the whole group is stopped (TERM, then KILL after 20 s), MARK is written, and the status is 124. A TERM
+# to the bounder stops the group the same way.
+bounded() {
+  python3 -c '
+import os, signal, subprocess, sys
+limit, mark, cmd = float(sys.argv[1]), sys.argv[2], sys.argv[3:]
+p = subprocess.Popen(cmd, start_new_session=True)
+def stop(rc):
+    for sig, grace in ((signal.SIGTERM, 20), (signal.SIGKILL, 5)):
+        try:
+            os.killpg(p.pid, sig)
+        except ProcessLookupError:
+            break
+        try:
+            p.wait(grace)
+            break
+        except subprocess.TimeoutExpired:
+            pass
+    try:
+        os.killpg(p.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    sys.exit(rc)
+signal.signal(signal.SIGTERM, lambda *a: stop(143))
+signal.signal(signal.SIGINT, lambda *a: stop(130))
+try:
+    sys.exit(p.wait(limit))
+except subprocess.TimeoutExpired:
+    open(mark, "w").write("%d\n" % limit)
+    stop(124)
+' "$@" &
+  BOUND_PID=$!
+  local rc=0
+  wait "$BOUND_PID" || rc=$?
+  BOUND_PID=""
+  return "$rc"
+}
 
 # ---- the Service-creation race probe: it observes, and it never changes the outcome --------------------------------
 # A hypothesis from the earlier cut runs: CoreDNS answers a new ClusterIP before k3s's embedded kube-proxy has
@@ -682,76 +754,21 @@ echo "airgap lane 7: this tree served at ${TM_URL} @ ${TAG} (${REL_TAG} plus ${V
 # 8. the cut, proven by the positive control
 step "8 waiting for the cut"
 count() { bash "$EDC" --guest "$GUEST_IP" --since "$1" --until "$2" "${@:3}"; }
-echo "AIRGAP-PAUSE make the cut now: ${TOCKMOX_AIRGAP_CUT_HINT}. Waiting up to ${CUT_WAIT}s; the lane goes on by itself once the guest is refused and the edge logs it."
-deadline=$(( $(date +%s) + CUT_WAIT ))
-silent=0
-while :; do
-  c0="$(date -u -d '-1 second' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || now)"
-  ans="$(gexec "curl -sS -m 10 -o /dev/null https://${CONTROL_HOST}/v2/ && echo AIRGAP-CONTROL-REACHED || echo AIRGAP-CONTROL-REFUSED" 2>/dev/null || true)"
-  case "$ans" in
-    *AIRGAP-CONTROL-REFUSED*)
-      sleep "$SETTLE"
-      c1="$(now)"
-      n_rc=0; n="$(count "$c0" "$c1" 2>"${LANE}/control-count.err")" || n_rc=$?
-      [ "$n_rc" = 0 ] || infra "the edge's log could not be read for the control (edge-deny-count exit ${n_rc}: $(tail -1 "${LANE}/control-count.err"))"
-      if [ "$n" -ge 1 ]; then
-        note "AIRGAP-CUT proven: the guest was refused ${CONTROL_HOST} and the edge logged ${n} deny line(s), ${c0} to ${c1}"
-        break
-      fi
-      silent=$((silent + 1))
-      echo "airgap lane 8: the guest was refused, but the edge logged no deny line for it (${silent} of 3)"
-      [ "$silent" -lt 3 ] || fail "the guest is refused but the edge logs no deny line for it, so the counter cannot count and a zero would mean nothing"
-      ;;
-    *AIRGAP-CONTROL-REACHED*) ;;
-    *) infra "the guest did not answer the positive control" ;;
-  esac
-  [ "$(date +%s)" -lt "$deadline" ] || blocked "the cut was not made within ${CUT_WAIT}s: the guest still reaches ${CONTROL_HOST}. ${TOCKMOX_AIRGAP_CUT_HINT}"
-  sleep "$POLL"
-done
-
-# 9. P09, under the cut
-step "9 P09 under the cut"
-NODE_IP="$(kubectl --context="$KUBE_CONTEXT" get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')"
-[ -n "$NODE_IP" ] || fail "the throwaway reports no node InternalIP"
-# TOCKMOX_P09_AIRGAPPED: P09 also sets global.airGapped where airgap.md says to, so the cut run has the values the page
-# gives a disconnected site, not only install.md's.
-export TOCKMOX_P09_ROUTE=built-in TOCKMOX_P09_FROM_TREE=1 TOCKMOX_P09_AIRGAPPED=1
-export TOCKMOX_P09_TOCKMOX_REPO_URL="$TM_URL" TOCKMOX_P09_TOCKMOX_REVISION="$TAG" TOCKMOX_P09_TOCKMOX_CLONE="$TREE"
-export TOCKMOX_P09_STATE="${LANE}/p09-state" TOCKMOX_P09_BUDGET="${TOCKMOX_P09_BUDGET:-3000}"
-export TOCKMOX_P09_LAN_CIDR="${TOCKMOX_P09_LAN_CIDR:-${NODE_IP%.*}.0/24}"
-export TOCKMOX_P09_POOL="${TOCKMOX_P09_POOL:-${NODE_IP%.*}.240-${NODE_IP%.*}.250}"
-race_sampler_start || true
-T0="$(now)"
-INSTALL_STARTED=1
-echo "airgap lane 9: P09 under the cut, from ${T0}"
-set +e
-bash "${HERE}/run.sh" P09
-P09_RC=$?
-set -e
-sleep "$SETTLE"
-T1="$(now)"
-note "AIRGAP-WINDOW ${T0} ${T1} guest ${GUEST_IP}"
-
-# The outcome P09 declared, not its exit status: run.sh exits 0 for a path that declared BLOCKED.
-p09_rec="MISSING no receipt for P09 in the newest run"
-d=""; for g in "${TOCKMOX_WORKDIR}"/receipts-*; do [ -d "$g" ] && d="$g"; done
-if [ -n "$d" ] && [ -s "${d}/P09-install-md-end-to-end" ]; then
-  read -r o r < "${d}/P09-install-md-end-to-end" || true
-  p09_rec="${o:-MISSING} ${r:-}"
-fi
-note "airgap lane 9: P09 exit ${P09_RC}, declared ${p09_rec}"
-race_sampler_stop || true
-race_services || true
-
-# 10. the edge's denies over the cut window, by destination
-step "10 count the edge's denies"
-n_rc=0
-n="$(count "$T0" "$T1" --lines 2000 2>"${LANE}/cut-denies.txt")" || n_rc=$?
-[ "$n_rc" = 0 ] || infra "the edge's log could not be read for the cut window (edge-deny-count exit ${n_rc}: $(tail -1 "${LANE}/cut-denies.txt"))"
-note "airgap lane 10: ${n} deny line(s) for ${GUEST_IP} over the cut window"
-counted=0
-if [ "$n" -gt 0 ]; then
-  python3 - "$GUEST_IP" "$IGNORE" "$n" "${LANE}/cut-denies.txt" "$GUEST_RANGES" > "${LANE}/cut-by-destination.txt" <<'PY' || fail "the cut window's deny lines could not be grouped"
+# deny_table SINCE UNTIL: the edge's deny lines for the guest over the window, counted and grouped by destination, as
+# AIRGAP-DENY lines in the report. Sets DENY_N (the lines the edge logged) and counted (those that count against the
+# clause). Step 10 calls it, and finish() on an early end after P09 began. On failure it returns 1 (the edge's log was
+# not read) or 2 (its lines could not be grouped), with DENY_WHY, and exits nothing itself.
+deny_table() {
+  local n_rc=0
+  DENY_WHY=""; DENY_N=0; counted=0
+  DENY_N="$(count "$1" "$2" --lines 2000 2>"${LANE}/cut-denies.txt")" || n_rc=$?
+  if [ "$n_rc" != 0 ]; then
+    DENY_WHY="the edge's log could not be read for the cut window (edge-deny-count exit ${n_rc}: $(tail -1 "${LANE}/cut-denies.txt"))"
+    return 1
+  fi
+  note "airgap lane 10: ${DENY_N} deny line(s) for ${GUEST_IP} over the cut window"
+  if [ "$DENY_N" -gt 0 ]; then
+    if ! python3 - "$GUEST_IP" "$IGNORE" "$DENY_N" "${LANE}/cut-denies.txt" "$GUEST_RANGES" > "${LANE}/cut-by-destination.txt" <<'PY'
 import collections, ipaddress, sys
 guest, ignore, total, path = sys.argv[1], set(sys.argv[2].split()), int(sys.argv[3]), sys.argv[4]
 own = [ipaddress.ip_network(r) for r in sys.argv[5].split()]
@@ -787,13 +804,98 @@ if unread:
     bad += unread
 print(f"COUNTED {bad}")
 PY
-  grep '^AIRGAP-DENY' "${LANE}/cut-by-destination.txt" | tee -a "$REPORT"
-  counted="$(sed -n 's/^COUNTED //p' "${LANE}/cut-by-destination.txt")"
+    then
+      DENY_WHY="the cut window's deny lines could not be grouped"
+      return 2
+    fi
+    grep '^AIRGAP-DENY' "${LANE}/cut-by-destination.txt" | tee -a "$REPORT"
+    counted="$(sed -n 's/^COUNTED //p' "${LANE}/cut-by-destination.txt")"
+  fi
+  note "airgap lane 10: ${counted} deny line(s) count against the clause (ignored: ${IGNORE:-none}; the guest cluster's own: ${GUEST_RANGES})"
+}
+
+echo "AIRGAP-PAUSE make the cut now: ${TOCKMOX_AIRGAP_CUT_HINT}. Waiting up to ${CUT_WAIT}s; the lane goes on by itself once the guest is refused and the edge logs it."
+deadline=$(( $(date +%s) + CUT_WAIT ))
+silent=0
+while :; do
+  c0="$(date -u -d '-1 second' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || now)"
+  ans="$(gexec "curl -sS -m 10 -o /dev/null https://${CONTROL_HOST}/v2/ && echo AIRGAP-CONTROL-REACHED || echo AIRGAP-CONTROL-REFUSED" 2>/dev/null || true)"
+  case "$ans" in
+    *AIRGAP-CONTROL-REFUSED*)
+      sleep "$SETTLE"
+      c1="$(now)"
+      n_rc=0; n="$(count "$c0" "$c1" 2>"${LANE}/control-count.err")" || n_rc=$?
+      [ "$n_rc" = 0 ] || infra "the edge's log could not be read for the control (edge-deny-count exit ${n_rc}: $(tail -1 "${LANE}/control-count.err"))"
+      if [ "$n" -ge 1 ]; then
+        note "AIRGAP-CUT proven: the guest was refused ${CONTROL_HOST} and the edge logged ${n} deny line(s), ${c0} to ${c1}"
+        break
+      fi
+      silent=$((silent + 1))
+      echo "airgap lane 8: the guest was refused, but the edge logged no deny line for it (${silent} of 3)"
+      [ "$silent" -lt 3 ] || fail "the guest is refused but the edge logs no deny line for it, so the counter cannot count and a zero would mean nothing"
+      ;;
+    *AIRGAP-CONTROL-REACHED*) ;;
+    *) infra "the guest did not answer the positive control" ;;
+  esac
+  [ "$(date +%s)" -lt "$deadline" ] || blocked "the cut was not made within ${CUT_WAIT}s: the guest still reaches ${CONTROL_HOST}. ${TOCKMOX_AIRGAP_CUT_HINT}"
+  sleep "$POLL"
+done
+
+# 9. P09, under the cut
+step "9 P09 under the cut"
+NODE_IP="$(kubectl --context="$KUBE_CONTEXT" get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')"
+[ -n "$NODE_IP" ] || fail "the throwaway reports no node InternalIP"
+# TOCKMOX_P09_AIRGAPPED: P09 also sets global.airGapped where airgap.md says to, so the cut run has the values the page
+# gives a disconnected site, not only install.md's.
+export TOCKMOX_P09_ROUTE=built-in TOCKMOX_P09_FROM_TREE=1 TOCKMOX_P09_AIRGAPPED=1
+export TOCKMOX_P09_TOCKMOX_REPO_URL="$TM_URL" TOCKMOX_P09_TOCKMOX_REVISION="$TAG" TOCKMOX_P09_TOCKMOX_CLONE="$TREE"
+export TOCKMOX_P09_STATE="${LANE}/p09-state" TOCKMOX_P09_BUDGET="$P09_BUDGET_S"
+export TOCKMOX_P09_LAN_CIDR="${TOCKMOX_P09_LAN_CIDR:-${NODE_IP%.*}.0/24}"
+export TOCKMOX_P09_POOL="${TOCKMOX_P09_POOL:-${NODE_IP%.*}.240-${NODE_IP%.*}.250}"
+race_sampler_start || true
+T0="$(now)"
+INSTALL_STARTED=1
+echo "airgap lane 9: P09 under the cut, from ${T0}, bounded at ${P09_WALL}s"
+rm -f "${LANE}/p09-bound"
+set +e
+bounded "$P09_WALL" "${LANE}/p09-bound" bash "${HERE}/run.sh" P09
+P09_RC=$?
+set -e
+P09_BOUND=0
+if [ -e "${LANE}/p09-bound" ]; then
+  P09_BOUND=1
+  newest="$(python3 -c 'import os, sys
+d = sys.argv[1]
+f = [(os.path.getmtime(os.path.join(d, x)), x) for x in os.listdir(d)] if os.path.isdir(d) else []
+print(max(f)[1] if f else "")' "${TOCKMOX_P09_STATE}" 2>/dev/null || true)"
+  note "AIRGAP-P09-BOUND P09 ran past its bound of ${P09_WALL}s and was stopped (its budget ${P09_BUDGET_S}s is checked only between its steps); last state written: ${newest:-none}"
 fi
-note "airgap lane 10: ${counted} deny line(s) count against the clause (ignored: ${IGNORE:-none}; the guest cluster's own: ${GUEST_RANGES})"
+sleep "$SETTLE"
+T1="$(now)"
+note "AIRGAP-WINDOW ${T0} ${T1} guest ${GUEST_IP}"
+
+# The outcome P09 declared, not its exit status: run.sh exits 0 for a path that declared BLOCKED.
+p09_rec="MISSING no receipt for P09 in the newest run"
+d=""; for g in "${TOCKMOX_WORKDIR}"/receipts-*; do [ -d "$g" ] && d="$g"; done
+if [ -n "$d" ] && [ -s "${d}/P09-install-md-end-to-end" ]; then
+  read -r o r < "${d}/P09-install-md-end-to-end" || true
+  p09_rec="${o:-MISSING} ${r:-}"
+fi
+note "airgap lane 9: P09 exit ${P09_RC}, declared ${p09_rec}"
+race_sampler_stop || true
+race_services || true
+
+# 10. the edge's denies over the cut window, by destination
+step "10 count the edge's denies"
+dt_rc=0
+deny_table "$T0" "$T1" || dt_rc=$?
+DENY_DONE=1
+case "$dt_rc" in 0) ;; 1) infra "$DENY_WHY" ;; *) fail "$DENY_WHY" ;; esac
+n="$DENY_N"
 race_verdict "$n" || true
 
 # 11. the judgment; finish() destroys the throwaway and prints AIRGAP-RESULT
+[ "$P09_BOUND" = 0 ] || infra "P09 did not finish within its bound of ${P09_WALL}s and was stopped (AIRGAP-P09-BOUND above); the AIRGAP-DENY lines cover the cut window up to then"
 if [ "$P09_RC" != 0 ] || [ "${p09_rec%% *}" != PASS ]; then
   case "${p09_rec%% *}" in
     BLOCKED) blocked "P09 declared ${p09_rec}" ;;
