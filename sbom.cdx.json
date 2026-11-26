@@ -3,9 +3,9 @@
   "components": [
     {
       "name": "alpine/k8s",
-      "purl": "pkg:oci/k8s?repository_url=alpine/k8s&tag=1.37.2",
+      "purl": "pkg:oci/k8s@sha256:7a82aeefea3d554a43a8676b137f2b88bae6c1fe11c13862b191b3a086cc28c0?repository_url=alpine/k8s&tag=1.37.2",
       "type": "container",
-      "version": "1.37.2"
+      "version": "sha256:7a82aeefea3d554a43a8676b137f2b88bae6c1fe11c13862b191b3a086cc28c0"
     },
     {
       "name": "binwiederhier/ntfy",

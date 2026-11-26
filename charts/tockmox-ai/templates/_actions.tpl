@@ -69,7 +69,7 @@ Alertmanager-reading observability capability for the Alertmanager kinds.
 {{- $mf := $a.moveForge | default dict -}}
 {{- $mfOn := $chOn -}}
 {{- if and (hasKey $mf "enabled") (not (kindIs "invalid" $mf.enabled)) -}}{{- $mfOn = and $chOn $mf.enabled -}}{{- end -}}
-{{- $mfImage := include "tockmox.image" (dict "ctx" . "repo" (($a.moveForge | default dict).image | default "alpine/k8s:1.37.2")) -}}
+{{- $mfImage := include "tockmox.image" (dict "ctx" . "repo" (($a.moveForge | default dict).image | default "alpine/k8s:1.37.2@sha256:7a82aeefea3d554a43a8676b137f2b88bae6c1fe11c13862b191b3a086cc28c0")) -}}
 {{- $_ := set $out "moveForge" (dict "enabled" $mfOn "image" $mfImage) -}}
 {{- end -}}
 {{- $out | toYaml -}}

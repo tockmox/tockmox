@@ -184,7 +184,7 @@ apps:
 
 heartbeat:
   schedule: "*/15 * * * *"
-  image: alpine/k8s:1.37.2
+  image: alpine/k8s:1.37.2@sha256:7a82aeefea3d554a43a8676b137f2b88bae6c1fe11c13862b191b3a086cc28c0
 
 # How long without a SUCCESSFUL heartbeat before the platform declares itself
 # unwatched. Seconds, because the value lands inside a PromQL comparison.

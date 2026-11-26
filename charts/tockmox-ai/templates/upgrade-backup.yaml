@@ -89,7 +89,7 @@ layer's to add.
 {{- end -}}
 {{- if and $targets (not (and (kindIs "bool" $ub.enabled) (not $ub.enabled))) }}
 {{- $timeout := int ($ub.timeoutSeconds | default 900) }}
-{{- $image := include "tockmox.image" (dict "ctx" $ "repo" ($ub.image | default "alpine/k8s:1.37.2")) }}
+{{- $image := include "tockmox.image" (dict "ctx" $ "repo" ($ub.image | default "alpine/k8s:1.37.2@sha256:7a82aeefea3d554a43a8676b137f2b88bae6c1fe11c13862b191b3a086cc28c0")) }}
 {{- $workloads := list -}}
 {{- $clusters := list -}}
 {{- range $targets }}{{ $workloads = append $workloads .workload }}{{ $clusters = append $clusters .cluster }}{{ end }}
