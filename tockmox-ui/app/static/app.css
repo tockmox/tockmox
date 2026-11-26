@@ -446,7 +446,7 @@ table.gens .sub { display: block; margin-top: .15rem; color: var(--tx-text-muted
 .stack-wrap.with-drawer { grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem); }
 /* Was ".stack", the class every form uses (form.stack above): the lab run, 2026-11-01, found the confirm page and
    the node and onboarding forms squeezed into this grid's 2.6rem first column. */
-.layer-stack { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr); gap: .6rem; }
+.layer-stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: .6rem; }
 .bands { display: grid; gap: .6rem; }
 .band { display: grid; grid-template-columns: 11rem minmax(0, 1fr); border: 1px solid var(--tx-border); border-radius: var(--tx-radius-md); background: var(--tx-surface); color: var(--tx-text); }
 .band.st-warning { border-color: var(--st-warning); } .band.st-critical { border-color: var(--st-critical); }
@@ -463,9 +463,8 @@ table.gens .sub { display: block; margin-top: .15rem; color: var(--tx-text-muted
 .part[aria-current] { outline: 2px solid var(--tx-trim); outline-offset: 2px; }
 .part .n { font-weight: 400; font-size: var(--fs-1); color: var(--tx-text-muted); font-variant-numeric: tabular-nums; }
 .band .folded { align-self: center; padding: 0 .3rem; }
-.layer-stack .side { writing-mode: vertical-rl; transform: rotate(180deg); justify-content: center; padding: .8rem .2rem; min-height: 0; border-radius: var(--tx-radius-md); }
+.layer-stack .side { justify-content: flex-start; padding: .45rem .8rem; min-height: 0; border-radius: var(--tx-radius-md); }
 .layer-stack .side .side-in { display: inline-flex; align-items: center; gap: .4rem; }
-.layer-stack .side .ico { transform: rotate(90deg); }
 .drawer { position: sticky; top: 1rem; padding: 1rem 1.1rem; }
 .drawer-top { display: flex; justify-content: space-between; align-items: center; }
 .drawer h2 { margin: .5rem 0 .2rem; }
