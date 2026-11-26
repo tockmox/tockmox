@@ -288,6 +288,7 @@ approve; **Act** (no role has it) would run named, reversible actions.
 | Test Manager | Observe | Service validation and testing | none yet; 1 planned | none yet |
 | Configuration and Asset Manager | Observe | Service configuration management; IT asset management; Infrastructure and platform management | none yet; 1 planned | Cluster nodes not ready, AI nodes running an unverified configuration |
 | Supplier Manager | Observe | Supplier management; Relationship management | none yet; 2 planned | none yet |
+| AI Model Manager | Observe | Deployment management; Supplier management (model providers) | none yet | none yet |
 
 **Improve.** Governs and learns. Measures how well the platform is run, keeps knowledge current and watches cost and risk.
 
@@ -295,6 +296,7 @@ approve; **Act** (no role has it) would run named, reversible actions.
 |---|---|---|---|---|
 | Improvement Manager (lead) | Propose | Continual improvement; Measurement and reporting; Strategy management | `.*improvement-fetch.*`; 1 planned | none yet |
 | Knowledge Manager | Propose | Knowledge management | none yet; 1 planned | none yet |
+| Performance Manager | Propose | Capacity and performance management; Continual improvement | none yet | none yet |
 | Finance Manager | Observe | Service financial management | none yet; 1 planned | Frontier spend, last 24h, Frontier spend, last 30 days, Least budget left on any gateway key |
 | Architect | Propose | Architecture management; Service design | none yet; 1 planned | none yet |
 | Risk and Compliance Manager | Observe | Risk management; Information security management (compliance) | none yet; 1 planned | none yet |

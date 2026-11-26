@@ -39,7 +39,7 @@
 #   `or on() vector(0)`: that turns a missing metric into a healthy 0. `or (count(<metric>) * 0)` is zero
 #   only while the metric exists.
 version: 2
-specialistsSource: {file: roles/platform-roles.yaml, sha256: a85fb6dbadfac28c8798a8bbf85e0730910fa45c7662e604062372d2ba888b66}   # generated: tools/gen-platform-specialists.py
+specialistsSource: {file: roles/platform-roles.yaml, sha256: fbb708023a64379b3ec3f825dfff7a6b2d4b8426aa319bde6d42b08c9fc751f2}   # generated: tools/gen-platform-specialists.py
 
 teams:
   # ------------------------------------------------------------------ RUN
@@ -169,7 +169,7 @@ teams:
       - id: security
         name: Security Manager
         agentRole: security-manager   # generated: tools/gen-platform-specialists.py
-        specialists: [{id: outbound-scrubber, state: built}, {id: security-sentinel, state: proposed}]
+        specialists: [{id: outbound-scrubber, state: built}, {id: security-sentinel, state: proposed}, {id: vulnerability-manager, state: built}]
         reference: {itil: "Information security management", fitsm: "ISM"}
         mission: >-
           Keeps an eye on exposure: known vulnerabilities in what is running, certificates close to
@@ -280,7 +280,7 @@ teams:
       - id: release
         name: Release Manager
         agentRole: release-manager   # generated: tools/gen-platform-specialists.py
-        specialists: [{id: release-engineer, state: specced}, {id: gitops-engineer, state: built}]
+        specialists: [{id: release-engineer, state: built}, {id: gitops-engineer, state: built}]
         reference: {itil: "Release management; Deployment management", fitsm: "RDM"}
         mission: >-
           Cuts and ships releases: the version bump, the gates, the lab proof and the release notes,
@@ -356,6 +356,20 @@ teams:
             - {name: upstream-watch, cron: "0 7 * * 3", what: "Summarises what changed upstream this week and what is worth taking"}
             - {name: firmware-advisory, cron: "0 9 7 1,4,7,10 *", what: "Checks vendor firmware against what each machine runs"}
 
+      - id: models
+        name: AI Model Manager
+        agentRole: ai-model-manager   # generated: tools/gen-platform-specialists.py
+        specialists: [{id: model-steward, state: proposed}]
+        reference: {itil: "Deployment management; Supplier management (model providers)", fitsm: "-"}
+        mission: >-
+          Looks after the models the platform serves: each one is evaluated before it serves, promoted
+          only on evidence, watched after it is promoted and retired on purpose.
+        mode: observe
+        mayRead: [the model catalogue, evaluation results, the gateway's routing and health counters]
+        mayPropose: [an evaluation run, a promotion or retirement for a person to approve]
+        never: [promote, switch or retire a model on its own, change a gateway key]
+        dataClass: internal
+
   # ------------------------------------------------------------------ IMPROVE
   - id: improve
     name: Improve
@@ -395,6 +409,20 @@ teams:
         schedules:
           planned:
             - {name: runbook-currency, cron: "0 10 * * 5", what: "Checks every runbook touched by this week's incidents still matches the platform"}
+
+      - id: performance
+        name: Performance Manager
+        agentRole: performance-manager   # generated: tools/gen-platform-specialists.py
+        specialists: [{id: performance-steward, state: built}]
+        reference: {itil: "Capacity and performance management; Continual improvement", fitsm: "CAPM"}
+        mission: >-
+          Reviews performance on a schedule, not only when someone notices. Each finding is carded once,
+          with its evidence and whether the fix can be undone.
+        mode: propose
+        mayRead: [metrics, capacity trend reports, the task boards]
+        mayPropose: [a card or a Log line for each finding, a tuning change as a pull request]
+        never: [apply a tuning change, resize or restart anything]
+        dataClass: internal
 
       - id: finance
         name: Finance Manager

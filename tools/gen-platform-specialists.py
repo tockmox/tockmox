@@ -5,6 +5,10 @@
   python3 tools/gen-platform-specialists.py ROLES.yaml [CATALOG.yaml]          rewrite the catalog in place
   python3 tools/gen-platform-specialists.py --check ROLES.yaml [CATALOG.yaml]  exit 1 if the catalog is not what
                                                                               ROLES.yaml would make it (drift)
+  python3 tools/gen-platform-specialists.py --check --served INDEX.json ROLES.yaml [CATALOG.yaml]
+                                                                              also exit 1 if INDEX.json (the specialist
+                                                                              host's index) was made from another roles
+                                                                              file, or serves a specialist no role names
 
 ROLES.yaml is roles/platform-roles.yaml from the specialists repository: which specialists (the agents that do the
 work) serve each accountable role, and how built each one is. The catalog stays the source for what the page shows
@@ -121,7 +125,36 @@ def generate(roles_text, catalog_text):
     return text
 
 
+def served_problems(roles_text, catalog_text, index_text):
+    """What the specialist host's index says that the catalog would not: another roles file, or a specialist it
+    serves that no role in the roles file names (so no page lists it)."""
+    index = json.loads(index_text)
+    if not (isinstance(index, dict) and isinstance(index.get("specialists"), list)):
+        raise GenError("the index has no specialists list")
+    out = []
+    ours = roles_sha(yaml.safe_load(roles_text))
+    theirs = str(((index.get("roles") or {}).get("sha256")) or index.get("roles_sha256") or "")
+    if theirs and theirs != ours:
+        out.append(f"the host serves roles file {theirs[:12]}, this one is {ours[:12]}")
+    named = {s["id"] for t in yaml.safe_load(catalog_text)["teams"]
+             for a in [t["lead"]] + list(t.get("members") or []) for s in a.get("specialists") or []}
+    ids = sorted(str(s.get("id")) for s in index["specialists"] if isinstance(s, dict))
+    missing = [i for i in ids if i not in named]
+    if missing:
+        out.append("served but named by no role, so no page lists it: " + ", ".join(missing))
+    return out
+
+
 def main(argv):
+    argv = list(argv)
+    served = None
+    if "--served" in argv:
+        k = argv.index("--served")
+        if k + 1 >= len(argv):
+            print(__doc__)
+            return 2
+        served = argv[k + 1]
+        del argv[k:k + 2]
     args = [a for a in argv[1:] if a != "--check"]
     if not args or len(args) > 2:
         print(__doc__)
@@ -141,7 +174,17 @@ def main(argv):
         if new != cur:
             print(f"stale: {cat_path} is not what {roles_path} makes it; run tools/gen-platform-specialists.py {roles_path}")
             return 1
-        print("ok: the catalog's specialists field matches the roles file")
+        if served:
+            with open(served, encoding="utf-8") as fh:
+                try:
+                    bad = served_problems(roles_text, new, fh.read())
+                except (GenError, ValueError) as e:
+                    print(f"refused: {e}")
+                    return 1
+            if bad:
+                print("drift: " + "; ".join(bad))
+                return 1
+        print("ok: the catalog's specialists field matches the roles file" + (" and what the host serves" if served else ""))
         return 0
     if new != cur:
         with open(cat_path, "w", encoding="utf-8") as fh:
