@@ -51,6 +51,26 @@ MOVE_STEPS = ((1, "The target is empty"), (2, "The whole history is pushed"), (3
               (5, "Finish: main pushed again, the root re-applied, the built-in repository archived"))
 SILENCE_CHOICES = ((1, "1 hour"), (4, "4 hours"), (24, "24 hours"), (168, "7 days"))
 RECOVERY_CHOICES = ((1, "1 hour"), (24, "24 hours"), (72, "3 days"))
+# Activity: the console asks for every row the service keeps (app/actions_service.py ACTIVITY_MAX; a test holds the
+# two equal) and shows them a page at a time, so the oldest one kept is reachable, not only the newest page.
+ACTIVITY_READ = 300
+ACTIVITY_PAGE = 100
+
+
+def activity_page(rows: list, raw: str | None) -> dict:
+    """One page of Activity: the rows on it and the words around them. raw is the ?page= text as sent; anything that
+    is not a whole number lands on page 1, and a number past either end on the nearest page there is."""
+    kept = len(rows)
+    pages = max(1, -(-kept // ACTIVITY_PAGE))
+    try:
+        page = int(str(raw or "1").strip())
+    except ValueError:
+        page = 1
+    page = min(max(page, 1), pages)
+    first = (page - 1) * ACTIVITY_PAGE
+    on = rows[first:first + ACTIVITY_PAGE]
+    return {"rows": on, "kept": kept, "page": page, "pages": pages, "first": first + 1, "last": first + len(on),
+            "full": kept >= ACTIVITY_READ, "max": ACTIVITY_READ}
 
 
 def _back(v: str, default: str = "/status") -> str:
@@ -545,7 +565,7 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
         rows, err = [], ""
         try:
             with httpx.Client(base_url=cfg.url, timeout=s.source_timeout_s, transport=transport) as c:
-                r = c.get("/v1/activity", params={"limit": 100})
+                r = c.get("/v1/activity", params={"limit": ACTIVITY_READ})
                 r.raise_for_status()
                 rows = r.json().get("rows") or []
         except Exception as e:  # noqa: BLE001
@@ -556,7 +576,8 @@ def register(app, s, render, user_of, need_login, forbidden, csrf_ok, sessions, 
                 active = set(active_silences())        # a failed read offers no Expire here; Status still does
             except Exception:  # noqa: BLE001
                 active = set()
-        return render(request, "platform_activity.html", u, rows=rows, err=err, now=time.time(),
+        pg = activity_page(rows, request.query_params.get("page"))
+        return render(request, "platform_activity.html", u, rows=pg["rows"], pg=pg, err=err, now=time.time(),
                       expire_on=cfg.on("expire"), active=active)
 
     @app.get("/platform/identity")

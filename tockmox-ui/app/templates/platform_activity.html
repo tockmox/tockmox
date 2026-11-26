@@ -13,7 +13,9 @@
 {% else %}
 <div class="table-wrap" tabindex="0" role="region" aria-labelledby="act-cap">
 <table>
-  <caption id="act-cap">The last {{ rows | length }} action{{ "s" if rows | length != 1 }}, newest first. Times in {{ site.timezone }}.</caption>
+  {#- Each page is 100 of what the record keeps (app/actions_routes.py activity_page), and says which ones: before,
+      only the newest 100 could be seen, with no word of how many more were kept. -#}
+  <caption id="act-cap">Showing {{ rows | length }} of {{ pg.kept }} kept{% if pg.pages > 1 %} ({{ pg.first }} to {{ pg.last }}){% endif %}, newest first. Times in {{ site.timezone }}.</caption>
   <thead><tr><th scope="col">When</th><th scope="col">Who</th><th scope="col">Action</th><th scope="col">Result</th></tr></thead>
   <tbody>
   {% for r in rows %}
@@ -33,5 +35,14 @@
   </tbody>
 </table>
 </div>
+{% if pg.pages > 1 %}
+<nav class="pager" aria-label="Activity pages"><p>
+  {%- if pg.page > 1 %}<a href="/platform/activity?page={{ pg.page - 1 }}" rel="prev">Newer</a> · {% endif -%}
+  Page {{ pg.page }} of {{ pg.pages }}
+  {%- if pg.page < pg.pages %} · <a href="/platform/activity?page={{ pg.page + 1 }}" rel="next">Older</a>{% endif %}</p></nav>
+{% endif %}
+{% if pg.full %}
+<p class="quiet">The record keeps the last {{ pg.max }} actions; older ones are in Loki only.</p>
+{% endif %}
 {% endif %}
 {% endblock %}
