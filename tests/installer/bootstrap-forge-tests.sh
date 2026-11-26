@@ -454,7 +454,7 @@ assert_artifact "F37 the ConfigMap carries install/forge-approver-watch.py exact
   "fk_get $FKNS ConfigMap $WNAME-script data/forge-approver-watch.py | cmp - '$REPO_ROOT/install/forge-approver-watch.py' && echo identical" "identical"
 assert_artifact "F37 the Deployment runs it in the move job's pinned image, non-root, with a read-only root filesystem and limits" \
   "fk_obj $FKNS Deployment $WNAME \"[d['spec']['template']['spec']['containers'][0]['image'], d['spec']['template']['spec']['securityContext']['runAsNonRoot'], d['spec']['template']['spec']['containers'][0]['securityContext']['readOnlyRootFilesystem'], d['spec']['template']['spec']['containers'][0]['securityContext']['allowPrivilegeEscalation'], sorted(d['spec']['template']['spec']['containers'][0]['resources']['limits']), sorted(d['spec']['template']['spec']['containers'][0]['resources']['requests'])]\"" \
-  "['alpine/k8s:1.37.2', True, True, False, ['cpu', 'memory'], ['cpu', 'memory']]"
+  "['alpine/k8s:1.37.2@sha256:7a82aeefea3d554a43a8676b137f2b88bae6c1fe11c13862b191b3a086cc28c0', True, True, False, ['cpu', 'memory'], ['cpu', 'memory']]"
 assert_artifact "F37 ... mounts the script and the one Secret, with no Kubernetes token and no credential in its environment" \
   "fk_obj $FKNS Deployment $WNAME \"[sorted(v['name'] for v in d['spec']['template']['spec']['volumes']), d['spec']['template']['spec']['automountServiceAccountToken']]\"; grep -c \"\$(fk_get $FKNS Secret $WNAME data/forge-token)\" '$D/state/objs/$FKNS/Deployment/$WNAME.json' || true" \
   "$(printf "[['credentials', 'script', 'tmp'], False]\n0")"

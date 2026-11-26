@@ -146,7 +146,7 @@ FORGE_IMAGE_TAG_DEFAULT="15.0.11"
 # python3 and kubectl in one image the AI layer already pins, so the air-gap set gains nothing.
 # Read by tools/gen-images.sh; Renovate moves it with the charts' alpine/k8s pins, and the
 # tockmox-actions admission policy pins the same string (tockmoxUi.actions.moveForge.image).
-MOVE_IMAGE_DEFAULT="alpine/k8s:1.37.2"
+MOVE_IMAGE_DEFAULT="alpine/k8s:1.37.2@sha256:7a82aeefea3d554a43a8676b137f2b88bae6c1fe11c13862b191b3a086cc28c0"
 FORGE_NS_DEFAULT="tockmox-forge"
 RELEASE="tockmox-forge"
 ORG="tockmox"
