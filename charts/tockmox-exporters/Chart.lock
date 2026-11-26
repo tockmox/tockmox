@@ -1,12 +1,12 @@
 dependencies:
 - name: tockmox-common
   repository: file://../tockmox-common
-  version: 0.8.0
+  version: 0.9.0
 - name: prometheus-blackbox-exporter
   repository: https://prometheus-community.github.io/helm-charts
   version: 11.21.3
 - name: prometheus-snmp-exporter
   repository: https://prometheus-community.github.io/helm-charts
   version: 9.21.1
-digest: sha256:95b453c4fb51efccbeead204c4c5203ded12dca04fe0c293ba33860a39dbcf53
-generated: "2026-11-18T14:35:00.471287596Z"
+digest: sha256:1ba3e3feb9564d8c672932bc6ca1e2cddc7b1e305f98280260da0454c4dad41f
+generated: "2026-11-26T17:57:52.912820699Z"

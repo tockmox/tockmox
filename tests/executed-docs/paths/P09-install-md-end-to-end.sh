@@ -455,8 +455,8 @@ fi
 # here and pinned as xfail so the day it starts passing is visible.
 S=S04-ls-remote-github
 if ! done_step "$S"; then budget_left || yield "S04+"
-  step_begin "$S" 'git ls-remote https://github.com/tockmox/tockmox.git refs/tags/v0.8.0' || block_gone "$S"
-  execute_begin "install.md Phase 1 precondition ls-remote"; GIT_TERMINAL_PROMPT=0 run_ws "$S" "$(block 'git ls-remote https://github.com/tockmox/tockmox.git refs/tags/v0.8.0')"; execute_end $?
+  step_begin "$S" 'git ls-remote https://github.com/tockmox/tockmox.git refs/tags/v0.9.0' || block_gone "$S"
+  execute_begin "install.md Phase 1 precondition ls-remote"; GIT_TERMINAL_PROMPT=0 run_ws "$S" "$(block 'git ls-remote https://github.com/tockmox/tockmox.git refs/tags/v0.9.0')"; execute_end $?
   record_tag_row "$S"
   note "S04: source 1 for this run is ${TM_URL} @ ${TM_REV}, a harness snapshot of the tree under test, NOT the published tag. Nothing below is evidence about GitHub's copy."
   mark_done "$S"
