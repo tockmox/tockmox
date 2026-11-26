@@ -1691,7 +1691,7 @@
       "x-tockmox-stability-rerule": "0.10.0",
       "type": "object",
       "additionalProperties": false,
-      "description": "The Tockmox UI (experimental): opt-in Deployment with its own NetworkPolicy; site-built image. Held below stable at 0.9.0, re-ruled at 0.10.0, with everything beneath it: config.features.platform.* (including ledgerUrl) and platformCatalog. See docs/administration/tockmox-ui.md.",
+      "description": "The Tockmox UI (experimental): opt-in Deployment with its own NetworkPolicy; site-built image. Held below stable at 0.9.0, re-ruled at 0.10.0, with everything beneath it: config.features.platform.* (including ledgerUrl), platformCatalog and specialistPlacement. See docs/administration/tockmox-ui.md.",
       "properties": {
         "enabled": {
           "type": "boolean"
@@ -1811,6 +1811,46 @@
           "properties": {
             "configMap": {
               "type": "string"
+            }
+          }
+        },
+        "specialistPlacement": {
+          "type": "array",
+          "description": "Experimental, as everything under tockmoxUi. The site's values list of its specialists, one line each: id, cell, tier (t0 write path, t1 on call, t2 scheduled or idle), recovery time (a duration such as 5m) and an optional pool. Rendered as written into the UI config at features.platform.specialistPlacement for the specialist pages and filters; used only when config.features.platform.enabled. See docs/administration/platform-management.md.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "cell",
+              "tier",
+              "recovery"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,62}$"
+              },
+              "cell": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,62}$"
+              },
+              "tier": {
+                "type": "string",
+                "enum": [
+                  "t0",
+                  "t1",
+                  "t2"
+                ]
+              },
+              "recovery": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*(s|m|h)$"
+              },
+              "pool": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,62}$"
+              }
             }
           }
         },

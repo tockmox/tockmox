@@ -160,6 +160,32 @@ specialist index. Its token (caller client/tockmox-ui, reads only) is the site's
 {{- if and $platOn $catCm -}}
 {{- $_ := set $plat "catalogFile" "/etc/tockmox-ui/platform-catalog/catalog.yaml" -}}
 {{- end -}}
+{{- /* SPECIALIST PLACEMENT (experimental, under tockmoxUi): the site's values list of its specialists, one line
+each (id, cell, tier, recovery time, optional pool), rendered as written into features.platform.specialistPlacement
+for the specialist pages and their filters. The schema refuses a line without a tier or a recovery time; this
+refuses the same id twice, a list nothing would read (Platform Management off) and a hand-written copy in the
+UI config, so the pages have one source. With no list the key is absent, which the pages show as unknown. */ -}}
+{{- $place := $ui.specialistPlacement | default list -}}
+{{- if hasKey $plat "specialistPlacement" -}}
+{{- fail "tockmoxUi.config.features.platform.specialistPlacement is written by the chart: list your specialists under tockmoxUi.specialistPlacement instead" -}}
+{{- end -}}
+{{- if $place -}}
+{{- if not $platOn -}}
+{{- fail "tockmoxUi.specialistPlacement is set but config.features.platform.enabled is not: only Platform Management reads it. Turn it on, or remove the list" -}}
+{{- end -}}
+{{- $seenSp := dict -}}
+{{- $rows := list -}}
+{{- range $place -}}
+{{- if hasKey $seenSp .id -}}
+{{- fail (printf "tockmoxUi.specialistPlacement lists %s twice: one line per specialist" .id) -}}
+{{- end -}}
+{{- $_ := set $seenSp .id true -}}
+{{- $row := dict "id" .id "cell" .cell "tier" .tier "recovery" .recovery -}}
+{{- if .pool -}}{{- $_ := set $row "pool" .pool -}}{{- end -}}
+{{- $rows = append $rows $row -}}
+{{- end -}}
+{{- $_ := set $plat "specialistPlacement" $rows -}}
+{{- end -}}
 {{- /* ACTIONS: which buttons the UI offers, from the same block the tockmox-actions service reads
 (templates/_actions.tpl), and where that service is. The UI itself still holds no write credential. */ -}}
 {{- $actionsOn := ne (include "tockmox.actionsOn" .) "" -}}
