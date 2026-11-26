@@ -473,6 +473,77 @@ tells the charts there is no route out: the model gateway then uses the price
 map bundled in LiteLLM's image instead of fetching it from the internet on
 every start.
 
+## Large uploads through your own ingress: the websecure read timeout
+
+**Only matters if you push images through the cluster's own ingress.** Step 2
+copies images with `tools/mirror-images.sh` from the connected host. If the
+registry you push to is served by the platform layer's Traefik (for example a
+Harbor you run inside the cluster and publish on `REGISTRY_HOST`), every layer
+upload crosses that ingress, and a slow transfer path can hit a Traefik limit
+that has nothing to do with the registry.
+
+**What it is.** Traefik gives up on a request when it cannot finish reading it
+within the entrypoint's `readTimeout`, and for Traefik 3 that is 60 seconds by
+default. The timer covers the whole request, body included, so it is a limit on
+how long one upload may take, not on how long the connection may sit idle. A
+layer of a few hundred megabytes sent over a slow link takes longer than that,
+and the registry sees the client disappear mid-upload. The push reports a
+dropped connection or a failed `PATCH` on a blob, and the same layer fails
+again on every retry.
+
+**What the chart does.** The platform chart leaves it unset on purpose, so the
+60-second default applies. A higher default would widen how long every request
+may hold a connection open on every site's LAN ingress, and only the mirror
+path needs it. Set it yourself, in your site values, when you see the symptom
+above. Leave it alone if your images arrive some other way (a push to a
+registry outside the cluster, or a transfer that never crosses the ingress).
+
+**When to set it.** Set it before the mirror run if you know the transfer path
+is slow or the images are large. Otherwise set it the first time a push of a
+large layer is cut off at about one minute. The signature is that small layers
+succeed, large ones fail, and the failure time is the same each attempt.
+
+**How.** The platform layer passes everything under `traefik:` to the upstream
+Traefik chart unchanged, so the key is the upstream chart's:
+`ports.websecure.transport.respondingTimeouts.readTimeout`. In your site values
+for the platform layer:
+
+```yaml
+traefik:
+  ports:
+    websecure:
+      transport:
+        respondingTimeouts:
+          readTimeout: 600s   # YOU SUPPLY: long enough for your slowest layer
+```
+
+Choose the value from your slowest large layer and your slowest link, not from
+a round number: the transfer time is the layer size divided by the sustained
+rate. `0` removes the limit entirely, which also removes the protection against
+a client that sends a request very slowly, so prefer a finite value. The
+setting lives on the `websecure` entrypoint and applies to every host served
+through it, not only the registry. It does not change `writeTimeout` or
+`idleTimeout`.
+
+**Success condition.** Let ArgoCD sync the platform layer so the Traefik pods
+roll, then check that the running argument carries your value.
+
+**WORKSTATION** ... inside the boundary. **YOU SUPPLY:** the platform
+namespace and your Helm release name. Run
+`kubectl -n YOUR_PLATFORM_NAMESPACE get deploy YOUR_RELEASE_NAME-traefik -o yaml | grep -i readtimeout`
+and read the result.
+
+A line comes back that carries your value. Nothing comes back if
+the key was misspelt: the platform layer accepts any key under `traefik:`
+without complaint, so an empty result is the only sign. Then repeat the push
+that failed. A layer that now uploads past the one-minute mark confirms the
+cause.
+
+**Not run on a disconnected site.** The key and its default come from reading
+the chart and the upstream chart's values; the effect on a large push is what
+sites that hit it have reported. This page does not claim a tested range of
+values.
+
 ## 3. Vendor the upstream Helm subcharts ... Required
 
 Runs on the **CONNECTED** host.
