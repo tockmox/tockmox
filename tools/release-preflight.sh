@@ -33,14 +33,18 @@
 #   3. changelog    the top-most `## [` section of CHANGELOG.md is [X.Y.Z],
 #                   which is the same reading rule tools/check-values-tiers.sh
 #                   uses; `[Unreleased]` here means the rename has not happened
-#                   (run the drift gate first, then rename, then re-run this)
+#                   (run the drift gate first, then rename, then re-run this).
+#                   At an rc, [Unreleased] is accepted too (see RELEASE
+#                   CANDIDATES); a section naming any other version is still
+#                   refused
 #   4. checksums    if a SHA256SUMS exists at the root or in dist/, it names
 #                   tockmox-X.Y.Z.tar.gz and every file it lists verifies;
 #                   absent, the check is reported SKIP because the file is
 #                   generated from the tag and cannot exist before it
 #   5. site pin     if tockmox-site-template is checked out beside this repo,
 #                   in $HOME/src, or at $TOCKMOX_SITE_TEMPLATE: exactly one
-#                   `targetRevision: vX.Y.Z` per layer chart, every other
+#                   `targetRevision: vX.Y.Z` per layer chart (vX.Y.Z-rcN at
+#                   an rc: the tag being cut, see RELEASE CANDIDATES), every other
 #                   `targetRevision:` still `main` (the operator's own repo,
 #                   which a blanket sed would break), and the README's
 #                   "Pinned to" line names the tag; then REPORTS, without
@@ -64,8 +68,23 @@
 # the shape of every decorative gate this directory has retired. The name is the
 # scope.
 #
+# RELEASE CANDIDATES. The argument is the tag about to be cut, without the v:
+# X.Y.Z for a final, X.Y.Z-rcN for a release candidate. An rc tag sits on a tree
+# that already carries X.Y.Z (the five-edit bump happens once, before rc1: every
+# rc of a release has the same chart versions, installer VERSION, footers and
+# prose), while the site template is re-pinned at every rc to that rc's tag
+# (tools/site-pin-at-tag.sh refuses anything else). So for X.Y.Z-rcN checks 1
+# and 2 compare against X.Y.Z, check 3 accepts [X.Y.Z] or a top-most
+# [Unreleased] (the release text is written last, RELEASING.md), and check 5
+# wants every layer on vX.Y.Z-rcN and the README "Pinned to" line on it. Run as
+# X.Y.Z, check 5 still refuses a template left on any rc pin; run as X.Y.Z-rcN,
+# it refuses the previous rc's pins, the previous release's and a mixed set.
+# Until this split, check 5 at an rc could not pass: run as X.Y.Z it wanted the
+# final pin, and run as X.Y.Z-rcN check 1 wanted rc chart versions nothing has.
+#
 # Usage:
 #   tools/release-preflight.sh X.Y.Z            run the five checks
+#   tools/release-preflight.sh X.Y.Z-rcN        the same for a release candidate (RELEASE CANDIDATES)
 #   tools/release-preflight.sh X.Y.Z --strict   the same, and a SKIP is not green: a run with no
 #                                               FAIL that skipped a check exits 2 (BLOCKED), not 0;
 #                                               check 4 before the tag is N/A (see STRICT)
@@ -101,7 +120,9 @@ cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
 
 PROSE_FILES="install/tockmox.yaml.example docs/deployment/profiles.md docs/administration/configuration.md docs/administration/customising.md"
-SEMVER_RE='^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*(-[0-9A-Za-z.]+)?$'
+# X.Y.Z or X.Y.Z-rcN, the two tag shapes a release cuts (tools/site-pin-at-tag.sh
+# takes the same two)
+SEMVER_RE='^[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*(-rc[0-9][0-9]*)?$'
 # a version-shaped token in prose: v0.6.0, v0.6.0-rc1
 VTOKEN_RE='v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*(-[0-9A-Za-z.]*)?'
 
@@ -266,16 +287,25 @@ check_prose() {
 }
 
 # --------------------------------------------------------------------------
-# check_changelog ROOT VER
+# check_changelog ROOT VER [RC]
+#
+# RC (e.g. rc2) says the tag being cut is vVER-RC. The release text is written
+# last, from the gate's run sheet (RELEASING.md), so at an rc the top-most
+# section may still be [Unreleased]. It may not name any other version: a
+# previous release's section on top means the entries were never started.
 # --------------------------------------------------------------------------
 check_changelog() {
-  cc_root="$1"; cc_ver="$2"
+  cc_root="$1"; cc_ver="$2"; cc_rc="${3:-}"
   cc_f="$cc_root/CHANGELOG.md"
   [ -f "$cc_f" ] || { fail "no CHANGELOG.md"; return 1; }
   cc_head=$(grep -m1 '^## \[' "$cc_f" || true)
   [ -n "$cc_head" ] || { fail "CHANGELOG.md has no '## [' heading"; return 1; }
   cc_name=$(printf '%s\n' "$cc_head" | sed 's/^## \[\([^]]*\)\].*/\1/')
   echo "        top-most section: $cc_head"
+  if [ "$cc_name" = "Unreleased" ] && [ -n "$cc_rc" ]; then
+    echo "        at $cc_rc the release text is not written yet: [Unreleased] is accepted; the final's preflight wants [$cc_ver]"
+    return 0
+  fi
   if [ "$cc_name" = "Unreleased" ]; then
     fail "CHANGELOG.md still opens with [Unreleased]; rename it to [$cc_ver] ... AFTER tools/check-values-tiers.sh --drift-only has run green (it reads the same top-most section, so run it, rename, then run this again)"
     return 1
@@ -557,6 +587,10 @@ selftest() {
   probe "the target section below [Unreleased] does not count" fail check_changelog "$r" "$V"
   r="$tmp/nolog"; mkrepo "$r" "$V"; rm "$r/CHANGELOG.md"
   probe "no CHANGELOG.md is refused" fail check_changelog "$r" "$V"
+  # at an rc (RELEASE CANDIDATES): [Unreleased] on top is the expected state, any other version is not
+  probe "at an rc, a top-most [Unreleased] is accepted" pass check_changelog "$tmp/unrel" "$V" rc2
+  probe "at an rc, a top-most [$V] is accepted too" pass check_changelog "$good" "$V" rc2
+  probe "at an rc, a top-most section naming another version is still refused" fail check_changelog "$tmp/older" "$V" rc2
 
   echo "selftest: checksums"
   probe "no SHA256SUMS is a SKIP" skip check_sums "$good" "$V"
@@ -680,6 +714,47 @@ selftest() {
     echo "  (no sha256sum/shasum on PATH; strict-mode probes not run)"
   fi
 
+  echo "selftest: a release candidate, the whole script (X.Y.Z-rcN)"
+  # An rc tree carries X.Y.Z everywhere and opens its CHANGELOG on [Unreleased];
+  # only the site template names the rc. No SHA256SUMS: --strict reads check 4 N/A.
+  # The rc tag is not on the fixture remote, so check 5 passes with WINDOW OPEN.
+  VRC="$V-rc2"
+  run_whole_at() { # run_whole_at LABEL WANT-RC REGEX FIXTURE SITE ARG...  ... and the output matches REGEX
+    rwa_label="$1"; rwa_want="$2"; rwa_re="$3"; shift 3
+    run_whole "$rwa_label" "$rwa_want" "$@"
+    if printf '%s\n' "$rw_out" | grep -E "$rwa_re" >/dev/null; then echo "  ok  ...and it says /$rwa_re/"
+    else echo "  SELFTEST FAIL: '$rwa_label' wanted /$rwa_re/ in:"; printf '%s\n' "$rw_out" | tail -8 | sed 's/^/            /'; fails=1; fi
+  }
+  rcr="$tmp/rc-repo"; mkrepo "$rcr" "$V"
+  sed -i.bak "s/^## \[$V\] ... 2026-01-01/## [Unreleased]/" "$rcr/CHANGELOG.md"
+  s="$tmp/rc-site"; mksite "$s" "$VRC" 2
+  run_whole_at "an rc tree with the template on its rc pin passes as $VRC" 0 \
+    "PASS  5\. tockmox-site-template pinned to v$VRC" "$rcr" "$s" "$VRC" --strict
+  run_whole_at "the same with a leading v" 0 "PASS  1\. the bump locations agree on $V\b" "$rcr" "$s" "v$VRC" --strict
+  run_whole_at "the same tree as the final $V still stops at its [Unreleased]" 1 'FAILED at "3\.' "$rcr" "$s" "$V" --strict
+  rcf="$tmp/rc-final"; mkrepo "$rcf" "$V"
+  run_whole_at "at the final $V, a template left on the rc pin is refused" 1 'FAILED at "5\.' "$rcf" "$s" "$V" --strict
+  s="$tmp/rc-site-prev"; mksite "$s" "1.2.2" 2
+  run_whole_at "at $VRC, the previous release's pins are refused" 1 'FAILED at "5\.' "$rcr" "$s" "$VRC" --strict
+  s="$tmp/rc-site-final"; mksite "$s" "$V" 2
+  run_whole_at "at $VRC, the final's pins (one step early) are refused" 1 'FAILED at "5\.' "$rcr" "$s" "$VRC" --strict
+  s="$tmp/rc-site-rc1"; mksite "$s" "$V-rc1" 2
+  run_whole_at "at $VRC, the previous rc's pins are refused" 1 'FAILED at "5\.' "$rcr" "$s" "$VRC" --strict
+  s="$tmp/rc-site-readme"; mksite "$s" "$VRC" 2; printf 'Pinned to **v%s-rc1**.\n' "$V" > "$s/README.md"
+  run_whole_at "at $VRC, a README still on the previous rc is refused" 1 'FAILED at "5\.' "$rcr" "$s" "$VRC" --strict
+  s="$tmp/rc-site-mixed"; mksite "$s" "$VRC" 2
+  sed -i.bak "s/targetRevision: v$VRC\$/targetRevision: v$V/" "$s/bootstrap/applications/layer-1.yaml"
+  run_whole_at "at $VRC, a mixed set (one layer on the rc, one on the final) is refused" 1 'FAILED at "5\.' "$rcr" "$s" "$VRC" --strict
+  s="$tmp/rc-site-sed"; mksite "$s" "$VRC" 2
+  sed -i.bak "s/targetRevision: main/targetRevision: v$VRC/" "$s"/bootstrap/applications/*.yaml
+  run_whole_at "at $VRC, a blanket sed that pinned the site repo lines is refused" 1 'FAILED at "5\.' "$rcr" "$s" "$VRC" --strict
+  s="$tmp/rc-site"
+  rco="$tmp/rc-old-log"; mkrepo "$rco" "$V"; sed -i.bak "s/^## \[$V\]/## [1.2.2]/" "$rco/CHANGELOG.md"
+  run_whole_at "at $VRC, a CHANGELOG opening on another version is refused" 1 'FAILED at "3\.' "$rco" "$s" "$VRC" --strict
+  rcv="$tmp/rc-charts"; mkrepo "$rcv" "$VRC"; sed -i.bak "s/^## \[$VRC\] ... 2026-01-01/## [Unreleased]/" "$rcv/CHANGELOG.md"
+  run_whole_at "at $VRC, charts bumped to the rc string instead of $V are refused" 1 'FAILED at "1\.' "$rcv" "$s" "$VRC" --strict
+  run_whole_at "a prerelease other than -rcN is not a version" 1 'is not a version' "$rcr" "$s" "$V-beta1" --strict
+
   if [ "$fails" -eq 0 ]; then
     echo "release-preflight --selftest: PASSED"; exit 0
   fi
@@ -714,9 +789,15 @@ printf '%s\n' "$VER" | grep -E "$SEMVER_RE" >/dev/null || {
   echo "release-preflight: \"$ARG_VER\" is not a version (want X.Y.Z or X.Y.Z-rcN, with or without a leading v)"
   exit 1
 }
+# VER is the tag being cut; BASE is the version the tree carries (RELEASE
+# CANDIDATES). They differ only at an rc, and RC names it.
+BASE="${VER%%-*}"
+RC=""
+[ "$BASE" = "$VER" ] || RC="${VER#"$BASE"-}"
 command -v python3 >/dev/null 2>&1 || { echo "release-preflight: python3 is required (reads sbom.cdx.json)"; exit 1; }
 
 echo "release preflight for v$VER"
+[ -z "$RC" ] || echo "release candidate: the tree carries $BASE (checks 1 to 3), the site template pins v$VER (check 5)"
 [ "$STRICT" = 0 ] || echo "mode: strict (a SKIP is not green: exit 2)"
 echo "repository: $ROOT"
 
@@ -734,9 +815,13 @@ run_check() { # run_check NAME FUNCTION ARGS...
   esac
 }
 
-run_check "1. the bump locations agree on $VER" check_versions "$ROOT" "$VER"
-run_check "2. hand-maintained prose names v$VER" check_prose "$ROOT" "$VER"
-run_check "3. CHANGELOG top-most section is [$VER]" check_changelog "$ROOT" "$VER"
+run_check "1. the bump locations agree on $BASE" check_versions "$ROOT" "$BASE"
+run_check "2. hand-maintained prose names v$BASE" check_prose "$ROOT" "$BASE"
+if [ -n "$RC" ]; then
+  run_check "3. CHANGELOG top-most section is [$BASE] or, at $RC, [Unreleased]" check_changelog "$ROOT" "$BASE" "$RC"
+else
+  run_check "3. CHANGELOG top-most section is [$BASE]" check_changelog "$ROOT" "$BASE"
+fi
 if [ "$STRICT" = 1 ] && [ ! -f "$ROOT/SHA256SUMS" ] && [ ! -f "$ROOT/dist/SHA256SUMS" ]; then
   printf '\n== 4. SHA256SUMS names and verifies the archive ==\n'
   echo "        no SHA256SUMS at the root or in dist/: it is generated from the tag, after this check's hour"
