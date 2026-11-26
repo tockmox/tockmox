@@ -14,7 +14,8 @@ What this module shows, and from where:
                   client/tockmox-ui, reads only): what the operations agents worked on and what waits on
                   whom (platform_cases.py)
   specialists     each role's specialists (the agents that do its work) from the catalog's generated
-                  specialists field, and what the host serves from its /v1/index
+                  specialists field, and what the host serves from its /v1/index; each specialist's own page
+                  and its Health (specialist_page.py), from the index and Prometheus
   needs you       the ledger's jobs waiting on a person; approving happens in the conversation
                   surface (features.platform.interfaceUrl), never here
 
@@ -42,7 +43,7 @@ import yaml
 from fastapi import Request
 from zoneinfo import ZoneInfo
 
-from . import platform_cases, platform_report
+from . import platform_cases, platform_report, specialist_page
 from .cronexpr import Cron, describe
 from .sources import CRIT, OK, UNKNOWN, WARN, KubeClient, Reading, Source, _parse_ts, _why, worst
 
@@ -952,7 +953,7 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
                   if isinstance(e, CatalogError) else f"Platform Management could not start: {e}"
                   if isinstance(e, AgentNameError) else f"Platform Management could not start: a time zone in features.platform: {e!r}")
 
-        def broken(request: Request, aid: str = "", rid: str = ""):
+        def broken(request: Request, aid: str = "", rid: str = "", sid: str = ""):
             u = user_of(request)
             if not u:
                 return need_login(request)
@@ -961,7 +962,8 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
             return render(request, "error.html", u, status_code=503, title="Platform Management is unavailable",
                           message=reason)
         for path in ("/platform", "/platform/schedule", "/platform/agents/{aid}", "/platform/cases",
-                     "/platform/cases/{rid}", "/platform/specialists", "/platform/organization"):
+                     "/platform/cases/{rid}", "/platform/specialists", "/platform/specialists/{sid}",
+                     "/platform/organization"):
             app.get(path)(broken)
         return None
     tp = transports
@@ -977,6 +979,10 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
                                           str(opt.get("specialistsTokenFile", "")), getattr(tp, "specialists", None)),
         "index": platform_cases.IndexSource(str(opt.get("specialistsUrl", "")), s.source_timeout_s,
                                             getattr(tp, "specialists", None)),
+        # Health is read only for a connected host: without one there is no specialist to be healthy
+        "health": specialist_page.HealthSource(s.prometheus_url if opt.get("specialistsUrl") else "", s.source_timeout_s,
+                                               str(opt.get("specialistsJob") or "specialist-host"),
+                                               str(opt.get("specialistsDeployment") or "specialist-host"), tp.prometheus),
     }
     interface_url = str(opt.get("interfaceUrl", "")).rstrip("/")
     tz = str(opt.get("timezone", "UTC"))
@@ -993,7 +999,7 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
     assign_on = bool(s.actions and s.actions.on("assign-job"))
 
     def snapshot():
-        r = {k: v.read() for k, v in srcs.items() if k not in ("desk", "index")}
+        r = {k: v.read() for k, v in srcs.items() if k not in ("desk", "index", "health")}
         views, unowned, site = build(cat, r, ledger_configured=srcs["ledger"].configured(), tz=tz, assign=assign,
                                      tasks=tasks, site_namespaces=site_ns, protects=protects)
         if not srcs["ledger"].configured() and srcs["index"].configured():
@@ -1118,4 +1124,6 @@ def register(app, s, render, user_of, need_login, forbidden, kube: KubeClient, t
         return resp
 
     platform_cases.register(app, cat, srcs, guard, render, common)
+    specialist_page.register(app, cat, srcs, guard, render, common, prometheus_url=s.prometheus_url,
+                             timeout=s.source_timeout_s, prom_transport=tp.prometheus, secure_cookies=s.secure_cookies)
     return srcs

@@ -223,6 +223,54 @@
 </div>
 {%- endmacro %}
 
+{# ---- A specialist's own page opens on three blocks shaped like a role's (specialist_page.py): what it did since you
+   last looked, its open items, its health. A source that is out is a sentence (block_gaps), never a zero. #}
+{% macro health_badge(h) -%}{{ badge(h.badge, h.word) }}{%- endmacro %}
+
+{% macro spec_blocks(sid, entry, health, act, seen_from, first_look, open_rows, open_gaps, tz, type_words, ask_words, by_agent_role, modes) -%}
+<div class="role-blocks">
+<section class="rblock" aria-labelledby="sb-did">
+  <h2 id="sb-did">What it did since you last looked</h2>
+  <p class="muted small">{% if first_look %}This browser has not opened this page in the last 90 days, so this shows the last 24 hours, from {{ when(seen_from, tz) }}.{% else %}Since {{ when(seen_from, tz) }}, when this browser last opened this page.{% endif %}</p>
+  {% if act is none %}
+  <p class="quiet">It is not served, so it has made no calls this page can show.</p>
+  {% elif act.gap %}
+  {{ block_gaps([act.gap]) }}
+  {% elif act.rows %}
+  <ul class="plain rb-list">
+  {% for r in act.rows %}<li><span class="rb-name">{{ r.op | replace("_", " ") | capitalize }}</span> <span class="num">{{ r.n }} time{{ "s" if r.n != 1 }}</span><span class="why">{% for o in r.outcomes %}{{ o[1] }} {{ o[0] | replace("_", " ") }}{{ ", " if not loop.last }}{% endfor %}</span></li>{% endfor %}
+  </ul>
+  <p class="muted small">{{ act.calls }} call{{ "s" if act.calls != 1 }} in all. {% if act.spend is none %}Model spend: unknown, Prometheus did not answer for it.{% elif act.spend > 0 %}Model spend ${{ "%.2f" | format(act.spend) }}.{% else %}No model spend recorded.{% endif %}</p>
+  {% else %}
+  <p class="quiet">No calls since then. Prometheus answered and counts none.</p>
+  {% endif %}
+</section>
+
+<section class="rblock" aria-labelledby="sb-open">
+  <h2 id="sb-open">Its open items</h2>
+  {% if open_rows %}
+  <ul class="plain rb-list">
+  {% for i in open_rows %}<li><a href="/platform/cases/{{ i.id }}"><code>{{ i.id }}</code></a> {{ type_words.get(i.type, "Record") }} {{ wait_badge(i) }}<span class="why">{{ wait_text(i, ask_words, by_agent_role) }}</span>{{ act_line(i) }}</li>{% endfor %}
+  </ul>
+  {% elif open_gaps %}
+  <p class="quiet">No open item from the sources that answered.</p>
+  {% else %}
+  <p class="quiet">No open item. The Service Desk answered and holds no open case it is handed or worked.</p>
+  {% endif %}
+  {{ block_gaps(open_gaps) }}
+</section>
+
+<section class="rblock" aria-labelledby="sb-health">
+  <h2 id="sb-health">Its health</h2>
+  <dl class="rb-health">
+    <dt>Health</dt><dd>{{ health_badge(health) }}{% for r in health.reasons %}<span class="why">{{ r }}</span>{% endfor %}</dd>
+    <dt>Mode</dt><dd>{% if entry and entry.status in modes %}{{ modes[entry.status][0] }}<span class="why">{{ modes[entry.status][1] }}</span>{% elif entry %}<span class="muted">the index does not say</span>{% else %}<span class="muted">unknown: the host does not serve it</span>{% endif %}</dd>
+    <dt>Maturity</dt><dd><span class="muted">Not rated here yet: the specialist host does not report maturity.</span></dd>
+  </dl>
+</section>
+</div>
+{%- endmacro %}
+
 {# ---- The Overview's tiles (platform_report.overview_tiles): a count, its state, and where it comes from. #}
 {% macro tiles_row(tiles) -%}
 <section aria-labelledby="pm-tiles">

@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% from "macros.html" import badge, source_line %}
+{% from "platform_macros.html" import spec_blocks, health_badge, spec_name %}
+{% block title %}{{ title }} · Specialists · Platform Management{% endblock %}
+{% block main %}
+<p class="crumb"><a href="/platform">Platform Management</a> / <a href="/platform/specialists">Specialists</a> / {{ title }}</p>
+<h1>{{ title }}</h1>
+{% if entry and entry.summary %}<p class="lede">{{ entry.summary }}</p>
+{% elif planned %}<p class="lede">Planned: the roles name it, and it is not built yet.</p>
+{% else %}<p class="lede">The specialist host does not serve it, so what it does is not read here.</p>{% endif %}
+<p class="ref"><code>{{ sid }}</code>{% if entry and entry.version %} · version {{ entry.version }}{% endif %}</p>
+
+{% if drift %}<p class="panel">{{ badge("warning", "Out of date") }} {{ drift }}</p>{% endif %}
+
+<dl class="facts" aria-label="Five facts about it">
+  <div><dt>Health</dt><dd>{{ health_badge(health) }}</dd></div>
+  <div><dt>Mode</dt><dd>{% if entry and entry.status in modes %}{{ modes[entry.status][0] }}{% else %}<span class="muted">Unknown</span>{% endif %}</dd></div>
+  <div><dt>Maturity</dt><dd><span class="muted">Not rated here yet</span></dd></div>
+  <div><dt>AI level</dt><dd><span class="muted">Not read here yet</span></dd></div>
+  <div><dt>Tier</dt><dd><span class="muted">Not read here yet</span></dd></div>
+</dl>
+
+{{ spec_blocks(sid, entry, health, act, seen_from, first_look, open_rows, open_gaps, tz, type_words, ask_words, by_agent_role, modes) }}
+
+<section aria-labelledby="sp-does">
+  <h2 id="sp-does">What it does</h2>
+  {% if not entry %}
+  <p class="panel quiet">Its operations come from the specialist host's index, which does not list it{% if index_on and index.fetched_at is none %} because the host did not answer{% endif %}.</p>
+  {% else %}
+  {% set asks = entry.operations | selectattr("kind", "equalto", "query") | list %}
+  {% set does = entry.operations | rejectattr("kind", "equalto", "query") | list %}
+  {% if asks %}<h3>Things you can ask it</h3>
+  <dl class="ops">{% for o in asks %}<dt>{{ o.name | replace("_", " ") | capitalize }}</dt><dd>{{ o.summary }}{% if o.outcomes %}<span class="why">It answers {{ o.outcomes | join(", ") | replace("_", " ") }}.</span>{% endif %}{% if o.model_step and o.model_step != "none" %}<span class="why">Uses a model for one step ({{ o.model_step | replace("_", " ") }}).</span>{% endif %}</dd>{% endfor %}</dl>{% endif %}
+  {% if does %}<h3>Things it can do</h3>
+  <dl class="ops">{% for o in does %}<dt>{{ o.name | replace("_", " ") | capitalize }}</dt><dd>{{ o.summary }}{% if o.outcomes %}<span class="why">It ends {{ o.outcomes | join(", ") | replace("_", " ") }}.</span>{% endif %}{% if o.model_step and o.model_step != "none" %}<span class="why">Uses a model for one step ({{ o.model_step | replace("_", " ") }}).</span>{% endif %}</dd>{% endfor %}</dl>{% endif %}
+  {% if not entry.operations %}<p class="quiet">The index lists no operation for it.</p>{% endif %}
+  <h3>What starts it</h3>
+  {% if "triggers" not in entry.present %}<p class="quiet">Its schedules and events are not in the index yet.</p>
+  {% elif entry.triggers %}<ul>{% for t in entry.triggers %}<li>{{ t }}</li>{% endfor %}</ul>
+  {% else %}<p class="quiet">No schedule or event starts it; it runs when it is called.</p>{% endif %}
+  {% endif %}
+</section>
+
+<section aria-labelledby="sp-for">
+  <h2 id="sp-for">Who it works for</h2>
+  {% if works_for %}
+  <ul class="plain">{% for w in works_for %}<li><a href="/platform/agents/{{ w[0] }}">{{ w[1] }}</a>{% if accountable and w[0] == accountable.id %} <span class="muted">(accountable)</span>{% endif %}</li>{% endfor %}</ul>
+  {% else %}
+  <p class="panel quiet">{{ badge("unknown", "Unknown") }} Not in the catalog yet: no role in this platform's organization names it.</p>
+  {% endif %}
+</section>
+
+<section aria-labelledby="sp-ask">
+  <h2 id="sp-ask">Who can ask it</h2>
+  {% if not entry %}<p class="quiet">Unknown: the host does not serve it.</p>
+  {% elif entry.callers %}
+  <ul class="plain">{% for c in entry.callers %}<li>{% if c.href %}<a href="{{ c.href }}">{{ c.words }}</a>{% else %}{{ c.words }}{% endif %}</li>{% endfor %}</ul>
+  {% set narrowed = entry.operations | selectattr("callers") | list %}
+  {% if narrowed %}<p class="muted small">Narrowed per operation:</p><ul class="plain">{% for o in narrowed %}<li>{{ o.name | replace("_", " ") | capitalize }}: {% for c in o.callers %}{{ c.words }}{{ ", " if not loop.last }}{% endfor %}</li>{% endfor %}</ul>
+  {% elif entry.operations and entry.operations[0].callers is none %}<p class="muted small">Whether an operation narrows its callers is not in the index yet.</p>{% endif %}
+  {% else %}<p class="quiet">The index names no caller, so nothing may ask it.</p>{% endif %}
+</section>
+
+<section aria-labelledby="sp-calls">
+  <h2 id="sp-calls">What it may call</h2>
+  {% if not entry %}<p class="quiet">Unknown: the host does not serve it.</p>
+  {% else %}
+  {% if entry.may_call %}<ul class="plain">{% for m in entry.may_call %}<li><a href="/platform/specialists/{{ m.id }}">{{ spec_name(m.id) }}</a>{% if m.ops %}: {{ m.ops | join(", ") | replace("_", " ") }}{% endif %}</li>{% endfor %}</ul>
+  {% else %}<p class="quiet">No other specialist.</p>{% endif %}
+  {% if "model_steps" not in entry.present %}<p class="muted small">Which models it may use, and the cost cap on each call, are not in the index yet.</p>
+  {% elif entry.model_steps %}<ul class="plain">{% for m in entry.model_steps %}<li>Model {{ m.alias or "unnamed alias" }} for one step ({{ m.name | replace("_", " ") }}){% if m.usd is not none %}, at most ${{ "%.2f" | format(m.usd) }} a call{% endif %}{% if m.shadow %}<span class="why">Without a model: {{ m.shadow }}</span>{% endif %}</li>{% endfor %}</ul>
+  {% else %}<p class="muted small">It uses no model: every step is code or a table.</p>{% endif %}
+  {% if entry.data_class_max %}<p class="muted small">The most sensitive data it may see: {{ entry.data_class_max }}.</p>{% endif %}
+  {% endif %}
+</section>
+
+<section aria-labelledby="sp-yours">
+  <h2 id="sp-yours">What stays yours</h2>
+  {% if not entry %}<p class="quiet">Unknown: the host does not serve it.</p>
+  {% elif "owner_keeps" not in entry.present %}<p class="quiet">What it leaves to you is not in the index yet.</p>
+  {% elif entry.owner_keeps %}<ul>{% for k in entry.owner_keeps %}<li>{{ k }}</li>{% endfor %}</ul>
+  {% else %}<p class="quiet">Its spec names nothing it leaves to you.</p>{% endif %}
+  {% if entry and entry.tells_you %}<p class="muted">It tells you {{ entry.tells_you }}.</p>{% endif %}
+</section>
+
+<section aria-labelledby="sp-sources">
+  <h2 id="sp-sources">Where this page reads from</h2>
+  <ul class="srcs">
+    {% if index_on %}<li>{{ source_line(index) }}</li>{% else %}<li><span class="src">{{ badge("unknown", "Not connected") }}<span><span class="src-name">Specialist host</span><span class="muted">: not configured</span></span></span></li>{% endif %}
+    {% if prom_on %}<li>{{ source_line(prom) }}</li>{% else %}<li><span class="src">{{ badge("unknown", "Not connected") }}<span><span class="src-name">Specialist health (Prometheus)</span><span class="muted">: not configured</span></span></span></li>{% endif %}
+    {% if cases_on %}<li>{{ source_line(desk) }}</li>{% else %}<li><span class="src">{{ badge("unknown", "Not connected") }}<span><span class="src-name">Service Desk</span><span class="muted">: not configured</span></span></span></li>{% endif %}
+    <li><span class="src">{{ badge("ok", "Catalog") }}<span><span class="src-name">The role catalog</span><span class="muted">: who it works for</span></span></span></li>
+  </ul>
+</section>
+{% endblock %}

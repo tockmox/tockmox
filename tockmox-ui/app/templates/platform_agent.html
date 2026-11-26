@@ -37,7 +37,7 @@
   <ul class="plain spec-list">
   {% for sp in v.agent.specialists %}
   {% set sv = served.get(sp.id) if served is not none else none %}
-  <li><strong>{{ spec_name(sp.id) }}</strong> <code>{{ sp.id }}</code>
+  <li><strong><a href="/platform/specialists/{{ sp.id }}">{{ spec_name(sp.id) }}</a></strong> <code>{{ sp.id }}</code>
     {% if sp.state == "built" %}{{ badge("ok", spec_words[sp.state]) }}{% else %}<span class="muted">{{ spec_words[sp.state] }}</span>{% endif %}
     {%- if sp.state == "built" -%}
       {%- if served is none %} <span class="muted">· whether the host serves it now is unknown</span>

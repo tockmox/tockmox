@@ -15,7 +15,7 @@
   <thead><tr><th scope="col">Specialist</th><th scope="col">Built</th><th scope="col">Served now</th><th scope="col">Works for</th></tr></thead>
   <tbody>
   {% for r in rows %}
-  <tr><th scope="row">{{ spec_name(r.id) }}<span class="ref"><code>{{ r.id }}</code></span></th>
+  <tr><th scope="row"><a href="/platform/specialists/{{ r.id }}">{{ spec_name(r.id) }}</a><span class="ref"><code>{{ r.id }}</code></span></th>
       <td>{% if r.state == "built" %}{{ badge("ok", spec_words[r.state]) }}{% else %}<span class="muted">{{ spec_words[r.state] }}</span>{% endif %}</td>
       <td>{% if not index_on %}<span class="muted">host not connected</span>
           {%- elif index.fetched_at is none %}{{ badge("unknown", "Unknown") }}
