@@ -703,6 +703,11 @@ run_gate "the release morning refuses every planted bad witness, record, report 
 # shellcheck disable=SC2016
 run_gate "the release-feed signer refuses every bad feed and key, and the console's verifier accepts what it signs" \
   bash -c 'case "$("${OPENSSL:-openssl}" version 2>/dev/null)" in "OpenSSL 3."*) exec bash tools/release-feed.sh --selftest ;; *) echo "SKIPPED: OpenSSL 3 is not on PATH (set OPENSSL to it), so the release-feed signer cannot be exercised"; exit 2 ;; esac'
+# The release preflight's own refusals. The preflight itself stays out of this list: it needs a target
+# version and means something only in the hour before a tag (its header says why). Its --selftest takes
+# no version, builds every fixture under a temporary directory and needs no network, so it belongs here;
+# without this line CI never ran it, and a change that broke one of its refusals passed every check.
+run_gate "the release preflight refuses every planted split version, stale prose, wrong changelog, bad checksum and wrong template pin" bash tools/release-preflight.sh --selftest
 # (REQ-0004 AC-4.1, ruled 2026-10-08): the gateway is the shipped
 # default and the console goes through it on a chart-minted key. Not in
 # ci.yaml yet, for the reason at the top of this file.

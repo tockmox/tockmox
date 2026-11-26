@@ -135,6 +135,7 @@ tools/lib/extract-images.sh --selftest	0
 tools/lib/tool-runs.sh --selftest	0
 tools/mint-secrets.sh --selftest	0
 tools/publish-docs.sh --selftest	2
+tools/release-preflight.sh --selftest	4
 tools/render-counts.sh	2
 tools/render-counts.sh --selftest	1
 tools/stamp-docs.sh --check	0
