@@ -69,6 +69,10 @@
 # WHAT IT PRINTS for a caller to grep: AIRGAP-PAUSE, AIRGAP-CUT (the control's proof), AIRGAP-WINDOW,
 # AIRGAP-DENY <proto> <destination>:<port> <count> [ignored|guest-cluster], AIRGAP-STALL, AIRGAP-P09-BOUND, the race probe's
 # AIRGAP-RACE-DENY lines and its AIRGAP-RACE confirmed|not-confirmed line (they observe; they never change the outcome),
+# the guest pods' container states and image IDs (AIRGAP-IMAGES BEGIN, one AIRGAP-IMAGE <namespace> <pod> <container> <init|app>
+# <state> <imageID> line per container, init containers included, AIRGAP-IMAGES END), printed after P09 and before the safe
+# end, so a proof that a container runs from the mirror's digest is read while the guest still exists. It reads status
+# fields only: never an environment variable, an argument or a Secret. It observes and never changes the outcome.
 # and last AIRGAP-RESULT <outcome>.
 #
 # Exit: 0 PASS; 1 FAIL (a step failed, P09 did not pass, or the install reached past the edge); 2 a refused
@@ -166,6 +170,8 @@ finish() {
     note "airgap lane: the run ended early (${RESULT}); the edge's denies for the cut window it had, ${T0} to ${t1}:"
     deny_table "$T0" "$t1" || note "airgap lane: the early-end deny table could not be made: ${DENY_WHY}"
   fi
+  # An early end after the cut install began: the guest's image IDs too, before the safe end below.
+  if [ "$INSTALL_STARTED" = 1 ] && [ "${IMAGES_DONE:-0}" != 1 ] && declare -F image_ids >/dev/null 2>&1; then image_ids || true; fi
   [ -z "$STOPPED" ] || printf '%s\n' "$STOPPED" >> "$REPORT"
   [ -z "$STOP_DETAIL" ] || printf '%s\n' "$STOP_DETAIL" >> "$REPORT"
   # A kept run keeps an install. A run stopped before the cut install began has none, so its VM goes.
@@ -646,6 +652,53 @@ case "$k3s_cfg" in
   *) infra "the guest did not answer the read of its k3s config, so its own pod and Service ranges are unknown" ;;
 esac
 gk() { KUBECONFIG="$KC" kubectl --context="$KUBE_CONTEXT" "$@"; }
+
+# image_ids: after P09 and before the safe end (the guest is destroyed there), one marked block with, for every container
+# of every pod in the guest cluster (init containers included), its namespace, pod, container, kind (init or app),
+# state and imageID, so which digest a container runs from is read, not inferred. Status fields only: the filter never
+# looks at env, args or Secrets. A guest that does not answer leaves AIRGAP-IMAGES UNREADABLE inside the block; the
+# outcome is never changed either way.
+IMAGES_DONE=0
+image_ids() {
+  local out rc=0
+  IMAGES_DONE=1
+  out="$(gk get pods -A -o json --request-timeout=30s 2>"${LANE}/image-ids.err")" || rc=$?
+  note "AIRGAP-IMAGES BEGIN namespace pod container kind state imageID"
+  if [ "$rc" != 0 ]; then
+    note "AIRGAP-IMAGES UNREADABLE kubectl get pods -A exit ${rc}"
+  else
+    cat > "${LANE}/image-ids.py" <<'PY'
+import json, re, sys
+d = json.load(sys.stdin)
+def clean(v):
+    v = re.sub(r"\s+", "_", str(v or "").strip())
+    return v or "-"
+rows = []
+for p in d.get("items") or []:
+    m, st, sp = p.get("metadata") or {}, p.get("status") or {}, p.get("spec") or {}
+    ns, pod = clean(m.get("namespace")), clean(m.get("name"))
+    for kind, sk, pk in (("init", "initContainerStatuses", "initContainers"), ("app", "containerStatuses", "containers")):
+        seen = set()
+        for c in st.get(sk) or []:
+            s = c.get("state") or {}
+            k = next(iter(s), "unknown")
+            r = (s.get(k) or {}).get("reason")
+            rows.append((ns, pod, 0 if kind == "init" else 1, clean(c.get("name")), kind, clean(k + (":" + r if r else "")), clean(c.get("imageID"))))
+            seen.add(c.get("name"))
+        for c in sp.get(pk) or []:
+            if c.get("name") not in seen:
+                rows.append((ns, pod, 0 if kind == "init" else 1, clean(c.get("name")), kind, "no-status", "-"))
+for ns, pod, _, name, kind, state, iid in sorted(rows):
+    print("AIRGAP-IMAGE %s %s %s %s %s %s" % (ns, pod, name, kind, state, iid))
+PY
+    if printf '%s' "$out" | python3 "${LANE}/image-ids.py" > "${LANE}/image-ids.txt" 2>/dev/null; then
+      while IFS= read -r line; do note "$line"; done < "${LANE}/image-ids.txt"
+    else
+      note "AIRGAP-IMAGES UNREADABLE the pod list could not be parsed"
+    fi
+  fi
+  note "AIRGAP-IMAGES END"
+}
 live_pod="$(gk get nodes -o jsonpath='{.items[*].spec.podCIDRs[*]}' 2>/dev/null || true)"
 live_svc="$(gk get servicecidrs.networking.k8s.io kubernetes -o jsonpath='{.spec.cidrs[*]}' 2>/dev/null || true)"
 svc_probe=""
@@ -884,6 +937,7 @@ fi
 note "airgap lane 9: P09 exit ${P09_RC}, declared ${p09_rec}"
 race_sampler_stop || true
 race_services || true
+image_ids || true
 
 # 10. the edge's denies over the cut window, by destination
 step "10 count the edge's denies"
