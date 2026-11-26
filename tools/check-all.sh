@@ -651,6 +651,8 @@ run_gate "identity and AI seams: host, sub_mode, merge-by-email, DB recovery and
 run_gate "the identity-seams gate goes red on every assertion" bash tools/check-identity-seams.sh --selftest
 run_gate "platform seams: namespace labels, probe hosts, dashboard keys, CNPG PodMonitor, etcd, Retain" bash tools/check-platform-seams.sh
 run_gate "the platform-seams gate goes red on every assertion" bash tools/check-platform-seams.sh --selftest
+run_gate "the specialist pages read tier, cell and recovery time from the values list; a line without a tier or a recovery time is refused" bash tools/check-specialist-placement.sh
+run_gate "the specialist-placement gate goes red on every assertion" bash tools/check-specialist-placement.sh --selftest
 # The namespace guard (apps.namespace_guard, off by default). Evaluates its exemption
 # expression with cel-python against every ServiceAccount the layers ship; skips (exit 2)
 # without cel-python, which check-all.yaml installs.

@@ -236,6 +236,40 @@ python3 tools/gen-platform-specialists.py --check path/to/roles/platform-roles.y
 The script changes only those keys. When the hash the host publishes differs
 from the catalog's, the role and specialist pages say the list is out of date.
 
+## Specialist placement
+
+Each specialist's tier, cell and recovery time are facts about your
+deployment, not about the specialist, so they live in your values and not in
+its spec: the same specialist can be on the write path in one cell and
+scheduled work in another. List them under `tockmoxUi.specialistPlacement`
+(experimental, as everything under `tockmoxUi`), one line per specialist:
+
+```yaml
+tockmoxUi:
+  specialistPlacement:
+    - {id: service-desk, cell: ops, tier: t0, recovery: 1m}
+    - {id: incident-responder, cell: ops, tier: t1, recovery: 5m}
+    - {id: upgrade-triager, cell: ops, tier: t2, recovery: 1h, pool: ops-scheduled}
+```
+
+| Field | What it says |
+|---|---|
+| `id` | The specialist, as the specialist host's index names it. |
+| `cell` | The part of your estate it serves (one namespace and its own data, behind its own dispatcher). |
+| `tier` | `t0` write path (two replicas, never down together), `t1` on call (one replica, back within minutes after a node loss), `t2` scheduled or idle (may share a pod with others of its cell). |
+| `recovery` | How long its callers can wait for it to come back, as a duration: `30s`, `5m`, `2h`. |
+| `pool` | Optional: the shared pod a `t2` specialist runs in. |
+
+The chart renders the list, as written, into the UI's configuration at
+`features.platform.specialistPlacement`, and the specialist pages read it
+there. A line without a tier, a cell or a recovery time is refused, and so are
+a tier other than `t0`, `t1` or `t2`, a key the list does not know, the same id
+twice, the list with Platform Management off, and a hand-written
+`config.features.platform.specialistPlacement` (the chart writes that key).
+A specialist with no line reads **Unknown** on its page, never a default tier.
+With no list at all, the configuration carries nothing and the UI does not
+restart.
+
 ## Replacing the catalog
 
 The roles, what each owns and what each watches are a catalog file, version 2.

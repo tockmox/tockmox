@@ -82,6 +82,13 @@ costs you, with the reasoning in the documentation rather than here.
 
 ### Added
 
+- **The specialist pages can read each specialist's tier, cell and recovery time from your values.**
+  `tockmoxUi.specialistPlacement` (experimental) lists them, one line per specialist, and the AI layer
+  renders the list as written into the UI's configuration; a line without a tier or a recovery time, a
+  tier outside `t0`, `t1`, `t2`, an unknown key, the same id twice and the list with Platform Management
+  off are refused at render. With no list nothing changes and the UI does not restart
+  (docs/administration/platform-management.md, "Specialist placement").
+
 - **A subchart byte lock: a verified tag now vouches for the bytes of every upstream subchart you vendor.** `subcharts.sha256` records one sha256 per upstream subchart archive a `Chart.lock` pins. `tools/helm-deps.sh` refuses an archive whose bytes differ from its line, on its offline path and after a download alike, and never re-records it; `tools/helm-deps.sh --record` adds the line for a new or bumped subchart and drops lines no `Chart.lock` pins, and a new gate holds the file to every `Chart.lock`. Argo CD's own subchart download on a connected site is still not checked, and the verify page now says so. Verifying the tag is now Required in the upgrade procedure, and step 6 compares the commit Argo CD synced with the commit you verified (docs/deployment/verify.md, "What a signed tag does not cover"; docs/deployment/upgrade.md, steps 1 and 6). **Action, for anyone who bumps a subchart in a fork:** run `tools/helm-deps.sh --record` and commit `subcharts.sha256` with the `Chart.lock` change.
 
 - **Platform › Schedule shows how each Argo CronWorkflow's newest run ended.** The console reads the
