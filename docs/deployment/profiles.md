@@ -96,7 +96,7 @@ The copy route, in a generated Application:
 ```yaml
 sources:
   - repoURL: https://github.com/tockmox/tockmox.git
-    targetRevision: v0.8.0
+    targetRevision: v0.9.0
     path: charts/tockmox-ai
     helm:
       valueFiles:
@@ -113,7 +113,7 @@ The reference route needs the extra source, in the same shape as `ref: site`:
 ```yaml
 sources:
   - repoURL: https://github.com/tockmox/tockmox.git
-    targetRevision: v0.8.0
+    targetRevision: v0.9.0
     path: charts/tockmox-ai
     helm:
       valueFiles:
@@ -124,7 +124,7 @@ sources:
     targetRevision: main
     ref: site
   - repoURL: https://github.com/tockmox/tockmox.git
-    targetRevision: v0.8.0
+    targetRevision: v0.9.0
     ref: tockmox                             # <-- and this
 ```
 
@@ -488,5 +488,5 @@ which are not yet.
 
 ---
 
-<sub>Tockmox v0.8.0 &middot; &copy; 2026 Tockmox LLC &middot; code Apache-2.0, docs CC BY 4.0 &middot; Tockmox is a trademark</sub>
+<sub>Tockmox v0.9.0 &middot; &copy; 2026 Tockmox LLC &middot; code Apache-2.0, docs CC BY 4.0 &middot; Tockmox is a trademark</sub>
 <!-- tockmox:footer:end -->

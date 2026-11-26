@@ -39,7 +39,7 @@ set -euo pipefail
 # version that had never existed, and the revision prompt below offered
 # "v0.1.0" as its default, which no remote could resolve. CI now
 # compares the two, because a checklist is not a mechanism.
-VERSION="0.8.0"
+VERSION="0.9.0"
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SELF/.." && pwd)"
 # The name the next steps print. A launcher that runs this script on your behalf (install/kit/tockmox-kit)
