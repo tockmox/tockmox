@@ -8,7 +8,7 @@
 #   ./tools/mirror-images.sh --registry harbor.int.example.com/mirror
 #   ./tools/mirror-images.sh --registry ... --dry-run       # print, do nothing
 #   ./tools/mirror-images.sh --registry ... --images FILE   # not images.txt
-#   ./tools/mirror-images.sh --registry ... --verify        # assert every entry resolves
+#   ./tools/mirror-images.sh --registry ... --verify        # assert every entry resolves, at its digest
 #   ./tools/mirror-images.sh --selftest                     # prove --verify can fail
 #
 # --verify IS THE SUCCESS CONDITION, and a catalogue count is not. On
@@ -19,6 +19,14 @@
 # or `crane manifest`), one entry at a time, and exits non-zero if any single
 # one is missing ... even when its repository exists. It reads only; nothing is
 # copied. Run it from inside the boundary, with the uplink cut if you can.
+#
+# --verify ALSO COMPARES DIGESTS, for every entry that records one
+# (NAME@sha256:... or NAME:TAG@sha256:...). It hashes the manifest each
+# destination holds and refuses one whose SHA-256 is not the recorded digest,
+# naming both. Presence alone cannot see a tag that upstream re-pushed and that
+# was copied by tag, or a mirror refreshed from a source that no longer serves
+# the pinned bytes. An entry with a tag and no digest records nothing to compare
+# against, so for it --verify can assert only that the manifest is there.
 #
 # WHY A TOOL AND NOT A SNIPPET. The docs carried an inline loop for this, and
 # the loop's one subtle part ... path handling ... is exactly the part people
@@ -59,10 +67,18 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# sha256_stdin: the SHA-256 of stdin as bare hex (sha256sum on Linux, shasum on macOS).
+sha256_stdin() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum | cut -d' ' -f1
+  else shasum -a 256 | cut -d' ' -f1; fi
+}
+
 # ---------------------------------------------------------------------------
-# --selftest: prove --verify goes red on a single miss, hermetically. A stub
-# skopeo on PATH answers `inspect --raw` from a fixed set of "present"
-# references; everything else is a miss. No network, no registry.
+# --selftest: prove --verify goes red on a single miss, and on a manifest whose
+# bytes are not the recorded digest, hermetically. A stub skopeo on PATH
+# answers `inspect --raw` from a fixed set of "present" references, with the
+# bytes of one fixed manifest (or, for a reference marked `other`, of a
+# different one); everything else is a miss. No network, no registry.
 # ---------------------------------------------------------------------------
 if [ "$SELFTEST" = 1 ]; then
   SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
@@ -71,21 +87,28 @@ if [ "$SELFTEST" = 1 ]; then
   cat > "$T/bin/skopeo" <<'STUB'
 #!/usr/bin/env bash
 # stub: `skopeo inspect --raw docker://REF` succeeds only for REFs listed in
-# $STUB_PRESENT (one per line). Anything else is "manifest unknown".
+# $STUB_PRESENT (one per line), printing the bytes of $STUB_MANIFEST, or of
+# $STUB_MANIFEST.other for a line `REF other`. Anything else is "manifest unknown".
 eval "ref=\${$#}"; ref="${ref#docker://}"   # last argument; bash 3.2 safe
-if grep -qxF "$ref" "$STUB_PRESENT"; then
-  printf '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json"}\n'
+if kind="$(awk -v r="$ref" '$1 == r { print $2; f = 1 } END { exit !f }' "$STUB_PRESENT")"; then
+  if [ "$kind" = other ]; then cat "$STUB_MANIFEST.other"; else cat "$STUB_MANIFEST"; fi
 else
   echo "FATA[0000] Error parsing image name \"docker://$ref\": reading manifest: manifest unknown" >&2
   exit 1
 fi
 STUB
   chmod +x "$T/bin/skopeo"
-  printf 'docker.io/grafana/grafana:1.0\nbusybox:1.36\nghcr.io/org/app@sha256:%s\n' \
-    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" > "$T/images.txt"
+  # The stub's manifest, and its real digest: a digest-pinned entry that names
+  # it is what a correct mirror holds. The .other manifest is a re-pushed tag.
+  printf '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json"}\n' > "$T/manifest.json"
+  printf '{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[]}\n' > "$T/manifest.json.other"
+  export STUB_MANIFEST="$T/manifest.json"
+  DG="$(sha256_stdin < "$T/manifest.json")"; DG12="$(printf '%s' "$DG" | cut -c1-12)"
+  OTHER="$(sha256_stdin < "$T/manifest.json.other")"; OTHER12="$(printf '%s' "$OTHER" | cut -c1-12)"
+  printf 'docker.io/grafana/grafana:1.0\nbusybox:1.36\nghcr.io/org/app@sha256:%s\n' "$DG" > "$T/images.txt"
   # Present set: exactly what --verify should ask for, per the dest_path rule,
   # plus library/ for the Docker Hub official image (the path containerd asks for).
-  printf 'reg.test/m/grafana/grafana:1.0\nreg.test/m/busybox:1.36\nreg.test/m/library/busybox:1.36\nreg.test/m/org/app:sha256-0123456789ab\n' > "$T/present.txt"
+  printf 'reg.test/m/grafana/grafana:1.0\nreg.test/m/busybox:1.36\nreg.test/m/library/busybox:1.36\nreg.test/m/org/app:sha256-%s\n' "$DG12" > "$T/present.txt"
   pass=0; fail=0
   ok()  { pass=$((pass+1)); echo "ok   $1"; }
   bad() { fail=$((fail+1)); echo "FAIL $1"; }
@@ -157,8 +180,8 @@ STUB
 
   # --verify asks for the tag form as well: a mirror holding only the derived
   # tag is a miss, named at the tag.
-  printf 'quay.io/org/reloader:v1.2@sha256:%s\n' "$dg" > "$T/td-verify.txt"
-  printf 'reg.test/m/org/reloader:sha256-0123456789ab\n' > "$T/td-derived.txt"
+  printf 'quay.io/org/reloader:v1.2@sha256:%s\n' "$DG" > "$T/td-verify.txt"
+  printf 'reg.test/m/org/reloader:sha256-%s\n' "$DG12" > "$T/td-derived.txt"
   out="$(STUB_PRESENT="$T/td-derived.txt" PATH="$T/bin:$PATH" bash "$SELF" --registry reg.test/m --images "$T/td-verify.txt" --verify 2>&1)"; rc=$?
   if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'at  reg.test/m/org/reloader:v1.2' && printf '%s' "$out" | grep -q '0 present, 1 missing'; then
     ok "--verify: a tag-plus-digest entry held only under its derived tag is a miss, named at the tag"
@@ -168,6 +191,34 @@ STUB
   if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q '1 present, 0 missing'; then
     ok "--verify: the same entry held under both its derived tag and its own tag is present"
   else bad "tag-plus-digest verify, both held: expected exit 0 and 1/0, got rc=$rc: $out"; fi
+
+  # --verify compares what the mirror holds with the digest the entry records.
+  # A planted wrong digest: the mirror holds the stub's manifest under both
+  # names the entry asks for, but the entry records another digest. Red, and
+  # the line names both digests.
+  printf 'quay.io/org/reloader:v1.2@sha256:%s\n' "$OTHER" > "$T/td-wrong.txt"
+  printf 'reg.test/m/org/reloader:sha256-%s\nreg.test/m/org/reloader:v1.2\n' "$OTHER12" > "$T/td-wrong-present.txt"
+  out="$(STUB_PRESENT="$T/td-wrong-present.txt" PATH="$T/bin:$PATH" bash "$SELF" --registry reg.test/m --images "$T/td-wrong.txt" --verify 2>&1)"; rc=$?
+  if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q "WRONG DIGEST quay.io/org/reloader:v1.2@sha256:$OTHER" \
+     && printf '%s' "$out" | grep -q "holds  sha256:$DG" && printf '%s' "$out" | grep -q '0 present, 0 missing, 1 at another digest'; then
+    ok "--verify: a mirror holding other bytes than the recorded digest is red, naming both digests"
+  else bad "planted wrong digest: expected exit 1, WRONG DIGEST and 0/0/1, got rc=$rc: $out"; fi
+
+  # The tag form re-pointed: the derived tag holds the recorded digest, but the
+  # entry's own tag holds a different manifest (a tag copied after upstream
+  # re-pushed it). Red, named at the tag; the same mirror with the tag holding
+  # the recorded bytes is green and says so per destination.
+  printf 'reg.test/m/org/reloader:sha256-%s\nreg.test/m/org/reloader:v1.2 other\n' "$DG12" > "$T/td-moved.txt"
+  out="$(STUB_PRESENT="$T/td-moved.txt" PATH="$T/bin:$PATH" bash "$SELF" --registry reg.test/m --images "$T/td-verify.txt" --verify 2>&1)"; rc=$?
+  if [ "$rc" -eq 1 ] && printf '%s' "$out" | grep -q 'at  reg.test/m/org/reloader:v1.2' \
+     && printf '%s' "$out" | grep -q "holds  sha256:$OTHER" && printf '%s' "$out" | grep -q '0 present, 0 missing, 1 at another digest'; then
+    ok "--verify: an entry whose own tag holds other bytes is red, named at the tag"
+  else bad "re-pointed tag: expected exit 1 naming reg.test/m/org/reloader:v1.2 and the digest it holds, got rc=$rc: $out"; fi
+  out="$(STUB_PRESENT="$T/td-derived.txt" PATH="$T/bin:$PATH" bash "$SELF" --registry reg.test/m --images "$T/td-verify.txt" --verify 2>&1)"; rc=$?
+  if [ "$rc" -eq 0 ] && [ "$(printf '%s\n' "$out" | grep -c "^verified    .* sha256:$DG\$")" = 2 ] \
+     && printf '%s' "$out" | grep -q '1 present, 0 missing, 0 at another digest'; then
+    ok "--verify: the recorded digest at both names is green, each destination verified by digest"
+  else bad "recorded digest held: expected exit 0 and two verified lines, got rc=$rc: $out"; fi
 
   # A Docker Hub official image with a tag and a digest: both forms, each also under library/.
   printf 'busybox:1.36@sha256:%s\n' "$dg" > "$T/td-official.txt"
@@ -263,8 +314,19 @@ raw_manifest() {
   esac
 }
 
+# manifest_digest REF : sha256:HEX of the manifest bytes held at REF, which is
+# the digest a pull by digest asks for; empty when nothing is there. The bytes
+# go through a file, not $(...), which would drop a trailing newline and change
+# the hash.
+manifest_digest() {
+  raw_manifest "$1" > "$MTMP" || true
+  [ -s "$MTMP" ] || return 0
+  printf 'sha256:%s' "$(sha256_stdin < "$MTMP")"
+}
+if [ "$VERIFY" = 1 ]; then MTMP="$(mktemp)"; trap 'rm -f "$MTMP"' EXIT; fi
+
 COPIED=0; SKIPPED=0; FAILED=0; FAILED_LIST=""
-PRESENT=0; MISSING=0; MISSING_LIST=""; ENTRIES=0
+PRESENT=0; MISSING=0; MISSING_LIST=""; ENTRIES=0; WRONG=0; WRONG_LIST=""
 while IFS= read -r img; do
   case "$img" in ''|'#'*) continue ;; esac
 
@@ -315,20 +377,34 @@ while IFS= read -r img; do
   fi
 
   if [ "$VERIFY" = 1 ]; then
-    all=1
+    # The digest this entry records, if any: every destination must hold it.
+    want=""
+    case "$img" in *@sha256:*) want="sha256:${img##*@sha256:}" ;; esac
+    all=1; same=1
     for d in $dests; do
-      m="$(raw_manifest "$d")"
-      if [ -n "$m" ]; then
-        echo "present     $d"
-      else
+      got="$(manifest_digest "$d")"
+      if [ -z "$got" ]; then
         all=0
         echo "MISSING     $img" >&2
         echo "        at  $d" >&2
         MISSING_LIST="${MISSING_LIST}  ${img}  ->  ${d}
 "
+      elif [ -n "$want" ] && [ "$got" != "$want" ]; then
+        same=0
+        echo "WRONG DIGEST $img" >&2
+        echo "        at  $d" >&2
+        echo "     holds  $got" >&2
+        WRONG_LIST="${WRONG_LIST}  ${img}  ->  ${d}  holds ${got}
+"
+      elif [ -n "$want" ]; then
+        echo "verified    $d  $got"
+      else
+        echo "present     $d"
       fi
     done
-    if [ "$all" = 1 ]; then PRESENT=$((PRESENT + 1)); else MISSING=$((MISSING + 1)); fi
+    if [ "$all" = 0 ]; then MISSING=$((MISSING + 1))
+    elif [ "$same" = 0 ]; then WRONG=$((WRONG + 1))
+    else PRESENT=$((PRESENT + 1)); fi
     continue
   fi
 
@@ -362,16 +438,22 @@ fi
 
 if [ "$VERIFY" = 1 ]; then
   echo
-  echo "mirror-images --verify: ${ENTRIES} entries, ${PRESENT} present, ${MISSING} missing at ${REG}"
+  echo "mirror-images --verify: ${ENTRIES} entries, ${PRESENT} present, ${MISSING} missing, ${WRONG} at another digest at ${REG}"
   if [ "$MISSING" -gt 0 ]; then
     echo "missing:" >&2
     printf '%s' "$MISSING_LIST" >&2
     echo "A repository that exists is not an image that resolves. Re-run the mirror" >&2
     echo "for these, then re-run --verify. Do not read a catalogue count instead." >&2
-    exit 1
   fi
-  echo "Every entry resolves at the target prefix. That is the success condition,"
-  echo "not a repository count."
+  if [ "$WRONG" -gt 0 ]; then
+    echo "at another digest:" >&2
+    printf '%s' "$WRONG_LIST" >&2
+    echo "The mirror holds other bytes than images.txt records. Do not re-tag to make" >&2
+    echo "this pass: find out which side moved, then mirror the recorded digest." >&2
+  fi
+  if [ "$MISSING" -gt 0 ] || [ "$WRONG" -gt 0 ]; then exit 1; fi
+  echo "Every entry resolves at the target prefix, and every recorded digest is the"
+  echo "one the mirror holds. That is the success condition, not a repository count."
   exit 0
 fi
 

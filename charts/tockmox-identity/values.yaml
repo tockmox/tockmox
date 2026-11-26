@@ -198,7 +198,7 @@ brand:
   # read-only root it fails during startup with a permission error that names a
   # path, not a cause. This variant listens on 8080 as UID 101 by design, and
   # the observability layer already pulls the same image family.
-  image: nginxinc/nginx-unprivileged:1.31-alpine
+  image: nginxinc/nginx-unprivileged:1.31-alpine@sha256:b5047b9b76845eac124358373c6852377c52e4b05834a47647e955dd91cb8f1e
   priorityClassName: tockmox-apps
   resources:
     requests: {cpu: 10m, memory: 16Mi}
