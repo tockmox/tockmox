@@ -31,6 +31,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 . "${HERE}/../lib/assert.sh"
+. "${HERE}/../lib/registry-error.sh"
 
 REF="${TOCKMOX_DOCS_REF:?set TOCKMOX_DOCS_REF to the tag under test}"
 PAGE="${TOCKMOX_B7_PAGE:-docs/deployment/fresh-install.md}"
@@ -57,6 +58,15 @@ execute_end "$RC1"
 printf '%s\n' "$BLOCK1_OUT" | sed 's/^/    | /'
 _emit "(block 1 exited ${RC1}; the exit code is not the assertion)"
 _emit ""
+
+# A registry refusal (Docker Hub's anonymous pull limit answers 429) leaves no version line, and
+# the shape check below would call that "MISSING". It is not a finding about the page: it is
+# INFRA_ERROR, status 5, never declarable, with the registry's own line quoted.
+if [ -z "$(printf '%s\n' "$BLOCK1_OUT" | awk -F': *' '/^version:/{print $2; exit}')" ] \
+   && REG_ERR="$(registry_error_line "$BLOCK1_OUT")"; then
+  path_outcome INFRA_ERROR "block 1 got a registry error, not a version (block 1 exited ${RC1}): ${REG_ERR}"
+  exit 5
+fi
 
 # No substitution: this block carries no placeholder. It is upstream of the
 # one two blocks later (`--version <CHART_VERSION_FROM_ABOVE>`), which is out

@@ -1292,6 +1292,27 @@ if [ "$LA_CASES" -eq 0 ] || { [ "$LA_RC" -ne 0 ] && ! printf '%s\n' "$LA_OUT" | 
 fi
 
 # ---------------------------------------------------------------------------
+# A registry refusal is not a gone doc section (2026-11-25).
+#
+# P05 and B7 read Docker Hub's anonymous pull limit (a 429 on the chart manifest) as "section gone"
+# (exit 3) and "MISSING: version=[]", and P05's "block 1 exited N" always said 0. The cases assert
+# INFRA_ERROR with exit 5 and the registry's line quoted, the real block status, and that a genuinely
+# missing section stays exit 3. Folded in like the cases above.
+RE_OUT="$(bash "${HERE}/registry-error-test.sh" 2>&1)"; RE_RC=$?
+RE_CASES=0
+while IFS= read -r line; do
+  case "$line" in
+    "ok   "*) RE_CASES=$((RE_CASES+1)); ok "registry error: ${line#ok   }" ;;
+    "FAIL "*) RE_CASES=$((RE_CASES+1)); bad "registry error: ${line#FAIL }" "run tests/executed-docs/registry-error-test.sh for detail" ;;
+  esac
+done <<EOF_RE
+$RE_OUT
+EOF_RE
+if [ "$RE_CASES" -eq 0 ] || { [ "$RE_RC" -ne 0 ] && ! printf '%s\n' "$RE_OUT" | grep '^FAIL' >/dev/null; }; then
+  bad "registry-error-test.sh ran its cases" "rc=${RE_RC}, ${RE_CASES} case(s): $(printf '%s' "$RE_OUT" | tail -3)"
+fi
+
+# ---------------------------------------------------------------------------
 # Every block a path asks its page for still resolves (2026-11-06).
 #
 # Run 42074588954 found S20's needle matching two install.md blocks only in a live lab run. The
