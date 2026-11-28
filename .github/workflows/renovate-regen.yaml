@@ -83,7 +83,7 @@ jobs:
         # refuses a workflow that carries its own copy.
         shell: bash -euo pipefail {0}
         run: bash tools/toolchain.sh --pins | tee -a "$GITHUB_ENV"
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+      - uses: azure/setup-helm@2f5e7bc67f1f9972ab16657bb795f36d8f04de0e # v5.1.0
         with:
           version: ${{ env.HELM_VERSION }}
 
@@ -138,7 +138,7 @@ jobs:
     steps:
       - name: mint a token for this repository only
         id: app
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           client-id: ${{ vars.REGEN_APP_CLIENT_ID }}
           private-key: ${{ secrets.REGEN_APP_PRIVATE_KEY }}

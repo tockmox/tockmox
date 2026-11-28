@@ -23,7 +23,7 @@ dependencies:
     condition: apps.metallb.enabled
 
   - name: traefik
-    version: 42.4.0
+    version: 42.4.3
     repository: "https://traefik.github.io/charts"
     condition: apps.traefik.enabled
 
@@ -78,6 +78,6 @@ dependencies:
   # chart is the one the wider ecosystem uses and the one the maintainer's own
   # deployment has run for months.
   - name: snapshot-controller
-    version: "5.4.0"
+    version: "5.4.1"
     repository: "https://piraeus.io/helm-charts/"
     condition: apps.snapshotController.enabled,capabilities.dataProtection.enabled

@@ -10,7 +10,7 @@ dependencies:
   version: 0.16.2
 - name: traefik
   repository: https://traefik.github.io/charts
-  version: 42.4.0
+  version: 42.4.3
 - name: longhorn
   repository: https://charts.longhorn.io
   version: 1.13.0
@@ -25,6 +25,6 @@ dependencies:
   version: 6.1.0
 - name: snapshot-controller
   repository: https://piraeus.io/helm-charts/
-  version: 5.4.0
-digest: sha256:b0d562e68b6c5e7f507a6fc7a1bf9122afbf3f0a68c5dfdf14f44a50e2269ea6
-generated: "2026-11-26T17:58:16.650056406Z"
+  version: 5.4.1
+digest: sha256:42c876f67cb60c45ed2541d71c3ffdab2878f405e4dd9aba0109a7bdf71145a5
+generated: "2026-11-28T01:13:05.963550566Z"
