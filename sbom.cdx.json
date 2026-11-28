@@ -117,9 +117,9 @@
     },
     {
       "name": "ghcr.io/goauthentik/server",
-      "purl": "pkg:oci/server?repository_url=ghcr.io/goauthentik/server&tag=2026.8.5",
+      "purl": "pkg:oci/server?repository_url=ghcr.io/goauthentik/server&tag=2026.8.6",
       "type": "container",
-      "version": "2026.8.5"
+      "version": "2026.8.6"
     },
     {
       "name": "ghcr.io/jkroepke/access-log-exporter",
@@ -317,9 +317,9 @@
     {
       "description": "Helm chart dependency of tockmox-identity",
       "name": "authentik",
-      "purl": "pkg:generic/helm/authentik@2026.8.5",
+      "purl": "pkg:generic/helm/authentik@2026.8.6",
       "type": "application",
-      "version": "2026.8.5"
+      "version": "2026.8.6"
     },
     {
       "description": "Helm chart dependency of tockmox-observability",
